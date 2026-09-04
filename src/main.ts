@@ -1,6 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { randomUUID } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
@@ -11,7 +11,15 @@ async function bootstrap(): Promise<void> {
   const config = app.get(ConfigService);
   const logger = new Logger('bootstrap');
 
-  app.setGlobalPrefix('api/v1');
+  // The prefix carries no version. Versioning is per-controller, so v1 and v2 can be
+  // served side by side from the same process — which docs/02-specs/api/conventions.md
+  // already promises ("a breaking change means v2 alongside v1"). Baking the version
+  // into a global prefix would make every route move at once.
+  app.setGlobalPrefix('api');
+  app.enableVersioning({
+    type: VersioningType.URI,
+    defaultVersion: '1', // A controller declares @Version('2') when its contract breaks.
+  });
 
   // Every response carries a request id, echoed into logs and into the error envelope,
   // so a user-reported failure is traceable without guessing.

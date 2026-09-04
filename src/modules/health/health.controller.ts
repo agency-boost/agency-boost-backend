@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, VERSION_NEUTRAL } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 
@@ -6,7 +6,9 @@ import { Connection } from 'mongoose';
  * Liveness and readiness. Neither leaks a version or dependency detail publicly —
  * an unauthenticated endpoint is a reconnaissance surface.
  */
-@Controller('health')
+// Version-neutral: a load balancer's health probe should not have to know or track
+// the API contract version. Served at /api/health, not /api/v1/health.
+@Controller({ path: 'health', version: VERSION_NEUTRAL })
 export class HealthController {
   constructor(@InjectConnection() private readonly connection: Connection) {}
 
