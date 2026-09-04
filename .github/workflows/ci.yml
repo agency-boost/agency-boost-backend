@@ -19,6 +19,24 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      # A dependency override can satisfy an advisory and silently break an unrelated
+      # consumer that needed the old major. This caught glob: a bare override collapsed
+      # every glob to v13, breaking test-exclude@6 which needs glob 7's callable export
+      # — and it only surfaced on a clean install, because a stale node_modules kept
+      # the old copy around.
+      - name: Overrides are scoped to a dependency path
+        run: |
+          if node -e "
+            const o = require('./package.json').pnpm?.overrides ?? {};
+            const bare = Object.keys(o).filter((k) => !k.includes('>'));
+            if (bare.length) {
+              console.error('Unscoped pnpm overrides: ' + bare.join(', '));
+              console.error('Use \"parent>child\" so the pin cannot leak into an unrelated');
+              console.error('consumer. See docs/02-specs/nfr/security-and-privacy.md.');
+              process.exit(1);
+            }
+          "; then echo "all overrides are scoped"; fi
+
       - name: Lint
         run: pnpm lint
 
