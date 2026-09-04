@@ -1,7 +1,7 @@
 # AgencyBoost — backend
 
-NestJS API for a multi-tenant SaaS. **This is a separate git repository** (`agency-boost-backend`).
-The documentation that governs it lives in the docs repo one level up: `../docs/`, with the working
+NestJS API for a multi-tenant SaaS. **This is a git submodule** of the `agency-boost` superproject (ADR-0009) — a complete, independent repository (`agency-boost-backend`).
+The documentation that governs it lives in the superproject one level up: `../docs/`, with the working
 rules in `../.claude/`.
 
 Read `../CLAUDE.md` first. In particular:
@@ -56,4 +56,5 @@ positive and negative permission tests per role. Ratchet: global ≥80%, domain 
 permissions **100% branch**.
 
 Every API change regenerates the OpenAPI document and updates `../docs/02-specs/`. A PR touching
-`src/` must name its companion docs PR or CI fails.
+`src/` must name its companion superproject PR or CI fails, and after merging here the superproject
+needs a **pointer bump** recording which commit of this repository belongs with those docs.

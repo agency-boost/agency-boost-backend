@@ -6,8 +6,8 @@
 
 <!--
 REQUIRED when this PR touches src/.
-Link the agency-boost-docs PR carrying the spec and manual updates, or write
-`docs:none` with a one-line justification for a pure refactor.
+Link the agency-boost superproject PR carrying the spec and manual updates, or
+write `docs:none` with a one-line justification for a pure refactor.
 CI fails if this section is left empty. See ADR-0001.
 -->
 
@@ -20,3 +20,4 @@ CI fails if this section is left empty. See ADR-0001.
 - [ ] Manual book updated for **every** affected role, derived from
       `docs/00-product/roles-and-permissions.md`
 - [ ] Coverage ratchet holds (global 80% / domain 95% / tenancy + permissions 100% branch)
+- [ ] Superproject pointer bump prepared (merge this PR first, then the bump)

@@ -4,9 +4,11 @@ on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
 
-# Backend, frontend and docs live in three repositories (ADR-0001), so no single job
-# can verify that code, tests, docs and manuals ship together. This is the compensating
-# control: a PR touching src/ must name its companion docs PR, or explicitly opt out.
+# This repository is a submodule of the agency-boost superproject (ADR-0009), so a change
+# spanning code and docs is two commits in two repositories and no single job can verify
+# they ship together. This is the review-time control: a PR touching src/ must name its
+# companion superproject PR, or explicitly opt out. The durable counterpart is the
+# submodule pointer bump in the superproject.
 jobs:
   companion:
     runs-on: ubuntu-latest
@@ -30,12 +32,12 @@ jobs:
         env:
           BODY: ${{ github.event.pull_request.body }}
         run: |
-          if printf '%s' "$BODY" | grep -qiE 'agency-boost-docs.*(pull|#[0-9]+)|docs:none'; then
+          if printf '%s' "$BODY" | grep -qiE 'agency-boost(-docs)?.*(pull|#[0-9]+)|docs:none'; then
             if printf '%s' "$BODY" | grep -qi 'docs:none'; then
               echo "::warning::docs:none claimed — reviewer must confirm this is a pure refactor."
             fi
             exit 0
           fi
           echo "::error::This PR touches src/ but names no companion docs PR."
-          echo "::error::Link the agency-boost-docs PR, or write 'docs:none' with a justification."
+          echo "::error::Link the agency-boost superproject PR, or write 'docs:none' with a justification."
           exit 1
