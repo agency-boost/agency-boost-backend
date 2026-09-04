@@ -1,0 +1,41 @@
+name: companion pr
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+# Backend, frontend and docs live in three repositories (ADR-0001), so no single job
+# can verify that code, tests, docs and manuals ship together. This is the compensating
+# control: a PR touching src/ must name its companion docs PR, or explicitly opt out.
+jobs:
+  companion:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Does this PR touch src/?
+        id: scope
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          if git diff --name-only "origin/${{ github.base_ref }}"...HEAD | grep -q '^src/'; then
+            echo "touches_src=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "touches_src=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Companion docs PR is named
+        if: steps.scope.outputs.touches_src == 'true'
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if printf '%s' "$BODY" | grep -qiE 'agency-boost-docs.*(pull|#[0-9]+)|docs:none'; then
+            if printf '%s' "$BODY" | grep -qi 'docs:none'; then
+              echo "::warning::docs:none claimed — reviewer must confirm this is a pure refactor."
+            fi
+            exit 0
+          fi
+          echo "::error::This PR touches src/ but names no companion docs PR."
+          echo "::error::Link the agency-boost-docs PR, or write 'docs:none' with a justification."
+          exit 1
