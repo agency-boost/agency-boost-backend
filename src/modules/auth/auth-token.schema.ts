@@ -1,0 +1,53 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument } from 'mongoose';
+import { baseSchemaOptions } from '@/common/schema/base.schema';
+
+export type AuthTokenDocument = HydratedDocument<AuthToken>;
+
+export type AuthTokenKind = 'refresh' | 'email_verification' | 'password_reset';
+
+/**
+ * Credentials live apart from identity, so rotating one never touches the other.
+ *
+ * Refresh tokens rotate on every use and carry a `familyId`. Presenting a token that
+ * has already been rotated is the standard signal of theft: the whole family is
+ * revoked rather than just that token.
+ */
+@Schema({ ...baseSchemaOptions, collection: 'authTokens' })
+export class AuthToken {
+  @Prop({ type: String, required: true, index: true })
+  userId!: string;
+
+  @Prop({ type: String, required: true, enum: ['refresh', 'email_verification', 'password_reset'] })
+  kind!: AuthTokenKind;
+
+  /** SHA-256 of the token. The raw value exists only in the response that issued it. */
+  @Prop({ type: String, required: true, unique: true, index: true })
+  tokenHash!: string;
+
+  /** Shared by every token descended from one login. Null for single-use tokens. */
+  @Prop({ type: String, default: null, index: true })
+  familyId!: string | null;
+
+  @Prop({ type: Date, required: true, index: true })
+  expiresAt!: Date;
+
+  @Prop({ type: Date, default: null })
+  usedAt!: Date | null;
+
+  @Prop({ type: Date, default: null })
+  revokedAt!: Date | null;
+
+  @Prop({ type: String, default: null })
+  revokedReason!: string | null;
+
+  @Prop({ type: String, default: null })
+  userAgent!: string | null;
+
+  @Prop({ type: String, default: null })
+  ip!: string | null;
+}
+
+export const AuthTokenSchema = SchemaFactory.createForClass(AuthToken);
+AuthTokenSchema.index({ userId: 1, kind: 1, revokedAt: 1 });
+AuthTokenSchema.index({ familyId: 1, revokedAt: 1 });

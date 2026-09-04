@@ -28,6 +28,9 @@ export class Notification {
 
   @Prop({ type: Date, default: null })
   readAt!: Date | null;
+
+  @Prop({ type: Date, default: null, index: true })
+  deletedAt!: Date | null;
 }
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);
@@ -51,6 +54,9 @@ export class NotificationPreferences {
   /** Template ids the user has muted individually. */
   @Prop({ type: [String], default: [] })
   mutedTemplates!: string[];
+
+  @Prop({ type: Date, default: null, index: true })
+  deletedAt!: Date | null;
 }
 
 export const NotificationPreferencesSchema =

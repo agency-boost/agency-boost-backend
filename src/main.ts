@@ -2,12 +2,14 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { randomUUID } from 'node:crypto';
-import type { NextFunction, Request, Response } from 'express';
+import { Logger as PinoLogger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // Route Nest's own logs through pino so every line is structured and carries the
+  // request id.
+  app.useLogger(app.get(PinoLogger));
   const config = app.get(ConfigService);
   const logger = new Logger('bootstrap');
 
@@ -21,13 +23,8 @@ async function bootstrap(): Promise<void> {
     defaultVersion: '1', // A controller declares @Version('2') when its contract breaks.
   });
 
-  // Every response carries a request id, echoed into logs and into the error envelope,
-  // so a user-reported failure is traceable without guessing.
-  app.use((req: Request & { id?: string }, res: Response, next: NextFunction) => {
-    req.id = String(req.headers['x-request-id'] ?? randomUUID());
-    res.setHeader('X-Request-Id', req.id);
-    next();
-  });
+  // The request id is generated and echoed by the pino http logger (LoggingModule),
+  // which also puts it on every log line. The error filter reads the same value.
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -36,7 +33,14 @@ async function bootstrap(): Promise<void> {
       // quietly ignored is the hardest kind of bug to find.
       forbidNonWhitelisted: true,
       transform: true,
-      transformOptions: { enableImplicitConversion: true },
+      // Implicit conversion is OFF. With it on, class-transformer coerces 42 to "42"
+      // before validation runs, so @IsString() passes for a number and @IsInt() passes
+      // for a numeric string — body type validation becomes decorative.
+      //
+      // Query and param DTOs, which genuinely arrive as strings, opt in per field with
+      // @Type(() => Number). That is more typing and it is the right trade: this
+      // product's premise is that a silently wrong number is worse than a crash.
+      transformOptions: { enableImplicitConversion: false },
     }),
   );
 

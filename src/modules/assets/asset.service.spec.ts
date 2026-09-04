@@ -108,6 +108,41 @@ describe('AssetService', () => {
     });
   });
 
+  describe('orphan reporting', () => {
+    it('finds assets referenced by nothing, older than the retention window', async () => {
+      const queries: Record<string, unknown>[] = [];
+      const assets = {
+        create: jest.fn(),
+        findOne: () => ({ exec: async () => null }),
+        updateOne: jest.fn(() => ({ exec: async () => ({}) })),
+        find: jest.fn((q: Record<string, unknown>) => {
+          queries.push(q);
+          return { exec: async () => [{ storageKey: 'dev/kpm-a/x/1' }] };
+        }),
+      };
+      const service = new AssetService(
+        assets as never,
+        new StubStorage(),
+        new FixedClock(new Date('2026-09-04T00:00:00Z')),
+      );
+
+      const orphans = await service.findOrphans(30);
+
+      expect(orphans).toHaveLength(1);
+      expect(queries[0]).toMatchObject({ refCount: 0, deletedAt: null });
+      // 30 days before the injected clock, not before the real one.
+      expect((queries[0].createdAt as { $lt: Date }).$lt.toISOString()).toBe(
+        '2026-08-05T00:00:00.000Z',
+      );
+    });
+
+    it('reports orphans rather than deleting them — deletion is a human decision', async () => {
+      const { service, storage } = makeService();
+      await service.findOrphans();
+      expect(storage.removed).toEqual([]);
+    });
+  });
+
   describe('reference counting', () => {
     it('never decrements below zero', async () => {
       const { service, assets } = makeService();

@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { APP_FILTER } from '@nestjs/core';
 
 import { validateEnv } from '@/config/env.validation';
+import { LoggingModule } from '@/common/logging/logging.module';
 import { Clock, SystemClock } from '@/common/clock/clock.port';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { HealthController } from '@/modules/health/health.controller';
@@ -16,6 +17,7 @@ import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
 
 @Module({
   imports: [
+    LoggingModule,
     ConfigModule.forRoot({
       isGlobal: true,
       // Boot fails loudly on a missing or malformed key rather than starting and
