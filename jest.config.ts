@@ -9,7 +9,21 @@ const config: Config = {
   testRegex: '\\.spec\\.ts$',
   transform: { '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json' }] },
   moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
-  collectCoverageFrom: ['src/**/*.ts', '!src/**/*.spec.ts', '!src/main.ts', '!src/**/*.module.ts'],
+  collectCoverageFrom: [
+    'src/**/*.ts',
+    '!src/**/*.spec.ts',
+    // Entry points, not application code: nothing imports them, and their correctness is
+    // established by running them rather than by asserting on branches. `main.ts` was
+    // always excluded on this basis; the seed is excluded for the same reason and no
+    // other — it is a fixture builder run by hand, and it is exercised end to end every
+    // time the demo tenant is rebuilt.
+    //
+    // Excluding code is how a ratchet gets gamed, so the list stays short and each entry
+    // carries its reason. Nothing that serves a request belongs here.
+    '!src/main.ts',
+    '!src/**/*.module.ts',
+    '!src/seed/**',
+  ],
   coverageDirectory: 'coverage',
   coverageThreshold: {
     global: { lines: 80, branches: 80, functions: 80, statements: 80 },
