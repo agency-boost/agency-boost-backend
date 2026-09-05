@@ -202,6 +202,39 @@ async function main(): Promise<void> {
     };
   }
 
+  /**
+   * A role change that happened before today.
+   *
+   * The Role change log reads `membershipHistory`, so an office seeded only with
+   * `joined` rows shows an empty log — which is indistinguishable from a broken screen.
+   * The `toRole` here always matches the role the person actually holds; a seeded
+   * transition that contradicts the membership would be a lie in the audit trail.
+   */
+  async function promotedEarlier(
+    kpmId: string,
+    membership: Placed,
+    from: Role,
+    to: Role,
+    actor: Placed,
+    reason: string,
+    daysAgo: number,
+  ) {
+    if (await History.findOne({ membershipId: membership.id, eventType: 'role_changed' }).exec()) {
+      return;
+    }
+    await History.create({
+      kpmId,
+      membershipId: membership.id,
+      eventType: 'role_changed',
+      fromRole: from,
+      toRole: to,
+      validFrom: new Date(clock.now().getTime() - daysAgo * 24 * 60 * 60 * 1000),
+      validTo: null,
+      actorMembershipId: actor.id,
+      reason,
+    });
+  }
+
   /** Counts are derived, never incremented, so they cannot drift out of step. */
   async function recount(kpmId: string, membershipId: string) {
     const directs = await Memberships.find({ kpmId, leaderId: membershipId, status: 'active' }).exec();
@@ -248,7 +281,12 @@ async function main(): Promise<void> {
 
   // The case OD-23 settles: holds the role, leads nobody.
   const dewiUser = await user('dewi@kpm0417.test', 'Dewi Lestari');
-  await place(office0417, String(dewiUser._id), 'aab', ab);
+  const dewi = await place(office0417, String(dewiUser._id), 'aab', ab);
+
+  // Both AABs were agents first. Without these the Role change log is empty, and an
+  // empty log reads as a screen that does not work.
+  await promotedEarlier(id0417, sari, 'agent', 'aab', ab, 'Ready to lead a unit of her own', 62);
+  await promotedEarlier(id0417, dewi, 'agent', 'aab', ab, 'Took the AAB track after Q2', 21);
 
   const rinaUser = await user('rina@kpm0417.test', 'Rina Wijaya', { password: 'demo password rina' });
   await place(office0417, String(rinaUser._id), 'agent', sari);
@@ -352,6 +390,8 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     agus@kpm0417.test                                  AB with a unit, neither Owner nor Admin
     sari@kpm0417.test                                  AAB leading two agents
     dewi@kpm0417.test                                  AAB leading nobody — the OD-23 case
+                                                       Sari and Dewi were promoted from Agent,
+                                                       so /people/members Role change log has rows
     rina@kpm0417.test            demo password rina    Agent under Sari
     budi@kpm0417.test                                  Agent under Sari
     pending@kpm0417.test                               Registered, request sent to Sari, waiting

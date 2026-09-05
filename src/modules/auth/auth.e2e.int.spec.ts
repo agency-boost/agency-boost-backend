@@ -39,6 +39,7 @@ import { OnboardingController } from '@/modules/org/onboarding.controller';
 import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { InviteService } from '@/modules/org/invite.service';
 import { ApprovalsService } from '@/modules/org/approvals.service';
+import { RoleChangeService } from '@/modules/org/role-change.service';
 import { AuthToken, AuthTokenSchema } from './auth-token.schema';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -100,7 +101,7 @@ describe('auth and admin over HTTP', () => {
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService,
-        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService, ApprovalsService,
+        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService, ApprovalsService, RoleChangeService,
         AuthGuard, PermissionsGuard,
       ],
     }).compile();
@@ -117,6 +118,18 @@ describe('auth and admin over HTTP', () => {
     );
     app.useGlobalGuards(app.get(AuthGuard), app.get(PermissionsGuard));
     await app.init();
+    // Listen once, for the whole suite.
+    //
+    // Given a server that is not listening, supertest opens an ephemeral port for each
+    // request and closes it again afterwards — several hundred listen/close cycles per
+    // run. The OS reissues those port numbers, so a request can arrive at whatever now
+    // owns the port it was told to use: another dev server on this machine, or nothing
+    // at all. That is the intermittent this suite has been showing — a random test
+    // failing with a 404 carrying no `x-powered-by` and an empty body, or a socket hang
+    // up, in a run where nothing was wrong with the code under test.
+    //
+    // With the server already listening, supertest reuses it and never closes it.
+    await app.listen(0);
   });
 
   afterAll(async () => {
@@ -767,6 +780,161 @@ describe('auth and admin over HTTP', () => {
 
       await api().post(`/api/v1/join/requests/${inbox.body[0].requestId}/approve`)
         .set(mine.auth).send({}).expect(404);
+    });
+  });
+
+  describe('changing a role, over HTTP (P3-T6)', () => {
+    /** An office, its Owner, and one agent who reports to them. */
+    async function officeWithAgent() {
+      const sa = await makeUser(`sa-role-${Math.random()}@agencyboost.test`, 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const owner = await makeUser(`owner-role-${Math.random()}@kpm.test`);
+
+      const company = await api().post('/api/v1/admin/companies').set(auth)
+        .send({ name: `Insurer ${Math.random()}`, slug: `r${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
+        .expect(201);
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({
+          companyId: String(company.body._id),
+          code: `${Math.floor(Math.random() * 9000) + 1000}`,
+          branchName: 'Role Branch',
+        })
+        .expect(201);
+      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
+        .set(auth).send({ userId: owner.id }).expect(200);
+
+      const asOwner = { Authorization: `Bearer ${owner.accessToken}` };
+      const kpmId = String(kpm.body._id);
+      const agent = await joins(kpmId, asOwner);
+      return { kpmId, asOwner, agent };
+    }
+
+    /** Somebody registers to the office and is pulled into the tagger's unit. */
+    async function joins(kpmId: string, tagger: Record<string, string>) {
+      const email = `member-${Math.random()}@kpm.test`;
+      const user = await makeUser(email);
+      const as = { Authorization: `Bearer ${user.accessToken}` };
+      await api().post('/api/v1/join/kpm').set(as).send({ kpmId }).expect(200);
+
+      const pool = await api().get('/api/v1/join/untagged').set(tagger).expect(200);
+      const mine = pool.body.find((row: { email: string }) => row.email === email);
+      await api().post(`/api/v1/join/untagged/${mine.membershipId}`).set(tagger).expect(200);
+      return { ...user, as, membershipId: String(mine.membershipId) };
+    }
+
+    it('AC-1/AC-2: promotes, and the log carries the reason and who did it', async () => {
+      const { asOwner, agent } = await officeWithAgent();
+
+      const team = await api().get('/api/v1/members/my-team').set(asOwner).expect(200);
+      expect(team.body).toHaveLength(1);
+      expect(team.body[0]).toMatchObject({ role: 'agent', canChangeRole: true, directCount: 0 });
+
+      const after = await api().patch(`/api/v1/members/${agent.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'aab', reason: 'Ready to lead a unit' }).expect(200);
+      // The write answers with the team as it now stands, so the screen never has to
+      // guess what the row became.
+      expect(after.body[0].role).toBe('aab');
+
+      const log = await api().get('/api/v1/members/role-changes').set(asOwner).expect(200);
+      expect(log.body[0]).toMatchObject({
+        membershipId: agent.membershipId,
+        fromRole: 'agent',
+        toRole: 'aab',
+        reason: 'Ready to lead a unit',
+      });
+      expect(log.body[0].actorName).toBeTruthy();
+    });
+
+    it('nobody moves: the promoted person still reports to the same leader', async () => {
+      const { asOwner, agent } = await officeWithAgent();
+      const before = await api().get(`/api/v1/members/${agent.membershipId}`)
+        .set(asOwner).expect(200);
+
+      await api().patch(`/api/v1/members/${agent.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'aab' }).expect(200);
+
+      const after = await api().get(`/api/v1/members/${agent.membershipId}`)
+        .set(asOwner).expect(200);
+      expect(after.body.leaderId).toBe(before.body.leaderId);
+      expect(after.body.role).toBe('aab');
+    });
+
+    it('AC-3: refuses a demotion while people still report to them, with the count', async () => {
+      const { kpmId, asOwner, agent } = await officeWithAgent();
+      await api().patch(`/api/v1/members/${agent.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'aab' }).expect(200);
+      await joins(kpmId, agent.as); // now the AAB leads somebody
+
+      const res = await api().patch(`/api/v1/members/${agent.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'agent' }).expect(409);
+      expect(res.body.error.code).toBe('ORG_HAS_DIRECT_REPORTS');
+      expect(res.body.error.details.directCount).toBe(1);
+      expect(res.body.error.message).toContain('1 person reports');
+    });
+
+    it('AC-1: an AB who is not an Admin cannot hand out AB', async () => {
+      const { kpmId, asOwner, agent } = await officeWithAgent();
+      await api().patch(`/api/v1/members/${agent.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'ab' }).expect(200);
+      const theirs = await joins(kpmId, agent.as);
+
+      // Agent ⇄ AAB is theirs to decide…
+      await api().patch(`/api/v1/members/${theirs.membershipId}/role`)
+        .set(agent.as).send({ toRole: 'aab' }).expect(200);
+
+      // …the shape of the office is not.
+      const res = await api().patch(`/api/v1/members/${theirs.membershipId}/role`)
+        .set(agent.as).send({ toRole: 'ab' }).expect(403);
+      expect(res.body.error.code).toBe('ORG_ROLE_CHANGE_NOT_PERMITTED');
+      expect(res.body.error.message).toContain('Agency Builder');
+    });
+
+    it('refuses somebody who has the permission but is not their leader', async () => {
+      const { kpmId, asOwner, agent } = await officeWithAgent();
+      await api().patch(`/api/v1/members/${agent.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'ab' }).expect(200);
+      const stranger = await joins(kpmId, asOwner); // reports to the Owner, not to the AB
+
+      const res = await api().patch(`/api/v1/members/${stranger.membershipId}/role`)
+        .set(agent.as).send({ toRole: 'aab' }).expect(403);
+      expect(res.body.error.code).toBe('ORG_ROLE_CHANGE_NOT_PERMITTED');
+      expect(res.body.error.message).toContain('direct leader');
+
+      // And their team never listed them, so the control was never offered either.
+      const team = await api().get('/api/v1/members/my-team').set(agent.as).expect(200);
+      expect(team.body.map((r: { membershipId: string }) => r.membershipId))
+        .not.toContain(stranger.membershipId);
+    });
+
+    it('refuses an agent outright — the permission is a leader permission', async () => {
+      const { agent } = await officeWithAgent();
+      const res = await api().patch(`/api/v1/members/${agent.membershipId}/role`)
+        .set(agent.as).send({ toRole: 'aab' }).expect(403);
+      expect(res.body.error.details.permission).toBe('member:change_role');
+    });
+
+    it('never reaches another office member, and 404s rather than 403', async () => {
+      const mine = await officeWithAgent();
+      const theirs = await officeWithAgent();
+
+      await api().patch(`/api/v1/members/${theirs.agent.membershipId}/role`)
+        .set(mine.asOwner).send({ toRole: 'aab' }).expect(404);
+
+      // And the log stops at the office boundary too.
+      await api().patch(`/api/v1/members/${theirs.agent.membershipId}/role`)
+        .set(theirs.asOwner).send({ toRole: 'aab' }).expect(200);
+      const log = await api().get('/api/v1/members/role-changes').set(mine.asOwner).expect(200);
+      expect(log.body).toEqual([]);
+    });
+
+    it('validates the role rather than writing whatever arrives', async () => {
+      const { asOwner, agent } = await officeWithAgent();
+      const res = await api().patch(`/api/v1/members/${agent.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'manager' }).expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+
+      await api().patch(`/api/v1/members/${agent.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'aab', note: 'dropped?' }).expect(400);
     });
   });
 

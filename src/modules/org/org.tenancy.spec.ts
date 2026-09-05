@@ -12,6 +12,7 @@ import { JoinRequest, JoinRequestSchema } from './join-request.schema';
 import { OnboardingService } from './onboarding.service';
 import { InviteService } from './invite.service';
 import { ApprovalsService } from './approvals.service';
+import { RoleChangeService } from './role-change.service';
 import { InviteCode, InviteCodeSchema } from './invite-code.schema';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
@@ -56,6 +57,7 @@ describe('organisation', () => {
   let onboarding: OnboardingService;
   let invites: InviteService;
   let approvals: ApprovalsService;
+  let roles: RoleChangeService;
   let sent: { userId?: string; templateId: string }[];
   let clock: MovableClock;
   let users: ReturnType<typeof userModel>;
@@ -110,6 +112,16 @@ describe('organisation', () => {
       members,
       hierarchy,
       mongoose.model(JoinRequest.name) as never,
+      historyModel as never,
+      users as never,
+      new AuditService(mongoose.model(AuditLog.name) as never),
+      notifications as never,
+      clock,
+    );
+
+    roles = new RoleChangeService(
+      members,
+      hierarchy,
       historyModel as never,
       users as never,
       new AuditService(mongoose.model(AuditLog.name) as never),
@@ -1279,6 +1291,238 @@ describe('organisation', () => {
         const theirs = await join(KPM_B, 'agent');
         await expect(approvals.tag(abCtx, theirs)).rejects.toMatchObject({ code: 'NOT_FOUND' });
         expect((await approvals.untagged(abCtx)).map((p) => p.membershipId)).not.toContain(theirs);
+      });
+    });
+  });
+
+  describe('role changes (P3-T6)', () => {
+    async function asMember(
+      membershipId: string,
+      over: Partial<{ isKpmOwner: boolean; isKpmAdmin: boolean }> = {},
+    ) {
+      const row = await members.findById(ctx(KPM_A), membershipId);
+      return new RequestContext(row!.userId, 'none', {
+        membershipId,
+        kpmId: KPM_A,
+        hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
+        status: 'active',
+        isKpmOwner: over.isKpmOwner ?? false,
+        isKpmAdmin: over.isKpmAdmin ?? false,
+        directCount: row!.directCounts?.total ?? 0,
+      });
+    }
+
+    let ab: string;
+    let aab: string;
+    let agent: string;
+    let abCtx: RequestContext;
+
+    beforeEach(async () => {
+      ab = await join(KPM_A, 'ab');
+      aab = await join(KPM_A, 'aab', ab);
+      agent = await join(KPM_A, 'agent', ab);
+      await hierarchy.refreshCounts(ctx(KPM_A), ab);
+      abCtx = await asMember(ab);
+    });
+
+    it('lists a leader team, with what they may do to each', async () => {
+      const team = await roles.team(abCtx);
+      expect(team.map((t) => t.membershipId).sort()).toEqual([aab, agent].sort());
+      expect(team.every((t) => t.canChangeRole)).toBe(true);
+    });
+
+    it('AC-1: never offers the control for an AB report, even to their leader', async () => {
+      const otherAb = await join(KPM_A, 'ab', ab);
+      await hierarchy.refreshCounts(ctx(KPM_A), ab);
+
+      const team = await roles.team(await asMember(ab));
+      expect(team.find((t) => t.membershipId === otherAb)?.canChangeRole).toBe(false);
+    });
+
+    it('AC-1: promotes an agent to AAB, and back', async () => {
+      await roles.change(abCtx, agent, 'aab');
+      expect((await members.findById(ctx(KPM_A), agent))?.role).toBe('aab');
+
+      await roles.change(abCtx, agent, 'agent');
+      expect((await members.findById(ctx(KPM_A), agent))?.role).toBe('agent');
+    });
+
+    it('never moves anybody — a role change is a statement, not a reorganisation', async () => {
+      // The prototype's own copy says so: "they'll keep reporting to you".
+      const before = await members.findById(ctx(KPM_A), agent);
+      await roles.change(abCtx, agent, 'aab');
+      const after = await members.findById(ctx(KPM_A), agent);
+
+      expect(after?.leaderId).toBe(before?.leaderId);
+      expect(after?.ancestorIds).toEqual(before?.ancestorIds);
+      expect(after?.depth).toBe(before?.depth);
+    });
+
+    it('AC-2: writes a role_changed row with both roles, the actor and the reason', async () => {
+      await roles.change(abCtx, agent, 'aab', '  Ready to lead  ');
+
+      const rows = await mongoose
+        .model(MembershipHistory.name)
+        .find({ membershipId: agent, eventType: 'role_changed' });
+      expect(rows).toHaveLength(1);
+      expect(rows[0].get('fromRole')).toBe('agent');
+      expect(rows[0].get('toRole')).toBe('aab');
+      expect(rows[0].get('actorMembershipId')).toBe(ab);
+      expect(rows[0].get('reason')).toBe('Ready to lead');
+      expect(rows[0].get('validTo')).toBeNull();
+    });
+
+    it('closes the previous role edge rather than overwriting it', async () => {
+      await roles.change(abCtx, agent, 'aab');
+      clock.advance(60_000);
+      await roles.change(abCtx, agent, 'agent');
+
+      const rows = await mongoose
+        .model(MembershipHistory.name)
+        .find({ membershipId: agent, eventType: 'role_changed' })
+        .sort({ validFrom: 1 });
+      expect(rows).toHaveLength(2);
+      expect(rows[0].get('validTo')).not.toBeNull();
+      expect(rows[1].get('validTo')).toBeNull();
+    });
+
+    it('updates the leader counts, which break down by role', async () => {
+      await roles.change(abCtx, agent, 'aab');
+      const leader = await members.findById(ctx(KPM_A), ab);
+      expect(leader?.directCounts).toMatchObject({ aab: 2, agent: 0, total: 2 });
+    });
+
+    it('tells them', async () => {
+      const row = await members.findById(ctx(KPM_A), agent);
+      sent.length = 0;
+      await roles.change(abCtx, agent, 'aab');
+      expect(sent[0]).toMatchObject({ userId: row!.userId, templateId: 'member.role_changed' });
+    });
+
+    it('does nothing when the role is already what was asked for', async () => {
+      await roles.change(abCtx, agent, 'agent');
+      const rows = await mongoose
+        .model(MembershipHistory.name)
+        .countDocuments({ membershipId: agent, eventType: 'role_changed' });
+      expect(rows).toBe(0);
+    });
+
+    describe('AC-3: demoting somebody who leads people', () => {
+      it('refuses, and says how many, rather than orphaning them silently', async () => {
+        await join(KPM_A, 'agent', aab);
+        await join(KPM_A, 'agent', aab);
+        await hierarchy.refreshCounts(ctx(KPM_A), aab);
+
+        const err = await roles.change(abCtx, aab, 'agent').catch((e) => e);
+        expect(err.code).toBe('ORG_HAS_DIRECT_REPORTS');
+        expect(err.details.directCount).toBe(2);
+        // And nothing changed.
+        expect((await members.findById(ctx(KPM_A), aab))?.role).toBe('aab');
+      });
+
+      it('allows it once nobody reports to them', async () => {
+        await expect(roles.change(abCtx, aab, 'agent')).resolves.toBeDefined();
+        expect((await members.findById(ctx(KPM_A), aab))?.role).toBe('agent');
+      });
+
+      it('does not block a promotion, which orphans nobody', async () => {
+        await join(KPM_A, 'agent', aab);
+        await hierarchy.refreshCounts(ctx(KPM_A), aab);
+        await expect(roles.change(abCtx, aab, 'ab')).rejects.toMatchObject({
+          // Refused for a different reason: AB is not a leader's call.
+          code: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
+        });
+      });
+    });
+
+    describe('who may change what', () => {
+      it('refuses a leader who is not the direct one', async () => {
+        const stranger = await join(KPM_A, 'ab');
+        await expect(roles.change(await asMember(stranger), agent, 'aab')).rejects.toMatchObject({
+          code: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
+        });
+      });
+
+      it('refuses a direct leader making somebody an AB', async () => {
+        await expect(roles.change(abCtx, agent, 'ab')).rejects.toMatchObject({
+          code: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
+        });
+      });
+
+      it('refuses a direct leader unmaking an AB', async () => {
+        const abReport = await join(KPM_A, 'ab', ab);
+        await expect(roles.change(abCtx, abReport, 'agent')).rejects.toMatchObject({
+          code: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
+        });
+      });
+
+      it('allows the Owner anything, including AB, and anywhere in the office', async () => {
+        const ownerCtx = await asMember(ab, { isKpmOwner: true });
+        await expect(roles.change(ownerCtx, agent, 'ab')).resolves.toBeDefined();
+        expect((await members.findById(ctx(KPM_A), agent))?.role).toBe('ab');
+      });
+
+      it('allows an Admin the same, and somebody they do not lead', async () => {
+        const other = await join(KPM_A, 'aab');
+        const adminCtx = await asMember(ab, { isKpmAdmin: true });
+        await expect(roles.change(adminCtx, other, 'agent')).resolves.toBeDefined();
+      });
+
+      it('never reaches another office', async () => {
+        const theirs = await join(KPM_B, 'agent');
+        await expect(roles.change(abCtx, theirs, 'aab')).rejects.toMatchObject({
+          code: 'NOT_FOUND',
+        });
+      });
+    });
+
+    describe('the log', () => {
+      it('reads back what changed, who did it and why, newest first', async () => {
+        await roles.change(abCtx, agent, 'aab', 'Ready to lead');
+        clock.advance(60_000);
+        await roles.change(abCtx, agent, 'agent', 'Stepping back');
+
+        const log = await roles.log(abCtx);
+        expect(log).toHaveLength(2);
+        expect(log[0]).toMatchObject({ fromRole: 'aab', toRole: 'agent', reason: 'Stepping back' });
+        expect(log[0].actorName).toBeTruthy();
+        expect(log[0].agentCode).toBeTruthy();
+        expect(log[1]).toMatchObject({ fromRole: 'agent', toRole: 'aab' });
+      });
+
+      it('is empty before anything has changed', async () => {
+        expect(await roles.log(abCtx)).toEqual([]);
+      });
+
+      it('refuses every surface to somebody in no office', async () => {
+        // A Super Admin has the permission but no membership, so "your team" and "your
+        // office's log" have no meaning for them. Answering [] would read as an empty
+        // office rather than the wrong question.
+        const nowhere = new RequestContext('u-root', 'super_admin', null);
+        await expect(roles.team(nowhere)).rejects.toMatchObject({
+          code: 'TENANT_NO_MEMBERSHIP',
+        });
+        await expect(roles.log(nowhere)).rejects.toMatchObject({
+          code: 'TENANT_NO_MEMBERSHIP',
+        });
+        await expect(roles.change(nowhere, agent, 'aab')).rejects.toMatchObject({
+          code: 'TENANT_NO_MEMBERSHIP',
+        });
+      });
+
+      it('never shows another office changes', async () => {
+        const theirAb = await join(KPM_B, 'ab');
+        const theirAgent = await join(KPM_B, 'agent', theirAb);
+        await hierarchy.refreshCounts(ctx(KPM_B), theirAb);
+        await roles.change(await (async () => {
+          const row = await members.findById(ctx(KPM_B), theirAb);
+          return new RequestContext(row!.userId, 'none', {
+            membershipId: theirAb, kpmId: KPM_B, hierarchyRole: 'ab', status: 'active',
+            isKpmOwner: false, isKpmAdmin: false, directCount: 1,
+          });
+        })(), theirAgent, 'aab');
+
+        expect(await roles.log(abCtx)).toEqual([]);
       });
     });
   });

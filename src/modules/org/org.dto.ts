@@ -156,3 +156,19 @@ export class UntaggedSearchDto {
   @MaxLength(120)
   q?: string;
 }
+
+export class ChangeRoleDto {
+  @ApiProperty({ enum: ['ab', 'aab', 'agent'] })
+  @IsEnum(['ab', 'aab', 'agent'])
+  toRole!: 'ab' | 'aab' | 'agent';
+
+  @ApiPropertyOptional({
+    example: 'Ready to bring on their own agents',
+    description: 'Kept in the role change log, which is the only place this can be read back.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(300)
+  reason?: string;
+}

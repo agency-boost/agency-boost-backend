@@ -44,6 +44,9 @@ describe('API versioning', () => {
     app.setGlobalPrefix('api');
     app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
     await app.init();
+    // Listening once keeps supertest from cycling an ephemeral port per
+    // request — see auth.e2e.int.spec.ts for what that causes.
+    await app.listen(0);
   });
 
   afterAll(async () => {

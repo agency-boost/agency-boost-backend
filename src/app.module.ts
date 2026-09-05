@@ -48,6 +48,7 @@ import { OnboardingController } from '@/modules/org/onboarding.controller';
 import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { InviteService } from '@/modules/org/invite.service';
 import { ApprovalsService } from '@/modules/org/approvals.service';
+import { RoleChangeService } from '@/modules/org/role-change.service';
 
 @Module({
   imports: [
@@ -115,6 +116,7 @@ import { ApprovalsService } from '@/modules/org/approvals.service';
     OnboardingService,
     InviteService,
     ApprovalsService,
+    RoleChangeService,
   ],
   exports: [Clock, AuditService],
 })

@@ -1,9 +1,10 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { DirectoryService } from './directory.service';
-import { DirectoryQueryDto } from './org.dto';
+import { ChangeRoleDto, DirectoryQueryDto } from './org.dto';
+import { RoleChangeService } from './role-change.service';
 
 /**
  * The office roster and the hierarchy behind it.
@@ -17,7 +18,53 @@ import { DirectoryQueryDto } from './org.dto';
 @ApiBearerAuth()
 @Controller('members')
 export class OrgController {
-  constructor(private readonly directory: DirectoryService) {}
+  constructor(
+    private readonly directory: DirectoryService,
+    private readonly roles: RoleChangeService,
+  ) {}
+
+  @Get('my-team')
+  @RequirePermission('member:read_profile')
+  @ApiOperation({
+    summary: 'The people who report to you',
+    description:
+      'Each row carries whether you may change that person\'s role. The rule is a ' +
+      'server rule, and sending the answer stops the screen keeping a second copy of ' +
+      'it that can drift out of step.',
+  })
+  async myTeam(@Ctx() ctx: RequestContext) {
+    return this.roles.team(ctx);
+  }
+
+  @Patch(':membershipId/role')
+  @RequirePermission('member:change_role')
+  @ApiOperation({
+    summary: 'Change somebody\'s role',
+    description:
+      'Agent ⇄ AAB is the direct leader\'s call. Anything involving AB is the Owner\'s ' +
+      'or an Admin\'s. Nobody moves: a role change is a statement about a person, not a ' +
+      'reorganisation. Demoting somebody who still leads people is refused with the ' +
+      'count, so the caller knows what has to happen first.',
+  })
+  async changeRole(
+    @Ctx() ctx: RequestContext,
+    @Param('membershipId') membershipId: string,
+    @Body() dto: ChangeRoleDto,
+  ) {
+    return this.roles.change(ctx, membershipId, dto.toRole, dto.reason);
+  }
+
+  @Get('role-changes')
+  @RequirePermission('member:read_profile')
+  @ApiOperation({
+    summary: 'The role change log',
+    description:
+      'Read from the append-only membership history, which is the only place the ' +
+      'before-and-after of a role survives.',
+  })
+  async roleLog(@Ctx() ctx: RequestContext) {
+    return this.roles.log(ctx);
+  }
 
   @Get()
   @RequirePermission('member:read_profile')
