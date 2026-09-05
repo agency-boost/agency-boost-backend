@@ -257,6 +257,43 @@ describe('auth and admin over HTTP', () => {
       expect(res.body.error.code).toBe('NOT_FOUND');
     });
 
+    it('refuses to point an office at an account that does not exist', async () => {
+      // The console's screen claimed this error before the service produced it: the id
+      // was stored on trust, so an office could be left owned by nobody, permanently.
+      const sa = await makeUser('sa6@agencyboost.test', 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+
+      const company = await api().post('/api/v1/admin/companies')
+        .set(auth).send({ name: 'Generali', slug: 'generali' }).expect(201);
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({ companyId: String(company.body._id), code: '1001', branchName: 'Menteng' }).expect(201);
+
+      const res = await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
+        .set(auth).send({ email: 'nobody@nowhere.test' }).expect(404);
+      expect(res.body.error.code).toBe('NOT_FOUND');
+
+      const after = await api().get(`/api/v1/admin/tenants/${kpm.body._id}`).set(auth).expect(200);
+      expect(after.body.ownerUserId).toBeNull();
+    });
+
+    it('assigns by the email a Super Admin actually knows', async () => {
+      const sa = await makeUser('sa7@agencyboost.test', 'super_admin');
+      const owner = await makeUser('owner7@kpm.test');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+
+      const company = await api().post('/api/v1/admin/companies')
+        .set(auth).send({ name: 'BNI Life', slug: 'bni-life' }).expect(201);
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({ companyId: String(company.body._id), code: '1002', branchName: 'Thamrin' }).expect(201);
+
+      // Pasted addresses carry whitespace and case. @IsEmail runs before the service
+      // normalises, so the trim has to happen on the DTO or HTTP rejects what the
+      // service would have accepted.
+      const assigned = await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
+        .set(auth).send({ email: '  Owner7@KPM.test  ' }).expect(200);
+      expect(assigned.body.ownerUserId).toBe(owner.id);
+    });
+
     it('shows a Super Admin the platform audit trail their own work wrote', async () => {
       const sa = await makeUser('sa5@agencyboost.test', 'super_admin');
       const auth = { Authorization: `Bearer ${sa.accessToken}` };

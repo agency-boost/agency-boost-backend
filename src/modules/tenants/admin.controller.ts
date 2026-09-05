@@ -88,14 +88,17 @@ export class AdminController {
   @RequirePermission('kpm:assign_owner')
   @ApiOperation({
     summary: 'Assign or transfer the KPM Owner',
-    description: 'Audited with both the outgoing and incoming user.',
+    description:
+      'Name the person by email or by user id. The account must already exist — this ' +
+      'promotes an existing platform user; inviting a new one arrives with invitations ' +
+      'in Phase 3. Audited with both the outgoing and incoming user.',
   })
   async assignOwner(
     @Ctx() ctx: RequestContext,
     @Param('id') id: string,
     @Body() dto: AssignOwnerDto,
   ) {
-    return this.tenants.assignOwner(ctx, id, dto.userId);
+    return this.tenants.assignOwner(ctx, id, dto);
   }
 
   @Patch('tenants/:id/status')

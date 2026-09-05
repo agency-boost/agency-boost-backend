@@ -3,6 +3,7 @@ import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
+import { User, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanySchema } from './company.schema';
 import { Kpm, KpmSchema } from './kpm.schema';
 import { TenantService } from './tenant.service';
@@ -27,8 +28,14 @@ function ctx(opts: { superAdmin?: boolean; owner?: boolean; admin?: boolean; kpm
   );
 }
 
+/** Inferring the model type keeps mongoose's generics out of the test's way. */
+function userModel() {
+  return mongoose.model(User.name, UserSchema);
+}
+
 describe('TenantService', () => {
   let service: TenantService;
+  let users: ReturnType<typeof userModel>;
   let companyId: string;
 
   beforeAll(async () => {
@@ -36,9 +43,11 @@ describe('TenantService', () => {
     const kpms = mongoose.model(Kpm.name, KpmSchema);
     const companies = mongoose.model(Company.name, CompanySchema);
     const auditModel = mongoose.model(AuditLog.name, AuditLogSchema);
+    users = userModel();
     service = new TenantService(
       kpms as never,
       companies as never,
+      users as never,
       new AuditService(auditModel as never),
       new FixedClock(NOW),
     );
@@ -121,29 +130,94 @@ describe('TenantService', () => {
   });
 
   describe('ownership', () => {
+    async function makeUser(email: string, status: 'active' | 'deactivated' = 'active') {
+      const user = await users.create({
+        email,
+        passwordHash: 'x',
+        fullName: email,
+        status,
+        platformRole: 'none',
+      });
+      return String(user._id);
+    }
+
     it('assigns an owner and audits it', async () => {
+      const owner = await makeUser('owner@kpm0417.test');
       const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
-      const updated = await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), 'u-owner');
-      expect(updated.ownerUserId).toBe('u-owner');
+      const updated = await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), {
+        userId: owner,
+      });
+      expect(updated.ownerUserId).toBe(owner);
 
       const audit = await mongoose.model(AuditLog.name).findOne({ action: 'kpm.owner_assigned' });
       expect(audit).not.toBeNull();
     });
 
-    it('records a transfer with both parties', async () => {
+    it('accepts the email a Super Admin actually knows', async () => {
+      // §6.1 of roles-and-permissions.md describes this by email. Requiring a Mongo id
+      // made the console's own screen unusable — there was no way to learn one from it.
+      const owner = await makeUser('owner@kpm0417.test');
       const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
-      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), 'u-first');
-      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), 'u-second');
+      const updated = await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), {
+        email: '  Owner@KPM0417.test ',
+      });
+      expect(updated.ownerUserId).toBe(owner);
+    });
+
+    it('refuses an account that does not exist, instead of storing the string', async () => {
+      // The bug this pins: the id was written on trust, so an office could be left
+      // pointing at nobody — permanently, and with no one able to administer it.
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
+      await expect(
+        service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), {
+          email: 'nobody@nowhere.test',
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+      const unchanged = await mongoose.model(Kpm.name).findById(kpm._id);
+      expect(unchanged?.get('ownerUserId')).toBeNull();
+    });
+
+    it('treats a malformed id as unknown rather than letting Mongoose throw a 500', async () => {
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
+      await expect(
+        service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: 'not-an-id' }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('refuses a deactivated account, which could never sign in to administer anything', async () => {
+      await makeUser('gone@kpm0417.test', 'deactivated');
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
+      await expect(
+        service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), {
+          email: 'gone@kpm0417.test',
+        }),
+      ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    });
+
+    it('asks for one of the two identifiers rather than silently doing nothing', async () => {
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
+      await expect(
+        service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), {}),
+      ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    });
+
+    it('records a transfer with both parties', async () => {
+      const first = await makeUser('first@kpm0417.test');
+      const second = await makeUser('second@kpm0417.test');
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
+      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: first });
+      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: second });
 
       const audit = await mongoose.model(AuditLog.name).findOne({ action: 'kpm.owner_transferred' });
-      expect(audit?.get('before')).toMatchObject({ ownerUserId: 'u-first' });
-      expect(audit?.get('after')).toMatchObject({ ownerUserId: 'u-second' });
+      expect(audit?.get('before')).toMatchObject({ ownerUserId: first });
+      expect(audit?.get('after')).toMatchObject({ ownerUserId: second });
     });
 
     it('refuses an Owner transferring ownership themselves', async () => {
       const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
       await expect(
-        service.assignOwner(ctx({ owner: true }), String(kpm._id), 'u-other'),
+        service.assignOwner(ctx({ owner: true }), String(kpm._id), { email: 'other@kpm.test' }),
       ).rejects.toMatchObject({ code: 'PERM_DENIED' });
     });
 

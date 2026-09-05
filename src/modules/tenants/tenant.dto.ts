@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsEmail, IsEnum, IsOptional, IsString, Matches, MinLength } from 'class-validator';
 
 export class CreateCompanyDto {
   @ApiProperty({ example: 'Prudential' })
@@ -48,9 +49,27 @@ export class CreateKpmDto {
 }
 
 export class AssignOwnerDto {
-  @ApiProperty({ description: 'User id. Create one first with POST /auth/register.' })
+  @ApiPropertyOptional({
+    example: 'owner@kpm0417.test',
+    description:
+      'The account to make Owner. It must already exist — create one at /register or ' +
+      'with POST /auth/register. Email is what a Super Admin normally knows.',
+  })
+  @IsOptional()
+  // Trimmed before validation, not after. The service normalises too, but @IsEmail
+  // runs first and rejects a pasted address with surrounding whitespace — so the
+  // service's own trim never got the chance, and a service test passed against a
+  // contract HTTP did not honour.
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsEmail()
+  email?: string;
+
+  @ApiPropertyOptional({
+    description: 'Alternative to email, for when you already have the id.',
+  })
+  @IsOptional()
   @IsString()
-  userId!: string;
+  userId?: string;
 }
 
 export class SetStatusDto {
