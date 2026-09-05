@@ -10,6 +10,8 @@ import { MembershipHistory, MembershipHistorySchema } from './membership-history
 import { Membership, MembershipSchema } from './membership.schema';
 import { JoinRequest, JoinRequestSchema } from './join-request.schema';
 import { OnboardingService } from './onboarding.service';
+import { InviteService } from './invite.service';
+import { InviteCode, InviteCodeSchema } from './invite-code.schema';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
@@ -51,6 +53,7 @@ describe('organisation', () => {
   let directory: DirectoryService;
   let members: MembershipRepository;
   let onboarding: OnboardingService;
+  let invites: InviteService;
   let sent: { userId?: string; templateId: string }[];
   let clock: MovableClock;
   let users: ReturnType<typeof userModel>;
@@ -84,6 +87,19 @@ describe('organisation', () => {
       users as never,
       mongoose.model(JoinRequest.name, JoinRequestSchema) as never,
       new AuditService(mongoose.model(AuditLog.name, AuditLogSchema) as never),
+      notifications as never,
+      clock,
+    );
+
+    invites = new InviteService(
+      members,
+      hierarchy,
+      mongoose.model(InviteCode.name, InviteCodeSchema) as never,
+      mongoose.model(JoinRequest.name) as never,
+      kpmModel as never,
+      mongoose.model(Company.name) as never,
+      users as never,
+      new AuditService(mongoose.model(AuditLog.name) as never),
       notifications as never,
       clock,
     );
@@ -730,6 +746,249 @@ describe('organisation', () => {
         await expect(onboarding.cancelRequest(joinerCtx)).rejects.toMatchObject({
           code: 'NOT_FOUND',
         });
+      });
+    });
+  });
+
+  describe('invites (P3-T4)', () => {
+    function newcomer(userId: string) {
+      return new RequestContext(userId, 'none', null);
+    }
+
+    let leader: string;
+    let leaderCtx: RequestContext;
+
+    beforeEach(async () => {
+      leader = await join(KPM_A, 'ab');
+      const row = await members.findById(ctx(KPM_A), leader);
+      leaderCtx = new RequestContext(row!.userId, 'none', {
+        membershipId: leader, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+        isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      });
+    });
+
+    it('AC-1: issues one artefact, presented as a code and a link', async () => {
+      // The prototype shows three tiles as if they were three things; its own copy says
+      // any of the three does the same job. One record, three renderings.
+      const issued = await invites.issue(leaderCtx, {}, 'https://agencyboost.app');
+      expect(issued.code).toMatch(/^[A-Z2-9]{6}$/);
+      expect(issued.url).toBe(`https://agencyboost.app/join?code=${issued.code}`);
+      expect(issued.state).toBe('active');
+      expect(issued.autoApprove).toBe(true);
+    });
+
+    it('leaves out the characters people misread aloud', async () => {
+      // A code gets read down a phone line. 0/O and 1/I are where that goes wrong.
+      for (let i = 0; i < 15; i += 1) {
+        const { code } = await invites.issue(leaderCtx, {}, '');
+        expect(code).not.toMatch(/[01OI]/);
+      }
+    });
+
+    it('AC-1: redeeming tags the joiner to the issuer, active, with no approval', async () => {
+      const { code } = await invites.issue(leaderCtx, {}, '');
+      const joinerId = await person('Invited Person');
+
+      const result = await invites.redeem(newcomer(joinerId), code);
+      expect(result.kpmId).toBe(KPM_A);
+
+      const row = await mongoose.model(Membership.name).findOne({ kpmId: KPM_A, userId: joinerId });
+      expect(row?.get('status')).toBe('active');
+      expect(row?.get('leaderId')).toBe(leader);
+      expect(row?.get('role')).toBe('agent');
+      expect(row?.get('recruitedByMembershipId')).toBe(leader);
+    });
+
+    it('AC-3: writes a joined history row and creates no join request', async () => {
+      // A request would sit in the leader's inbox asking them to approve something that
+      // already happened.
+      const { code } = await invites.issue(leaderCtx, {}, '');
+      const joinerId = await person();
+      await invites.redeem(newcomer(joinerId), code);
+
+      const row = await mongoose.model(Membership.name).findOne({ kpmId: KPM_A, userId: joinerId });
+      const events = await mongoose
+        .model(MembershipHistory.name)
+        .find({ membershipId: String(row!._id) });
+      expect(events.map((e) => e.get('eventType'))).toEqual(['joined']);
+      expect(events[0].get('toLeaderId')).toBe(leader);
+
+      expect(await mongoose.model(JoinRequest.name).countDocuments({})).toBe(0);
+    });
+
+    it('forces the agent role, whatever the invite is used for', async () => {
+      // An invite is a way into somebody's unit, not a way to pick your own rank on the
+      // way in.
+      const { code } = await invites.issue(leaderCtx, {}, '');
+      const joinerId = await person();
+      await invites.redeem(newcomer(joinerId), code);
+      const row = await mongoose.model(Membership.name).findOne({ userId: joinerId });
+      expect(row?.get('role')).toBe('agent');
+    });
+
+    it('cancels an outstanding request, because they got in by another door', async () => {
+      const joinerId = await person();
+      await onboarding.registerKpm(newcomer(joinerId), KPM_A);
+      const registered = await mongoose.model(Membership.name).findOne({ userId: joinerId });
+      const asJoiner = new RequestContext(joinerId, 'none', {
+        membershipId: String(registered!._id), kpmId: KPM_A, hierarchyRole: 'agent',
+        status: 'pending', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      });
+      await onboarding.requestLeader(asJoiner, leader);
+
+      // They are pending, so redeeming refuses — they already have an office.
+      const { code } = await invites.issue(leaderCtx, {}, '');
+      await expect(invites.redeem(asJoiner, code)).rejects.toMatchObject({
+        code: 'ORG_AGENT_ALREADY_TAGGED',
+      });
+    });
+
+    it('notifies the leader that somebody walked in', async () => {
+      const { code } = await invites.issue(leaderCtx, {}, '');
+      sent.length = 0;
+      await invites.redeem(newcomer(await person()), code);
+
+      const leaderRow = await mongoose.model(Membership.name).findById(leader);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({
+        userId: leaderRow!.get('userId'),
+        templateId: 'member.tagged_by_leader',
+      });
+    });
+
+    describe('AC-2: refusing an invite that should not work', () => {
+      it('refuses a code nobody issued', async () => {
+        await expect(invites.redeem(newcomer(await person()), 'NOPE99')).rejects.toMatchObject({
+          code: 'ORG_INVITE_EXPIRED',
+        });
+      });
+
+      it('refuses a revoked one, and says nothing different from an unknown one', async () => {
+        // Six characters, and the reward for guessing is joining somebody's unit. Telling
+        // a prober which of the two they hit hands them a working oracle.
+        const issued = await invites.issue(leaderCtx, {}, '');
+        await invites.revoke(leaderCtx, issued.inviteId);
+
+        const revoked = await invites
+          .redeem(newcomer(await person()), issued.code)
+          .catch((e) => e);
+        const unknown = await invites.redeem(newcomer(await person()), 'ZZZZZZ').catch((e) => e);
+        expect(revoked.code).toBe(unknown.code);
+        expect(revoked.message).toBe(unknown.message);
+      });
+
+      it('refuses an expired one', async () => {
+        const { code } = await invites.issue(leaderCtx, { expiresInDays: 1 }, '');
+        clock.advance(2 * 86_400_000);
+        await expect(invites.redeem(newcomer(await person()), code)).rejects.toMatchObject({
+          code: 'ORG_INVITE_EXPIRED',
+        });
+      });
+
+      it('refuses an exhausted one, and says so — a ceiling is not a mistake', async () => {
+        // The one refusal that names itself: hitting a use limit is not a guess, and the
+        // person redeeming it was given a real code by a real leader.
+        const { code } = await invites.issue(leaderCtx, { maxUses: 1 }, '');
+        await invites.redeem(newcomer(await person()), code);
+
+        await expect(invites.redeem(newcomer(await person()), code)).rejects.toMatchObject({
+          code: 'ORG_INVITE_EXHAUSTED',
+        });
+      });
+
+      it('does not spend a use on a redemption that failed', async () => {
+        const { code, inviteId } = await invites.issue(leaderCtx, { maxUses: 2 }, '');
+        const joinerId = await person();
+        await invites.redeem(newcomer(joinerId), code);
+        // The same person again: already tagged, so it refuses before counting.
+        const row = await mongoose.model(Membership.name).findOne({ userId: joinerId });
+        const asMember = new RequestContext(joinerId, 'none', {
+          membershipId: String(row!._id), kpmId: KPM_A, hierarchyRole: 'agent',
+          status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+        });
+        await expect(invites.redeem(asMember, code)).rejects.toMatchObject({
+          code: 'ORG_AGENT_ALREADY_TAGGED',
+        });
+
+        const after = await mongoose.model(InviteCode.name).findById(inviteId);
+        expect(after?.get('useCount')).toBe(1);
+      });
+
+      it('refuses an invite into a suspended office', async () => {
+        const { code } = await invites.issue(leaderCtx, {}, '');
+        await mongoose.model(Kpm.name).updateOne({ _id: KPM_A }, { $set: { status: 'suspended' } });
+        await expect(invites.redeem(newcomer(await person()), code)).rejects.toMatchObject({
+          code: 'ORG_INVITE_EXPIRED',
+        });
+      });
+
+      it('refuses an invite whose issuer has left, rather than dropping somebody in leaderless', async () => {
+        const { code } = await invites.issue(leaderCtx, {}, '');
+        await members.updateById(ctx(KPM_A), leader, { $set: { status: 'removed' } });
+        await expect(invites.redeem(newcomer(await person()), code)).rejects.toMatchObject({
+          code: 'ORG_INVITE_EXPIRED',
+        });
+      });
+    });
+
+    describe('managing them', () => {
+      it('lists a leader own invites, revoked ones included', async () => {
+        const first = await invites.issue(leaderCtx, { label: 'September' }, '');
+        await invites.issue(leaderCtx, {}, '');
+        await invites.revoke(leaderCtx, first.inviteId);
+
+        const mine = await invites.mine(leaderCtx, '');
+        expect(mine).toHaveLength(2);
+        expect(mine.find((i) => i.inviteId === first.inviteId)?.state).toBe('revoked');
+        expect(mine.find((i) => i.inviteId === first.inviteId)?.label).toBe('September');
+      });
+
+      it('never lists or revokes somebody else invite', async () => {
+        const theirs = await invites.issue(leaderCtx, {}, '');
+        const otherId = await join(KPM_A, 'aab', leader);
+        const otherRow = await members.findById(ctx(KPM_A), otherId);
+        const otherCtx = new RequestContext(otherRow!.userId, 'none', {
+          membershipId: otherId, kpmId: KPM_A, hierarchyRole: 'aab', status: 'active',
+          isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+        });
+
+        expect(await invites.mine(otherCtx, '')).toHaveLength(0);
+        await expect(invites.revoke(otherCtx, theirs.inviteId)).rejects.toMatchObject({
+          code: 'NOT_FOUND',
+        });
+      });
+
+      it('never reaches another office invite', async () => {
+        const theirLeader = await join(KPM_B, 'ab');
+        const theirRow = await members.findById(ctx(KPM_B), theirLeader);
+        const theirCtx = new RequestContext(theirRow!.userId, 'none', {
+          membershipId: theirLeader, kpmId: KPM_B, hierarchyRole: 'ab', status: 'active',
+          isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+        });
+        const mine = await invites.issue(leaderCtx, {}, '');
+
+        await expect(invites.revoke(theirCtx, mine.inviteId)).rejects.toMatchObject({
+          code: 'NOT_FOUND',
+        });
+      });
+
+      it('is idempotent about revoking twice', async () => {
+        const issued = await invites.issue(leaderCtx, {}, '');
+        const once = await invites.revoke(leaderCtx, issued.inviteId);
+        const twice = await invites.revoke(leaderCtx, issued.inviteId);
+        expect(twice.revokedAt).toBe(once.revokedAt);
+      });
+
+      it('previews whose unit and which office, before anybody commits', async () => {
+        const { code } = await invites.issue(leaderCtx, {}, '');
+        const preview = await invites.preview(code);
+        expect(preview.kpmLabel).toContain('KPM 0417');
+        expect(preview.leaderName).toBeTruthy();
+      });
+
+      it('accepts a code in any case, because people type it as they read it', async () => {
+        const { code } = await invites.issue(leaderCtx, {}, '');
+        await expect(invites.preview(`  ${code.toLowerCase()}  `)).resolves.toBeDefined();
       });
     });
   });

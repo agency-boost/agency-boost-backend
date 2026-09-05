@@ -32,6 +32,11 @@ export const envSchema = z.object({
 
   APP_BASE_URL: z.string().url(),
   CORS_ORIGINS: z.string().default(''),
+  /**
+   * Where a shared invite link points — the app's origin, not this API's. A joiner opens
+   * a page, not an endpoint, and the two differ in every environment.
+   */
+  APP_ORIGIN: z.string().url().default('http://localhost:3000'),
 
   RATE_LIMIT_LOGIN_PER_15M: z.coerce.number().int().positive().default(5),
 

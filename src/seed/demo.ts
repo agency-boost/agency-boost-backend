@@ -26,6 +26,7 @@ import {
   MembershipHistory, MembershipHistorySchema,
 } from '@/modules/org/membership-history.schema';
 import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
+import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { formatAgentCode } from '@/modules/org/agent-code';
 
 loadEnv();
@@ -62,6 +63,7 @@ async function main(): Promise<void> {
   const Memberships = mongoose.model(Membership.name, MembershipSchema);
   const History = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
   const JoinRequests = mongoose.model(JoinRequest.name, JoinRequestSchema);
+  const Invites = mongoose.model(InviteCode.name, InviteCodeSchema);
 
   if (process.argv.includes('--reset')) {
     // Empty the collections rather than drop the database. An Atlas user with ordinary
@@ -69,7 +71,7 @@ async function main(): Promise<void> {
     // one — and emptying named collections will not take out a database someone pointed
     // at by mistake.
     const owned = [
-      'memberships', 'membershipHistory', 'joinRequests', 'kpms', 'companies', 'users',
+      'memberships', 'membershipHistory', 'joinRequests', 'inviteCodes', 'kpms', 'companies', 'users',
       'authTokens', 'auditLog', 'notifications', 'notificationPreferences', 'assets',
     ];
     for (const name of owned) {
@@ -275,6 +277,35 @@ async function main(): Promise<void> {
 
   for (const id of [owner.id, ab.id, sari.id]) await recount(id0417, id);
 
+  /**
+   * Invites, fixed rather than random so the sign-in panel and the docs can quote them.
+   * The service generates a random code; these are written directly, which is the one
+   * thing the seed does differently from the API — and it is why they are readable.
+   */
+  const INVITES = [
+    { code: 'SARI01', issuedBy: sari.id, label: 'Sari — no limit, runs until withdrawn', maxUses: null, expiresAt: null, revokedAt: null },
+    { code: 'ONCE01', issuedBy: ab.id, label: 'Agus — one use only', maxUses: 1, expiresAt: null, revokedAt: null },
+    { code: 'GONE01', issuedBy: ab.id, label: 'Agus — withdrawn', maxUses: null, expiresAt: null, revokedAt: clock.now() },
+    {
+      code: 'PAST01', issuedBy: sari.id, label: 'Sari — already expired',
+      maxUses: null, expiresAt: new Date(clock.now().getTime() - 86_400_000), revokedAt: null,
+    },
+  ];
+  for (const invite of INVITES) {
+    if (await Invites.findOne({ kpmId: id0417, code: invite.code }).exec()) continue;
+    await Invites.create({
+      kpmId: id0417,
+      code: invite.code,
+      issuedByMembershipId: invite.issuedBy,
+      autoApprove: true,
+      maxUses: invite.maxUses,
+      useCount: 0,
+      expiresAt: invite.expiresAt,
+      revokedAt: invite.revokedAt,
+      label: invite.label,
+    });
+  }
+
   // ------------------------------------------------- KPM 0555, for cross-tenant checks
 
   const owner0555User = await user('owner@kpm0555.test', 'Hendra Wijaya');
@@ -336,6 +367,12 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
 
   NO OFFICE
     newcomer@agencyboost.test                          Brand new — starts at Register KPM
+
+  INVITE CODES for KPM 0417, at /join?code=<code>
+    SARI01   works — Sari's, no limit
+    ONCE01   works once — Agus's
+    GONE01   withdrawn, and refused exactly like a code nobody issued
+    PAST01   expired, refused the same way
 
 Sign in at POST /api/v1/auth/login, then send the access token as
   Authorization: Bearer <accessToken>

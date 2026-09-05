@@ -137,9 +137,15 @@ describe('permission matrix', () => {
      * every authenticated user *including one with no KPM yet*, because otherwise
      * nobody could ever join.
      */
-    const JOIN_FLOW: readonly Permission[] = ['kpm:read_directory', 'kpm_registration:create'];
+    const JOIN_FLOW: readonly Permission[] = [
+      'kpm:read_directory',
+      'kpm_registration:create',
+      // The other door: redeeming a leader's invite skips the search and the approval,
+      // and the person redeeming one is by definition in no office yet.
+      'join_via_code_link_qr',
+    ];
 
-    it('holds the two permissions that let somebody join, and nothing else', () => {
+    it('holds only the permissions that let somebody join, and nothing else', () => {
       const stranger = ctx({ noMembership: true });
       for (const p of Object.keys(PERMISSIONS) as Permission[]) {
         expect([p, can(stranger, p)]).toEqual([p, JOIN_FLOW.includes(p)]);
@@ -171,7 +177,11 @@ describe('permission matrix', () => {
      * to find. Both are the way into an office — refusing either to somebody outside one
      * would close the only door.
      */
-    const UNIVERSAL_GRANTS: readonly string[] = ['kpm:read_directory', 'kpm_registration:create'];
+    const UNIVERSAL_GRANTS: readonly string[] = [
+      'kpm:read_directory',
+      'kpm_registration:create',
+      'join_via_code_link_qr',
+    ];
 
     const ALL = [
       ctx({ superAdmin: true }),

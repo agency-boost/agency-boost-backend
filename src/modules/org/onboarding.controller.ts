@@ -1,9 +1,19 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { OnboardingService } from './onboarding.service';
-import { KpmSearchDto, LeaderSearchDto, RegisterKpmDto, RequestLeaderDto } from './org.dto';
+import {
+  InviteCodeQueryDto,
+  IssueInviteDto,
+  KpmSearchDto,
+  LeaderSearchDto,
+  RedeemInviteDto,
+  RegisterKpmDto,
+  RequestLeaderDto,
+} from './org.dto';
+import { InviteService } from './invite.service';
 
 /**
  * Joining an office, from the joiner's side.
@@ -16,7 +26,22 @@ import { KpmSearchDto, LeaderSearchDto, RegisterKpmDto, RequestLeaderDto } from 
 @ApiBearerAuth()
 @Controller('join')
 export class OnboardingController {
-  constructor(private readonly onboarding: OnboardingService) {}
+  constructor(
+    private readonly onboarding: OnboardingService,
+    private readonly invites: InviteService,
+    private readonly config: ConfigService,
+  ) {}
+
+  /**
+   * Where a shared link points.
+   *
+   * The app's origin, not the API's — a joiner opens a page, not an endpoint. It comes
+   * from configuration because it differs per environment, and falls back to the local
+   * dev server so the link is never a broken string.
+   */
+  private get appOrigin(): string {
+    return this.config.get<string>('APP_ORIGIN') ?? 'http://localhost:3000';
+  }
 
   @Get('me')
   @ApiOperation({
@@ -86,5 +111,67 @@ export class OnboardingController {
   @ApiOperation({ summary: 'Withdraw your request' })
   async cancel(@Ctx() ctx: RequestContext) {
     return this.onboarding.cancelRequest(ctx);
+  }
+
+  // ---- Invites: one artefact, three presentations. ----
+
+  @Get('invites')
+  @RequirePermission('member:invite')
+  @ApiOperation({
+    summary: 'The invites you have issued',
+    description:
+      'Revoked and spent ones stay in the list, so you can see what has been out there ' +
+      'rather than only what still works.',
+  })
+  async listInvites(@Ctx() ctx: RequestContext) {
+    return this.invites.mine(ctx, this.appOrigin);
+  }
+
+  @Post('invites')
+  @RequirePermission('member:invite')
+  @ApiOperation({
+    summary: 'Issue an invite',
+    description:
+      'Returns the code and the link; a QR is that link rendered. Anyone who redeems it ' +
+      'joins your office tagged to you, with no approval — which is why it can carry a ' +
+      'use limit and an expiry, and can be revoked.',
+  })
+  async issueInvite(@Ctx() ctx: RequestContext, @Body() dto: IssueInviteDto) {
+    return this.invites.issue(ctx, dto, this.appOrigin);
+  }
+
+  @Delete('invites/:inviteId')
+  @RequirePermission('member:revoke_invite')
+  @ApiOperation({
+    summary: 'Revoke an invite',
+    description: 'Kills the code, the link and the QR at once — they are one artefact.',
+  })
+  async revokeInvite(@Ctx() ctx: RequestContext, @Param('inviteId') inviteId: string) {
+    return this.invites.revoke(ctx, inviteId);
+  }
+
+  @Get('invite')
+  @ApiOperation({
+    summary: 'What an invite is for',
+    description:
+      'Whose unit and which office, so somebody can see what they are accepting before ' +
+      'they accept it. Unknown, revoked and expired all answer alike.',
+  })
+  async previewInvite(@Query() query: InviteCodeQueryDto) {
+    return this.invites.preview(query.code);
+  }
+
+  @Post('redeem')
+  @RequirePermission('join_via_code_link_qr')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Redeem an invite',
+    description:
+      'Registers you and tags you to the issuer in one step, with no approval — that is ' +
+      'the whole difference from asking a leader. No join request is created: one would ' +
+      'sit in their inbox asking them to approve something that already happened.',
+  })
+  async redeem(@Ctx() ctx: RequestContext, @Body() dto: RedeemInviteDto) {
+    return this.invites.redeem(ctx, dto.code);
   }
 }

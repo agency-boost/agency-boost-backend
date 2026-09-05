@@ -169,6 +169,16 @@ export const PERMISSIONS = {
     { grantee: AAB, scope: 'own', whileStatus: ['active', 'pending'] },
     { grantee: AGENT, scope: 'own', whileStatus: ['active', 'pending'] },
   ],
+  'member:revoke_invite': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+  ],
+  // The joiner's side of an invite. Held by anyone signed in for the same reason
+  // `kpm_registration:create` is: the person redeeming one is in no office yet.
+  'join_via_code_link_qr': [{ grantee: AUTHENTICATED, scope: 'own' }],
   'leader_request:cancel': [
     { grantee: AB, scope: 'own', whileStatus: ['active', 'pending'] },
     { grantee: AAB, scope: 'own', whileStatus: ['active', 'pending'] },

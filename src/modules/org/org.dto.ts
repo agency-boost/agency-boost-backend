@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class DirectoryQueryDto {
   @ApiPropertyOptional({ description: 'Name, email or agent code. Case-insensitive.' })
@@ -68,4 +68,58 @@ export class RequestLeaderDto {
   @ApiProperty({ description: 'From GET /join/leaders.' })
   @IsString()
   leaderMembershipId!: string;
+}
+
+export class IssueInviteDto {
+  @ApiPropertyOptional({
+    example: 'Hiring push, September',
+    description: 'A note for you. Never shown to whoever redeems it.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(120)
+  label?: string;
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 500,
+    description: 'How many people may use it. Omitted means no ceiling.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  maxUses?: number;
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 365,
+    description: 'Days until it stops working. Omitted means it runs until revoked.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  expiresInDays?: number;
+}
+
+export class RedeemInviteDto {
+  @ApiProperty({ example: 'JOR417', description: 'From a link, a QR, or read aloud.' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value))
+  @IsString()
+  @MinLength(4)
+  @MaxLength(16)
+  code!: string;
+}
+
+export class InviteCodeQueryDto {
+  @ApiProperty({ example: 'JOR417' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value))
+  @IsString()
+  @MinLength(4)
+  @MaxLength(16)
+  code!: string;
 }

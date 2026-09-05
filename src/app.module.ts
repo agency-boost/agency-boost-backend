@@ -45,6 +45,8 @@ import { OrgController } from '@/modules/org/org.controller';
 import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { OnboardingService } from '@/modules/org/onboarding.service';
 import { OnboardingController } from '@/modules/org/onboarding.controller';
+import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
+import { InviteService } from '@/modules/org/invite.service';
 
 @Module({
   imports: [
@@ -78,6 +80,7 @@ import { OnboardingController } from '@/modules/org/onboarding.controller';
       { name: Membership.name, schema: MembershipSchema },
       { name: MembershipHistory.name, schema: MembershipHistorySchema },
       { name: JoinRequest.name, schema: JoinRequestSchema },
+      { name: InviteCode.name, schema: InviteCodeSchema },
     ]),
   ],
   controllers: [HealthController, AuthController, AdminController, OrgController, OnboardingController],
@@ -109,6 +112,7 @@ import { OnboardingController } from '@/modules/org/onboarding.controller';
     HierarchyService,
     DirectoryService,
     OnboardingService,
+    InviteService,
   ],
   exports: [Clock, AuditService],
 })

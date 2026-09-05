@@ -26,6 +26,11 @@ export const ErrorCode = {
   ORG_CYCLE_DETECTED: 'ORG_CYCLE_DETECTED',
   ORG_LEADER_NOT_IN_KPM: 'ORG_LEADER_NOT_IN_KPM',
   ORG_AGENT_ALREADY_TAGGED: 'ORG_AGENT_ALREADY_TAGGED',
+  // Unknown, revoked and expired all answer with EXPIRED, deliberately: a six-character
+  // code whose reward is joining somebody's unit must not tell a prober which of the
+  // three they hit.
+  ORG_INVITE_EXPIRED: 'ORG_INVITE_EXPIRED',
+  ORG_INVITE_EXHAUSTED: 'ORG_INVITE_EXHAUSTED',
 
   // Authorization
   PERM_DENIED: 'PERM_DENIED',
