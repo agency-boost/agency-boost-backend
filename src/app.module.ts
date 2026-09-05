@@ -34,6 +34,14 @@ import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { TenantService } from '@/modules/tenants/tenant.service';
 import { AdminController } from '@/modules/tenants/admin.controller';
+import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
+import {
+  MembershipHistory, MembershipHistorySchema,
+} from '@/modules/org/membership-history.schema';
+import { MembershipRepository } from '@/modules/org/membership.repository';
+import { HierarchyService } from '@/modules/org/hierarchy.service';
+import { DirectoryService } from '@/modules/org/directory.service';
+import { OrgController } from '@/modules/org/org.controller';
 
 @Module({
   imports: [
@@ -44,6 +52,15 @@ import { AdminController } from '@/modules/tenants/admin.controller';
       useFactory: (config: ConfigService) => ({
         uri: config.getOrThrow<string>('MONGODB_URI'),
         dbName: config.getOrThrow<string>('MONGODB_DB_NAME'),
+        // Stated rather than left to Mongoose's default, because two guarantees rest on
+        // it: `kpmId` leads every scoped index, and the partial unique index on
+        // (kpmId, userId) is what stops one person holding two live memberships. An
+        // index that was never built enforces nothing, and the failure is silent.
+        //
+        // It stays on in production at this size — the collections are small and the
+        // cost is a boot-time no-op once built. Revisit when a collection is large
+        // enough that a build would block, and move to a migration step then.
+        autoIndex: true,
       }),
     }),
     MongooseModule.forFeature([
@@ -55,9 +72,11 @@ import { AdminController } from '@/modules/tenants/admin.controller';
       { name: AuthToken.name, schema: AuthTokenSchema },
       { name: Company.name, schema: CompanySchema },
       { name: Kpm.name, schema: KpmSchema },
+      { name: Membership.name, schema: MembershipSchema },
+      { name: MembershipHistory.name, schema: MembershipHistorySchema },
     ]),
   ],
-  controllers: [HealthController, AuthController, AdminController],
+  controllers: [HealthController, AuthController, AdminController, OrgController],
   providers: [
     { provide: Clock, useClass: SystemClock },
     {
@@ -82,6 +101,9 @@ import { AdminController } from '@/modules/tenants/admin.controller';
     ContextResolver,
     ImpersonationService,
     TenantService,
+    MembershipRepository,
+    HierarchyService,
+    DirectoryService,
   ],
   exports: [Clock, AuditService],
 })

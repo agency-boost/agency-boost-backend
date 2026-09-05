@@ -1,9 +1,12 @@
 /**
  * Seeds a demo tenant so the API can actually be exercised.
  *
- * Phase 2 scope: a platform Super Admin, one company, one KPM, and that office's Owner.
- * Members, activity, leads and the rest arrive as Phases 3–9 create their collections —
- * this grows with them rather than pretending to be the full fixture now.
+ * Phase 3 scope: a platform Super Admin, one company, one KPM, its Owner, and a small
+ * hierarchy underneath — an AB with an AAB and agents, plus a childless AAB, because
+ * that is the case leadership-by-graph exists to get right (OD-23).
+ *
+ * Activity, leads and production arrive as Phases 6–9 create their collections. This
+ * grows with them rather than pretending to be the full fixture now.
  *
  *   pnpm seed:demo            create, leaving anything that already exists
  *   pnpm seed:demo --reset    drop the database first
@@ -16,6 +19,11 @@ import { PasswordService } from '@/modules/auth/password.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { DEFAULT_KPM_SETTINGS, Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
+import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
+import {
+  MembershipHistory, MembershipHistorySchema,
+} from '@/modules/org/membership-history.schema';
+import { formatAgentCode } from '@/modules/org/agent-code';
 
 loadEnv();
 
@@ -40,8 +48,19 @@ async function main(): Promise<void> {
   const Kpms = mongoose.model(Kpm.name, KpmSchema);
 
   if (process.argv.includes('--reset')) {
-    await mongoose.connection.dropDatabase();
-    console.log(`dropped database ${dbName}`);
+    // Empty the collections rather than drop the database. An Atlas user with ordinary
+    // read/write permissions cannot `dropDatabase` — the seed failed outright against
+    // one — and emptying named collections will not take out a database someone pointed
+    // at by mistake.
+    const owned = [
+      'memberships', 'membershipHistory', 'kpms', 'companies', 'users',
+      'authTokens', 'auditLog', 'notifications', 'notificationPreferences', 'assets',
+    ];
+    for (const name of owned) {
+      const { deletedCount } = await mongoose.connection.collection(name).deleteMany({});
+      if (deletedCount) console.log(`cleared ${deletedCount} from ${name}`);
+    }
+    console.log(`reset ${dbName}`);
   }
 
   async function upsertUser(spec: typeof OWNER, platformRole: 'super_admin' | 'none') {
@@ -83,13 +102,107 @@ async function main(): Promise<void> {
       status: 'active',
     }));
 
+  // The office's people. Ordered, because the agent code is issued from a counter and
+  // the roster reads better when the seed's numbering matches the tree.
+  const Memberships = mongoose.model(Membership.name, MembershipSchema);
+  const History = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
+  const kpmId = String(kpm._id);
+
+  async function member(
+    userId: string,
+    role: 'ab' | 'aab' | 'agent',
+    leader: { _id: unknown; ancestorIds: string[]; depth: number } | null,
+  ) {
+    const existing = await Memberships.findOne({ kpmId, userId }).exec();
+    if (existing) return existing;
+
+    const counted = await Kpms.findOneAndUpdate(
+      { _id: kpm._id },
+      { $inc: { 'counters.nextAgentCodeSeq': 1 } },
+      { new: false },
+    ).exec();
+    const seq = (counted?.get('counters')?.nextAgentCodeSeq as number) ?? 1;
+    const leaderId = leader ? String(leader._id) : null;
+
+    const created = await Memberships.create({
+      kpmId,
+      userId,
+      agentCode: formatAgentCode(kpm.get('code') as string, seq),
+      agentSeq: seq,
+      role,
+      leaderId,
+      ancestorIds: leader ? [...leader.ancestorIds, leaderId!] : [],
+      depth: leader ? leader.depth + 1 : 0,
+      status: 'active',
+      joinedAt: clock.now(),
+      recruitedByMembershipId: leaderId,
+    });
+    // History is written from the first day, not from the day a screen reads it.
+    await History.create({
+      kpmId, membershipId: String(created._id), eventType: 'joined',
+      toRole: role, toLeaderId: leaderId, validFrom: clock.now(), validTo: null,
+      actorUserId: String(superAdmin._id),
+    });
+    return created;
+  }
+
+  async function extra(email: string, fullName: string) {
+    const existing = await Users.findOne({ email }).exec();
+    if (existing) return existing;
+    return Users.create({
+      email,
+      passwordHash: await passwords.hash('demo password field'),
+      fullName,
+      platformRole: 'none',
+      status: 'active',
+      emailVerifiedAt: clock.now(),
+    });
+  }
+
+  const ownerMembership = await member(String(owner._id), 'ab', null);
+  const ownerRef = {
+    _id: ownerMembership._id,
+    ancestorIds: ownerMembership.get('ancestorIds') as string[],
+    depth: ownerMembership.get('depth') as number,
+  };
+
+  const aabUser = await extra('sari@kpm0417.test', 'Sari Puspita');
+  const aab = await member(String(aabUser._id), 'aab', ownerRef);
+  const aabRef = {
+    _id: aab._id,
+    ancestorIds: aab.get('ancestorIds') as string[],
+    depth: aab.get('depth') as number,
+  };
+
+  await member(String(agent._id), 'agent', aabRef);
+  const budi = await extra('budi@kpm0417.test', 'Budi Santoso');
+  await member(String(budi._id), 'agent', aabRef);
+
+  // A childless AAB: holds the role, leads nobody. The case the prototype's two
+  // definitions of "leader" disagree about, and the reason OD-23 picked the graph.
+  const dewiUser = await extra('dewi@kpm0417.test', 'Dewi Lestari');
+  await member(String(dewiUser._id), 'aab', ownerRef);
+
+  // Counts are derived, never incremented, so they cannot drift out of step.
+  for (const id of [String(ownerMembership._id), String(aab._id)]) {
+    const directs = await Memberships.find({ kpmId, leaderId: id, status: 'active' }).exec();
+    const counts = { ab: 0, aab: 0, agent: 0, total: directs.length };
+    for (const d of directs) counts[d.get('role') as 'ab' | 'aab' | 'agent'] += 1;
+    const subtreeCount = await Memberships.countDocuments({ kpmId, ancestorIds: id, status: 'active' });
+    await Memberships.updateOne({ _id: id }, { $set: { directCounts: counts, subtreeCount } });
+  }
+
   console.log(`
 Seeded.
 
   Super Admin   ${SUPER_ADMIN.email}   ${SUPER_ADMIN.password}
   KPM Owner     ${OWNER.email}          ${OWNER.password}
   Agent         ${AGENT.email}          ${AGENT.password}
-                (no membership yet — this is the "new agent" state, valid by design)
+
+  The office's people, all with the password "demo password field":
+    sari@kpm0417.test    AAB, leads two agents
+    budi@kpm0417.test    Agent under Sari
+    dewi@kpm0417.test    AAB who leads nobody — the case OD-23 settles
 
   Company       ${company.name} (${company._id})
   KPM           ${kpm.get('code')} ${kpm.get('branchName')} (${kpm._id})

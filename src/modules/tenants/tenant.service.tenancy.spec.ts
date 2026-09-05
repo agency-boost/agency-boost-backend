@@ -4,6 +4,12 @@ import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
+import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
+import {
+  MembershipHistory, MembershipHistorySchema,
+} from '@/modules/org/membership-history.schema';
+import { MembershipRepository } from '@/modules/org/membership.repository';
+import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { Company, CompanySchema } from './company.schema';
 import { Kpm, KpmSchema } from './kpm.schema';
 import { TenantService } from './tenant.service';
@@ -22,7 +28,7 @@ function ctx(opts: { superAdmin?: boolean; owner?: boolean; admin?: boolean; kpm
           hierarchyRole: 'ab',
           status: 'active',
           isKpmOwner: opts.owner ?? false,
-          isKpmAdmin: opts.admin ?? false,
+          isKpmAdmin: opts.admin ?? false, directCount: 0,
         }
       : null,
   );
@@ -44,12 +50,18 @@ describe('TenantService', () => {
     const companies = mongoose.model(Company.name, CompanySchema);
     const auditModel = mongoose.model(AuditLog.name, AuditLogSchema);
     users = userModel();
+    const memberModel = mongoose.model(Membership.name, MembershipSchema);
+    const historyModel = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
+    const repo = new MembershipRepository(memberModel as never);
+    const clock = new FixedClock(NOW);
     service = new TenantService(
       kpms as never,
       companies as never,
       users as never,
       new AuditService(auditModel as never),
-      new FixedClock(NOW),
+      clock,
+      new HierarchyService(repo, kpms as never, historyModel as never, clock),
+      repo,
     );
   });
   afterAll(stopMongo);
@@ -200,6 +212,47 @@ describe('TenantService', () => {
       await expect(
         service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), {}),
       ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    });
+
+    it('gives the new Owner a membership, or they cannot reach their own office', async () => {
+      // §6.1 creates this on first login. Creating it at assignment means the office is
+      // administrable the moment it is assigned, and a context resolves for the Owner.
+      const owner = await makeUser('owner@kpm0417.test');
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
+      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: owner });
+
+      const membership = await mongoose
+        .model(Membership.name)
+        .findOne({ kpmId: String(kpm._id), userId: owner });
+      expect(membership?.get('role')).toBe('ab');
+      expect(membership?.get('status')).toBe('active');
+      expect(membership?.get('leaderId')).toBeNull();
+      // Server-issued from the office counter, never supplied by a caller.
+      expect(membership?.get('agentCode')).toBe('KPM0417-001');
+    });
+
+    it('writes the joined history row from the first day, before any screen reads it', async () => {
+      const owner = await makeUser('owner@kpm0417.test');
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
+      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: owner });
+
+      const events = await mongoose.model(MembershipHistory.name).find({ kpmId: String(kpm._id) });
+      expect(events.map((e) => e.get('eventType'))).toEqual(['joined']);
+      expect(events[0].get('validTo')).toBeNull();
+    });
+
+    it('does not mint a second membership when ownership returns to a previous owner', async () => {
+      // The partial unique index would reject it, and the right answer is the row they
+      // already have.
+      const first = await makeUser('first@kpm0417.test');
+      const second = await makeUser('second@kpm0417.test');
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
+      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: first });
+      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: second });
+      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: first });
+
+      const rows = await mongoose.model(Membership.name).find({ kpmId: String(kpm._id), userId: first });
+      expect(rows).toHaveLength(1);
     });
 
     it('records a transfer with both parties', async () => {

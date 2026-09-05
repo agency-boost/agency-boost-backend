@@ -6,6 +6,7 @@ import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
+import { Membership, MembershipDocument } from '@/modules/org/membership.schema';
 
 /**
  * Builds the RequestContext once per request.
@@ -13,16 +14,15 @@ import { User, UserDocument } from '@/modules/users/user.schema';
  * Roles are resolved here rather than read from the token, which is what makes
  * revoking a grant take effect immediately (docs/02-specs/api/auth-and-sessions.md).
  *
- * Phase 2 knows about platform role and KPM ownership. Hierarchy membership —
- * AB/AAB/Agent, the leader edge, KPM Admin grants — arrives with the `memberships`
- * collection in Phase 3; until then a non-owner resolves to no membership, which is
- * the same valid state as a brand-new agent who has not joined an office.
+ * A user with no membership is valid, not an error — that is the person who has
+ * registered and not yet joined an office.
  */
 @Injectable()
 export class ContextResolver {
   constructor(
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
+    @InjectModel(Membership.name) private readonly memberships: Model<MembershipDocument>,
   ) {}
 
   async resolve(userId: string, impersonatorUserId: string | null = null): Promise<RequestContext> {
@@ -67,20 +67,36 @@ export class ContextResolver {
     return new RequestContext(userId, user.platformRole, membership, impersonatorUserId);
   }
 
+  /**
+   * The real membership row, from Phase 3 onward.
+   *
+   * v1 allows one live membership per person, so this is a single lookup. `pending` is
+   * resolved as well as `active`: someone waiting on approval has a membership and a
+   * KPM, and telling them so is what lets the app say "waiting for your leader" rather
+   * than "you are in no office".
+   *
+   * Ownership is read from the office, not stored on the membership — `kpms.ownerUserId`
+   * is the single writer, and P2 made assigning it the only way it changes.
+   */
   private async resolveMembership(userId: string): Promise<TenantMembership | null> {
-    const owned = await this.kpms.findOne({ ownerUserId: userId, deletedAt: null }).exec();
-    if (!owned) return null;
+    const membership = await this.memberships
+      .findOne({ userId, status: { $in: ['active', 'pending'] }, deletedAt: null })
+      .exec();
+    if (!membership) return null;
+
+    const owned = await this.kpms
+      .findOne({ _id: membership.kpmId, ownerUserId: userId, deletedAt: null })
+      .exec();
 
     return {
-      membershipId: `owner:${String(owned._id)}`,
-      kpmId: String(owned._id),
-      // An Owner is a person in the office; their hierarchy role arrives in Phase 3
-      // with the memberships collection. `ab` is the closest truthful placeholder and
-      // grants nothing an Owner does not already hold.
-      hierarchyRole: 'ab',
-      status: 'active',
-      isKpmOwner: true,
-      isKpmAdmin: false,
+      membershipId: String(membership._id),
+      kpmId: membership.kpmId,
+      hierarchyRole: membership.role,
+      status: membership.status,
+      isKpmOwner: owned !== null,
+      isKpmAdmin: membership.adminAccess?.isKpmAdmin ?? false,
+      // Leadership is the graph, not the role (OD-23).
+      directCount: membership.directCounts?.total ?? 0,
     };
   }
 }

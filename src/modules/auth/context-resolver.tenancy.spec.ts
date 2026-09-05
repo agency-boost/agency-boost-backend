@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
+import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import { ContextResolver } from './context-resolver';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 
@@ -12,6 +13,7 @@ describe('ContextResolver', () => {
     resolver = new ContextResolver(
       mongoose.model(User.name, UserSchema) as never,
       mongoose.model(Kpm.name, KpmSchema) as never,
+      mongoose.model(Membership.name, MembershipSchema) as never,
     );
   });
   afterAll(stopMongo);
@@ -21,6 +23,19 @@ describe('ContextResolver', () => {
     return mongoose.model(User.name).create({
       email: `u${Math.random()}@kpm.test`, passwordHash: 'x', fullName: 'Rina',
       status: 'active', platformRole: 'none', ...over,
+    });
+  }
+
+  /**
+   * The membership row is what resolves a context now, not `kpms.ownerUserId`. The
+   * synthetic owner membership Phase 2 fabricated is gone: a context built from a row
+   * that does not exist cannot carry a direct count, and leadership is that count.
+   */
+  async function join(userId: string, kpmId: string, over: Record<string, unknown> = {}) {
+    const seq = Math.floor(Math.random() * 900) + 100;
+    return mongoose.model(Membership.name).create({
+      kpmId, userId, agentCode: `KPM0417-${seq}`, agentSeq: seq,
+      role: 'ab', status: 'active', ...over,
     });
   }
 
@@ -44,9 +59,56 @@ describe('ContextResolver', () => {
     const kpm = await mongoose.model(Kpm.name).create({
       companyId: 'c1', code: '0417', branchName: 'BSD', ownerUserId: String(u._id),
     });
+    await join(String(u._id), String(kpm._id));
     const ctx = await resolver.resolve(String(u._id));
     expect(ctx.kpmId).toBe(String(kpm._id));
     expect(ctx.membership?.isKpmOwner).toBe(true);
+  });
+
+  it('resolves a pending member, so the app can say what they are waiting for', async () => {
+    const u = await makeUser();
+    const kpm = await mongoose.model(Kpm.name).create({
+      companyId: 'c1', code: '0417', branchName: 'BSD',
+    });
+    await join(String(u._id), String(kpm._id), { role: 'agent', status: 'pending' });
+    const ctx = await resolver.resolve(String(u._id));
+    expect(ctx.membership?.status).toBe('pending');
+    expect(ctx.kpmId).toBe(String(kpm._id));
+  });
+
+  it('ignores a removed membership — leaving is not a state you can act from', async () => {
+    const u = await makeUser();
+    const kpm = await mongoose.model(Kpm.name).create({
+      companyId: 'c1', code: '0417', branchName: 'BSD',
+    });
+    await join(String(u._id), String(kpm._id), { status: 'removed' });
+    expect((await resolver.resolve(String(u._id))).membership).toBeNull();
+  });
+
+  describe('leadership is the graph, not the role (OD-23)', () => {
+    it('an AAB with no direct reports is not a leader', async () => {
+      const u = await makeUser();
+      const kpm = await mongoose.model(Kpm.name).create({
+        companyId: 'c1', code: '0417', branchName: 'BSD',
+      });
+      await join(String(u._id), String(kpm._id), { role: 'aab' });
+      const ctx = await resolver.resolve(String(u._id));
+      expect(ctx.membership?.hierarchyRole).toBe('aab');
+      expect(ctx.isLeader).toBe(false);
+    });
+
+    it('an agent with a direct report is', async () => {
+      // Contrived on purpose: the point is that the count decides, not the role.
+      const u = await makeUser();
+      const kpm = await mongoose.model(Kpm.name).create({
+        companyId: 'c1', code: '0417', branchName: 'BSD',
+      });
+      await join(String(u._id), String(kpm._id), {
+        role: 'agent',
+        directCounts: { ab: 0, aab: 0, agent: 1, total: 1 },
+      });
+      expect((await resolver.resolve(String(u._id))).isLeader).toBe(true);
+    });
   });
 
   it('resolves roles from the database, not the token — a revoked grant bites at once', async () => {
@@ -54,10 +116,15 @@ describe('ContextResolver', () => {
     const kpm = await mongoose.model(Kpm.name).create({
       companyId: 'c1', code: '0417', branchName: 'BSD', ownerUserId: String(u._id),
     });
+    await join(String(u._id), String(kpm._id));
     expect((await resolver.resolve(String(u._id))).membership?.isKpmOwner).toBe(true);
 
+    // Ownership moves; the membership stays. They are still in the office, no longer
+    // running it — which is exactly what a transfer does.
     await mongoose.model(Kpm.name).updateOne({ _id: kpm._id }, { $set: { ownerUserId: null } });
-    expect((await resolver.resolve(String(u._id))).membership).toBeNull();
+    const after = await resolver.resolve(String(u._id));
+    expect(after.membership).not.toBeNull();
+    expect(after.membership?.isKpmOwner).toBe(false);
   });
 
   it('refuses a deactivated account', async () => {
@@ -75,10 +142,11 @@ describe('ContextResolver', () => {
 
   it('short-circuits a member of a suspended office, distinctly from a permission failure', async () => {
     const u = await makeUser();
-    await mongoose.model(Kpm.name).create({
+    const kpm = await mongoose.model(Kpm.name).create({
       companyId: 'c1', code: '0417', branchName: 'BSD',
       ownerUserId: String(u._id), status: 'suspended',
     });
+    await join(String(u._id), String(kpm._id));
     await expect(resolver.resolve(String(u._id))).rejects.toMatchObject({
       code: 'TENANT_SUSPENDED',
     });
@@ -86,10 +154,11 @@ describe('ContextResolver', () => {
 
   it('short-circuits an archived office as read-only', async () => {
     const u = await makeUser();
-    await mongoose.model(Kpm.name).create({
+    const kpm = await mongoose.model(Kpm.name).create({
       companyId: 'c1', code: '0417', branchName: 'BSD',
       ownerUserId: String(u._id), status: 'archived',
     });
+    await join(String(u._id), String(kpm._id));
     await expect(resolver.resolve(String(u._id))).rejects.toMatchObject({
       code: 'TENANT_ARCHIVED',
     });

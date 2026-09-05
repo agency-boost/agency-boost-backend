@@ -22,7 +22,7 @@ function ctx(opts: {
           hierarchyRole: opts.role ?? 'agent',
           status: opts.status ?? 'active',
           isKpmOwner: opts.owner ?? false,
-          isKpmAdmin: opts.admin ?? false,
+          isKpmAdmin: opts.admin ?? false, directCount: 0,
         },
   );
 }

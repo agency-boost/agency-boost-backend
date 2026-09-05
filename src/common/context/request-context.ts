@@ -16,6 +16,12 @@ export interface TenantMembership {
   readonly status: 'active' | 'pending' | 'removed';
   readonly isKpmOwner: boolean;
   readonly isKpmAdmin: boolean;
+  /**
+   * Active direct reports. Carried because leadership is a graph property, not a role
+   * (OD-23) — an AAB with no reports leads nobody, and every surface gated on
+   * leadership is asking about people you actually lead.
+   */
+  readonly directCount: number;
 }
 
 export class RequestContext {
@@ -26,6 +32,15 @@ export class RequestContext {
     readonly membership: TenantMembership | null,
     /** Set only inside an impersonation session — the real actor behind the effective one. */
     readonly impersonatorUserId: string | null = null,
+    /**
+     * The office a Super Admin is acting inside, when they belong to none.
+     *
+     * Provisioning writes into a tenant the actor is not a member of, and the tenant
+     * repository needs a `kpmId`. Naming the office here is honest about what is
+     * happening; fabricating a membership would attribute the write to a member who
+     * does not exist.
+     */
+    private readonly actingInKpmId: string | null = null,
   ) {
     Object.freeze(this);
   }
@@ -40,17 +55,26 @@ export class RequestContext {
 
   /** The tenant this request operates in, or null for a platform-level or unjoined request. */
   get kpmId(): string | null {
-    return this.membership?.kpmId ?? null;
+    return this.membership?.kpmId ?? this.actingInKpmId;
   }
 
   get membershipId(): string | null {
     return this.membership?.membershipId ?? null;
   }
 
-  /** Leader-ness is derived from the hierarchy, never stored as a role. */
+  /**
+   * Leader-ness is derived from the hierarchy, never from the role (OD-23).
+   *
+   * The prototype infers it both ways and they disagree for an AAB with no direct
+   * reports, who renders no unit block despite holding the role. The graph is the
+   * answer that makes the unit dashboard, the coaching roster and the list of people an
+   * approval can be routed to agree with one another.
+   *
+   * A promotion to AAB does not by itself make someone a leader; their first direct
+   * report does, and losing their last one ends it.
+   */
   get isLeader(): boolean {
-    const role = this.membership?.hierarchyRole;
-    return role === 'ab' || role === 'aab';
+    return (this.membership?.directCount ?? 0) > 0;
   }
 
   /**
@@ -78,6 +102,23 @@ export class RequestContext {
       status: 'active',
       isKpmOwner: false,
       isKpmAdmin: false,
+      directCount: 0,
     });
+  }
+
+  /**
+   * A Super Admin acting inside one office, named explicitly.
+   *
+   * Provisioning writes into a tenant the actor does not belong to — assigning an owner
+   * creates that owner's membership. The tenant repository needs a `kpmId` and a Super
+   * Admin has none, so the office is named here rather than the write being let out
+   * through an unscoped path.
+   *
+   * `userId` is kept, not replaced with a job label, so the history row still says who
+   * did it. `membershipId` stays null: they are not a member, and pretending otherwise
+   * would attribute the change to a membership that does not exist.
+   */
+  static superAdminInTenant(userId: string, kpmId: string): RequestContext {
+    return new RequestContext(userId, 'super_admin', null, null, kpmId);
   }
 }

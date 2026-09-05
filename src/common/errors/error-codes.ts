@@ -21,6 +21,11 @@ export const ErrorCode = {
   TENANT_NO_MEMBERSHIP: 'TENANT_NO_MEMBERSHIP',
   TENANT_CODE_TAKEN: 'TENANT_CODE_TAKEN',
 
+  // Organisation. The rest of the ORG_* family in the error catalog lands with the task
+  // that can actually throw it — a code no path produces is a contract we do not honour.
+  ORG_CYCLE_DETECTED: 'ORG_CYCLE_DETECTED',
+  ORG_LEADER_NOT_IN_KPM: 'ORG_LEADER_NOT_IN_KPM',
+
   // Authorization
   PERM_DENIED: 'PERM_DENIED',
   PERM_OUT_OF_SCOPE: 'PERM_OUT_OF_SCOPE',

@@ -8,6 +8,8 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
 import { User, UserDocument } from '@/modules/users/user.schema';
+import { HierarchyService } from '@/modules/org/hierarchy.service';
+import { MembershipRepository } from '@/modules/org/membership.repository';
 import { Company, CompanyDocument } from './company.schema';
 import { DEFAULT_KPM_SETTINGS, Kpm, KpmDocument } from './kpm.schema';
 
@@ -38,6 +40,8 @@ export class TenantService {
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    private readonly hierarchy: HierarchyService,
+    private readonly memberships: MembershipRepository,
   ) {}
 
   private require(ctx: RequestContext, permission: Parameters<typeof can>[1]): void {
@@ -128,6 +132,12 @@ export class TenantService {
     kpm.ownerUserId = String(user._id);
     await kpm.save();
 
+    // An Owner who is not a member cannot be resolved into the office, so nothing they
+    // own is reachable. §6.1 of roles-and-permissions.md creates this on first login;
+    // creating it here instead means the office is administrable the moment it is
+    // assigned, rather than the first time someone happens to sign in.
+    await this.ensureOwnerMembership(ctx, kpmId, String(user._id));
+
     await this.audit.record(ctx, {
       action: previousOwnerUserId ? 'kpm.owner_transferred' : 'kpm.owner_assigned',
       targetCollection: 'kpms',
@@ -137,6 +147,39 @@ export class TenantService {
     });
 
     return kpm;
+  }
+
+  /**
+   * The Owner's own membership: an AB at the root of the office's tree.
+   *
+   * Idempotent, because a transfer back to a previous owner must not mint a second row —
+   * the partial unique index would reject it, and the right answer is the row they
+   * already have. Their hierarchy role is left alone if they are already a member:
+   * an office may promote its Owner's account through the ranks like anyone else's.
+   */
+  private async ensureOwnerMembership(
+    ctx: RequestContext,
+    kpmId: string,
+    userId: string,
+  ): Promise<void> {
+    const scoped = ctx.kpmId === kpmId
+      ? ctx
+      : RequestContext.superAdminInTenant(ctx.auditActors.actorUserId, kpmId);
+
+    const existing = await this.memberships.findOne(scoped, {
+      userId,
+      status: { $in: ['active', 'pending'] },
+    });
+    if (existing) {
+      if (existing.status !== 'active') {
+        await this.memberships.updateById(scoped, String(existing._id), {
+          $set: { status: 'active', joinedAt: this.clock.now() },
+        });
+      }
+      return;
+    }
+
+    await this.hierarchy.create(scoped, { userId, role: 'ab', leaderId: null, status: 'active' });
   }
 
   private async resolveOwner(who: { userId?: string; email?: string }): Promise<UserDocument> {

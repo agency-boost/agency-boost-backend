@@ -20,6 +20,18 @@ export async function stopMongo(): Promise<void> {
   server = null;
 }
 
+/**
+ * Build every registered model's indexes and wait for them.
+ *
+ * Mongoose builds indexes in the background, so an insert can beat the build — and a
+ * unique index that has not been built enforces nothing. A test asserting a uniqueness
+ * constraint has to wait for it, or it asserts the absence of a race rather than the
+ * presence of a constraint.
+ */
+export async function syncIndexes(): Promise<void> {
+  await Promise.all(Object.values(mongoose.models).map((m) => m.syncIndexes()));
+}
+
 export async function clearCollections(): Promise<void> {
   const { collections } = mongoose.connection;
   await Promise.all(Object.values(collections).map((c) => c.deleteMany({})));

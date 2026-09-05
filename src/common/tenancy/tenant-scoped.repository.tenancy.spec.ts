@@ -40,7 +40,7 @@ function ctxFor(kpmId: string, overrides: Partial<TenantMembership> = {}): Reque
     hierarchyRole: 'agent',
     status: 'active',
     isKpmOwner: false,
-    isKpmAdmin: false,
+    isKpmAdmin: false, directCount: 0,
     ...overrides,
   });
 }

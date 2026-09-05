@@ -25,6 +25,14 @@ import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { TenantService } from '@/modules/tenants/tenant.service';
 import { AdminController } from '@/modules/tenants/admin.controller';
+import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
+import {
+  MembershipHistory, MembershipHistorySchema,
+} from '@/modules/org/membership-history.schema';
+import { MembershipRepository } from '@/modules/org/membership.repository';
+import { HierarchyService } from '@/modules/org/hierarchy.service';
+import { DirectoryService } from '@/modules/org/directory.service';
+import { OrgController } from '@/modules/org/org.controller';
 import { AuthToken, AuthTokenSchema } from './auth-token.schema';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -62,9 +70,11 @@ describe('auth and admin over HTTP', () => {
           { name: AuditLog.name, schema: AuditLogSchema },
           { name: Notification.name, schema: NotificationSchema },
           { name: NotificationPreferences.name, schema: NotificationPreferencesSchema },
+          { name: Membership.name, schema: MembershipSchema },
+          { name: MembershipHistory.name, schema: MembershipHistorySchema },
         ]),
       ],
-      controllers: [AuthController, AdminController],
+      controllers: [AuthController, AdminController, OrgController],
       providers: [
         Reflector,
         { provide: Clock, useClass: SystemClock },
@@ -82,6 +92,7 @@ describe('auth and admin over HTTP', () => {
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService,
+        MembershipRepository, HierarchyService, DirectoryService,
         AuthGuard, PermissionsGuard,
       ],
     }).compile();

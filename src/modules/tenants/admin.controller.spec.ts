@@ -13,7 +13,7 @@ describe('AdminController', () => {
     hierarchyRole: 'ab',
     status: 'active',
     isKpmOwner: true,
-    isKpmAdmin: false,
+    isKpmAdmin: false, directCount: 0,
   });
 
   function make(companies: unknown = {}) {

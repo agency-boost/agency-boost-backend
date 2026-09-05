@@ -19,7 +19,7 @@ describe('ImpersonationService', () => {
   const superAdmin = new RequestContext('sa-1', 'super_admin', null);
   const owner = new RequestContext('u-owner', 'none', {
     membershipId: 'm', kpmId: 'k', hierarchyRole: 'ab', status: 'active',
-    isKpmOwner: true, isKpmAdmin: false,
+    isKpmOwner: true, isKpmAdmin: false, directCount: 0,
   });
 
   beforeAll(async () => {
