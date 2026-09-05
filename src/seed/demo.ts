@@ -143,10 +143,22 @@ async function main(): Promise<void> {
     userId: string,
     role: Role,
     leader: Placed | null,
-    opts: { status?: 'active' | 'pending' | 'removed'; isKpmAdmin?: boolean } = {},
+    opts: {
+      status?: 'active' | 'pending' | 'removed';
+      isKpmAdmin?: boolean;
+      /** Backdates a removal, so the Removed tab does not read as though it happened today. */
+      removedDaysAgo?: number;
+    } = {},
   ): Promise<Placed> {
     const kpmId = String(kpm._id);
-    const existing = await Memberships.findOne({ kpmId, userId }).exec();
+    // A removed row is not "already placed". Re-running the seed must not adopt somebody's
+    // old membership as their current one — that is the mistake P3-T7 AC-4 forbids, and the
+    // partial unique index draws the same line.
+    const existing = await Memberships.findOne({
+      kpmId,
+      userId,
+      status: { $ne: 'removed' },
+    }).exec();
     if (existing) {
       return {
         id: String(existing._id),
@@ -175,7 +187,7 @@ async function main(): Promise<void> {
       depth: leader ? leader.depth + 1 : 0,
       status,
       joinedAt: status === 'pending' ? null : clock.now(),
-      removedAt: status === 'removed' ? clock.now() : null,
+      removedAt: status === 'removed' ? daysAgo(opts.removedDaysAgo ?? 0) : null,
       recruitedByMembershipId: leaderId,
       adminAccess: opts.isKpmAdmin
         ? { isKpmAdmin: true, grantedByUserId: null, grantedAt: clock.now(), revokedAt: null }
@@ -190,7 +202,7 @@ async function main(): Promise<void> {
     if (status === 'removed') {
       await History.create({
         kpmId, membershipId: String(created._id), eventType: 'removed',
-        fromRole: role, validFrom: clock.now(), validTo: null,
+        fromRole: role, validFrom: daysAgo(opts.removedDaysAgo ?? 0), validTo: null,
         reason: 'Left the industry — seeded so the Removed tab has something to show',
       });
     }
@@ -210,6 +222,9 @@ async function main(): Promise<void> {
    * The `toRole` here always matches the role the person actually holds; a seeded
    * transition that contradicts the membership would be a lie in the audit trail.
    */
+  const daysAgo = (days: number) =>
+    new Date(clock.now().getTime() - days * 24 * 60 * 60 * 1000);
+
   async function promotedEarlier(
     kpmId: string,
     membership: Placed,
@@ -217,7 +232,7 @@ async function main(): Promise<void> {
     to: Role,
     actor: Placed,
     reason: string,
-    daysAgo: number,
+    days: number,
   ) {
     if (await History.findOne({ membershipId: membership.id, eventType: 'role_changed' }).exec()) {
       return;
@@ -228,7 +243,7 @@ async function main(): Promise<void> {
       eventType: 'role_changed',
       fromRole: from,
       toRole: to,
-      validFrom: new Date(clock.now().getTime() - daysAgo * 24 * 60 * 60 * 1000),
+      validFrom: daysAgo(days),
       validTo: null,
       actorMembershipId: actor.id,
       reason,
@@ -311,7 +326,15 @@ async function main(): Promise<void> {
 
   // Left the office. The row stays, and so does everything attached to it.
   const removedUser = await user('removed@kpm0417.test', 'Yanti Kusuma');
-  await place(office0417, String(removedUser._id), 'agent', sari, { status: 'removed' });
+  await place(office0417, String(removedUser._id), 'agent', sari, {
+    status: 'removed',
+    removedDaysAgo: 48,
+  });
+
+  // Came back. A second, live membership for the same person, with its own agent code —
+  // the case P3-T7 AC-4 exists for, and the one a reader will not believe until they
+  // see the same name twice on the roster.
+  await place(office0417, String(removedUser._id), 'agent', sari);
 
   for (const id of [owner.id, ab.id, sari.id]) await recount(id0417, id);
 
@@ -396,7 +419,8 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     budi@kpm0417.test                                  Agent under Sari
     pending@kpm0417.test                               Registered, request sent to Sari, waiting
     untagged@kpm0417.test                              Registered, has asked nobody
-    removed@kpm0417.test                               Removed — the row and its history stay
+    removed@kpm0417.test                               Removed once, rejoined — two memberships,
+                                                       two agent codes, one person (P3-T7 AC-4)
 
   KPM 0555 · Kelapa Gading Branch  (${String(kpm0555._id)})
     owner@kpm0555.test                                 KPM Owner — for cross-tenant checks

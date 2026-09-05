@@ -33,6 +33,8 @@ export interface DirectoryMember {
   isKpmOwner: boolean;
   isKpmAdmin: boolean;
   joinedAt: string | null;
+  /** Set only on a removed row. The Removed tab answers "when", which is the first thing asked. */
+  removedAt: string | null;
 }
 
 export interface DirectoryPage {
@@ -198,6 +200,7 @@ export class DirectoryService {
       isKpmOwner: false,
       isKpmAdmin: m.adminAccess?.isKpmAdmin ?? false,
       joinedAt: m.joinedAt ? m.joinedAt.toISOString() : null,
+      removedAt: m.removedAt ? m.removedAt.toISOString() : null,
     };
   }
 

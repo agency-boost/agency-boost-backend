@@ -39,6 +39,7 @@ import { OnboardingController } from '@/modules/org/onboarding.controller';
 import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { InviteService } from '@/modules/org/invite.service';
 import { ApprovalsService } from '@/modules/org/approvals.service';
+import { RemovalService } from '@/modules/org/removal.service';
 import { RoleChangeService } from '@/modules/org/role-change.service';
 import { AuthToken, AuthTokenSchema } from './auth-token.schema';
 import { AuthController } from './auth.controller';
@@ -101,7 +102,7 @@ describe('auth and admin over HTTP', () => {
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService,
-        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService, ApprovalsService, RoleChangeService,
+        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService, ApprovalsService, RoleChangeService, RemovalService,
         AuthGuard, PermissionsGuard,
       ],
     }).compile();
@@ -935,6 +936,187 @@ describe('auth and admin over HTTP', () => {
 
       await api().patch(`/api/v1/members/${agent.membershipId}/role`)
         .set(asOwner).send({ toRole: 'aab', note: 'dropped?' }).expect(400);
+    });
+  });
+
+  describe('removing somebody, over HTTP (P3-T7)', () => {
+    async function office() {
+      const sa = await makeUser(`sa-rm-${Math.random()}@agencyboost.test`, 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const owner = await makeUser(`owner-rm-${Math.random()}@kpm.test`);
+
+      const company = await api().post('/api/v1/admin/companies').set(auth)
+        .send({ name: `Insurer ${Math.random()}`, slug: `x${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
+        .expect(201);
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({
+          companyId: String(company.body._id),
+          code: `${Math.floor(Math.random() * 9000) + 1000}`,
+          branchName: 'Removal Branch',
+        })
+        .expect(201);
+      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
+        .set(auth).send({ userId: owner.id }).expect(200);
+
+      const asOwner = { Authorization: `Bearer ${owner.accessToken}` };
+      return { kpmId: String(kpm.body._id), asOwner };
+    }
+
+    /** Registers somebody to the office and pulls them into the tagger's unit. */
+    async function joins(kpmId: string, tagger: Record<string, string>) {
+      const email = `rm-${Math.random()}@kpm.test`;
+      const user = await makeUser(email);
+      const as = { Authorization: `Bearer ${user.accessToken}` };
+      await api().post('/api/v1/join/kpm').set(as).send({ kpmId }).expect(200);
+
+      const pool = await api().get('/api/v1/join/untagged').set(tagger).expect(200);
+      const mine = pool.body.find((row: { email: string }) => row.email === email);
+      await api().post(`/api/v1/join/untagged/${mine.membershipId}`).set(tagger).expect(200);
+      return { email, as, membershipId: String(mine.membershipId), accessToken: user.accessToken };
+    }
+
+    it('AC-1: refuses without the word, and the roster is unchanged', async () => {
+      const { kpmId, asOwner } = await office();
+      const them = await joins(kpmId, asOwner);
+
+      const res = await api().delete(`/api/v1/members/${them.membershipId}`)
+        .set(asOwner).send({ confirmation: 'yes' }).expect(400);
+      expect(res.body.error.code).toBe('ORG_REMOVAL_NOT_CONFIRMED');
+
+      const roster = await api().get('/api/v1/members').set(asOwner).expect(200);
+      expect(roster.body.members.map((m: { membershipId: string }) => m.membershipId))
+        .toContain(them.membershipId);
+    });
+
+    it('AC-2: removes, and the row is still there when asked for', async () => {
+      const { kpmId, asOwner } = await office();
+      const them = await joins(kpmId, asOwner);
+
+      const after = await api().delete(`/api/v1/members/${them.membershipId}`)
+        .set(asOwner).send({ confirmation: 'REMOVE', reason: 'Left the industry' }).expect(200);
+      expect(after.body.map((r: { membershipId: string }) => r.membershipId))
+        .not.toContain(them.membershipId);
+
+      const roster = await api().get('/api/v1/members').set(asOwner).expect(200);
+      expect(roster.body.members.map((m: { membershipId: string }) => m.membershipId))
+        .not.toContain(them.membershipId);
+
+      const removed = await api().get('/api/v1/members?status=removed').set(asOwner).expect(200);
+      expect(removed.body.members).toHaveLength(1);
+      expect(removed.body.members[0].removedAt).not.toBeNull();
+
+      // And the link from that row still goes somewhere.
+      const one = await api().get(`/api/v1/members/${them.membershipId}`).set(asOwner).expect(200);
+      expect(one.body.status).toBe('removed');
+    });
+
+    it('AC-3: refuses a leader with reports until the body says where they go', async () => {
+      const { kpmId, asOwner } = await office();
+      const leader = await joins(kpmId, asOwner);
+      await api().patch(`/api/v1/members/${leader.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'aab' }).expect(200);
+      const asLeader = { Authorization: `Bearer ${leader.accessToken}` };
+      const under = await joins(kpmId, asLeader);
+
+      const refused = await api().delete(`/api/v1/members/${leader.membershipId}`)
+        .set(asOwner).send({ confirmation: 'REMOVE' }).expect(400);
+      expect(refused.body.error.code).toBe('ORG_SUBTREE_DISPOSITION_REQUIRED');
+      expect(refused.body.error.details.directCount).toBe(1);
+
+      await api().delete(`/api/v1/members/${leader.membershipId}`)
+        .set(asOwner)
+        .send({ confirmation: 'REMOVE', subtree: { action: 'orphan' } })
+        .expect(200);
+
+      // Orphaned, so they are back in the pool somebody can pick up.
+      const pool = await api().get('/api/v1/join/untagged').set(asOwner).expect(200);
+      expect(pool.body.map((p: { membershipId: string }) => p.membershipId))
+        .toContain(under.membershipId);
+    });
+
+    it('AC-3: reassign moves the unit to the named leader', async () => {
+      const { kpmId, asOwner } = await office();
+      const leader = await joins(kpmId, asOwner);
+      await api().patch(`/api/v1/members/${leader.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'aab' }).expect(200);
+      const under = await joins(kpmId, { Authorization: `Bearer ${leader.accessToken}` });
+
+      const owner = await api().get('/api/v1/members').set(asOwner).expect(200);
+      const ownerId = owner.body.members.find(
+        (m: { leaderId: string | null }) => m.leaderId === null,
+      ).membershipId;
+
+      await api().delete(`/api/v1/members/${leader.membershipId}`)
+        .set(asOwner)
+        .send({ confirmation: 'REMOVE', subtree: { action: 'reassign', toMembershipId: ownerId } })
+        .expect(200);
+
+      const moved = await api().get(`/api/v1/members/${under.membershipId}`).set(asOwner).expect(200);
+      expect(moved.body.leaderId).toBe(ownerId);
+    });
+
+    it('AC-4: coming back is a new membership with a new code', async () => {
+      const { kpmId, asOwner } = await office();
+      const them = await joins(kpmId, asOwner);
+      const before = await api().get(`/api/v1/members/${them.membershipId}`).set(asOwner).expect(200);
+
+      await api().delete(`/api/v1/members/${them.membershipId}`)
+        .set(asOwner).send({ confirmation: 'REMOVE' }).expect(200);
+
+      // Their own view says they are out, and the register step is open again.
+      const gone = await api().get('/api/v1/join/me').set(them.as).expect(200);
+      expect(gone.body.status).toBe('none');
+
+      await api().post('/api/v1/join/kpm').set(them.as).send({ kpmId }).expect(200);
+
+      const rejoined = await api().get('/api/v1/join/me').set(them.as).expect(200);
+      expect(rejoined.body.status).toBe('pending');
+
+      const removed = await api().get('/api/v1/members?status=removed').set(asOwner).expect(200);
+      expect(removed.body.members[0].agentCode).toBe(before.body.agentCode);
+
+      const live = await api().get('/api/v1/members?status=pending').set(asOwner).expect(200);
+      expect(live.body.members[0].agentCode).not.toBe(before.body.agentCode);
+    });
+
+    it('refuses an agent the endpoint outright', async () => {
+      const { kpmId, asOwner } = await office();
+      const them = await joins(kpmId, asOwner);
+      const other = await joins(kpmId, asOwner);
+
+      const res = await api().delete(`/api/v1/members/${other.membershipId}`)
+        .set(them.as).send({ confirmation: 'REMOVE' }).expect(403);
+      expect(res.body.error.details.permission).toBe('member:remove_from_team');
+    });
+
+    it('never reaches another office member, and 404s rather than 403', async () => {
+      const mine = await office();
+      const theirs = await office();
+      const target = await joins(theirs.kpmId, theirs.asOwner);
+
+      await api().delete(`/api/v1/members/${target.membershipId}`)
+        .set(mine.asOwner).send({ confirmation: 'REMOVE' }).expect(404);
+    });
+
+    it('validates the disposition rather than writing a half-understood one', async () => {
+      const { kpmId, asOwner } = await office();
+      const them = await joins(kpmId, asOwner);
+
+      await api().delete(`/api/v1/members/${them.membershipId}`)
+        .set(asOwner)
+        .send({ confirmation: 'REMOVE', subtree: { action: 'move' } })
+        .expect(400);
+
+      // `reassign` without a destination is not a disposition.
+      await api().delete(`/api/v1/members/${them.membershipId}`)
+        .set(asOwner)
+        .send({ confirmation: 'REMOVE', subtree: { action: 'reassign' } })
+        .expect(400);
+
+      await api().delete(`/api/v1/members/${them.membershipId}`)
+        .set(asOwner)
+        .send({ confirmation: 'REMOVE', note: 'dropped?' })
+        .expect(400);
     });
   });
 

@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { DirectoryService } from './directory.service';
-import { ChangeRoleDto, DirectoryQueryDto } from './org.dto';
+import { ChangeRoleDto, DirectoryQueryDto, RemoveMemberDto } from './org.dto';
+import { RemovalService } from './removal.service';
 import { RoleChangeService } from './role-change.service';
 
 /**
@@ -21,6 +22,7 @@ export class OrgController {
   constructor(
     private readonly directory: DirectoryService,
     private readonly roles: RoleChangeService,
+    private readonly removals: RemovalService,
   ) {}
 
   @Get('my-team')
@@ -64,6 +66,33 @@ export class OrgController {
   })
   async roleLog(@Ctx() ctx: RequestContext) {
     return this.roles.log(ctx);
+  }
+
+  @Delete(':membershipId')
+  @RequirePermission('member:remove_from_team')
+  @ApiOperation({
+    summary: 'Remove somebody from the office',
+    description:
+      'Requires the literal word REMOVE in the body — the screen\'s gate is a ' +
+      'convenience, this is the control. Nothing is deleted: the row, the agent code ' +
+      'and every history event stay with the office. If they still have reports, the ' +
+      'body must say where those reports go; there is no default, because a default ' +
+      'here silently reorganises somebody else\'s unit.',
+  })
+  async remove(
+    @Ctx() ctx: RequestContext,
+    @Param('membershipId') membershipId: string,
+    @Body() dto: RemoveMemberDto,
+  ) {
+    return this.removals.remove(ctx, membershipId, {
+      confirmation: dto.confirmation,
+      reason: dto.reason,
+      subtree: dto.subtree
+        ? dto.subtree.action === 'reassign'
+          ? { action: 'reassign', toMembershipId: dto.subtree.toMembershipId as string }
+          : { action: 'orphan' }
+        : undefined,
+    });
   }
 
   @Get()

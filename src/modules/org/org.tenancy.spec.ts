@@ -12,6 +12,7 @@ import { JoinRequest, JoinRequestSchema } from './join-request.schema';
 import { OnboardingService } from './onboarding.service';
 import { InviteService } from './invite.service';
 import { ApprovalsService } from './approvals.service';
+import { RemovalService } from './removal.service';
 import { RoleChangeService } from './role-change.service';
 import { InviteCode, InviteCodeSchema } from './invite-code.schema';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -58,7 +59,8 @@ describe('organisation', () => {
   let invites: InviteService;
   let approvals: ApprovalsService;
   let roles: RoleChangeService;
-  let sent: { userId?: string; templateId: string }[];
+  let removals: RemovalService;
+  let sent: { userId?: string; templateId: string; payload?: Record<string, unknown> }[];
   let clock: MovableClock;
   let users: ReturnType<typeof userModel>;
 
@@ -79,7 +81,7 @@ describe('organisation', () => {
 
     sent = [];
     const notifications = {
-      send: async (r: { userId?: string; templateId: string }) => {
+      send: async (r: { userId?: string; templateId: string; payload?: Record<string, unknown> }) => {
         sent.push(r);
       },
     };
@@ -124,6 +126,16 @@ describe('organisation', () => {
       hierarchy,
       historyModel as never,
       users as never,
+      new AuditService(mongoose.model(AuditLog.name) as never),
+      notifications as never,
+      clock,
+    );
+
+    removals = new RemovalService(
+      members,
+      hierarchy,
+      roles,
+      historyModel as never,
       new AuditService(mongoose.model(AuditLog.name) as never),
       notifications as never,
       clock,
@@ -1291,6 +1303,370 @@ describe('organisation', () => {
         const theirs = await join(KPM_B, 'agent');
         await expect(approvals.tag(abCtx, theirs)).rejects.toMatchObject({ code: 'NOT_FOUND' });
         expect((await approvals.untagged(abCtx)).map((p) => p.membershipId)).not.toContain(theirs);
+      });
+    });
+  });
+
+  describe('removal, orphaning and re-entry (P3-T7)', () => {
+    async function asMember(
+      membershipId: string,
+      over: Partial<{ isKpmOwner: boolean; isKpmAdmin: boolean }> = {},
+    ) {
+      const row = await members.findById(ctx(KPM_A), membershipId);
+      return new RequestContext(row!.userId, 'none', {
+        membershipId,
+        kpmId: KPM_A,
+        hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
+        status: 'active',
+        isKpmOwner: over.isKpmOwner ?? false,
+        isKpmAdmin: over.isKpmAdmin ?? false,
+        directCount: row!.directCounts?.total ?? 0,
+      });
+    }
+
+    const CONFIRM = { confirmation: 'REMOVE' };
+
+    let ab: string;
+    let aab: string;
+    let agent: string;
+    let abCtx: RequestContext;
+
+    beforeEach(async () => {
+      ab = await join(KPM_A, 'ab');
+      aab = await join(KPM_A, 'aab', ab);
+      agent = await join(KPM_A, 'agent', ab);
+      await hierarchy.refreshCounts(ctx(KPM_A), ab);
+      abCtx = await asMember(ab);
+    });
+
+    describe('AC-1: the typed confirmation', () => {
+      it('refuses without the word, before it even looks the person up', async () => {
+        await expect(
+          removals.remove(abCtx, agent, { confirmation: '' }),
+        ).rejects.toMatchObject({ code: 'ORG_REMOVAL_NOT_CONFIRMED' });
+
+        const row = await members.findById(ctx(KPM_A), agent);
+        expect(row!.status).toBe('active');
+      });
+
+      it('refuses a near miss', async () => {
+        for (const word of ['REMOV', 'REMOVED', 'delete', 'REMOVE ME']) {
+          await expect(
+            removals.remove(abCtx, agent, { confirmation: word }),
+          ).rejects.toMatchObject({ code: 'ORG_REMOVAL_NOT_CONFIRMED' });
+        }
+      });
+
+      it('accepts it trimmed and in any case, exactly as the prototype does', async () => {
+        await removals.remove(abCtx, agent, { confirmation: '  remove  ' });
+        const row = await members.findById(ctx(KPM_A), agent);
+        expect(row!.status).toBe('removed');
+      });
+
+      it('checks the word even for somebody who could otherwise remove them', async () => {
+        // The gate is not a permission. A tenant admin types it too.
+        const owner = await asMember(ab, { isKpmOwner: true });
+        await expect(
+          removals.remove(owner, agent, { confirmation: 'yes' }),
+        ).rejects.toMatchObject({ code: 'ORG_REMOVAL_NOT_CONFIRMED' });
+      });
+    });
+
+    describe('AC-2: nothing is deleted', () => {
+      it('keeps the row, the agent code and the leader they had', async () => {
+        const before = await members.findById(ctx(KPM_A), agent);
+        await removals.remove(abCtx, agent, { ...CONFIRM, reason: 'Left the industry' });
+
+        const after = await members.findById(ctx(KPM_A), agent);
+        expect(after).not.toBeNull();
+        expect(after!.agentCode).toBe(before!.agentCode);
+        expect(after!.role).toBe(before!.role);
+        // Kept, not blanked: it is who they reported to when they left.
+        expect(after!.leaderId).toBe(ab);
+        expect(after!.removedAt).toBeInstanceOf(Date);
+      });
+
+      it('writes a removal event carrying the reason and who did it', async () => {
+        await removals.remove(abCtx, agent, { ...CONFIRM, reason: 'Left the industry' });
+
+        const events = await mongoose
+          .model(MembershipHistory.name)
+          .find({ membershipId: agent })
+          .sort({ validFrom: 1 });
+        const removal = events.find((e) => e.get('eventType') === 'removed');
+        expect(removal).toBeDefined();
+        expect(removal!.get('reason')).toBe('Left the industry');
+        expect(removal!.get('actorMembershipId')).toBe(ab);
+        expect(removal!.get('fromLeaderId')).toBe(ab);
+
+        // Append-only: every earlier edge is closed, and only the removal is open.
+        expect(events.filter((e) => e.get('validTo') === null)).toHaveLength(1);
+      });
+
+      it('keeps their role changes readable in the log after they are gone', async () => {
+        await roles.change(abCtx, agent, 'aab', 'Ready to lead');
+        await removals.remove(abCtx, agent, CONFIRM);
+
+        const log = await roles.log(abCtx);
+        expect(log.map((e) => e.membershipId)).toContain(agent);
+        expect(log[0].fullName).not.toBe('Unknown');
+      });
+
+      it('leaves them out of the roster, and findable when asked for', async () => {
+        await removals.remove(abCtx, agent, CONFIRM);
+
+        const roster = await directory.list(abCtx, {});
+        expect(roster.members.map((m) => m.membershipId)).not.toContain(agent);
+
+        const removed = await directory.list(abCtx, { status: 'removed' });
+        expect(removed.members.map((m) => m.membershipId)).toEqual([agent]);
+        expect(removed.members[0].removedAt).not.toBeNull();
+      });
+
+      it('still reads one by one, so a link from the log does not dead-end', async () => {
+        await removals.remove(abCtx, agent, CONFIRM);
+        const one = await directory.read(abCtx, agent);
+        expect(one.status).toBe('removed');
+      });
+    });
+
+    describe('AC-3: their reports have to go somewhere', () => {
+      let under: string;
+
+      beforeEach(async () => {
+        under = await join(KPM_A, 'agent', aab);
+        await hierarchy.refreshCounts(ctx(KPM_A), aab);
+      });
+
+      it('refuses removal with no disposition, naming the count', async () => {
+        await expect(removals.remove(abCtx, aab, CONFIRM)).rejects.toMatchObject({
+          code: 'ORG_SUBTREE_DISPOSITION_REQUIRED',
+          details: { directCount: 1 },
+        });
+        expect((await members.findById(ctx(KPM_A), aab))!.status).toBe('active');
+      });
+
+      it('reassigns them, and the moved person keeps a legible history', async () => {
+        await removals.remove(abCtx, aab, {
+          ...CONFIRM,
+          subtree: { action: 'reassign', toMembershipId: ab },
+        });
+
+        const moved = await members.findById(ctx(KPM_A), under);
+        expect(moved!.leaderId).toBe(ab);
+        expect(moved!.ancestorIds).toEqual([ab]);
+        expect(moved!.depth).toBe(1);
+
+        // The move is its own event, not something to infer from a removal.
+        const events = await mongoose.model(MembershipHistory.name).find({ membershipId: under });
+        expect(events.some((e) => e.get('eventType') === 're_parented')).toBe(true);
+      });
+
+      it('orphans them, which puts them back in the untagged pool', async () => {
+        await removals.remove(abCtx, aab, { ...CONFIRM, subtree: { action: 'orphan' } });
+
+        const orphan = await members.findById(ctx(KPM_A), under);
+        expect(orphan!.leaderId).toBeNull();
+        expect(orphan!.ancestorIds).toEqual([]);
+        expect(orphan!.status).toBe('active');
+
+        const pool = await approvals.untagged(abCtx);
+        expect(pool.map((p) => p.membershipId)).toContain(under);
+      });
+
+      it('refuses moving them to the person being removed', async () => {
+        await expect(
+          removals.remove(abCtx, aab, {
+            ...CONFIRM,
+            subtree: { action: 'reassign', toMembershipId: aab },
+          }),
+        ).rejects.toMatchObject({ code: 'ORG_SUBTREE_DISPOSITION_REQUIRED' });
+      });
+
+      it('moves a whole unit, not just the first of it', async () => {
+        const second = await join(KPM_A, 'agent', aab);
+        await hierarchy.refreshCounts(ctx(KPM_A), aab);
+
+        await removals.remove(abCtx, aab, {
+          ...CONFIRM,
+          subtree: { action: 'reassign', toMembershipId: ab },
+        });
+
+        for (const id of [under, second]) {
+          expect((await members.findById(ctx(KPM_A), id))!.leaderId).toBe(ab);
+        }
+      });
+
+      it('re-splices a deeper subtree rather than only its top', async () => {
+        const deep = await join(KPM_A, 'agent', under);
+        await hierarchy.refreshCounts(ctx(KPM_A), under);
+
+        await removals.remove(abCtx, aab, {
+          ...CONFIRM,
+          subtree: { action: 'reassign', toMembershipId: ab },
+        });
+
+        const grandchild = await members.findById(ctx(KPM_A), deep);
+        expect(grandchild!.ancestorIds).toEqual([ab, under]);
+        expect(grandchild!.depth).toBe(2);
+      });
+
+      it('counts them in the plural, and carries the reason into the moves', async () => {
+        await join(KPM_A, 'agent', aab);
+        await hierarchy.refreshCounts(ctx(KPM_A), aab);
+
+        await expect(removals.remove(abCtx, aab, CONFIRM)).rejects.toMatchObject({
+          code: 'ORG_SUBTREE_DISPOSITION_REQUIRED',
+          message: expect.stringContaining('2 people report'),
+        });
+
+        await removals.remove(abCtx, aab, {
+          ...CONFIRM,
+          reason: 'Left the industry',
+          subtree: { action: 'reassign', toMembershipId: ab },
+        });
+
+        // Why somebody moved is the question asked when reading it back, and the answer
+        // is on the move rather than only on the removal that caused it.
+        const moved = await mongoose
+          .model(MembershipHistory.name)
+          .find({ membershipId: under, eventType: 're_parented' });
+        expect(moved[0].get('reason')).toContain('Left the industry');
+      });
+
+      it('a disposition on somebody who leads nobody changes nothing', async () => {
+        await removals.remove(abCtx, agent, {
+          ...CONFIRM,
+          subtree: { action: 'orphan' },
+        });
+        expect((await members.findById(ctx(KPM_A), agent))!.status).toBe('removed');
+      });
+
+      it('leaves the office untouched when the disposition is refused', async () => {
+        await expect(removals.remove(abCtx, aab, CONFIRM)).rejects.toThrow();
+        expect((await members.findById(ctx(KPM_A), under))!.leaderId).toBe(aab);
+      });
+    });
+
+    describe('who may remove whom', () => {
+      it('refuses somebody who is not their direct leader', async () => {
+        const aabCtx = await asMember(aab);
+        await expect(removals.remove(aabCtx, agent, CONFIRM)).rejects.toMatchObject({
+          code: 'ORG_REMOVAL_NOT_PERMITTED',
+        });
+      });
+
+      it('lets a tenant admin remove anybody in the office', async () => {
+        const owner = await asMember(ab, { isKpmOwner: true });
+        const deep = await join(KPM_A, 'agent', aab);
+        await hierarchy.refreshCounts(ctx(KPM_A), aab);
+
+        await removals.remove(owner, deep, CONFIRM);
+        expect((await members.findById(ctx(KPM_A), deep))!.status).toBe('removed');
+      });
+
+      it('refuses removing yourself', async () => {
+        const aabCtx = await asMember(aab);
+        await expect(removals.remove(aabCtx, aab, CONFIRM)).rejects.toMatchObject({
+          code: 'ORG_REMOVAL_NOT_PERMITTED',
+        });
+      });
+
+      it('refuses removing the root, which nobody could put back', async () => {
+        const owner = await asMember(ab, { isKpmOwner: true });
+        const root = await join(KPM_A, 'ab');
+        await expect(removals.remove(owner, root, CONFIRM)).rejects.toMatchObject({
+          code: 'ORG_REMOVAL_NOT_PERMITTED',
+        });
+      });
+
+      it('refuses removing them twice, saying when the first one was', async () => {
+        await removals.remove(abCtx, agent, CONFIRM);
+        await expect(removals.remove(abCtx, agent, CONFIRM)).rejects.toMatchObject({
+          code: 'ORG_ALREADY_REMOVED',
+        });
+      });
+
+      it('never reaches another office member', async () => {
+        const theirs = await join(KPM_B, 'agent');
+        await expect(removals.remove(abCtx, theirs, CONFIRM)).rejects.toMatchObject({
+          code: 'NOT_FOUND',
+        });
+      });
+
+      it('refuses somebody in no office', async () => {
+        const nowhere = new RequestContext('u-root', 'super_admin', null);
+        await expect(removals.remove(nowhere, agent, CONFIRM)).rejects.toMatchObject({
+          code: 'TENANT_NO_MEMBERSHIP',
+        });
+      });
+    });
+
+    describe('the leader they left', () => {
+      it('loses them from the counts, by role and in total', async () => {
+        await removals.remove(abCtx, agent, CONFIRM);
+        const leader = await members.findById(ctx(KPM_A), ab);
+        expect(leader!.directCounts.total).toBe(1);
+        expect(leader!.directCounts.agent).toBe(0);
+        expect(leader!.directCounts.aab).toBe(1);
+      });
+
+      it('no longer lists them as a report', async () => {
+        await removals.remove(abCtx, agent, CONFIRM);
+        expect((await roles.team(abCtx)).map((t) => t.membershipId)).not.toContain(agent);
+      });
+
+      it('tells the person, with what to do next', async () => {
+        const userId = (await members.findById(ctx(KPM_A), agent))!.userId;
+        sent = [];
+        await removals.remove(abCtx, agent, { ...CONFIRM, reason: 'Left the industry' });
+
+        const note = sent.find((n) => n.templateId === 'member.removed');
+        expect(note).toBeDefined();
+        expect(note!.userId).toBe(userId);
+        // The reason and the way back, because being told only that you are out is the
+        // prototype's dead end.
+        expect(note!.payload).toMatchObject({
+          reason: 'Left the industry',
+          nextStep: expect.stringContaining('request to join again'),
+        });
+      });
+    });
+
+    describe('AC-4: coming back', () => {
+      it('gives a new membership and a new agent code, keeping the old row', async () => {
+        const oldRow = await members.findById(ctx(KPM_A), agent);
+        const userId = oldRow!.userId;
+        await removals.remove(abCtx, agent, CONFIRM);
+
+        const rejoined = await hierarchy.create(ctx(KPM_A), { userId, role: 'agent', status: 'pending' });
+
+        expect(String(rejoined._id)).not.toBe(agent);
+        expect(rejoined.agentCode).not.toBe(oldRow!.agentCode);
+        // Both rows are theirs, and both stay.
+        const all = await members.find(ctx(KPM_A), { userId });
+        expect(all).toHaveLength(2);
+        expect(all.filter((m) => m.status === 'removed')).toHaveLength(1);
+      });
+
+      it('does not reopen the old membership, so the two spells stay separate', async () => {
+        const userId = (await members.findById(ctx(KPM_A), agent))!.userId;
+        await roles.change(abCtx, agent, 'aab', 'Led a unit last time');
+        await removals.remove(abCtx, agent, CONFIRM);
+        await hierarchy.create(ctx(KPM_A), { userId, role: 'agent', status: 'pending' });
+
+        const old = await members.findById(ctx(KPM_A), agent);
+        expect(old!.status).toBe('removed');
+        expect(old!.role).toBe('aab'); // what they were when they left, not what they are now
+      });
+
+      it('refuses a second live membership while the first is live', async () => {
+        // The partial unique index is what makes re-entry safe: it exempts `removed`
+        // rows and nothing else.
+        const userId = (await members.findById(ctx(KPM_A), agent))!.userId;
+        await expect(
+          hierarchy.create(ctx(KPM_A), { userId, role: 'agent', status: 'pending' }),
+        ).rejects.toThrow();
       });
     });
   });

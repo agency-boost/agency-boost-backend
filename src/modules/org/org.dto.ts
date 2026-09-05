@@ -1,6 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import {
+  IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min, MinLength,
+  ValidateIf, ValidateNested,
+} from 'class-validator';
 
 export class DirectoryQueryDto {
   @ApiPropertyOptional({ description: 'Name, email or agent code. Case-insensitive.' })
@@ -171,4 +174,53 @@ export class ChangeRoleDto {
   @IsString()
   @MaxLength(300)
   reason?: string;
+}
+
+export class SubtreeDispositionDto {
+  @ApiProperty({
+    enum: ['reassign', 'orphan'],
+    description:
+      'Where the reports of the person being removed go. There is no default: leaving ' +
+      'it to the server would be a silent reorganisation of somebody else’s unit.',
+  })
+  @IsEnum(['reassign', 'orphan'])
+  action!: 'reassign' | 'orphan';
+
+  @ApiPropertyOptional({
+    description: 'Required when action is `reassign`. The membership their reports move to.',
+  })
+  @ValidateIf((o: SubtreeDispositionDto) => o.action === 'reassign')
+  @IsString()
+  @IsNotEmpty()
+  toMembershipId?: string;
+}
+
+export class RemoveMemberDto {
+  @ApiProperty({
+    example: 'REMOVE',
+    description:
+      'The literal word REMOVE, trimmed and case-insensitive. Checked here as well as ' +
+      'in the screen — a confirmation only the screen enforces is not a confirmation.',
+  })
+  @IsString()
+  confirmation!: string;
+
+  @ApiPropertyOptional({
+    example: 'Left the industry',
+    description: 'Kept on the removal history event, and sent to them.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(300)
+  reason?: string;
+
+  @ApiPropertyOptional({
+    type: SubtreeDispositionDto,
+    description: 'Required when they still have direct reports; refused otherwise.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SubtreeDispositionDto)
+  subtree?: SubtreeDispositionDto;
 }
