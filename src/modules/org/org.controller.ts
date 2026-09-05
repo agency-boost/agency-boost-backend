@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { DirectoryService } from './directory.service';
+import { OrgTreeService } from './org-tree.service';
 import { ChangeRoleDto, DirectoryQueryDto, RemoveMemberDto } from './org.dto';
 import { RemovalService } from './removal.service';
 import { RoleChangeService } from './role-change.service';
@@ -23,6 +24,7 @@ export class OrgController {
     private readonly directory: DirectoryService,
     private readonly roles: RoleChangeService,
     private readonly removals: RemovalService,
+    private readonly tree: OrgTreeService,
   ) {}
 
   @Get('my-team')
@@ -93,6 +95,23 @@ export class OrgController {
           : { action: 'orphan' }
         : undefined,
     });
+  }
+
+  @Get('tree')
+  @RequirePermission('org_tree:read')
+  @ApiOperation({
+    summary: 'The hierarchy, as a graph',
+    description:
+      'A flat node list plus the ids of its roots. Narrowed exactly as the roster is: a ' +
+      'tenant admin sees the office, everybody else sees themselves and their downline. ' +
+      'The answer is a **forest** — a root is any visible node whose leader is not also ' +
+      'visible, which is the office root plus anybody orphaned by a removal or not yet ' +
+      'tagged. Your own leader comes back separately and is not a node, so it cannot be ' +
+      'given a layer. Refuses rather than truncates above the cap: a page of a tree is ' +
+      'not a tree.',
+  })
+  async orgTree(@Ctx() ctx: RequestContext) {
+    return this.tree.read(ctx);
   }
 
   @Get()

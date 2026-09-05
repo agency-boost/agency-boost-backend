@@ -128,6 +128,18 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
   ],
+  // The tree is a read of the same graph the roster reads, and it narrows the same way:
+  // a tenant admin sees the office, everyone else sees themselves and their downline.
+  // An agent's tree is degenerate — their leader and themselves — and it is granted
+  // anyway so the API answers rather than 403s; the nav hides it for them.
+  'org_tree:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-unit' },
+    { grantee: AGENT, scope: 'own' },
+  ],
   'member:change_role': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },

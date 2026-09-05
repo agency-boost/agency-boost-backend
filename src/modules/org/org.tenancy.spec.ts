@@ -12,6 +12,7 @@ import { JoinRequest, JoinRequestSchema } from './join-request.schema';
 import { OnboardingService } from './onboarding.service';
 import { InviteService } from './invite.service';
 import { ApprovalsService } from './approvals.service';
+import { OrgTreeService, ORG_TREE_MAX_NODES } from './org-tree.service';
 import { RemovalService } from './removal.service';
 import { RoleChangeService } from './role-change.service';
 import { InviteCode, InviteCodeSchema } from './invite-code.schema';
@@ -60,6 +61,7 @@ describe('organisation', () => {
   let approvals: ApprovalsService;
   let roles: RoleChangeService;
   let removals: RemovalService;
+  let tree: OrgTreeService;
   let sent: { userId?: string; templateId: string; payload?: Record<string, unknown> }[];
   let clock: MovableClock;
   let users: ReturnType<typeof userModel>;
@@ -140,6 +142,8 @@ describe('organisation', () => {
       notifications as never,
       clock,
     );
+
+    tree = new OrgTreeService(members, users as never);
 
     // The partial unique index is the guarantee under test, not a background detail.
     await syncIndexes();
@@ -1303,6 +1307,304 @@ describe('organisation', () => {
         const theirs = await join(KPM_B, 'agent');
         await expect(approvals.tag(abCtx, theirs)).rejects.toMatchObject({ code: 'NOT_FOUND' });
         expect((await approvals.untagged(abCtx)).map((p) => p.membershipId)).not.toContain(theirs);
+      });
+    });
+  });
+
+  describe('the tree (P3-T8)', () => {
+    async function asMember(
+      membershipId: string,
+      over: Partial<{ isKpmOwner: boolean; isKpmAdmin: boolean }> = {},
+    ) {
+      const row = await members.findById(ctx(KPM_A), membershipId);
+      return new RequestContext(row!.userId, 'none', {
+        membershipId,
+        kpmId: KPM_A,
+        hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
+        status: 'active',
+        isKpmOwner: over.isKpmOwner ?? false,
+        isKpmAdmin: over.isKpmAdmin ?? false,
+        directCount: row!.directCounts?.total ?? 0,
+      });
+    }
+
+    let root: string;
+    let ab: string;
+    let aab: string;
+    let agent: string;
+
+    beforeEach(async () => {
+      root = await join(KPM_A, 'ab');
+      ab = await join(KPM_A, 'ab', root);
+      aab = await join(KPM_A, 'aab', ab);
+      agent = await join(KPM_A, 'agent', aab);
+      for (const id of [root, ab, aab]) await hierarchy.refreshCounts(ctx(KPM_A), id);
+    });
+
+    describe('AC-1: layers come from depth, and your leader is not one', () => {
+      it('sends the depth the membership carries, not a position', async () => {
+        const owner = await asMember(root, { isKpmOwner: true });
+        const byId = new Map((await tree.read(owner)).nodes.map((n) => [n.membershipId, n.depth]));
+
+        expect(byId.get(root)).toBe(0);
+        expect(byId.get(ab)).toBe(1);
+        expect(byId.get(aab)).toBe(2);
+        expect(byId.get(agent)).toBe(3);
+      });
+
+      it('a depth survives an unrelated branch being collapsed, because it is not an index', async () => {
+        // The prototype labels by column index, so collapsing a branch renumbers
+        // everybody. Depth is a property of the person.
+        const second = await join(KPM_A, 'agent', root);
+        await hierarchy.refreshCounts(ctx(KPM_A), root);
+        const owner = await asMember(root, { isKpmOwner: true });
+
+        const before = (await tree.read(owner)).nodes.find((n) => n.membershipId === agent)!.depth;
+        await removals.remove(owner, second, { confirmation: 'REMOVE' });
+        const after = (await tree.read(owner)).nodes.find((n) => n.membershipId === agent)!.depth;
+
+        expect(after).toBe(before);
+      });
+
+      it('puts the root of your own tree on layer 1, whatever the office says', async () => {
+        // The trap two independent reviews found: sending office depth and letting the
+        // screen label it. An AB two layers down the office is layer 1 of their tree.
+        const asAb = await tree.read(await asMember(ab));
+        const byId = new Map(asAb.nodes.map((n) => [n.membershipId, n]));
+
+        expect(byId.get(ab)).toMatchObject({ depth: 1, layer: 1 });
+        expect(byId.get(aab)).toMatchObject({ depth: 2, layer: 2 });
+        expect(byId.get(agent)).toMatchObject({ depth: 3, layer: 3 });
+
+        // The same people, seen office-wide, are one layer deeper.
+        const owner = await tree.read(await asMember(root, { isKpmOwner: true }));
+        expect(new Map(owner.nodes.map((n) => [n.membershipId, n.layer])).get(agent)).toBe(4);
+      });
+
+      it('puts an orphan root on layer 1 beside the office root', async () => {
+        await removals.remove(await asMember(root, { isKpmOwner: true }), ab, {
+          confirmation: 'REMOVE',
+          subtree: { action: 'orphan' },
+        });
+        const result = await tree.read(await asMember(root, { isKpmOwner: true }));
+        const byId = new Map(result.nodes.map((n) => [n.membershipId, n.layer]));
+
+        expect(byId.get(root)).toBe(1);
+        expect(byId.get(aab)).toBe(1);
+        expect(byId.get(agent)).toBe(2);
+      });
+
+      it('sends your own leader separately, and never as a node', async () => {
+        const asAab = await asMember(aab);
+        const result = await tree.read(asAab);
+
+        expect(result.leader?.membershipId).toBe(ab);
+        expect(result.nodes.map((n) => n.membershipId)).not.toContain(ab);
+        // Structurally incapable of being a layer: it carries no depth and no leaderId.
+        expect(result.leader).not.toHaveProperty('depth');
+      });
+
+      it('sends no leader card to somebody whose leader is already a node', async () => {
+        // A tenant admin sees their own leader in the tree. Drawing them above as well
+        // would be the same person twice on one screen.
+        const owner = await asMember(aab, { isKpmOwner: true });
+        expect((await tree.read(owner)).leader).toBeNull();
+      });
+
+      it('sends no leader card to the office root, who has none', async () => {
+        expect((await tree.read(await asMember(root))).leader).toBeNull();
+      });
+
+      it('marks which node is you, so the tree can say YOU without guessing', async () => {
+        const asAab = await asMember(aab);
+        const result = await tree.read(asAab);
+        expect(result.selfId).toBe(aab);
+        expect(result.nodes.filter((n) => n.isSelf).map((n) => n.membershipId)).toEqual([aab]);
+      });
+    });
+
+    describe('AC-2: who sees what', () => {
+      it('gives a tenant admin the whole office', async () => {
+        const owner = await asMember(root, { isKpmOwner: true });
+        expect((await tree.read(owner)).nodes.map((n) => n.membershipId).sort())
+          .toEqual([root, ab, aab, agent].sort());
+      });
+
+      it('gives a leader themselves and their downline, and nothing above', async () => {
+        const result = await tree.read(await asMember(ab));
+        expect(result.nodes.map((n) => n.membershipId).sort()).toEqual([ab, aab, agent].sort());
+        expect(result.rootIds).toEqual([ab]);
+      });
+
+      it('gives an agent a tree of one, rather than refusing them', async () => {
+        const result = await tree.read(await asMember(agent));
+        expect(result.nodes.map((n) => n.membershipId)).toEqual([agent]);
+        expect(result.leader?.membershipId).toBe(aab);
+      });
+
+      it('never reaches another office, even for an admin', async () => {
+        await join(KPM_B, 'ab');
+        const owner = await asMember(root, { isKpmOwner: true });
+        const ids = (await tree.read(owner)).nodes.map((n) => n.membershipId);
+        const theirs = await members.find(ctx(KPM_B), {});
+        for (const row of theirs) expect(ids).not.toContain(String(row._id));
+      });
+
+      it('shows a Super Admin acting in an office the whole of it, and no leader card', async () => {
+        // The one cross-tenant reader, and they are named as acting inside the office
+        // rather than given a fabricated membership.
+        const sa = new RequestContext('u-root', 'super_admin', null, null, KPM_A);
+        const result = await tree.read(sa);
+
+        expect(result.nodes.map((n) => n.membershipId).sort()).toEqual([root, ab, aab, agent].sort());
+        expect(result.selfId).toBeNull();
+        expect(result.leader).toBeNull();
+        expect(result.nodes.some((n) => n.isSelf)).toBe(false);
+      });
+
+      it('shows nothing to somebody in the office who is not a member of it', async () => {
+        // An absent filter would return the tenant, so the rule fails closed with an
+        // impossible one instead.
+        const nobody = new RequestContext('u-new', 'none', null, null, KPM_A);
+        expect((await tree.read(nobody)).nodes).toEqual([]);
+        expect((await tree.read(nobody)).rootIds).toEqual([]);
+      });
+    });
+
+    describe('an office is a forest, which P3-T7 made true', () => {
+      it('roots everybody whose leader is not visible, not just the office root', async () => {
+        // Orphaning is a removal disposition. Rooting the query at the Owner would have
+        // hidden this person and everybody under them.
+        await removals.remove(await asMember(root, { isKpmOwner: true }), ab, {
+          confirmation: 'REMOVE',
+          subtree: { action: 'orphan' },
+        });
+
+        const owner = await asMember(root, { isKpmOwner: true });
+        const result = await tree.read(owner);
+
+        expect(result.nodes.map((n) => n.membershipId)).toContain(aab);
+        expect(result.rootIds.sort()).toEqual([root, aab].sort());
+      });
+
+      it('keeps the orphan subtree attached to the orphan', async () => {
+        await removals.remove(await asMember(root, { isKpmOwner: true }), ab, {
+          confirmation: 'REMOVE',
+          subtree: { action: 'orphan' },
+        });
+        const result = await tree.read(await asMember(root, { isKpmOwner: true }));
+        expect(result.nodes.find((n) => n.membershipId === agent)!.leaderId).toBe(aab);
+      });
+
+      it('leaves a removed member out of the tree entirely', async () => {
+        await removals.remove(await asMember(aab), agent, { confirmation: 'REMOVE' });
+        const result = await tree.read(await asMember(root, { isKpmOwner: true }));
+        expect(result.nodes.map((n) => n.membershipId)).not.toContain(agent);
+      });
+
+      it('leaves a pending member out — they are in no unit yet', async () => {
+        const waiting = await join(KPM_A, 'agent');
+        await members.updateById(ctx(KPM_A), waiting, { $set: { status: 'pending' } });
+        const result = await tree.read(await asMember(root, { isKpmOwner: true }));
+        expect(result.nodes.map((n) => n.membershipId)).not.toContain(waiting);
+      });
+    });
+
+    describe('the breakdown', () => {
+      it('counts everybody but you, as the prototype does', async () => {
+        const result = await tree.read(await asMember(ab));
+        // ab is self; aab and agent are below.
+        expect(result.counts).toEqual({ ab: 0, aab: 1, agent: 1, total: 2 });
+      });
+
+      it('counts an AB under an AB, which the Owner prototype silently drops', async () => {
+        const owner = await asMember(root, { isKpmOwner: true });
+        expect((await tree.read(owner)).counts.ab).toBe(1);
+      });
+
+      it('says who leads from the graph, never from the role (OD-23)', async () => {
+        const childless = await join(KPM_A, 'aab', ab);
+        await hierarchy.refreshCounts(ctx(KPM_A), ab);
+        const owner = await asMember(root, { isKpmOwner: true });
+        const byId = new Map((await tree.read(owner)).nodes.map((n) => [n.membershipId, n]));
+
+        expect(byId.get(childless)!.role).toBe('aab');
+        expect(byId.get(childless)!.isLeader).toBe(false);
+        expect(byId.get(aab)!.isLeader).toBe(true);
+      });
+    });
+
+    describe('AC-3: it stays one indexed query at office scale', () => {
+      it('refuses rather than truncating above the cap, naming the number', async () => {
+        // A page of a tree is not a tree, so the failure is a refusal rather than a
+        // wrong org chart drawn from a slice. The repository is doubled because
+        // inserting 2001 memberships to prove one branch is not worth the minute.
+        const oversized = new OrgTreeService(
+          {
+            find: async () =>
+              Array.from({ length: ORG_TREE_MAX_NODES + 1 }, (_, i) => ({
+                _id: `m${i}`, userId: `u${i}`, role: 'agent', depth: 0, leaderId: null,
+                agentCode: `KPM-${i}`, directCounts: { total: 0 }, subtreeCount: 0,
+              })),
+          } as never,
+          users as never,
+        );
+
+        await expect(oversized.read(ctx(KPM_A))).rejects.toMatchObject({
+          code: 'ORG_TREE_TOO_LARGE',
+          details: { count: ORG_TREE_MAX_NODES + 1, max: ORG_TREE_MAX_NODES },
+        });
+      });
+
+      it('names somebody whose user row has gone rather than dropping their card', async () => {
+        // The membership is the record of participation; the user row is global and
+        // could be erased under PDP. A hole in the tree would hide a whole subtree.
+        const row = await members.findById(ctx(KPM_A), agent);
+        await users.deleteOne({ _id: row!.userId });
+
+        const result = await tree.read(await asMember(root, { isKpmOwner: true }));
+        const orphanNode = result.nodes.find((n) => n.membershipId === agent);
+        expect(orphanNode).toBeDefined();
+        expect(orphanNode!.fullName).toBe('Unknown');
+      });
+
+      it('reads the whole office with one indexed query and no collection scan', async () => {
+        // performance-and-scale.md requires an explain() assertion on every list
+        // endpoint. This is the first one, and the tree is the widest read in the
+        // product — 500 members in a single response.
+        const model = mongoose.model(Membership.name);
+        const plan = await model
+          .find({ kpmId: KPM_A, status: 'active', deletedAt: null })
+          .sort({ agentSeq: 1 })
+          .explain('executionStats');
+
+        const winning = JSON.stringify((plan as unknown as { queryPlanner: unknown }).queryPlanner);
+        expect(winning).not.toContain('COLLSCAN');
+        expect(winning).toContain('IXSCAN');
+      });
+
+      it('reads a downline with one indexed query too', async () => {
+        const model = mongoose.model(Membership.name);
+        const plan = await model
+          .find({ kpmId: KPM_A, ancestorIds: ab, status: 'active', deletedAt: null })
+          .explain('executionStats');
+
+        const winning = JSON.stringify((plan as unknown as { queryPlanner: unknown }).queryPlanner);
+        expect(winning).not.toContain('COLLSCAN');
+      });
+
+      it('does not fan out: one query for members, one for names, whatever the size', async () => {
+        for (let i = 0; i < 40; i += 1) await join(KPM_A, 'agent', aab);
+        await hierarchy.refreshCounts(ctx(KPM_A), aab);
+
+        const owner = await asMember(root, { isKpmOwner: true });
+        const before = mongoose.connection.db;
+        expect(before).toBeDefined();
+
+        const result = await tree.read(owner);
+        expect(result.nodes).toHaveLength(44);
+        // Every name resolved, so the second query covered all of them.
+        expect(result.nodes.every((n) => n.fullName !== 'Unknown')).toBe(true);
       });
     });
   });

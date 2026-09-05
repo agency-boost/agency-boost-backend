@@ -39,6 +39,7 @@ import { OnboardingController } from '@/modules/org/onboarding.controller';
 import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { InviteService } from '@/modules/org/invite.service';
 import { ApprovalsService } from '@/modules/org/approvals.service';
+import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { RemovalService } from '@/modules/org/removal.service';
 import { RoleChangeService } from '@/modules/org/role-change.service';
 import { AuthToken, AuthTokenSchema } from './auth-token.schema';
@@ -102,7 +103,7 @@ describe('auth and admin over HTTP', () => {
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService,
-        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService, ApprovalsService, RoleChangeService, RemovalService,
+        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService, ApprovalsService, RoleChangeService, RemovalService, OrgTreeService,
         AuthGuard, PermissionsGuard,
       ],
     }).compile();
@@ -1117,6 +1118,133 @@ describe('auth and admin over HTTP', () => {
         .set(asOwner)
         .send({ confirmation: 'REMOVE', note: 'dropped?' })
         .expect(400);
+    });
+  });
+
+  describe('the tree, over HTTP (P3-T8)', () => {
+    async function office() {
+      const sa = await makeUser(`sa-tree-${Math.random()}@agencyboost.test`, 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const owner = await makeUser(`owner-tree-${Math.random()}@kpm.test`);
+
+      const company = await api().post('/api/v1/admin/companies').set(auth)
+        .send({ name: `Insurer ${Math.random()}`, slug: `t${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
+        .expect(201);
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({
+          companyId: String(company.body._id),
+          code: `${Math.floor(Math.random() * 9000) + 1000}`,
+          branchName: 'Tree Branch',
+        })
+        .expect(201);
+      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
+        .set(auth).send({ userId: owner.id }).expect(200);
+
+      return { kpmId: String(kpm.body._id), asOwner: { Authorization: `Bearer ${owner.accessToken}` } };
+    }
+
+    async function joins(kpmId: string, tagger: Record<string, string>) {
+      const email = `tree-${Math.random()}@kpm.test`;
+      const user = await makeUser(email);
+      const as = { Authorization: `Bearer ${user.accessToken}` };
+      await api().post('/api/v1/join/kpm').set(as).send({ kpmId }).expect(200);
+      const pool = await api().get('/api/v1/join/untagged').set(tagger).expect(200);
+      const mine = pool.body.find((row: { email: string }) => row.email === email);
+      await api().post(`/api/v1/join/untagged/${mine.membershipId}`).set(tagger).expect(200);
+      return { as, membershipId: String(mine.membershipId), accessToken: user.accessToken };
+    }
+
+    it('routes /members/tree to the tree, not to a member called "tree"', async () => {
+      // @Get('tree') has to be declared above @Get(':membershipId') or Nest resolves
+      // this as a membership id and 404s.
+      const { asOwner } = await office();
+      const res = await api().get('/api/v1/members/tree').set(asOwner).expect(200);
+      expect(res.body).toHaveProperty('nodes');
+      expect(res.body).toHaveProperty('rootIds');
+    });
+
+    it('AC-2: gives the Owner the office, and a leader only their downline', async () => {
+      const { kpmId, asOwner } = await office();
+      const lead = await joins(kpmId, asOwner);
+      await api().patch(`/api/v1/members/${lead.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'aab' }).expect(200);
+      const under = await joins(kpmId, { Authorization: `Bearer ${lead.accessToken}` });
+      const other = await joins(kpmId, asOwner);
+
+      const wide = await api().get('/api/v1/members/tree').set(asOwner).expect(200);
+      expect(wide.body.nodes).toHaveLength(4);
+
+      const narrow = await api().get('/api/v1/members/tree').set(lead.as).expect(200);
+      const ids = narrow.body.nodes.map((n: { membershipId: string }) => n.membershipId);
+      expect(ids.sort()).toEqual([lead.membershipId, under.membershipId].sort());
+      expect(ids).not.toContain(other.membershipId);
+    });
+
+    it('AC-1: layers are relative to your own tree, and your leader is not one', async () => {
+      const { kpmId, asOwner } = await office();
+      const lead = await joins(kpmId, asOwner);
+      await api().patch(`/api/v1/members/${lead.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'aab' }).expect(200);
+      const under = await joins(kpmId, { Authorization: `Bearer ${lead.accessToken}` });
+
+      const mine = await api().get('/api/v1/members/tree').set(lead.as).expect(200);
+      const byId = new Map(
+        mine.body.nodes.map((n: { membershipId: string; layer: number }) => [n.membershipId, n.layer]),
+      );
+      expect(byId.get(lead.membershipId)).toBe(1);
+      expect(byId.get(under.membershipId)).toBe(2);
+
+      // The Owner is above them, sent separately, and is not a node.
+      expect(mine.body.leader).not.toBeNull();
+      expect(mine.body.leader).not.toHaveProperty('layer');
+      expect(mine.body.nodes.map((n: { membershipId: string }) => n.membershipId))
+        .not.toContain(mine.body.leader.membershipId);
+
+      // The same person is one layer deeper seen office-wide.
+      const wide = await api().get('/api/v1/members/tree').set(asOwner).expect(200);
+      const wideById = new Map(
+        wide.body.nodes.map((n: { membershipId: string; layer: number }) => [n.membershipId, n.layer]),
+      );
+      expect(wideById.get(under.membershipId)).toBe(3);
+    });
+
+    it('sends every root, so an orphan is not hidden', async () => {
+      const { kpmId, asOwner } = await office();
+      const lead = await joins(kpmId, asOwner);
+      await api().patch(`/api/v1/members/${lead.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'aab' }).expect(200);
+      const under = await joins(kpmId, { Authorization: `Bearer ${lead.accessToken}` });
+
+      await api().delete(`/api/v1/members/${lead.membershipId}`)
+        .set(asOwner).send({ confirmation: 'REMOVE', subtree: { action: 'orphan' } })
+        .expect(200);
+
+      const tree = await api().get('/api/v1/members/tree').set(asOwner).expect(200);
+      expect(tree.body.rootIds).toContain(under.membershipId);
+      expect(tree.body.nodes.map((n: { membershipId: string }) => n.membershipId))
+        .toContain(under.membershipId);
+      // And the removed leader is gone from it.
+      expect(tree.body.nodes.map((n: { membershipId: string }) => n.membershipId))
+        .not.toContain(lead.membershipId);
+    });
+
+    it('never reaches another office', async () => {
+      const mine = await office();
+      const theirs = await office();
+      await joins(theirs.kpmId, theirs.asOwner);
+
+      const tree = await api().get('/api/v1/members/tree').set(mine.asOwner).expect(200);
+      expect(tree.body.nodes).toHaveLength(1);
+    });
+
+    it('answers an agent with a tree of one rather than refusing them', async () => {
+      const { kpmId, asOwner } = await office();
+      const them = await joins(kpmId, asOwner);
+
+      const tree = await api().get('/api/v1/members/tree').set(them.as).expect(200);
+      expect(tree.body.nodes).toHaveLength(1);
+      expect(tree.body.nodes[0].isSelf).toBe(true);
+      expect(tree.body.leader).not.toBeNull();
     });
   });
 

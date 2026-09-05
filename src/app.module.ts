@@ -48,6 +48,7 @@ import { OnboardingController } from '@/modules/org/onboarding.controller';
 import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { InviteService } from '@/modules/org/invite.service';
 import { ApprovalsService } from '@/modules/org/approvals.service';
+import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { RemovalService } from '@/modules/org/removal.service';
 import { RoleChangeService } from '@/modules/org/role-change.service';
 
@@ -119,6 +120,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ApprovalsService,
     RoleChangeService,
     RemovalService,
+    OrgTreeService,
   ],
   exports: [Clock, AuditService],
 })

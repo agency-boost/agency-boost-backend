@@ -46,6 +46,25 @@ export const DIRECTORY_PAGE_SIZE = 25;
 export const DIRECTORY_MAX_PAGE_SIZE = 100;
 
 /**
+ * Who this requester may see, as a filter fragment.
+ *
+ * A tenant admin sees the office; everyone else sees themselves and their downline. It
+ * is exported and shared because the roster and the org tree must narrow **identically**
+ * — two copies of a visibility rule drift, and the drift is a cross-unit leak rather
+ * than a rendering bug. `ancestorIds` makes the downline arm a single indexed lookup on
+ * `(kpmId, ancestorIds, status)`.
+ *
+ * Somebody with no membership sees nothing, and says so as an impossible filter rather
+ * than an absent one — an absent filter would return the office.
+ */
+export function visibleTo(ctx: RequestContext): FilterQuery<MembershipDocument> {
+  if (ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin || ctx.isSuperAdmin) return {};
+  const self = ctx.membershipId;
+  if (!self) return { _id: null };
+  return { $or: [{ _id: self }, { ancestorIds: self }] };
+}
+
+/**
  * Avatar initials.
  *
  * Exported so the whitespace case can be tested directly: `users.fullName` is required
@@ -82,10 +101,7 @@ export class DirectoryService {
    * lookup still does the work.
    */
   private visibility(ctx: RequestContext): FilterQuery<MembershipDocument> {
-    if (ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin || ctx.isSuperAdmin) return {};
-    const self = ctx.membershipId;
-    if (!self) return { _id: null };
-    return { $or: [{ _id: self }, { ancestorIds: self }] };
+    return visibleTo(ctx);
   }
 
   async list(ctx: RequestContext, query: DirectoryQuery = {}): Promise<DirectoryPage> {
