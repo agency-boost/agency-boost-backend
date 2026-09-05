@@ -44,8 +44,14 @@ export class AuditService {
     }
   }
 
-  /** Reads are tenant-scoped by the caller passing its own context's kpmId. */
-  async findForTenant(kpmId: string, limit = 100): Promise<AuditLogDocument[]> {
+  /**
+   * Reads are tenant-scoped by the caller passing the kpmId it is entitled to.
+   *
+   * `null` is a real scope, not "unscoped": platform-level events — provisioning a KPM,
+   * creating a company — are recorded by a Super Admin whose context has no membership,
+   * so they carry `kpmId: null`. Coercing that to `''` would silently return nothing.
+   */
+  async findForTenant(kpmId: string | null, limit = 100): Promise<AuditLogDocument[]> {
     return this.model.find({ kpmId }).sort({ createdAt: -1 }).limit(limit).exec();
   }
 }

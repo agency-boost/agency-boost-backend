@@ -79,4 +79,12 @@ describe('AuditService', () => {
     await service.findForTenant('kpm-a', 10);
     expect(model.find).toHaveBeenCalledWith({ kpmId: 'kpm-a' });
   });
+
+  it('queries the null scope literally, so platform events are readable', async () => {
+    // A Super Admin has no membership. Coercing their null tenant to '' would query a
+    // scope nothing is ever written under and return an empty log that looks correct.
+    const { service, model } = makeService();
+    await service.findForTenant(null, 10);
+    expect(model.find).toHaveBeenCalledWith({ kpmId: null });
+  });
 });

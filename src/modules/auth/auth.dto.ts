@@ -29,9 +29,14 @@ export class LoginDto {
 }
 
 export class RefreshDto {
-  @ApiProperty({ description: 'The refresh token returned by /auth/login.' })
+  @ApiPropertyOptional({
+    description:
+      'Only for non-browser clients. A browser sends the httpOnly cookie set at login ' +
+      'and should omit this entirely.',
+  })
+  @IsOptional()
   @IsString()
-  refreshToken!: string;
+  refreshToken?: string;
 }
 
 export class TokenDto {

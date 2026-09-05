@@ -1,10 +1,10 @@
 import {
-  Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Req,
+  Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Req, Res,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { Ctx, Public } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
@@ -17,6 +17,20 @@ import {
   ChangePasswordDto, ForgotPasswordDto, LoginDto, RefreshDto, RegisterDto,
   ResetPasswordDto, TokenDto, UpdateProfileDto,
 } from './auth.dto';
+
+/**
+ * The refresh token travels as an httpOnly cookie, never in the response body.
+ *
+ * A body value has to be stored somewhere JavaScript can read, which makes any XSS a
+ * full account takeover. The cookie is unreachable from script, and `SameSite=Lax`
+ * keeps it off cross-site requests. This is what
+ * docs/02-specs/api/auth-and-sessions.md specifies.
+ *
+ * Swagger still works: the browser holds the cookie, so /auth/refresh and /auth/logout
+ * succeed from the UI without pasting anything.
+ */
+const REFRESH_COOKIE = 'agencyboost_refresh';
+const REFRESH_COOKIE_MAX_AGE_MS = 30 * 86_400_000;
 
 const LOGIN_LIMIT = 5;
 const LOGIN_WINDOW_SECONDS = 15 * 60;
@@ -31,6 +45,34 @@ export class AuthController {
     private readonly limiter: RateLimiter,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
   ) {}
+
+  private setRefreshCookie(res: Response, token: string): void {
+    res.cookie(REFRESH_COOKIE, token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/api/v1/auth',
+      maxAge: REFRESH_COOKIE_MAX_AGE_MS,
+    });
+  }
+
+  private clearRefreshCookie(res: Response): void {
+    res.clearCookie(REFRESH_COOKIE, { path: '/api/v1/auth' });
+  }
+
+  /** Cookie first; an explicit body value is accepted for non-browser clients. */
+  private refreshTokenFrom(req: Request, body?: RefreshDto): string {
+    const fromCookie = (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
+    const token = fromCookie ?? body?.refreshToken;
+    if (!token) {
+      throw new DomainException(
+        ErrorCode.AUTH_TOKEN_INVALID,
+        'No session to refresh. Sign in again.',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+    return token;
+  }
 
   private limit(key: string, limit: number, windowSeconds: number): void {
     const retryAfter = this.limiter.check(key, limit, windowSeconds);
@@ -67,7 +109,11 @@ export class AuthController {
       'Rate limited per IP **and** per email — an attacker rotating IPs against one ' +
       'account still burns the per-email budget.',
   })
-  async login(@Body() dto: LoginDto, @Req() req: Request) {
+  async login(
+    @Body() dto: LoginDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const ip = req.ip ?? 'unknown';
     this.limit(`login:ip:${ip}`, LOGIN_LIMIT, LOGIN_WINDOW_SECONDS);
     this.limit(`login:email:${dto.email.toLowerCase()}`, LOGIN_LIMIT, LOGIN_WINDOW_SECONDS);
@@ -80,7 +126,9 @@ export class AuthController {
     // A successful sign-in should not spend the budget a typo already dented.
     this.limiter.reset(`login:ip:${ip}`);
     this.limiter.reset(`login:email:${dto.email.toLowerCase()}`);
-    return pair;
+
+    this.setRefreshCookie(res, pair.refreshToken);
+    return { accessToken: pair.accessToken, expiresIn: pair.expiresIn };
   }
 
   @Public()
@@ -92,19 +140,32 @@ export class AuthController {
       'Presenting a token that was already rotated revokes the whole family — the ' +
       'standard signal that a refresh token was stolen.',
   })
-  async refresh(@Body() dto: RefreshDto, @Req() req: Request) {
-    return this.auth.refresh(dto.refreshToken, {
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() dto?: RefreshDto,
+  ) {
+    const pair = await this.auth.refresh(this.refreshTokenFrom(req, dto), {
       ip: req.ip ?? null,
       userAgent: req.headers['user-agent'] ?? null,
     });
+    this.setRefreshCookie(res, pair.refreshToken);
+    return { accessToken: pair.accessToken, expiresIn: pair.expiresIn };
   }
 
   @Public()
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'End this session' })
-  async logout(@Body() dto: RefreshDto) {
-    await this.auth.logout(dto.refreshToken);
+  async logout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() dto?: RefreshDto,
+  ) {
+    const fromCookie = (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
+    const token = fromCookie ?? dto?.refreshToken;
+    if (token) await this.auth.logout(token);
+    this.clearRefreshCookie(res);
   }
 
   @Public()

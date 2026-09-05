@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -8,7 +8,13 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { ImpersonateDto } from '@/modules/auth/auth.dto';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
 import { Company, CompanyDocument } from './company.schema';
-import { AssignOwnerDto, CreateCompanyDto, CreateKpmDto, SetStatusDto } from './tenant.dto';
+import {
+  AssignOwnerDto,
+  AuditQueryDto,
+  CreateCompanyDto,
+  CreateKpmDto,
+  SetStatusDto,
+} from './tenant.dto';
 import { TenantService } from './tenant.service';
 
 /**
@@ -35,9 +41,21 @@ export class AdminController {
 
   @Post('companies')
   @RequirePermission('company:crud')
-  @ApiOperation({ summary: 'Create a principal insurer' })
-  async createCompany(@Body() dto: CreateCompanyDto) {
-    return this.companies.create({ ...dto });
+  @ApiOperation({
+    summary: 'Create a principal insurer',
+    description:
+      'Audited: an insurer is the parent every office inherits its currency, locale ' +
+      'and time zone from, so its creation is a platform-level change worth recording.',
+  })
+  async createCompany(@Ctx() ctx: RequestContext, @Body() dto: CreateCompanyDto) {
+    const company = await this.companies.create({ ...dto });
+    await this.audit.record(ctx, {
+      action: 'company.created',
+      targetCollection: 'companies',
+      targetId: String(company._id),
+      after: { name: company.name, slug: company.slug },
+    });
+    return company;
   }
 
   @Get('tenants')
@@ -98,9 +116,17 @@ export class AdminController {
 
   @Get('audit')
   @RequirePermission('audit_log:read')
-  @ApiOperation({ summary: 'Read the audit log for a tenant' })
-  async readAudit(@Ctx() ctx: RequestContext) {
-    return this.audit.findForTenant(ctx.kpmId ?? '', 100);
+  @ApiOperation({
+    summary: 'Read the audit log',
+    description:
+      'Defaults to the caller\'s own tenant. A Super Admin has no tenant, so their ' +
+      'default is the platform-level log — provisioning, company creation, ' +
+      'impersonation — and `kpmId` narrows it to one office. Anyone else is pinned to ' +
+      'their own office whatever they pass.',
+  })
+  async readAudit(@Ctx() ctx: RequestContext, @Query() query: AuditQueryDto) {
+    const scope = ctx.isSuperAdmin ? (query.kpmId ?? null) : ctx.kpmId;
+    return this.audit.findForTenant(scope, 100);
   }
 
   @Post('impersonate/:userId')

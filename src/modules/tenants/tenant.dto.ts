@@ -63,3 +63,14 @@ export class SetStatusDto {
   @IsString()
   reason?: string;
 }
+
+export class AuditQueryDto {
+  @ApiPropertyOptional({
+    description:
+      'Super Admin only: narrow the log to one office. Omitted reads the platform-level ' +
+      'log. Ignored for anyone else, who always reads their own office.',
+  })
+  @IsOptional()
+  @IsString()
+  kpmId?: string;
+}

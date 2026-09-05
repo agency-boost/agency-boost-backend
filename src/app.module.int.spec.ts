@@ -1,6 +1,7 @@
 import { INestApplication, VersioningType } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
 import { AppModule } from './app.module';
 import { startMongo, stopMongo } from '../test/mongo';
@@ -36,6 +37,7 @@ describe('AppModule boots', () => {
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
+    app.use(cookieParser());
     app.setGlobalPrefix('api');
     app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
     await app.init();

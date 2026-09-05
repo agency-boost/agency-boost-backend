@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger as PinoLogger } from 'nestjs-pino';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
@@ -17,6 +18,8 @@ async function bootstrap(): Promise<void> {
   // served side by side from the same process — which docs/02-specs/api/conventions.md
   // already promises ("a breaking change means v2 alongside v1"). Baking the version
   // into a global prefix would make every route move at once.
+  app.use(cookieParser());
+
   app.setGlobalPrefix('api');
   app.enableVersioning({
     type: VersioningType.URI,
