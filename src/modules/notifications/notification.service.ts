@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -10,6 +10,13 @@ import {
   DeliveryStatus, NotificationChannel, NotificationChannelAdapter,
   RenderedMessage, SendRequest, TEMPLATE_CHANNELS,
 } from './notification.types';
+
+/**
+ * The registered channel adapters. An injection token rather than a default parameter,
+ * so adding the email or WhatsApp adapter is a provider change in one module rather
+ * than a constructor edit here (ADR-0010).
+ */
+export const NOTIFICATION_ADAPTERS = 'NOTIFICATION_ADAPTERS';
 
 /** Renders a template id + payload into a subject and body. */
 export abstract class TemplateRenderer {
@@ -35,7 +42,7 @@ export class NotificationService {
     private readonly preferences: Model<NotificationPreferencesDocument>,
     private readonly renderer: TemplateRenderer,
     private readonly clock: Clock,
-    adapters: NotificationChannelAdapter[] = [],
+    @Inject(NOTIFICATION_ADAPTERS) adapters: NotificationChannelAdapter[] = [],
   ) {
     for (const adapter of adapters) this.adapters.set(adapter.channel, adapter);
   }

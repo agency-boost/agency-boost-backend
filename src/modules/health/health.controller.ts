@@ -1,4 +1,5 @@
 import { Controller, Get, VERSION_NEUTRAL } from '@nestjs/common';
+import { Public } from '@/common/auth/auth.decorators';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 
@@ -6,8 +7,10 @@ import { Connection } from 'mongoose';
  * Liveness and readiness. Neither leaks a version or dependency detail publicly —
  * an unauthenticated endpoint is a reconnaissance surface.
  */
-// Version-neutral: a load balancer's health probe should not have to know or track
-// the API contract version. Served at /api/health, not /api/v1/health.
+// Version-neutral so a probe never tracks the API contract version, and public so the
+// global AuthGuard does not answer 401 — a health check that needs a token is a health
+// check that reports the service down whenever auth is the thing that broke.
+@Public()
 @Controller({ path: 'health', version: VERSION_NEUTRAL })
 export class HealthController {
   constructor(@InjectConnection() private readonly connection: Connection) {}
