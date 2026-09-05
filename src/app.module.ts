@@ -48,6 +48,8 @@ import { OnboardingController } from '@/modules/org/onboarding.controller';
 import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { InviteService } from '@/modules/org/invite.service';
 import { ApprovalsService } from '@/modules/org/approvals.service';
+import { Group, GroupSchema } from '@/modules/org/group.schema';
+import { GroupService } from '@/modules/org/group.service';
 import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { RemovalService } from '@/modules/org/removal.service';
 import { RoleChangeService } from '@/modules/org/role-change.service';
@@ -85,6 +87,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: MembershipHistory.name, schema: MembershipHistorySchema },
       { name: JoinRequest.name, schema: JoinRequestSchema },
       { name: InviteCode.name, schema: InviteCodeSchema },
+      { name: Group.name, schema: GroupSchema },
     ]),
   ],
   controllers: [HealthController, AuthController, AdminController, OrgController, OnboardingController],
@@ -121,6 +124,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     RoleChangeService,
     RemovalService,
     OrgTreeService,
+    GroupService,
   ],
   exports: [Clock, AuditService],
 })

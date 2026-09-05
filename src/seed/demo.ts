@@ -25,6 +25,7 @@ import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import {
   MembershipHistory, MembershipHistorySchema,
 } from '@/modules/org/membership-history.schema';
+import { Group, GroupSchema } from '@/modules/org/group.schema';
 import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { formatAgentCode } from '@/modules/org/agent-code';
@@ -62,6 +63,7 @@ async function main(): Promise<void> {
   const Kpms = mongoose.model(Kpm.name, KpmSchema);
   const Memberships = mongoose.model(Membership.name, MembershipSchema);
   const History = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
+  const Groups = mongoose.model(Group.name, GroupSchema);
   const JoinRequests = mongoose.model(JoinRequest.name, JoinRequestSchema);
   const Invites = mongoose.model(InviteCode.name, InviteCodeSchema);
 
@@ -71,7 +73,7 @@ async function main(): Promise<void> {
     // one — and emptying named collections will not take out a database someone pointed
     // at by mistake.
     const owned = [
-      'memberships', 'membershipHistory', 'joinRequests', 'inviteCodes', 'kpms', 'companies', 'users',
+      'memberships', 'membershipHistory', 'joinRequests', 'inviteCodes', 'groups', 'kpms', 'companies', 'users',
       'authTokens', 'auditLog', 'notifications', 'notificationPreferences', 'assets',
     ];
     for (const name of owned) {
@@ -304,9 +306,9 @@ async function main(): Promise<void> {
   await promotedEarlier(id0417, dewi, 'agent', 'aab', ab, 'Took the AAB track after Q2', 21);
 
   const rinaUser = await user('rina@kpm0417.test', 'Rina Wijaya', { password: 'demo password rina' });
-  await place(office0417, String(rinaUser._id), 'agent', sari);
+  const rina = await place(office0417, String(rinaUser._id), 'agent', sari);
   const budiUser = await user('budi@kpm0417.test', 'Budi Santoso');
-  await place(office0417, String(budiUser._id), 'agent', sari);
+  const budi = await place(office0417, String(budiUser._id), 'agent', sari);
 
   // Registered and waiting on a leader, with the request already sent.
   const pendingUser = await user('pending@kpm0417.test', 'Putri Anggraini');
@@ -337,6 +339,39 @@ async function main(): Promise<void> {
   await place(office0417, String(removedUser._id), 'agent', sari);
 
   for (const id of [owner.id, ab.id, sari.id]) await recount(id0417, id);
+
+  /**
+   * Informal groups, and the Core Leader tag.
+   *
+   * Seeded so the Groups tab has something to show and the person page has a tag to
+   * render. Deliberately cutting across the hierarchy — Rina reports to Sari, Maya to
+   * the Owner — because that is the whole point of a group: it is not the tree.
+   */
+  const groupSeeds = [
+    { name: 'New Agent Mentoring Circle', owner: sari.id, members: [rina.id, budi.id] },
+    { name: 'Top Producers 2026', owner: owner.id, members: [ab.id, sari.id] },
+  ];
+  for (const seed of groupSeeds) {
+    const existing = await Groups.findOne({ kpmId: id0417, name: seed.name }).exec();
+    const group =
+      existing ??
+      (await Groups.create({
+        kpmId: id0417,
+        name: seed.name,
+        ownerMembershipId: seed.owner,
+        status: 'active',
+        createdByMembershipId: owner.id,
+      }));
+    await Memberships.updateMany(
+      { _id: { $in: seed.members } },
+      { $addToSet: { groupIds: String(group._id) } },
+    ).exec();
+  }
+  // Core Leader gates Leader Forum co-editing (Phase 14) and nothing else.
+  await Memberships.updateMany(
+    { _id: { $in: [ab.id, sari.id] } },
+    { $set: { isCoreLeader: true } },
+  ).exec();
 
   /**
    * Invites, fixed rather than random so the sign-in panel and the docs can quote them.
@@ -431,6 +466,11 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
 
   NO OFFICE
     newcomer@agencyboost.test                          Brand new — starts at Register KPM
+
+  GROUPS in KPM 0417, at /people/members → Groups
+    New Agent Mentoring Circle   owned by Sari · Rina and Budi tagged
+    Top Producers 2026           owned by the Owner · Agus and Sari tagged
+    Agus and Sari also carry the Core Leader tag
 
   INVITE CODES for KPM 0417, at /join?code=<code>
     SARI01   works — Sari's, no limit

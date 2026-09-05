@@ -1,8 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
-  IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min, MinLength,
-  ValidateIf, ValidateNested,
+  IsArray, IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength,
+  Min, MinLength, ValidateIf, ValidateNested,
 } from 'class-validator';
 
 export class DirectoryQueryDto {
@@ -223,4 +223,42 @@ export class RemoveMemberDto {
   @ValidateNested()
   @Type(() => SubtreeDispositionDto)
   subtree?: SubtreeDispositionDto;
+}
+
+export class GroupDto {
+  @ApiProperty({ example: 'New Agent Mentoring Circle' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MinLength(1)
+  @MaxLength(80)
+  name!: string;
+
+  @ApiProperty({
+    description:
+      'The membership that owns it. Never a name — the prototype stores `ownerName`, ' +
+      'which breaks the moment anybody is renamed or two people share one.',
+  })
+  @IsString()
+  @IsNotEmpty()
+  ownerMembershipId!: string;
+}
+
+export class TagMemberDto {
+  @ApiProperty({
+    type: [String],
+    description:
+      'Every live group this person should be in. Absent ids are removed; tags on ' +
+      'retired groups are kept, because they are the record that a cohort existed.',
+  })
+  @IsArray()
+  @IsString({ each: true })
+  groupIds!: string[];
+
+  @ApiProperty({
+    description:
+      'Gates Strategic Leader Forum co-editing (Phase 14) and nothing else. It grants ' +
+      'no hierarchy and no data scope.',
+  })
+  @IsBoolean()
+  isCoreLeader!: boolean;
 }

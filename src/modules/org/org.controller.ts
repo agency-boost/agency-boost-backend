@@ -1,10 +1,11 @@
-import { Body, Controller, Delete, Get, Param, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { DirectoryService } from './directory.service';
+import { GroupService } from './group.service';
 import { OrgTreeService } from './org-tree.service';
-import { ChangeRoleDto, DirectoryQueryDto, RemoveMemberDto } from './org.dto';
+import { ChangeRoleDto, DirectoryQueryDto, GroupDto, RemoveMemberDto, TagMemberDto } from './org.dto';
 import { RemovalService } from './removal.service';
 import { RoleChangeService } from './role-change.service';
 
@@ -25,6 +26,7 @@ export class OrgController {
     private readonly roles: RoleChangeService,
     private readonly removals: RemovalService,
     private readonly tree: OrgTreeService,
+    private readonly groups: GroupService,
   ) {}
 
   @Get('my-team')
@@ -112,6 +114,72 @@ export class OrgController {
   })
   async orgTree(@Ctx() ctx: RequestContext) {
     return this.tree.read(ctx);
+  }
+
+  @Get('groups')
+  @RequirePermission('group_informal:create')
+  @ApiOperation({
+    summary: 'The office’s informal groups',
+    description:
+      'Tags this office defines for its own organising — a mentoring circle, a task ' +
+      'force. Never hierarchy and never access: nothing in scope resolution reads them.',
+  })
+  async listGroups(@Ctx() ctx: RequestContext) {
+    return this.groups.list(ctx);
+  }
+
+  @Post('groups')
+  @RequirePermission('group_informal:create')
+  @ApiOperation({ summary: 'Create a group' })
+  async createGroup(@Ctx() ctx: RequestContext, @Body() dto: GroupDto) {
+    return this.groups.create(ctx, dto);
+  }
+
+  @Put('groups/:groupId')
+  @RequirePermission('group_informal:update')
+  @ApiOperation({ summary: 'Rename a group, or hand it to a different owner' })
+  async updateGroup(
+    @Ctx() ctx: RequestContext,
+    @Param('groupId') groupId: string,
+    @Body() dto: GroupDto,
+  ) {
+    return this.groups.rename(ctx, groupId, dto);
+  }
+
+  @Delete('groups/:groupId')
+  @RequirePermission('group_informal:archive')
+  @ApiOperation({
+    summary: 'Retire a group',
+    description:
+      'Archived, never deleted, and the tags on the people who were in it stay. The ' +
+      'prototype splices the row and strips everybody’s tags in the same breath, so the ' +
+      'record that a cohort existed is gone.',
+  })
+  async archiveGroup(@Ctx() ctx: RequestContext, @Param('groupId') groupId: string) {
+    return this.groups.archive(ctx, groupId);
+  }
+
+  @Get(':membershipId/tags')
+  @RequirePermission('member:tag_group')
+  @ApiOperation({ summary: 'What this person is tagged with' })
+  async readTags(@Ctx() ctx: RequestContext, @Param('membershipId') membershipId: string) {
+    return this.groups.tagsFor(ctx, membershipId);
+  }
+
+  @Put(':membershipId/tags')
+  @RequirePermission('member:tag_group')
+  @ApiOperation({
+    summary: 'Set this person’s groups and Core Leader flag',
+    description:
+      'Core Leader gates Strategic Leader Forum co-editing (Phase 14) and nothing ' +
+      'else — no hierarchy, no data scope. A group is the same: a label, not a rule.',
+  })
+  async tagMember(
+    @Ctx() ctx: RequestContext,
+    @Param('membershipId') membershipId: string,
+    @Body() dto: TagMemberDto,
+  ) {
+    return this.groups.tag(ctx, membershipId, dto);
   }
 
   @Get()

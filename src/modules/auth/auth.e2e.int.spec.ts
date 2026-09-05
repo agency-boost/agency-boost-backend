@@ -39,6 +39,8 @@ import { OnboardingController } from '@/modules/org/onboarding.controller';
 import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { InviteService } from '@/modules/org/invite.service';
 import { ApprovalsService } from '@/modules/org/approvals.service';
+import { Group, GroupSchema } from '@/modules/org/group.schema';
+import { GroupService } from '@/modules/org/group.service';
 import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { RemovalService } from '@/modules/org/removal.service';
 import { RoleChangeService } from '@/modules/org/role-change.service';
@@ -83,6 +85,7 @@ describe('auth and admin over HTTP', () => {
           { name: MembershipHistory.name, schema: MembershipHistorySchema },
           { name: JoinRequest.name, schema: JoinRequestSchema },
           { name: InviteCode.name, schema: InviteCodeSchema },
+          { name: Group.name, schema: GroupSchema },
         ]),
       ],
       controllers: [AuthController, AdminController, OrgController, OnboardingController],
@@ -103,7 +106,7 @@ describe('auth and admin over HTTP', () => {
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService,
-        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService, ApprovalsService, RoleChangeService, RemovalService, OrgTreeService,
+        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService, ApprovalsService, RoleChangeService, RemovalService, OrgTreeService, GroupService,
         AuthGuard, PermissionsGuard,
       ],
     }).compile();
@@ -1245,6 +1248,167 @@ describe('auth and admin over HTTP', () => {
       expect(tree.body.nodes).toHaveLength(1);
       expect(tree.body.nodes[0].isSelf).toBe(true);
       expect(tree.body.leader).not.toBeNull();
+    });
+  });
+
+  describe('groups and Core Leader, over HTTP (P3-T9)', () => {
+    async function office() {
+      const sa = await makeUser(`sa-grp-${Math.random()}@agencyboost.test`, 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const owner = await makeUser(`owner-grp-${Math.random()}@kpm.test`);
+
+      const company = await api().post('/api/v1/admin/companies').set(auth)
+        .send({ name: `Insurer ${Math.random()}`, slug: `g${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
+        .expect(201);
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({
+          companyId: String(company.body._id),
+          code: `${Math.floor(Math.random() * 9000) + 1000}`,
+          branchName: 'Group Branch',
+        })
+        .expect(201);
+      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
+        .set(auth).send({ userId: owner.id }).expect(200);
+
+      const asOwner = { Authorization: `Bearer ${owner.accessToken}` };
+      const roster = await api().get('/api/v1/members').set(asOwner).expect(200);
+      return {
+        kpmId: String(kpm.body._id),
+        asOwner,
+        ownerMembershipId: String(roster.body.members[0].membershipId),
+      };
+    }
+
+    async function joins(kpmId: string, tagger: Record<string, string>) {
+      const email = `grp-${Math.random()}@kpm.test`;
+      const user = await makeUser(email);
+      const as = { Authorization: `Bearer ${user.accessToken}` };
+      await api().post('/api/v1/join/kpm').set(as).send({ kpmId }).expect(200);
+      const pool = await api().get('/api/v1/join/untagged').set(tagger).expect(200);
+      const mine = pool.body.find((row: { email: string }) => row.email === email);
+      await api().post(`/api/v1/join/untagged/${mine.membershipId}`).set(tagger).expect(200);
+      return { as, membershipId: String(mine.membershipId) };
+    }
+
+    it('routes /members/groups to groups, not to a member called "groups"', async () => {
+      const { asOwner } = await office();
+      const res = await api().get('/api/v1/members/groups').set(asOwner).expect(200);
+      expect(Array.isArray(res.body)).toBe(true);
+    });
+
+    it('creates, renames, and counts who is tagged', async () => {
+      const { kpmId, asOwner, ownerMembershipId } = await office();
+      const them = await joins(kpmId, asOwner);
+
+      const made = await api().post('/api/v1/members/groups').set(asOwner)
+        .send({ name: 'New Agent Mentoring Circle', ownerMembershipId })
+        .expect(201);
+      expect(made.body[0]).toMatchObject({ name: 'New Agent Mentoring Circle', memberCount: 0 });
+      const groupId = made.body[0].groupId;
+
+      await api().put(`/api/v1/members/${them.membershipId}/tags`).set(asOwner)
+        .send({ groupIds: [groupId], isCoreLeader: false }).expect(200);
+
+      const listed = await api().get('/api/v1/members/groups').set(asOwner).expect(200);
+      expect(listed.body[0].memberCount).toBe(1);
+
+      const renamed = await api().put(`/api/v1/members/groups/${groupId}`).set(asOwner)
+        .send({ name: 'Top Producers 2026', ownerMembershipId }).expect(200);
+      expect(renamed.body[0].name).toBe('Top Producers 2026');
+    });
+
+    it('refuses a duplicate name, and frees it once the group is retired', async () => {
+      const { asOwner, ownerMembershipId } = await office();
+      const made = await api().post('/api/v1/members/groups').set(asOwner)
+        .send({ name: 'Task Force', ownerMembershipId }).expect(201);
+
+      const clash = await api().post('/api/v1/members/groups').set(asOwner)
+        .send({ name: 'Task Force', ownerMembershipId }).expect(409);
+      expect(clash.body.error.code).toBe('ORG_GROUP_NAME_TAKEN');
+
+      await api().delete(`/api/v1/members/groups/${made.body[0].groupId}`).set(asOwner).expect(200);
+      await api().post('/api/v1/members/groups').set(asOwner)
+        .send({ name: 'Task Force', ownerMembershipId }).expect(201);
+    });
+
+    it('AC-1: retiring keeps the tag, so who was in a cohort stays readable', async () => {
+      const { kpmId, asOwner, ownerMembershipId } = await office();
+      const them = await joins(kpmId, asOwner);
+      const made = await api().post('/api/v1/members/groups').set(asOwner)
+        .send({ name: 'Class of 2025', ownerMembershipId }).expect(201);
+      const groupId = made.body[0].groupId;
+
+      await api().put(`/api/v1/members/${them.membershipId}/tags`).set(asOwner)
+        .send({ groupIds: [groupId], isCoreLeader: false }).expect(200);
+      await api().delete(`/api/v1/members/groups/${groupId}`).set(asOwner).expect(200);
+
+      const tags = await api().get(`/api/v1/members/${them.membershipId}/tags`)
+        .set(asOwner).expect(200);
+      expect(tags.body.groupIds).toEqual([groupId]);
+      expect(await api().get('/api/v1/members/groups').set(asOwner).expect(200))
+        .toHaveProperty('body', []);
+    });
+
+    it('AC-1: a group changes nothing about what anybody can see', async () => {
+      const { kpmId, asOwner, ownerMembershipId } = await office();
+      const one = await joins(kpmId, asOwner);
+      const two = await joins(kpmId, asOwner);
+      const made = await api().post('/api/v1/members/groups').set(asOwner)
+        .send({ name: 'Circle', ownerMembershipId }).expect(201);
+
+      const before = await api().get('/api/v1/members').set(one.as).expect(200);
+
+      for (const person of [one, two]) {
+        await api().put(`/api/v1/members/${person.membershipId}/tags`).set(asOwner)
+          .send({ groupIds: [made.body[0].groupId], isCoreLeader: true }).expect(200);
+      }
+
+      const after = await api().get('/api/v1/members').set(one.as).expect(200);
+      expect(after.body.members.map((m: { membershipId: string }) => m.membershipId))
+        .toEqual(before.body.members.map((m: { membershipId: string }) => m.membershipId));
+      // And the tree does not gain a node either.
+      const tree = await api().get('/api/v1/members/tree').set(one.as).expect(200);
+      expect(tree.body.nodes.map((n: { membershipId: string }) => n.membershipId))
+        .not.toContain(two.membershipId);
+    });
+
+    it('refuses an agent every one of these routes', async () => {
+      const { kpmId, asOwner, ownerMembershipId } = await office();
+      const them = await joins(kpmId, asOwner);
+
+      const listed = await api().get('/api/v1/members/groups').set(them.as).expect(403);
+      expect(listed.body.error.details.permission).toBe('group_informal:create');
+
+      await api().post('/api/v1/members/groups').set(them.as)
+        .send({ name: 'Mine', ownerMembershipId }).expect(403);
+      await api().put(`/api/v1/members/${them.membershipId}/tags`).set(them.as)
+        .send({ groupIds: [], isCoreLeader: true }).expect(403);
+    });
+
+    it('never reaches another office group or member', async () => {
+      const mine = await office();
+      const theirs = await office();
+      const made = await api().post('/api/v1/members/groups').set(theirs.asOwner)
+        .send({ name: 'Theirs', ownerMembershipId: theirs.ownerMembershipId }).expect(201);
+      const groupId = made.body[0].groupId;
+
+      expect((await api().get('/api/v1/members/groups').set(mine.asOwner).expect(200)).body)
+        .toEqual([]);
+      await api().delete(`/api/v1/members/groups/${groupId}`).set(mine.asOwner).expect(404);
+      await api().put(`/api/v1/members/${mine.ownerMembershipId}/tags`).set(mine.asOwner)
+        .send({ groupIds: [groupId], isCoreLeader: false }).expect(404);
+    });
+
+    it('validates the body rather than writing what arrives', async () => {
+      const { asOwner, ownerMembershipId } = await office();
+      await api().post('/api/v1/members/groups').set(asOwner)
+        .send({ name: '', ownerMembershipId }).expect(400);
+      await api().post('/api/v1/members/groups').set(asOwner)
+        .send({ name: 'Fine', ownerMembershipId, colour: 'red' }).expect(400);
+      await api().put(`/api/v1/members/${ownerMembershipId}/tags`).set(asOwner)
+        .send({ groupIds: 'not-an-array', isCoreLeader: false }).expect(400);
+      await api().put(`/api/v1/members/${ownerMembershipId}/tags`).set(asOwner)
+        .send({ groupIds: [], isCoreLeader: 'yes' }).expect(400);
     });
   });
 

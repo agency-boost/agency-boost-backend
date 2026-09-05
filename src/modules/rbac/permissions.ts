@@ -128,6 +128,34 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
   ],
+  // Tags, and only the office's admins set them. A group is not hierarchy and not
+  // access, so no leader grant: it is the office's own way of organising, not a unit's.
+  'member:tag_group': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  'member:tag_core_leader': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  'group_informal:create': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  'group_informal:update': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  'group_informal:archive': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+
   // The tree is a read of the same graph the roster reads, and it narrows the same way:
   // a tenant admin sees the office, everyone else sees themselves and their downline.
   // An agent's tree is degenerate — their leader and themselves — and it is granted

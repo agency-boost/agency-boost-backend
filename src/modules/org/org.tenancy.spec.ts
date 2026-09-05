@@ -12,6 +12,8 @@ import { JoinRequest, JoinRequestSchema } from './join-request.schema';
 import { OnboardingService } from './onboarding.service';
 import { InviteService } from './invite.service';
 import { ApprovalsService } from './approvals.service';
+import { Group, GroupSchema } from './group.schema';
+import { GroupService } from './group.service';
 import { OrgTreeService, ORG_TREE_MAX_NODES } from './org-tree.service';
 import { RemovalService } from './removal.service';
 import { RoleChangeService } from './role-change.service';
@@ -62,6 +64,7 @@ describe('organisation', () => {
   let roles: RoleChangeService;
   let removals: RemovalService;
   let tree: OrgTreeService;
+  let groups: GroupService;
   let sent: { userId?: string; templateId: string; payload?: Record<string, unknown> }[];
   let clock: MovableClock;
   let users: ReturnType<typeof userModel>;
@@ -144,6 +147,14 @@ describe('organisation', () => {
     );
 
     tree = new OrgTreeService(members, users as never);
+
+    groups = new GroupService(
+      mongoose.model(Group.name, GroupSchema) as never,
+      members,
+      users as never,
+      new AuditService(mongoose.model(AuditLog.name) as never),
+      clock,
+    );
 
     // The partial unique index is the guarantee under test, not a background detail.
     await syncIndexes();
@@ -1307,6 +1318,304 @@ describe('organisation', () => {
         const theirs = await join(KPM_B, 'agent');
         await expect(approvals.tag(abCtx, theirs)).rejects.toMatchObject({ code: 'NOT_FOUND' });
         expect((await approvals.untagged(abCtx)).map((p) => p.membershipId)).not.toContain(theirs);
+      });
+    });
+  });
+
+  describe('groups and Core Leader (P3-T9)', () => {
+    async function asOwner(membershipId: string) {
+      const row = await members.findById(ctx(KPM_A), membershipId);
+      return new RequestContext(row!.userId, 'none', {
+        membershipId,
+        kpmId: KPM_A,
+        hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
+        status: 'active',
+        isKpmOwner: true,
+        isKpmAdmin: false,
+        directCount: row!.directCounts?.total ?? 0,
+      });
+    }
+
+    let root: string;
+    let ab: string;
+    let agent: string;
+    let owner: RequestContext;
+
+    beforeEach(async () => {
+      root = await join(KPM_A, 'ab');
+      ab = await join(KPM_A, 'ab', root);
+      agent = await join(KPM_A, 'agent', ab);
+      await hierarchy.refreshCounts(ctx(KPM_A), root);
+      await hierarchy.refreshCounts(ctx(KPM_A), ab);
+      owner = await asOwner(root);
+    });
+
+    describe('AC-1: a group is a tag, and never touches what anybody can see', () => {
+      it('does not change one person visibility of another', async () => {
+        // The whole point of the acceptance criterion. Two people in one group, with no
+        // hierarchy between them, still cannot see each other.
+        const [created] = await groups.create(owner, {
+          name: 'Top Producers 2026',
+          ownerMembershipId: root,
+        });
+        const peer = await join(KPM_A, 'agent', root);
+        await hierarchy.refreshCounts(ctx(KPM_A), root);
+
+        const asAb = new RequestContext((await members.findById(ctx(KPM_A), ab))!.userId, 'none', {
+          membershipId: ab, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+          isKpmOwner: false, isKpmAdmin: false, directCount: 1,
+        });
+
+        const before = (await directory.list(asAb, {})).members.map((m) => m.membershipId);
+        expect(before).not.toContain(peer);
+
+        await groups.tag(owner, ab, { groupIds: [created.groupId], isCoreLeader: false });
+        await groups.tag(owner, peer, { groupIds: [created.groupId], isCoreLeader: false });
+
+        const after = (await directory.list(asAb, {})).members.map((m) => m.membershipId);
+        expect(after).toEqual(before);
+      });
+
+      it('does not put a group member into anybody tree', async () => {
+        const [created] = await groups.create(owner, { name: 'Task Force', ownerMembershipId: root });
+        const peer = await join(KPM_A, 'agent', root);
+        await hierarchy.refreshCounts(ctx(KPM_A), root);
+        await groups.tag(owner, ab, { groupIds: [created.groupId], isCoreLeader: false });
+        await groups.tag(owner, peer, { groupIds: [created.groupId], isCoreLeader: false });
+
+        const asAb = new RequestContext((await members.findById(ctx(KPM_A), ab))!.userId, 'none', {
+          membershipId: ab, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+          isKpmOwner: false, isKpmAdmin: false, directCount: 1,
+        });
+        expect((await tree.read(asAb)).nodes.map((n) => n.membershipId)).not.toContain(peer);
+      });
+
+      it('AC-2: Core Leader changes nothing about scope either', async () => {
+        const asAgent = new RequestContext(
+          (await members.findById(ctx(KPM_A), agent))!.userId,
+          'none',
+          {
+            membershipId: agent, kpmId: KPM_A, hierarchyRole: 'agent', status: 'active',
+            isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+          },
+        );
+        const before = (await directory.list(asAgent, {})).members.length;
+
+        await groups.tag(owner, agent, { groupIds: [], isCoreLeader: true });
+        expect((await members.findById(ctx(KPM_A), agent))!.isCoreLeader).toBe(true);
+
+        expect((await directory.list(asAgent, {})).members).toHaveLength(before);
+      });
+    });
+
+    describe('creating and naming', () => {
+      it('names the owner by membership, and reads their name back', async () => {
+        const list = await groups.create(owner, {
+          name: 'New Agent Mentoring Circle',
+          ownerMembershipId: ab,
+        });
+        expect(list[0]).toMatchObject({
+          name: 'New Agent Mentoring Circle',
+          ownerMembershipId: ab,
+          ownerHasLeft: false,
+          memberCount: 0,
+        });
+        expect(list[0].ownerName).toBeTruthy();
+      });
+
+      it('refuses a second live group with the same name', async () => {
+        await groups.create(owner, { name: 'Task Force', ownerMembershipId: root });
+        await expect(
+          groups.create(owner, { name: 'Task Force', ownerMembershipId: root }),
+        ).rejects.toMatchObject({ code: 'ORG_GROUP_NAME_TAKEN' });
+      });
+
+      it('refuses an owner who is not in this office', async () => {
+        const theirs = await join(KPM_B, 'ab');
+        await expect(
+          groups.create(owner, { name: 'Cross-office', ownerMembershipId: theirs }),
+        ).rejects.toMatchObject({ code: 'ORG_GROUP_OWNER_NOT_IN_KPM' });
+      });
+
+      it('renames, and hands it to a different owner', async () => {
+        const [made] = await groups.create(owner, { name: 'Old name', ownerMembershipId: root });
+        const [renamed] = await groups.rename(owner, made.groupId, {
+          name: 'New name',
+          ownerMembershipId: ab,
+        });
+        expect(renamed).toMatchObject({ name: 'New name', ownerMembershipId: ab });
+      });
+
+      it('lets a group keep its own name when only the owner changes', async () => {
+        const [made] = await groups.create(owner, { name: 'Steady', ownerMembershipId: root });
+        await expect(
+          groups.rename(owner, made.groupId, { name: 'Steady', ownerMembershipId: ab }),
+        ).resolves.toBeDefined();
+      });
+
+      it('counts the people tagged into it', async () => {
+        const [made] = await groups.create(owner, { name: 'Circle', ownerMembershipId: root });
+        await groups.tag(owner, ab, { groupIds: [made.groupId], isCoreLeader: false });
+        await groups.tag(owner, agent, { groupIds: [made.groupId], isCoreLeader: false });
+
+        expect((await groups.list(owner))[0].memberCount).toBe(2);
+      });
+
+      it('says so when the owner has left, rather than showing a blank', async () => {
+        const leaver = await join(KPM_A, 'aab', root);
+        await hierarchy.refreshCounts(ctx(KPM_A), root);
+        await groups.create(owner, { name: 'Theirs to run', ownerMembershipId: leaver });
+
+        await removals.remove(owner, leaver, { confirmation: 'REMOVE' });
+
+        const [listed] = await groups.list(owner);
+        // Still named — they really are the recorded owner, and a blank would read as a
+        // fault — but flagged, because the group now has nobody running it.
+        expect(listed.ownerName).toBeTruthy();
+        expect(listed.ownerHasLeft).toBe(true);
+        // The group itself survives its owner leaving — somebody has to be able to
+        // hand it on, and a group that vanished would take its tags with it.
+        expect(listed.name).toBe('Theirs to run');
+      });
+
+      it('never counts, or shows, another office groups', async () => {
+        const theirRoot = await join(KPM_B, 'ab');
+        const theirOwner = new RequestContext(
+          (await members.findById(ctx(KPM_B), theirRoot))!.userId,
+          'none',
+          {
+            membershipId: theirRoot, kpmId: KPM_B, hierarchyRole: 'ab', status: 'active',
+            isKpmOwner: true, isKpmAdmin: false, directCount: 0,
+          },
+        );
+        await groups.create(theirOwner, { name: 'Theirs', ownerMembershipId: theirRoot });
+
+        expect(await groups.list(owner)).toEqual([]);
+        // And the same name is free over here, because uniqueness is per office.
+        await expect(
+          groups.create(owner, { name: 'Theirs', ownerMembershipId: root }),
+        ).resolves.toBeDefined();
+      });
+    });
+
+    describe('retiring one', () => {
+      it('archives rather than deleting, and keeps the tags on the people', async () => {
+        // The prototype splices the row and strips everybody tags in the same breath,
+        // so the record that a cohort existed is gone.
+        const [made] = await groups.create(owner, { name: 'Class of 2025', ownerMembershipId: root });
+        await groups.tag(owner, agent, { groupIds: [made.groupId], isCoreLeader: false });
+
+        expect(await groups.archive(owner, made.groupId)).toEqual([]);
+        expect((await members.findById(ctx(KPM_A), agent))!.groupIds).toEqual([made.groupId]);
+      });
+
+      it('frees the name for reuse once it is retired', async () => {
+        const [made] = await groups.create(owner, { name: 'Task Force', ownerMembershipId: root });
+        await groups.archive(owner, made.groupId);
+        await expect(
+          groups.create(owner, { name: 'Task Force', ownerMembershipId: root }),
+        ).resolves.toBeDefined();
+      });
+
+      it('404s a group that is not here, and one already retired', async () => {
+        const [made] = await groups.create(owner, { name: 'Gone', ownerMembershipId: root });
+        await groups.archive(owner, made.groupId);
+        await expect(groups.archive(owner, made.groupId)).rejects.toMatchObject({
+          code: 'NOT_FOUND',
+        });
+        await expect(groups.archive(owner, 'not-an-id')).rejects.toMatchObject({
+          code: 'NOT_FOUND',
+        });
+      });
+    });
+
+    describe('tagging one person', () => {
+      it('sets and clears groups, and the Core Leader flag, together', async () => {
+        const [a] = await groups.create(owner, { name: 'A', ownerMembershipId: root });
+        const list = await groups.create(owner, { name: 'B', ownerMembershipId: root });
+        const b = list.find((g) => g.name === 'B')!;
+
+        let tags = await groups.tag(owner, agent, {
+          groupIds: [a.groupId, b.groupId],
+          isCoreLeader: true,
+        });
+        expect(tags.groupIds.sort()).toEqual([a.groupId, b.groupId].sort());
+        expect(tags.isCoreLeader).toBe(true);
+
+        tags = await groups.tag(owner, agent, { groupIds: [a.groupId], isCoreLeader: false });
+        expect(tags.groupIds).toEqual([a.groupId]);
+        expect(tags.isCoreLeader).toBe(false);
+      });
+
+      it('keeps a tag on a retired group, because it is the record of a past cohort', async () => {
+        const [old] = await groups.create(owner, { name: 'Class of 2025', ownerMembershipId: root });
+        await groups.tag(owner, agent, { groupIds: [old.groupId], isCoreLeader: false });
+        await groups.archive(owner, old.groupId);
+
+        const [now] = await groups.create(owner, { name: 'Class of 2026', ownerMembershipId: root });
+        const tags = await groups.tag(owner, agent, {
+          groupIds: [now.groupId],
+          isCoreLeader: false,
+        });
+
+        // Saving the panel does not silently drop what the panel could not offer.
+        expect(tags.groupIds.sort()).toEqual([old.groupId, now.groupId].sort());
+      });
+
+      it('refuses a group id from another office', async () => {
+        const theirRoot = await join(KPM_B, 'ab');
+        const theirOwner = new RequestContext(
+          (await members.findById(ctx(KPM_B), theirRoot))!.userId,
+          'none',
+          {
+            membershipId: theirRoot, kpmId: KPM_B, hierarchyRole: 'ab', status: 'active',
+            isKpmOwner: true, isKpmAdmin: false, directCount: 0,
+          },
+        );
+        const [theirs] = await groups.create(theirOwner, {
+          name: 'Theirs',
+          ownerMembershipId: theirRoot,
+        });
+
+        await expect(
+          groups.tag(owner, agent, { groupIds: [theirs.groupId], isCoreLeader: false }),
+        ).rejects.toMatchObject({ code: 'ORG_GROUP_NOT_FOUND' });
+      });
+
+      it('refuses a retired group rather than quietly re-adding it', async () => {
+        const [made] = await groups.create(owner, { name: 'Retired', ownerMembershipId: root });
+        await groups.archive(owner, made.groupId);
+        await expect(
+          groups.tag(owner, agent, { groupIds: [made.groupId], isCoreLeader: false }),
+        ).rejects.toMatchObject({ code: 'ORG_GROUP_NOT_FOUND' });
+      });
+
+      it('never reaches another office member', async () => {
+        const theirs = await join(KPM_B, 'agent');
+        await expect(
+          groups.tag(owner, theirs, { groupIds: [], isCoreLeader: false }),
+        ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(groups.tagsFor(owner, theirs)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      });
+
+      it('does not duplicate a group somebody is already in', async () => {
+        const [made] = await groups.create(owner, { name: 'Once', ownerMembershipId: root });
+        await groups.tag(owner, agent, {
+          groupIds: [made.groupId, made.groupId],
+          isCoreLeader: false,
+        });
+        expect((await groups.tagsFor(owner, agent)).groupIds).toEqual([made.groupId]);
+      });
+    });
+
+    it('refuses every surface to somebody in no office', async () => {
+      const nowhere = new RequestContext('u-new', 'none', null);
+      await expect(groups.list(nowhere)).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
+      await expect(
+        groups.create(nowhere, { name: 'X', ownerMembershipId: root }),
+      ).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
+      await expect(groups.tagsFor(nowhere, agent)).rejects.toMatchObject({
+        code: 'TENANT_NO_MEMBERSHIP',
       });
     });
   });
