@@ -19,7 +19,13 @@ export type Scope = 'own' | 'own-unit' | 'own-downline' | 'own-kpm' | 'all';
 export type Grantee =
   | { kind: 'platform'; role: 'super_admin' }
   | { kind: 'tenant'; role: 'kpm_owner' | 'kpm_admin' }
-  | { kind: 'hierarchy'; role: HierarchyRole };
+  | { kind: 'hierarchy'; role: HierarchyRole }
+  /**
+   * Anyone signed in, membership or not. Exactly one permission uses it, and the
+   * documentation says why: the office directory is `all` for every authenticated user
+   * *including one with no KPM yet*, because otherwise nobody could ever join one.
+   */
+  | { kind: 'authenticated' };
 
 export const SUPER_ADMIN: Grantee = { kind: 'platform', role: 'super_admin' };
 export const KPM_OWNER: Grantee = { kind: 'tenant', role: 'kpm_owner' };
@@ -27,10 +33,22 @@ export const KPM_ADMIN: Grantee = { kind: 'tenant', role: 'kpm_admin' };
 export const AB: Grantee = { kind: 'hierarchy', role: 'ab' };
 export const AAB: Grantee = { kind: 'hierarchy', role: 'aab' };
 export const AGENT: Grantee = { kind: 'hierarchy', role: 'agent' };
+export const AUTHENTICATED: Grantee = { kind: 'authenticated' };
 
 export interface Grant {
   readonly grantee: Grantee;
   readonly scope: Scope;
+  /**
+   * Which membership statuses the grant survives. Active only, unless stated.
+   *
+   * The join flow is the exception that needs stating: registering to an office makes
+   * you `pending`, and the whole point of that state is that you can then look for a
+   * leader. Without this, the person the flow exists for would be refused by it.
+   *
+   * It lives on the grant rather than in the check, so the exception is visible beside
+   * the permission it applies to instead of being a special case buried in `holds`.
+   */
+  readonly whileStatus?: readonly ('active' | 'pending')[];
 }
 
 /**
@@ -127,6 +145,36 @@ export const PERMISSIONS = {
     { grantee: AAB, scope: 'own-unit' },
   ],
 
+  // ---- Joining an office. ----
+  //
+  // `kpm:read_directory` is the only cross-tenant read a non-Super-Admin has, and it is
+  // granted to everyone — including someone with no office at all, because otherwise
+  // nobody could ever join one. It is projection-limited to code, branch name, company
+  // and city: no member counts, no production, no owner name.
+  'kpm:read_directory': [{ grantee: AUTHENTICATED, scope: 'all' }],
+  // Attaching yourself to an office. Held by anyone signed in, because the person who
+  // needs it is by definition in no office yet — the service refuses a second one.
+  'kpm_registration:create': [{ grantee: AUTHENTICATED, scope: 'own' }],
+  // From here on a membership exists, and `pending` is the state these are *for*.
+  'leader:search_directory': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-kpm', whileStatus: ['active', 'pending'] },
+    { grantee: AAB, scope: 'own-kpm', whileStatus: ['active', 'pending'] },
+    { grantee: AGENT, scope: 'own-kpm', whileStatus: ['active', 'pending'] },
+  ],
+  'leader_request:create': [
+    { grantee: AB, scope: 'own', whileStatus: ['active', 'pending'] },
+    { grantee: AAB, scope: 'own', whileStatus: ['active', 'pending'] },
+    { grantee: AGENT, scope: 'own', whileStatus: ['active', 'pending'] },
+  ],
+  'leader_request:cancel': [
+    { grantee: AB, scope: 'own', whileStatus: ['active', 'pending'] },
+    { grantee: AAB, scope: 'own', whileStatus: ['active', 'pending'] },
+    { grantee: AGENT, scope: 'own', whileStatus: ['active', 'pending'] },
+  ],
+
   // ---- Own records. ----
   'profile:read_self': [
     { grantee: AB, scope: 'own' },
@@ -158,7 +206,7 @@ export function scopeFor(ctx: RequestContext, permission: Permission): Scope | n
   let widest: Scope | null = null;
 
   for (const grant of grants) {
-    if (!holds(ctx, grant.grantee)) continue;
+    if (!holds(ctx, grant)) continue;
     widest = wider(widest, grant.scope);
   }
   return widest;
@@ -168,17 +216,29 @@ export function can(ctx: RequestContext, permission: Permission): boolean {
   return scopeFor(ctx, permission) !== null;
 }
 
-function holds(ctx: RequestContext, grantee: Grantee): boolean {
+function holds(ctx: RequestContext, grant: Grant): boolean {
+  const { grantee } = grant;
   switch (grantee.kind) {
+    case 'authenticated':
+      // The guard has already established who they are; that is the whole test.
+      return true;
     case 'platform':
       return ctx.isSuperAdmin;
     case 'tenant':
       if (!ctx.membership) return false;
       return grantee.role === 'kpm_owner' ? ctx.membership.isKpmOwner : ctx.membership.isKpmAdmin;
-    case 'hierarchy':
-      // A hierarchy grant applies to an *active* member only. A pending or removed
-      // membership carries the role but not the rights.
-      return ctx.membership?.status === 'active' && ctx.membership.hierarchyRole === grantee.role;
+    case 'hierarchy': {
+      // A hierarchy grant applies to an active member unless the grant says otherwise.
+      // A removed membership never carries rights, whatever a grant says.
+      const allowed = grant.whileStatus ?? ['active'];
+      const status = ctx.membership?.status;
+      return (
+        status !== undefined &&
+        status !== 'removed' &&
+        (allowed as readonly string[]).includes(status) &&
+        ctx.membership!.hierarchyRole === grantee.role
+      );
+    }
   }
 }
 

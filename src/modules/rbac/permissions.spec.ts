@@ -131,11 +131,26 @@ describe('permission matrix', () => {
   });
 
   describe('a user with no membership', () => {
-    it('holds no tenant or hierarchy permission', () => {
+    /**
+     * Exactly two, and both exist so that somebody in no office can get into one.
+     * `roles-and-permissions.md` says it outright: the office directory is granted to
+     * every authenticated user *including one with no KPM yet*, because otherwise
+     * nobody could ever join.
+     */
+    const JOIN_FLOW: readonly Permission[] = ['kpm:read_directory', 'kpm_registration:create'];
+
+    it('holds the two permissions that let somebody join, and nothing else', () => {
       const stranger = ctx({ noMembership: true });
       for (const p of Object.keys(PERMISSIONS) as Permission[]) {
-        expect(can(stranger, p)).toBe(false);
+        expect([p, can(stranger, p)]).toEqual([p, JOIN_FLOW.includes(p)]);
       }
+    });
+
+    it('cannot search for a leader before registering an office', () => {
+      // The next step in the chain, and it is gated: a leader search is scoped to one
+      // office, so there has to be one.
+      expect(can(ctx({ noMembership: true }), 'leader:search_directory')).toBe(false);
+      expect(can(ctx({ noMembership: true }), 'leader_request:create')).toBe(false);
     });
 
     it('is still valid — that is the new agent who has not joined an office', () => {
@@ -150,6 +165,13 @@ describe('permission matrix', () => {
      * recording who may do it.
      */
     const DELIBERATE_DENIALS: readonly string[] = ['impersonation:target_super_admin'];
+
+    /**
+     * The mirror image: granted to everyone, deliberately, so there is no negative case
+     * to find. Both are the way into an office — refusing either to somebody outside one
+     * would close the only door.
+     */
+    const UNIVERSAL_GRANTS: readonly string[] = ['kpm:read_directory', 'kpm_registration:create'];
 
     const ALL = [
       ctx({ superAdmin: true }),
@@ -166,6 +188,10 @@ describe('permission matrix', () => {
 
       if (DELIBERATE_DENIALS.includes(p)) {
         expect(results.every((r) => !r)).toBe(true);
+        return;
+      }
+      if (UNIVERSAL_GRANTS.includes(p)) {
+        expect(results.every(Boolean)).toBe(true);
         return;
       }
       expect(results.some(Boolean)).toBe(true); // somebody can

@@ -25,6 +25,7 @@ export const ErrorCode = {
   // that can actually throw it — a code no path produces is a contract we do not honour.
   ORG_CYCLE_DETECTED: 'ORG_CYCLE_DETECTED',
   ORG_LEADER_NOT_IN_KPM: 'ORG_LEADER_NOT_IN_KPM',
+  ORG_AGENT_ALREADY_TAGGED: 'ORG_AGENT_ALREADY_TAGGED',
 
   // Authorization
   PERM_DENIED: 'PERM_DENIED',

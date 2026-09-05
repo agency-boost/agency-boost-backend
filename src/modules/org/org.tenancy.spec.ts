@@ -8,6 +8,11 @@ import { HierarchyService } from './hierarchy.service';
 import { MembershipRepository } from './membership.repository';
 import { MembershipHistory, MembershipHistorySchema } from './membership-history.schema';
 import { Membership, MembershipSchema } from './membership.schema';
+import { JoinRequest, JoinRequestSchema } from './join-request.schema';
+import { OnboardingService } from './onboarding.service';
+import { AuditService } from '@/modules/audit/audit.service';
+import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
+import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { clearCollections, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
 
 /** A clock that can be moved, so as-of-date history is testable without sleeping. */
@@ -45,6 +50,8 @@ describe('organisation', () => {
   let hierarchy: HierarchyService;
   let directory: DirectoryService;
   let members: MembershipRepository;
+  let onboarding: OnboardingService;
+  let sent: { userId?: string; templateId: string }[];
   let clock: MovableClock;
   let users: ReturnType<typeof userModel>;
 
@@ -62,6 +69,25 @@ describe('organisation', () => {
     members = new MembershipRepository(memberModel as never);
     hierarchy = new HierarchyService(members, kpmModel as never, historyModel as never, clock);
     directory = new DirectoryService(members, users as never);
+
+    sent = [];
+    const notifications = {
+      send: async (r: { userId?: string; templateId: string }) => {
+        sent.push(r);
+      },
+    };
+    onboarding = new OnboardingService(
+      members,
+      hierarchy,
+      kpmModel as never,
+      mongoose.model(Company.name, CompanySchema) as never,
+      users as never,
+      mongoose.model(JoinRequest.name, JoinRequestSchema) as never,
+      new AuditService(mongoose.model(AuditLog.name, AuditLogSchema) as never),
+      notifications as never,
+      clock,
+    );
+
     // The partial unique index is the guarantee under test, not a background detail.
     await syncIndexes();
   });
@@ -69,10 +95,14 @@ describe('organisation', () => {
 
   beforeEach(async () => {
     await clearCollections();
+    sent = [];
+    const company = await mongoose.model(Company.name).create({
+      name: 'Prudential', slug: `prudential-${Math.random()}`,
+    });
     for (const [id, code] of [[KPM_A, '0417'], [KPM_B, '0555']]) {
       await mongoose.model(Kpm.name).create({
-        _id: id, companyId: 'co-1', code, branchName: `Branch ${code}`,
-        counters: { nextAgentCodeSeq: 1 },
+        _id: id, companyId: String(company._id), code, branchName: `Branch ${code}`,
+        counters: { nextAgentCodeSeq: 1 }, status: 'active',
       });
     }
   });
@@ -254,6 +284,13 @@ describe('organisation', () => {
         isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
       await expect(directory.reportsOf(asAb, peer)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('filters by status when one is named, not only by role', async () => {
+      const id = await join(KPM_A, 'agent');
+      await members.updateById(ctx(KPM_A), id, { $set: { status: 'pending' } });
+      expect((await directory.list(ctx(KPM_A), { status: 'pending' })).members).toHaveLength(1);
+      expect((await directory.list(ctx(KPM_A), { status: 'active' })).members).toHaveLength(0);
     });
 
     it('reads a member whose identity row is gone without crashing the roster', async () => {
@@ -479,6 +516,221 @@ describe('organisation', () => {
       const row = await members.findById(ctx(KPM_A), root);
       expect(row?.directCounts).toMatchObject({ aab: 1, total: 1 });
       expect(row?.subtreeCount).toBe(2);
+    });
+  });
+
+  describe('joining an office (P3-T3)', () => {
+    /** Somebody registered and in no office — the state the whole chain starts from. */
+    function newcomer(userId: string) {
+      return new RequestContext(userId, 'none', null);
+    }
+
+    it('AC-2: refuses a leader search before an office is registered', async () => {
+      // The prototype hides the card; this refuses the call, because a hidden card is
+      // not a gate — anything can ask the API directly.
+      await expect(onboarding.leaders(newcomer(await person()))).rejects.toMatchObject({
+        code: 'TENANT_NO_MEMBERSHIP',
+      });
+    });
+
+    it('AC-2: refuses a leader request before an office is registered', async () => {
+      await expect(
+        onboarding.requestLeader(newcomer(await person()), 'anyone'),
+      ).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
+    });
+
+    it('names the leader once one is set, and copes when the row is gone', async () => {
+      const ab = await join(KPM_A, 'ab');
+      const agent = await join(KPM_A, 'agent', ab);
+      const row = await members.findById(ctx(KPM_A), agent);
+      const asAgent = new RequestContext(row!.userId, 'none', {
+        membershipId: agent, kpmId: KPM_A, hierarchyRole: 'agent', status: 'active',
+        isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      });
+
+      expect((await onboarding.myState(asAgent)).leaderName).toBeTruthy();
+
+      // Identity is global and can be erased independently. The screen must still load;
+      // an unnamed leader is better than a page that will not open.
+      const leaderRow = await members.findById(ctx(KPM_A), ab);
+      await users.deleteOne({ _id: leaderRow!.userId });
+      expect((await onboarding.myState(asAgent)).leaderName).toBeNull();
+    });
+
+    it('answers "no office" for a context whose membership row has since gone', async () => {
+      // A token outlives the row it was issued against — somebody removed mid-session.
+      const stale = new RequestContext('u-gone', 'none', {
+        membershipId: new mongoose.Types.ObjectId().toString(),
+        kpmId: KPM_A, hierarchyRole: 'agent', status: 'active',
+        isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      });
+      expect((await onboarding.myState(stale)).kpmId).toBeNull();
+    });
+
+    it('answers "no office" for a newcomer rather than failing', async () => {
+      // Being in no office is a valid state, not an error — it is where everybody
+      // starts.
+      const state = await onboarding.myState(newcomer(await person()));
+      expect(state).toMatchObject({ kpmId: null, status: 'none', pendingRequestTo: null });
+    });
+
+    it('searches the office directory by code or branch name', async () => {
+      expect((await onboarding.searchKpms('0417')).map((k) => k.code)).toEqual(['0417']);
+      expect((await onboarding.searchKpms('Branch 0555')).map((k) => k.code)).toEqual(['0555']);
+      expect((await onboarding.searchKpms()).map((k) => k.code)).toEqual(['0417', '0555']);
+      expect(await onboarding.searchKpms('nothing like this')).toEqual([]);
+    });
+
+    it('tells an outsider nothing but code, branch, company and city', async () => {
+      // The one cross-tenant read a non-Super-Admin has. Member counts, production and
+      // the owner's name are all absent by construction, not by a filter someone could
+      // forget.
+      const [entry] = await onboarding.searchKpms('0417');
+      expect(Object.keys(entry).sort()).toEqual([
+        'branchName', 'city', 'code', 'companyId'.replace('companyId', 'companyName'), 'kpmId',
+      ].sort());
+    });
+
+    it('hides an office that is not active, without saying which it was', async () => {
+      await mongoose.model(Kpm.name).updateOne({ _id: KPM_B }, { $set: { status: 'suspended' } });
+      expect((await onboarding.searchKpms()).map((k) => k.code)).toEqual(['0417']);
+      await expect(
+        onboarding.registerKpm(newcomer(await person()), KPM_B),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('AC-1: registering creates a pending membership with no leader', async () => {
+      const userId = await person();
+      const state = await onboarding.registerKpm(newcomer(userId), KPM_A);
+
+      expect(state.status).toBe('pending');
+      expect(state.leaderMembershipId).toBeNull();
+      expect(state.kpmLabel).toBe('Prudential — KPM 0417 · Branch 0417');
+
+      const row = await mongoose.model(Membership.name).findOne({ kpmId: KPM_A, userId });
+      expect(row?.get('status')).toBe('pending');
+      // A code is issued even though nobody has approved them, so every membership row
+      // has one. A declined request leaves a gap in the numbering, which is fine.
+      expect(row?.get('agentCode')).toBe('KPM0417-001');
+    });
+
+    it('refuses a second registration rather than moving somebody silently', async () => {
+      const userId = await person();
+      await onboarding.registerKpm(newcomer(userId), KPM_A);
+      const joined = await mongoose.model(Membership.name).findOne({ userId });
+      const ctxAfter = new RequestContext(userId, 'none', {
+        membershipId: String(joined!._id), kpmId: KPM_A, hierarchyRole: 'agent',
+        status: 'pending', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      });
+      await expect(onboarding.registerKpm(ctxAfter, KPM_B)).rejects.toMatchObject({
+        code: 'ORG_AGENT_ALREADY_TAGGED',
+      });
+    });
+
+    describe('once registered', () => {
+      let joinerCtx: RequestContext;
+      let ab: string;
+      let childlessAab: string;
+
+      beforeEach(async () => {
+        ab = await join(KPM_A, 'ab');
+        childlessAab = await join(KPM_A, 'aab', ab);
+        await join(KPM_A, 'agent', ab);
+
+        const userId = await person('Joining Person');
+        await onboarding.registerKpm(newcomer(userId), KPM_A);
+        const row = await mongoose.model(Membership.name).findOne({ kpmId: KPM_A, userId });
+        joinerCtx = new RequestContext(userId, 'none', {
+          membershipId: String(row!._id), kpmId: KPM_A, hierarchyRole: 'agent',
+          status: 'pending', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+        });
+      });
+
+      it('offers every AB and AAB, including one who leads nobody yet', async () => {
+        // By role, not by the graph. A new AAB has to be askable or they could never
+        // get a first report — OD-23 governs who *is* a leader, not who may become one.
+        const choices = await onboarding.leaders(joinerCtx);
+        expect(choices.map((c) => c.membershipId).sort()).toEqual([ab, childlessAab].sort());
+        expect(choices.find((c) => c.membershipId === childlessAab)?.unitSize).toBe(0);
+      });
+
+      it('searches leaders by name only, as the prototype does', async () => {
+        expect(await onboarding.leaders(joinerCtx, 'nobody named this')).toEqual([]);
+        expect((await onboarding.leaders(joinerCtx, 'rina')).length).toBeGreaterThanOrEqual(0);
+      });
+
+      it('never offers the asker themselves', async () => {
+        const choices = await onboarding.leaders(joinerCtx);
+        expect(choices.map((c) => c.membershipId)).not.toContain(joinerCtx.membershipId);
+      });
+
+      it('AC-3: sending a request notifies the leader', async () => {
+        await onboarding.requestLeader(joinerCtx, ab);
+        const leaderRow = await mongoose.model(Membership.name).findById(ab);
+        expect(sent).toHaveLength(1);
+        expect(sent[0]).toMatchObject({
+          userId: leaderRow!.get('userId'),
+          templateId: 'join_request.received',
+        });
+      });
+
+      it('marks the row it was sent to, so the screen can say so', async () => {
+        await onboarding.requestLeader(joinerCtx, ab);
+        const choices = await onboarding.leaders(joinerCtx);
+        expect(choices.find((c) => c.membershipId === ab)?.requestSent).toBe(true);
+        expect(choices.find((c) => c.membershipId === childlessAab)?.requestSent).toBe(false);
+      });
+
+      it('replaces an outstanding ask rather than stacking a second', async () => {
+        // Two open rows would let two approvers both say yes, and the membership would
+        // end up in a state neither decision describes.
+        await onboarding.requestLeader(joinerCtx, ab);
+        await onboarding.requestLeader(joinerCtx, childlessAab);
+
+        const open = await mongoose
+          .model(JoinRequest.name)
+          .find({ membershipId: joinerCtx.membershipId, status: 'pending' });
+        expect(open).toHaveLength(1);
+        expect(open[0].get('leaderMembershipId')).toBe(childlessAab);
+      });
+
+      it('refuses a leader from another office', async () => {
+        const theirs = await join(KPM_B, 'ab');
+        await expect(onboarding.requestLeader(joinerCtx, theirs)).rejects.toMatchObject({
+          code: 'ORG_LEADER_NOT_IN_KPM',
+        });
+      });
+
+      it('refuses an agent as a leader — they cannot take anyone on', async () => {
+        const plainAgent = await join(KPM_A, 'agent', ab);
+        await expect(onboarding.requestLeader(joinerCtx, plainAgent)).rejects.toMatchObject({
+          code: 'ORG_LEADER_NOT_IN_KPM',
+        });
+      });
+
+      it('refuses asking to report to yourself', async () => {
+        await expect(
+          onboarding.requestLeader(joinerCtx, joinerCtx.membershipId!),
+        ).rejects.toMatchObject({ code: 'ORG_CYCLE_DETECTED' });
+      });
+
+      it('withdraws an outstanding ask', async () => {
+        await onboarding.requestLeader(joinerCtx, ab);
+        const after = await onboarding.cancelRequest(joinerCtx);
+        expect(after.pendingRequestTo).toBeNull();
+      });
+
+      it('refuses a withdrawal from somebody in no office', async () => {
+        await expect(onboarding.cancelRequest(newcomer(await person()))).rejects.toMatchObject({
+          code: 'TENANT_NO_MEMBERSHIP',
+        });
+      });
+
+      it('404s a withdrawal when there is nothing to withdraw', async () => {
+        await expect(onboarding.cancelRequest(joinerCtx)).rejects.toMatchObject({
+          code: 'NOT_FOUND',
+        });
+      });
     });
   });
 });

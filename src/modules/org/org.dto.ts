@@ -1,4 +1,4 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
@@ -38,4 +38,34 @@ export class DirectoryQueryDto {
   @Min(1)
   @Max(100)
   limit?: number;
+}
+
+export class KpmSearchDto {
+  @ApiPropertyOptional({ description: 'Office code or branch name. Case-insensitive substring.' })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(120)
+  q?: string;
+}
+
+export class RegisterKpmDto {
+  @ApiProperty({ description: 'From GET /join/kpms.' })
+  @IsString()
+  kpmId!: string;
+}
+
+export class LeaderSearchDto {
+  @ApiPropertyOptional({ description: 'Name only, as the prototype searches it.' })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(120)
+  q?: string;
+}
+
+export class RequestLeaderDto {
+  @ApiProperty({ description: 'From GET /join/leaders.' })
+  @IsString()
+  leaderMembershipId!: string;
 }

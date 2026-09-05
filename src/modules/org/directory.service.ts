@@ -43,7 +43,15 @@ export interface DirectoryPage {
 export const DIRECTORY_PAGE_SIZE = 25;
 export const DIRECTORY_MAX_PAGE_SIZE = 100;
 
-function initialsOf(name: string): string {
+/**
+ * Avatar initials.
+ *
+ * Exported so the whitespace case can be tested directly: `users.fullName` is required
+ * and trimmed, so a blank name cannot be written through the schema today. The guard
+ * stays because a future import will not go through the schema, and an avatar is not
+ * worth a crash.
+ */
+export function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '??';
   return (parts[0][0] + (parts[parts.length - 1][0] ?? '')).toUpperCase();

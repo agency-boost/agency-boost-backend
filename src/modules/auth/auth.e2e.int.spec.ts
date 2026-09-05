@@ -33,6 +33,9 @@ import { MembershipRepository } from '@/modules/org/membership.repository';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { DirectoryService } from '@/modules/org/directory.service';
 import { OrgController } from '@/modules/org/org.controller';
+import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
+import { OnboardingService } from '@/modules/org/onboarding.service';
+import { OnboardingController } from '@/modules/org/onboarding.controller';
 import { AuthToken, AuthTokenSchema } from './auth-token.schema';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -72,9 +75,10 @@ describe('auth and admin over HTTP', () => {
           { name: NotificationPreferences.name, schema: NotificationPreferencesSchema },
           { name: Membership.name, schema: MembershipSchema },
           { name: MembershipHistory.name, schema: MembershipHistorySchema },
+          { name: JoinRequest.name, schema: JoinRequestSchema },
         ]),
       ],
-      controllers: [AuthController, AdminController, OrgController],
+      controllers: [AuthController, AdminController, OrgController, OnboardingController],
       providers: [
         Reflector,
         { provide: Clock, useClass: SystemClock },
@@ -92,7 +96,7 @@ describe('auth and admin over HTTP', () => {
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService,
-        MembershipRepository, HierarchyService, DirectoryService,
+        MembershipRepository, HierarchyService, DirectoryService, OnboardingService,
         AuthGuard, PermissionsGuard,
       ],
     }).compile();
@@ -168,7 +172,9 @@ describe('auth and admin over HTTP', () => {
       expect(me.body.user.email).toBe('journey@kpm.test');
       expect(me.body.user.pronoun).toBe('they');
       expect(me.body.membership).toBeNull(); // the new-agent state
-      expect(me.body.permissions).toEqual([]);
+      // Exactly two, and both exist so somebody in no office can get into one. Anything
+      // more would be a grant that outlives the reason for it.
+      expect(me.body.permissions).toEqual(['kpm:read_directory', 'kpm_registration:create']);
     });
 
     it('refuses /auth/me without a token', async () => {
@@ -322,6 +328,201 @@ describe('auth and admin over HTTP', () => {
       const office = await api().get(`/api/v1/admin/audit?kpmId=${kpm.body._id}`)
         .set(auth).expect(200);
       expect(office.body).toEqual([]);
+    });
+  });
+
+  describe('joining an office, over HTTP (P3-T3)', () => {
+    /** The whole chain, in the order a person actually walks it. */
+    async function officeWithLeader() {
+      const sa = await makeUser(`sa-join-${Math.random()}@agencyboost.test`, 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const owner = await makeUser(`owner-join-${Math.random()}@kpm.test`);
+
+      const company = await api().post('/api/v1/admin/companies').set(auth)
+        .send({ name: `Insurer ${Math.random()}`, slug: `slug-${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
+        .expect(201);
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({ companyId: String(company.body._id), code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'Join Branch' })
+        .expect(201);
+      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
+        .set(auth).send({ userId: owner.id }).expect(200);
+
+      return { kpmId: String(kpm.body._id), code: kpm.body.code, owner };
+    }
+
+    it('AC-1: a newcomer has no office, and says so rather than failing', async () => {
+      const person = await makeUser(`new-${Math.random()}@kpm.test`);
+      const res = await api().get('/api/v1/join/me')
+        .set('Authorization', `Bearer ${person.accessToken}`).expect(200);
+      expect(res.body).toMatchObject({ kpmId: null, status: 'none' });
+    });
+
+    it('AC-2: refuses a leader search before an office is registered', async () => {
+      // The permission guard refuses first, so the code is PERM_DENIED rather than the
+      // service's more helpful TENANT_NO_MEMBERSHIP. That is the right order: the gate
+      // is the gate, and widening the grant to improve an error string would weaken it.
+      // The screen never makes this call — it knows there is no office — and a direct
+      // caller gets an accurate refusal.
+      const person = await makeUser(`new2-${Math.random()}@kpm.test`);
+      const res = await api().get('/api/v1/join/leaders')
+        .set('Authorization', `Bearer ${person.accessToken}`).expect(403);
+      expect(res.body.error.code).toBe('PERM_DENIED');
+      expect(res.body.error.details.permission).toBe('leader:search_directory');
+    });
+
+    it('lists offices to anyone, including somebody in none', async () => {
+      const { code } = await officeWithLeader();
+      const person = await makeUser(`new3-${Math.random()}@kpm.test`);
+
+      const res = await api().get(`/api/v1/join/kpms?q=${code}`)
+        .set('Authorization', `Bearer ${person.accessToken}`).expect(200);
+
+      expect(res.body).toHaveLength(1);
+      // Projection-limited by construction: no member counts, no production, no owner.
+      expect(Object.keys(res.body[0]).sort()).toEqual(
+        ['branchName', 'city', 'code', 'companyName', 'kpmId'],
+      );
+    });
+
+    it('walks the whole chain: register, search, ask', async () => {
+      const { kpmId, owner } = await officeWithLeader();
+      const person = await makeUser(`joiner-${Math.random()}@kpm.test`);
+      const asJoiner = { Authorization: `Bearer ${person.accessToken}` };
+
+      const registered = await api().post('/api/v1/join/kpm')
+        .set(asJoiner).send({ kpmId }).expect(200);
+      expect(registered.body).toMatchObject({ kpmId, status: 'pending', leaderMembershipId: null });
+
+      const leaders = await api().get('/api/v1/join/leaders').set(asJoiner).expect(200);
+      // The Owner is an AB at the root, so they are the leader on offer.
+      expect(leaders.body).toHaveLength(1);
+      expect(leaders.body[0].role).toBe('ab');
+
+      const asked = await api().post('/api/v1/join/leader-request')
+        .set(asJoiner).send({ leaderMembershipId: leaders.body[0].membershipId }).expect(200);
+      expect(asked.body.pendingRequestTo).toBe(leaders.body[0].membershipId);
+
+      const after = await api().get('/api/v1/join/leaders').set(asJoiner).expect(200);
+      expect(after.body[0].requestSent).toBe(true);
+
+      // And the leader is told. `owner` is who was asked.
+      expect(owner.id).toBeDefined();
+
+      const withdrawn = await api().delete('/api/v1/join/leader-request').set(asJoiner).expect(200);
+      expect(withdrawn.body.pendingRequestTo).toBeNull();
+    });
+
+    it('refuses a second registration rather than moving somebody silently', async () => {
+      const first = await officeWithLeader();
+      const second = await officeWithLeader();
+      const person = await makeUser(`twice-${Math.random()}@kpm.test`);
+      const asJoiner = { Authorization: `Bearer ${person.accessToken}` };
+
+      await api().post('/api/v1/join/kpm').set(asJoiner).send({ kpmId: first.kpmId }).expect(200);
+      const res = await api().post('/api/v1/join/kpm')
+        .set(asJoiner).send({ kpmId: second.kpmId }).expect(409);
+      expect(res.body.error.code).toBe('ORG_AGENT_ALREADY_TAGGED');
+    });
+
+    it('404s an office that does not exist, without saying which kind of absent', async () => {
+      const person = await makeUser(`ghost-${Math.random()}@kpm.test`);
+      await api().post('/api/v1/join/kpm')
+        .set('Authorization', `Bearer ${person.accessToken}`)
+        .send({ kpmId: '6a9b7b8dedbf9254dd6a98bc' })
+        .expect(404);
+    });
+
+    it('validates the body rather than dropping an unknown field', async () => {
+      const person = await makeUser(`bad-${Math.random()}@kpm.test`);
+      const res = await api().post('/api/v1/join/kpm')
+        .set('Authorization', `Bearer ${person.accessToken}`)
+        .send({ kpmId: 'x', somethingElse: 1 })
+        .expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('keeps the roster closed to somebody still waiting to be let in', async () => {
+      // A pending member is registered to the office, not in it. `member:read_profile`
+      // is an active-member grant, and the join screens are what they see instead.
+      const { kpmId } = await officeWithLeader();
+      const person = await makeUser(`solo-${Math.random()}@kpm.test`);
+      const asJoiner = { Authorization: `Bearer ${person.accessToken}` };
+      await api().post('/api/v1/join/kpm').set(asJoiner).send({ kpmId }).expect(200);
+
+      const res = await api().get('/api/v1/members').set(asJoiner).expect(403);
+      expect(res.body.error.code).toBe('PERM_DENIED');
+      // But the join chain stays open to them — that is the point of the state.
+      await api().get('/api/v1/join/leaders').set(asJoiner).expect(200);
+    });
+  });
+
+  describe('the roster, over HTTP (P3-T1)', () => {
+    async function officeWithOwner() {
+      const sa = await makeUser(`sa-ros-${Math.random()}@agencyboost.test`, 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const owner = await makeUser(`owner-ros-${Math.random()}@kpm.test`);
+
+      const company = await api().post('/api/v1/admin/companies').set(auth)
+        .send({ name: `Insurer ${Math.random()}`, slug: `s${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
+        .expect(201);
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({ companyId: String(company.body._id), code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'Roster Branch' })
+        .expect(201);
+      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
+        .set(auth).send({ userId: owner.id }).expect(200);
+
+      return { kpmId: String(kpm.body._id), owner, auth: { Authorization: `Bearer ${owner.accessToken}` } };
+    }
+
+    it('returns the Owner as an AB at the root, with an issued code', async () => {
+      const { auth } = await officeWithOwner();
+      const res = await api().get('/api/v1/members').set(auth).expect(200);
+
+      expect(res.body.members).toHaveLength(1);
+      expect(res.body.members[0]).toMatchObject({
+        role: 'ab', status: 'active', leaderId: null, isLeader: false,
+      });
+      expect(res.body.members[0].agentCode).toMatch(/^KPM\d+-001$/);
+      expect(res.body.nextCursor).toBeNull();
+    });
+
+    it('converts limit from the query string, which arrives as text', async () => {
+      // Implicit conversion is off globally, so this DTO opts in per field. Without it
+      // the validator would reject a perfectly good `?limit=1`.
+      const { auth } = await officeWithOwner();
+      await api().get('/api/v1/members?limit=1').set(auth).expect(200);
+    });
+
+    it('refuses a limit outside the range rather than clamping it silently', async () => {
+      const { auth } = await officeWithOwner();
+      await api().get('/api/v1/members?limit=0').set(auth).expect(400);
+      await api().get('/api/v1/members?limit=500').set(auth).expect(400);
+      await api().get('/api/v1/members?role=chief').set(auth).expect(400);
+    });
+
+    it('trims a pasted search term', async () => {
+      const { auth } = await officeWithOwner();
+      const res = await api().get('/api/v1/members?q=%20%20Roster%20%20').set(auth).expect(200);
+      expect(res.body.members).toHaveLength(0);
+    });
+
+    it('reads one member, and 404s somebody who is not there', async () => {
+      const { auth } = await officeWithOwner();
+      const list = await api().get('/api/v1/members').set(auth).expect(200);
+      const id = list.body.members[0].membershipId;
+
+      await api().get(`/api/v1/members/${id}`).set(auth).expect(200);
+      await api().get(`/api/v1/members/${id}/reports`).set(auth).expect(200);
+      await api().get('/api/v1/members/6a9b7b8dedbf9254dd6a98bc').set(auth).expect(404);
+    });
+
+    it('404s another office\'s member rather than 403 — a 403 would confirm they exist', async () => {
+      const mine = await officeWithOwner();
+      const theirs = await officeWithOwner();
+      const list = await api().get('/api/v1/members').set(theirs.auth).expect(200);
+
+      await api().get(`/api/v1/members/${list.body.members[0].membershipId}`)
+        .set(mine.auth).expect(404);
     });
   });
 

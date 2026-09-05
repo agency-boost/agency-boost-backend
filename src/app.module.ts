@@ -42,6 +42,9 @@ import { MembershipRepository } from '@/modules/org/membership.repository';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { DirectoryService } from '@/modules/org/directory.service';
 import { OrgController } from '@/modules/org/org.controller';
+import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
+import { OnboardingService } from '@/modules/org/onboarding.service';
+import { OnboardingController } from '@/modules/org/onboarding.controller';
 
 @Module({
   imports: [
@@ -74,9 +77,10 @@ import { OrgController } from '@/modules/org/org.controller';
       { name: Kpm.name, schema: KpmSchema },
       { name: Membership.name, schema: MembershipSchema },
       { name: MembershipHistory.name, schema: MembershipHistorySchema },
+      { name: JoinRequest.name, schema: JoinRequestSchema },
     ]),
   ],
-  controllers: [HealthController, AuthController, AdminController, OrgController],
+  controllers: [HealthController, AuthController, AdminController, OrgController, OnboardingController],
   providers: [
     { provide: Clock, useClass: SystemClock },
     {
@@ -104,6 +108,7 @@ import { OrgController } from '@/modules/org/org.controller';
     MembershipRepository,
     HierarchyService,
     DirectoryService,
+    OnboardingService,
   ],
   exports: [Clock, AuditService],
 })
