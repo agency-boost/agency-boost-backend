@@ -123,3 +123,36 @@ export class InviteCodeQueryDto {
   @MaxLength(16)
   code!: string;
 }
+
+export class ApproveRequestDto {
+  @ApiPropertyOptional({
+    description:
+      'One of your own AABs, from GET /join/requests/routing. Omitted adds them to ' +
+      'your own unit. Ignored for an AB or AAB requester — a leader is not placed in a ' +
+      'unit, they are tagged to you directly.',
+  })
+  @IsOptional()
+  @IsString()
+  routeToMembershipId?: string;
+}
+
+export class DeclineRequestDto {
+  @ApiPropertyOptional({
+    example: 'Not in my patch — try Sari',
+    description: 'Sent to them. The prototype captures none, which leaves a decline unexplainable.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(300)
+  reason?: string;
+}
+
+export class UntaggedSearchDto {
+  @ApiPropertyOptional({ description: 'Name. Case-insensitive substring.' })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(120)
+  q?: string;
+}

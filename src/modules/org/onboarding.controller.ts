@@ -5,6 +5,8 @@ import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { OnboardingService } from './onboarding.service';
 import {
+  ApproveRequestDto,
+  DeclineRequestDto,
   InviteCodeQueryDto,
   IssueInviteDto,
   KpmSearchDto,
@@ -12,8 +14,10 @@ import {
   RedeemInviteDto,
   RegisterKpmDto,
   RequestLeaderDto,
+  UntaggedSearchDto,
 } from './org.dto';
 import { InviteService } from './invite.service';
+import { ApprovalsService } from './approvals.service';
 
 /**
  * Joining an office, from the joiner's side.
@@ -29,6 +33,7 @@ export class OnboardingController {
   constructor(
     private readonly onboarding: OnboardingService,
     private readonly invites: InviteService,
+    private readonly approvals: ApprovalsService,
     private readonly config: ConfigService,
   ) {}
 
@@ -159,6 +164,92 @@ export class OnboardingController {
   })
   async previewInvite(@Query() query: InviteCodeQueryDto) {
     return this.invites.preview(query.code);
+  }
+
+  // ---- The leader's side: deciding, and pulling somebody in. ----
+
+  @Get('requests')
+  @RequirePermission('leader_request:read_inbox')
+  @ApiOperation({
+    summary: 'Requests waiting on you',
+    description:
+      'Includes anything routed to you by somebody above — an AB may send an agent into ' +
+      'one of their AABs\' units, and that AAB is then the one who decides.',
+  })
+  async inbox(@Ctx() ctx: RequestContext) {
+    return this.approvals.inbox(ctx);
+  }
+
+  @Get('requests/routing')
+  @RequirePermission('leader_request:read_inbox')
+  @ApiOperation({
+    summary: 'Units you may send somebody into',
+    description:
+      'Your own direct AABs, and only those. Empty for an AAB — their reports are ' +
+      'agents, so there is no sub-unit below them.',
+  })
+  async routing(@Ctx() ctx: RequestContext) {
+    return this.approvals.routingChoices(ctx);
+  }
+
+  @Post('requests/:requestId/approve')
+  @RequirePermission('leader_request:approve')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve a request',
+    description:
+      'Returns the inbox as it now stands. Deciding one that was already decided is a ' +
+      '409 naming which way it went — two leaders can have this open at once.',
+  })
+  async approve(
+    @Ctx() ctx: RequestContext,
+    @Param('requestId') requestId: string,
+    @Body() dto: ApproveRequestDto,
+  ) {
+    return this.approvals.approve(ctx, requestId, dto.routeToMembershipId);
+  }
+
+  @Post('requests/:requestId/decline')
+  @RequirePermission('leader_request:approve')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Decline a request',
+    description:
+      'They stay registered to the office and may ask somebody else. Declining is not ' +
+      'removal, and the reason is sent to them.',
+  })
+  async decline(
+    @Ctx() ctx: RequestContext,
+    @Param('requestId') requestId: string,
+    @Body() dto: DeclineRequestDto,
+  ) {
+    return this.approvals.decline(ctx, requestId, dto.reason);
+  }
+
+  @Get('untagged')
+  @RequirePermission('member:search_untagged_pool')
+  @ApiOperation({
+    summary: 'People in this office with no leader',
+    description:
+      'Office-wide, because somebody untagged belongs to nobody yet and so cannot be ' +
+      'found by looking down anybody\'s tree.',
+  })
+  async untagged(@Ctx() ctx: RequestContext, @Query() query: UntaggedSearchDto) {
+    return this.approvals.untagged(ctx, query.q);
+  }
+
+  @Post('untagged/:membershipId')
+  @RequirePermission('member:add_untagged_to_unit')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Add an untagged person to your unit',
+    description:
+      'No approval from them — the office already admitted them, and being placed under ' +
+      'a leader is not a change they have standing to refuse. Somebody who already ' +
+      'reports to another leader is refused: moving them is a different operation.',
+  })
+  async tag(@Ctx() ctx: RequestContext, @Param('membershipId') membershipId: string) {
+    return this.approvals.tag(ctx, membershipId);
   }
 
   @Post('redeem')

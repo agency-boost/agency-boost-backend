@@ -140,6 +140,35 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
   ],
+  'leader_request:read_inbox': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-unit' },
+    { grantee: AAB, scope: 'own-unit' },
+  ],
+  // Sending an approved agent into one of your own AABs' units instead of your own.
+  // AB only: an AAB's reports are agents, so there is no sub-unit to route into.
+  'leader_request:route_to_sub_unit': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-downline' },
+  ],
+  'member:search_untagged_pool': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-kpm' },
+    { grantee: AAB, scope: 'own-kpm' },
+  ],
+  'member:add_untagged_to_unit': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-unit' },
+  ],
   'leader_request:approve': [
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },

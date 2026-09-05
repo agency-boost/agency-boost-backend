@@ -11,6 +11,7 @@ import { Membership, MembershipSchema } from './membership.schema';
 import { JoinRequest, JoinRequestSchema } from './join-request.schema';
 import { OnboardingService } from './onboarding.service';
 import { InviteService } from './invite.service';
+import { ApprovalsService } from './approvals.service';
 import { InviteCode, InviteCodeSchema } from './invite-code.schema';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
@@ -54,6 +55,7 @@ describe('organisation', () => {
   let members: MembershipRepository;
   let onboarding: OnboardingService;
   let invites: InviteService;
+  let approvals: ApprovalsService;
   let sent: { userId?: string; templateId: string }[];
   let clock: MovableClock;
   let users: ReturnType<typeof userModel>;
@@ -98,6 +100,17 @@ describe('organisation', () => {
       mongoose.model(JoinRequest.name) as never,
       kpmModel as never,
       mongoose.model(Company.name) as never,
+      users as never,
+      new AuditService(mongoose.model(AuditLog.name) as never),
+      notifications as never,
+      clock,
+    );
+
+    approvals = new ApprovalsService(
+      members,
+      hierarchy,
+      mongoose.model(JoinRequest.name) as never,
+      historyModel as never,
       users as never,
       new AuditService(mongoose.model(AuditLog.name) as never),
       notifications as never,
@@ -989,6 +1002,283 @@ describe('organisation', () => {
       it('accepts a code in any case, because people type it as they read it', async () => {
         const { code } = await invites.issue(leaderCtx, {}, '');
         await expect(invites.preview(`  ${code.toLowerCase()}  `)).resolves.toBeDefined();
+      });
+    });
+  });
+
+  describe('approving and tagging (P3-T5)', () => {
+    function newcomer(userId: string) {
+      return new RequestContext(userId, 'none', null);
+    }
+
+    async function asMember(membershipId: string, over: Partial<{ role: 'ab' | 'aab' | 'agent' }> = {}) {
+      const row = await members.findById(ctx(KPM_A), membershipId);
+      return new RequestContext(row!.userId, 'none', {
+        membershipId,
+        kpmId: KPM_A,
+        hierarchyRole: over.role ?? (row!.role as 'ab' | 'aab' | 'agent'),
+        status: 'active',
+        isKpmOwner: false,
+        isKpmAdmin: false,
+        directCount: row!.directCounts?.total ?? 0,
+      });
+    }
+
+    /** Somebody registered to the office who has asked `leaderId` to take them on. */
+    async function askedFor(leaderId: string, name = 'Asking Person') {
+      const userId = await person(name);
+      await onboarding.registerKpm(newcomer(userId), KPM_A);
+      const row = await mongoose.model(Membership.name).findOne({ kpmId: KPM_A, userId });
+      const joinerCtx = new RequestContext(userId, 'none', {
+        membershipId: String(row!._id), kpmId: KPM_A, hierarchyRole: 'agent',
+        status: 'pending', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      });
+      await onboarding.requestLeader(joinerCtx, leaderId);
+      return { membershipId: String(row!._id), userId, ctx: joinerCtx };
+    }
+
+    let ab: string;
+    let aab: string;
+    let abCtx: RequestContext;
+    let aabCtx: RequestContext;
+
+    beforeEach(async () => {
+      ab = await join(KPM_A, 'ab');
+      aab = await join(KPM_A, 'aab', ab);
+      await hierarchy.refreshCounts(ctx(KPM_A), ab);
+      abCtx = await asMember(ab);
+      aabCtx = await asMember(aab);
+    });
+
+    it('shows a leader what is waiting on them and nothing else', async () => {
+      const mine = await askedFor(ab, 'For The AB');
+      await askedFor(aab, 'For The AAB');
+
+      const inbox = await approvals.inbox(abCtx);
+      expect(inbox.map((r) => r.membershipId)).toEqual([mine.membershipId]);
+      expect(inbox[0].fullName).toBe('For The AB');
+      expect(inbox[0].agentCode).toBeTruthy();
+      expect(inbox[0].routedFromName).toBeNull();
+    });
+
+    it('AC-2: offers an AB their own AABs to route into, and only those', async () => {
+      const otherAb = await join(KPM_A, 'ab');
+      await join(KPM_A, 'aab', otherAb);
+
+      const choices = await approvals.routingChoices(abCtx);
+      expect(choices.map((c) => c.membershipId)).toEqual([aab]);
+    });
+
+    it('AC-2: offers an AAB nothing, because there is no sub-unit below them', async () => {
+      expect(await approvals.routingChoices(aabCtx)).toEqual([]);
+    });
+
+    it('AC-2: approving into an AAB unit puts them under the AAB, not the AB', async () => {
+      const asker = await askedFor(ab);
+      await approvals.approve(abCtx, (await approvals.inbox(abCtx))[0].requestId, aab);
+
+      const row = await members.findById(ctx(KPM_A), asker.membershipId);
+      expect(row?.leaderId).toBe(aab);
+      expect(row?.status).toBe('active');
+      expect(row?.ancestorIds).toEqual([ab, aab]);
+      expect(row?.depth).toBe(2);
+    });
+
+    it('approving with no destination puts them under the approver', async () => {
+      const asker = await askedFor(ab);
+      await approvals.approve(abCtx, (await approvals.inbox(abCtx))[0].requestId);
+
+      const row = await members.findById(ctx(KPM_A), asker.membershipId);
+      expect(row?.leaderId).toBe(ab);
+      expect(row?.ancestorIds).toEqual([ab]);
+    });
+
+    it('closes the joined edge and opens the one naming their leader', async () => {
+      // Nothing is overwritten. The row that said "registered, no leader" is closed, and
+      // a new one records who they now report to.
+      const asker = await askedFor(ab);
+      clock.advance(60_000);
+      await approvals.approve(abCtx, (await approvals.inbox(abCtx))[0].requestId);
+
+      const rows = await mongoose
+        .model(MembershipHistory.name)
+        .find({ membershipId: asker.membershipId })
+        .sort({ validFrom: 1 });
+      expect(rows).toHaveLength(2);
+      expect(rows[0].get('validTo')).not.toBeNull();
+      expect(rows[1].get('toLeaderId')).toBe(ab);
+      expect(rows[1].get('validTo')).toBeNull();
+    });
+
+    it('counts the new report, so the approver becomes a leader by it', async () => {
+      await askedFor(aab);
+      await approvals.approve(aabCtx, (await approvals.inbox(aabCtx))[0].requestId);
+
+      const row = await members.findById(ctx(KPM_A), aab);
+      expect(row?.directCounts.total).toBe(1);
+    });
+
+    it('tells the asker they are in', async () => {
+      const asker = await askedFor(ab);
+      sent.length = 0;
+      await approvals.approve(abCtx, (await approvals.inbox(abCtx))[0].requestId);
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({ userId: asker.userId, templateId: 'join_request.approved' });
+    });
+
+    it('AC-4: refuses to decide one that was already decided, and says which way', async () => {
+      const { requestId } = (await askedFor(ab), (await approvals.inbox(abCtx))[0]);
+      await approvals.approve(abCtx, requestId);
+
+      await expect(approvals.approve(abCtx, requestId)).rejects.toMatchObject({
+        code: 'ORG_REQUEST_ALREADY_DECIDED',
+      });
+      const err = await approvals.decline(abCtx, requestId).catch((e) => e);
+      expect(err.details.status).toBe('approved');
+    });
+
+    it('404s another leader request rather than saying it is not theirs', async () => {
+      await askedFor(aab);
+      const requestId = (await approvals.inbox(aabCtx))[0].requestId;
+      await expect(approvals.approve(abCtx, requestId)).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+    });
+
+    it('refuses routing into a unit that is not the approver own', async () => {
+      const otherAb = await join(KPM_A, 'ab');
+      const strangersAab = await join(KPM_A, 'aab', otherAb);
+      await askedFor(ab);
+      const requestId = (await approvals.inbox(abCtx))[0].requestId;
+
+      await expect(approvals.approve(abCtx, requestId, strangersAab)).rejects.toMatchObject({
+        code: 'ORG_LEADER_NOT_IN_KPM',
+      });
+    });
+
+    it('refuses routing by somebody without the grant', async () => {
+      // An AAB has the inbox but not the routing. Checked on approve as well as on the
+      // list, because a caller can name any id and the list is only a convenience.
+      const target = await join(KPM_A, 'aab', aab);
+      await askedFor(aab);
+      const requestId = (await approvals.inbox(aabCtx))[0].requestId;
+
+      await expect(approvals.approve(aabCtx, requestId, target)).rejects.toMatchObject({
+        code: 'PERM_DENIED',
+      });
+    });
+
+    describe('declining', () => {
+      it('leaves them registered, so they can ask somebody else', async () => {
+        // The prototype drops the row, which leaves them nowhere.
+        const asker = await askedFor(ab);
+        await approvals.decline(abCtx, (await approvals.inbox(abCtx))[0].requestId, 'Not my patch');
+
+        const row = await members.findById(ctx(KPM_A), asker.membershipId);
+        expect(row?.status).toBe('pending');
+        expect(row?.leaderId).toBeNull();
+
+        // And they can, straight away.
+        await expect(onboarding.requestLeader(asker.ctx, aab)).resolves.toBeDefined();
+      });
+
+      it('sends the reason to them', async () => {
+        const asker = await askedFor(ab);
+        sent.length = 0;
+        await approvals.decline(abCtx, (await approvals.inbox(abCtx))[0].requestId, '  Try Sari  ');
+
+        expect(sent[0]).toMatchObject({
+          userId: asker.userId,
+          templateId: 'join_request.declined',
+        });
+        const rows = await mongoose.model(JoinRequest.name).find({ status: 'declined' });
+        expect(rows[0].get('reason')).toBe('Try Sari');
+      });
+
+      it('empties the inbox it returns', async () => {
+        await askedFor(ab);
+        const after = await approvals.decline(abCtx, (await approvals.inbox(abCtx))[0].requestId);
+        expect(after).toEqual([]);
+      });
+    });
+
+    describe('AC-3: pulling in somebody untagged', () => {
+      it('lists people with no leader, not the whole office', async () => {
+        const untaggedId = await person('Untagged Person');
+        await onboarding.registerKpm(newcomer(untaggedId), KPM_A);
+
+        const pool = await approvals.untagged(abCtx);
+        expect(pool.map((p) => p.fullName)).toContain('Untagged Person');
+        // The AAB reports to the AB, so they are not untagged.
+        expect(pool.map((p) => p.membershipId)).not.toContain(aab);
+      });
+
+      it('never lists the searcher themselves', async () => {
+        const pool = await approvals.untagged(abCtx);
+        expect(pool.map((p) => p.membershipId)).not.toContain(ab);
+      });
+
+      it('searches by name', async () => {
+        const untaggedId = await person('Findable Person');
+        await onboarding.registerKpm(newcomer(untaggedId), KPM_A);
+        expect(await approvals.untagged(abCtx, 'findable')).toHaveLength(1);
+        expect(await approvals.untagged(abCtx, 'nobody')).toHaveLength(0);
+      });
+
+      it('tags them immediately, active, with no approval', async () => {
+        const untaggedId = await person('Pulled In');
+        await onboarding.registerKpm(newcomer(untaggedId), KPM_A);
+        const row = await mongoose.model(Membership.name).findOne({ userId: untaggedId });
+
+        await approvals.tag(abCtx, String(row!._id));
+
+        const after = await members.findById(ctx(KPM_A), String(row!._id));
+        expect(after?.status).toBe('active');
+        expect(after?.leaderId).toBe(ab);
+      });
+
+      it('notifies them, because nobody asked', async () => {
+        const untaggedId = await person();
+        await onboarding.registerKpm(newcomer(untaggedId), KPM_A);
+        const row = await mongoose.model(Membership.name).findOne({ userId: untaggedId });
+        sent.length = 0;
+
+        await approvals.tag(abCtx, String(row!._id));
+        expect(sent[0]).toMatchObject({
+          userId: untaggedId,
+          templateId: 'member.tagged_by_leader',
+        });
+      });
+
+      it('cancels a request they had open, since they are in a unit now', async () => {
+        const asker = await askedFor(aab);
+        await approvals.tag(abCtx, asker.membershipId);
+
+        const open = await mongoose
+          .model(JoinRequest.name)
+          .find({ membershipId: asker.membershipId, status: 'pending' });
+        expect(open).toHaveLength(0);
+      });
+
+      it('refuses somebody who already reports to a leader', async () => {
+        // Taking them out of another unit is a re-parent, not a tag, and not something
+        // you do from a search result.
+        await expect(approvals.tag(abCtx, aab)).rejects.toMatchObject({
+          code: 'ORG_AGENT_ALREADY_TAGGED',
+        });
+      });
+
+      it('refuses adding yourself to your own unit', async () => {
+        await expect(approvals.tag(abCtx, ab)).rejects.toMatchObject({
+          code: 'ORG_CYCLE_DETECTED',
+        });
+      });
+
+      it('never reaches another office', async () => {
+        const theirs = await join(KPM_B, 'agent');
+        await expect(approvals.tag(abCtx, theirs)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        expect((await approvals.untagged(abCtx)).map((p) => p.membershipId)).not.toContain(theirs);
       });
     });
   });

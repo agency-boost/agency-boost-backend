@@ -38,6 +38,7 @@ import { OnboardingService } from '@/modules/org/onboarding.service';
 import { OnboardingController } from '@/modules/org/onboarding.controller';
 import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { InviteService } from '@/modules/org/invite.service';
+import { ApprovalsService } from '@/modules/org/approvals.service';
 import { AuthToken, AuthTokenSchema } from './auth-token.schema';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -99,7 +100,7 @@ describe('auth and admin over HTTP', () => {
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService,
-        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService,
+        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService, ApprovalsService,
         AuthGuard, PermissionsGuard,
       ],
     }).compile();
@@ -626,6 +627,146 @@ describe('auth and admin over HTTP', () => {
       await api().post('/api/v1/join/invites').set(auth).send({ maxUses: 0 }).expect(400);
       await api().post('/api/v1/join/invites').set(auth).send({ expiresInDays: 900 }).expect(400);
       await api().post('/api/v1/join/invites').set(auth).send({ code: 'MINE01' }).expect(400);
+    });
+  });
+
+  describe('approving and tagging, over HTTP (P3-T5)', () => {
+    async function officeWithLeader() {
+      const sa = await makeUser(`sa-app-${Math.random()}@agencyboost.test`, 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const owner = await makeUser(`owner-app-${Math.random()}@kpm.test`);
+
+      const company = await api().post('/api/v1/admin/companies').set(auth)
+        .send({ name: `Insurer ${Math.random()}`, slug: `a${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
+        .expect(201);
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({
+          companyId: String(company.body._id),
+          code: `${Math.floor(Math.random() * 9000) + 1000}`,
+          branchName: 'Approval Branch',
+        })
+        .expect(201);
+      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
+        .set(auth).send({ userId: owner.id }).expect(200);
+
+      return { kpmId: String(kpm.body._id), auth: { Authorization: `Bearer ${owner.accessToken}` } };
+    }
+
+    /** Somebody registered to the office who has asked the Owner to take them on. */
+    async function asked(kpmId: string, leaderMembershipId: string) {
+      const joiner = await makeUser(`asker-${Math.random()}@kpm.test`);
+      const asJoiner = { Authorization: `Bearer ${joiner.accessToken}` };
+      await api().post('/api/v1/join/kpm').set(asJoiner).send({ kpmId }).expect(200);
+      await api().post('/api/v1/join/leader-request')
+        .set(asJoiner).send({ leaderMembershipId }).expect(200);
+      return { joiner, asJoiner };
+    }
+
+    it('AC-1: refuses the inbox to somebody who leads nobody', async () => {
+      // The permission is AB and AAB only; an agent never sees this.
+      const { kpmId, auth } = await officeWithLeader();
+      const list = await api().get('/api/v1/members').set(auth).expect(200);
+      const { asJoiner } = await asked(kpmId, list.body.members[0].membershipId);
+
+      const res = await api().get('/api/v1/join/requests').set(asJoiner).expect(403);
+      expect(res.body.error.details.permission).toBe('leader_request:read_inbox');
+    });
+
+    it('shows the request, approves it, and empties the inbox', async () => {
+      const { kpmId, auth } = await officeWithLeader();
+      const list = await api().get('/api/v1/members').set(auth).expect(200);
+      const leaderId = list.body.members[0].membershipId;
+      const { asJoiner } = await asked(kpmId, leaderId);
+
+      const inbox = await api().get('/api/v1/join/requests').set(auth).expect(200);
+      expect(inbox.body).toHaveLength(1);
+      expect(inbox.body[0].role).toBe('agent');
+
+      const after = await api()
+        .post(`/api/v1/join/requests/${inbox.body[0].requestId}/approve`)
+        .set(auth).send({}).expect(200);
+      expect(after.body).toEqual([]);
+
+      // They are in, under the approver, and their own view says so.
+      const me = await api().get('/api/v1/join/me').set(asJoiner).expect(200);
+      expect(me.body.status).toBe('active');
+      expect(me.body.leaderMembershipId).toBe(leaderId);
+    });
+
+    it('AC-4: refuses a second decision, naming which way the first went', async () => {
+      const { kpmId, auth } = await officeWithLeader();
+      const list = await api().get('/api/v1/members').set(auth).expect(200);
+      await asked(kpmId, list.body.members[0].membershipId);
+
+      const inbox = await api().get('/api/v1/join/requests').set(auth).expect(200);
+      const { requestId } = inbox.body[0];
+      await api().post(`/api/v1/join/requests/${requestId}/approve`).set(auth).send({}).expect(200);
+
+      const res = await api()
+        .post(`/api/v1/join/requests/${requestId}/decline`)
+        .set(auth).send({}).expect(409);
+      expect(res.body.error.code).toBe('ORG_REQUEST_ALREADY_DECIDED');
+      expect(res.body.error.details.status).toBe('approved');
+    });
+
+    it('declining leaves them registered, free to ask somebody else', async () => {
+      const { kpmId, auth } = await officeWithLeader();
+      const list = await api().get('/api/v1/members').set(auth).expect(200);
+      const { asJoiner } = await asked(kpmId, list.body.members[0].membershipId);
+
+      const inbox = await api().get('/api/v1/join/requests').set(auth).expect(200);
+      await api().post(`/api/v1/join/requests/${inbox.body[0].requestId}/decline`)
+        .set(auth).send({ reason: 'Not my patch' }).expect(200);
+
+      const me = await api().get('/api/v1/join/me').set(asJoiner).expect(200);
+      expect(me.body.status).toBe('pending');
+      expect(me.body.pendingRequestTo).toBeNull();
+      // And the leader search is still open to them.
+      await api().get('/api/v1/join/leaders').set(asJoiner).expect(200);
+    });
+
+    it('AC-3: tags somebody untagged, with nothing asked of them', async () => {
+      const { kpmId, auth } = await officeWithLeader();
+      const joiner = await makeUser(`untagged-${Math.random()}@kpm.test`);
+      const asJoiner = { Authorization: `Bearer ${joiner.accessToken}` };
+      await api().post('/api/v1/join/kpm').set(asJoiner).send({ kpmId }).expect(200);
+
+      const pool = await api().get('/api/v1/join/untagged').set(auth).expect(200);
+      expect(pool.body).toHaveLength(1);
+
+      const after = await api()
+        .post(`/api/v1/join/untagged/${pool.body[0].membershipId}`)
+        .set(auth).expect(200);
+      expect(after.body).toEqual([]);
+
+      const me = await api().get('/api/v1/join/me').set(asJoiner).expect(200);
+      expect(me.body.status).toBe('active');
+    });
+
+    it('refuses tagging somebody who already reports to a leader', async () => {
+      const { kpmId, auth } = await officeWithLeader();
+      const list = await api().get('/api/v1/members').set(auth).expect(200);
+      const leaderId = list.body.members[0].membershipId;
+      await asked(kpmId, leaderId);
+      const inbox = await api().get('/api/v1/join/requests').set(auth).expect(200);
+      await api().post(`/api/v1/join/requests/${inbox.body[0].requestId}/approve`)
+        .set(auth).send({}).expect(200);
+
+      const res = await api()
+        .post(`/api/v1/join/untagged/${inbox.body[0].membershipId}`)
+        .set(auth).expect(409);
+      expect(res.body.error.code).toBe('ORG_AGENT_ALREADY_TAGGED');
+    });
+
+    it('never reaches another office request', async () => {
+      const mine = await officeWithLeader();
+      const theirs = await officeWithLeader();
+      const list = await api().get('/api/v1/members').set(theirs.auth).expect(200);
+      await asked(theirs.kpmId, list.body.members[0].membershipId);
+      const inbox = await api().get('/api/v1/join/requests').set(theirs.auth).expect(200);
+
+      await api().post(`/api/v1/join/requests/${inbox.body[0].requestId}/approve`)
+        .set(mine.auth).send({}).expect(404);
     });
   });
 
