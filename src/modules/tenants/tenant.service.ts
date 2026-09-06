@@ -10,6 +10,7 @@ import { can } from '@/modules/rbac/permissions';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import { initialsOf } from '@/modules/org/directory.service';
 import { Company, CompanyDocument } from './company.schema';
 import { DEFAULT_KPM_SETTINGS, Kpm, KpmDocument } from './kpm.schema';
 
@@ -32,6 +33,20 @@ export interface CreateKpmInput {
  * repository: there is no tenant yet to scope to. The permission check is therefore
  * the only gate, which is why it is explicit at the top of every method.
  */
+
+/** One person who administers an office, seen from the platform. */
+export interface PlatformAdminRow {
+  membershipId: string;
+  fullName: string;
+  email: string;
+  initials: string;
+  kpmId: string;
+  kpmLabel: string;
+  isOwner: boolean;
+  isAdmin: boolean;
+  /** When admin access was granted. Null for an Owner, whose rights come with the office. */
+  grantedAt: string | null;
+}
 
 /** One row of the console's `Needs your attention` queue (`Superadmin.html:232-273`). */
 export interface AttentionItem {
@@ -377,6 +392,88 @@ export class TenantService {
     }
 
     return items;
+  }
+
+  /**
+   * Everybody who administers an office, across every office.
+   *
+   * ADR-0011 lists this among the destinations the Superadmin prototype declares
+   * (`Superadmin.html:196`) and we had not built. It is the platform's answer to *"who
+   * can act inside our tenants"*, which nothing else could give without opening each
+   * office in turn.
+   *
+   * **Read-only, and that is the point.** Granting and revoking stay inside the office,
+   * where the Owner does them — `kpm_admin:grant` names no tenant grantee but the Owner,
+   * and `isOwnerReserved` derives the refusal from that list. A platform screen that
+   * could hand out office administration would route around a decision the office owns.
+   *
+   * Cross-tenant, through the explicitly named unscoped method. `kpm_admin:list` already
+   * gives Super Admin `all`; this is what that cell was for.
+   */
+  async platformAdmins(ctx: RequestContext): Promise<PlatformAdminRow[]> {
+    this.require(ctx, 'kpm_admin:list_platform');
+
+    // **Ownership is not on the membership.** `kpms.ownerUserId` holds it, and
+    // `ContextResolver` derives `isKpmOwner` by comparing the two — so this has to make
+    // the same join rather than filter a field that does not exist. Delegated admin
+    // rights *are* on the membership, which is why only one half of this is a query.
+    const [kpms, admins] = await Promise.all([
+      this.kpms.find({ deletedAt: null }).exec(),
+      this.memberships.findAcrossAllTenants(ctx, {
+        status: 'active',
+        'adminAccess.isKpmAdmin': true,
+      }),
+    ]);
+
+    const ownerOf = new Map(
+      kpms.filter((k) => k.ownerUserId).map((k) => [String(k._id), String(k.ownerUserId)]),
+    );
+    const owners = await this.memberships.findAcrossAllTenants(ctx, {
+      status: 'active',
+      userId: { $in: [...new Set(ownerOf.values())] },
+    });
+
+    // An Owner who is also a delegated Admin is one person and one row.
+    const byId = new Map(admins.map((m) => [String(m._id), m]));
+    for (const m of owners) {
+      if (ownerOf.get(m.kpmId) === m.userId) byId.set(String(m._id), m);
+    }
+    const rows = [...byId.values()];
+    if (rows.length === 0) return [];
+
+    const users = await this.users
+      .find({ _id: { $in: [...new Set(rows.map((r) => r.userId))] } })
+      .exec();
+    const office = new Map(kpms.map((k) => [String(k._id), `KPM ${k.code} — ${k.branchName}`]));
+    const byUser = new Map(users.map((u) => [String(u._id), u]));
+
+    return rows
+      .map((r) => {
+        const who = byUser.get(r.userId);
+        const fullName = who?.fullName ?? 'Unknown';
+        return {
+          membershipId: String(r._id),
+          fullName,
+          email: who?.email ?? '',
+          initials: initialsOf(fullName),
+          kpmId: r.kpmId,
+          kpmLabel: office.get(r.kpmId) ?? 'Unknown office',
+          isOwner: ownerOf.get(r.kpmId) === r.userId,
+          isAdmin: Boolean(r.adminAccess?.isKpmAdmin),
+          // An Owner's rights come with the office, not from a grant, so there is no date
+          // to show and a blank is the honest answer rather than the office's own.
+          grantedAt: r.adminAccess?.isKpmAdmin
+            ? (r.adminAccess.grantedAt?.toISOString() ?? null)
+            : null,
+        };
+      })
+      // Grouped by office, Owner first within it: that is the question the screen answers
+      // — who runs this one, and who else can act in it.
+      .sort(
+        (a, b) =>
+          a.kpmLabel.localeCompare(b.kpmLabel) || Number(b.isOwner) - Number(a.isOwner) ||
+          a.fullName.localeCompare(b.fullName),
+      );
   }
 
   async listAll(ctx: RequestContext): Promise<KpmDocument[]> {

@@ -664,10 +664,15 @@ describe('organisation', () => {
       // The one cross-tenant read a non-Super-Admin has. Member counts, production and
       // the owner's name are all absent by construction, not by a filter someone could
       // forget.
+      //
+      // `companyId` joined the list on 2026-09-06 for P3.5-T2: somebody whose branch is
+      // not on the platform has to name the company they would belong to, and this list
+      // is the only place a newcomer learns which companies exist. It is the id of a
+      // company already named in the same row, so it discloses nothing the row did not.
       const [entry] = await onboarding.searchKpms('0417');
-      expect(Object.keys(entry).sort()).toEqual([
-        'branchName', 'city', 'code', 'companyId'.replace('companyId', 'companyName'), 'kpmId',
-      ].sort());
+      expect(Object.keys(entry).sort()).toEqual(
+        ['branchName', 'city', 'code', 'companyId', 'companyName', 'kpmId'].sort(),
+      );
     });
 
     it('hides an office that is not active, without saying which it was', async () => {

@@ -116,6 +116,31 @@ describe('KpmRequestService (P3.5-T2)', () => {
     });
   });
 
+    it('keeps an empty note as nothing, not as an empty string', async () => {
+      // `note` is optional and free text; a blank one is the absence of a note, and a
+      // screen rendering "" would show an empty paragraph where there is no answer.
+      const row = await service.create(asker(requesterId), {
+        companyId, branchName: 'Medan Branch', note: '   ',
+      });
+      expect(row.note).toBeNull();
+    });
+
+    it('names an unknown company and an unknown asker rather than failing', async () => {
+      // Both are soft-deletable and neither is this service's to resurrect. A row that
+      // cannot name its company is still a row somebody has to decide.
+      const row = await service.create(asker(requesterId), ask());
+      await mongoose.model(Company.name).deleteOne({ _id: companyId });
+      await mongoose.model(User.name).deleteOne({ _id: requesterId });
+
+      const [seen] = await service.queue(platform());
+      expect(seen).toMatchObject({
+        requestId: row.requestId,
+        companyName: 'Unknown',
+        requestedByName: 'Unknown',
+        requestedByEmail: '',
+      });
+    });
+
   describe('deciding', () => {
     it('AC-2: approving creates the office and hands it to whoever asked', async () => {
       const row = await service.create(asker(requesterId), ask());

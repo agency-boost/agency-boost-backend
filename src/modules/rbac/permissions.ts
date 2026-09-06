@@ -125,6 +125,12 @@ export const PERMISSIONS = {
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
+  // The platform-wide roster is a different question from an office's own admin list, and
+  // needs its own grant: `kpm_admin:list` gives an Owner `own-kpm`, so gating the roster
+  // on it let an Owner past the guard and left the repository to refuse them — with
+  // `MissingTenantContextError`, which is a defence, not an answer. A test now asserts
+  // they get `PERM_DENIED` at the door instead.
+  'kpm_admin:list_platform': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'audit_log:read': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },

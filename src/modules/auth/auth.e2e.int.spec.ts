@@ -344,6 +344,102 @@ describe('auth and admin over HTTP', () => {
       expect(assigned.body.ownerUserId).toBe(owner.id);
     });
 
+    it('P3.5-T1: the overview counts the platform, and refuses an Owner', async () => {
+      const sa = await makeUser(`sa-ov-${Math.random()}@agencyboost.test`, 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const company = await api().post('/api/v1/admin/companies').set(auth)
+        .send({ name: `Ins ${Math.random()}`, slug: `o${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
+        .expect(201);
+      await api().post('/api/v1/admin/tenants').set(auth)
+        .send({ companyId: String(company.body._id), code: '7001', branchName: 'Overview Branch' })
+        .expect(201);
+
+      const res = await api().get('/api/v1/admin/overview').set(auth).expect(200);
+      expect(res.body.tiles.kpms).toBeGreaterThan(0);
+      // An office with no Owner is the one attention row that has a real source today.
+      expect(res.body.attention.some((a: { tag: string }) => a.tag === 'KPM owner')).toBe(true);
+
+      const outsider = await makeUser(`out-ov-${Math.random()}@kpm.test`);
+      const refused = await api().get('/api/v1/admin/overview')
+        .set('Authorization', `Bearer ${outsider.accessToken}`).expect(403);
+      expect(refused.body.error.code).toBe('PERM_DENIED');
+    });
+
+    it('P3.5-T12: the admin roster names the Owner and the office', async () => {
+      const sa = await makeUser(`sa-ta-${Math.random()}@agencyboost.test`, 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const owner = await makeUser(`own-ta-${Math.random()}@kpm.test`);
+      const company = await api().post('/api/v1/admin/companies').set(auth)
+        .send({ name: `Ins ${Math.random()}`, slug: `t${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
+        .expect(201);
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({ companyId: String(company.body._id), code: '7002', branchName: 'Roster Branch' })
+        .expect(201);
+      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
+        .set(auth).send({ userId: owner.id }).expect(200);
+
+      const res = await api().get('/api/v1/admin/tenant-admins').set(auth).expect(200);
+      const row = res.body.find((r: { kpmLabel: string }) => r.kpmLabel.includes('7002'));
+      expect(row).toMatchObject({ isOwner: true, isAdmin: false, grantedAt: null });
+
+      // `kpm_admin:list` gives an Owner their own office's list; the platform roster is a
+      // different question and a different grant, refused at the door rather than by the
+      // repository.
+      const refused = await api().get('/api/v1/admin/tenant-admins')
+        .set('Authorization', `Bearer ${owner.accessToken}`).expect(403);
+      expect(refused.body.error.code).toBe('PERM_DENIED');
+    });
+
+    it('P3.5-T2: somebody with no office can ask for one, and the platform decides', async () => {
+      const sa = await makeUser(`sa-rq-${Math.random()}@agencyboost.test`, 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const company = await api().post('/api/v1/admin/companies').set(auth)
+        .send({ name: `Ins ${Math.random()}`, slug: `r${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
+        .expect(201);
+
+      const asker = await makeUser(`ask-${Math.random()}@example.test`);
+      const asking = { Authorization: `Bearer ${asker.accessToken}` };
+      expect((await api().get('/api/v1/join/kpm-request').set(asking).expect(200)).body)
+        .toEqual({ request: null });
+
+      const filed = await api().post('/api/v1/join/kpm-request').set(asking)
+        .send({ companyId: String(company.body._id), branchName: 'Surabaya Branch' })
+        .expect(201);
+      expect(filed.body.status).toBe('pending');
+
+      // One at a time.
+      const second = await api().post('/api/v1/join/kpm-request').set(asking)
+        .send({ companyId: String(company.body._id), branchName: 'Medan Branch' })
+        .expect(409);
+      expect(second.body.error.code).toBe('TENANT_REQUEST_ALREADY_OPEN');
+
+      // The queue is the platform's, and nobody else's.
+      await api().get('/api/v1/admin/kpm-requests').set(asking).expect(403);
+
+      const queue = await api().get('/api/v1/admin/kpm-requests').set(auth).expect(200);
+      expect(queue.body[0]).toMatchObject({
+        branchName: 'Surabaya Branch',
+        status: 'pending',
+      });
+
+      const approved = await api()
+        .post(`/api/v1/admin/kpm-requests/${filed.body.requestId}/approve`)
+        .set(auth).send({ code: '7003' }).expect(200);
+      const row = approved.body.find((r: { requestId: string }) => r.requestId === filed.body.requestId);
+      expect(row.status).toBe('approved');
+      expect(row.createdKpmId).toBeTruthy();
+
+      // The office is theirs, which is what "proposed KPM Owner" means.
+      const me = await api().get('/api/v1/auth/me').set(asking).expect(200);
+      expect(me.body.membership.isKpmOwner).toBe(true);
+
+      // Deciding twice says which way the first went.
+      const again = await api()
+        .post(`/api/v1/admin/kpm-requests/${filed.body.requestId}/decline`)
+        .set(auth).send({}).expect(409);
+      expect(again.body.error.code).toBe('TENANT_REQUEST_DECIDED');
+    });
+
     it('shows a Super Admin the platform audit trail their own work wrote', async () => {
       const sa = await makeUser('sa5@agencyboost.test', 'super_admin');
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
@@ -412,8 +508,10 @@ describe('auth and admin over HTTP', () => {
 
       expect(res.body).toHaveLength(1);
       // Projection-limited by construction: no member counts, no production, no owner.
+      // `companyId` is here so somebody whose branch is missing can name the company they
+      // would belong to (P3.5-T2); it identifies a company the same row already names.
       expect(Object.keys(res.body[0]).sort()).toEqual(
-        ['branchName', 'city', 'code', 'companyName', 'kpmId'],
+        ['branchName', 'city', 'code', 'companyId', 'companyName', 'kpmId'],
       );
     });
 

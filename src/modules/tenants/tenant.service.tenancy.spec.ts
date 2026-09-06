@@ -410,6 +410,71 @@ describe('TenantService', () => {
     });
   });
 
+  describe('the platform admin roster (P3.5-T12)', () => {
+    const seedMemberFor = (kpmId: string, userId: string, admin = false) =>
+      mongoose.model(Membership.name).create({
+        kpmId, userId, role: 'ab', status: 'active', agentCode: `${kpmId.slice(-4)}-${userId}`,
+        agentSeq: 1, leaderId: null, ancestorIds: [], depth: 0,
+        ...(admin ? { adminAccess: { isKpmAdmin: true, grantedAt: NOW, grantedByUserId: 'u1', revokedAt: null } } : {}),
+      });
+
+    it('AC-2: is Super Admin only', async () => {
+      await expect(service.platformAdmins(ctx({ owner: true }))).rejects.toMatchObject({
+        code: 'PERM_DENIED',
+      });
+    });
+
+    it('AC-1: lists the Owner of every office, with which office it is', async () => {
+      const sa = ctx({ superAdmin: true });
+      const kpm = await service.createKpm(sa, input());
+      const owner = await users.create({ email: 'o@kpm.test', fullName: 'Wilson Tanoto', passwordHash: 'x' });
+      await service.assignOwner(sa, String(kpm._id), { userId: String(owner._id) });
+
+      const [row] = await service.platformAdmins(sa);
+      expect(row).toMatchObject({
+        fullName: 'Wilson Tanoto',
+        isOwner: true,
+        isAdmin: false,
+        kpmLabel: 'KPM 0417 — BSD City Branch',
+      });
+      // An Owner's rights come with the office, not from a grant, so there is no date.
+      expect(row.grantedAt).toBeNull();
+    });
+
+    it('AC-1: lists a delegated Admin with when their access was granted', async () => {
+      const sa = ctx({ superAdmin: true });
+      const kpm = await service.createKpm(sa, input());
+      const person = await users.create({ email: 'a@kpm.test', fullName: 'Agus Prasetyo', passwordHash: 'x' });
+      await seedMemberFor(String(kpm._id), String(person._id), true);
+
+      const [row] = await service.platformAdmins(sa);
+      expect(row).toMatchObject({ fullName: 'Agus Prasetyo', isOwner: false, isAdmin: true });
+      expect(row.grantedAt).toBe(NOW.toISOString());
+    });
+
+    it('AC-1: an Owner who is also a delegated Admin is one row, not two', async () => {
+      const sa = ctx({ superAdmin: true });
+      const kpm = await service.createKpm(sa, input());
+      const owner = await users.create({ email: 'both@kpm.test', fullName: 'Both Roles', passwordHash: 'x' });
+      await service.assignOwner(sa, String(kpm._id), { userId: String(owner._id) });
+      await mongoose.model(Membership.name).updateOne(
+        { kpmId: String(kpm._id), userId: String(owner._id) },
+        { $set: { adminAccess: { isKpmAdmin: true, grantedAt: NOW, grantedByUserId: 'u1', revokedAt: null } } },
+      );
+
+      const rows = await service.platformAdmins(sa);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ isOwner: true, isAdmin: true });
+    });
+
+    it('AC-3: reaches every office, and says nothing when none has an administrator', async () => {
+      const sa = ctx({ superAdmin: true });
+      await service.createKpm(sa, input());
+      // Created, no Owner assigned yet — which is the state the overview raises.
+      expect(await service.platformAdmins(sa)).toEqual([]);
+    });
+  });
+
   describe('listing', () => {
     it('is Super Admin only', async () => {
       await expect(service.listAll(ctx({ owner: true }))).rejects.toMatchObject({

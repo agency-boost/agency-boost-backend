@@ -92,11 +92,13 @@ export class OnboardingController {
   @ApiOperation({
     summary: 'The office you asked for, if you asked for one',
     description:
-      'Null when you have not. The screen reads this before offering the form, so somebody who has ' +
+      '`{ request: null }` when you have not. Wrapped rather than returned bare, because a bare ' +
+      '`null` leaves the wire as an empty body and a client cannot tell it from a response that ' +
+      'failed to serialise. The screen reads this before offering the form, so somebody who has ' +
       'already asked is told where it stands instead of being invited to ask again.',
   })
   async myKpmRequest(@Ctx() ctx: RequestContext) {
-    return this.kpmRequests.mine(ctx);
+    return { request: await this.kpmRequests.mine(ctx) };
   }
 
   @Post('kpm-request')

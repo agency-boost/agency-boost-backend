@@ -310,6 +310,27 @@
         ]
       }
     },
+    "/api/v1/admin/tenant-admins": {
+      "get": {
+        "description": "Every KPM Owner and delegated KPM Admin, across every office, grouped by office. Read-only: granting and revoking stay inside the office, where the Owner does them.",
+        "operationId": "AdminController_tenantAdmins_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Everybody who administers an office",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      }
+    },
     "/api/v1/admin/kpm-requests": {
       "get": {
         "description": "Offices somebody has asked for and nobody has decided yet, pending first. The requester is the proposed Owner — the prototype writes them as one person with one intent.",
@@ -1335,7 +1356,7 @@
     },
     "/api/v1/join/kpm-request": {
       "get": {
-        "description": "Null when you have not. The screen reads this before offering the form, so somebody who has already asked is told where it stands instead of being invited to ask again.",
+        "description": "`{ request: null }` when you have not. Wrapped rather than returned bare, because a bare `null` leaves the wire as an empty body and a client cannot tell it from a response that failed to serialise. The screen reads this before offering the form, so somebody who has already asked is told where it stands instead of being invited to ask again.",
         "operationId": "OnboardingController_myKpmRequest_v1",
         "parameters": [],
         "responses": {

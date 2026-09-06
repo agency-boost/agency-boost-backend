@@ -53,6 +53,18 @@ export class AdminController {
     return this.tenants.platformOverview(ctx);
   }
 
+  @Get('tenant-admins')
+  @RequirePermission('kpm_admin:list_platform')
+  @ApiOperation({
+    summary: 'Everybody who administers an office',
+    description:
+      'Every KPM Owner and delegated KPM Admin, across every office, grouped by office. Read-only: ' +
+      'granting and revoking stay inside the office, where the Owner does them.',
+  })
+  async tenantAdmins(@Ctx() ctx: RequestContext) {
+    return this.tenants.platformAdmins(ctx);
+  }
+
   @Get('kpm-requests')
   @RequirePermission('kpm_request:read')
   @ApiOperation({
