@@ -325,6 +325,16 @@ export const PERMISSIONS = {
     { grantee: AAB, scope: 'own' },
     { grantee: AGENT, scope: 'own' },
   ],
+  // Reading your own inbox, and marking a row read. Granted to everybody signed in and
+  // scoped to `own`, like the profile: a notification is addressed to a **person**, and
+  // `notifications.kpmId` is nullable because email verification and password reset are
+  // sent before anybody has an office. Scoping these to a tenant would hide the
+  // notifications a newcomer most needs.
+  // `AUTHENTICATED`, not the six roles: somebody who has joined no office still has an
+  // inbox, and the first thing in it is their own email verification. Listing the roles
+  // refused exactly that person — the test that builds a newcomer caught it.
+  'notification:read_inbox': [{ grantee: AUTHENTICATED, scope: 'own' }],
+  'notification:mark_read': [{ grantee: AUTHENTICATED, scope: 'own' }],
   'notification:receive': [
     { grantee: AB, scope: 'own' },
     { grantee: AAB, scope: 'own' },

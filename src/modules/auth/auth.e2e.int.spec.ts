@@ -198,15 +198,17 @@ describe('auth and admin over HTTP', () => {
       expect(me.body.user.email).toBe('journey@kpm.test');
       expect(me.body.user.pronoun).toBe('they');
       expect(me.body.membership).toBeNull(); // the new-agent state
-      // Four, and every one of them exists so somebody in no office can get into one:
-      // find an office, attach to it, walk in through a leader's invite, or — since
-      // 2026-09-06 — ask for an office that has never been provisioned. Anything more
-      // would be a grant that outlives the reason for it.
-      expect(me.body.permissions).toEqual([
+      // Four ways into an office — find one, attach to it, walk in through a leader's
+      // invite, or ask for one that has never been provisioned — plus their own inbox,
+      // which is addressed to them as a person and exists before any office does.
+      // Anything more would be a grant that outlives the reason for it.
+      expect(me.body.permissions.sort()).toEqual([
+        'join_via_code_link_qr',
         'kpm:read_directory',
         'kpm_registration:create',
         'kpm_request:create',
-        'join_via_code_link_qr',
+        'notification:mark_read',
+        'notification:read_inbox',
       ]);
     });
 

@@ -303,6 +303,10 @@ describe('permission matrix', () => {
       // never been provisioned cannot find it in the directory, and until 2026-09-06 the
       // product had no answer for them at all (ADR-0011).
       'kpm_request:create',
+      // Not a door, but held by the same person for the same reason: their own inbox,
+      // whose first row is the email verification that gets them in.
+      'notification:read_inbox',
+      'notification:mark_read',
     ];
 
     it('holds only the permissions that let somebody join, and nothing else', () => {
@@ -345,6 +349,10 @@ describe('permission matrix', () => {
       // refuses somebody who already belongs somewhere — a permission cannot express
       // "unless you already did this".
       'kpm_request:create',
+      // A notification is addressed to a person, and the first one anybody receives is
+      // their own email verification — sent before they have joined anything.
+      'notification:read_inbox',
+      'notification:mark_read',
     ];
 
     const ALL = [

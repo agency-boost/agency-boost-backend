@@ -19,6 +19,7 @@ import {
 import {
   NOTIFICATION_ADAPTERS, NotificationService, TemplateRenderer,
 } from '@/modules/notifications/notification.service';
+import { NotificationController } from '@/modules/notifications/notification.controller';
 import { ConsoleTemplateRenderer } from '@/modules/notifications/console-renderer';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
@@ -94,7 +95,14 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: Group.name, schema: GroupSchema },
     ]),
   ],
-  controllers: [HealthController, AuthController, AdminController, OrgController, OnboardingController],
+  controllers: [
+    HealthController,
+    AuthController,
+    AdminController,
+    OrgController,
+    OnboardingController,
+    NotificationController,
+  ],
   providers: [
     { provide: Clock, useClass: SystemClock },
     {
