@@ -1219,6 +1219,90 @@ describe('organisation', () => {
       });
     });
 
+    describe('the office-wide queue (P3.5)', () => {
+      async function asOwner(membershipId: string) {
+        const row = await members.findById(ctx(KPM_A), membershipId);
+        return new RequestContext(row!.userId, 'none', {
+          membershipId, kpmId: KPM_A, hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
+          status: 'active', isKpmOwner: true, isKpmAdmin: false,
+          directCount: row!.directCounts?.total ?? 0,
+        });
+      }
+
+      it('shows an Owner every open request, not only their own', async () => {
+        // `leader_request:approve` grants the Owner `own-kpm`; the inbox used to answer
+        // `own-unit` regardless, so a request nobody else answered was invisible.
+        await askedFor(aab, 'Asked The AAB');
+        await askedFor(ab, 'Asked The AB');
+
+        const owner = await asOwner(ab);
+        expect(await approvals.inbox(owner)).toHaveLength(2);
+      });
+
+      it('still shows a leader only what was addressed to them', async () => {
+        await askedFor(aab, 'Asked The AAB');
+        await askedFor(ab, 'Asked The AB');
+
+        const theirs = await approvals.inbox(aabCtx);
+        expect(theirs).toHaveLength(1);
+        expect(theirs[0].fullName).toBe('Asked The AAB');
+      });
+
+      it('a peer still cannot reach a request addressed to somebody else', async () => {
+        const peer = await join(KPM_A, 'aab', ab);
+        await hierarchy.refreshCounts(ctx(KPM_A), ab);
+        const asked = await askedFor(aab, 'Asked The AAB');
+
+        const inbox = await approvals.inbox(aabCtx);
+        await expect(
+          approvals.approve(await asMember(peer), inbox[0].requestId),
+        ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        expect((await members.findById(ctx(KPM_A), asked.membershipId))!.status).toBe('pending');
+      });
+
+      it('AC: approving on a leader behalf attaches the joiner to THAT leader', async () => {
+        // The trap: `leaderId` defaulted to the actor. An Owner clearing the queue would
+        // have quietly moved every joiner into their own unit.
+        const asked = await askedFor(aab, 'Asked The AAB');
+        const owner = await asOwner(ab);
+
+        const inbox = await approvals.inbox(owner);
+        await approvals.approve(owner, inbox[0].requestId);
+
+        const joined = await members.findById(ctx(KPM_A), asked.membershipId);
+        expect(joined!.leaderId).toBe(aab);
+        expect(joined!.status).toBe('active');
+      });
+
+      it('records who decided it, which is not who they asked', async () => {
+        await askedFor(aab, 'Asked The AAB');
+        const owner = await asOwner(ab);
+        const inbox = await approvals.inbox(owner);
+        await approvals.approve(owner, inbox[0].requestId);
+
+        const row = await mongoose
+          .model(JoinRequest.name)
+          .findOne({ _id: inbox[0].requestId });
+        expect(row!.get('decidedByMembershipId')).toBe(ab);
+        expect(row!.get('leaderMembershipId')).toBe(aab);
+        // Not routed — it went where it was asked to go.
+        expect(row!.get('routedToMembershipId')).toBeNull();
+      });
+
+      it('never reaches another office queue', async () => {
+        const theirRoot = await join(KPM_B, 'ab');
+        const theirOwner = new RequestContext(
+          (await members.findById(ctx(KPM_B), theirRoot))!.userId, 'none',
+          {
+            membershipId: theirRoot, kpmId: KPM_B, hierarchyRole: 'ab', status: 'active',
+            isKpmOwner: true, isKpmAdmin: false, directCount: 0,
+          },
+        );
+        await askedFor(aab, 'Asked In A');
+        expect(await approvals.inbox(theirOwner)).toEqual([]);
+      });
+    });
+
     describe('declining', () => {
       it('leaves them registered, so they can ask somebody else', async () => {
         // The prototype drops the row, which leaves them nowhere.

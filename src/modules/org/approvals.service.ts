@@ -86,6 +86,10 @@ export class ApprovalsService {
     return ctx.membershipId;
   }
 
+  private isTenantAdmin(ctx: RequestContext): boolean {
+    return Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
+  }
+
   private async named(userIds: string[]): Promise<Map<string, UserDocument>> {
     const users = await this.users.find({ _id: { $in: userIds } }).exec();
     return new Map(users.map((u) => [String(u._id), u]));
@@ -100,11 +104,16 @@ export class ApprovalsService {
   async inbox(ctx: RequestContext): Promise<PendingRequest[]> {
     const me = this.requireLeader(ctx);
 
+    // A leader sees what was addressed to them. The Owner and an Admin see the office's
+    // whole queue — `leader_request:approve` grants them `own-kpm`, and a request nobody
+    // answers is the failure this screen exists to prevent.
     const rows = await this.requests
       .find({
         kpmId: ctx.kpmId,
         status: 'pending',
-        $or: [{ leaderMembershipId: me }, { routedToMembershipId: me }],
+        ...(this.isTenantAdmin(ctx)
+          ? {}
+          : { $or: [{ leaderMembershipId: me }, { routedToMembershipId: me }] }),
       })
       .sort({ createdAt: -1 })
       .exec();
@@ -186,8 +195,11 @@ export class ApprovalsService {
     const request = await this.requests
       .findOne({ _id: requestId, kpmId: ctx.kpmId, deletedAt: null })
       .exec();
-    // Somebody else's request reads the same as one that does not exist.
-    if (!request || (request.leaderMembershipId !== me && request.routedToMembershipId !== me)) {
+    // Somebody else's request reads the same as one that does not exist — unless you
+    // administer the office, in which case every request in it is yours to decide.
+    const addressedToMe =
+      request?.leaderMembershipId === me || request?.routedToMembershipId === me;
+    if (!request || !(addressedToMe || this.isTenantAdmin(ctx))) {
       throw new NotFoundException('Join request');
     }
     if (request.status !== 'pending') {
@@ -214,8 +226,12 @@ export class ApprovalsService {
     const joiner = await this.members.findById(ctx, request.membershipId);
     if (!joiner) throw new NotFoundException('Membership');
 
-    let leaderId = me;
-    if (routeToMembershipId && routeToMembershipId !== me) {
+    // **The leader they asked for**, not the actor. Identical while a leader decides
+    // their own request; the moment an Owner decides Sari's, defaulting to the actor
+    // would quietly move the joiner into the Owner's own unit.
+    const requested = request.leaderMembershipId;
+    let leaderId = requested;
+    if (routeToMembershipId && routeToMembershipId !== requested) {
       // Routing is a separate grant, and it is checked here rather than only on the
       // list: a caller can name any id, and the list is a convenience.
       if (!can(ctx, 'leader_request:route_to_sub_unit')) {
@@ -232,7 +248,9 @@ export class ApprovalsService {
         !destination ||
         destination.status !== 'active' ||
         destination.role !== 'aab' ||
-        destination.leaderId !== me
+        // Into one of the *requested* leader's units. Routing places an agent inside the
+        // unit they asked to join, which is not the same as the decider's unit.
+        destination.leaderId !== requested
       ) {
         throw new DomainException(
           ErrorCode.ORG_LEADER_NOT_IN_KPM,
@@ -260,7 +278,7 @@ export class ApprovalsService {
             status: 'approved',
             decidedAt: this.clock.now(),
             decidedByMembershipId: me,
-            routedToMembershipId: leaderId === me ? null : leaderId,
+            routedToMembershipId: leaderId === requested ? null : leaderId,
           },
         },
       )
