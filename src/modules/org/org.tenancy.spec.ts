@@ -2235,23 +2235,34 @@ describe('organisation', () => {
         );
       });
 
-      it('gives an AAB their unit, and not their unit leaders\' units', async () => {
-        // Four matrix rows give an AAB `own-unit` and an AB `own-downline`
-        // (`roles-and-permissions.md:304-305, 342-343`). Until 2026-09-06 `visibleTo`
-        // took no scope at all and handed everybody their whole downline, which was
-        // unobservable only for as long as every AAB's reports were agents. Nothing
-        // forbids an AAB leading an AAB — so this builds one and checks the boundary.
+      it('gives a nested AAB their whole downline, not just their direct reports', async () => {
+        // The matrix cell for an AAB reads `own-unit`, and the rules beneath it say what
+        // that means: rule 1 resolves `own-unit` to `own-downline` for reading, naming
+        // role change and removal as the only exceptions, and rule 2 says `own-downline`
+        // stays correct even where a KPM nests AAB under AAB
+        // (`roles-and-permissions.md:187-196`).
+        //
+        // A first pass on 2026-09-06 read the cell and not the rules, and asserted the
+        // opposite of this — that the top AAB should NOT see the grandchild. That would
+        // have cut a nested AAB off from their own downline on a screen whose manual
+        // says it draws "your unit and everyone below it".
         const topAab = await join(KPM_A, 'aab', ab);
         const midAab = await join(KPM_A, 'aab', topAab);
         const grandchild = await join(KPM_A, 'agent', midAab);
 
         const seen = (await tree.read(await asMember(topAab))).nodes.map((n) => n.membershipId);
-        expect(seen.sort()).toEqual([topAab, midAab].sort());
-        expect(seen).not.toContain(grandchild);
+        expect(seen.sort()).toEqual([topAab, midAab, grandchild].sort());
 
-        // The AB above them keeps `own-downline`, and sees all three.
+        // The AB above them sees all four, and a peer's unit is still unreachable.
         const abSees = (await tree.read(await asMember(ab))).nodes.map((n) => n.membershipId);
         for (const id of [topAab, midAab, grandchild]) expect(abSees).toContain(id);
+      });
+
+      it('gives an agent themselves, and nobody else', async () => {
+        // `own` is the one token that stays literal: an agent who leads nobody has a
+        // downline of one, and an agent who leads somebody is still granted only `own`.
+        const seen = (await tree.read(await asMember(agent))).nodes.map((n) => n.membershipId);
+        expect(seen).toEqual([agent]);
       });
 
       it('never reaches another office, even for an admin', async () => {

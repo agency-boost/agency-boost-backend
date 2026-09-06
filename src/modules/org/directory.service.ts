@@ -63,13 +63,22 @@ export const DIRECTORY_MAX_PAGE_SIZE = 100;
  *
  * **The scope comes from the grant list**, resolved for the permission the caller was
  * gated on, so the matrix column is the implementation rather than a description of one.
- * It was not, until 2026-09-06: this returned self-plus-whole-downline for everybody who
+ * It was not until 2026-09-06: this returned self-plus-whole-downline for everybody who
  * was not a tenant admin, and no caller passed a scope because it took none.
  *
- * That was invisible for as long as an AAB's reports were all agents, because then their
- * unit *was* their downline. Nothing forbids an AAB leading an AAB, and the moment one
- * does, an AAB documented at `own-unit` in four separate matrix rows was reading their
- * grandchildren. There is a test that builds exactly that shape.
+ * **`own-unit` resolves to the subtree here, and that is deliberate.** The matrix's rules
+ * 1 and 2 (`roles-and-permissions.md:187-196`) say so in as many words: *"`own-unit` for
+ * an AB resolves to `own-downline`"*, with role change and removal named as the only
+ * exceptions, and for an AAB *"`own-downline` is still the correct token"* even where a
+ * KPM nests AAB under AAB. This function serves **reading** — the roster and the org
+ * tree — and neither is one of those exceptions. The exceptions act on the leader edge
+ * the actor owns and check `leaderId` directly; they never come through here.
+ *
+ * A first pass on 2026-09-06 read the matrix *cells* and not the rules beneath them, and
+ * narrowed an AAB to their direct reports. That is a real narrowing: a nested AAB would
+ * have lost sight of their own grandchildren in the group tree, on a screen whose manual
+ * says it draws "your unit and everyone below it". Corrected the same day, with the test
+ * below rewritten to assert the downline rather than the narrowing.
  *
  * Somebody with no membership sees nothing, and says so as an impossible filter rather
  * than an absent one — an absent filter would return the office.
@@ -88,10 +97,12 @@ export function visibleTo(
       return {};
     // `ancestorIds` makes the downline arm a single indexed lookup on
     // `(kpmId, ancestorIds, status)`.
+    //
+    // Both tokens land here: see the note above on rules 1 and 2. A leader reads their
+    // subtree; the rules that are genuinely limited to direct reports do not use this.
     case 'own-downline':
-      return { $or: [{ _id: self }, { ancestorIds: self }] };
     case 'own-unit':
-      return { $or: [{ _id: self }, { leaderId: self }] };
+      return { $or: [{ _id: self }, { ancestorIds: self }] };
     case 'own':
       return { _id: self };
     // No grant at all. The guard refuses these before a service is reached; a filter
