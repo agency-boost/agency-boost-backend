@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsEmail, IsEnum, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsMongoId, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
 export class CreateCompanyDto {
   @ApiProperty({ example: 'Prudential' })
@@ -92,4 +92,47 @@ export class AuditQueryDto {
   @IsOptional()
   @IsString()
   kpmId?: string;
+}
+
+/**
+ * The office code, supplied by the platform when a request is approved.
+ *
+ * Not by the requester: it must be unique within the company, and nobody outside the
+ * platform can know what is free. The prototype's `KPM name` column is a branch name for
+ * exactly that reason.
+ */
+export class ApproveKpmRequestDto {
+  @ApiProperty({ example: '0629', description: 'Unique within the company.' })
+  @IsString()
+  @Matches(/^\d{4}$/, { message: 'code must be four digits' })
+  code!: string;
+}
+
+export class DeclineKpmRequestDto {
+  @ApiPropertyOptional({
+    example: 'This branch already trades under KPM 0417.',
+    description: 'Kept, and sent back to whoever asked. A refusal with nothing to act on is not an answer.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}
+
+/** Somebody with no office asking for one. */
+export class CreateKpmRequestDto {
+  @ApiProperty({ example: '65b1f0c2a4d3e5f6a7b8c9d0' })
+  @IsMongoId()
+  companyId!: string;
+
+  @ApiProperty({ example: 'Surabaya Branch' })
+  @IsString()
+  @MaxLength(120)
+  branchName!: string;
+
+  @ApiPropertyOptional({ example: 'We have twelve agents already working this area.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
 }

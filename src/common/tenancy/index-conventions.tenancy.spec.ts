@@ -8,6 +8,7 @@ import {
 import { AuthTokenSchema } from '@/modules/auth/auth-token.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
+import { KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { UserSchema } from '@/modules/users/user.schema';
 import { GroupSchema } from '@/modules/org/group.schema';
 import { InviteCodeSchema } from '@/modules/org/invite-code.schema';
@@ -55,6 +56,12 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
   ['companies', CompanySchema, 'a company owns KPMs; it sits above the tenant, not inside one'],
   ['kpms', KpmSchema, 'the tenant record itself — it cannot be scoped to itself'],
   [
+    'kpmRequests',
+    KpmRequestSchema,
+    'a request for a tenant that does not exist: there is nothing to scope it to until it ' +
+      'is approved, and then `createdKpmId` names what it became',
+  ],
+  [
     'authTokens',
     AuthTokenSchema,
     'issued against a global identity before any office is chosen: refresh, email ' +
@@ -94,6 +101,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [JoinRequestSchema, 'JoinRequestSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [MembershipSchema, 'MembershipSchema'],
+  [KpmRequestSchema, 'KpmRequestSchema'],
 ]);
 
 function schemaExportName(schema: Schema): string {

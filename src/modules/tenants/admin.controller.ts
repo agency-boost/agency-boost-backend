@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -9,17 +9,24 @@ import { ImpersonateDto } from '@/modules/auth/auth.dto';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
 import { Company, CompanyDocument } from './company.schema';
 import {
+  ApproveKpmRequestDto,
   AssignOwnerDto,
   AuditQueryDto,
   CreateCompanyDto,
   CreateKpmDto,
+  DeclineKpmRequestDto,
   SetStatusDto,
 } from './tenant.dto';
+import { KpmRequestService } from './kpm-request.service';
 import { TenantService } from './tenant.service';
 
 /**
- * The Super Admin console. Tenant management only — no billing, no tenant business
- * data (ADR-0005).
+ * The Super Admin console.
+ *
+ * Tenant management, plus the aggregate composition counts the overview needs. No
+ * billing, and no office's leads, activity, coaching notes or production — ADR-0011
+ * retook ADR-0005's wider claim once the prototype turned up with headcounts on its
+ * front page.
  */
 @ApiTags('admin (Super Admin)')
 @ApiBearerAuth()
@@ -27,6 +34,7 @@ import { TenantService } from './tenant.service';
 export class AdminController {
   constructor(
     private readonly tenants: TenantService,
+    private readonly kpmRequestService: KpmRequestService,
     private readonly impersonation: ImpersonationService,
     private readonly audit: AuditService,
     @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
@@ -43,6 +51,51 @@ export class AdminController {
   })
   async overview(@Ctx() ctx: RequestContext) {
     return this.tenants.platformOverview(ctx);
+  }
+
+  @Get('kpm-requests')
+  @RequirePermission('kpm_request:read')
+  @ApiOperation({
+    summary: 'The KPM registration queue',
+    description:
+      'Offices somebody has asked for and nobody has decided yet, pending first. The requester is ' +
+      'the proposed Owner \u2014 the prototype writes them as one person with one intent.',
+  })
+  async kpmRequests(@Ctx() ctx: RequestContext) {
+    return this.kpmRequestService.queue(ctx);
+  }
+
+  @Post('kpm-requests/:requestId/approve')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('kpm_request:decide')
+  @ApiOperation({
+    summary: 'Approve a KPM registration',
+    description:
+      'Creates the office and hands it to the person who asked, in one audited operation. The code ' +
+      'is supplied here because it must be unique within the company and a requester cannot know ' +
+      'what is free.',
+  })
+  async approveKpmRequest(
+    @Ctx() ctx: RequestContext,
+    @Param('requestId') requestId: string,
+    @Body() dto: ApproveKpmRequestDto,
+  ) {
+    return this.kpmRequestService.approve(ctx, requestId, dto);
+  }
+
+  @Post('kpm-requests/:requestId/decline')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('kpm_request:decide')
+  @ApiOperation({
+    summary: 'Decline a KPM registration',
+    description: 'Creates nothing. The reason is kept and is the only thing the asker can act on.',
+  })
+  async declineKpmRequest(
+    @Ctx() ctx: RequestContext,
+    @Param('requestId') requestId: string,
+    @Body() dto: DeclineKpmRequestDto,
+  ) {
+    return this.kpmRequestService.decline(ctx, requestId, dto);
   }
 
   @Get('companies')

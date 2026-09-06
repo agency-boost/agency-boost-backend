@@ -21,6 +21,7 @@ describe('AdminController', () => {
     const controller = new AdminController(
       {} as never,
       {} as never,
+      {} as never,
       audit as never,
       companies as never,
     );

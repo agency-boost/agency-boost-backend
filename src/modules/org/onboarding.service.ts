@@ -20,6 +20,15 @@ export interface KpmDirectoryEntry {
   kpmId: string;
   code: string;
   branchName: string;
+  /**
+   * The insurer, named and identified.
+   *
+   * The id travels because somebody whose branch is not on the platform has to say which
+   * company they would belong to, and the directory is the only place a newcomer can
+   * learn which companies exist. It names no office and leaks nothing an outsider could
+   * not read from the list itself.
+   */
+  companyId: string;
   companyName: string;
   city: string | null;
 }
@@ -97,6 +106,7 @@ export class OnboardingService {
       kpmId: String(o._id),
       code: o.code,
       branchName: o.branchName,
+      companyId: o.companyId,
       companyName: nameOf.get(o.companyId) ?? 'Unknown',
       city: o.address,
     }));

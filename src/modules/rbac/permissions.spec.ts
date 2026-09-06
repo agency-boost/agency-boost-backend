@@ -299,6 +299,10 @@ describe('permission matrix', () => {
       // The other door: redeeming a leader's invite skips the search and the approval,
       // and the person redeeming one is by definition in no office yet.
       'join_via_code_link_qr',
+      // The third: asking for an office that does not exist. Somebody whose branch has
+      // never been provisioned cannot find it in the directory, and until 2026-09-06 the
+      // product had no answer for them at all (ADR-0011).
+      'kpm_request:create',
     ];
 
     it('holds only the permissions that let somebody join, and nothing else', () => {
@@ -330,13 +334,17 @@ describe('permission matrix', () => {
 
     /**
      * The mirror image: granted to everyone, deliberately, so there is no negative case
-     * to find. Both are the way into an office — refusing either to somebody outside one
-     * would close the only door.
+     * to find. All three are a way into an office — refusing any of them to somebody
+     * outside one would close a door that is the only one they have.
      */
     const UNIVERSAL_GRANTS: readonly string[] = [
       'kpm:read_directory',
       'kpm_registration:create',
       'join_via_code_link_qr',
+      // Asking for an office that has never existed. The service, not the grant, is what
+      // refuses somebody who already belongs somewhere — a permission cannot express
+      // "unless you already did this".
+      'kpm_request:create',
     ];
 
     const ALL = [

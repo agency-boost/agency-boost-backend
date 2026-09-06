@@ -20,6 +20,10 @@ export const ErrorCode = {
   TENANT_ARCHIVED: 'TENANT_ARCHIVED',
   TENANT_NO_MEMBERSHIP: 'TENANT_NO_MEMBERSHIP',
   TENANT_CODE_TAKEN: 'TENANT_CODE_TAKEN',
+  /** Somebody with an open request asked for a second office. */
+  TENANT_REQUEST_ALREADY_OPEN: 'TENANT_REQUEST_ALREADY_OPEN',
+  /** A KPM request was approved or declined already; the second decision says which. */
+  TENANT_REQUEST_DECIDED: 'TENANT_REQUEST_DECIDED',
 
   // Organisation. The rest of the ORG_* family in the error catalog lands with the task
   // that can actually throw it — a code no path produces is a contract we do not honour.

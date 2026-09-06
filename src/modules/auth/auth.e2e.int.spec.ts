@@ -24,6 +24,8 @@ import { User, UserDocument, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { TenantService } from '@/modules/tenants/tenant.service';
+import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
+import { KpmRequestService } from '@/modules/tenants/kpm-request.service';
 import { AdminController } from '@/modules/tenants/admin.controller';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import {
@@ -79,6 +81,7 @@ describe('auth and admin over HTTP', () => {
           { name: AuthToken.name, schema: AuthTokenSchema },
           { name: Company.name, schema: CompanySchema },
           { name: Kpm.name, schema: KpmSchema },
+          { name: KpmRequest.name, schema: KpmRequestSchema },
           { name: AuditLog.name, schema: AuditLogSchema },
           { name: Notification.name, schema: NotificationSchema },
           { name: NotificationPreferences.name, schema: NotificationPreferencesSchema },
@@ -106,7 +109,7 @@ describe('auth and admin over HTTP', () => {
         { provide: NOTIFICATION_ADAPTERS, useValue: [] },
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         AuditService, NotificationService, PasswordService, RateLimiter,
-        AuthService, ContextResolver, ImpersonationService, TenantService,
+        AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService,
         MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService, ApprovalsService, RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService,
         AuthGuard, PermissionsGuard,
       ],
@@ -195,12 +198,14 @@ describe('auth and admin over HTTP', () => {
       expect(me.body.user.email).toBe('journey@kpm.test');
       expect(me.body.user.pronoun).toBe('they');
       expect(me.body.membership).toBeNull(); // the new-agent state
-      // Three, and every one of them exists so somebody in no office can get into one:
-      // find an office, attach to it, or walk in through a leader's invite. Anything
-      // more would be a grant that outlives the reason for it.
+      // Four, and every one of them exists so somebody in no office can get into one:
+      // find an office, attach to it, walk in through a leader's invite, or — since
+      // 2026-09-06 — ask for an office that has never been provisioned. Anything more
+      // would be a grant that outlives the reason for it.
       expect(me.body.permissions).toEqual([
         'kpm:read_directory',
         'kpm_registration:create',
+        'kpm_request:create',
         'join_via_code_link_qr',
       ]);
     });

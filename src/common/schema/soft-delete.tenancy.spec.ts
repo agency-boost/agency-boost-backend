@@ -8,6 +8,7 @@ import { UserSchema } from '@/modules/users/user.schema';
 import { AuthTokenSchema } from '@/modules/auth/auth-token.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
+import { KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { GroupSchema } from '@/modules/org/group.schema';
 import { InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { JoinRequestSchema } from '@/modules/org/join-request.schema';
@@ -27,6 +28,7 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['users', UserSchema],
   ['companies', CompanySchema],
   ['kpms', KpmSchema],
+  ['kpmRequests', KpmRequestSchema],
   ['assets', AssetSchema],
   ['notifications', NotificationSchema],
   ['notificationPreferences', NotificationPreferencesSchema],
@@ -50,6 +52,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [UserSchema, 'UserSchema'],
   [CompanySchema, 'CompanySchema'],
   [KpmSchema, 'KpmSchema'],
+  [KpmRequestSchema, 'KpmRequestSchema'],
   [AssetSchema, 'AssetSchema'],
   [NotificationSchema, 'NotificationSchema'],
   [NotificationPreferencesSchema, 'NotificationPreferencesSchema'],

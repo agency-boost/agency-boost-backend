@@ -18,6 +18,8 @@ import {
 } from './org.dto';
 import { InviteService } from './invite.service';
 import { ApprovalsService } from './approvals.service';
+import { KpmRequestService } from '@/modules/tenants/kpm-request.service';
+import { CreateKpmRequestDto } from '@/modules/tenants/tenant.dto';
 
 /**
  * Joining an office, from the joiner's side.
@@ -34,6 +36,7 @@ export class OnboardingController {
     private readonly onboarding: OnboardingService,
     private readonly invites: InviteService,
     private readonly approvals: ApprovalsService,
+    private readonly kpmRequests: KpmRequestService,
     private readonly config: ConfigService,
   ) {}
 
@@ -83,6 +86,30 @@ export class OnboardingController {
   })
   async register(@Ctx() ctx: RequestContext, @Body() dto: RegisterKpmDto) {
     return this.onboarding.registerKpm(ctx, dto.kpmId);
+  }
+
+  @Get('kpm-request')
+  @ApiOperation({
+    summary: 'The office you asked for, if you asked for one',
+    description:
+      'Null when you have not. The screen reads this before offering the form, so somebody who has ' +
+      'already asked is told where it stands instead of being invited to ask again.',
+  })
+  async myKpmRequest(@Ctx() ctx: RequestContext) {
+    return this.kpmRequests.mine(ctx);
+  }
+
+  @Post('kpm-request')
+  @RequirePermission('kpm_request:create')
+  @ApiOperation({
+    summary: 'Ask for an office that does not exist yet',
+    description:
+      'For somebody whose branch has never been provisioned: they search the directory, find ' +
+      'nothing, and until now the product had no answer for them (ADR-0011). Refused to anybody ' +
+      'already in an office.',
+  })
+  async askForKpm(@Ctx() ctx: RequestContext, @Body() dto: CreateKpmRequestDto) {
+    return this.kpmRequests.create(ctx, dto);
   }
 
   @Get('leaders')

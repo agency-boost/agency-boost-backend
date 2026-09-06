@@ -68,6 +68,10 @@ export const PERMISSIONS = {
   // because the prototype puts two of them on the overview and nothing else can answer
   // "how big is this platform". Leads, activity, coaching notes and production stay out.
   'platform_metrics:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  // The queue the Superadmin prototype puts on its front page. Reading and deciding are
+  // separate so a future read-only platform role is a grant, not a refactor.
+  'kpm_request:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  'kpm_request:decide': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:read_profile': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
@@ -263,6 +267,11 @@ export const PERMISSIONS = {
   // Attaching yourself to an office. Held by anyone signed in, because the person who
   // needs it is by definition in no office yet — the service refuses a second one.
   'kpm_registration:create': [{ grantee: AUTHENTICATED, scope: 'own' }],
+  // Asking for an office that does not exist. Granted to anybody signed in for the same
+  // reason as attaching to one that does: the asker has no office and therefore no
+  // hierarchy role, so there is no role to grant it to. The service refuses somebody who
+  // already belongs somewhere.
+  'kpm_request:create': [{ grantee: AUTHENTICATED, scope: 'own' }],
   // From here on a membership exists, and `pending` is the state these are *for*.
   'leader:search_directory': [
     { grantee: SUPER_ADMIN, scope: 'all' },
