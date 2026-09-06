@@ -116,9 +116,15 @@ export class DirectoryService {
     const limit = Math.min(Math.max(query.limit ?? DIRECTORY_PAGE_SIZE, 1), DIRECTORY_MAX_PAGE_SIZE);
 
     const filter: FilterQuery<MembershipDocument> = { ...this.visibility(ctx) };
-    // Removed members are excluded unless asked for by name. The roster's ordinary
-    // question is who is here now; their rows are kept, not hidden.
-    filter.status = query.status ?? { $ne: 'removed' };
+    // **Active only.** The roster's question is who is here now, and somebody still
+    // waiting for a leader is not here yet — they have registered, nothing more.
+    //
+    // This used to be `$ne: 'removed'`, which put pending members in the Directory *and*
+    // counted them under Pending: the same person on two tabs, and a Directory count that
+    // disagreed with its own rows by exactly the number of them. The three tabs are
+    // disjoint populations, as the prototype's `Directory (187) · Pending (14) ·
+    // Removed (3)` implies, and each count now counts what its tab shows.
+    filter.status = query.status ?? 'active';
     if (query.role) filter.role = query.role;
 
     // Cursor rather than offset: an offset skips a row whenever someone joins

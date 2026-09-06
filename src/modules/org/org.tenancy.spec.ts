@@ -1920,6 +1920,45 @@ describe('organisation', () => {
     });
   });
 
+  const directory_list = (c: RequestContext, q = {}) => directory.list(c, q);
+
+  describe('the roster is three disjoint populations (P3.5)', () => {
+    it('the Directory is active only, and each count counts its own tab', async () => {
+      // The bug: the Directory answered `$ne: 'removed'`, so a pending member appeared
+      // there *and* under Pending — the same person on two tabs, and a Directory count
+      // that disagreed with its own rows by exactly the number of them.
+      const root = await join(KPM_A, 'ab');
+      const active = await join(KPM_A, 'agent', root);
+      const waiting = await join(KPM_A, 'agent');
+      await members.updateById(ctx(KPM_A), waiting, { $set: { status: 'pending' } });
+      const gone = await join(KPM_A, 'agent', root);
+      await members.updateById(ctx(KPM_A), gone, { $set: { status: 'removed' } });
+      await hierarchy.refreshCounts(ctx(KPM_A), root);
+
+      const owner = new RequestContext(
+        (await members.findById(ctx(KPM_A), root))!.userId, 'none',
+        {
+          membershipId: root, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+          isKpmOwner: true, isKpmAdmin: false, directCount: 2,
+        },
+      );
+
+      const directory = await directory_list(owner);
+      expect(directory.members.map((m) => m.membershipId).sort()).toEqual([root, active].sort());
+      expect(directory.counts).toEqual({ directory: 2, pending: 1, removed: 1 });
+
+      // Each tab's rows equal its own count, and no member is on two tabs.
+      const pending = await directory_list(owner, { status: 'pending' as const });
+      const removed = await directory_list(owner, { status: 'removed' as const });
+      expect(pending.members).toHaveLength(pending.counts.pending);
+      expect(removed.members).toHaveLength(removed.counts.removed);
+
+      const ids = [...directory.members, ...pending.members, ...removed.members]
+        .map((m) => m.membershipId);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+  });
+
   describe('the tree (P3-T8)', () => {
     async function asMember(
       membershipId: string,
