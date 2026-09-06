@@ -12,6 +12,7 @@ import { JoinRequest, JoinRequestSchema } from './join-request.schema';
 import { OnboardingService } from './onboarding.service';
 import { InviteService } from './invite.service';
 import { ApprovalsService } from './approvals.service';
+import { AdminDelegationService } from './admin-delegation.service';
 import { Group, GroupSchema } from './group.schema';
 import { GroupService } from './group.service';
 import { OrgTreeService, ORG_TREE_MAX_NODES } from './org-tree.service';
@@ -65,6 +66,7 @@ describe('organisation', () => {
   let removals: RemovalService;
   let tree: OrgTreeService;
   let groups: GroupService;
+  let delegation: AdminDelegationService;
   let sent: { userId?: string; templateId: string; payload?: Record<string, unknown> }[];
   let clock: MovableClock;
   let users: ReturnType<typeof userModel>;
@@ -153,6 +155,15 @@ describe('organisation', () => {
       members,
       users as never,
       new AuditService(mongoose.model(AuditLog.name) as never),
+      clock,
+    );
+
+    delegation = new AdminDelegationService(
+      members,
+      historyModel as never,
+      users as never,
+      new AuditService(mongoose.model(AuditLog.name) as never),
+      notifications as never,
       clock,
     );
 
@@ -1318,6 +1329,211 @@ describe('organisation', () => {
         const theirs = await join(KPM_B, 'agent');
         await expect(approvals.tag(abCtx, theirs)).rejects.toMatchObject({ code: 'NOT_FOUND' });
         expect((await approvals.untagged(abCtx)).map((p) => p.membershipId)).not.toContain(theirs);
+      });
+    });
+  });
+
+  describe('KPM Admin delegation (P3-T10)', () => {
+    async function asMember(
+      membershipId: string,
+      over: Partial<{ isKpmOwner: boolean; isKpmAdmin: boolean }> = {},
+    ) {
+      const row = await members.findById(ctx(KPM_A), membershipId);
+      return new RequestContext(row!.userId, 'none', {
+        membershipId,
+        kpmId: KPM_A,
+        hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
+        status: 'active',
+        isKpmOwner: over.isKpmOwner ?? false,
+        isKpmAdmin: over.isKpmAdmin ?? false,
+        directCount: row!.directCounts?.total ?? 0,
+      });
+    }
+
+    let root: string;
+    let ab: string;
+    let agent: string;
+    let owner: RequestContext;
+
+    beforeEach(async () => {
+      root = await join(KPM_A, 'ab');
+      ab = await join(KPM_A, 'ab', root);
+      agent = await join(KPM_A, 'agent', ab);
+      await hierarchy.refreshCounts(ctx(KPM_A), root);
+      await hierarchy.refreshCounts(ctx(KPM_A), ab);
+      owner = await asMember(root, { isKpmOwner: true });
+    });
+
+    describe('AC-2: admin rights are independent of hierarchy role', () => {
+      it('gives them to an AB with a unit, and touches neither', async () => {
+        const before = await members.findById(ctx(KPM_A), ab);
+        const [granted] = await delegation.grant(owner, ab);
+
+        expect(granted).toMatchObject({ membershipId: ab, role: 'ab' });
+        const after = await members.findById(ctx(KPM_A), ab);
+        expect(after!.role).toBe('ab');
+        expect(after!.leaderId).toBe(before!.leaderId);
+        expect(after!.directCounts.total).toBe(before!.directCounts.total);
+      });
+
+      it('gives them to an agent, who is still an agent', async () => {
+        await delegation.grant(owner, agent);
+        expect((await members.findById(ctx(KPM_A), agent))!.role).toBe('agent');
+      });
+
+      it('changing a role afterwards leaves the admin rights alone', async () => {
+        await delegation.grant(owner, agent);
+        await roles.change(owner, agent, 'aab', 'Ready to lead');
+
+        const after = await members.findById(ctx(KPM_A), agent);
+        expect(after!.role).toBe('aab');
+        expect(after!.adminAccess.isKpmAdmin).toBe(true);
+      });
+
+      it('and revoking them leaves the role alone', async () => {
+        await delegation.grant(owner, ab);
+        await delegation.revoke(owner, ab);
+        expect((await members.findById(ctx(KPM_A), ab))!.role).toBe('ab');
+      });
+    });
+
+    describe('AC-3: both parties are recorded', () => {
+      it('writes who granted it and when, and reads the name back', async () => {
+        const [granted] = await delegation.grant(owner, ab);
+        expect(granted.grantedAt).toBeTruthy();
+        expect(granted.grantedByName).toBeTruthy();
+
+        const row = await members.findById(ctx(KPM_A), ab);
+        expect(row!.adminAccess.grantedByUserId).toBe(owner.userId);
+      });
+
+      it('appends a history event naming actor and target, and closes the last one', async () => {
+        await delegation.grant(owner, ab);
+        await delegation.revoke(owner, ab);
+
+        const events = await mongoose
+          .model(MembershipHistory.name)
+          .find({ membershipId: ab, eventType: { $in: ['admin_granted', 'admin_revoked'] } })
+          .sort({ validFrom: 1 });
+
+        expect(events.map((e) => e.get('eventType'))).toEqual(['admin_granted', 'admin_revoked']);
+        expect(events.every((e) => e.get('actorMembershipId') === root)).toBe(true);
+        // Append-only: only the newest edge is open.
+        expect(events.filter((e) => e.get('validTo') === null)).toHaveLength(1);
+      });
+
+      it('tells the person, both ways', async () => {
+        const userId = (await members.findById(ctx(KPM_A), ab))!.userId;
+        sent = [];
+        await delegation.grant(owner, ab);
+        await delegation.revoke(owner, ab);
+
+        const notes = sent.filter((n) => n.templateId === 'member.admin_access_changed');
+        expect(notes).toHaveLength(2);
+        expect(notes.every((n) => n.userId === userId)).toBe(true);
+        expect(notes.map((n) => n.payload?.granted)).toEqual([true, false]);
+      });
+    });
+
+    describe('the list', () => {
+      it('is empty before anybody is granted anything', async () => {
+        expect(await delegation.list(owner)).toEqual([]);
+      });
+
+      it('shows an Admin the list, read-only', async () => {
+        await delegation.grant(owner, ab);
+        const asAdmin = await asMember(ab, { isKpmAdmin: true });
+
+        const seen = await delegation.list(asAdmin);
+        expect(seen.map((a) => a.membershipId)).toEqual([ab]);
+        // Knowing who administers the office is not a power. Taking it away is.
+        expect(seen[0].canRevoke).toBe(false);
+      });
+
+      it('never offers the Owner their own row to revoke', async () => {
+        await delegation.grant(owner, root);
+        const listed = await delegation.list(owner);
+        expect(listed.find((a) => a.membershipId === root)!.canRevoke).toBe(false);
+        expect(listed.find((a) => a.membershipId !== root)).toBeUndefined();
+      });
+
+      it('drops somebody once they are removed from the office', async () => {
+        await delegation.grant(owner, ab);
+        await removals.remove(owner, ab, {
+          confirmation: 'REMOVE',
+          subtree: { action: 'orphan' },
+        });
+        expect(await delegation.list(owner)).toEqual([]);
+      });
+
+      it('never shows another office admins', async () => {
+        const theirRoot = await join(KPM_B, 'ab');
+        const theirOwner = new RequestContext(
+          (await members.findById(ctx(KPM_B), theirRoot))!.userId,
+          'none',
+          {
+            membershipId: theirRoot, kpmId: KPM_B, hierarchyRole: 'ab', status: 'active',
+            isKpmOwner: true, isKpmAdmin: false, directCount: 0,
+          },
+        );
+        await delegation.grant(theirOwner, theirRoot);
+        expect(await delegation.list(owner)).toEqual([]);
+      });
+    });
+
+    describe('what granting refuses', () => {
+      it('refuses somebody who already has it', async () => {
+        await delegation.grant(owner, ab);
+        await expect(delegation.grant(owner, ab)).rejects.toMatchObject({
+          code: 'ORG_ALREADY_ADMIN',
+        });
+      });
+
+      it('refuses somebody who has not joined yet', async () => {
+        const waiting = await join(KPM_A, 'agent');
+        await members.updateById(ctx(KPM_A), waiting, { $set: { status: 'pending' } });
+        await expect(delegation.grant(owner, waiting)).rejects.toMatchObject({
+          code: 'ORG_ADMIN_TARGET_NOT_ACTIVE',
+        });
+      });
+
+      it('refuses somebody who has been removed', async () => {
+        await removals.remove(owner, agent, { confirmation: 'REMOVE' });
+        await expect(delegation.grant(owner, agent)).rejects.toMatchObject({
+          code: 'NOT_FOUND',
+        });
+      });
+
+      it('never reaches another office member', async () => {
+        const theirs = await join(KPM_B, 'agent');
+        await expect(delegation.grant(owner, theirs)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(delegation.revoke(owner, theirs)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      });
+    });
+
+    describe('what revoking refuses', () => {
+      it('refuses somebody who does not have it', async () => {
+        await expect(delegation.revoke(owner, agent)).rejects.toMatchObject({
+          code: 'ORG_NOT_AN_ADMIN',
+        });
+      });
+
+      it('refuses the Owner their own access — transferring the office is the operation', async () => {
+        await delegation.grant(owner, root);
+        await expect(delegation.revoke(owner, root)).rejects.toMatchObject({
+          code: 'PERM_OWNER_ONLY',
+        });
+        expect((await members.findById(ctx(KPM_A), root))!.adminAccess.isKpmAdmin).toBe(true);
+      });
+    });
+
+    it('refuses every surface to somebody in no office', async () => {
+      const nowhere = new RequestContext('u-new', 'none', null);
+      await expect(delegation.list(nowhere)).rejects.toMatchObject({
+        code: 'TENANT_NO_MEMBERSHIP',
+      });
+      await expect(delegation.grant(nowhere, ab)).rejects.toMatchObject({
+        code: 'TENANT_NO_MEMBERSHIP',
       });
     });
   });

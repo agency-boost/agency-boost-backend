@@ -49,6 +49,7 @@ import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { InviteService } from '@/modules/org/invite.service';
 import { ApprovalsService } from '@/modules/org/approvals.service';
 import { Group, GroupSchema } from '@/modules/org/group.schema';
+import { AdminDelegationService } from '@/modules/org/admin-delegation.service';
 import { GroupService } from '@/modules/org/group.service';
 import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { RemovalService } from '@/modules/org/removal.service';
@@ -125,6 +126,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     RemovalService,
     OrgTreeService,
     GroupService,
+    AdminDelegationService,
   ],
   exports: [Clock, AuditService],
 })

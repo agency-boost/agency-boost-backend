@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { DirectoryService } from './directory.service';
+import { AdminDelegationService } from './admin-delegation.service';
 import { GroupService } from './group.service';
 import { OrgTreeService } from './org-tree.service';
 import { ChangeRoleDto, DirectoryQueryDto, GroupDto, RemoveMemberDto, TagMemberDto } from './org.dto';
@@ -27,6 +28,7 @@ export class OrgController {
     private readonly removals: RemovalService,
     private readonly tree: OrgTreeService,
     private readonly groups: GroupService,
+    private readonly admins: AdminDelegationService,
   ) {}
 
   @Get('my-team')
@@ -114,6 +116,44 @@ export class OrgController {
   })
   async orgTree(@Ctx() ctx: RequestContext) {
     return this.tree.read(ctx);
+  }
+
+  @Get('admins')
+  @RequirePermission('kpm_admin:list')
+  @ApiOperation({
+    summary: 'Who administers this office',
+    description:
+      'Readable by the Owner and by Admins — knowing who else administers the office ' +
+      'is not a power, and hiding it would make the nav lie. Each row says whether the ' +
+      'reader may revoke it.',
+  })
+  async listAdmins(@Ctx() ctx: RequestContext) {
+    return this.admins.list(ctx);
+  }
+
+  @Post(':membershipId/admin')
+  @RequirePermission('kpm_admin:grant')
+  @ApiOperation({
+    summary: 'Give somebody admin access',
+    description:
+      'Owner only. An Admin attempting it is refused with PERM_OWNER_ONLY rather than ' +
+      'a flat PERM_DENIED — they are told the Owner reserved it. Admin rights are ' +
+      'orthogonal to hierarchy role: an AB with a unit of forty can hold them.',
+  })
+  async grantAdmin(@Ctx() ctx: RequestContext, @Param('membershipId') membershipId: string) {
+    return this.admins.grant(ctx, membershipId);
+  }
+
+  @Delete(':membershipId/admin')
+  @RequirePermission('kpm_admin:revoke')
+  @ApiOperation({
+    summary: 'Take admin access away',
+    description:
+      'Owner only. The Owner’s own access comes from being the Owner, not from a ' +
+      'grant, and cannot be revoked — transferring the office is the operation for that.',
+  })
+  async revokeAdmin(@Ctx() ctx: RequestContext, @Param('membershipId') membershipId: string) {
+    return this.admins.revoke(ctx, membershipId);
   }
 
   @Get('groups')

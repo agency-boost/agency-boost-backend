@@ -40,6 +40,7 @@ import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { InviteService } from '@/modules/org/invite.service';
 import { ApprovalsService } from '@/modules/org/approvals.service';
 import { Group, GroupSchema } from '@/modules/org/group.schema';
+import { AdminDelegationService } from '@/modules/org/admin-delegation.service';
 import { GroupService } from '@/modules/org/group.service';
 import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { RemovalService } from '@/modules/org/removal.service';
@@ -106,7 +107,7 @@ describe('auth and admin over HTTP', () => {
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService,
-        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService, ApprovalsService, RoleChangeService, RemovalService, OrgTreeService, GroupService,
+        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService, ApprovalsService, RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService,
         AuthGuard, PermissionsGuard,
       ],
     }).compile();
@@ -1409,6 +1410,150 @@ describe('auth and admin over HTTP', () => {
         .send({ groupIds: 'not-an-array', isCoreLeader: false }).expect(400);
       await api().put(`/api/v1/members/${ownerMembershipId}/tags`).set(asOwner)
         .send({ groupIds: [], isCoreLeader: 'yes' }).expect(400);
+    });
+  });
+
+  describe('KPM Admin delegation, over HTTP (P3-T10)', () => {
+    async function office() {
+      const sa = await makeUser(`sa-del-${Math.random()}@agencyboost.test`, 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const owner = await makeUser(`owner-del-${Math.random()}@kpm.test`);
+
+      const company = await api().post('/api/v1/admin/companies').set(auth)
+        .send({ name: `Insurer ${Math.random()}`, slug: `d${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
+        .expect(201);
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({
+          companyId: String(company.body._id),
+          code: `${Math.floor(Math.random() * 9000) + 1000}`,
+          branchName: 'Delegation Branch',
+        })
+        .expect(201);
+      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
+        .set(auth).send({ userId: owner.id }).expect(200);
+
+      const asOwner = { Authorization: `Bearer ${owner.accessToken}` };
+      const roster = await api().get('/api/v1/members').set(asOwner).expect(200);
+      return {
+        kpmId: String(kpm.body._id),
+        asOwner,
+        ownerMembershipId: String(roster.body.members[0].membershipId),
+      };
+    }
+
+    async function joins(kpmId: string, tagger: Record<string, string>) {
+      const email = `del-${Math.random()}@kpm.test`;
+      const user = await makeUser(email);
+      const as = { Authorization: `Bearer ${user.accessToken}` };
+      await api().post('/api/v1/join/kpm').set(as).send({ kpmId }).expect(200);
+      const pool = await api().get('/api/v1/join/untagged').set(tagger).expect(200);
+      const mine = pool.body.find((row: { email: string }) => row.email === email);
+      await api().post(`/api/v1/join/untagged/${mine.membershipId}`).set(tagger).expect(200);
+      return { as, membershipId: String(mine.membershipId) };
+    }
+
+    it('routes /members/admins to the list, not to a member called "admins"', async () => {
+      const { asOwner } = await office();
+      const res = await api().get('/api/v1/members/admins').set(asOwner).expect(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it('AC-2: grants to an AB with a unit, and touches neither role nor unit', async () => {
+      const { kpmId, asOwner } = await office();
+      const them = await joins(kpmId, asOwner);
+      await api().patch(`/api/v1/members/${them.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'aab' }).expect(200);
+      await joins(kpmId, them.as);
+
+      const before = await api().get(`/api/v1/members/${them.membershipId}`).set(asOwner).expect(200);
+      const granted = await api().post(`/api/v1/members/${them.membershipId}/admin`)
+        .set(asOwner).expect(201);
+
+      expect(granted.body[0]).toMatchObject({ membershipId: them.membershipId, role: 'aab' });
+      const after = await api().get(`/api/v1/members/${them.membershipId}`).set(asOwner).expect(200);
+      expect(after.body.role).toBe(before.body.role);
+      expect(after.body.directCount).toBe(before.body.directCount);
+      expect(after.body.isKpmAdmin).toBe(true);
+    });
+
+    it('AC-1: an Admin is refused with PERM_OWNER_ONLY, not a flat PERM_DENIED', async () => {
+      const { kpmId, asOwner } = await office();
+      const them = await joins(kpmId, asOwner);
+      const other = await joins(kpmId, asOwner);
+      await api().post(`/api/v1/members/${them.membershipId}/admin`).set(asOwner).expect(201);
+
+      const granting = await api().post(`/api/v1/members/${other.membershipId}/admin`)
+        .set(them.as).expect(403);
+      expect(granting.body.error.code).toBe('PERM_OWNER_ONLY');
+      expect(granting.body.error.details.permission).toBe('kpm_admin:grant');
+
+      const revoking = await api().delete(`/api/v1/members/${them.membershipId}/admin`)
+        .set(them.as).expect(403);
+      expect(revoking.body.error.code).toBe('PERM_OWNER_ONLY');
+
+      // They may still read the list, and every row says they cannot act on it.
+      const listed = await api().get('/api/v1/members/admins').set(them.as).expect(200);
+      expect(listed.body).toHaveLength(1);
+      expect(listed.body[0].canRevoke).toBe(false);
+    });
+
+    it('refuses an agent with PERM_DENIED — they are not missing owner-ness', async () => {
+      // The distinction the guard draws: an Admin is told the Owner reserved it, an
+      // agent is told this is not for them at all.
+      const { kpmId, asOwner } = await office();
+      const them = await joins(kpmId, asOwner);
+
+      const listed = await api().get('/api/v1/members/admins').set(them.as).expect(403);
+      expect(listed.body.error.code).toBe('PERM_DENIED');
+    });
+
+    it('revokes, and the person keeps their place in the office', async () => {
+      const { kpmId, asOwner } = await office();
+      const them = await joins(kpmId, asOwner);
+      await api().post(`/api/v1/members/${them.membershipId}/admin`).set(asOwner).expect(201);
+
+      const after = await api().delete(`/api/v1/members/${them.membershipId}/admin`)
+        .set(asOwner).expect(200);
+      expect(after.body).toEqual([]);
+
+      const still = await api().get(`/api/v1/members/${them.membershipId}`).set(asOwner).expect(200);
+      expect(still.body.status).toBe('active');
+      expect(still.body.isKpmAdmin).toBe(false);
+    });
+
+    it('refuses the Owner their own access — transferring the office is the operation', async () => {
+      const { asOwner, ownerMembershipId } = await office();
+      await api().post(`/api/v1/members/${ownerMembershipId}/admin`).set(asOwner).expect(201);
+
+      const res = await api().delete(`/api/v1/members/${ownerMembershipId}/admin`)
+        .set(asOwner).expect(403);
+      expect(res.body.error.code).toBe('PERM_OWNER_ONLY');
+    });
+
+    it('refuses granting twice, and revoking somebody who never had it', async () => {
+      const { kpmId, asOwner } = await office();
+      const them = await joins(kpmId, asOwner);
+
+      await api().post(`/api/v1/members/${them.membershipId}/admin`).set(asOwner).expect(201);
+      const twice = await api().post(`/api/v1/members/${them.membershipId}/admin`)
+        .set(asOwner).expect(409);
+      expect(twice.body.error.code).toBe('ORG_ALREADY_ADMIN');
+
+      const other = await joins(kpmId, asOwner);
+      const never = await api().delete(`/api/v1/members/${other.membershipId}/admin`)
+        .set(asOwner).expect(409);
+      expect(never.body.error.code).toBe('ORG_NOT_AN_ADMIN');
+    });
+
+    it('never reaches another office member', async () => {
+      const mine = await office();
+      const theirs = await office();
+      const target = await joins(theirs.kpmId, theirs.asOwner);
+
+      await api().post(`/api/v1/members/${target.membershipId}/admin`)
+        .set(mine.asOwner).expect(404);
+      expect((await api().get('/api/v1/members/admins').set(mine.asOwner).expect(200)).body)
+        .toEqual([]);
     });
   });
 

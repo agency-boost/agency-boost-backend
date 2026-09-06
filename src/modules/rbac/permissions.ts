@@ -291,6 +291,23 @@ export function scopeFor(ctx: RequestContext, permission: Permission): Scope | n
   return widest;
 }
 
+/**
+ * Is this a power the office's Owner keeps to themselves?
+ *
+ * True when no tenant grantee but `KPM_OWNER` appears — admin delegation, ownership
+ * transfer, branch info. It lets a refusal say *which* wall was hit: an Admin denied one
+ * of these is not missing a role, they are being told the Owner reserved it. Derived
+ * from the grant list rather than a second list of "owner things", which would drift.
+ */
+export function isOwnerReserved(permission: Permission): boolean {
+  const grants = PERMISSIONS[permission] as readonly Grant[];
+  const tenantGrantees = grants.filter((g) => g.grantee.kind !== 'platform');
+  return (
+    tenantGrantees.length > 0 &&
+    tenantGrantees.every((g) => g.grantee.kind === 'tenant' && g.grantee.role === 'kpm_owner')
+  );
+}
+
 export function can(ctx: RequestContext, permission: Permission): boolean {
   return scopeFor(ctx, permission) !== null;
 }

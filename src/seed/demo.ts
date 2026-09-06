@@ -148,6 +148,9 @@ async function main(): Promise<void> {
     opts: {
       status?: 'active' | 'pending' | 'removed';
       isKpmAdmin?: boolean;
+      grantedByUserId?: string;
+      /** Backdates a grant, so "Admin since" reads as a date rather than as today. */
+      adminSinceDaysAgo?: number;
       /** Backdates a removal, so the Removed tab does not read as though it happened today. */
       removedDaysAgo?: number;
     } = {},
@@ -191,8 +194,15 @@ async function main(): Promise<void> {
       joinedAt: status === 'pending' ? null : clock.now(),
       removedAt: status === 'removed' ? daysAgo(opts.removedDaysAgo ?? 0) : null,
       recruitedByMembershipId: leaderId,
+      // A grant nobody made and nobody dated reads as a bug on Manage KPM admins, so
+      // the seed records both — the Owner, months ago.
       adminAccess: opts.isKpmAdmin
-        ? { isKpmAdmin: true, grantedByUserId: null, grantedAt: clock.now(), revokedAt: null }
+        ? {
+            isKpmAdmin: true,
+            grantedByUserId: opts.grantedByUserId ?? null,
+            grantedAt: daysAgo(opts.adminSinceDaysAgo ?? 0),
+            revokedAt: null,
+          }
         : { isKpmAdmin: false, grantedByUserId: null, grantedAt: null, revokedAt: null },
     });
 
@@ -287,7 +297,18 @@ async function main(): Promise<void> {
 
   // Admin rights are orthogonal to hierarchy role: this one is an AB as well.
   const adminUser = await user('admin@kpm0417.test', 'Maya Halim');
-  await place(office0417, String(adminUser._id), 'ab', owner, { isKpmAdmin: true });
+  const admin = await place(office0417, String(adminUser._id), 'ab', owner, {
+    isKpmAdmin: true,
+    grantedByUserId: String(ownerUser._id),
+    adminSinceDaysAgo: 234,
+  });
+  if (!(await History.findOne({ membershipId: admin.id, eventType: 'admin_granted' }).exec())) {
+    await History.create({
+      kpmId: id0417, membershipId: admin.id, eventType: 'admin_granted',
+      validFrom: daysAgo(234), validTo: null, actorMembershipId: owner.id,
+      actorUserId: String(ownerUser._id),
+    });
+  }
 
   // An AB who is neither Owner nor Admin, with a unit of their own.
   const abUser = await user('agus@kpm0417.test', 'Agus Prasetyo');
@@ -444,7 +465,8 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
 
   KPM 0417 · BSD City Branch  (${id0417})
     owner@kpm0417.test           demo password 0417    KPM Owner, AB at the root
-    admin@kpm0417.test                                 KPM Admin, and an AB — the two are independent
+    admin@kpm0417.test                                 KPM Admin since Jan 2026, granted by the Owner,
+                                                       and an AB — the two are independent
     agus@kpm0417.test                                  AB with a unit, neither Owner nor Admin
     sari@kpm0417.test                                  AAB leading two agents
     dewi@kpm0417.test                                  AAB leading nobody — the OD-23 case
