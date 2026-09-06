@@ -40,6 +40,14 @@ export interface DirectoryMember {
 export interface DirectoryPage {
   members: DirectoryMember[];
   nextCursor: string | null;
+  /**
+   * How many are in each tab, within what this requester may see.
+   *
+   * The prototype labels its tabs `Directory (187)`, `Pending (14)`, `Removed (3)`
+   * (`KPM_Owner.html:1822-1824`). A count that only reflected the current page would be
+   * wrong on every page but the last, so these are counted, not measured from `members`.
+   */
+  counts: { directory: number; pending: number; removed: number };
 }
 
 export const DIRECTORY_PAGE_SIZE = 25;
@@ -126,9 +134,19 @@ export class DirectoryService {
     });
 
     const page = rows.slice(0, limit);
+    const visible = this.visibility(ctx);
+    const [directory, pending, removed] = await Promise.all([
+      this.members.count(ctx, { ...visible, status: 'active' }),
+      this.members.count(ctx, { ...visible, status: 'pending' }),
+      this.members.count(ctx, { ...visible, status: 'removed' }),
+    ]);
+
     return {
       members: await this.decorate(ctx, page),
       nextCursor: rows.length > limit ? String(page[page.length - 1].agentSeq) : null,
+      // Unfiltered by the search term on purpose: the tab says how many are in that
+      // tab, not how many match what you have typed into a different one.
+      counts: { directory, pending, removed },
     };
   }
 

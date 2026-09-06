@@ -30,6 +30,15 @@ export interface OrgTreeNode {
   layer: number;
   leaderId: string | null;
   directCount: number;
+  /**
+   * The direct reports split by role.
+   *
+   * The prototype's node writes a sentence — *"3 direct agents, 2 AAB"*
+   * (`Group_Overview.html:219-228`) — not a bare number. A total alone cannot be
+   * rendered as that sentence, so the split travels rather than being recomputed from a
+   * second query per node.
+   */
+  directCounts: { ab: number; aab: number; agent: number; total: number };
   subtreeCount: number;
   /** The graph, not the role (OD-23). */
   isLeader: boolean;
@@ -156,6 +165,12 @@ export class OrgTreeService {
         layer: row.depth - rootDepth + 1,
         leaderId: row.leaderId,
         directCount,
+        directCounts: {
+          ab: row.directCounts?.ab ?? 0,
+          aab: row.directCounts?.aab ?? 0,
+          agent: row.directCounts?.agent ?? 0,
+          total: directCount,
+        },
         subtreeCount: row.subtreeCount ?? 0,
         isLeader: directCount > 0,
         isSelf: id === self,
