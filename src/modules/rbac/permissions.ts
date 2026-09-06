@@ -98,9 +98,21 @@ export const PERMISSIONS = {
   ],
 
   // ---- Tenant administration. ----
-  'kpm_admin:grant': [{ grantee: KPM_OWNER, scope: 'own-kpm' }],
-  'kpm_admin:revoke': [{ grantee: KPM_OWNER, scope: 'own-kpm' }],
+  // The Super Admin grants were missing until 2026-09-06, against a matrix that has
+  // always read `all`. An office whose Owner has left is exactly the case a platform
+  // operator exists for, and without these there was no way to restore its administration
+  // — the office was stuck. `isOwnerReserved` filters platform grantees before it decides,
+  // so these do not stop an Admin being refused with `PERM_OWNER_ONLY`; there is a test.
+  'kpm_admin:grant': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+  ],
+  'kpm_admin:revoke': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+  ],
   'kpm_admin:list': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
@@ -179,6 +191,15 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-unit' },
     { grantee: AAB, scope: 'own-unit' },
   ],
+  // Owner and Admin only. Gated on `member:read_profile` until 2026-09-06, which every
+  // member holds — so an agent whose own roster is one row could read every role change
+  // in the office, with names, reasons and the acting leader. The service filters by
+  // `kpmId` and nothing else, so the permission is the only boundary there is.
+  'member:read_role_change_log': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
   'member:remove_from_team': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
@@ -214,8 +235,16 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
   ],
+  // The Owner and an Admin decide anywhere in the office — a request whose leader never
+  // looks is the failure the queue exists to prevent. This matched the matrix nowhere
+  // until 2026-09-06: the code had only the two leader grants, and office-wide approval
+  // worked solely because `assignOwner` happens to make an Owner an AB. An agent
+  // promoted to Owner, or an Admin who is an agent, was refused their own queue.
   'leader_request:approve': [
-    { grantee: AB, scope: 'own-downline' },
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-unit' },
     { grantee: AAB, scope: 'own-unit' },
   ],
 
@@ -261,11 +290,17 @@ export const PERMISSIONS = {
 
   // ---- Own records. ----
   'profile:read_self': [
+    { grantee: SUPER_ADMIN, scope: 'own' },
+    { grantee: KPM_OWNER, scope: 'own' },
+    { grantee: KPM_ADMIN, scope: 'own' },
     { grantee: AB, scope: 'own' },
     { grantee: AAB, scope: 'own' },
     { grantee: AGENT, scope: 'own' },
   ],
   'profile:update_self': [
+    { grantee: SUPER_ADMIN, scope: 'own' },
+    { grantee: KPM_OWNER, scope: 'own' },
+    { grantee: KPM_ADMIN, scope: 'own' },
     { grantee: AB, scope: 'own' },
     { grantee: AAB, scope: 'own' },
     { grantee: AGENT, scope: 'own' },
@@ -345,8 +380,16 @@ function holds(ctx: RequestContext, grant: Grant): boolean {
 
 const SCOPE_ORDER: readonly Scope[] = ['own', 'own-unit', 'own-downline', 'own-kpm', 'all'];
 
-/** When several grants apply, the widest wins. */
+/**
+ * When several grants apply, the widest wins.
+ *
+ * Written without a comparison branch on purpose. Every table below happens to list its
+ * grants widest-first, which made the `a < b` arm unreachable and left this module short
+ * of the 100% branch coverage the ratchet demands of anything that decides access. The
+ * guarantee is unchanged — the result does not depend on the order grants are declared
+ * in — but now nothing here can go untested because of how a table happens to be typed.
+ */
 function wider(a: Scope | null, b: Scope): Scope {
   if (a === null) return b;
-  return SCOPE_ORDER.indexOf(a) >= SCOPE_ORDER.indexOf(b) ? a : b;
+  return SCOPE_ORDER[Math.max(SCOPE_ORDER.indexOf(a), SCOPE_ORDER.indexOf(b))];
 }

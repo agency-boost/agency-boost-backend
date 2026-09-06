@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { Permission, scopeFor } from '@/modules/rbac/permissions';
 import { NotFoundException } from '@/common/errors/domain.exception';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { MembershipRepository } from './membership.repository';
@@ -56,20 +57,48 @@ export const DIRECTORY_MAX_PAGE_SIZE = 100;
 /**
  * Who this requester may see, as a filter fragment.
  *
- * A tenant admin sees the office; everyone else sees themselves and their downline. It
- * is exported and shared because the roster and the org tree must narrow **identically**
- * — two copies of a visibility rule drift, and the drift is a cross-unit leak rather
- * than a rendering bug. `ancestorIds` makes the downline arm a single indexed lookup on
- * `(kpmId, ancestorIds, status)`.
+ * It is exported and shared because the roster and the org tree must narrow
+ * **identically** — two copies of a visibility rule drift, and the drift is a cross-unit
+ * leak rather than a rendering bug.
+ *
+ * **The scope comes from the grant list**, resolved for the permission the caller was
+ * gated on, so the matrix column is the implementation rather than a description of one.
+ * It was not, until 2026-09-06: this returned self-plus-whole-downline for everybody who
+ * was not a tenant admin, and no caller passed a scope because it took none.
+ *
+ * That was invisible for as long as an AAB's reports were all agents, because then their
+ * unit *was* their downline. Nothing forbids an AAB leading an AAB, and the moment one
+ * does, an AAB documented at `own-unit` in four separate matrix rows was reading their
+ * grandchildren. There is a test that builds exactly that shape.
  *
  * Somebody with no membership sees nothing, and says so as an impossible filter rather
  * than an absent one — an absent filter would return the office.
  */
-export function visibleTo(ctx: RequestContext): FilterQuery<MembershipDocument> {
+export function visibleTo(
+  ctx: RequestContext,
+  permission: Permission = 'member:read_profile',
+): FilterQuery<MembershipDocument> {
   if (ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin || ctx.isSuperAdmin) return {};
   const self = ctx.membershipId;
   if (!self) return { _id: null };
-  return { $or: [{ _id: self }, { ancestorIds: self }] };
+
+  switch (scopeFor(ctx, permission)) {
+    case 'all':
+    case 'own-kpm':
+      return {};
+    // `ancestorIds` makes the downline arm a single indexed lookup on
+    // `(kpmId, ancestorIds, status)`.
+    case 'own-downline':
+      return { $or: [{ _id: self }, { ancestorIds: self }] };
+    case 'own-unit':
+      return { $or: [{ _id: self }, { leaderId: self }] };
+    case 'own':
+      return { _id: self };
+    // No grant at all. The guard refuses these before a service is reached; a filter
+    // that fails closed is the backstop for the day one is not behind the guard.
+    default:
+      return { _id: null };
+  }
 }
 
 /**
@@ -104,12 +133,13 @@ export class DirectoryService {
   /**
    * What this requester may see.
    *
-   * A tenant admin — Owner or KPM Admin — sees everyone. Anyone else sees themselves
-   * and their downline, expressed as an `$or` so the single indexed `ancestorIds`
-   * lookup still does the work.
+   * A tenant admin — Owner or KPM Admin — sees everyone. Below that it is the scope
+   * `member:read_profile` grants — the permission the roster route is gated on, and
+   * documented at the same scopes as `member:list_directory`: an AB their downline, an AAB their own unit. Both
+   * arms are an `$or` so an indexed lookup still does the work.
    */
   private visibility(ctx: RequestContext): FilterQuery<MembershipDocument> {
-    return visibleTo(ctx);
+    return visibleTo(ctx, 'member:read_profile');
   }
 
   async list(ctx: RequestContext, query: DirectoryQuery = {}): Promise<DirectoryPage> {

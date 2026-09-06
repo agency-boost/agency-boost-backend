@@ -110,6 +110,7 @@ export class ApprovalsService {
     const rows = await this.requests
       .find({
         kpmId: ctx.kpmId,
+        deletedAt: null,
         status: 'pending',
         ...(this.isTenantAdmin(ctx)
           ? {}
@@ -270,9 +271,13 @@ export class ApprovalsService {
       requestId,
     });
 
+    // `openRequest` has already proved this row is in `ctx.kpmId`, so the tenant clause
+    // changes no outcome today. It is here because a write addressed by `_id` alone is
+    // one refactor away from being reachable without that proof, and the invariant is
+    // that a tenant-scoped write carries its tenant (`domain-invariants.md` §1).
     await this.requests
       .updateOne(
-        { _id: requestId },
+        { _id: requestId, kpmId: ctx.kpmId },
         {
           $set: {
             status: 'approved',
@@ -300,7 +305,7 @@ export class ApprovalsService {
 
     await this.requests
       .updateOne(
-        { _id: requestId },
+        { _id: requestId, kpmId: ctx.kpmId },
         {
           $set: {
             status: 'declined',
@@ -449,7 +454,12 @@ export class ApprovalsService {
     // that names their leader. Nothing is overwritten.
     await this.history
       .updateMany(
-        { membershipId: String(member._id), eventType: 'joined', validTo: null },
+        {
+          kpmId: ctx.kpmId,
+          membershipId: String(member._id),
+          eventType: 'joined',
+          validTo: null,
+        },
         { $set: { validTo: this.clock.now() } },
       )
       .exec();

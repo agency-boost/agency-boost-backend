@@ -106,7 +106,7 @@ export class OrgTreeService {
 
     const rows = await this.members.find(
       ctx,
-      { ...visibleTo(ctx), status: 'active' },
+      { ...visibleTo(ctx, 'org_tree:read'), status: 'active' },
       { sort: { agentSeq: 1 } },
     );
 

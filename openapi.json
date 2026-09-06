@@ -1,0 +1,2055 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/health": {
+      "get": {
+        "operationId": "HealthController_live",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/api/health/ready": {
+      "get": {
+        "operationId": "HealthController_ready",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "description": "Always succeeds in shape, even for an address that already exists — confirming that would let anyone enumerate accounts. A verification email follows.",
+        "operationId": "AuthController_register_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Account created; verification sent."
+          }
+        },
+        "summary": "Create an account",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "description": "Rate limited per IP **and** per email — an attacker rotating IPs against one account still burns the per-email budget.",
+        "operationId": "AuthController_login_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Sign in",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "description": "Presenting a token that was already rotated revokes the whole family — the standard signal that a refresh token was stolen.",
+        "operationId": "AuthController_refresh_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Rotate the refresh token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "AuthController_logout_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "summary": "End this session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/verify-email": {
+      "post": {
+        "operationId": "AuthController_verifyEmail_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Consume a verification token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/forgot-password": {
+      "post": {
+        "description": "Always 202, whether or not the address exists.",
+        "operationId": "AuthController_forgotPassword_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgotPasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": ""
+          }
+        },
+        "summary": "Request a password reset",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/reset-password": {
+      "post": {
+        "description": "Revokes every existing session.",
+        "operationId": "AuthController_resetPassword_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Set a new password with a reset token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/change-password": {
+      "post": {
+        "description": "Revokes your other sessions.",
+        "operationId": "AuthController_changePassword_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change your password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "description": "The resolved context: identity, membership, and the permissions held right now. Resolved per request, so a revoked grant disappears immediately.",
+        "operationId": "AuthController_me_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Who am I, and what may I do",
+        "tags": [
+          "auth"
+        ]
+      },
+      "patch": {
+        "operationId": "AuthController_updateMe_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update your own account",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/admin/companies": {
+      "get": {
+        "operationId": "AdminController_listCompanies_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List principal insurers",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      },
+      "post": {
+        "description": "Audited: an insurer is the parent every office inherits its currency, locale and time zone from, so its creation is a platform-level change worth recording.",
+        "operationId": "AdminController_createCompany_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCompanyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a principal insurer",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      }
+    },
+    "/api/v1/admin/tenants": {
+      "get": {
+        "operationId": "AdminController_listTenants_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List every KPM on the platform",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      },
+      "post": {
+        "description": "The only way an office comes into existence — there is no self-service path (ADR-0005). Seeds the per-office settings every prototype screen hardcodes.",
+        "operationId": "AdminController_createTenant_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateKpmDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a KPM",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      }
+    },
+    "/api/v1/admin/tenants/{id}": {
+      "get": {
+        "operationId": "AdminController_readTenant_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read one KPM",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      }
+    },
+    "/api/v1/admin/tenants/{id}/owner": {
+      "patch": {
+        "description": "Name the person by email or by user id. The account must already exist — this promotes an existing platform user; inviting a new one arrives with invitations in Phase 3. Audited with both the outgoing and incoming user.",
+        "operationId": "AdminController_assignOwner_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignOwnerDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Assign or transfer the KPM Owner",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      }
+    },
+    "/api/v1/admin/tenants/{id}/status": {
+      "patch": {
+        "description": "A suspended office refuses its members with TENANT_SUSPENDED, distinct from a permission failure so the UI can explain it.",
+        "operationId": "AdminController_setStatus_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetStatusDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Suspend, reactivate or archive a KPM",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      }
+    },
+    "/api/v1/admin/audit": {
+      "get": {
+        "description": "Defaults to the caller's own tenant. A Super Admin has no tenant, so their default is the platform-level log — provisioning, company creation, impersonation — and `kpmId` narrows it to one office. Anyone else is pinned to their own office whatever they pass.",
+        "operationId": "AdminController_readAudit_v1",
+        "parameters": [
+          {
+            "name": "kpmId",
+            "required": false,
+            "in": "query",
+            "description": "Super Admin only: narrow the log to one office. Omitted reads the platform-level log. Ignored for anyone else, who always reads their own office.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read the audit log",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      }
+    },
+    "/api/v1/admin/impersonate/{userId}": {
+      "post": {
+        "description": "Time-boxed to an hour, reason required, and every action it produces records both the real Super Admin and the person acted as. Refused for another Super Admin — that would erase the attribution the feature depends on.",
+        "operationId": "AdminController_impersonate_v1",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImpersonateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Start a support impersonation session",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      }
+    },
+    "/api/v1/admin/impersonate/end": {
+      "post": {
+        "operationId": "AdminController_endImpersonation_v1",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "End the current impersonation session",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      }
+    },
+    "/api/v1/members/my-team": {
+      "get": {
+        "description": "Each row carries whether you may change that person's role. The rule is a server rule, and sending the answer stops the screen keeping a second copy of it that can drift out of step.",
+        "operationId": "OrgController_myTeam_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The people who report to you",
+        "tags": [
+          "organisation"
+        ]
+      }
+    },
+    "/api/v1/members/{membershipId}/role": {
+      "patch": {
+        "description": "Agent ⇄ AAB is the direct leader's call. Anything involving AB is the Owner's or an Admin's. Nobody moves: a role change is a statement about a person, not a reorganisation. Demoting somebody who still leads people is refused with the count, so the caller knows what has to happen first.",
+        "operationId": "OrgController_changeRole_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeRoleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change somebody's role",
+        "tags": [
+          "organisation"
+        ]
+      }
+    },
+    "/api/v1/members/role-changes": {
+      "get": {
+        "description": "Read from the append-only membership history, which is the only place the before-and-after of a role survives.",
+        "operationId": "OrgController_roleLog_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The role change log",
+        "tags": [
+          "organisation"
+        ]
+      }
+    },
+    "/api/v1/members/{membershipId}": {
+      "delete": {
+        "description": "Requires the literal word REMOVE in the body — the screen's gate is a convenience, this is the control. Nothing is deleted: the row, the agent code and every history event stay with the office. If they still have reports, the body must say where those reports go; there is no default, because a default here silently reorganises somebody else's unit.",
+        "operationId": "OrgController_remove_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveMemberDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove somebody from the office",
+        "tags": [
+          "organisation"
+        ]
+      },
+      "get": {
+        "description": "Someone outside your scope reads as 404 — a 403 would confirm they exist.",
+        "operationId": "OrgController_read_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One member",
+        "tags": [
+          "organisation"
+        ]
+      }
+    },
+    "/api/v1/members/tree": {
+      "get": {
+        "description": "A flat node list plus the ids of its roots. Narrowed exactly as the roster is: a tenant admin sees the office, everybody else sees themselves and their downline. The answer is a **forest** — a root is any visible node whose leader is not also visible, which is the office root plus anybody orphaned by a removal or not yet tagged. Your own leader comes back separately and is not a node, so it cannot be given a layer. Refuses rather than truncates above the cap: a page of a tree is not a tree.",
+        "operationId": "OrgController_orgTree_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The hierarchy, as a graph",
+        "tags": [
+          "organisation"
+        ]
+      }
+    },
+    "/api/v1/members/admins": {
+      "get": {
+        "description": "Readable by the Owner and by Admins — knowing who else administers the office is not a power, and hiding it would make the nav lie. Each row says whether the reader may revoke it.",
+        "operationId": "OrgController_listAdmins_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Who administers this office",
+        "tags": [
+          "organisation"
+        ]
+      }
+    },
+    "/api/v1/members/{membershipId}/admin": {
+      "post": {
+        "description": "Owner only. An Admin attempting it is refused with PERM_OWNER_ONLY rather than a flat PERM_DENIED — they are told the Owner reserved it. Admin rights are orthogonal to hierarchy role: an AB with a unit of forty can hold them.",
+        "operationId": "OrgController_grantAdmin_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Give somebody admin access",
+        "tags": [
+          "organisation"
+        ]
+      },
+      "delete": {
+        "description": "Owner only. The Owner’s own access comes from being the Owner, not from a grant, and cannot be revoked — transferring the office is the operation for that.",
+        "operationId": "OrgController_revokeAdmin_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Take admin access away",
+        "tags": [
+          "organisation"
+        ]
+      }
+    },
+    "/api/v1/members/groups": {
+      "get": {
+        "description": "Tags this office defines for its own organising — a mentoring circle, a task force. Never hierarchy and never access: nothing in scope resolution reads them.",
+        "operationId": "OrgController_listGroups_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office’s informal groups",
+        "tags": [
+          "organisation"
+        ]
+      },
+      "post": {
+        "operationId": "OrgController_createGroup_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a group",
+        "tags": [
+          "organisation"
+        ]
+      }
+    },
+    "/api/v1/members/groups/{groupId}": {
+      "put": {
+        "operationId": "OrgController_updateGroup_v1",
+        "parameters": [
+          {
+            "name": "groupId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rename a group, or hand it to a different owner",
+        "tags": [
+          "organisation"
+        ]
+      },
+      "delete": {
+        "description": "Archived, never deleted, and the tags on the people who were in it stay. The prototype splices the row and strips everybody’s tags in the same breath, so the record that a cohort existed is gone.",
+        "operationId": "OrgController_archiveGroup_v1",
+        "parameters": [
+          {
+            "name": "groupId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Retire a group",
+        "tags": [
+          "organisation"
+        ]
+      }
+    },
+    "/api/v1/members/{membershipId}/tags": {
+      "get": {
+        "operationId": "OrgController_readTags_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "What this person is tagged with",
+        "tags": [
+          "organisation"
+        ]
+      },
+      "put": {
+        "description": "Core Leader gates Strategic Leader Forum co-editing (Phase 14) and nothing else — no hierarchy, no data scope. A group is the same: a label, not a rule.",
+        "operationId": "OrgController_tagMember_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagMemberDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set this person’s groups and Core Leader flag",
+        "tags": [
+          "organisation"
+        ]
+      }
+    },
+    "/api/v1/members": {
+      "get": {
+        "description": "Cursor-paginated by agent code. Filter by role and status, or search by name, email or agent code. Removed members are excluded unless asked for.",
+        "operationId": "OrgController_list_v1",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Name, email or agent code. Case-insensitive.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "role",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "ab",
+                "aab",
+                "agent"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Omitted excludes removed members — the roster asks who is here now.",
+            "schema": {
+              "enum": [
+                "active",
+                "pending",
+                "removed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "The `nextCursor` of the previous page — an agent code.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office roster",
+        "tags": [
+          "organisation"
+        ]
+      }
+    },
+    "/api/v1/members/{membershipId}/reports": {
+      "get": {
+        "description": "One level down. The whole downline is the tree endpoint, not this one.",
+        "operationId": "OrgController_reports_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Direct reports",
+        "tags": [
+          "organisation"
+        ]
+      }
+    },
+    "/api/v1/join/me": {
+      "get": {
+        "description": "Office, leader and any outstanding request. Answers for somebody in no office too — that is a valid state, not an error.",
+        "operationId": "OnboardingController_me_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Where you stand",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/join/kpms": {
+      "get": {
+        "description": "The only cross-tenant read a non-Super-Admin has, and the reason it exists is that otherwise nobody could join. Projection-limited to code, branch name, company and city: no member counts, no production, no owner name.",
+        "operationId": "OnboardingController_kpms_v1",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Office code or branch name. Case-insensitive substring.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Search the office directory",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/join/kpm": {
+      "post": {
+        "description": "Creates a pending membership with no leader — inside the office, in the untagged pool, with no unit-scoped grants at all. A leader still has to take you on.",
+        "operationId": "OnboardingController_register_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterKpmDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Register yourself to an office",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/join/leaders": {
+      "get": {
+        "description": "Everyone in your office holding AB or AAB. By role rather than by the graph: this asks who may take you on, and a new AAB has to be askable to ever get a first report.",
+        "operationId": "OnboardingController_leaders_v1",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Name only, as the prototype searches it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Leaders you can ask",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/join/leader-request": {
+      "post": {
+        "description": "Notifies them; they decide. Asking somebody else replaces the outstanding ask rather than adding a second — two open rows would let two approvers both say yes.",
+        "operationId": "OnboardingController_request_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestLeaderDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Ask a leader to take you",
+        "tags": [
+          "joining an office"
+        ]
+      },
+      "delete": {
+        "operationId": "OnboardingController_cancel_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Withdraw your request",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/join/invites": {
+      "get": {
+        "description": "Revoked and spent ones stay in the list, so you can see what has been out there rather than only what still works.",
+        "operationId": "OnboardingController_listInvites_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The invites you have issued",
+        "tags": [
+          "joining an office"
+        ]
+      },
+      "post": {
+        "description": "Returns the code and the link; a QR is that link rendered. Anyone who redeems it joins your office tagged to you, with no approval — which is why it can carry a use limit and an expiry, and can be revoked.",
+        "operationId": "OnboardingController_issueInvite_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueInviteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Issue an invite",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/join/invites/{inviteId}": {
+      "delete": {
+        "description": "Kills the code, the link and the QR at once — they are one artefact.",
+        "operationId": "OnboardingController_revokeInvite_v1",
+        "parameters": [
+          {
+            "name": "inviteId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Revoke an invite",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/join/invite": {
+      "get": {
+        "description": "Whose unit and which office, so somebody can see what they are accepting before they accept it. Unknown, revoked and expired all answer alike.",
+        "operationId": "OnboardingController_previewInvite_v1",
+        "parameters": [
+          {
+            "name": "code",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "example": "JOR417",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "What an invite is for",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/join/requests": {
+      "get": {
+        "description": "Includes anything routed to you by somebody above — an AB may send an agent into one of their AABs' units, and that AAB is then the one who decides.",
+        "operationId": "OnboardingController_inbox_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Requests waiting on you",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/join/requests/routing": {
+      "get": {
+        "description": "Your own direct AABs, and only those. Empty for an AAB — their reports are agents, so there is no sub-unit below them.",
+        "operationId": "OnboardingController_routing_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Units you may send somebody into",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/join/requests/{requestId}/approve": {
+      "post": {
+        "description": "Returns the inbox as it now stands. Deciding one that was already decided is a 409 naming which way it went — two leaders can have this open at once.",
+        "operationId": "OnboardingController_approve_v1",
+        "parameters": [
+          {
+            "name": "requestId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Approve a request",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/join/requests/{requestId}/decline": {
+      "post": {
+        "description": "They stay registered to the office and may ask somebody else. Declining is not removal, and the reason is sent to them.",
+        "operationId": "OnboardingController_decline_v1",
+        "parameters": [
+          {
+            "name": "requestId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclineRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Decline a request",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/join/untagged": {
+      "get": {
+        "description": "Office-wide, because somebody untagged belongs to nobody yet and so cannot be found by looking down anybody's tree.",
+        "operationId": "OnboardingController_untagged_v1",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Name. Case-insensitive substring.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "People in this office with no leader",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/join/untagged/{membershipId}": {
+      "post": {
+        "description": "No approval from them — the office already admitted them, and being placed under a leader is not a change they have standing to refuse. Somebody who already reports to another leader is refused: moving them is a different operation.",
+        "operationId": "OnboardingController_tag_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add an untagged person to your unit",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/join/redeem": {
+      "post": {
+        "description": "Registers you and tags you to the issuer in one step, with no approval — that is the whole difference from asking a leader. No join request is created: one would sit in their inbox asking them to approve something that already happened.",
+        "operationId": "OnboardingController_redeem_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeemInviteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Redeem an invite",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "AgencyBoost API",
+    "description": "Multi-tenant SaaS for insurance agency offices (KPM)",
+    "version": "1.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http"
+      }
+    },
+    "schemas": {
+      "RegisterDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "rina@kpm0417.test"
+          },
+          "password": {
+            "type": "string",
+            "example": "correct horse battery",
+            "minLength": 10
+          },
+          "fullName": {
+            "type": "string",
+            "example": "Rina Wijaya"
+          }
+        },
+        "required": [
+          "email",
+          "password",
+          "fullName"
+        ]
+      },
+      "LoginDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "owner@kpm0417.test"
+          },
+          "password": {
+            "type": "string",
+            "example": "demo password 0417"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
+      },
+      "RefreshDto": {
+        "type": "object",
+        "properties": {
+          "refreshToken": {
+            "type": "string",
+            "description": "Only for non-browser clients. A browser sends the httpOnly cookie set at login and should omit this entirely."
+          }
+        }
+      },
+      "TokenDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Send as `Authorization: Bearer <token>`. Expires in 15 minutes."
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "ForgotPasswordDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "owner@kpm0417.test"
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "ResetPasswordDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "From the password-reset email."
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 10
+          }
+        },
+        "required": [
+          "token",
+          "newPassword"
+        ]
+      },
+      "ChangePasswordDto": {
+        "type": "object",
+        "properties": {
+          "currentPassword": {
+            "type": "string"
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 10
+          }
+        },
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ]
+      },
+      "UpdateProfileDto": {
+        "type": "object",
+        "properties": {
+          "fullName": {
+            "type": "string",
+            "example": "Rina Wijaya"
+          },
+          "preferredName": {
+            "type": "string",
+            "example": "Rina"
+          },
+          "pronoun": {
+            "type": "string",
+            "enum": [
+              "she",
+              "he",
+              "they"
+            ],
+            "description": "Yours to set. It appears in the coaching commitment sentence your leader reads."
+          }
+        }
+      },
+      "CreateCompanyDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Prudential"
+          },
+          "slug": {
+            "type": "string",
+            "example": "prudential"
+          }
+        },
+        "required": [
+          "name",
+          "slug"
+        ]
+      },
+      "CreateKpmDto": {
+        "type": "object",
+        "properties": {
+          "companyId": {
+            "type": "string",
+            "description": "Company id from GET /admin/companies"
+          },
+          "code": {
+            "type": "string",
+            "example": "0417",
+            "description": "Unique within the company. Prefixes agent codes."
+          },
+          "branchName": {
+            "type": "string",
+            "example": "BSD City Branch"
+          },
+          "address": {
+            "type": "string",
+            "example": "Jl. Raya Serpong, Tangerang"
+          },
+          "contactPhone": {
+            "type": "string",
+            "example": "+622112345678"
+          },
+          "timezone": {
+            "type": "string",
+            "example": "Asia/Jakarta",
+            "description": "Canonical for every day boundary in this office. Inherited from the company if omitted."
+          }
+        },
+        "required": [
+          "companyId",
+          "code",
+          "branchName"
+        ]
+      },
+      "AssignOwnerDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "owner@kpm0417.test",
+            "description": "The account to make Owner. It must already exist — create one at /register or with POST /auth/register. Email is what a Super Admin normally knows."
+          },
+          "userId": {
+            "type": "string",
+            "description": "Alternative to email, for when you already have the id."
+          }
+        }
+      },
+      "SetStatusDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "suspended",
+              "archived"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "example": "unpaid invoice"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "ImpersonateDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Recorded in the audit log. Required.",
+            "example": "support ticket 42"
+          },
+          "durationMinutes": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 60,
+            "default": 60
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "ChangeRoleDto": {
+        "type": "object",
+        "properties": {
+          "toRole": {
+            "type": "string",
+            "enum": [
+              "ab",
+              "aab",
+              "agent"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "example": "Ready to bring on their own agents",
+            "description": "Kept in the role change log, which is the only place this can be read back."
+          }
+        },
+        "required": [
+          "toRole"
+        ]
+      },
+      "SubtreeDispositionDto": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "reassign",
+              "orphan"
+            ],
+            "description": "Where the reports of the person being removed go. There is no default: leaving it to the server would be a silent reorganisation of somebody else’s unit."
+          },
+          "toMembershipId": {
+            "type": "string",
+            "description": "Required when action is `reassign`. The membership their reports move to."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "RemoveMemberDto": {
+        "type": "object",
+        "properties": {
+          "confirmation": {
+            "type": "string",
+            "example": "REMOVE",
+            "description": "The literal word REMOVE, trimmed and case-insensitive. Checked here as well as in the screen — a confirmation only the screen enforces is not a confirmation."
+          },
+          "reason": {
+            "type": "string",
+            "example": "Left the industry",
+            "description": "Kept on the removal history event, and sent to them."
+          },
+          "subtree": {
+            "description": "Required when they still have direct reports; refused otherwise.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SubtreeDispositionDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "confirmation"
+        ]
+      },
+      "GroupDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "New Agent Mentoring Circle"
+          },
+          "ownerMembershipId": {
+            "type": "string",
+            "description": "The membership that owns it. Never a name — the prototype stores `ownerName`, which breaks the moment anybody is renamed or two people share one."
+          }
+        },
+        "required": [
+          "name",
+          "ownerMembershipId"
+        ]
+      },
+      "TagMemberDto": {
+        "type": "object",
+        "properties": {
+          "groupIds": {
+            "description": "Every live group this person should be in. Absent ids are removed; tags on retired groups are kept, because they are the record that a cohort existed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "isCoreLeader": {
+            "type": "boolean",
+            "description": "Gates Strategic Leader Forum co-editing (Phase 14) and nothing else. It grants no hierarchy and no data scope."
+          }
+        },
+        "required": [
+          "groupIds",
+          "isCoreLeader"
+        ]
+      },
+      "RegisterKpmDto": {
+        "type": "object",
+        "properties": {
+          "kpmId": {
+            "type": "string",
+            "description": "From GET /join/kpms."
+          }
+        },
+        "required": [
+          "kpmId"
+        ]
+      },
+      "RequestLeaderDto": {
+        "type": "object",
+        "properties": {
+          "leaderMembershipId": {
+            "type": "string",
+            "description": "From GET /join/leaders."
+          }
+        },
+        "required": [
+          "leaderMembershipId"
+        ]
+      },
+      "IssueInviteDto": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "example": "Hiring push, September",
+            "description": "A note for you. Never shown to whoever redeems it."
+          },
+          "maxUses": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 500,
+            "description": "How many people may use it. Omitted means no ceiling."
+          },
+          "expiresInDays": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 365,
+            "description": "Days until it stops working. Omitted means it runs until revoked."
+          }
+        }
+      },
+      "ApproveRequestDto": {
+        "type": "object",
+        "properties": {
+          "routeToMembershipId": {
+            "type": "string",
+            "description": "One of your own AABs, from GET /join/requests/routing. Omitted adds them to your own unit. Ignored for an AB or AAB requester — a leader is not placed in a unit, they are tagged to you directly."
+          }
+        }
+      },
+      "DeclineRequestDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "example": "Not in my patch — try Sari",
+            "description": "Sent to them. The prototype captures none, which leaves a decline unexplainable."
+          }
+        }
+      },
+      "RedeemInviteDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "JOR417",
+            "description": "From a link, a QR, or read aloud."
+          }
+        },
+        "required": [
+          "code"
+        ]
+      }
+    }
+  }
+}

@@ -164,7 +164,7 @@ export class OnboardingService {
     // An office that is suspended, archived or absent all read the same to an outsider.
     if (!kpm) throw new NotFoundException('KPM');
 
-    const scoped = RequestContext.superAdminInTenant(ctx.userId, kpmId);
+    const scoped = RequestContext.joiningTenant(ctx, kpmId);
     const membership = await this.hierarchy.create(scoped, {
       userId: ctx.userId,
       role: 'agent',

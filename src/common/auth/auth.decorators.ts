@@ -11,8 +11,16 @@ export const REQUIRED_PERMISSION = 'requiredPermission';
 export const RequirePermission = (permission: Permission) =>
   SetMetadata(REQUIRED_PERMISSION, permission);
 
-/** Injects the resolved RequestContext. Never build one by hand in a handler. */
-export const Ctx = createParamDecorator((_data: unknown, ctx: ExecutionContext): RequestContext => {
+/**
+ * Reads the context AuthGuard attached.
+ *
+ * Exported separately from the decorator because `createParamDecorator` keeps its
+ * factory private, and the branch that matters here — a handler reading a context that
+ * was never attached — is a wiring mistake no request can produce once the wiring is
+ * right. It is worth a test precisely because it fires only when somebody is already
+ * confused, and the message is what tells them what they did.
+ */
+export function resolveCtx(_data: unknown, ctx: ExecutionContext): RequestContext {
   const request = ctx.switchToHttp().getRequest<{ context?: RequestContext }>();
   if (!request.context) {
     throw new Error(
@@ -21,4 +29,7 @@ export const Ctx = createParamDecorator((_data: unknown, ctx: ExecutionContext):
     );
   }
   return request.context;
-});
+}
+
+/** Injects the resolved RequestContext. Never build one by hand in a handler. */
+export const Ctx = createParamDecorator(resolveCtx);

@@ -8,6 +8,12 @@ import { UserSchema } from '@/modules/users/user.schema';
 import { AuthTokenSchema } from '@/modules/auth/auth-token.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
+import { GroupSchema } from '@/modules/org/group.schema';
+import { InviteCodeSchema } from '@/modules/org/invite-code.schema';
+import { JoinRequestSchema } from '@/modules/org/join-request.schema';
+import { MembershipHistorySchema } from '@/modules/org/membership-history.schema';
+import { MembershipSchema } from '@/modules/org/membership.schema';
+import { unclassified } from './registered-schemas';
 
 /**
  * P2-T8: soft delete everywhere.
@@ -24,6 +30,11 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['assets', AssetSchema],
   ['notifications', NotificationSchema],
   ['notificationPreferences', NotificationPreferencesSchema],
+  ['memberships', MembershipSchema],
+  ['membershipHistory', MembershipHistorySchema],
+  ['joinRequests', JoinRequestSchema],
+  ['inviteCodes', InviteCodeSchema],
+  ['groups', GroupSchema],
 ];
 
 /**
@@ -34,6 +45,22 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
   ['auditLog', AuditLogSchema, 'append-only: an audit row that can be hidden is not evidence'],
   ['authTokens', AuthTokenSchema, 'self-expiring: revokedAt and expiresAt already model the lifecycle'],
 ];
+
+const EXPORT_NAMES = new Map<Schema, string>([
+  [UserSchema, 'UserSchema'],
+  [CompanySchema, 'CompanySchema'],
+  [KpmSchema, 'KpmSchema'],
+  [AssetSchema, 'AssetSchema'],
+  [NotificationSchema, 'NotificationSchema'],
+  [NotificationPreferencesSchema, 'NotificationPreferencesSchema'],
+  [MembershipSchema, 'MembershipSchema'],
+  [MembershipHistorySchema, 'MembershipHistorySchema'],
+  [JoinRequestSchema, 'JoinRequestSchema'],
+  [InviteCodeSchema, 'InviteCodeSchema'],
+  [GroupSchema, 'GroupSchema'],
+  [AuditLogSchema, 'AuditLogSchema'],
+  [AuthTokenSchema, 'AuthTokenSchema'],
+]);
 
 describe('soft delete', () => {
   it.each(SOFT_DELETABLE)('%s declares deletedAt', (_name, schema) => {
@@ -53,9 +80,13 @@ describe('soft delete', () => {
   });
 
   it('classifies every schema, so a new collection cannot quietly opt out', () => {
-    // Update deliberately when a collection is added — the failure is the prompt to
-    // decide which list it belongs in.
-    expect(SOFT_DELETABLE.length + NOT_SOFT_DELETABLE.length).toBe(8);
+    // Was `SOFT_DELETABLE.length + NOT_SOFT_DELETABLE.length === 8` — a tautology that
+    // survived all five Phase 3 collections. The names now come from the source tree.
+    const missing = unclassified([
+      ...SOFT_DELETABLE.map(([, schema]) => EXPORT_NAMES.get(schema)!),
+      ...NOT_SOFT_DELETABLE.map(([, schema]) => EXPORT_NAMES.get(schema)!),
+    ]);
+    expect(missing).toEqual([]);
   });
 
   it('exempts nothing that also declares deletedAt — that would be a contradiction', () => {

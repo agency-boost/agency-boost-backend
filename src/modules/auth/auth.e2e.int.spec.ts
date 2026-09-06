@@ -933,6 +933,25 @@ describe('auth and admin over HTTP', () => {
       expect(log.body).toEqual([]);
     });
 
+    it('refuses the office role-change log to an agent, whose own roster is one row', async () => {
+      // The route was gated on `member:read_profile` until 2026-09-06 — a permission
+      // every member holds — so any agent could read every promotion and demotion in the
+      // office, with names and the leader's written reason, for people whose roster row
+      // they are not allowed to see. `member:read_role_change_log` is the office-
+      // administration permission, and nobody in the hierarchy is granted it.
+      const { asOwner, agent } = await officeWithAgent();
+      await api().patch(`/api/v1/members/${agent.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'aab', reason: 'Ready to lead a unit' }).expect(200);
+
+      // The Owner sees it.
+      const asSeen = await api().get('/api/v1/members/role-changes').set(asOwner).expect(200);
+      expect(asSeen.body).toHaveLength(1);
+
+      // The person it is *about* does not — the log is not a personal record.
+      const refused = await api().get('/api/v1/members/role-changes').set(agent.as).expect(403);
+      expect(refused.body.error.code).toBe('PERM_DENIED');
+    });
+
     it('validates the role rather than writing whatever arrives', async () => {
       const { asOwner, agent } = await officeWithAgent();
       const res = await api().patch(`/api/v1/members/${agent.membershipId}/role`)

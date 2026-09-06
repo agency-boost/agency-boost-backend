@@ -919,6 +919,47 @@ describe('organisation', () => {
       });
     });
 
+    describe('codes are unique across the platform, not just the office', () => {
+      // A code is the credential somebody presents *before* they belong anywhere:
+      // `resolve()` looks it up by code alone, because a joiner has no office to scope
+      // the lookup to. The unique index was `{kpmId, code}` until 2026-09-06, so two
+      // live `JOR417`s could exist and `findOne` would return whichever the plan reached
+      // first — landing the joiner in a stranger's office under a stranger's leader.
+      it('refuses a second live invite carrying a code another office already holds', async () => {
+        const { code } = await invites.issue(leaderCtx, {}, '');
+
+        const otherLeader = await join(KPM_B, 'ab');
+        await expect(
+          mongoose.model(InviteCode.name).create({
+            kpmId: KPM_B,
+            code,
+            issuedByMembershipId: otherLeader,
+            autoApprove: true,
+            maxUses: null,
+            createdBy: otherLeader,
+          }),
+        ).rejects.toMatchObject({ code: 11000 });
+      });
+
+      it('releases a code once its invite is soft-deleted', async () => {
+        const { code } = await invites.issue(leaderCtx, {}, '');
+        const model = mongoose.model(InviteCode.name);
+        await model.updateOne({ code }, { $set: { deletedAt: new Date() } });
+
+        const otherLeader = await join(KPM_B, 'ab');
+        await expect(
+          model.create({
+            kpmId: KPM_B,
+            code,
+            issuedByMembershipId: otherLeader,
+            autoApprove: true,
+            maxUses: null,
+            createdBy: otherLeader,
+          }),
+        ).resolves.toBeDefined();
+      });
+    });
+
     describe('AC-2: refusing an invite that should not work', () => {
       it('refuses a code nobody issued', async () => {
         await expect(invites.redeem(newcomer(await person()), 'NOPE99')).rejects.toMatchObject({
@@ -1922,6 +1963,91 @@ describe('organisation', () => {
 
   const directory_list = (c: RequestContext, q = {}) => directory.list(c, q);
 
+  describe('Phase 3 exit criterion: the hierarchy at 500 members', () => {
+    /**
+     * Seed an office of `n` members directly.
+     *
+     * Through `hierarchy.create` this would be 500 counter increments and 500 history
+     * writes — minutes, not seconds, and none of it is what is under test. The shape is
+     * what matters: one root, ten ABs, five AABs each, nine agents each.
+     */
+    async function office(kpmId: string, root: string) {
+      const model = mongoose.model(Membership.name);
+      const docs: Record<string, unknown>[] = [];
+      const abIds: string[] = [];
+      let seq = 1000;
+      const add = (leaderId: string | null, ancestors: string[], role: string) => {
+        const id = String(new mongoose.Types.ObjectId());
+        docs.push({
+          _id: id, kpmId, userId: `u-${id}`, role, leaderId,
+          ancestorIds: ancestors, depth: ancestors.length, status: 'active',
+          agentSeq: ++seq, agentCode: `PERF-${seq}`,
+          directCounts: { ab: 0, aab: 0, agent: 0, total: 0 }, subtreeCount: 0,
+          isCoreLeader: false, groupIds: [], deletedAt: null,
+          adminAccess: { isKpmAdmin: false, grantedByUserId: null, grantedAt: null, revokedAt: null },
+        });
+        return id;
+      };
+      for (let a = 0; a < 10; a += 1) {
+        const ab = add(root, [root], 'ab');
+        abIds.push(ab);
+        for (let b = 0; b < 5; b += 1) {
+          const aab = add(ab, [root, ab], 'aab');
+          for (let g = 0; g < 9; g += 1) add(aab, [root, ab, aab], 'agent');
+        }
+      }
+      await model.insertMany(docs);
+      return { count: docs.length, abIds };
+    }
+
+    it('answers descendants and the whole office from one index, examining nothing spare', async () => {
+      // Two offices, so a query that forgot `kpmId` would be visibly wrong rather than
+      // accidentally right.
+      const rootA = await join(KPM_A, 'ab');
+      const rootB = await join(KPM_B, 'ab');
+      const seeded = await office(KPM_A, rootA);
+      await office(KPM_B, rootB);
+      expect(seeded.count).toBe(510);
+
+      type Explained = {
+        queryPlanner: unknown;
+        executionStats: { nReturned: number; totalDocsExamined: number };
+      };
+      const model = mongoose.model(Membership.name);
+      const explain = async (filter: Record<string, unknown>) =>
+        (await model.find(filter).explain('executionStats')) as unknown as Explained;
+
+      const office_ = await explain({ kpmId: KPM_A, status: 'active', deletedAt: null });
+      const downline = await explain({
+        kpmId: KPM_A, ancestorIds: seeded.abIds[3], status: 'active', deletedAt: null,
+      });
+
+      for (const plan of [office_, downline]) {
+        const winning = JSON.stringify(plan.queryPlanner);
+        expect(winning).not.toContain('COLLSCAN');
+        expect(winning).toContain('IXSCAN');
+        // The whole point of `ancestorIds`: the fan-out is an indexed lookup, so the
+        // engine touches what it returns and not the office around it.
+        expect(plan.executionStats.totalDocsExamined)
+          .toBeLessThanOrEqual(plan.executionStats.nReturned);
+      }
+
+      expect(office_.executionStats.nReturned).toBe(511);
+      expect(downline.executionStats.nReturned).toBe(50);
+    });
+
+    it('reads one office and never the other, at scale', async () => {
+      const rootA = await join(KPM_A, 'ab');
+      const rootB = await join(KPM_B, 'ab');
+      await office(KPM_A, rootA);
+      await office(KPM_B, rootB);
+
+      const descendants = await hierarchy.descendantsOf(ctx(KPM_A), rootA);
+      expect(descendants).toHaveLength(510);
+      expect(descendants.every((d) => d.kpmId === KPM_A)).toBe(true);
+    });
+  });
+
   describe('the roster is three disjoint populations (P3.5)', () => {
     it('the Directory is active only, and each count counts its own tab', async () => {
       // The bug: the Directory answered `$ne: 'removed'`, so a pending member appeared
@@ -2088,6 +2214,44 @@ describe('organisation', () => {
         const result = await tree.read(await asMember(agent));
         expect(result.nodes.map((n) => n.membershipId)).toEqual([agent]);
         expect(result.leader?.membershipId).toBe(aab);
+      });
+
+      it('stops the leader card at one person, and at four fields', async () => {
+        // `visibleTo` is self plus descendants, so a leader is an *ancestor* and outside
+        // it. The card is the single registered exception to "you see your downline
+        // only" (`multi-tenancy-and-scoping.md`). It is bounded deliberately, and this
+        // fails if either bound moves.
+        const result = await tree.read(await asMember(agent));
+
+        // One person: their own leader, never the chain above them.
+        expect(result.leader?.membershipId).toBe(aab);
+        expect(result.leader?.membershipId).not.toBe(ab);
+        expect(result.nodes.map((n) => n.membershipId)).toEqual([agent]);
+
+        // Four fields. Not unit size, not a count, not an email or an agent code — an
+        // agent cannot read their leader's row, only be told who they are.
+        expect(Object.keys(result.leader!).sort()).toEqual(
+          ['fullName', 'initials', 'membershipId', 'role'].sort(),
+        );
+      });
+
+      it('gives an AAB their unit, and not their unit leaders\' units', async () => {
+        // Four matrix rows give an AAB `own-unit` and an AB `own-downline`
+        // (`roles-and-permissions.md:304-305, 342-343`). Until 2026-09-06 `visibleTo`
+        // took no scope at all and handed everybody their whole downline, which was
+        // unobservable only for as long as every AAB's reports were agents. Nothing
+        // forbids an AAB leading an AAB — so this builds one and checks the boundary.
+        const topAab = await join(KPM_A, 'aab', ab);
+        const midAab = await join(KPM_A, 'aab', topAab);
+        const grandchild = await join(KPM_A, 'agent', midAab);
+
+        const seen = (await tree.read(await asMember(topAab))).nodes.map((n) => n.membershipId);
+        expect(seen.sort()).toEqual([topAab, midAab].sort());
+        expect(seen).not.toContain(grandchild);
+
+        // The AB above them keeps `own-downline`, and sees all three.
+        const abSees = (await tree.read(await asMember(ab))).nodes.map((n) => n.membershipId);
+        for (const id of [topAab, midAab, grandchild]) expect(abSees).toContain(id);
       });
 
       it('never reaches another office, even for an admin', async () => {

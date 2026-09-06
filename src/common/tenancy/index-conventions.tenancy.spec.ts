@@ -5,6 +5,16 @@ import {
   NotificationSchema,
   NotificationPreferencesSchema,
 } from '@/modules/notifications/notification.schema';
+import { AuthTokenSchema } from '@/modules/auth/auth-token.schema';
+import { CompanySchema } from '@/modules/tenants/company.schema';
+import { KpmSchema } from '@/modules/tenants/kpm.schema';
+import { UserSchema } from '@/modules/users/user.schema';
+import { GroupSchema } from '@/modules/org/group.schema';
+import { InviteCodeSchema } from '@/modules/org/invite-code.schema';
+import { JoinRequestSchema } from '@/modules/org/join-request.schema';
+import { MembershipHistorySchema } from '@/modules/org/membership-history.schema';
+import { MembershipSchema } from '@/modules/org/membership.schema';
+import { unclassified } from '@/common/schema/registered-schemas';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -19,6 +29,11 @@ import {
 const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['assets', AssetSchema],
   ['notifications', NotificationSchema],
+  ['memberships', MembershipSchema],
+  ['membershipHistory', MembershipHistorySchema],
+  ['joinRequests', JoinRequestSchema],
+  ['inviteCodes', InviteCodeSchema],
+  ['groups', GroupSchema],
 ];
 
 /**
@@ -31,6 +46,19 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'notificationPreferences',
     NotificationPreferencesSchema,
     'keyed by global userId: a person carries preferences across offices',
+  ],
+  [
+    'users',
+    UserSchema,
+    'identity is global: one person, one account, one login across every office they join',
+  ],
+  ['companies', CompanySchema, 'a company owns KPMs; it sits above the tenant, not inside one'],
+  ['kpms', KpmSchema, 'the tenant record itself — it cannot be scoped to itself'],
+  [
+    'authTokens',
+    AuthTokenSchema,
+    'issued against a global identity before any office is chosen: refresh, email ' +
+      'verification and password reset all predate membership',
   ],
 ];
 
@@ -47,6 +75,32 @@ const CROSS_TENANT_INDEXES: Record<string, string> = {
     'password reset are sent before a user has joined any KPM, so the inbox query is ' +
     'per-user by design and reads only that user’s own rows.',
 };
+
+/**
+ * The exported const name for a schema instance, so the classification lists can be
+ * compared against what the source tree exports without repeating the names by hand.
+ */
+const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
+  [AssetSchema, 'AssetSchema'],
+  [NotificationSchema, 'NotificationSchema'],
+  [NotificationPreferencesSchema, 'NotificationPreferencesSchema'],
+  [AuditLogSchema, 'AuditLogSchema'],
+  [AuthTokenSchema, 'AuthTokenSchema'],
+  [CompanySchema, 'CompanySchema'],
+  [KpmSchema, 'KpmSchema'],
+  [UserSchema, 'UserSchema'],
+  [GroupSchema, 'GroupSchema'],
+  [InviteCodeSchema, 'InviteCodeSchema'],
+  [JoinRequestSchema, 'JoinRequestSchema'],
+  [MembershipHistorySchema, 'MembershipHistorySchema'],
+  [MembershipSchema, 'MembershipSchema'],
+]);
+
+function schemaExportName(schema: Schema): string {
+  const name = SCHEMA_EXPORT_NAMES.get(schema);
+  if (!name) throw new Error('Schema missing from SCHEMA_EXPORT_NAMES — add it.');
+  return name;
+}
 
 function compoundIndexes(schema: Schema): Record<string, number | string>[] {
   return schema
@@ -88,9 +142,15 @@ describe('index conventions', () => {
   });
 
   it('classifies every schema as scoped or exempt, so none is overlooked', () => {
-    const classified = TENANT_SCOPED.length + EXEMPT.length;
-    // Update this count deliberately when a collection is added — the failure is the
-    // prompt to decide which list it belongs in.
-    expect(classified).toBe(4);
+    // This compared `TENANT_SCOPED.length + EXEMPT.length` to a literal until 2026-09-06,
+    // which is a tautology: both sides came from the lists, so it could only fail if
+    // somebody edited a list and forgot the number. Phase 3 added five collections and it
+    // stayed green through all of them. The names now come from the source tree, so a new
+    // `*.schema.ts` fails here until it is classified.
+    const missing = unclassified([
+      ...TENANT_SCOPED.map(([, schema]) => schemaExportName(schema)),
+      ...EXEMPT.map(([, schema]) => schemaExportName(schema)),
+    ]);
+    expect(missing).toEqual([]);
   });
 });

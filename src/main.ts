@@ -1,10 +1,12 @@
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { SwaggerModule } from '@nestjs/swagger';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { buildOpenApiDocument } from './openapi';
+
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -54,19 +56,7 @@ async function bootstrap(): Promise<void> {
   });
 
   if (config.get('NODE_ENV') !== 'production') {
-    SwaggerModule.setup(
-      'api/docs',
-      app,
-      SwaggerModule.createDocument(
-        app,
-        new DocumentBuilder()
-          .setTitle('AgencyBoost API')
-          .setDescription('Multi-tenant SaaS for insurance agency offices (KPM)')
-          .setVersion('1.0')
-          .addBearerAuth()
-          .build(),
-      ),
-    );
+    SwaggerModule.setup('api/docs', app, buildOpenApiDocument(app));
   }
 
   const port = config.get<number>('PORT', 3001);

@@ -106,10 +106,15 @@ export class InviteService {
     }
 
     // Retry on collision rather than trusting 32^6: the unique index is the real
-    // guarantee, and an office with a lot of invites will eventually collide.
+    // guarantee, and the platform as a whole will eventually collide.
+    //
+    // The probe is deliberately **unscoped**, matching the global unique index. Scoping
+    // it to `ctx.kpmId` — as it did until 2026-09-06 — asks a question nobody needs the
+    // answer to: `resolve()` has no office to scope by, so a code that is free in *this*
+    // office but taken in another is not free at all.
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const code = this.generateCode();
-      const clash = await this.invites.findOne({ kpmId: ctx.kpmId, code }).exec();
+      const clash = await this.invites.findOne({ code, deletedAt: null }).exec();
       if (clash) continue;
 
       const invite = await this.invites.create({
@@ -220,7 +225,7 @@ export class InviteService {
     const kpm = await this.kpms.findOne({ _id: invite.kpmId }).exec();
     const company = kpm ? await this.companies.findOne({ _id: kpm.companyId }).exec() : null;
 
-    const scoped = RequestContext.superAdminInTenant('invite-preview', invite.kpmId);
+    const scoped = RequestContext.tenantRead(invite.kpmId, 'invite-preview');
     const leader = await this.members.findById(scoped, invite.issuedByMembershipId);
     const leaderUser = leader ? await this.users.findOne({ _id: leader.userId }).exec() : null;
 
@@ -249,7 +254,7 @@ export class InviteService {
     }
 
     const invite = await this.resolve(code);
-    const scoped = RequestContext.superAdminInTenant(ctx.userId, invite.kpmId);
+    const scoped = RequestContext.joiningTenant(ctx, invite.kpmId);
 
     const leader = await this.members.findById(scoped, invite.issuedByMembershipId);
     if (!leader || leader.status !== 'active') {

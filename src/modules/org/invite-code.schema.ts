@@ -78,9 +78,26 @@ export class InviteCode {
 export const InviteCodeSchema = SchemaFactory.createForClass(InviteCode);
 
 /**
- * Unique within the office, not globally: two offices may both have a `JOR417`, and a
- * code is only ever resolved together with the office it came from.
+ * Unique **globally**, across every office.
+ *
+ * This said the opposite until 2026-09-06 — *"two offices may both have a `JOR417`, and
+ * a code is only ever resolved together with the office it came from"* — and the second
+ * half was never true. A code is the credential somebody presents *before* they belong
+ * anywhere: `InviteService.resolve` looks it up by code alone, because a joiner has no
+ * office to scope the lookup to. It is the code that names the office, not the reverse.
+ *
+ * So with per-office uniqueness two live `JOR417`s could exist and `findOne` would return
+ * whichever the plan reached first — putting the joiner in a stranger's office, under a
+ * stranger's leader, with a valid-looking membership. 32^6 is a billion codes; the
+ * generator retries on collision and this index is what makes that retry mean something.
+ *
+ * Scoped to live rows, so a soft-deleted invite releases its code for reuse.
  */
-InviteCodeSchema.index({ kpmId: 1, code: 1 }, { unique: true });
+InviteCodeSchema.index(
+  { code: 1 },
+  { unique: true, partialFilterExpression: { deletedAt: null } },
+);
+/** The office's own invites, and the per-office lookup behind the codes list. */
+InviteCodeSchema.index({ kpmId: 1, code: 1 });
 /** A leader's own invites, newest first. */
 InviteCodeSchema.index({ kpmId: 1, issuedByMembershipId: 1, createdAt: -1 });

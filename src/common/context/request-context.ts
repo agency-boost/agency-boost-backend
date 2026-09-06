@@ -121,4 +121,37 @@ export class RequestContext {
   static superAdminInTenant(userId: string, kpmId: string): RequestContext {
     return new RequestContext(userId, 'super_admin', null, null, kpmId);
   }
+
+  /**
+   * Somebody writing themselves into an office they have not joined yet.
+   *
+   * The join flow has the same shape as Super Admin provisioning — a write into a tenant
+   * the actor is not yet a member of — and until 2026-09-06 it borrowed
+   * `superAdminInTenant` for it. That was wrong twice.
+   *
+   * It claimed `platformRole: 'super_admin'` for an ordinary newcomer. Nothing reads
+   * platform role off these contexts today (the repository wants only a `kpmId`, and the
+   * guard runs on the real request context, never this one), so it opened no hole — but
+   * "the newcomer is a Super Admin for this write" is one refactor away from being one,
+   * and it is not the sentence anybody meant to write.
+   *
+   * The live defect was the second one: it took a bare `userId` and dropped
+   * `impersonatorUserId` with it. A Super Admin redeeming an invite on somebody's behalf
+   * was audited as the newcomer acting alone. This carries the whole context through, so
+   * `auditActors` still answers *who really did this*.
+   */
+  static joiningTenant(ctx: RequestContext, kpmId: string): RequestContext {
+    return new RequestContext(ctx.userId, 'none', null, ctx.impersonatorUserId, kpmId);
+  }
+
+  /**
+   * A read against one office by somebody outside it, and possibly nobody at all.
+   *
+   * The invite preview is unauthenticated — it is what a joiner sees before committing —
+   * so there is no user to name. It used to pass the literal string `'invite-preview'`
+   * as a userId, which reads like an account. A job label says what it is.
+   */
+  static tenantRead(kpmId: string, reason: string): RequestContext {
+    return new RequestContext(`job:${reason}`, 'none', null, null, kpmId);
+  }
 }

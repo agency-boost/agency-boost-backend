@@ -63,7 +63,7 @@ export class OrgController {
   }
 
   @Get('role-changes')
-  @RequirePermission('member:read_profile')
+  @RequirePermission('member:read_role_change_log')
   @ApiOperation({
     summary: 'The role change log',
     description:

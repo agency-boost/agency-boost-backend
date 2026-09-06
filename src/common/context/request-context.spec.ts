@@ -1,0 +1,138 @@
+import { RequestContext } from './request-context';
+
+/**
+ * The factories that mint a context inside a service, rather than from a request.
+ *
+ * These never reach the guard — they exist because `TenantScopedRepository` needs a
+ * `kpmId` and the caller has none yet. That makes them easy to get wrong quietly: no
+ * route refuses a bad one, and the only visible consequence is an audit row that names
+ * the wrong actor. So they are pinned here.
+ */
+describe('request context factories', () => {
+  const NEWCOMER = '65b1f0c2a4d3e5f6a7b8c9d0';
+  const OPERATOR = '65b1f0c2a4d3e5f6a7b8c9d1';
+  const OFFICE = '65b1f0c2a4d3e5f6a7b8c9d2';
+
+  describe('joiningTenant', () => {
+    it('scopes the write without claiming platform rights', () => {
+      const newcomer = new RequestContext(NEWCOMER, 'none', null);
+      const scoped = RequestContext.joiningTenant(newcomer, OFFICE);
+
+      expect(scoped.kpmId).toBe(OFFICE);
+      // The whole point: an ordinary person joining an office is not a Super Admin for
+      // the duration of the write. It said 'super_admin' until 2026-09-06.
+      expect(scoped.platformRole).toBe('none');
+      // They are not a member yet — claiming a membershipId would attribute the join to
+      // a membership that does not exist.
+      expect(scoped.membershipId).toBeNull();
+    });
+
+    it('carries the impersonator through, so the audit row says who really did it', () => {
+      // A Super Admin redeeming an invite on somebody's behalf. The old factory took a
+      // bare userId, so `impersonatorUserId` was dropped and the trail recorded the
+      // newcomer acting alone — the one thing an impersonation audit exists to prevent.
+      const impersonated = new RequestContext(NEWCOMER, 'none', null, OPERATOR);
+      const scoped = RequestContext.joiningTenant(impersonated, OFFICE);
+
+      expect(scoped.isImpersonating).toBe(true);
+      expect(scoped.auditActors).toEqual({
+        actorUserId: OPERATOR,
+        effectiveUserId: NEWCOMER,
+      });
+    });
+
+    it('leaves an ordinary join attributed to the person themselves', () => {
+      const newcomer = new RequestContext(NEWCOMER, 'none', null);
+      const scoped = RequestContext.joiningTenant(newcomer, OFFICE);
+
+      expect(scoped.isImpersonating).toBe(false);
+      expect(scoped.auditActors).toEqual({
+        actorUserId: NEWCOMER,
+        effectiveUserId: NEWCOMER,
+      });
+    });
+  });
+
+  describe('tenantRead', () => {
+    it('names a job rather than inventing an account', () => {
+      const scoped = RequestContext.tenantRead(OFFICE, 'invite-preview');
+
+      expect(scoped.kpmId).toBe(OFFICE);
+      expect(scoped.platformRole).toBe('none');
+      // `'invite-preview'` used to be passed as the userId, where it reads like an
+      // account id. The `job:` prefix matches `forJob` and says what it is.
+      expect(scoped.userId).toBe('job:invite-preview');
+    });
+  });
+
+  describe('isLeader (OD-23)', () => {
+    function withMembership(role: 'ab' | 'aab' | 'agent', directCount?: number) {
+      return new RequestContext(NEWCOMER, 'none', {
+        membershipId: '65b1f0c2a4d3e5f6a7b8c9d3',
+        kpmId: OFFICE,
+        hierarchyRole: role,
+        status: 'active',
+        isKpmOwner: false,
+        isKpmAdmin: false,
+        ...(directCount === undefined ? {} : { directCount }),
+      } as never);
+    }
+
+    it('is the graph, not the role: an AAB with nobody under them leads nobody', () => {
+      // The prototype infers leader-ness both ways and they disagree exactly here. The
+      // graph is the answer the unit dashboard, the coaching roster and the routing list
+      // all have to agree on.
+      expect(withMembership('aab', 0).isLeader).toBe(false);
+      expect(withMembership('ab', 0).isLeader).toBe(false);
+    });
+
+    it('is true from the first direct report, whatever the role', () => {
+      expect(withMembership('aab', 1).isLeader).toBe(true);
+      expect(withMembership('agent', 3).isLeader).toBe(true);
+    });
+
+    it('treats an unknown count as nobody, rather than throwing', () => {
+      // A membership read from a document written before `directCount` existed.
+      expect(withMembership('ab', undefined).isLeader).toBe(false);
+    });
+
+    it('is false for somebody who is in no office at all', () => {
+      expect(new RequestContext(NEWCOMER, 'none', null).isLeader).toBe(false);
+    });
+  });
+
+  describe('forJob', () => {
+    it('names the job as the actor and scopes it to one office', () => {
+      const scoped = RequestContext.forJob(OFFICE, 'nightly-rollup');
+
+      expect(scoped.kpmId).toBe(OFFICE);
+      expect(scoped.platformRole).toBe('none');
+      // A job is not a person, and the audit row should not read like one did this.
+      expect(scoped.userId).toBe('job:nightly-rollup');
+      expect(scoped.membershipId).toBe('job:nightly-rollup');
+      expect(scoped.isImpersonating).toBe(false);
+    });
+  });
+
+  describe('platform', () => {
+    it('carries no office at all — that is what makes it platform work', () => {
+      const scoped = RequestContext.platform(OPERATOR);
+
+      expect(scoped.platformRole).toBe('super_admin');
+      expect(scoped.kpmId).toBeNull();
+      // Every tenant-scoped repository call fails closed on this, rather than running
+      // unscoped: MissingTenantContextError, not a query across all offices.
+      expect(scoped.membershipId).toBeNull();
+    });
+  });
+
+  describe('superAdminInTenant', () => {
+    it('is still what provisioning uses, and still says super_admin', () => {
+      const scoped = RequestContext.superAdminInTenant(OPERATOR, OFFICE);
+
+      expect(scoped.platformRole).toBe('super_admin');
+      expect(scoped.kpmId).toBe(OFFICE);
+      expect(scoped.membershipId).toBeNull();
+    });
+  });
+});
