@@ -32,6 +32,34 @@ export interface CreateKpmInput {
  * repository: there is no tenant yet to scope to. The permission check is therefore
  * the only gate, which is why it is explicit at the top of every method.
  */
+
+/** One row of the console's `Needs your attention` queue (`Superadmin.html:232-273`). */
+export interface AttentionItem {
+  /** The chip: `KPM owner`, `KPM request`, `Role ladder`, `Product`. */
+  tag: string;
+  /** Drives the chip's colour. `structural` is the platform's own to fix. */
+  severity: 'structural' | 'approval' | 'template';
+  title: string;
+  detail: string;
+  /** Where the reader goes to act on it. */
+  href: string;
+  actionLabel: string;
+}
+
+export interface CompanyCard {
+  companyId: string;
+  name: string;
+  initials: string;
+  kpmCount: number;
+  memberCount: number;
+}
+
+export interface PlatformOverview {
+  tiles: { companies: number; kpms: number; totalMembers: number; agencyBuilders: number };
+  attention: AttentionItem[];
+  companies: CompanyCard[];
+}
+
 @Injectable()
 export class TenantService {
   constructor(
@@ -254,6 +282,101 @@ export class TenantService {
     });
 
     return kpm;
+  }
+
+  /**
+   * The console's front page.
+   *
+   * **The overview is a queue, not four counters** — the prototype puts `Needs your
+   * attention` above the tiles and its footer says why: *"4 items need Superadmin action
+   * — nothing here can be delegated to a KPM Owner or Admin"* (`Superadmin.html:272`).
+   * The tiles are context for the queue, so they are returned together and rendered in
+   * that order.
+   *
+   * **Two of the tiles are cross-tenant headcounts**, which ADR-0011 deliberately allows:
+   * it retook ADR-0005's claim that this console "never reads an office's business data"
+   * once the prototype turned up with `Total members` and `Agency Builders` on the front
+   * page. Aggregate composition is in; leads, activity, coaching notes and production
+   * stay out, and nothing here reads them.
+   *
+   * One cross-tenant read serves all of it — the totals, the role split and the
+   * per-company breakdown — rather than a count per office. At the phase's own benchmark
+   * of 500 members that is a few thousand documents; if the platform outgrows that, this
+   * becomes a grouped aggregate rather than more round trips.
+   */
+  async platformOverview(ctx: RequestContext): Promise<PlatformOverview> {
+    this.require(ctx, 'platform_metrics:read');
+
+    const [companies, kpms, members] = await Promise.all([
+      this.companies.find({ deletedAt: null }).sort({ name: 1 }).exec(),
+      this.kpms.find({ deletedAt: null }).exec(),
+      this.memberships.findAcrossAllTenants(ctx, { status: 'active' }),
+    ]);
+
+    const membersByKpm = new Map<string, number>();
+    let agencyBuilders = 0;
+    for (const m of members) {
+      membersByKpm.set(m.kpmId, (membersByKpm.get(m.kpmId) ?? 0) + 1);
+      if (m.role === 'ab') agencyBuilders += 1;
+    }
+
+    const kpmsByCompany = new Map<string, KpmDocument[]>();
+    for (const kpm of kpms) {
+      const list = kpmsByCompany.get(kpm.companyId) ?? [];
+      list.push(kpm);
+      kpmsByCompany.set(kpm.companyId, list);
+    }
+
+    return {
+      tiles: {
+        companies: companies.length,
+        kpms: kpms.length,
+        totalMembers: members.length,
+        agencyBuilders,
+      },
+      attention: this.attentionQueue(kpms),
+      companies: companies.map((c) => {
+        const theirs = kpmsByCompany.get(String(c._id)) ?? [];
+        return {
+          companyId: String(c._id),
+          name: c.name,
+          initials: c.name.slice(0, 2).toUpperCase(),
+          kpmCount: theirs.length,
+          memberCount: theirs.reduce((n, k) => n + (membersByKpm.get(String(k._id)) ?? 0), 0),
+        };
+      }),
+    };
+  }
+
+  /**
+   * What needs the platform's own hand.
+   *
+   * The prototype seeds four rows from sources we mostly do not have yet: a role-ladder
+   * request (P3.5-T7), pending KPM registrations (P3.5-T2), template adoption and a
+   * product publish (Phases 4 and 5). **Only one of its sources exists today**, so only
+   * one kind of row is produced. A queue with one real row is honest; four invented ones
+   * would make the screen look finished and tell the reader nothing true.
+   */
+  private attentionQueue(kpms: KpmDocument[]): AttentionItem[] {
+    const items: AttentionItem[] = [];
+
+    const unowned = kpms.filter((k) => !k.ownerUserId && k.status !== 'archived');
+    if (unowned.length > 0) {
+      items.push({
+        tag: 'KPM owner',
+        severity: 'structural',
+        title:
+          unowned.length === 1
+            ? '1 office has no Owner'
+            : `${unowned.length} offices have no Owner`,
+        detail:
+          'Nobody can administer an office until an Owner is assigned, and only the platform can assign one.',
+        href: '/admin/tenants',
+        actionLabel: 'Review',
+      });
+    }
+
+    return items;
   }
 
   async listAll(ctx: RequestContext): Promise<KpmDocument[]> {

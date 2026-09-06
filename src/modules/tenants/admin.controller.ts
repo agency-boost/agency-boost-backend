@@ -32,6 +32,19 @@ export class AdminController {
     @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
   ) {}
 
+  @Get('overview')
+  @RequirePermission('platform_metrics:read')
+  @ApiOperation({
+    summary: 'The platform overview',
+    description:
+      'The queue of what needs the platform\u2019s own hand, the four headline counts, and every ' +
+      'company with its KPM and member totals. Aggregate composition only \u2014 no office\u2019s ' +
+      'leads, activity, coaching notes or production (ADR-0011).',
+  })
+  async overview(@Ctx() ctx: RequestContext) {
+    return this.tenants.platformOverview(ctx);
+  }
+
   @Get('companies')
   @RequirePermission('company:crud')
   @ApiOperation({ summary: 'List principal insurers' })

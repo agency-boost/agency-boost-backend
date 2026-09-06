@@ -76,6 +76,19 @@ describe('TenantService', () => {
 
   const input = () => ({ companyId, code: '0417', branchName: 'BSD City Branch' });
 
+  /**
+   * Seeds a membership straight through the model.
+   *
+   * The repository refuses a write with no tenant context, which is the whole point of
+   * it — a Super Admin building fixtures is not a tenant request. Going around it here
+   * is a test-setup shortcut, never something production code may copy.
+   */
+  const seedMember = (kpmId: string, userId: string, role: 'ab' | 'aab' | 'agent') =>
+    mongoose.model(Membership.name).create({
+      kpmId, userId, role, status: 'active', agentCode: `${kpmId.slice(-4)}-${userId}`,
+      agentSeq: 1, leaderId: null, ancestorIds: [], depth: 0,
+    });
+
   describe('only a Super Admin creates a KPM', () => {
     it('allows a Super Admin', async () => {
       const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
@@ -328,6 +341,72 @@ describe('TenantService', () => {
       await expect(
         service.readProfile(ctx({ superAdmin: true }), String(kpm._id)),
       ).resolves.toBeDefined();
+    });
+  });
+
+  describe('the platform overview (P3.5-T1)', () => {
+    it('AC-2: is Super Admin only, like everything else on this console', async () => {
+      await expect(service.platformOverview(ctx({ owner: true }))).rejects.toMatchObject({
+        code: 'PERM_DENIED',
+      });
+      await expect(service.platformOverview(ctx({ admin: true }))).rejects.toMatchObject({
+        code: 'PERM_DENIED',
+      });
+    });
+
+    it('AC-2: counts companies, offices, members and Agency Builders across every tenant', async () => {
+      // ADR-0011 retook ADR-0005 on exactly this: the prototype puts `Total members` and
+      // `Agency Builders` on the front page, so aggregate composition is in scope.
+      const sa = ctx({ superAdmin: true });
+      const kpm = await service.createKpm(sa, input());
+      const other = await service.createKpm(sa, { ...input(), code: '0555' });
+
+      await seedMember(String(kpm._id), 'u-a', 'ab');
+      await seedMember(String(kpm._id), 'u-b', 'agent');
+      await seedMember(String(other._id), 'u-c', 'ab');
+
+      const overview = await service.platformOverview(sa);
+      expect(overview.tiles).toEqual({
+        companies: 1,
+        kpms: 2,
+        totalMembers: 3,
+        agencyBuilders: 2,
+      });
+    });
+
+    it('AC-4: gives each company its own office and member totals', async () => {
+      const sa = ctx({ superAdmin: true });
+      const kpm = await service.createKpm(sa, input());
+      await seedMember(String(kpm._id), 'u-a', 'agent');
+
+      const [card] = (await service.platformOverview(sa)).companies;
+      expect(card).toMatchObject({ kpmCount: 1, memberCount: 1 });
+      expect(card.initials).toHaveLength(2);
+    });
+
+    it('AC-1: raises an office with no Owner, because only the platform can fix it', async () => {
+      const sa = ctx({ superAdmin: true });
+      await service.createKpm(sa, input());
+
+      const { attention } = await service.platformOverview(sa);
+      expect(attention).toHaveLength(1);
+      expect(attention[0]).toMatchObject({
+        tag: 'KPM owner',
+        severity: 'structural',
+        title: '1 office has no Owner',
+      });
+    });
+
+    it('AC-1: says nothing when there is nothing to say', async () => {
+      // The prototype's four rows come from sources that mostly do not exist yet — a
+      // ladder request, pending registrations, template adoption, a product publish. An
+      // empty queue is the honest answer; four invented rows would read as finished.
+      const sa = ctx({ superAdmin: true });
+      const kpm = await service.createKpm(sa, input());
+      const user = await users.create({ email: 'o@kpm.test', fullName: 'Owner', passwordHash: 'x' });
+      await service.assignOwner(sa, String(kpm._id), { userId: String(user._id) });
+
+      expect((await service.platformOverview(sa)).attention).toEqual([]);
     });
   });
 

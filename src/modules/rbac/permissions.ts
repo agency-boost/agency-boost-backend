@@ -63,6 +63,11 @@ export const PERMISSIONS = {
   // ---- Platform. Tenant management only in v1 (ADR-0005). ----
   'kpm:create': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:list_all': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  // Cross-tenant composition counts for the console's front page. ADR-0011 retook
+  // ADR-0005's "never reads an office's business data": aggregate headcounts are in,
+  // because the prototype puts two of them on the overview and nothing else can answer
+  // "how big is this platform". Leads, activity, coaching notes and production stay out.
+  'platform_metrics:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:read_profile': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },

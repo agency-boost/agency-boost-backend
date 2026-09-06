@@ -289,6 +289,27 @@
         ]
       }
     },
+    "/api/v1/admin/overview": {
+      "get": {
+        "description": "The queue of what needs the platform’s own hand, the four headline counts, and every company with its KPM and member totals. Aggregate composition only — no office’s leads, activity, coaching notes or production (ADR-0011).",
+        "operationId": "AdminController_overview_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The platform overview",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      }
+    },
     "/api/v1/admin/companies": {
       "get": {
         "operationId": "AdminController_listCompanies_v1",
