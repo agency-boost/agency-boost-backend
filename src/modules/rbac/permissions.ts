@@ -168,16 +168,21 @@ export const PERMISSIONS = {
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
   ],
+  // `own-unit` for an AB, not `own-downline`. These two are the named exceptions to the
+  // collapsing rule in roles-and-permissions.md §1: they act on the leader edge the actor
+  // owns, so an AB reaches their direct reports and no further. The services already
+  // enforce `target.leaderId === me`, so this was a declaration wider than the behaviour
+  // — and a permission that claims more than it grants is the kind that gets copied.
   'member:change_role': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
-    { grantee: AB, scope: 'own-downline' },
+    { grantee: AB, scope: 'own-unit' },
     { grantee: AAB, scope: 'own-unit' },
   ],
   'member:remove_from_team': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
-    { grantee: AB, scope: 'own-downline' },
+    { grantee: AB, scope: 'own-unit' },
     { grantee: AAB, scope: 'own-unit' },
   ],
   'leader_request:read_inbox': [
