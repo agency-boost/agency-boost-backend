@@ -27,12 +27,32 @@ export interface PendingRequest {
   requestedAt: string;
   /** Set when somebody else's request was routed to this approver. */
   routedFromName: string | null;
+  /**
+   * The leader this request names — which is who the joiner joins if it is approved
+   * with no destination, and whose sub-units are the destinations on offer.
+   *
+   * For a leader reading their own inbox this is always themselves. For the Owner or an
+   * Admin reading the office queue it differs per row, and the screen cannot render the
+   * destination list — or say plainly where an approval sends somebody — without it.
+   */
+  leaderMembershipId: string;
+  leaderName: string;
 }
 
 export interface RoutingChoice {
   membershipId: string;
   fullName: string;
   unitSize: number;
+  /**
+   * The leader whose sub-unit this is.
+   *
+   * A leader's inbox holds only requests addressed to them, so one list served every
+   * row. A tenant admin's inbox is the whole office, where each row names a different
+   * leader — and `approve()` validates the destination against **the requested leader**,
+   * not the actor. So a single list was not merely imprecise there, it was unusable:
+   * every choice it offered was refused with `422`.
+   */
+  forLeaderMembershipId: string;
 }
 
 export interface UntaggedMember {
@@ -125,19 +145,19 @@ export class ApprovalsService {
     });
     const byId = new Map(memberships.map((m) => [String(m._id), m]));
 
-    const routers = rows
-      .filter((r) => r.routedToMembershipId === me && r.leaderMembershipId !== me)
-      .map((r) => r.leaderMembershipId);
-    const routerRows = routers.length
-      ? await this.members.find(ctx, { _id: { $in: routers } })
+    // Every leader named by a row, not only the ones who routed. The office queue shows
+    // requests addressed to people other than the reader, and each has to be nameable.
+    const leaderIds = [...new Set(rows.map((r) => r.leaderMembershipId))];
+    const leaderRows = leaderIds.length
+      ? await this.members.find(ctx, { _id: { $in: leaderIds } })
       : [];
 
     const names = await this.named([
       ...memberships.map((m) => m.userId),
-      ...routerRows.map((m) => m.userId),
+      ...leaderRows.map((m) => m.userId),
     ]);
-    const routerName = new Map(
-      routerRows.map((m) => [String(m._id), names.get(m.userId)?.fullName ?? null]),
+    const leaderName = new Map(
+      leaderRows.map((m) => [String(m._id), names.get(m.userId)?.fullName ?? null]),
     );
 
     return rows
@@ -156,34 +176,73 @@ export class ApprovalsService {
           requestedAt: r.get('createdAt')?.toISOString() ?? '',
           routedFromName:
             r.routedToMembershipId === me && r.leaderMembershipId !== me
-              ? (routerName.get(r.leaderMembershipId) ?? null)
+              ? (leaderName.get(r.leaderMembershipId) ?? null)
               : null,
+          leaderMembershipId: r.leaderMembershipId,
+          leaderName: leaderName.get(r.leaderMembershipId) ?? 'Unknown',
         };
       })
       .filter((r): r is PendingRequest => r !== null);
   }
 
   /**
-   * The units an approver may send somebody into instead of their own.
+   * The sub-units a request may be sent into instead of the leader it names.
    *
-   * Their direct AABs, and only theirs. Empty for an AAB, whose reports are agents —
-   * there is no sub-unit below them to route into, which is why the permission is AB
-   * only rather than merely producing an empty list.
+   * **A destination is a direct report who can hold a unit, or already holds one.**
+   *
+   * This filtered `role: 'aab'` until 2026-09-06, which read the office as if a leader's
+   * reports were all one level below them. They are not: an AB may report to an AB, the
+   * seeded demo office contains exactly that, and ADR-0014 makes it ordinary by letting
+   * a promotion keep its leader edge. Such a unit was never offered, and a caller who
+   * knew the id was refused — so the sub-unit existed and was unreachable.
+   *
+   * The obvious repair, `directCounts.total > 0`, is wrong in the other direction, and a
+   * test caught it: it excludes an AAB who leads nobody *yet*, which is exactly the
+   * person you route a first agent to. Routing into an empty unit is how a unit starts.
+   *
+   * So the question is **capacity**, and capacity is a ladder question — which is not the
+   * same question OD-23 answers. OD-23 says do not infer *"is a leader"* from the role;
+   * leadership is the graph. *"May they hold a unit"* is about the rung, and the second
+   * arm below keeps OD-23's answer available anyway: somebody who already leads people
+   * has a unit whatever they are called. P3.5-T8 restates the first arm against the
+   * ladder, where it becomes "not the bottom rung".
+   *
+   * Built per **requested leader**, not per actor: see `forLeaderMembershipId`.
    */
   async routingChoices(ctx: RequestContext): Promise<RoutingChoice[]> {
     const me = this.requireLeader(ctx);
     if (!can(ctx, 'leader_request:route_to_sub_unit')) return [];
 
-    const aabs = await this.members.find(
+    // Whose requests this reader is deciding — the same narrowing `inbox()` applies, so
+    // the destinations always belong to a row the reader can actually see.
+    const open = await this.requests
+      .find({
+        kpmId: ctx.kpmId,
+        deletedAt: null,
+        status: 'pending',
+        ...(this.isTenantAdmin(ctx)
+          ? {}
+          : { $or: [{ leaderMembershipId: me }, { routedToMembershipId: me }] }),
+      })
+      .exec();
+    const leaders = [...new Set(open.map((r) => r.leaderMembershipId))];
+    if (leaders.length === 0) return [];
+
+    const units = await this.members.find(
       ctx,
-      { leaderId: me, role: 'aab', status: 'active' },
+      {
+        leaderId: { $in: leaders },
+        status: 'active',
+        $or: [{ role: { $ne: 'agent' } }, { 'directCounts.total': { $gt: 0 } }],
+      },
       { sort: { agentSeq: 1 } },
     );
-    const names = await this.named(aabs.map((a) => a.userId));
-    return aabs.map((a) => ({
-      membershipId: String(a._id),
-      fullName: names.get(a.userId)?.fullName ?? 'Unknown',
-      unitSize: a.subtreeCount ?? 0,
+    const names = await this.named(units.map((u) => u.userId));
+    return units.map((u) => ({
+      membershipId: String(u._id),
+      fullName: names.get(u.userId)?.fullName ?? 'Unknown',
+      unitSize: u.subtreeCount ?? 0,
+      forLeaderMembershipId: String(u.leaderId),
     }));
   }
 
@@ -244,11 +303,12 @@ export class ApprovalsService {
         );
       }
       const destination = await this.members.findById(ctx, routeToMembershipId);
-      // Only into your *own* AABs. Anywhere else is somebody else's unit to staff.
+      // The same test the list applies, for the same reason: the list is a convenience
+      // and a caller can name any id, so the two must agree or one of them is decorative.
       if (
         !destination ||
         destination.status !== 'active' ||
-        destination.role !== 'aab' ||
+        (destination.role === 'agent' && (destination.directCounts?.total ?? 0) === 0) ||
         // Into one of the *requested* leader's units. Routing places an agent inside the
         // unit they asked to join, which is not the same as the decider's unit.
         destination.leaderId !== requested

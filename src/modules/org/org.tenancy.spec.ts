@@ -1152,16 +1152,84 @@ describe('organisation', () => {
       expect(inbox[0].routedFromName).toBeNull();
     });
 
-    it('AC-2: offers an AB their own AABs to route into, and only those', async () => {
+    it('AC-2: offers the sub-units under the leader a request names, and only those', async () => {
       const otherAb = await join(KPM_A, 'ab');
       await join(KPM_A, 'aab', otherAb);
+      await askedFor(ab);
 
       const choices = await approvals.routingChoices(abCtx);
       expect(choices.map((c) => c.membershipId)).toEqual([aab]);
+      expect(choices[0].forLeaderMembershipId).toBe(ab);
     });
 
-    it('AC-2: offers an AAB nothing, because there is no sub-unit below them', async () => {
+    it('AC-3: offers an AB who reports to an AB — the bug this task exists for', async () => {
+      // `routingChoices` filtered `role: 'aab'` until 2026-09-06, and `approve` re-checked
+      // the same equality. An AB reporting to an AB — which `seed/demo.ts` creates — was
+      // therefore never offered, and a caller who knew the id was refused with 422. So
+      // the sub-unit existed and nothing could reach it.
+      const subAb = await join(KPM_A, 'ab', ab);
+      await join(KPM_A, 'agent', subAb);
+      await hierarchy.refreshCounts(ctx(KPM_A), ab);
+      const asker = await askedFor(ab);
+
+      const choices = await approvals.routingChoices(abCtx);
+      expect(choices.map((c) => c.membershipId).sort()).toEqual([aab, subAb].sort());
+
+      // And the write agrees with the list, which is the half that returned 422.
+      await approvals.approve(abCtx, (await approvals.inbox(abCtx))[0].requestId, subAb);
+      const row = await members.findById(ctx(KPM_A), asker.membershipId);
+      expect(row?.leaderId).toBe(subAb);
+      expect(row?.ancestorIds).toEqual([ab, subAb]);
+      expect(row?.depth).toBe(2);
+    });
+
+    it('AC-2: still offers an AAB who leads nobody yet — that is how a unit starts', async () => {
+      // The obvious repair for AC-3 is `directCounts.total > 0`, and it is wrong: it
+      // excludes exactly the person you route a first agent to. Capacity to hold a unit
+      // is a ladder question; it is not the question OD-23 answers.
+      await askedFor(ab);
+      const choices = await approvals.routingChoices(abCtx);
+      expect(choices.map((c) => c.membershipId)).toContain(aab);
+    });
+
+    it('AC-4: does not offer a report who neither leads nor can', async () => {
+      const plainAgent = await join(KPM_A, 'agent', ab);
+      await askedFor(ab);
+
+      const choices = await approvals.routingChoices(abCtx);
+      expect(choices.map((c) => c.membershipId)).not.toContain(plainAgent);
+    });
+
+    it('AC-4: offers an agent who does lead a unit, whatever they are called', async () => {
+      const leadingAgent = await join(KPM_A, 'agent', ab);
+      await join(KPM_A, 'agent', leadingAgent);
+      await hierarchy.refreshCounts(ctx(KPM_A), ab);
+      await askedFor(ab);
+
+      const choices = await approvals.routingChoices(abCtx);
+      expect(choices.map((c) => c.membershipId)).toContain(leadingAgent);
+    });
+
+    it('AC-2: offers an AAB nothing, because the permission is not theirs', async () => {
+      await askedFor(aab);
       expect(await approvals.routingChoices(aabCtx)).toEqual([]);
+    });
+
+    it('AC-5: builds the list per requested leader, not per actor', async () => {
+      // The office queue holds rows naming different leaders, and `approve` validates a
+      // destination against the leader the *request* names. One list built from the
+      // actor's own reports offered an Owner choices that were all refused.
+      const owner = await join(KPM_A, 'ab');
+      const ownerCtx = new RequestContext((await members.findById(ctx(KPM_A), owner))!.userId,
+        'none', {
+          membershipId: owner, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+          isKpmOwner: true, isKpmAdmin: false, directCount: 0,
+        });
+      await askedFor(ab);
+
+      const choices = await approvals.routingChoices(ownerCtx);
+      expect(choices.map((c) => c.membershipId)).toEqual([aab]);
+      expect(choices[0].forLeaderMembershipId).toBe(ab);
     });
 
     it('AC-2: approving into an AAB unit puts them under the AAB, not the AB', async () => {
