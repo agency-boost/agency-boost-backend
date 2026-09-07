@@ -462,6 +462,48 @@ export class ApprovalsService {
       );
     }
 
+    /**
+     * **`untagged()` filters the list; this has to filter the argument.**
+     *
+     * The list excludes an active AB with no leader — the office root — and the caller
+     * supplies the id, so the list was the only thing standing between an ordinary AAB
+     * and `POST /join/untagged/<theOwnersMembershipId>`. It succeeded: the office's root
+     * ended up reporting to a subordinate, and because `visibleTo` reads `ancestorIds`,
+     * that subordinate could then read them.
+     *
+     * `approve()` writes this reasoning out at its own re-validation and then does it.
+     * This did not.
+     */
+    const tenantAdmin = Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
+    const isRoot = target.leaderId === null && target.role === 'ab' && target.status === 'active';
+    if (isRoot || (await this.hierarchy.ownsTheOffice(ctx, target))) {
+      throw new DomainException(
+        ErrorCode.ORG_NOT_PERMITTED_TO_TAG,
+        'They lead the office. Nobody tags them into a unit.',
+        HttpStatus.FORBIDDEN,
+        { membershipId },
+      );
+    }
+
+    /**
+     * And the person has to be somebody this caller could already reach.
+     *
+     * `member:search_untagged_pool` is `own-kpm` — the pool is office-wide on purpose,
+     * because an untagged person is in nobody's downline and would otherwise be
+     * unreachable. But an **orphan who still leads a unit** is a different thing: a
+     * leader could remove their own AAB with `orphan`, and a peer could then pick that
+     * whole unit up. Nobody's removal should hand a peer a unit, which is the same
+     * defect `RemovalService`'s destination check closes from the other side.
+     */
+    if (!tenantAdmin && (target.directCounts?.total ?? 0) > 0) {
+      throw new DomainException(
+        ErrorCode.ORG_NOT_PERMITTED_TO_TAG,
+        'They lead a unit of their own. Only the office can place them.',
+        HttpStatus.FORBIDDEN,
+        { membershipId, directCount: target.directCounts?.total ?? 0 },
+      );
+    }
+
     await this.attach(ctx, target, me, { action: 'member.tagged_by_leader' });
 
     // Any request they had open is moot — they are in somebody's unit now.
@@ -499,16 +541,32 @@ export class ApprovalsService {
     if (!leader) throw new NotFoundException('Membership');
 
     const wasPending = member.status === 'pending';
+
+    /**
+     * **The graph move goes through `HierarchyService`, not through a `$set` here.**
+     *
+     * This used to write `leaderId`, `ancestorIds` and `depth` by hand, which is correct
+     * only for somebody who leads nobody — the case its docstring assumed. Two live paths
+     * reach it with a member who has a unit: an orphaned leader picked up from the
+     * untagged pool, and an active member whose leader request is approved. Their
+     * descendants kept the **old** ancestry, so the previous leader chain retained read
+     * reach over a unit that had left it, the new leader could not see the unit they now
+     * owned, and the old leader's counts were never refreshed.
+     *
+     * `moveUnder` carries the cycle check, the subtree re-splice and both `refreshCounts`.
+     * The history row stays here, because joining is not the same event as being moved.
+     */
+    // Active **first**, then placed: `refreshCounts` counts active members, so moving a
+    // still-pending joiner would refresh a count that does not yet include them and
+    // leave the new leader reading zero.
     await this.members.updateById(ctx, String(member._id), {
       $set: {
-        leaderId,
-        ancestorIds: [...leader.ancestorIds, leaderId],
-        depth: leader.depth + 1,
         status: 'active',
         joinedAt: member.joinedAt ?? this.clock.now(),
         recruitedByMembershipId: member.recruitedByMembershipId ?? leaderId,
       },
     });
+    await this.hierarchy.moveUnder(ctx, String(member._id), leaderId);
 
     // The joined edge was opened when they registered; this closes it and opens the one
     // that names their leader. Nothing is overwritten.
@@ -535,8 +593,6 @@ export class ApprovalsService {
       actorMembershipId: ctx.membershipId,
       actorUserId: ctx.auditActors.actorUserId,
     });
-
-    await this.hierarchy.refreshCounts(ctx, leaderId);
 
     await this.audit.record(ctx, {
       action: audit.action,

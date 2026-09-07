@@ -5,6 +5,7 @@ import {
   PERFORMANCE,
   RATIO_BENCHMARKS,
   TIME,
+  DEFAULT_CURRENCY,
   DEFAULT_ORG_LADDER,
   DEFAULT_TENANT_TIMEZONE,
   MINOR_UNITS_PER_MAJOR,
@@ -99,5 +100,14 @@ describe('domain constants', () => {
     expect(DEFAULT_ORG_LADDER.map((l) => l.code)).toEqual(['AGENT', 'AAB', 'AB']);
     expect(DEFAULT_ORG_LADDER.map((l) => l.displayOrder)).toEqual([1, 2, 3]);
     expect(DEFAULT_ORG_LADDER.map((l) => l.code.toLowerCase())).toEqual(['agent', 'aab', 'ab']);
+
+    // Three registry rows that named no test until the Phase 3.5 exit re-review. The rule
+    // is that every number in `metrics-and-definitions.md` is pinned by a test that fails
+    // if it drifts, and these three were the exceptions.
+    expect(PERFORMANCE.COMPLIANCE_WINDOW_DAYS).toBe(7);
+    // The cap is on a *percentage*, and is deliberately not the same constant as the
+    // 0–999 activity-count clamp even though both read 999 — `metrics:1450` says so.
+    expect(PERFORMANCE.ATTAINMENT_PCT_CAP).toBe(999);
+    expect(DEFAULT_CURRENCY).toBe('IDR');
   });
 });

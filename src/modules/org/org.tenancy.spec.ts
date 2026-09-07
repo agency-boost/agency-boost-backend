@@ -3296,6 +3296,203 @@ describe('organisation', () => {
     });
   });
 
+  /**
+   * The exit re-review. `RemovalService`'s destination check closed the one-call route to
+   * handing a peer a unit; these are the two that were left open, and the move that was
+   * being done by hand.
+   */
+  describe('placing people (exit re-review)', () => {
+    const asLeader = (membershipId: string) =>
+      new RequestContext('u-leader', 'none', {
+        membershipId, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+        isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      });
+
+    it('refuses to tag the office root, which the list would never have offered', async () => {
+      // `untagged()` filters an active AB with no leader; `tag()` did not, and the caller
+      // supplies the id. An ordinary AAB could make the office's root report to them.
+      const root = await join(KPM_A, 'ab');
+      const aab = await join(KPM_A, 'aab', root);
+
+      expect((await approvals.untagged(asLeader(aab))).map((u) => u.membershipId))
+        .not.toContain(root);
+      await expect(approvals.tag(asLeader(aab), root)).rejects.toMatchObject({
+        code: 'ORG_NOT_PERMITTED_TO_TAG',
+      });
+      expect((await members.findById(ctx(KPM_A), root))!.leaderId).toBeNull();
+    });
+
+    it('refuses to tag the office owner, however they are placed in the tree', async () => {
+      const root = await join(KPM_A, 'ab');
+      const sari = await join(KPM_A, 'ab', root);
+      const sariRow = await members.findById(ctx(KPM_A), sari);
+      await mongoose.model(Kpm.name).updateOne(
+        { _id: KPM_A }, { $set: { ownerUserId: sariRow!.userId } },
+      );
+      await members.updateById(ctx(KPM_A), sari, { $set: { leaderId: null, ancestorIds: [], depth: 0 } });
+
+      const other = await join(KPM_A, 'aab', root);
+      await expect(approvals.tag(asLeader(other), sari)).rejects.toMatchObject({
+        code: 'ORG_NOT_PERMITTED_TO_TAG',
+      });
+    });
+
+    it('refuses a leader an orphan who still leads a unit, so a removal cannot hand a peer one', async () => {
+      // The two-call route: Alice removes her AAB with `orphan`, and Carla — a peer —
+      // picks the whole unit out of the office-wide pool.
+      const root = await join(KPM_A, 'ab');
+      const alice = await join(KPM_A, 'ab', root);
+      const carla = await join(KPM_A, 'ab', root);
+      const budi = await join(KPM_A, 'aab', alice);
+      await join(KPM_A, 'agent', budi);
+      await hierarchy.refreshCounts(ctx(KPM_A), alice);
+
+      await removals.remove(asLeader(alice), budi, {
+        confirmation: 'REMOVE', subtree: { action: 'orphan' },
+      });
+      // Budi's agent is now orphaned, and still leads nobody — so a leader may take them.
+      const orphan = (await approvals.untagged(asLeader(carla)))[0];
+      expect(orphan).toBeDefined();
+
+      // But an orphan *with* a unit is the office's to place.
+      const orphanLeader = await join(KPM_A, 'aab', root);
+      await join(KPM_A, 'agent', orphanLeader);
+      await hierarchy.refreshCounts(ctx(KPM_A), orphanLeader);
+      await members.updateById(ctx(KPM_A), orphanLeader, {
+        $set: { leaderId: null, ancestorIds: [], depth: 0 },
+      });
+
+      await expect(approvals.tag(asLeader(carla), orphanLeader)).rejects.toMatchObject({
+        code: 'ORG_NOT_PERMITTED_TO_TAG',
+      });
+      // The office may, because its reach is the whole tenant.
+      await approvals.tag(ctx(KPM_A, { isKpmOwner: true, membershipId: root }), orphanLeader);
+      expect((await members.findById(ctx(KPM_A), orphanLeader))!.leaderId).toBe(root);
+    });
+
+    it('re-splices the subtree when somebody with a unit is placed', async () => {
+      // `attach` wrote leaderId, ancestorIds and depth by hand and did none of the three
+      // things `reparent` does. Descendants kept the old ancestry: the previous chain
+      // retained read reach over a unit that had gone, and the new leader could not see
+      // the unit they now owned.
+      const root = await join(KPM_A, 'ab');
+      const orphanLeader = await join(KPM_A, 'aab', root);
+      const theirAgent = await join(KPM_A, 'agent', orphanLeader);
+      await hierarchy.refreshCounts(ctx(KPM_A), orphanLeader);
+      await members.updateById(ctx(KPM_A), orphanLeader, {
+        $set: { leaderId: null, ancestorIds: [], depth: 0 },
+      });
+      await members.updateById(ctx(KPM_A), theirAgent, {
+        $set: { ancestorIds: [orphanLeader], depth: 1 },
+      });
+
+      await approvals.tag(ctx(KPM_A, { isKpmOwner: true, membershipId: root }), orphanLeader);
+
+      const agentNow = await members.findById(ctx(KPM_A), theirAgent);
+      expect(agentNow!.ancestorIds).toEqual([root, orphanLeader]);
+      expect(agentNow!.depth).toBe(2);
+    });
+
+    it('refuses a leader request from somebody who already reports to a leader', async () => {
+      // Approving one moved an active member with a unit — a re-parent reachable with no
+      // removal permission and no re-parent permission, of which the matrix has none.
+      const root = await join(KPM_A, 'ab');
+      const leader = await join(KPM_A, 'ab', root);
+      const placed = await join(KPM_A, 'agent', leader);
+
+      const asPlaced = new RequestContext('u-placed', 'none', {
+        membershipId: placed, kpmId: KPM_A, hierarchyRole: 'agent', status: 'active',
+        isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      });
+      await expect(onboarding.requestLeader(asPlaced, root)).rejects.toMatchObject({
+        code: 'ORG_AGENT_ALREADY_TAGGED',
+      });
+    });
+  });
+
+  /**
+   * The rows that render when a user account has gone.
+   *
+   * Every read shape in this module carries a `?? 'Unknown'` fallback, and none of them
+   * was exercised — which is most of the branch gap the ratchet now measures. They are
+   * not cosmetic: a page of the roster must still render, and a name that silently
+   * becomes empty reads as a broken screen rather than a missing person.
+   */
+  it('a malformed id is nothing found, not a server fault', async () => {
+    // Every one of these ids arrives from a URL. `CastError` is neither a DomainException
+    // nor an HttpException, so it rendered as 500 INTERNAL_ERROR and was logged as
+    // unhandled — for somebody who mistyped a character. Both URL-facing reads answer the
+    // same way now.
+    await expect(directory.read(ctx(KPM_A), 'not-an-objectid')).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    expect(await members.findById(ctx(KPM_A), 'not-an-objectid')).toBeNull();
+  });
+
+  describe('a member whose user account has gone', () => {
+    // Real ObjectIds: `grant` records `ctx.userId` as the granter and the read shape
+    // looks it up, so a synthetic `u-actor` would be a cast error rather than the
+    // missing-user branch this is about.
+    // Real ObjectIds: `grant` records `ctx.userId` as the granter and the read shape
+    // looks it up, so a synthetic `u-actor` would be a cast error rather than the
+    // missing-user branch this is about.
+    const office = () =>
+      new RequestContext(new mongoose.Types.ObjectId().toString(), 'none', {
+        membershipId: new mongoose.Types.ObjectId().toString(),
+        kpmId: KPM_A,
+        hierarchyRole: 'ab',
+        status: 'active',
+        isKpmOwner: true,
+        isKpmAdmin: false,
+        directCount: 0,
+      });
+
+    async function orphanUser(membershipId: string) {
+      const row = await members.findById(ctx(KPM_A), membershipId);
+      await users.deleteOne({ _id: row!.userId });
+    }
+
+    it('still lists a delegated admin, named Unknown', async () => {
+      const root = await join(KPM_A, 'ab');
+      const target = await join(KPM_A, 'aab', root);
+      await delegation.grant(office(), target);
+      await orphanUser(target);
+
+      const [row] = (await delegation.list(office())).filter((r) => r.membershipId === target);
+      expect(row.fullName).toBe('Unknown');
+      expect(row.initials).toBe('UU');
+    });
+
+    it('names an unknown granter rather than dropping the grant', async () => {
+      const root = await join(KPM_A, 'ab');
+      const target = await join(KPM_A, 'aab', root);
+      await delegation.grant(office(), target);
+      // The person who granted it has gone; the grant and its date have not.
+      const granted = (await delegation.list(office())).find((r) => r.membershipId === target);
+      expect(granted?.grantedAt).toEqual(expect.any(String));
+    });
+
+    it('still lists a group whose owner has gone, and says they have left', async () => {
+      const root = await join(KPM_A, 'ab');
+      const owner = await join(KPM_A, 'aab', root);
+      await groups.create(office(), { name: 'Mentoring Circle', ownerMembershipId: owner });
+      await orphanUser(owner);
+
+      const [group] = await groups.list(office());
+      expect(group.ownerName).toBe('Unknown');
+    });
+
+    it('still offers a leader whose account has gone, rather than an empty row', async () => {
+      const root = await join(KPM_A, 'ab');
+      const leader = await join(KPM_A, 'ab', root);
+      await orphanUser(leader);
+
+      const offered = await onboarding.leaders(ctx(KPM_A), undefined);
+      const row = offered.find((l) => l.membershipId === leader);
+      expect(row?.fullName).toBe('Unknown');
+    });
+  });
+
   describe('the org level reference (P3.5-T8)', () => {
     const owner = ctx(KPM_A, { isKpmOwner: true });
     const levelOf = async (membershipId: string) => {

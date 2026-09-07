@@ -49,6 +49,12 @@ export const ErrorCode = {
   ORG_CYCLE_DETECTED: 'ORG_CYCLE_DETECTED',
   ORG_LEADER_NOT_IN_KPM: 'ORG_LEADER_NOT_IN_KPM',
   ORG_AGENT_ALREADY_TAGGED: 'ORG_AGENT_ALREADY_TAGGED',
+  /**
+   * The untagged pool is office-wide, so its *list* is filtered and its *argument* has to
+   * be too. Refuses tagging the office's root or owner, and — for anybody but the office
+   * — tagging an orphan who still leads a unit, which would hand a peer that whole unit.
+   */
+  ORG_NOT_PERMITTED_TO_TAG: 'ORG_NOT_PERMITTED_TO_TAG',
   // Unknown, revoked and expired all answer with EXPIRED, deliberately: a six-character
   // code whose reward is joining somebody's unit must not tell a prober which of the
   // three they hit.

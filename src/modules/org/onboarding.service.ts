@@ -264,6 +264,27 @@ export class OnboardingService {
       );
     }
 
+    /**
+     * **This is the joining flow, and only the joining flow.**
+     *
+     * Nothing here checked whether the *caller* already had a leader, and `approve()`
+     * checked the request's status rather than the member's — so an active member with a
+     * unit of their own could ask a different leader, be approved, and be moved. That is
+     * a re-parent by another name, reachable with no `member:remove_from_team` and no
+     * re-parent permission, of which the matrix has none. Changing an established leader
+     * is a decision the product has not designed; a side door is not the place to
+     * discover that.
+     */
+    const mine = await this.members.findById(ctx, ctx.membershipId);
+    if (mine?.leaderId) {
+      throw new DomainException(
+        ErrorCode.ORG_AGENT_ALREADY_TAGGED,
+        'You already report to somebody. Moving to another leader is not something you can ask for here.',
+        HttpStatus.CONFLICT,
+        { leaderId: mine.leaderId },
+      );
+    }
+
     // Checked first, and deliberately. Asking for yourself also fails the leader test
     // below — a pending agent is not a valid leader — but "you cannot report to
     // yourself" names the actual mistake, and the more specific message should win.

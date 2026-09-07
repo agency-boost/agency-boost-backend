@@ -1,4 +1,4 @@
-import { FilterQuery, Model, QueryOptions, UpdateQuery, Document } from 'mongoose';
+import { Document, FilterQuery, Model, QueryOptions, UpdateQuery, isValidObjectId } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { MissingTenantContextError } from './tenant-scope.error';
 
@@ -50,11 +50,33 @@ export abstract class TenantScopedRepository<T extends Document> {
   }
 
   async findById(ctx: RequestContext, id: string): Promise<T | null> {
-    return this.model.findOne(this.scope(ctx, 'findById', { _id: id } as FilterQuery<T>)).exec();
+    /**
+     * A malformed id is **nothing found**, not a server fault.
+     *
+     * Every one of these ids arrives from a URL. Without this, Mongoose throws a
+     * `CastError`, which is neither a `DomainException` nor an `HttpException` and so
+     * renders as `500 INTERNAL_ERROR`, logged as unhandled — for somebody who typed a
+     * character wrong. Two services had already noticed and were catching it locally
+     * (`GroupService.find`, `NotificationService.markRead`); doing it once here is the
+     * point of having one chokepoint.
+     */
+    // **Scope first.** Failing closed is the design, and it must not depend on the shape
+    // of the id: a malformed id with no tenant context still has to throw, or the check
+    // that proves this repository never queries unscoped can be skipped by typing a bad
+    // character. The tenancy suite catches this exact ordering.
+    const scoped = this.scope(ctx, 'findById', { _id: id } as FilterQuery<T>);
+    if (!isValidObjectId(id)) return null;
+    return this.model.findOne(scoped).exec();
   }
 
   async findOne(ctx: RequestContext, filter: FilterQuery<T> = {}): Promise<T | null> {
-    return this.model.findOne(this.scope(ctx, 'findOne', filter)).exec();
+    const scoped = this.scope(ctx, 'findOne', filter);
+    // `findOne({ _id, ...visibility })` is how the person page reads, so this is as
+    // URL-facing as `findById` and needs the same answer: a malformed id is nothing
+    // found, not a `CastError` rendered as 500 for somebody who mistyped a character.
+    const id = (filter as { _id?: unknown })._id;
+    if (typeof id === 'string' && !isValidObjectId(id)) return null;
+    return this.model.findOne(scoped).exec();
   }
 
   async find(

@@ -214,12 +214,28 @@ export class HierarchyService {
    * carries the moved member's old ancestors and must carry the new ones instead. This
    * is the price of making the descendant query one lookup, and it is paid here.
    */
-  async reparent(
+  /**
+   * Move a member under a new leader, correctly: cycle check, subtree re-splice, and
+   * `refreshCounts` on **both** the leader they left and the one they joined.
+   *
+   * Extracted because `ApprovalsService.attach` had its own copy of the move — a bare
+   * `$set` of `leaderId`, `ancestorIds` and `depth` — and did none of those three. So
+   * approving a request or tagging somebody who already led a unit left every descendant
+   * carrying the old ancestry: the previous leader kept read reach over a unit that had
+   * gone, the new leader could not see the unit they now owned, and the old leader's
+   * counts were never refreshed. Two ways of doing one thing is how the wrong one gets
+   * called.
+   *
+   * The history row is the caller's to write, because the *meaning* differs: joining an
+   * office for the first time is not the same event as being moved between leaders.
+   *
+   * Returns the leader they had before, or `undefined` when nothing moved.
+   */
+  async moveUnder(
     ctx: RequestContext,
     membershipId: string,
     newLeaderId: string | null,
-    reason?: string,
-  ): Promise<MembershipDocument> {
+  ): Promise<{ previousLeaderId: string | null; moved: boolean }> {
     const member = await this.members.findById(ctx, membershipId);
     if (!member) throw new NotFoundException('Membership');
 
@@ -227,8 +243,6 @@ export class HierarchyService {
 
     if (leader) {
       // A cycle would make the subtree query infinite and the member their own ancestor.
-      // Checking the proposed leader's ancestors catches it in one comparison: if the
-      // member is already above them, moving them below closes the loop.
       const wouldCycle =
         String(leader._id) === membershipId || leader.ancestorIds.includes(membershipId);
       if (wouldCycle) {
@@ -242,31 +256,46 @@ export class HierarchyService {
     }
 
     const previousLeaderId = member.leaderId;
-    if (previousLeaderId === (leader ? String(leader._id) : null)) return member;
+    const target = leader ? String(leader._id) : null;
+    if (previousLeaderId === target) return { previousLeaderId, moved: false };
 
     const oldPath = [...member.ancestorIds, membershipId];
     const newAncestors = leader ? [...leader.ancestorIds, String(leader._id)] : [];
     const newDepth = newAncestors.length;
-    const depthShift = newDepth - member.depth;
 
-    const updated = await this.members.updateById(ctx, membershipId, {
-      $set: { leaderId: leader ? String(leader._id) : null, ancestorIds: newAncestors, depth: newDepth },
+    await this.members.updateById(ctx, membershipId, {
+      $set: { leaderId: target, ancestorIds: newAncestors, depth: newDepth },
     });
 
     // Every descendant carries the old path as a prefix, so the whole subtree is one
     // splice rather than a walk — and one round trip rather than one per member.
-    await this.members.respliceSubtree(ctx, membershipId, newAncestors, oldPath.length, depthShift);
+    await this.members.respliceSubtree(
+      ctx, membershipId, newAncestors, oldPath.length, newDepth - member.depth,
+    );
+
+    await this.refreshCounts(ctx, previousLeaderId);
+    await this.refreshCounts(ctx, target);
+    return { previousLeaderId, moved: true };
+  }
+
+  async reparent(
+    ctx: RequestContext,
+    membershipId: string,
+    newLeaderId: string | null,
+    reason?: string,
+  ): Promise<MembershipDocument> {
+    const { previousLeaderId, moved } = await this.moveUnder(ctx, membershipId, newLeaderId);
+    const member = await this.members.findById(ctx, membershipId);
+    if (!member) throw new NotFoundException('Membership');
+    if (!moved) return member;
 
     await this.closeEdge(membershipId, 're_parented');
     await this.record(ctx, membershipId, 're_parented', {
       fromLeaderId: previousLeaderId,
-      toLeaderId: leader ? String(leader._id) : null,
+      toLeaderId: member.leaderId,
       reason: reason ?? null,
     });
-
-    await this.refreshCounts(ctx, previousLeaderId);
-    await this.refreshCounts(ctx, leader ? String(leader._id) : null);
-    return updated ?? member;
+    return member;
   }
 
   /**
