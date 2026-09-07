@@ -36,6 +36,22 @@ export interface DirectoryMember {
   joinedAt: string | null;
   /** Set only on a removed row. The Removed tab answers "when", which is the first thing asked. */
   removedAt: string | null;
+
+  /**
+   * What **this viewer** may do to **this person** (P3.5-T13).
+   *
+   * Sent rather than inferred, for the reason `TeamMember.canChangeRole` already gives:
+   * these are server rules, and a screen carrying a second copy of them is a screen that
+   * can drift. Three flags rather than one because the permission matrix has three rows —
+   * Agent⇄AAB is a direct leader's call, anything involving AB is the office's, and
+   * removal has its own refusals. On a leader's own team the three collapse; on a person
+   * page, where an Owner sees the whole office, they do not.
+   *
+   * The API refuses regardless. These decide what is *offered*, never what is *allowed*.
+   */
+  canChangeRole: boolean;
+  canPromoteToAb: boolean;
+  canRemove: boolean;
 }
 
 export interface DirectoryPage {
@@ -252,15 +268,21 @@ export class DirectoryService {
       ]),
     );
 
-    return rows.map((m) => this.present(m, byUser.get(m.userId), leaderName.get(m.leaderId ?? '') ?? null));
+    return rows.map((m) =>
+      this.present(m, byUser.get(m.userId), leaderName.get(m.leaderId ?? '') ?? null, ctx),
+    );
   }
 
   private present(
     m: MembershipDocument,
     user: UserDocument | undefined,
     leaderNameValue: string | null,
+    ctx?: RequestContext,
   ): DirectoryMember {
     const fullName = user?.fullName ?? 'Unknown';
+    const tenantAdmin = Boolean(ctx?.membership?.isKpmOwner || ctx?.membership?.isKpmAdmin);
+    const isDirectLeader = Boolean(ctx?.membershipId) && m.leaderId === ctx?.membershipId;
+    const removed = m.status === 'removed';
     return {
       membershipId: String(m._id),
       agentCode: m.agentCode,
@@ -282,6 +304,19 @@ export class DirectoryService {
       isKpmAdmin: m.adminAccess?.isKpmAdmin ?? false,
       joinedAt: m.joinedAt ? m.joinedAt.toISOString() : null,
       removedAt: m.removedAt ? m.removedAt.toISOString() : null,
+      // Mirrors `RoleChangeService.permitted` and `RemovalService.remove`, which are
+      // where these are actually enforced. A refusal the screen did not anticipate is a
+      // worse experience than a control that was never offered, so they are computed the
+      // same way — but the service is still the gate.
+      canChangeRole: !removed && (tenantAdmin || isDirectLeader),
+      canPromoteToAb: !removed && tenantAdmin,
+      canRemove:
+        !removed &&
+        // Not yourself, and not the office's root — it has no leader, so removing it
+        // would leave the whole office pointing at nothing.
+        String(m._id) !== ctx?.membershipId &&
+        m.leaderId !== null &&
+        (tenantAdmin || isDirectLeader),
     };
   }
 

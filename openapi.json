@@ -6640,6 +6640,18 @@
           "removedAt": {
             "type": "string",
             "nullable": true
+          },
+          "canChangeRole": {
+            "type": "boolean",
+            "description": "May **this viewer** move this person between Agent and AAB. A direct leader may; so may the office. Decides what is offered, never what is allowed — the API refuses regardless."
+          },
+          "canPromoteToAb": {
+            "type": "boolean",
+            "description": "May they involve the AB rung. The office only — a leader cannot make somebody their own peer."
+          },
+          "canRemove": {
+            "type": "boolean",
+            "description": "May they remove this person. False for yourself, for the office root, and for anybody already removed."
           }
         },
         "required": [
@@ -6660,7 +6672,10 @@
           "isKpmOwner",
           "isKpmAdmin",
           "joinedAt",
-          "removedAt"
+          "removedAt",
+          "canChangeRole",
+          "canPromoteToAb",
+          "canRemove"
         ]
       },
       "DirectoryCountsDto": {

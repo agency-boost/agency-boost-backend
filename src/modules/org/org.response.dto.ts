@@ -102,6 +102,15 @@ export class DirectoryMemberDto implements DirectoryMember {
   @ApiProperty({ type: String, nullable: true })
   removedAt!: string | null;
 
+
+  @ApiProperty({ type: Boolean, description: 'May **this viewer** move this person between Agent and AAB. A direct leader may; so may the office. Decides what is offered, never what is allowed — the API refuses regardless.' })
+  canChangeRole!: boolean;
+
+  @ApiProperty({ type: Boolean, description: 'May they involve the AB rung. The office only — a leader cannot make somebody their own peer.' })
+  canPromoteToAb!: boolean;
+
+  @ApiProperty({ type: Boolean, description: 'May they remove this person. False for yourself, for the office root, and for anybody already removed.' })
+  canRemove!: boolean;
 }
 
 export class DirectoryPageDto implements DirectoryPage {

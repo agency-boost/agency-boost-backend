@@ -3118,6 +3118,98 @@ describe('organisation', () => {
    * P3.5-T8. `orgLevelId` is the stored truth about where somebody stands; `role` is a
    * projection of it that survives only because v1 seeds one ladder (ADR-0012 §3).
    */
+  /**
+   * P3.5-T13. The person page offers a role change and a removal, and it may only offer
+   * what the service would actually allow.
+   */
+  describe('what a viewer may do to a person (P3.5-T13)', () => {
+    const office = ctx(KPM_A, { isKpmOwner: true, membershipId: 'mem-owner' });
+    const outsider = (membershipId: string) =>
+      new RequestContext('u-other', 'none', {
+        membershipId, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+        isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      });
+
+    it('AC-4: the office may do everything to an ordinary member', async () => {
+      const root = await join(KPM_A, 'ab');
+      const agent = await join(KPM_A, 'agent', root);
+
+      const one = await directory.read(office, agent);
+      expect(one).toMatchObject({ canChangeRole: true, canPromoteToAb: true, canRemove: true });
+    });
+
+    it('AC-4: a direct leader may move them between Agent and AAB, and no further', async () => {
+      // The two matrix rows the screen has to tell apart. A leader cannot make somebody
+      // their own peer.
+      const leader = await join(KPM_A, 'ab');
+      const agent = await join(KPM_A, 'agent', leader);
+
+      const one = await directory.read(outsider(leader), agent);
+      expect(one).toMatchObject({ canChangeRole: true, canPromoteToAb: false, canRemove: true });
+    });
+
+    it('AC-4: somebody else\u2019s leader never reaches the page at all', async () => {
+      // The first gate is visibility, not the flags: a leader reading outside their own
+      // downline gets a 404 — and 404 rather than 403, because a 403 would confirm the
+      // person exists. So the "can they act" question never arises for them.
+      const leaderA = await join(KPM_A, 'ab');
+      const leaderB = await join(KPM_A, 'ab');
+      const theirs = await join(KPM_A, 'agent', leaderA);
+
+      await expect(directory.read(outsider(leaderB), theirs)).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+    });
+
+    it('AC-4: nobody may remove themselves', async () => {
+      const root = await join(KPM_A, 'ab');
+      const me = await join(KPM_A, 'aab', root);
+
+      const one = await directory.read(outsider(me), me);
+      expect(one.canRemove).toBe(false);
+    });
+
+    it('AC-4: the office root cannot be removed, even by the office', async () => {
+      // It has no leader, so removing it leaves the whole office pointing at nothing and
+      // nobody able to put it back. Transferring an office is a Super Admin operation.
+      const root = await join(KPM_A, 'ab');
+      const one = await directory.read(office, root);
+      expect(one.canRemove).toBe(false);
+      expect(one.canChangeRole).toBe(true);
+    });
+
+    it('AC-4: a removed person offers nothing', async () => {
+      const root = await join(KPM_A, 'ab');
+      const gone = await join(KPM_A, 'agent', root);
+      await removals.remove(office, gone, { confirmation: 'REMOVE' });
+
+      const one = await directory.read(office, gone);
+      expect(one).toMatchObject({ canChangeRole: false, canPromoteToAb: false, canRemove: false });
+    });
+
+    it('AC-4: the flags describe what the service does, and the service is still the gate', async () => {
+      // The point of sending them. If these ever disagreed, the screen would offer a
+      // control that fails — so each refusal is asserted beside the flag that predicts it.
+      const root = await join(KPM_A, 'ab');
+      const leader = await join(KPM_A, 'ab', root);
+      const theirs = await join(KPM_A, 'agent', leader);
+      const viewer = outsider(leader);
+
+      // A leader may not touch the AB rung, and the service says the same.
+      expect((await directory.read(viewer, theirs)).canPromoteToAb).toBe(false);
+      await expect(roles.change(viewer, theirs, 'ab')).rejects.toMatchObject({
+        code: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
+      });
+
+      // Nobody may remove themselves, whatever else they hold.
+      expect((await directory.read(office, leader)).canRemove).toBe(true);
+      expect((await directory.read(viewer, leader)).canRemove).toBe(false);
+      await expect(
+        removals.remove(viewer, leader, { confirmation: 'REMOVE' }),
+      ).rejects.toMatchObject({ code: 'ORG_REMOVAL_NOT_PERMITTED' });
+    });
+  });
+
   describe('the org level reference (P3.5-T8)', () => {
     const owner = ctx(KPM_A, { isKpmOwner: true });
     const levelOf = async (membershipId: string) => {
