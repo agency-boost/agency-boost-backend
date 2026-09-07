@@ -236,7 +236,12 @@ export class AdminDelegationService {
   ): Promise<void> {
     await this.history
       .updateMany(
-        { membershipId, eventType: { $in: ['admin_granted', 'admin_revoked'] }, validTo: null },
+        {
+          kpmId,
+          membershipId,
+          eventType: { $in: ['admin_granted', 'admin_revoked'] },
+          validTo: null,
+        },
         { $set: { validTo: at } },
       )
       .exec();

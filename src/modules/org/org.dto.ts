@@ -1,8 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
-  IsArray, IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength,
-  Min, MinLength, ValidateIf, ValidateNested,
+  IsArray, IsBoolean, IsEnum, IsInt, IsMongoId, IsNotEmpty, IsOptional, IsString, Max,
+  MaxLength, Min, MinLength, ValidateIf, ValidateNested,
 } from 'class-validator';
 
 export class DirectoryQueryDto {
@@ -54,7 +54,7 @@ export class KpmSearchDto {
 
 export class RegisterKpmDto {
   @ApiProperty({ description: 'From GET /join/kpms.' })
-  @IsString()
+  @IsMongoId()
   kpmId!: string;
 }
 
@@ -251,7 +251,7 @@ export class TagMemberDto {
       'retired groups are kept, because they are the record that a cohort existed.',
   })
   @IsArray()
-  @IsString({ each: true })
+  @IsMongoId({ each: true })
   groupIds!: string[];
 
   @ApiProperty({

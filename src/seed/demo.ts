@@ -32,6 +32,10 @@ import {
 import { Group, GroupSchema } from '@/modules/org/group.schema';
 import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
+import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
+import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
+import { Notification, NotificationSchema } from '@/modules/notifications/notification.schema';
+import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { formatAgentCode } from '@/modules/org/agent-code';
 
 loadEnv();
@@ -71,6 +75,9 @@ async function main(): Promise<void> {
   const Groups = mongoose.model(Group.name, GroupSchema);
   const JoinRequests = mongoose.model(JoinRequest.name, JoinRequestSchema);
   const Invites = mongoose.model(InviteCode.name, InviteCodeSchema);
+  const KpmRequests = mongoose.model(KpmRequest.name, KpmRequestSchema);
+  const Audit = mongoose.model(AuditLog.name, AuditLogSchema);
+  const Notifications = mongoose.model(Notification.name, NotificationSchema);
 
   if (process.argv.includes('--reset')) {
     // Empty the collections rather than drop the database. An Atlas user with ordinary
@@ -80,6 +87,7 @@ async function main(): Promise<void> {
     const owned = [
       'memberships', 'membershipHistory', 'joinRequests', 'inviteCodes', 'groups', 'kpms', 'companies', 'users',
       'authTokens', 'auditLog', 'notifications', 'notificationPreferences', 'assets',
+      'kpmRequests',
     ];
     for (const name of owned) {
       const { deletedCount } = await mongoose.connection.collection(name).deleteMany({});
@@ -494,6 +502,271 @@ async function main(): Promise<void> {
     null,
   );
 
+  // ------------------------------------------------- offices asking to exist
+
+  /**
+   * `/admin/kpm-requests` had no rows, because nothing seeded the collection it reads.
+   *
+   * The approved one is `owner@kpm0555.test` asking for the office they now run, so the
+   * second tenant has a provenance rather than appearing from nowhere. The two pending
+   * ones are the screen's actual work; the declined one carries a reason, because the
+   * decline dialog requires one and a reader should see what that looks like afterwards.
+   */
+  async function kpmRequest(
+    email: string,
+    fullName: string,
+    branchName: string,
+    fields: Record<string, unknown>,
+  ) {
+    const who = await user(email, fullName);
+    const existing = await KpmRequests.findOne({ branchName }).exec();
+    if (existing) return existing;
+    return KpmRequests.create({
+      companyId: String(prudential._id),
+      branchName,
+      requestedByUserId: String(who._id),
+      note: null,
+      status: 'pending',
+      ...fields,
+    });
+  }
+
+  await kpmRequest('ade@agencyboost.test', 'Ade Kurniawan', 'Bandung Kota Branch', {
+    note: 'Six agents ready to move across from a branch that is closing.',
+    createdAt: daysAgo(3),
+  });
+  await kpmRequest('maya@agencyboost.test', 'Maya Sari', 'Surabaya Timur Branch', {
+    note: null,
+    createdAt: daysAgo(1),
+  });
+  await kpmRequest('tomi@agencyboost.test', 'Tomi Halim', 'Medan Selatan Branch', {
+    status: 'declined',
+    decidedAt: daysAgo(9),
+    decidedByUserId: String(superAdmin._id),
+    reason: 'Too close to an existing office. Reapply once the territory split is settled.',
+    createdAt: daysAgo(12),
+  });
+  await kpmRequest('owner@kpm0555.test', 'Hendra Wijaya', 'Kelapa Gading Branch', {
+    status: 'approved',
+    decidedAt: daysAgo(40),
+    decidedByUserId: String(superAdmin._id),
+    createdKpmId: String(kpm0555._id),
+    createdAt: daysAgo(45),
+  });
+
+  // ------------------------------------------------------------- the inbox
+
+  /**
+   * Every screen in the product has a bell, and it was empty for everybody.
+   *
+   * Only the seven templates whose subject matter Phase 3 actually built are seeded. The
+   * other three in-app templates — goals, coaching, event reminders — say things like
+   * *"Open Goals to accept it"*, and pointing a reader at a screen that does not exist is
+   * worse than an empty row. They arrive with their phases.
+   *
+   * Each one describes something that genuinely happened in this fixture: Putri really
+   * did ask Sari, Sari and Dewi really were promoted, Yanti really was removed and came
+   * back. A notification about an event the rest of the seed does not contain would send
+   * somebody looking for a record that is not there.
+   */
+  async function notify(
+    to: { userId: string; membershipId: string | null },
+    templateId: string,
+    payload: Record<string, unknown>,
+    opts: { readDaysAgo?: number; sentDaysAgo: number },
+  ) {
+    const existing = await Notifications.findOne({
+      userId: to.userId, templateId, createdAt: daysAgo(opts.sentDaysAgo),
+    }).exec();
+    if (existing) return;
+    const at = daysAgo(opts.sentDaysAgo);
+    await Notifications.create({
+      kpmId: id0417,
+      membershipId: to.membershipId,
+      userId: to.userId,
+      templateId,
+      payload,
+      delivery: {
+        in_app: { status: 'sent', at },
+        email: { status: 'sent', at },
+      },
+      readAt: opts.readDaysAgo === undefined ? null : daysAgo(opts.readDaysAgo),
+      createdAt: at,
+    });
+  }
+
+  // Sari: an open request to act on, and the promotion she already read about.
+  await notify(
+    { userId: String(sariUser._id), membershipId: sari.id },
+    NotificationTemplate.JOIN_REQUEST_RECEIVED,
+    { fullName: 'Putri Anggraini' },
+    { sentDaysAgo: 2 },
+  );
+  await notify(
+    { userId: String(sariUser._id), membershipId: sari.id },
+    NotificationTemplate.ROLE_CHANGED,
+    { reason: 'Ready to lead a unit of her own' },
+    { sentDaysAgo: 62, readDaysAgo: 61 },
+  );
+  await notify(
+    { userId: String(dewiUser._id), membershipId: dewi.id },
+    NotificationTemplate.ROLE_CHANGED,
+    { reason: 'Took the AAB track after Q2' },
+    { sentDaysAgo: 21, readDaysAgo: 20 },
+  );
+
+  // Rina and Budi: how each of them arrived. Two different doors, two templates.
+  await notify(
+    { userId: String(rinaUser._id), membershipId: rina.id },
+    NotificationTemplate.JOIN_REQUEST_APPROVED,
+    {},
+    { sentDaysAgo: 30, readDaysAgo: 29 },
+  );
+  await notify(
+    { userId: String(budiUser._id), membershipId: budi.id },
+    NotificationTemplate.MEMBER_TAGGED_BY_LEADER,
+    {},
+    { sentDaysAgo: 5 },
+  );
+
+  // Maya: the grant the Owner made, which is a row on /people/admins as well.
+  await notify(
+    { userId: String(adminUser._id), membershipId: null },
+    NotificationTemplate.ADMIN_ACCESS_CHANGED,
+    { granted: true },
+    { sentDaysAgo: 200, readDaysAgo: 199 },
+  );
+
+  // Yanti: removed, then back. Both rows, in that order.
+  await notify(
+    { userId: String(removedUser._id), membershipId: null },
+    NotificationTemplate.MEMBER_REMOVED,
+    { reason: 'Left for a competitor, then came back three weeks later.' },
+    { sentDaysAgo: 50, readDaysAgo: 49 },
+  );
+  await notify(
+    { userId: String(removedUser._id), membershipId: null },
+    NotificationTemplate.JOIN_REQUEST_APPROVED,
+    {},
+    { sentDaysAgo: 28 },
+  );
+
+  // Fajar has asked nobody *now* — because the first time he asked, he was declined.
+  await notify(
+    { userId: String(untaggedUser._id), membershipId: null },
+    NotificationTemplate.JOIN_REQUEST_DECLINED,
+    { reason: 'My unit is full this quarter — ask Agus, he has room.' },
+    { sentDaysAgo: 8 },
+  );
+
+  // ------------------------------------------------------------ the audit log
+
+  /**
+   * `/admin/audit` read an empty collection, because the seed writes through models
+   * rather than through the services that stamp audit rows.
+   *
+   * These are the actions the rest of the fixture implies, with the real action names the
+   * services emit — a row here that invented a name would teach the wrong vocabulary to
+   * anyone reading the screen to learn what the log contains.
+   */
+  async function audited(
+    action: string,
+    targetCollection: string,
+    fields: Record<string, unknown>,
+  ) {
+    const existing = await Audit.findOne({ action, ...fields }).exec();
+    if (existing) return;
+    await Audit.create({
+      kpmId: null,
+      actorUserId: String(superAdmin._id),
+      action,
+      targetCollection,
+      ...fields,
+    });
+  }
+
+  await audited('company.created', 'companies', {
+    targetId: String(prudential._id),
+    after: { name: 'Prudential', slug: 'prudential' },
+    createdAt: daysAgo(120),
+  });
+  /*
+   * `kpmId: null` on all of these, which is not an oversight.
+   *
+   * `AuditService.record` stamps `kpmId: ctx.kpmId`, and a Super Admin provisioning an
+   * office has no tenant context — so provisioning is a **platform-level** row, which is
+   * exactly the side `/admin/audit` shows by default. Seeding them under the office they
+   * created would put them behind the scope toggle and misrepresent the shape the
+   * service actually writes.
+   */
+  for (const [kpm, days] of [[kpm0417, 110], [kpm0555, 40], [kpm0999, 30]] as const) {
+    await audited('kpm.created', 'kpms', {
+      targetId: String(kpm._id),
+      after: { code: kpm.get('code'), branchName: kpm.get('branchName') },
+      createdAt: daysAgo(days),
+    });
+  }
+  await audited('kpm.owner_assigned', 'kpms', {
+    targetId: id0417,
+    after: { ownerUserId: String(ownerUser._id) },
+    createdAt: daysAgo(109),
+  });
+  await audited('kpm.suspended', 'kpms', {
+    targetId: String(kpm0999._id),
+    before: { status: 'active' },
+    after: { status: 'suspended', reason: 'Unpaid platform fees' },
+    createdAt: daysAgo(14),
+  });
+  await audited('kpm_request.declined', 'kpmRequests', {
+    after: { branchName: 'Medan Selatan Branch' },
+    createdAt: daysAgo(9),
+  });
+  // Tenant-level rows, so the screen's "Show platform level" toggle has both sides.
+  await audited('kpm_admin.granted', 'memberships', {
+    kpmId: id0417,
+    actorUserId: String(ownerUser._id),
+    targetMembershipId: admin.id,
+    after: { granted: true },
+    createdAt: daysAgo(200),
+  });
+  await audited('member.role_changed', 'memberships', {
+    kpmId: id0417,
+    actorUserId: String(ownerUser._id),
+    targetMembershipId: sari.id,
+    before: { role: 'agent' },
+    after: { role: 'aab' },
+    createdAt: daysAgo(62),
+  });
+  await audited('member.removed', 'memberships', {
+    kpmId: id0417,
+    actorUserId: String(sariUser._id),
+    targetMembershipId: rina.id,
+    onBehalfOf: true,
+    after: { reason: 'Left for a competitor' },
+    createdAt: daysAgo(50),
+  });
+
+  /*
+   * The pair is deliberately asymmetric, because the service writes it that way.
+   *
+   * Starting a session is done *as the Super Admin* — no tenant context, no
+   * `effectiveUserId`, so it is a platform row. Ending one is done *while impersonating*,
+   * so the context carries the target's office and `record` fills `effectiveUserId` in.
+   * One support session therefore appears on both sides of the scope toggle, which is
+   * worth seeing before somebody assumes a missing row means a missing event.
+   */
+  await audited('impersonation.started', 'users', {
+    targetId: String(rinaUser._id),
+    after: { reason: 'Support ticket 118 — cannot see her unit', minutes: 60 },
+    createdAt: daysAgo(6),
+  });
+  await audited('impersonation.ended', 'users', {
+    kpmId: id0417,
+    effectiveUserId: String(rinaUser._id),
+    targetId: String(rinaUser._id),
+    createdAt: daysAgo(6),
+  });
+
   // ---------------------------------------------------------- in no office at all
 
   await user('newcomer@agencyboost.test', 'Nadia Safitri');
@@ -537,6 +810,28 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     New Agent Mentoring Circle   owned by Sari · Rina and Budi tagged
     Top Producers 2026           owned by the Owner · Agus and Sari tagged
     Agus and Sari also carry the Core Leader tag
+
+  KPM REQUESTS at /admin/kpm-requests  (Super Admin)
+    Bandung Kota Branch          pending, with a note — ade@agencyboost.test
+    Surabaya Timur Branch        pending, no note — maya@agencyboost.test
+    Medan Selatan Branch         declined, with the reason on the row
+    Kelapa Gading Branch         approved — this is where KPM 0555 came from
+
+  NOTIFICATIONS at /notifications  (the bell on every screen)
+    sari@kpm0417.test            1 unread: Putri's request. Plus her own promotion, read
+    budi@kpm0417.test            1 unread: tagged by a leader
+    untagged@kpm0417.test        1 unread: declined, with the leader's reason
+    removed@kpm0417.test         1 unread: back in. Plus the removal, read
+    rina / dewi / admin          read-only inboxes — the "nothing new" state
+    owner@kpm0417.test           empty, deliberately: nothing in this fixture is
+                                 addressed to the Owner, and an empty inbox is a
+                                 state worth seeing too
+
+  AUDIT LOG at /admin/audit  (Super Admin)
+    Platform-level and tenant-level rows, so the scope toggle has both sides.
+    Includes an impersonation.started / .ended pair on Rina.
+    The log also accumulates from real API use, so expect more than the seed writes —
+    run with --reset for only these.
 
   INVITE CODES for KPM 0417, at /join?code=<code>
     SARI01   works — Sari's, no limit

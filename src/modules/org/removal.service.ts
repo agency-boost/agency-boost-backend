@@ -219,7 +219,7 @@ export class RemovalService {
     // `removed` event opened in its place. Their agent code, role and leader at the
     // moment of removal all stay on the row; nothing is blanked.
     await this.history
-      .updateMany({ membershipId, validTo: null }, { $set: { validTo: now } })
+      .updateMany({ kpmId: ctx.kpmId, membershipId, validTo: null }, { $set: { validTo: now } })
       .exec();
     await this.history.create({
       kpmId: ctx.kpmId,

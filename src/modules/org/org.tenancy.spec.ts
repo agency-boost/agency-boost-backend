@@ -3450,6 +3450,76 @@ describe('organisation', () => {
         code: 'ORG_AGENT_ALREADY_TAGGED',
       });
     });
+
+    it('answers NOT_FOUND for a malformed request or invite id, not a 500', async () => {
+      // Both reach a raw model from a URL parameter, so an uncaught CastError renders as
+      // INTERNAL_ERROR for somebody who mistyped a character.
+      const leader = await join(KPM_A, 'ab');
+      const asLeader = new RequestContext('u-lead', 'none', {
+        membershipId: leader, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+        isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      });
+      await expect(approvals.approve(asLeader, 'not-an-objectid')).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+      await expect(approvals.decline(asLeader, 'not-an-objectid')).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+      await expect(invites.revoke(asLeader, 'not-an-objectid')).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+    });
+
+    /*
+     * A refusal must not land after a write it cannot undo.
+     *
+     * `attach` has to set `status: 'active'` before it moves anybody, because
+     * `refreshCounts` counts active members. That put the cycle check *after* the status
+     * flip, and there are no transactions here — so an orphaned leader who asked somebody
+     * inside their own unit came out of a 409 active, leaderless, and carrying a recruiter
+     * who had never taken them on, with their request still open. `assertCanMoveUnder`
+     * moves the refusal in front of the first write.
+     */
+    it('leaves nothing half-written when an approval would make a cycle', async () => {
+      // Built through `hierarchy.create` rather than `join`, because the contexts below
+      // need the real user ids: `requestLeader` reads the asker's account to name them in
+      // the leader's notification.
+      const orphanUser = await person();
+      const orphanDoc = await hierarchy.create(ctx(KPM_A), {
+        userId: orphanUser, role: 'ab', status: 'active',
+      });
+      const orphanLeader = String(orphanDoc._id);
+      const belowUser = await person();
+      const belowDoc = await hierarchy.create(ctx(KPM_A), {
+        userId: belowUser, role: 'aab', leaderId: orphanLeader, status: 'active',
+      });
+      const below = String(belowDoc._id);
+
+      const asOrphan = new RequestContext(orphanUser, 'none', {
+        membershipId: orphanLeader, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+        isKpmOwner: false, isKpmAdmin: false, directCount: 1,
+      });
+      // Allowed to ask: they have no leader, and `below` is an active AAB.
+      await onboarding.requestLeader(asOrphan, below);
+
+      const asBelow = new RequestContext(belowUser, 'none', {
+        membershipId: below, kpmId: KPM_A, hierarchyRole: 'aab', status: 'active',
+        isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      });
+      const open = await approvals.inbox(asBelow);
+      const requestId = open[0].requestId;
+
+      await expect(approvals.approve(asBelow, requestId)).rejects.toMatchObject({
+        code: 'ORG_CYCLE_DETECTED',
+      });
+
+      // Everything the failed attach used to have already written.
+      const after = await members.findById(ctx(KPM_A), orphanLeader);
+      expect(after!.leaderId).toBeNull();
+      expect(after!.recruitedByMembershipId ?? null).toBeNull();
+      // And the request is still theirs to withdraw or re-aim.
+      expect((await approvals.inbox(asBelow)).map((r: { requestId: string }) => r.requestId)).toContain(requestId);
+    });
   });
 
   /**

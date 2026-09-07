@@ -140,6 +140,13 @@ describe('ImpersonationService', () => {
       expect(row?.get('effectiveUserId')).toBe('u-agent'); // who they acted as
     });
 
+    it('answers NOT_FOUND for a malformed target id, not a 500', async () => {
+      // `POST /admin/impersonate/:userId` reaches `users` on the raw model.
+      await expect(
+        service.start(superAdmin, 'not-an-objectid', 'Support ticket 41'),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
     it('does nothing when ending a session that was not impersonating', async () => {
       await service.end(superAdmin);
       expect(await mongoose.model(AuditLog.name).countDocuments({})).toBe(0);

@@ -166,6 +166,12 @@ describe('OrgLevelService', () => {
       expect(ladders.get(companyId)?.map((l) => l.label)).toEqual(['Agent', 'AB']);
     });
 
+    it('answers NOT_FOUND for a malformed rung id, not a 500', async () => {
+      await expect(
+        service.update(sa(), 'not-an-objectid', { label: 'Nope' }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
     it('is empty rather than absent for a company with no ladder', async () => {
       expect((await service.laddersByCompany([companyId])).get(companyId)).toBeUndefined();
       expect((await service.laddersByCompany([])).size).toBe(0);

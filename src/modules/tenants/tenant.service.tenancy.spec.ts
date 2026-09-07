@@ -684,6 +684,36 @@ describe('TenantService', () => {
     });
   });
 
+  /*
+   * These arrive from a URL. Before the Phase 3.5 exit review they reached a raw model
+   * with no validation, and Mongoose's CastError is neither a DomainException nor an
+   * HttpException — so `GET /admin/tenants/nope` was a 500 logged as an unhandled error
+   * for somebody who mistyped a character. `TenantScopedRepository` had already answered
+   * this correctly for two phases; these lookups bypass it.
+   */
+  describe('a malformed id is not found, not a server fault', () => {
+    const BAD = 'not-an-objectid';
+
+    it('answers NOT_FOUND on read, assign-owner and set-status alike', async () => {
+      const sa = ctx({ superAdmin: true });
+      await expect(service.readProfile(sa, BAD)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(
+        service.assignOwner(sa, BAD, { email: 'nobody@agencyboost.test' }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(service.setStatus(sa, BAD, 'suspended')).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+    });
+
+    it('still refuses before it looks, so the shape of an id cannot skip a permission', async () => {
+      // Ordering matters for the same reason it does in the tenant repository: failing
+      // closed must not depend on whether the id parses.
+      await expect(service.setStatus(ctx({ owner: true }), BAD, 'suspended')).rejects.toMatchObject({
+        code: 'PERM_DENIED',
+      });
+    });
+  });
+
   describe('listing', () => {
     it('is Super Admin only', async () => {
       await expect(service.listAll(ctx({ owner: true }))).rejects.toMatchObject({

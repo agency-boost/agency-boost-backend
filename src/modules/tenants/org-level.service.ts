@@ -206,7 +206,12 @@ export class OrgLevelService {
   ): Promise<OrgLevelRow[]> {
     this.require(ctx, 'org_level:crud');
 
-    const level = await this.levels.findOne({ _id: orgLevelId, deletedAt: null }).exec();
+    const level = await this.levels
+      .findOne({ _id: orgLevelId, deletedAt: null })
+      .exec()
+      // A malformed id is "not here", not a 500: these arrive from a URL, and an
+      // uncaught CastError renders as INTERNAL_ERROR and is logged as unhandled.
+      .catch(() => null);
     if (!level) throw new NotFoundException('Org level');
 
     const before = { label: level.label, displayOrder: level.displayOrder, status: level.status };

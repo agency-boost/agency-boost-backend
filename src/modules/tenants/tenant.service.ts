@@ -356,7 +356,12 @@ export class TenantService {
   ): Promise<KpmView> {
     this.require(ctx, 'kpm:assign_owner');
 
-    const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
+    const kpm = await this.kpms
+      .findOne({ _id: kpmId, deletedAt: null })
+      .exec()
+      // A malformed id is "not here", not a 500: these arrive from a URL, and an
+      // uncaught CastError renders as INTERNAL_ERROR and is logged as unhandled.
+      .catch(() => null);
     if (!kpm) throw new NotFoundException('KPM');
 
     const user = await this.resolveOwner(who);
@@ -469,7 +474,12 @@ export class TenantService {
   ): Promise<KpmView> {
     this.require(ctx, status === 'suspended' ? 'kpm:suspend' : 'kpm:activate');
 
-    const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
+    const kpm = await this.kpms
+      .findOne({ _id: kpmId, deletedAt: null })
+      .exec()
+      // A malformed id is "not here", not a 500: these arrive from a URL, and an
+      // uncaught CastError renders as INTERNAL_ERROR and is logged as unhandled.
+      .catch(() => null);
     if (!kpm) throw new NotFoundException('KPM');
 
     const before = kpm.status;
@@ -712,7 +722,12 @@ export class TenantService {
     // than 403 keeps the existence of other tenants unobservable.
     if (!ctx.isSuperAdmin && ctx.kpmId !== kpmId) throw new NotFoundException('KPM');
 
-    const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
+    const kpm = await this.kpms
+      .findOne({ _id: kpmId, deletedAt: null })
+      .exec()
+      // A malformed id is "not here", not a 500: these arrive from a URL, and an
+      // uncaught CastError renders as INTERNAL_ERROR and is logged as unhandled.
+      .catch(() => null);
     if (!kpm) throw new NotFoundException('KPM');
     return this.toView(kpm);
   }

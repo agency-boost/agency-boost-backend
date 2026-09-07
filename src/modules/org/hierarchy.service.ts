@@ -86,11 +86,22 @@ export class HierarchyService {
     });
   }
 
-  /** Close the open edge of a kind, so a change never overwrites what came before. */
-  private async closeEdge(membershipId: string, eventType: MembershipEvent): Promise<void> {
+  /**
+   * Close the open edge of a kind, so a change never overwrites what came before.
+   *
+   * `kpmId` leads the filter because it leads every index on `membershipHistory`
+   * (`{kpmId, membershipId, validFrom}`) — without it this is a collection scan. It is
+   * also invariant §1: a query is scoped because the collection is scoped, not because
+   * the id it happens to use is unique enough to get away with it.
+   */
+  private async closeEdge(
+    kpmId: string,
+    membershipId: string,
+    eventType: MembershipEvent,
+  ): Promise<void> {
     await this.history
       .updateMany(
-        { membershipId, eventType, validTo: null },
+        { kpmId, membershipId, eventType, validTo: null },
         { $set: { validTo: this.clock.now() } },
       )
       .exec();
@@ -231,6 +242,49 @@ export class HierarchyService {
    *
    * Returns the leader they had before, or `undefined` when nothing moved.
    */
+  /**
+   * Would this move be refused? Asked **before** anything is written.
+   *
+   * `moveUnder` checks the same thing, and keeps checking it — it is the one place the
+   * graph changes and it does not get to assume its callers were careful. This exists so
+   * a caller that must write something *else* first can find out beforehand.
+   *
+   * `ApprovalsService.attach` is that caller. It has to set `status: 'active'` before the
+   * move, because `refreshCounts` counts active members — so a refusal inside `moveUnder`
+   * used to leave the joiner active with no leader and a `recruitedByMembershipId` naming
+   * a leader who never took them on, with their request still pending. There are no
+   * transactions here (ADR-0002, and MongoDB sessions are not configured), so the only
+   * way to avoid a half-write is not to start one.
+   */
+  async assertCanMoveUnder(
+    ctx: RequestContext,
+    membershipId: string,
+    newLeaderId: string,
+  ): Promise<void> {
+    // No member read and no nullable leader: the only caller has both in hand already,
+    // and `moveUnder` re-reads and re-checks regardless. Accepting shapes nobody passes
+    // would be two branches no test could reach except by inventing a caller for them.
+    this.refuseCycle(membershipId, newLeaderId, await this.requireLeader(ctx, newLeaderId));
+  }
+
+  /** A cycle would make the subtree query infinite and the member their own ancestor. */
+  private refuseCycle(
+    membershipId: string,
+    newLeaderId: string,
+    leader: MembershipDocument,
+  ): void {
+    const wouldCycle =
+      String(leader._id) === membershipId || leader.ancestorIds.includes(membershipId);
+    if (wouldCycle) {
+      throw new DomainException(
+        ErrorCode.ORG_CYCLE_DETECTED,
+        'That would make this member their own leader.',
+        HttpStatus.CONFLICT,
+        { membershipId, leaderId: newLeaderId },
+      );
+    }
+  }
+
   async moveUnder(
     ctx: RequestContext,
     membershipId: string,
@@ -241,19 +295,7 @@ export class HierarchyService {
 
     const leader = newLeaderId ? await this.requireLeader(ctx, newLeaderId) : null;
 
-    if (leader) {
-      // A cycle would make the subtree query infinite and the member their own ancestor.
-      const wouldCycle =
-        String(leader._id) === membershipId || leader.ancestorIds.includes(membershipId);
-      if (wouldCycle) {
-        throw new DomainException(
-          ErrorCode.ORG_CYCLE_DETECTED,
-          'That would make this member their own leader.',
-          HttpStatus.CONFLICT,
-          { membershipId, leaderId: newLeaderId },
-        );
-      }
-    }
+    if (leader) this.refuseCycle(membershipId, newLeaderId as string, leader);
 
     const previousLeaderId = member.leaderId;
     const target = leader ? String(leader._id) : null;
@@ -289,7 +331,9 @@ export class HierarchyService {
     if (!member) throw new NotFoundException('Membership');
     if (!moved) return member;
 
-    await this.closeEdge(membershipId, 're_parented');
+    // The membership's own tenant, not the context's: it was just read through the
+    // tenant repository so the two agree, and this one is typed non-null.
+    await this.closeEdge(String(member.kpmId), membershipId, 're_parented');
     await this.record(ctx, membershipId, 're_parented', {
       fromLeaderId: previousLeaderId,
       toLeaderId: member.leaderId,

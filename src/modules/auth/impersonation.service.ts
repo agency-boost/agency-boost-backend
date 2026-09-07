@@ -64,7 +64,12 @@ export class ImpersonationService {
       );
     }
 
-    const target = await this.users.findOne({ _id: targetUserId, deletedAt: null }).exec();
+    const target = await this.users
+      .findOne({ _id: targetUserId, deletedAt: null })
+      .exec()
+      // A malformed id is "not here", not a 500: these arrive from a URL, and an
+      // uncaught CastError renders as INTERNAL_ERROR and is logged as unhandled.
+      .catch(() => null);
     if (!target) throw new NotFoundException('User');
 
     if (target.platformRole === 'super_admin') {

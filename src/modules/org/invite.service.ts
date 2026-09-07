@@ -162,7 +162,10 @@ export class InviteService {
 
     const invite = await this.invites
       .findOne({ _id: inviteId, kpmId: ctx.kpmId, deletedAt: null })
-      .exec();
+      .exec()
+      // A malformed id is "not here", not a 500: these arrive from a URL, and an
+      // uncaught CastError renders as INTERNAL_ERROR and is logged as unhandled.
+      .catch(() => null);
     // Someone else's invite reads the same as one that does not exist.
     if (!invite || invite.issuedByMembershipId !== ctx.membershipId) {
       throw new NotFoundException('Invite');
@@ -278,12 +281,14 @@ export class InviteService {
     });
 
     // Count the use only once the membership exists, so a failed join does not spend it.
-    await this.invites.updateOne({ _id: invite._id }, { $inc: { useCount: 1 } }).exec();
+    await this.invites
+      .updateOne({ _id: invite._id, kpmId: invite.kpmId }, { $inc: { useCount: 1 } })
+      .exec();
 
     // Any request they had open is moot — they are in, and by another door.
     await this.requests
       .updateMany(
-        { membershipId: String(membership._id), status: 'pending' },
+        { kpmId: scoped.kpmId, membershipId: String(membership._id), status: 'pending' },
         { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
       )
       .exec();

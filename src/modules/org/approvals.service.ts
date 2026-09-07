@@ -254,7 +254,10 @@ export class ApprovalsService {
   ): Promise<JoinRequestDocument> {
     const request = await this.requests
       .findOne({ _id: requestId, kpmId: ctx.kpmId, deletedAt: null })
-      .exec();
+      .exec()
+      // A malformed id is "not here", not a 500: these arrive from a URL, and an
+      // uncaught CastError renders as INTERNAL_ERROR and is logged as unhandled.
+      .catch(() => null);
     // Somebody else's request reads the same as one that does not exist — unless you
     // administer the office, in which case every request in it is yours to decide.
     const addressedToMe =
@@ -556,9 +559,16 @@ export class ApprovalsService {
      * `moveUnder` carries the cycle check, the subtree re-splice and both `refreshCounts`.
      * The history row stays here, because joining is not the same event as being moved.
      */
-    // Active **first**, then placed: `refreshCounts` counts active members, so moving a
-    // still-pending joiner would refresh a count that does not yet include them and
-    // leave the new leader reading zero.
+    // **Ask before writing anything.** The order below is forced — `refreshCounts` counts
+    // active members, so the status flip has to precede the move or the new leader reads
+    // a count that does not include the person who just arrived. That left the refusal
+    // inside `moveUnder` landing after a write it could not undo: an orphan who leads a
+    // unit can ask a leader inside their own downline (`requestLeader` checks only that
+    // the leader is an active AB or AAB), and approving it threw `ORG_CYCLE_DETECTED`
+    // with the joiner already active, leaderless, and carrying a recruiter who never took
+    // them on. There are no transactions to roll that back, so the refusal moves first.
+    await this.hierarchy.assertCanMoveUnder(ctx, String(member._id), leaderId);
+
     await this.members.updateById(ctx, String(member._id), {
       $set: {
         status: 'active',

@@ -65,7 +65,7 @@ const config: Config = {
     //
     // Raise these as coverage improves. Never lower one to make a change pass.
     './src/modules/org/': { lines: 95, branches: 79, functions: 95, statements: 95 },
-    './src/modules/tenants/': { lines: 95, branches: 85, functions: 93, statements: 95 },
+    './src/modules/tenants/': { lines: 95, branches: 87, functions: 93, statements: 95 },
     './src/modules/auth/': { lines: 95, branches: 84, functions: 89, statements: 95 },
   },
   testEnvironment: 'node',

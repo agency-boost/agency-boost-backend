@@ -188,7 +188,7 @@ export class RoleChangeService {
     // log reads exactly these rows, and nothing else could reconstruct them.
     await this.history
       .updateMany(
-        { membershipId, eventType: 'role_changed', validTo: null },
+        { kpmId: ctx.kpmId, membershipId, eventType: 'role_changed', validTo: null },
         { $set: { validTo: this.clock.now() } },
       )
       .exec();
