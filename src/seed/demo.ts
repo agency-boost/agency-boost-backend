@@ -20,6 +20,9 @@ import { SystemClock } from '@/common/clock/clock.port';
 import { PasswordService } from '@/modules/auth/password.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
+import {
+  CompanyOrgLevel, CompanyOrgLevelSchema,
+} from '@/modules/tenants/company-org-level.schema';
 import { DEFAULT_KPM_SETTINGS, Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import {
@@ -60,6 +63,7 @@ async function main(): Promise<void> {
 
   const Users = mongoose.model(User.name, UserSchema);
   const Companies = mongoose.model(Company.name, CompanySchema);
+  const OrgLevels = mongoose.model(CompanyOrgLevel.name, CompanyOrgLevelSchema);
   const Kpms = mongoose.model(Kpm.name, KpmSchema);
   const Memberships = mongoose.model(Membership.name, MembershipSchema);
   const History = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
@@ -282,6 +286,28 @@ async function main(): Promise<void> {
   await user('root@agencyboost.test', 'Second Operator', { platformRole: 'super_admin' });
 
   const prudential = await company('Prudential', 'prudential');
+
+  /**
+   * Prudential's ladder (P3.5-T7 AC-5), junior first, exactly as the prototype writes it:
+   * *"Role ladder: Agent → AAB → AB"* (`Superadmin.html:311`).
+   *
+   * The codes are what `memberships.orgLevelId` will resolve to in T8, and they match the
+   * `HierarchyRole` enum lower-cased — which is the whole reason v1's one-to-one mapping
+   * lets the enum keep working while the reference becomes the stored truth.
+   */
+  for (const [code, label, displayOrder] of [
+    ['AGENT', 'Agent', 1],
+    ['AAB', 'AAB', 2],
+    ['AB', 'AB', 3],
+  ] as const) {
+    const existing = await OrgLevels.findOne({ companyId: String(prudential._id), code }).exec();
+    if (!existing) {
+      await OrgLevels.create({
+        companyId: String(prudential._id), code, label, displayOrder,
+        status: 'active', archivedAt: null, deletedAt: null,
+      });
+    }
+  }
 
   // ---------------------------------------------------------- KPM 0417, the main office
 

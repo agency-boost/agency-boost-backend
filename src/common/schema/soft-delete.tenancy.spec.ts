@@ -7,6 +7,7 @@ import {
 import { UserSchema } from '@/modules/users/user.schema';
 import { AuthTokenSchema } from '@/modules/auth/auth-token.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
+import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
 import { KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { GroupSchema } from '@/modules/org/group.schema';
@@ -27,6 +28,7 @@ import { unclassified } from './registered-schemas';
 const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['users', UserSchema],
   ['companies', CompanySchema],
+  ['companyOrgLevels', CompanyOrgLevelSchema],
   ['kpms', KpmSchema],
   ['kpmRequests', KpmRequestSchema],
   ['assets', AssetSchema],
@@ -51,6 +53,7 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
 const EXPORT_NAMES = new Map<Schema, string>([
   [UserSchema, 'UserSchema'],
   [CompanySchema, 'CompanySchema'],
+  [CompanyOrgLevelSchema, 'CompanyOrgLevelSchema'],
   [KpmSchema, 'KpmSchema'],
   [KpmRequestSchema, 'KpmRequestSchema'],
   [AssetSchema, 'AssetSchema'],

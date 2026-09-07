@@ -14,6 +14,8 @@ import { Company, CompanySchema } from './company.schema';
 import { Kpm, KpmSchema } from './kpm.schema';
 import { KpmRequest, KpmRequestSchema } from './kpm-request.schema';
 import { KpmRequestService } from './kpm-request.service';
+import { OrgLevelService } from './org-level.service';
+import { CompanyOrgLevel, CompanyOrgLevelSchema } from './company-org-level.schema';
 import { TenantService } from './tenant.service';
 import { clearCollections, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
 
@@ -42,13 +44,15 @@ describe('KpmRequestService (P3.5-T2)', () => {
     const auditModel = mongoose.model(AuditLog.name, AuditLogSchema);
     const memberModel = mongoose.model(Membership.name, MembershipSchema);
     const historyModel = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
+    const levels = mongoose.model(CompanyOrgLevel.name, CompanyOrgLevelSchema);
     const repo = new MembershipRepository(memberModel as never);
     const clock = new FixedClock(NOW);
     const audit = new AuditService(auditModel as never);
 
     tenants = new TenantService(
-      kpms as never, companies as never, users as never, audit, clock,
+      kpms as never, companies as never, users as never, requests as never, audit, clock,
       new HierarchyService(repo, kpms as never, historyModel as never, clock), repo,
+      new OrgLevelService(levels as never, companies as never, audit, clock),
     );
     service = new KpmRequestService(
       requests as never, companies as never, users as never, tenants, audit, clock,

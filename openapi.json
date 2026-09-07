@@ -481,6 +481,105 @@
         ]
       }
     },
+    "/api/v1/admin/org-levels": {
+      "get": {
+        "description": "Every rung of every company’s ladder, junior first — archived ones included, because a screen that hid them would show a ladder that does not explain the people standing on it. Narrow with ?companyId.",
+        "operationId": "AdminController_listOrgLevels_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The role ladders companies define",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      },
+      "post": {
+        "description": "The ladder belongs to the company, not to any office (ADR-0012): a KPM cannot add, rename or remove a rung. `code` is stable and semantic and is never reused — not even after archiving — because it is what every membership holds.",
+        "operationId": "AdminController_createOrgLevel_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrgLevelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add a rung to a company’s ladder",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      }
+    },
+    "/api/v1/admin/org-levels/{id}": {
+      "patch": {
+        "description": "The code is not updatable, by construction — it is absent from the body. Archiving retires a rung and keeps every membership that references it readable.",
+        "operationId": "AdminController_updateOrgLevel_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrgLevelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rename, reorder or archive a rung",
+        "tags": [
+          "admin (Super Admin)"
+        ]
+      }
+    },
     "/api/v1/admin/tenants": {
       "get": {
         "operationId": "AdminController_listTenants_v1",
@@ -2083,6 +2182,60 @@
           "name",
           "slug"
         ]
+      },
+      "CreateOrgLevelDto": {
+        "type": "object",
+        "properties": {
+          "companyId": {
+            "type": "string",
+            "description": "Company id from GET /admin/companies"
+          },
+          "code": {
+            "type": "string",
+            "example": "AAB",
+            "description": "Stable and semantic. Upper-cased on the way in, and never changed afterwards.",
+            "pattern": "^[A-Z][A-Z0-9_]{1,31}$"
+          },
+          "label": {
+            "type": "string",
+            "example": "Associate Agency Business",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "displayOrder": {
+            "type": "number",
+            "example": 2,
+            "description": "Junior first. Presentation only — nothing references it."
+          }
+        },
+        "required": [
+          "companyId",
+          "code",
+          "label",
+          "displayOrder"
+        ]
+      },
+      "UpdateOrgLevelDto": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "example": "Associate Agency Business",
+            "maxLength": 60
+          },
+          "displayOrder": {
+            "type": "number",
+            "example": 2
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ],
+            "description": "Archiving retires a rung without deleting it. Nothing is ever deleted here."
+          }
+        }
       },
       "CreateKpmDto": {
         "type": "object",

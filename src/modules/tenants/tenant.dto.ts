@@ -1,7 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
-  IsEmail, IsEnum, IsIn, IsMongoId, IsOptional, IsString, Matches, MaxLength, MinLength,
+  IsEmail, IsEnum, IsIn, IsInt, IsMongoId, IsOptional, IsString, Matches, Max, MaxLength,
+  Min, MinLength,
 } from 'class-validator';
 import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
 
@@ -33,6 +34,67 @@ export class CreateCompanyDto {
     message: 'slug must be lower-case letters and digits, separated by single hyphens',
   })
   slug!: string;
+}
+
+/**
+ * A rung on a company's ladder.
+ *
+ * `code` is write-once by construction: it is on the create DTO and deliberately absent
+ * from the update one. Invariant 3 — a published code never changes, because it is the
+ * identity every membership and every history row holds.
+ */
+export class CreateOrgLevelDto {
+  @ApiProperty({ description: 'Company id from GET /admin/companies' })
+  @IsMongoId()
+  companyId!: string;
+
+  @ApiProperty({
+    example: 'AAB',
+    description: 'Stable and semantic. Upper-cased on the way in, and never changed afterwards.',
+    pattern: '^[A-Z][A-Z0-9_]{1,31}$',
+  })
+  @IsString()
+  @Matches(/^[A-Za-z][A-Za-z0-9_]{1,31}$/, {
+    message: 'code must be letters, digits and underscores, starting with a letter',
+  })
+  code!: string;
+
+  @ApiProperty({ example: 'Associate Agency Business', minLength: 1, maxLength: 60 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(60)
+  label!: string;
+
+  @ApiProperty({ example: 2, description: 'Junior first. Presentation only — nothing references it.' })
+  @IsInt()
+  @Min(1)
+  @Max(99)
+  displayOrder!: number;
+}
+
+/** No `code`. Renaming is what `label` is for; a different rung is a different level. */
+export class UpdateOrgLevelDto {
+  @ApiPropertyOptional({ example: 'Associate Agency Business', maxLength: 60 })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(60)
+  label?: string;
+
+  @ApiPropertyOptional({ example: 2 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(99)
+  displayOrder?: number;
+
+  @ApiPropertyOptional({
+    enum: ['active', 'archived'],
+    description: 'Archiving retires a rung without deleting it. Nothing is ever deleted here.',
+  })
+  @IsOptional()
+  @IsEnum(['active', 'archived'])
+  status?: 'active' | 'archived';
 }
 
 export class CreateKpmDto {

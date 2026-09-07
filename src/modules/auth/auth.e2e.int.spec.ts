@@ -25,6 +25,10 @@ import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { TenantService } from '@/modules/tenants/tenant.service';
 import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
+import {
+  CompanyOrgLevel, CompanyOrgLevelSchema,
+} from '@/modules/tenants/company-org-level.schema';
+import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { KpmRequestService } from '@/modules/tenants/kpm-request.service';
 import { AdminController } from '@/modules/tenants/admin.controller';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
@@ -82,6 +86,7 @@ describe('auth and admin over HTTP', () => {
           { name: Company.name, schema: CompanySchema },
           { name: Kpm.name, schema: KpmSchema },
           { name: KpmRequest.name, schema: KpmRequestSchema },
+          { name: CompanyOrgLevel.name, schema: CompanyOrgLevelSchema },
           { name: AuditLog.name, schema: AuditLogSchema },
           { name: Notification.name, schema: NotificationSchema },
           { name: NotificationPreferences.name, schema: NotificationPreferencesSchema },
@@ -109,7 +114,7 @@ describe('auth and admin over HTTP', () => {
         { provide: NOTIFICATION_ADAPTERS, useValue: [] },
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         AuditService, NotificationService, PasswordService, RateLimiter,
-        AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService,
+        AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService, OrgLevelService,
         MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService, ApprovalsService, RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService,
         AuthGuard, PermissionsGuard,
       ],
@@ -324,6 +329,64 @@ describe('auth and admin over HTTP', () => {
         await api().post('/api/v1/admin/companies')
           .set(auth).send({ name: 'Whatever', slug }).expect(400);
       }
+    });
+
+    it('P3.5-T7: the ladder is Super Admin only, over HTTP as well as in the service', async () => {
+      const sa = await makeUser('sa-ladder@agencyboost.test', 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const plain = await makeUser('plain-ladder@kpm.test');
+      const theirs = { Authorization: `Bearer ${plain.accessToken}` };
+
+      const company = await api().post('/api/v1/admin/companies')
+        .set(auth).send({ name: 'Prudential', slug: 'prudential' }).expect(201);
+      const companyId = String(company.body._id);
+
+      const ladder = await api().post('/api/v1/admin/org-levels').set(auth)
+        .send({ companyId, code: 'AGENT', label: 'Agent', displayOrder: 1 }).expect(201);
+      expect(ladder.body).toEqual([
+        expect.objectContaining({ code: 'AGENT', label: 'Agent', status: 'active' }),
+      ]);
+
+      // AC-2, at the layer a KPM Owner would actually reach it from.
+      for (const call of [
+        api().get('/api/v1/admin/org-levels').set(theirs),
+        api().post('/api/v1/admin/org-levels').set(theirs)
+          .send({ companyId, code: 'AAB', label: 'AAB', displayOrder: 2 }),
+        api().patch(`/api/v1/admin/org-levels/${ladder.body[0].orgLevelId}`).set(theirs)
+          .send({ label: 'Anything' }),
+      ]) {
+        const res = await call.expect(403);
+        expect(res.body.error.code).toBe('PERM_DENIED');
+      }
+
+      // The code is not in the update contract at all, so sending one is refused rather
+      // than silently ignored — `forbidNonWhitelisted` makes the shape the enforcement.
+      const sneaky = await api().patch(`/api/v1/admin/org-levels/${ladder.body[0].orgLevelId}`)
+        .set(auth).send({ code: 'SOMETHING_ELSE' }).expect(400);
+      expect(sneaky.body.error.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('P3.5-T7 AC-5: the overview card carries the ladder, from data', async () => {
+      const sa = await makeUser('sa-card@agencyboost.test', 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const company = await api().post('/api/v1/admin/companies')
+        .set(auth).send({ name: 'Prudential', slug: 'prudential' }).expect(201);
+      const companyId = String(company.body._id);
+
+      const before = await api().get('/api/v1/admin/overview').set(auth).expect(200);
+      // A company with no ladder says so with an empty list, not with an invented one.
+      expect(before.body.companies[0].ladder).toEqual([]);
+
+      for (const [code, label, displayOrder] of [
+        ['AB', 'AB', 3], ['AGENT', 'Agent', 1], ['AAB', 'AAB', 2],
+      ] as const) {
+        await api().post('/api/v1/admin/org-levels').set(auth)
+          .send({ companyId, code, label, displayOrder }).expect(201);
+      }
+
+      const after = await api().get('/api/v1/admin/overview').set(auth).expect(200);
+      // Junior first, whatever order they were entered in.
+      expect(after.body.companies[0].ladder).toEqual(['Agent', 'AAB', 'AB']);
     });
 
     it('refuses tenant creation to a non-Super-Admin with PERM_DENIED', async () => {

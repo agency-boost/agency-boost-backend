@@ -27,6 +27,12 @@ export const ErrorCode = {
    * name the company they collided with.
    */
   COMPANY_SLUG_TAKEN: 'COMPANY_SLUG_TAKEN',
+  /**
+   * A company already has a level with that code — **including an archived one**. An
+   * archived code is never reused: a membership still pointing at the old rung would
+   * quietly come to mean the new one.
+   */
+  ORG_LEVEL_CODE_TAKEN: 'ORG_LEVEL_CODE_TAKEN',
   /** Somebody with an open request asked for a second office. */
   TENANT_REQUEST_ALREADY_OPEN: 'TENANT_REQUEST_ALREADY_OPEN',
   /** A KPM request was approved or declined already; the second decision says which. */

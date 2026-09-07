@@ -7,6 +7,7 @@ import {
 } from '@/modules/notifications/notification.schema';
 import { AuthTokenSchema } from '@/modules/auth/auth-token.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
+import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
 import { KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { UserSchema } from '@/modules/users/user.schema';
@@ -62,6 +63,12 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
       'is approved, and then `createdKpmId` names what it became',
   ],
   [
+    'companyOrgLevels',
+    CompanyOrgLevelSchema,
+    'a company owns its role ladder, not any office (ADR-0012): an office cannot invent ' +
+      'a rung, so scoping the ladder to one would say the opposite of what it is',
+  ],
+  [
     'authTokens',
     AuthTokenSchema,
     'issued against a global identity before any office is chosen: refresh, email ' +
@@ -94,6 +101,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [AuditLogSchema, 'AuditLogSchema'],
   [AuthTokenSchema, 'AuthTokenSchema'],
   [CompanySchema, 'CompanySchema'],
+  [CompanyOrgLevelSchema, 'CompanyOrgLevelSchema'],
   [KpmSchema, 'KpmSchema'],
   [UserSchema, 'UserSchema'],
   [GroupSchema, 'GroupSchema'],

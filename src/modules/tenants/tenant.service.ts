@@ -12,6 +12,8 @@ import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { initialsOf } from '@/modules/org/directory.service';
 import { Company, CompanyDocument } from './company.schema';
+import { KpmRequest, KpmRequestDocument } from './kpm-request.schema';
+import { OrgLevelService } from './org-level.service';
 import { DEFAULT_KPM_SETTINGS, Kpm, KpmDocument } from './kpm.schema';
 
 export interface CreateKpmInput {
@@ -107,6 +109,8 @@ export interface CompanyCard {
   initials: string;
   kpmCount: number;
   memberCount: number;
+  /** The company's active rungs, junior first — labels only. Empty if none is defined. */
+  ladder: string[];
 }
 
 export interface PlatformOverview {
@@ -121,10 +125,14 @@ export class TenantService {
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
     @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
+    @InjectModel(KpmRequest.name) private readonly kpmRequests: Model<KpmRequestDocument>,
     private readonly audit: AuditService,
     private readonly clock: Clock,
     private readonly hierarchy: HierarchyService,
     private readonly memberships: MembershipRepository,
+    // Read-only here, and one-directional: OrgLevelService knows nothing about tenants,
+    // so there is no cycle to break.
+    private readonly orgLevels: OrgLevelService,
   ) {}
 
   private require(ctx: RequestContext, permission: Parameters<typeof can>[1]): void {
@@ -498,10 +506,19 @@ export class TenantService {
   async platformOverview(ctx: RequestContext): Promise<PlatformOverview> {
     this.require(ctx, 'platform_metrics:read');
 
-    const [companies, kpms, members] = await Promise.all([
+    const [companies, kpms, members, pendingRequests, ladders] = await Promise.all([
       this.companies.find({ deletedAt: null }).sort({ name: 1 }).exec(),
       this.kpms.find({ deletedAt: null }).exec(),
       this.memberships.findAcrossAllTenants(ctx, { status: 'active' }),
+      // The **model**, not `KpmRequestService` — that service already depends on this
+      // one, so injecting it back would be a cycle.
+      this.kpmRequests.countDocuments({ status: 'pending', deletedAt: null }).exec(),
+      // P3.5-T7 AC-5. The prototype's company meta line reads `Role ladder: Agent → AAB
+      // → AB` (`Superadmin.html:311`); until the ladder was data there was nothing behind
+      // it, and a literal would have been a sentence no data stood for.
+      this.orgLevels.laddersByCompany(
+        (await this.companies.find({ deletedAt: null }).select('_id').exec()).map((c) => String(c._id)),
+      ),
     ]);
 
     const membersByKpm = new Map<string, number>();
@@ -525,7 +542,7 @@ export class TenantService {
         totalMembers: members.length,
         agencyBuilders,
       },
-      attention: this.attentionQueue(kpms),
+      attention: this.attentionQueue(kpms, pendingRequests),
       companies: companies.map((c) => {
         const theirs = kpmsByCompany.get(String(c._id)) ?? [];
         return {
@@ -534,6 +551,10 @@ export class TenantService {
           initials: c.name.slice(0, 2).toUpperCase(),
           kpmCount: theirs.length,
           memberCount: theirs.reduce((n, k) => n + (membersByKpm.get(String(k._id)) ?? 0), 0),
+          // Junior first, as the prototype writes it. Empty for a company whose ladder
+          // nobody has defined — the card then says so rather than showing an arrow with
+          // nothing on either side.
+          ladder: (ladders.get(String(c._id)) ?? []).map((l) => l.label),
         };
       }),
     };
@@ -548,7 +569,7 @@ export class TenantService {
    * one kind of row is produced. A queue with one real row is honest; four invented ones
    * would make the screen look finished and tell the reader nothing true.
    */
-  private attentionQueue(kpms: KpmDocument[]): AttentionItem[] {
+  private attentionQueue(kpms: KpmDocument[], pendingRequests: number): AttentionItem[] {
     const items: AttentionItem[] = [];
 
     const unowned = kpms.filter((k) => !k.ownerUserId && k.status !== 'archived');
@@ -564,6 +585,26 @@ export class TenantService {
           'Nobody can administer an office until an Owner is assigned, and only the platform can assign one.',
         href: '/admin/tenants',
         actionLabel: 'Review',
+      });
+    }
+
+    // The second of the prototype's four sources (`Superadmin.html:232-273`). Parity row
+    // I-48 promised it would arrive with P3.5-T2; T2 built the entity, the endpoints and
+    // the screen, and left the queue row behind — so the only route to that screen was a
+    // nav item still flagged `upcoming`, which renders without an href. A shipped
+    // surface nobody could reach.
+    if (pendingRequests > 0) {
+      items.push({
+        tag: 'KPM request',
+        severity: 'approval',
+        title:
+          pendingRequests === 1
+            ? '1 office is waiting for a decision'
+            : `${pendingRequests} offices are waiting for a decision`,
+        detail:
+          'Somebody has asked for an office and nobody has approved or declined it yet. Until one of those happens they have no way in.',
+        href: '/admin/kpm-requests',
+        actionLabel: 'Decide',
       });
     }
 

@@ -11,6 +11,9 @@ import {
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { Company, CompanySchema } from './company.schema';
+import { KpmRequest, KpmRequestSchema } from './kpm-request.schema';
+import { OrgLevelService } from './org-level.service';
+import { CompanyOrgLevel, CompanyOrgLevelSchema } from './company-org-level.schema';
 import { Kpm, KpmSchema } from './kpm.schema';
 import { TenantService } from './tenant.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
@@ -48,6 +51,8 @@ describe('TenantService', () => {
     await startMongo();
     const kpms = mongoose.model(Kpm.name, KpmSchema);
     const companies = mongoose.model(Company.name, CompanySchema);
+    const requests = mongoose.model(KpmRequest.name, KpmRequestSchema);
+    const levels = mongoose.model(CompanyOrgLevel.name, CompanyOrgLevelSchema);
     const auditModel = mongoose.model(AuditLog.name, AuditLogSchema);
     users = userModel();
     const memberModel = mongoose.model(Membership.name, MembershipSchema);
@@ -58,10 +63,12 @@ describe('TenantService', () => {
       kpms as never,
       companies as never,
       users as never,
+      requests as never,
       new AuditService(auditModel as never),
       clock,
       new HierarchyService(repo, kpms as never, historyModel as never, clock),
       repo,
+      new OrgLevelService(levels as never, companies as never, new AuditService(auditModel as never), clock),
     );
   });
   afterAll(stopMongo);
@@ -543,6 +550,50 @@ describe('TenantService', () => {
         tag: 'KPM owner',
         severity: 'structural',
         title: '1 office has no Owner',
+      });
+    });
+
+    it('I-48: raises a pending KPM request, which is the only way to reach that screen', async () => {
+      // P3.5-T2 built the entity, the endpoints and the screen and left this row behind,
+      // so `/admin/kpm-requests` was reachable from nowhere — the nav item was still
+      // flagged `upcoming`, which renders an anchor with no href.
+      const sa = ctx({ superAdmin: true });
+      const asker = await users.create({
+        email: 'asker@kpm.test', fullName: 'Rangga Wibisono', passwordHash: 'x',
+      });
+      await mongoose.model(KpmRequest.name).create({
+        requestedByUserId: String(asker._id), companyId, branchName: 'Surabaya Branch',
+        status: 'pending', deletedAt: null,
+      });
+
+      const { attention } = await service.platformOverview(sa);
+      const row = attention.find((a) => a.tag === 'KPM request');
+      expect(row).toMatchObject({
+        severity: 'approval',
+        title: '1 office is waiting for a decision',
+        href: '/admin/kpm-requests',
+      });
+    });
+
+    it('I-48: counts only the undecided ones', async () => {
+      // One pending request per person — `one_open_request_per_user` enforces it — so two
+      // pending rows means two people, and a decided one does not stop them asking again.
+      const sa = ctx({ superAdmin: true });
+      const asks = async (email: string, status: string) => {
+        const who = await users.create({ email, fullName: 'Someone', passwordHash: 'x' });
+        await mongoose.model(KpmRequest.name).create({
+          requestedByUserId: String(who._id), companyId, branchName: 'X',
+          status, deletedAt: null,
+        });
+      };
+      await asks('a@kpm.test', 'pending');
+      await asks('b@kpm.test', 'pending');
+      await asks('c@kpm.test', 'approved');
+      await asks('d@kpm.test', 'declined');
+
+      const { attention } = await service.platformOverview(sa);
+      expect(attention.find((a) => a.tag === 'KPM request')).toMatchObject({
+        title: '2 offices are waiting for a decision',
       });
     });
 

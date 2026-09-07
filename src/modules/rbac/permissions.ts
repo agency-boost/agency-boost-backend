@@ -90,6 +90,11 @@ export const PERMISSIONS = {
   'kpm:assign_owner': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:transfer_ownership': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'company:crud': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  // The company role ladder (ADR-0012). Read is Super Admin only *for now*: nothing
+  // tenant-side consumes it until the role-badge maps become server-supplied, and a
+  // grant nobody exercises is the opposite of a permission.
+  'org_level:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  'org_level:crud': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'super_admin:grant': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'super_admin:revoke': [{ grantee: SUPER_ADMIN, scope: 'all' }],
 

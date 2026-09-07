@@ -11,10 +11,13 @@ import {
   AuditQueryDto,
   CreateCompanyDto,
   CreateKpmDto,
+  CreateOrgLevelDto,
   DeclineKpmRequestDto,
   SetStatusDto,
+  UpdateOrgLevelDto,
 } from './tenant.dto';
 import { KpmRequestService } from './kpm-request.service';
+import { OrgLevelService } from './org-level.service';
 import { TenantService } from './tenant.service';
 
 /**
@@ -32,6 +35,7 @@ export class AdminController {
   constructor(
     private readonly tenants: TenantService,
     private readonly kpmRequestService: KpmRequestService,
+    private readonly orgLevels: OrgLevelService,
     private readonly impersonation: ImpersonationService,
     private readonly audit: AuditService,
   ) {}
@@ -125,6 +129,48 @@ export class AdminController {
   })
   async createCompany(@Ctx() ctx: RequestContext, @Body() dto: CreateCompanyDto) {
     return this.tenants.createCompany(ctx, dto);
+  }
+
+  @Get('org-levels')
+  @RequirePermission('org_level:read')
+  @ApiOperation({
+    summary: 'The role ladders companies define',
+    description:
+      'Every rung of every company\u2019s ladder, junior first \u2014 archived ones included, ' +
+      'because a screen that hid them would show a ladder that does not explain the ' +
+      'people standing on it. Narrow with ?companyId.',
+  })
+  async listOrgLevels(@Ctx() ctx: RequestContext, @Query('companyId') companyId?: string) {
+    return this.orgLevels.list(ctx, companyId);
+  }
+
+  @Post('org-levels')
+  @RequirePermission('org_level:crud')
+  @ApiOperation({
+    summary: 'Add a rung to a company\u2019s ladder',
+    description:
+      'The ladder belongs to the company, not to any office (ADR-0012): a KPM cannot add, ' +
+      'rename or remove a rung. `code` is stable and semantic and is never reused \u2014 not ' +
+      'even after archiving \u2014 because it is what every membership holds.',
+  })
+  async createOrgLevel(@Ctx() ctx: RequestContext, @Body() dto: CreateOrgLevelDto) {
+    return this.orgLevels.create(ctx, dto);
+  }
+
+  @Patch('org-levels/:id')
+  @RequirePermission('org_level:crud')
+  @ApiOperation({
+    summary: 'Rename, reorder or archive a rung',
+    description:
+      'The code is not updatable, by construction \u2014 it is absent from the body. ' +
+      'Archiving retires a rung and keeps every membership that references it readable.',
+  })
+  async updateOrgLevel(
+    @Ctx() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() dto: UpdateOrgLevelDto,
+  ) {
+    return this.orgLevels.update(ctx, id, dto);
   }
 
   @Get('tenants')

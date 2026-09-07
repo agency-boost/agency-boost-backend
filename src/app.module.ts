@@ -36,6 +36,10 @@ import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { TenantService } from '@/modules/tenants/tenant.service';
 import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { KpmRequestService } from '@/modules/tenants/kpm-request.service';
+import { OrgLevelService } from '@/modules/tenants/org-level.service';
+import {
+  CompanyOrgLevel, CompanyOrgLevelSchema,
+} from '@/modules/tenants/company-org-level.schema';
 import { AdminController } from '@/modules/tenants/admin.controller';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import {
@@ -88,6 +92,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: Company.name, schema: CompanySchema },
       { name: Kpm.name, schema: KpmSchema },
       { name: KpmRequest.name, schema: KpmRequestSchema },
+      { name: CompanyOrgLevel.name, schema: CompanyOrgLevelSchema },
       { name: Membership.name, schema: MembershipSchema },
       { name: MembershipHistory.name, schema: MembershipHistorySchema },
       { name: JoinRequest.name, schema: JoinRequestSchema },
@@ -128,6 +133,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ImpersonationService,
     TenantService,
     KpmRequestService,
+    OrgLevelService,
     MembershipRepository,
     HierarchyService,
     DirectoryService,
