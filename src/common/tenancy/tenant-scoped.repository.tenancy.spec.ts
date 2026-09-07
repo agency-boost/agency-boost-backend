@@ -168,6 +168,67 @@ describe('TenantScopedRepository — cross-tenant isolation', () => {
     });
   });
 
+  describe('a malformed id is nothing found, wherever it sits in the filter', () => {
+    it('answers null for a bad id at the top level and inside $and', async () => {
+      const ctx = ctxFor(KPM_A);
+      await repo.create(ctx, { name: 'real' } as Partial<WidgetDoc>);
+
+      expect(await repo.findById(ctx, 'not-an-objectid')).toBeNull();
+      expect(await repo.findOne(ctx, { _id: 'not-an-objectid' } as never)).toBeNull();
+      // The shape the person page actually reads through. A guard that only read the top
+      // level went blind the day the id moved inside `$and` to stop a visibility
+      // narrowing overwriting it, and the query threw CastError → 500 again.
+      expect(
+        await repo.findOne(ctx, {
+          $and: [{ _id: 'not-an-objectid' }, { name: 'real' }],
+        } as never),
+      ).toBeNull();
+      // Nested two deep, because `$and` branches are themselves filters.
+      expect(
+        await repo.findOne(ctx, {
+          $and: [{ $and: [{ _id: 'not-an-objectid' }] }],
+        } as never),
+      ).toBeNull();
+    });
+
+    it('does not answer null for a bad id inside $or, where it kills only one branch', async () => {
+      const ctx = ctxFor(KPM_A);
+      const w = await repo.create(ctx, { name: 'real' } as Partial<WidgetDoc>);
+
+      // Disjunction is the case the guard deliberately does not claim: a dead branch is
+      // not a dead query. Mongoose still casts the whole filter, so this throws today —
+      // the assertion pins that the guard stays out of it rather than quietly answering
+      // `null` for a query that has a matching branch.
+      await expect(
+        repo.findOne(ctx, { $or: [{ _id: 'not-an-objectid' }, { _id: w._id }] } as never),
+      ).rejects.toThrow();
+    });
+
+    it('walks past a branch that is not a filter at all', async () => {
+      const ctx = ctxFor(KPM_A);
+      const w = await repo.create(ctx, { name: 'real' } as Partial<WidgetDoc>);
+
+      // Mongo tolerates neither, but the guard runs before Mongo does and must not throw
+      // on its way to deciding. It recurses into whatever `$and` holds, so `null` and a
+      // primitive are both shapes it can be handed.
+      expect(
+        await repo.findOne(ctx, { $and: [null, { _id: 'not-an-objectid' }] } as never),
+      ).toBeNull();
+      // A branch that is not a filter is still nonsense to Mongo, and the guard does not
+      // pretend otherwise — it answers only for malformed ids, and lets everything else
+      // reach the driver rather than inventing a `null` for a query it has no opinion on.
+      await expect(repo.findOne(ctx, { $and: ['nonsense'] } as never)).rejects.toThrow();
+      expect(String((await repo.findOne(ctx, { $and: [{}] } as never))?._id)).toBe(String(w._id));
+    });
+
+    it('still fails closed on a missing tenant, whatever the id looks like', async () => {
+      const noTenant = RequestContext.platform('root');
+      await expect(
+        repo.findOne(noTenant, { $and: [{ _id: 'not-an-objectid' }] } as never),
+      ).rejects.toThrow(MissingTenantContextError);
+    });
+  });
+
   describe('audit stamping', () => {
     it('records the acting membership on create and update', async () => {
       const ctx = ctxFor(KPM_A);

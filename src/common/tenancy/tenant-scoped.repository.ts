@@ -14,6 +14,29 @@ import { MissingTenantContextError } from './tenant-scope.error';
  * a caller has to opt in to seeing deleted rows. Nothing is ever hard-deleted
  * (.claude/rules/domain-invariants.md §6).
  */
+/**
+ * Is there an `_id` in this filter that cannot match anything?
+ *
+ * Only **conjunctive** positions count — the top level and `$and` branches — because
+ * those are the ones where a malformed id proves the whole query matches nothing. A
+ * malformed id inside `$or` proves only that one branch is dead, and answering `null` for
+ * the whole query would be wrong.
+ *
+ * It recurses because the person page reads through `$and: [{ _id }, visibility]`: the
+ * visibility narrowing for `own` is `{ _id: self }`, which collides with the requested id
+ * when spread, so the id had to move inside `$and` — and a guard that only read the top
+ * level stopped seeing it. That regression was caught by the tenancy suite, which is the
+ * argument for it living here rather than in each caller.
+ */
+function hasUnmatchableId(filter: unknown): boolean {
+  if (filter === null || typeof filter !== 'object') return false;
+  const node = filter as Record<string, unknown>;
+  const id = node._id;
+  if (typeof id === 'string' && !isValidObjectId(id)) return true;
+  const and = node.$and;
+  return Array.isArray(and) && and.some((branch) => hasUnmatchableId(branch));
+}
+
 export abstract class TenantScopedRepository<T extends Document> {
   protected constructor(
     protected readonly model: Model<T>,
@@ -71,11 +94,10 @@ export abstract class TenantScopedRepository<T extends Document> {
 
   async findOne(ctx: RequestContext, filter: FilterQuery<T> = {}): Promise<T | null> {
     const scoped = this.scope(ctx, 'findOne', filter);
-    // `findOne({ _id, ...visibility })` is how the person page reads, so this is as
-    // URL-facing as `findById` and needs the same answer: a malformed id is nothing
+    // `findOne({ $and: [{ _id }, visibility] })` is how the person page reads, so this is
+    // as URL-facing as `findById` and needs the same answer: a malformed id is nothing
     // found, not a `CastError` rendered as 500 for somebody who mistyped a character.
-    const id = (filter as { _id?: unknown })._id;
-    if (typeof id === 'string' && !isValidObjectId(id)) return null;
+    if (hasUnmatchableId(filter)) return null;
     return this.model.findOne(scoped).exec();
   }
 

@@ -190,8 +190,7 @@ export class RemovalService {
        */
       if (destination) {
         const reachable = await this.members.findOne(ctx, {
-          _id: destination,
-          ...visibleTo(ctx, 'member:remove_from_team'),
+          $and: [{ _id: destination }, visibleTo(ctx, 'member:remove_from_team')],
         });
         if (!reachable) throw new NotFoundException('Membership');
       }

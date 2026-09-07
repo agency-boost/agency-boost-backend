@@ -354,18 +354,28 @@ export class DirectoryService {
    */
   async reportsOf(ctx: RequestContext, membershipId: string): Promise<DirectoryMember[]> {
     await this.read(ctx, membershipId);
+    // Narrowed again rather than trusting the parent check. "Everyone below someone you
+    // can see is someone you can see" holds for a leader, whose filter is a subtree — it
+    // does not hold at `own`, where the only visible id is your own and the people under
+    // it are precisely the ones you may not read.
     const rows = await this.members.find(
       ctx,
-      { leaderId: membershipId, status: { $ne: 'removed' } },
+      {
+        $and: [{ leaderId: membershipId, status: { $ne: 'removed' } }, this.visibility(ctx)],
+      },
       { sort: { agentSeq: 1 } },
     );
     return this.decorate(ctx, rows);
   }
 
   async read(ctx: RequestContext, membershipId: string): Promise<DirectoryMember> {
+    // `$and`, not a spread. The narrowing for `own` is `{ _id: self }`, which is the one
+    // filter shape that collides with the id being asked for — spread second, it replaced
+    // the id and the read answered about the caller while claiming to be about somebody
+    // else. Under `$and` a colliding narrowing can only ever match nothing, which is the
+    // direction a visibility filter must fail in.
     const scoped = await this.members.findOne(ctx, {
-      _id: membershipId,
-      ...this.visibility(ctx),
+      $and: [{ _id: membershipId }, this.visibility(ctx)],
     });
     // 404 rather than 403 for someone outside your scope: a 403 would confirm they
     // exist, which is the same leak the cross-tenant rule closes.

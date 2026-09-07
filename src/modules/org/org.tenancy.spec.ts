@@ -376,6 +376,48 @@ describe('organisation', () => {
       await expect(directory.reportsOf(asAb, peer)).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
+    /*
+     * The `own` scope, which only an AGENT holds on this permission.
+     *
+     * Every other visibility negative here builds an AB, and an AB's filter is an `$or`
+     * that composes with the requested id. `own` returns `{ _id: self }`, which is the
+     * one shape that *collides* with it — so a narrowing spread over the id silently
+     * became a narrowing spread that replaced it, and the read answered about the caller
+     * while claiming to be about somebody else. Found in the Phase 3.5 exit review.
+     */
+    it('404s a peer for an agent rather than answering about the caller (`own` scope)', async () => {
+      const ab = await join(KPM_A, 'ab');
+      const me = await join(KPM_A, 'agent', ab);
+      const peer = await join(KPM_A, 'agent', ab);
+      const asAgent = new RequestContext('u-agent', 'none', {
+        membershipId: me, kpmId: KPM_A, hierarchyRole: 'agent', status: 'active',
+        isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      });
+      await expect(directory.read(asAgent, peer)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('refuses an agent their own leader, so the unit roster is never reachable', async () => {
+      const ab = await join(KPM_A, 'ab');
+      const me = await join(KPM_A, 'agent', ab);
+      await join(KPM_A, 'agent', ab);
+      const asAgent = new RequestContext('u-agent', 'none', {
+        membershipId: me, kpmId: KPM_A, hierarchyRole: 'agent', status: 'active',
+        isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      });
+      // The leader is visible to the agent on no permission, and `reportsOf` is what
+      // turns one visible id into a page of names, emails and agent codes.
+      await expect(directory.reportsOf(asAgent, ab)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(directory.reportsOf(asAgent, me)).resolves.toEqual([]);
+    });
+
+    it('reportsOf answers about no unit in another tenant', async () => {
+      const leaderB = await join(KPM_B, 'ab');
+      await join(KPM_B, 'agent', leaderB);
+      await expect(directory.reportsOf(ctx(KPM_A), leaderB)).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+    });
+
     it('filters by status when one is named, not only by role', async () => {
       const id = await join(KPM_A, 'agent');
       await members.updateById(ctx(KPM_A), id, { $set: { status: 'pending' } });
