@@ -20,6 +20,13 @@ export const ErrorCode = {
   TENANT_ARCHIVED: 'TENANT_ARCHIVED',
   TENANT_NO_MEMBERSHIP: 'TENANT_NO_MEMBERSHIP',
   TENANT_CODE_TAKEN: 'TENANT_CODE_TAKEN',
+  /**
+   * A company already holds that slug. Its own code rather than a generic conflict,
+   * because the form derives the slug from the name now: two differently-punctuated
+   * names produce the same slug, and the reader never chose it, so the refusal has to
+   * name the company they collided with.
+   */
+  COMPANY_SLUG_TAKEN: 'COMPANY_SLUG_TAKEN',
   /** Somebody with an open request asked for a second office. */
   TENANT_REQUEST_ALREADY_OPEN: 'TENANT_REQUEST_ALREADY_OPEN',
   /** A KPM request was approved or declined already; the second decision says which. */

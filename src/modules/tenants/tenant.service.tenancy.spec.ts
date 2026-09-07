@@ -89,6 +89,69 @@ describe('TenantService', () => {
       agentSeq: 1, leaderId: null, ancestorIds: [], depth: 0,
     });
 
+  describe('creating a company (P3.5-T14 AC-7)', () => {
+    it('refuses a duplicate slug by name, rather than falling through to a 500', async () => {
+      // `E11000` is neither a DomainException nor an HttpException, so before this it
+      // reached the filter's last branch: HTTP 500, INTERNAL_ERROR, logged as unhandled.
+      // The console's own test stubbed a `CONFLICT` code the API could not produce, and
+      // the manual promised a message the reader never got.
+      await expect(
+        service.createCompany(ctx({ superAdmin: true }), { name: 'Prudential Two', slug: 'prudential' }),
+      ).rejects.toMatchObject({
+        code: 'COMPANY_SLUG_TAKEN',
+        status: 409,
+      });
+    });
+
+    it('names the company that holds the slug, because the reader never chose it', async () => {
+      // The form derives the slug now. `Prudential Indonesia` and `Prudential-Indonesia`
+      // both land on the same value, and a refusal that only says "taken" leaves the
+      // reader with no way to tell what they collided with.
+      await expect(
+        service.createCompany(ctx({ superAdmin: true }), { name: 'Other', slug: 'prudential' }),
+      ).rejects.toMatchObject({ message: expect.stringContaining('Prudential') });
+    });
+
+    it('frees the slug once a company is soft-deleted', async () => {
+      // A bare `unique: true` reserved it for ever, which invariant 6 forbids: deleting
+      // is disabling, and a disabled row must not hold a name nobody can see.
+      await mongoose.model(Company.name).updateOne({ slug: 'prudential' }, { $set: { deletedAt: NOW } });
+      const revived = await service.createCompany(ctx({ superAdmin: true }), {
+        name: 'Prudential Again', slug: 'prudential',
+      });
+      expect(revived.slug).toBe('prudential');
+    });
+
+    it('seeds the three defaults an office inherits, and audits them', async () => {
+      const company = await service.createCompany(ctx({ superAdmin: true }), {
+        name: 'Allianz', slug: 'allianz',
+      });
+      expect(company.defaultCurrency).toBe('IDR');
+      expect(company.defaultLocale).toBe('id-ID');
+      expect(company.defaultTimezone).toBe('Asia/Jakarta');
+
+      const entry = await mongoose
+        .model(AuditLog.name)
+        .findOne({ action: 'company.created', targetId: String(company._id) })
+        .exec();
+      // The audit exists *because* offices inherit these. A row that recorded only the
+      // two typed fields omitted the thing its own justification named.
+      expect(entry?.get('after')).toMatchObject({
+        name: 'Allianz', slug: 'allianz',
+        defaultCurrency: 'IDR', defaultLocale: 'id-ID', defaultTimezone: 'Asia/Jakarta',
+      });
+    });
+
+    it.each([
+      ['a KPM Owner', ctx({ owner: true })],
+      ['a user with no membership', ctx()],
+    ])('refuses %s with PERM_DENIED', async (_label, actor) => {
+      await expect(
+        service.createCompany(actor, { name: 'Nope', slug: 'nope' }),
+      ).rejects.toMatchObject({ code: 'PERM_DENIED' });
+    });
+  });
+
   describe('only a Super Admin creates a KPM', () => {
     it('allows a Super Admin', async () => {
       const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
@@ -124,7 +187,12 @@ describe('TenantService', () => {
         onTrackPaceThreshold: 0.9,
         activityDailyMaxCount: 999,
       });
-      expect(kpm.counters.nextAgentCodeSeq).toBe(1);
+      // Read from the document, not the response. `counters.nextAgentCodeSeq` is the
+      // internal agent-code sequence and the read shape deliberately stops carrying it —
+      // an office's next code is nobody's business but the server's. The seeding is still
+      // an invariant, so it is still asserted, one layer down.
+      const stored = await mongoose.model(Kpm.name).findById(kpm._id).exec();
+      expect(stored?.get('counters').nextAgentCodeSeq).toBe(1);
     });
 
     it('rejects a duplicate code within the same company', async () => {
@@ -142,6 +210,84 @@ describe('TenantService', () => {
         companyId: String(other._id),
       });
       expect(kpm.code).toBe('0417');
+    });
+
+    it('P3.5-T14 AC-7: names the owner rather than handing back their id', async () => {
+      // The console rendered `ownerUserId` in a column headed **Owner** — a 24-character
+      // hex string where a person's name belongs. The join is the API's to make: no
+      // screen can turn a user id into a name.
+      const created = await service.createKpm(ctx({ superAdmin: true }), input());
+      expect(created.ownerName).toBeNull();
+      expect(created.ownerEmail).toBeNull();
+
+      await users.create({
+        email: 'owner@kpm0417.test', fullName: 'Rina Wijaya', passwordHash: 'x',
+        platformRole: 'none', status: 'active', emailVerifiedAt: NOW, deletedAt: null,
+      });
+      const owned = await service.assignOwner(ctx({ superAdmin: true }), created._id, {
+        email: 'owner@kpm0417.test',
+      });
+
+      expect(owned.ownerName).toBe('Rina Wijaya');
+      expect(owned.ownerEmail).toBe('owner@kpm0417.test');
+      // And the id stays: the detail screen shows it deliberately, labelled, for support.
+      expect(owned.ownerUserId).toEqual(expect.any(String));
+    });
+
+    it('P3.5-T14 AC-7: carries the company name, so no screen joins it client-side', async () => {
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
+      expect(kpm.companyName).toBe('Prudential');
+    });
+
+    it('P3.5-T14: says an owner is Unknown rather than dropping the office', async () => {
+      // An owner whose account has gone is a different problem from an office with no
+      // owner, and the screen renders them differently — one is a name, the other is a
+      // call to act. Hard-deleting a user should not be able to make an office look
+      // unowned.
+      const ghost = await users.create({
+        email: 'ghost@kpm0417.test', fullName: 'Gone Away', passwordHash: 'x',
+        platformRole: 'none', status: 'active', emailVerifiedAt: NOW, deletedAt: null,
+      });
+      const created = await service.createKpm(ctx({ superAdmin: true }), input());
+      await mongoose.model(Kpm.name).updateOne(
+        { _id: created._id },
+        { $set: { ownerUserId: String(ghost._id) } },
+      );
+      await users.deleteOne({ _id: ghost._id });
+
+      const read = await service.readProfile(ctx({ superAdmin: true }), created._id);
+      expect(read.ownerName).toBe('Unknown');
+      expect(read.ownerUserId).toBe(String(ghost._id));
+    });
+
+    it('P3.5-T14: resolves every owner in one query, not one per office', async () => {
+      // The roster is unpaginated. A lookup per row turns a list of offices into a list
+      // of round trips, and the pattern this copies (kpm-request.service `rows()`)
+      // batches for exactly that reason.
+      const owner = await users.create({
+        email: 'many@kpm0417.test', fullName: 'Many Offices', passwordHash: 'x',
+        platformRole: 'none', status: 'active', emailVerifiedAt: NOW, deletedAt: null,
+      });
+      for (const code of ['0417', '0418', '0419']) {
+        const k = await service.createKpm(ctx({ superAdmin: true }), { ...input(), code });
+        await mongoose.model(Kpm.name).updateOne(
+          { _id: k._id },
+          { $set: { ownerUserId: String(owner._id) } },
+        );
+      }
+      const spy = jest.spyOn(users, 'find');
+      const all = await service.listAll(ctx({ superAdmin: true }));
+
+      expect(all).toHaveLength(3);
+      expect(all.every((k) => k.ownerName === 'Many Offices')).toBe(true);
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockRestore();
+    });
+
+    it('P3.5-T14: keeps the internal agent-code sequence off the wire', async () => {
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
+      expect(kpm).not.toHaveProperty('counters');
+      expect(kpm).not.toHaveProperty('deletedAt');
     });
 
     it('404s an unknown company rather than creating an orphan tenant', async () => {
@@ -301,7 +447,10 @@ describe('TenantService', () => {
       const s = await service.setStatus(ctx({ superAdmin: true }), String(kpm._id), 'suspended', 'unpaid');
       expect(s.status).toBe('suspended');
       expect(s.suspendedReason).toBe('unpaid');
-      expect(s.suspendedAt).toEqual(NOW);
+      // An ISO string, not a Date: the read shape is what crosses the wire, and a Date
+      // was only ever going to arrive at the client as this anyway. Asserting the Date
+      // was asserting the service's private representation.
+      expect(s.suspendedAt).toBe(NOW.toISOString());
     });
 
     it('clears the suspension detail on reactivation', async () => {

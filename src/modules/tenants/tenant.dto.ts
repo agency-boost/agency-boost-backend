@@ -1,16 +1,37 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsEmail, IsEnum, IsMongoId, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import {
+  IsEmail, IsEnum, IsIn, IsMongoId, IsOptional, IsString, Matches, MaxLength, MinLength,
+} from 'class-validator';
+import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
 
 export class CreateCompanyDto {
-  @ApiProperty({ example: 'Prudential' })
+  @ApiProperty({ example: 'Prudential', minLength: 2, maxLength: 120 })
   @IsString()
   @MinLength(2)
+  @MaxLength(120)
   name!: string;
 
-  @ApiProperty({ example: 'prudential' })
+  /**
+   * The console derives this from the name and lets it be edited, so the pattern is
+   * tighter than "the characters we allow": it is the shape derivation actually
+   * produces. `-`, `--a--` and `---` all passed the old `/^[a-z0-9-]+$/` and none of
+   * them can come out of the deriver, which made a hand-typed slug expressible in ways
+   * a derived one never is.
+   */
+  @ApiProperty({
+    example: 'prudential',
+    maxLength: 64,
+    pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
+    description:
+      'Derived from the name by the console and editable there. Unique among companies ' +
+      'that have not been deleted; a clash is refused with COMPANY_SLUG_TAKEN.',
+  })
   @IsString()
-  @Matches(/^[a-z0-9-]+$/, { message: 'slug must be lower-case letters, digits and hyphens' })
+  @MaxLength(64)
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'slug must be lower-case letters and digits, separated by single hyphens',
+  })
   slug!: string;
 }
 
@@ -39,12 +60,30 @@ export class CreateKpmDto {
   @IsString()
   contactPhone?: string;
 
+  /**
+   * v1 is single-timezone (ADR-0016), so this accepts exactly one value.
+   *
+   * The field is kept rather than deleted for two reasons. `forbidNonWhitelisted` is on,
+   * so removing it would turn a request that works today into a 400 for anybody still
+   * sending it — including a reader copying the example out of Swagger. And the OpenAPI
+   * document is where an integrator learns the constraint: `enum: ["Asia/Jakarta"]`
+   * teaches that a zone exists and is fixed, where an absent field teaches nothing.
+   *
+   * Before this, `@IsString()` meant `{"timezone":"banana"}` returned 201 and every day
+   * boundary in that office resolved to an Invalid DateTime, for ever, with nothing
+   * raised at creation.
+   */
   @ApiPropertyOptional({
-    example: 'Asia/Jakarta',
-    description: 'Canonical for every day boundary in this office. Inherited from the company if omitted.',
+    example: DEFAULT_TENANT_TIMEZONE,
+    enum: [DEFAULT_TENANT_TIMEZONE],
+    description:
+      'v1 runs on a single time zone. Asia/Jakarta is the only accepted value; omit it ' +
+      'and the office inherits the same value from its company (ADR-0016).',
   })
   @IsOptional()
-  @IsString()
+  @IsIn([DEFAULT_TENANT_TIMEZONE], {
+    message: `timezone must be ${DEFAULT_TENANT_TIMEZONE} — v1 runs on a single time zone`,
+  })
   timezone?: string;
 }
 

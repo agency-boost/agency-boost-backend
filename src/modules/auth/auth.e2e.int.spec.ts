@@ -233,6 +233,99 @@ describe('auth and admin over HTTP', () => {
       expect(kpm.body.timezone).toBe('Asia/Jakarta');
     });
 
+    it('P3.5-T14 AC-7: the wire carries the owner\u2019s name, not only their id', async () => {
+      // At the HTTP layer deliberately. Mongoose runs strict, so a field attached to a
+      // hydrated document never reaches `_doc` and never reaches the response — while a
+      // service test reading the same object back would pass. That is the two-halves
+      // failure `.claude/rules/backend-then-frontend.md` describes, and only a request
+      // catches it.
+      const sa = await makeUser('sa-owner@agencyboost.test', 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      await makeUser('rina@kpm0417.test'); // `makeUser` names everybody 'Test Person'.
+
+      const company = await api().post('/api/v1/admin/companies')
+        .set(auth).send({ name: 'Prudential', slug: 'prudential' }).expect(201);
+      const created = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({ companyId: String(company.body._id), code: '0417', branchName: 'BSD City Branch' })
+        .expect(201);
+
+      expect(created.body.ownerName).toBeNull();
+      expect(created.body.companyName).toBe('Prudential');
+
+      const assigned = await api().patch(`/api/v1/admin/tenants/${created.body._id}/owner`)
+        .set(auth).send({ email: 'rina@kpm0417.test' }).expect(200);
+      expect(assigned.body.ownerName).toBe('Test Person');
+      expect(assigned.body.ownerEmail).toBe('rina@kpm0417.test');
+
+      // All five KPM responses share one shape. Adding the field to the detail alone
+      // would leave the roster showing an id and make the post-assign redirect flicker
+      // from a name back to one.
+      const list = await api().get('/api/v1/admin/tenants').set(auth).expect(200);
+      expect(list.body[0].ownerName).toBe('Test Person');
+      const read = await api().get(`/api/v1/admin/tenants/${created.body._id}`).set(auth).expect(200);
+      expect(read.body.ownerName).toBe('Test Person');
+      const status = await api().patch(`/api/v1/admin/tenants/${created.body._id}/status`)
+        .set(auth).send({ status: 'suspended', reason: 'unpaid' }).expect(200);
+      expect(status.body.ownerName).toBe('Test Person');
+
+      // And the internal sequence is off the wire.
+      expect(read.body).not.toHaveProperty('counters');
+    });
+
+    it('P3.5-T14 AC-7: refuses a time zone the product cannot honour', async () => {
+      // `{"timezone":"banana"}` returned 201 before this, and every day boundary in that
+      // office resolved to an Invalid DateTime from then on, with nothing raised at
+      // creation. v1 runs on one zone (ADR-0016) and the API says so.
+      const sa = await makeUser('sa-tz@agencyboost.test', 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const company = await api().post('/api/v1/admin/companies')
+        .set(auth).send({ name: 'Allianz', slug: 'allianz' }).expect(201);
+
+      const office = { companyId: String(company.body._id), branchName: 'Makassar Branch' };
+
+      const bad = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({ ...office, code: '0500', timezone: 'banana' })
+        .expect(400);
+      // The violation is asserted, not just the status. A 400 for some *other* reason
+      // would make this test pass while proving nothing about the time zone.
+      expect(bad.body.error.code).toBe('VALIDATION_FAILED');
+      expect(bad.body.error.details.violations.join(' ')).toContain('timezone must be Asia/Jakarta');
+
+      // A second real IANA zone is refused too — this is one zone, not "any valid zone".
+      const makassar = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({ ...office, code: '0501', timezone: 'Asia/Makassar' })
+        .expect(400);
+      expect(makassar.body.error.details.violations.join(' ')).toContain('timezone must be Asia/Jakarta');
+
+      // The legal value still works, so nobody sending it today breaks.
+      await api().post('/api/v1/admin/tenants').set(auth)
+        .send({ ...office, code: '0502', timezone: 'Asia/Jakarta' })
+        .expect(201);
+    });
+
+    it('P3.5-T14 AC-7: refuses a duplicate company slug with 409, not 500', async () => {
+      const sa = await makeUser('sa-slug@agencyboost.test', 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+
+      await api().post('/api/v1/admin/companies')
+        .set(auth).send({ name: 'Prudential Indonesia', slug: 'prudential-indonesia' }).expect(201);
+
+      const clash = await api().post('/api/v1/admin/companies')
+        .set(auth).send({ name: 'Prudential-Indonesia', slug: 'prudential-indonesia' }).expect(409);
+
+      expect(clash.body.error.code).toBe('COMPANY_SLUG_TAKEN');
+      expect(clash.body.error.message).toContain('Prudential Indonesia');
+    });
+
+    it('P3.5-T14: refuses a slug shaped in a way derivation never produces', async () => {
+      const sa = await makeUser('sa-shape@agencyboost.test', 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      for (const slug of ['-', '--a--', 'a--b', 'Prudential']) {
+        await api().post('/api/v1/admin/companies')
+          .set(auth).send({ name: 'Whatever', slug }).expect(400);
+      }
+    });
+
     it('refuses tenant creation to a non-Super-Admin with PERM_DENIED', async () => {
       const plain = await makeUser('plain@kpm.test');
       const res = await api().post('/api/v1/admin/tenants')

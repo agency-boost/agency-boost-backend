@@ -20,9 +20,14 @@ export interface CreateKpmInput {
   branchName: string;
   address?: string;
   contactPhone?: string;
+  /**
+   * Accepted for the single legal value only (ADR-0016). `locale` and `currency` used to
+   * sit beside it and were unreachable: `CreateKpmDto` declares neither and
+   * `forbidNonWhitelisted` would refuse them, so both could only ever be the company
+   * default. They are gone — a parameter no caller can supply is not an option, it is a
+   * suggestion that one exists.
+   */
   timezone?: string;
-  locale?: string;
-  currency?: string;
 }
 
 /**
@@ -33,6 +38,41 @@ export interface CreateKpmInput {
  * repository: there is no tenant yet to scope to. The permission check is therefore
  * the only gate, which is why it is explicit at the top of every method.
  */
+
+/**
+ * A KPM as the console reads it: the document, plus the two joins no screen can make for
+ * itself.
+ *
+ * The endpoints used to return the hydrated Mongoose document, which is why
+ * `/admin/tenants` rendered a 24-character hex string in a column headed **Owner**. The
+ * fix has to be a plain object rather than a field attached to the document: Mongoose
+ * runs strict by default (`baseSchemaOptions`), so `kpm.ownerName = …` never reaches
+ * `_doc` and never reaches the wire — while a service-level test reading the same object
+ * back would pass. That is the shape of defect `.claude/rules/backend-then-frontend.md`
+ * exists to prevent, so this is pinned at the HTTP layer too.
+ */
+export interface KpmView {
+  _id: string;
+  companyId: string;
+  /** The company's name. The list used to join this client-side and fall back to the id. */
+  companyName: string;
+  code: string;
+  branchName: string;
+  address: string | null;
+  contactPhone: string | null;
+  ownerUserId: string | null;
+  /** Null when nobody owns the office — which the screens already render as a call to act. */
+  ownerName: string | null;
+  ownerEmail: string | null;
+  timezone: string;
+  locale: string;
+  currency: string;
+  settings: Record<string, number>;
+  status: 'active' | 'suspended' | 'archived';
+  suspendedAt: string | null;
+  suspendedReason: string | null;
+  createdAt: string;
+}
 
 /** One person who administers an office, seen from the platform. */
 export interface PlatformAdminRow {
@@ -98,7 +138,143 @@ export class TenantService {
     }
   }
 
-  async createKpm(ctx: RequestContext, input: CreateKpmInput): Promise<KpmDocument> {
+  /**
+   * The document, plus the owner's name and the company's, resolved in **two** queries
+   * however many offices there are.
+   *
+   * Copied from `kpm-request.service.ts`'s `rows()`, deliberately: one `$in` per
+   * collection, a `Map` by id, and a fallback for the row whose user has gone. Neither
+   * lookup filters `deletedAt` — a soft-deleted owner still has to render, or the office
+   * silently loses the only name on the screen. That differs from `resolveOwner`, which
+   * does filter, because that is a write path and this is a display one.
+   */
+  private async toViews(kpms: KpmDocument[]): Promise<KpmView[]> {
+    if (kpms.length === 0) return [];
+
+    const ownerIds = [...new Set(kpms.map((k) => k.ownerUserId).filter((id): id is string => Boolean(id)))];
+    const [owners, companies] = await Promise.all([
+      ownerIds.length > 0 ? this.users.find({ _id: { $in: ownerIds } }).exec() : Promise.resolve([]),
+      this.companies.find({ _id: { $in: [...new Set(kpms.map((k) => k.companyId))] } }).exec(),
+    ]);
+    const byUser = new Map(owners.map((u) => [String(u._id), u]));
+    const byCompany = new Map(companies.map((c) => [String(c._id), c]));
+
+    return kpms.map((k) => {
+      const owner = k.ownerUserId ? byUser.get(k.ownerUserId) : undefined;
+      return {
+        _id: String(k._id),
+        companyId: k.companyId,
+        companyName: byCompany.get(k.companyId)?.name ?? 'Unknown company',
+        code: k.code,
+        branchName: k.branchName,
+        address: k.address ?? null,
+        contactPhone: k.contactPhone ?? null,
+        ownerUserId: k.ownerUserId ?? null,
+        // An owner whose account has gone still gets a row: 'Unknown' says the office is
+        // owned and the account is missing, which is a different problem from unowned.
+        ownerName: k.ownerUserId ? (owner?.fullName ?? 'Unknown') : null,
+        ownerEmail: k.ownerUserId ? (owner?.email ?? null) : null,
+        timezone: k.timezone,
+        locale: k.locale,
+        currency: k.currency,
+        settings: { ...k.settings } as unknown as Record<string, number>,
+        status: k.status,
+        suspendedAt: k.suspendedAt ? k.suspendedAt.toISOString() : null,
+        suspendedReason: k.suspendedReason ?? null,
+        createdAt: (k as unknown as { createdAt: Date }).createdAt.toISOString(),
+      };
+    });
+  }
+
+  private async toView(kpm: KpmDocument): Promise<KpmView> {
+    return (await this.toViews([kpm]))[0];
+  }
+
+  /**
+   * Every company on the platform, by name.
+   *
+   * Here rather than in the controller because its sibling `createCompany` has to be —
+   * a duplicate slug needs a domain error, and a controller reaching into a Mongoose
+   * model is the shape `backend/CLAUDE.md` calls a defect even where the query is right.
+   */
+  async listCompanies(ctx: RequestContext): Promise<CompanyDocument[]> {
+    this.require(ctx, 'company:crud');
+    return this.companies.find({ deletedAt: null }).sort({ name: 1 }).exec();
+  }
+
+  /**
+   * Create a company.
+   *
+   * A duplicate slug used to reach Mongo's unique index unguarded, and `E11000` is
+   * neither a `DomainException` nor an `HttpException` — so it fell through the filter
+   * to **500 INTERNAL_ERROR**, logged as an unhandled error. The console's own test
+   * stubbed a `CONFLICT` code the API could not produce, and the Super Admin manual
+   * promised *"if the slug is taken you get a message saying so"*. Three artifacts
+   * agreeing with each other and none of them with the server.
+   *
+   * That mattered less while slugs were typed. The form derives them now, so
+   * `Prudential Indonesia` and `Prudential-Indonesia` both reach `prudential-indonesia`
+   * and the reader never saw the value that collided — which is why the refusal names
+   * the incumbent rather than saying the slug is taken.
+   *
+   * **The catch is not belt-and-braces.** Two Super Admins creating the same company at
+   * once both pass the pre-check; only the index stops the second, and it must arrive as
+   * the same 409 the first reader would have got.
+   */
+  async createCompany(
+    ctx: RequestContext,
+    input: { name: string; slug: string },
+  ): Promise<CompanyDocument> {
+    this.require(ctx, 'company:crud');
+
+    const name = input.name.trim();
+    const slug = input.slug.trim().toLowerCase();
+
+    // The same filter the partial index uses. A pre-check that ignored `deletedAt`
+    // would refuse a slug the index would happily accept.
+    const clash = await this.companies.findOne({ slug, deletedAt: null }).exec();
+    if (clash) throw this.slugTaken(slug, clash.name);
+
+    let company: CompanyDocument;
+    try {
+      company = await this.companies.create({ name, slug });
+    } catch (err) {
+      if ((err as { code?: number }).code === 11000) {
+        const winner = await this.companies.findOne({ slug, deletedAt: null }).exec();
+        throw this.slugTaken(slug, winner?.name ?? 'another company');
+      }
+      throw err;
+    }
+
+    await this.audit.record(ctx, {
+      action: 'company.created',
+      targetCollection: 'companies',
+      targetId: String(company._id),
+      // The three inherited defaults are recorded, not just the two typed fields. The
+      // reason this is audited at all is that offices inherit them, and an audit row
+      // that omits the thing its own justification names is not much of a record.
+      after: {
+        name: company.name,
+        slug: company.slug,
+        defaultCurrency: company.defaultCurrency,
+        defaultLocale: company.defaultLocale,
+        defaultTimezone: company.defaultTimezone,
+      },
+    });
+
+    return company;
+  }
+
+  private slugTaken(slug: string, existingName: string): DomainException {
+    return new DomainException(
+      ErrorCode.COMPANY_SLUG_TAKEN,
+      `The slug "${slug}" already belongs to ${existingName}. Edit the slug to something unique.`,
+      HttpStatus.CONFLICT,
+      { slug, existingName },
+    );
+  }
+
+  async createKpm(ctx: RequestContext, input: CreateKpmInput): Promise<KpmView> {
     this.require(ctx, 'kpm:create');
 
     const company = await this.companies.findOne({ _id: input.companyId, deletedAt: null }).exec();
@@ -124,8 +300,8 @@ export class TenantService {
       contactPhone: input.contactPhone ?? null,
       // The office inherits its company's defaults unless told otherwise.
       timezone: input.timezone ?? company.defaultTimezone,
-      locale: input.locale ?? company.defaultLocale,
-      currency: input.currency ?? company.defaultCurrency,
+      locale: company.defaultLocale,
+      currency: company.defaultCurrency,
       settings: { ...DEFAULT_KPM_SETTINGS },
       counters: { nextAgentCodeSeq: 1 },
       status: 'active',
@@ -140,7 +316,7 @@ export class TenantService {
       after: { code: kpm.code, branchName: kpm.branchName, companyId: kpm.companyId },
     });
 
-    return kpm;
+    return this.toView(kpm);
   }
 
   /**
@@ -163,7 +339,7 @@ export class TenantService {
     ctx: RequestContext,
     kpmId: string,
     who: { userId?: string; email?: string },
-  ): Promise<KpmDocument> {
+  ): Promise<KpmView> {
     this.require(ctx, 'kpm:assign_owner');
 
     const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
@@ -189,7 +365,7 @@ export class TenantService {
       after: { ownerUserId: String(user._id), email: user.email },
     });
 
-    return kpm;
+    return this.toView(kpm);
   }
 
   /**
@@ -276,7 +452,7 @@ export class TenantService {
     kpmId: string,
     status: 'active' | 'suspended' | 'archived',
     reason?: string,
-  ): Promise<KpmDocument> {
+  ): Promise<KpmView> {
     this.require(ctx, status === 'suspended' ? 'kpm:suspend' : 'kpm:activate');
 
     const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
@@ -296,7 +472,7 @@ export class TenantService {
       after: { status, reason: reason ?? null },
     });
 
-    return kpm;
+    return this.toView(kpm);
   }
 
   /**
@@ -476,13 +652,13 @@ export class TenantService {
       );
   }
 
-  async listAll(ctx: RequestContext): Promise<KpmDocument[]> {
+  async listAll(ctx: RequestContext): Promise<KpmView[]> {
     this.require(ctx, 'kpm:list_all');
-    return this.kpms.find({ deletedAt: null }).sort({ createdAt: -1 }).exec();
+    return this.toViews(await this.kpms.find({ deletedAt: null }).sort({ createdAt: -1 }).exec());
   }
 
   /** A tenant's own profile. Readable by its Owner and Admins as well as Super Admin. */
-  async readProfile(ctx: RequestContext, kpmId: string): Promise<KpmDocument> {
+  async readProfile(ctx: RequestContext, kpmId: string): Promise<KpmView> {
     this.require(ctx, 'kpm:read_profile');
 
     // A non-Super-Admin may only read the office they belong to. Returning 404 rather
@@ -491,6 +667,6 @@ export class TenantService {
 
     const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
     if (!kpm) throw new NotFoundException('KPM');
-    return kpm;
+    return this.toView(kpm);
   }
 }

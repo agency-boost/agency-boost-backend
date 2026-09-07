@@ -16,14 +16,13 @@ describe('AdminController', () => {
     isKpmAdmin: false, directCount: 0,
   });
 
-  function make(companies: unknown = {}) {
+  function make() {
     const audit = { findForTenant: jest.fn(async () => []), record: jest.fn(async () => undefined) };
     const controller = new AdminController(
       {} as never,
       {} as never,
       {} as never,
       audit as never,
-      companies as never,
     );
     return { controller, audit };
   }
@@ -46,20 +45,9 @@ describe('AdminController', () => {
     expect(audit.findForTenant).toHaveBeenCalledWith('kpm-a', 100);
   });
 
-  it('audits an insurer being created', async () => {
-    // An insurer is the parent every office inherits its defaults from. Creating one
-    // without a trace would leave those defaults unattributable.
-    const companies = { create: jest.fn(async () => ({ _id: 'co-1', name: 'Prudential', slug: 'prudential' })) };
-    const { controller, audit } = make(companies);
-
-    await controller.createCompany(RequestContext.platform('root'), {
-      name: 'Prudential',
-      slug: 'prudential',
-    });
-
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ action: 'company.created', targetId: 'co-1' }),
-    );
-  });
+  // Creating a company used to happen *here*, against an injected Mongoose model — the
+  // one handler in this controller that did not delegate, and therefore the one place a
+  // duplicate slug had nowhere to be caught. It lives in TenantService now, and so does
+  // its test: `tenant.service.tenancy.spec.ts` has a real database, which is the only
+  // way to prove the unique index and the pre-check agree.
 });

@@ -1,13 +1,10 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
 import { ImpersonateDto } from '@/modules/auth/auth.dto';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
-import { Company, CompanyDocument } from './company.schema';
 import {
   ApproveKpmRequestDto,
   AssignOwnerDto,
@@ -37,7 +34,6 @@ export class AdminController {
     private readonly kpmRequestService: KpmRequestService,
     private readonly impersonation: ImpersonationService,
     private readonly audit: AuditService,
-    @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
   ) {}
 
   @Get('overview')
@@ -112,28 +108,23 @@ export class AdminController {
 
   @Get('companies')
   @RequirePermission('company:crud')
-  @ApiOperation({ summary: 'List principal insurers' })
-  async listCompanies() {
-    return this.companies.find({ deletedAt: null }).sort({ name: 1 }).exec();
+  @ApiOperation({ summary: 'List every company' })
+  async listCompanies(@Ctx() ctx: RequestContext) {
+    return this.tenants.listCompanies(ctx);
   }
 
   @Post('companies')
   @RequirePermission('company:crud')
   @ApiOperation({
-    summary: 'Create a principal insurer',
+    summary: 'Create a company',
     description:
-      'Audited: an insurer is the parent every office inherits its currency, locale ' +
-      'and time zone from, so its creation is a platform-level change worth recording.',
+      'Audited: a company is the parent every office inherits its currency, locale ' +
+      'and time zone from, so its creation is a platform-level change worth recording. ' +
+      'A slug already in use is refused with COMPANY_SLUG_TAKEN, naming the company ' +
+      'that holds it.',
   })
   async createCompany(@Ctx() ctx: RequestContext, @Body() dto: CreateCompanyDto) {
-    const company = await this.companies.create({ ...dto });
-    await this.audit.record(ctx, {
-      action: 'company.created',
-      targetCollection: 'companies',
-      targetId: String(company._id),
-      after: { name: company.name, slug: company.slug },
-    });
-    return company;
+    return this.tenants.createCompany(ctx, dto);
   }
 
   @Get('tenants')
