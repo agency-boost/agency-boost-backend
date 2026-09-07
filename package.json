@@ -15,7 +15,8 @@
     "test:tenancy": "jest --testPathPattern='\\.tenancy\\.spec\\.ts$'",
     "test:coverage": "jest --coverage",
     "seed:demo": "ts-node -r tsconfig-paths/register src/seed/demo.ts",
-    "openapi": "ts-node -r tsconfig-paths/register tools/write-openapi.ts"
+    "openapi": "ts-node -r tsconfig-paths/register tools/write-openapi.ts",
+    "migrate": "ts-node -r tsconfig-paths/register src/migrations/run.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",

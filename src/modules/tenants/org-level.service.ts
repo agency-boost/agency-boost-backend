@@ -6,6 +6,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
+import { DEFAULT_ORG_LADDER } from '@/domain/constants';
 import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from './company.schema';
 import { CompanyOrgLevel, CompanyOrgLevelDocument } from './company-org-level.schema';
@@ -103,6 +104,48 @@ export class OrgLevelService {
       byCompany.set(level.companyId, list);
     }
     return byCompany;
+  }
+
+  /**
+   * The rungs a brand-new company starts with, from `DEFAULT_ORG_LADDER`.
+   *
+   * No permission check and no audit row: this is not somebody acting, it is part of
+   * creating the company, which is audited as one event. Idempotent, so re-running the
+   * demo seed neither duplicates nor throws.
+   */
+  async seedDefaultLadder(companyId: string): Promise<void> {
+    for (const { code, label, displayOrder } of DEFAULT_ORG_LADDER) {
+      const existing = await this.levels.findOne({ companyId, code, deletedAt: null }).exec();
+      if (existing) continue;
+      await this.levels.create({
+        companyId, code, label, displayOrder,
+        status: 'active', archivedAt: null, deletedAt: null,
+      });
+    }
+  }
+
+  /**
+   * The rung a role name refers to, for the office's company.
+   *
+   * This is the join `memberships.orgLevelId` is written through. It resolves **active**
+   * rungs only — putting somebody on a retired rung is not something the product should
+   * be able to do quietly — and throws rather than returning null, because a membership
+   * with no level is exactly the defect the reference exists to prevent and it would be
+   * invisible until a screen tried to read it.
+   */
+  async resolveByCode(companyId: string, code: string): Promise<CompanyOrgLevelDocument> {
+    const level = await this.levels
+      .findOne({ companyId, code: code.toUpperCase(), status: 'active', deletedAt: null })
+      .exec();
+    if (!level) {
+      throw new DomainException(
+        ErrorCode.ORG_LEVEL_NOT_ON_LADDER,
+        `No active level with the code ${code.toUpperCase()} on this company's ladder.`,
+        HttpStatus.CONFLICT,
+        { companyId, code: code.toUpperCase() },
+      );
+    }
+    return level;
   }
 
   async create(ctx: RequestContext, input: CreateOrgLevelInput): Promise<OrgLevelRow[]> {

@@ -341,11 +341,15 @@ describe('auth and admin over HTTP', () => {
         .set(auth).send({ name: 'Prudential', slug: 'prudential' }).expect(201);
       const companyId = String(company.body._id);
 
+      // A company arrives with a ladder (P3.5-T8): `memberships.orgLevelId` resolves
+      // against it on every join, so a company without one is an office nobody can join.
+      const seeded = await api().get('/api/v1/admin/org-levels').set(auth).expect(200);
+      expect(seeded.body.map((l: { code: string }) => l.code)).toEqual(['AGENT', 'AAB', 'AB']);
+
       const ladder = await api().post('/api/v1/admin/org-levels').set(auth)
-        .send({ companyId, code: 'AGENT', label: 'Agent', displayOrder: 1 }).expect(201);
-      expect(ladder.body).toEqual([
-        expect.objectContaining({ code: 'AGENT', label: 'Agent', status: 'active' }),
-      ]);
+        .send({ companyId, code: 'SAB', label: 'Senior AB', displayOrder: 4 }).expect(201);
+      expect(ladder.body).toHaveLength(4);
+      expect(ladder.body[3]).toMatchObject({ code: 'SAB', label: 'Senior AB', status: 'active' });
 
       // AC-2, at the layer a KPM Owner would actually reach it from.
       for (const call of [
@@ -373,20 +377,21 @@ describe('auth and admin over HTTP', () => {
         .set(auth).send({ name: 'Prudential', slug: 'prudential' }).expect(201);
       const companyId = String(company.body._id);
 
-      const before = await api().get('/api/v1/admin/overview').set(auth).expect(200);
-      // A company with no ladder says so with an empty list, not with an invented one.
-      expect(before.body.companies[0].ladder).toEqual([]);
+      // Seeded at creation, so the card is right from the first moment.
+      const seeded = await api().get('/api/v1/admin/overview').set(auth).expect(200);
+      expect(seeded.body.companies[0].ladder).toEqual(['Agent', 'AAB', 'AB']);
 
-      for (const [code, label, displayOrder] of [
-        ['AB', 'AB', 3], ['AGENT', 'Agent', 1], ['AAB', 'AAB', 2],
-      ] as const) {
-        await api().post('/api/v1/admin/org-levels').set(auth)
-          .send({ companyId, code, label, displayOrder }).expect(201);
-      }
+      // A rung added out of order still reads junior first, and an archived one leaves
+      // the card — it is not a rung anybody can be given today.
+      await api().post('/api/v1/admin/org-levels').set(auth)
+        .send({ companyId, code: 'SAB', label: 'Senior AB', displayOrder: 4 }).expect(201);
+      const levels = await api().get('/api/v1/admin/org-levels').set(auth).expect(200);
+      const aab = levels.body.find((l: { code: string }) => l.code === 'AAB');
+      await api().patch(`/api/v1/admin/org-levels/${aab.orgLevelId}`)
+        .set(auth).send({ status: 'archived' }).expect(200);
 
       const after = await api().get('/api/v1/admin/overview').set(auth).expect(200);
-      // Junior first, whatever order they were entered in.
-      expect(after.body.companies[0].ladder).toEqual(['Agent', 'AAB', 'AB']);
+      expect(after.body.companies[0].ladder).toEqual(['Agent', 'AB', 'Senior AB']);
     });
 
     it('refuses tenant creation to a non-Super-Admin with PERM_DENIED', async () => {

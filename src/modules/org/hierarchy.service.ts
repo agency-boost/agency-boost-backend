@@ -9,6 +9,7 @@ import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { formatAgentCode } from './agent-code';
 import { MembershipHistory, MembershipHistoryDocument, MembershipEvent } from './membership-history.schema';
 import { MembershipRepository } from './membership.repository';
+import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { HierarchyRole, MembershipDocument } from './membership.schema';
 
 export interface CreateMembershipInput {
@@ -38,6 +39,8 @@ export class HierarchyService {
     @InjectModel(MembershipHistory.name)
     private readonly history: Model<MembershipHistoryDocument>,
     private readonly clock: Clock,
+    // No cycle: OrgLevelService knows nothing about the hierarchy.
+    private readonly orgLevels: OrgLevelService,
   ) {}
 
   /**
@@ -48,7 +51,9 @@ export class HierarchyService {
    * the unique index would then reject one of them — turning a race into a user-visible
    * failure on a code nobody chose.
    */
-  private async nextAgentCode(kpmId: string): Promise<{ agentCode: string; agentSeq: number }> {
+  private async nextAgentCode(
+    kpmId: string,
+  ): Promise<{ agentCode: string; agentSeq: number; companyId: string }> {
     const kpm = await this.kpms
       .findOneAndUpdate(
         { _id: kpmId, deletedAt: null },
@@ -58,7 +63,9 @@ export class HierarchyService {
       .exec();
     if (!kpm) throw new NotFoundException('KPM');
     const agentSeq = kpm.counters?.nextAgentCodeSeq ?? 1;
-    return { agentCode: formatAgentCode(kpm.code, agentSeq), agentSeq };
+    // The company comes back with it. The ladder a membership references belongs to the
+    // company, and this read has already paid for the document.
+    return { agentCode: formatAgentCode(kpm.code, agentSeq), agentSeq, companyId: kpm.companyId };
   }
 
   private async record(
@@ -89,6 +96,41 @@ export class HierarchyService {
       .exec();
   }
 
+  /**
+   * Move somebody to a different rung.
+   *
+   * Here rather than in `RoleChangeService` for the same reason `leaderId` is: **both
+   * fields are written in one place or they drift.** A caller doing
+   * `$set: { role: toRole }` on its own would leave `orgLevelId` pointing at the rung
+   * they left, and nothing would notice — the enum would answer every question correctly
+   * while the reference, which is the stored truth, said something else.
+   *
+   * Returns the rung, so the caller can record it in history.
+   */
+  async setLevel(
+    ctx: RequestContext,
+    membershipId: string,
+    toRole: HierarchyRole,
+  ): Promise<{ orgLevelId: string; role: HierarchyRole }> {
+    const kpmId = ctx.kpmId;
+    if (!kpmId) {
+      throw new DomainException(
+        ErrorCode.TENANT_NO_MEMBERSHIP,
+        'You are not in an office.',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
+    if (!kpm) throw new NotFoundException('KPM');
+
+    const level = await this.orgLevels.resolveByCode(kpm.companyId, toRole);
+    const role = level.code.toLowerCase() as HierarchyRole;
+    await this.members.updateById(ctx, membershipId, {
+      $set: { orgLevelId: String(level._id), role },
+    });
+    return { orgLevelId: String(level._id), role };
+  }
+
   async create(ctx: RequestContext, input: CreateMembershipInput): Promise<MembershipDocument> {
     const kpmId = ctx.kpmId;
     if (!kpmId) {
@@ -101,12 +143,23 @@ export class HierarchyService {
 
     const leader = input.leaderId ? await this.requireLeader(ctx, input.leaderId) : null;
 
-    const { agentCode, agentSeq } = await this.nextAgentCode(kpmId);
+    const { agentCode, agentSeq, companyId } = await this.nextAgentCode(kpmId);
+
+    // **The level is resolved first, and `role` is taken from what came back.**
+    //
+    // `input.role` is a lookup key, not the value stored: writing the caller's role
+    // beside a level resolved from it is how the two come to disagree. Taking the code
+    // off the resolved rung means they cannot — there is only one source, and it is the
+    // ladder (ADR-0012).
+    const level = await this.orgLevels.resolveByCode(companyId, input.role);
+    const role = level.code.toLowerCase() as HierarchyRole;
+
     const membership = await this.members.create(ctx, {
       userId: input.userId,
       agentCode,
       agentSeq,
-      role: input.role,
+      orgLevelId: String(level._id),
+      role,
       leaderId: leader ? String(leader._id) : null,
       ancestorIds: leader ? [...leader.ancestorIds, String(leader._id)] : [],
       depth: leader ? leader.depth + 1 : 0,
@@ -117,7 +170,8 @@ export class HierarchyService {
     });
 
     await this.record(ctx, String(membership._id), 'joined', {
-      toRole: input.role,
+      toRole: role,
+      toOrgLevelId: String(level._id),
       toLeaderId: membership.leaderId,
     });
 

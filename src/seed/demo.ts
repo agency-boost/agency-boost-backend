@@ -20,6 +20,7 @@ import { SystemClock } from '@/common/clock/clock.port';
 import { PasswordService } from '@/modules/auth/password.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
+import { DEFAULT_ORG_LADDER } from '@/domain/constants';
 import {
   CompanyOrgLevel, CompanyOrgLevelSchema,
 } from '@/modules/tenants/company-org-level.schema';
@@ -145,7 +146,7 @@ async function main(): Promise<void> {
    * joins on.
    */
   async function place(
-    kpm: { _id: unknown; code: string },
+    kpm: { _id: unknown; code: string; companyId: string },
     userId: string,
     role: Role,
     leader: Placed | null,
@@ -185,11 +186,20 @@ async function main(): Promise<void> {
     const status = opts.status ?? 'active';
     const leaderId = leader ? leader.id : null;
 
+    // The rung the role names, on this office's company ladder. The seed writes straight
+    // to the model rather than through HierarchyService, so it resolves this itself —
+    // and a missing rung throws here rather than producing a membership with no level.
+    const level = await OrgLevels.findOne({
+      companyId: kpm.companyId, code: role.toUpperCase(), status: 'active', deletedAt: null,
+    }).exec();
+    if (!level) throw new Error(`No ${role.toUpperCase()} rung on the ladder for KPM ${kpm.code}`);
+
     const created = await Memberships.create({
       kpmId,
       userId,
       agentCode: formatAgentCode(kpm.code, seq),
       agentSeq: seq,
+      orgLevelId: String(level._id),
       role,
       leaderId,
       ancestorIds: leader ? [...leader.ancestorIds, leader.id] : [],
@@ -295,11 +305,7 @@ async function main(): Promise<void> {
    * `HierarchyRole` enum lower-cased — which is the whole reason v1's one-to-one mapping
    * lets the enum keep working while the reference becomes the stored truth.
    */
-  for (const [code, label, displayOrder] of [
-    ['AGENT', 'Agent', 1],
-    ['AAB', 'AAB', 2],
-    ['AB', 'AB', 3],
-  ] as const) {
+  for (const { code, label, displayOrder } of DEFAULT_ORG_LADDER) {
     const existing = await OrgLevels.findOne({ companyId: String(prudential._id), code }).exec();
     if (!existing) {
       await OrgLevels.create({
@@ -316,7 +322,11 @@ async function main(): Promise<void> {
     ownerUserId: String(ownerUser._id),
     address: 'Jl. Raya Serpong, Tangerang Selatan',
   });
-  const office0417 = { _id: kpm0417._id, code: kpm0417.get('code') as string };
+  const office0417 = {
+    _id: kpm0417._id,
+    code: kpm0417.get('code') as string,
+    companyId: kpm0417.get('companyId') as string,
+  };
   const id0417 = String(kpm0417._id);
 
   const owner = await place(office0417, String(ownerUser._id), 'ab', null);
@@ -456,7 +466,11 @@ async function main(): Promise<void> {
     ownerUserId: String(owner0555User._id),
     address: 'Jl. Boulevard Raya, Jakarta Utara',
   });
-  const office0555 = { _id: kpm0555._id, code: kpm0555.get('code') as string };
+  const office0555 = {
+    _id: kpm0555._id,
+    code: kpm0555.get('code') as string,
+    companyId: kpm0555.get('companyId') as string,
+  };
   const owner0555 = await place(office0555, String(owner0555User._id), 'ab', null);
   const agent0555User = await user('agent@kpm0555.test', 'Lina Marlina');
   await place(office0555, String(agent0555User._id), 'agent', owner0555);
@@ -470,7 +484,11 @@ async function main(): Promise<void> {
     status: 'suspended',
   });
   await place(
-    { _id: kpm0999._id, code: kpm0999.get('code') as string },
+    {
+      _id: kpm0999._id,
+      code: kpm0999.get('code') as string,
+      companyId: kpm0999.get('companyId') as string,
+    },
     String(suspendedOwnerUser._id),
     'ab',
     null,

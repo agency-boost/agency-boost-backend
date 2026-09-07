@@ -254,6 +254,12 @@ export class TenantService {
       throw err;
     }
 
+    // **Every company gets a ladder, at creation.** `memberships.orgLevelId` resolves
+    // against it on every join, so a company without one is an office nobody can join —
+    // and nothing would say so until somebody tried. ADR-0012 §3 settles that v1 ships
+    // one seeded ladder; Super Admin edits it at /admin/org-levels afterwards.
+    await this.orgLevels.seedDefaultLadder(String(company._id));
+
     await this.audit.record(ctx, {
       action: 'company.created',
       targetCollection: 'companies',

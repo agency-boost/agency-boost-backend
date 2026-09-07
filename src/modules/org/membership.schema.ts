@@ -52,6 +52,28 @@ export class Membership {
   @Prop({ type: Number, required: true })
   agentSeq!: number;
 
+  /**
+   * → `companyOrgLevels._id`. **The stored truth about where somebody stands** (ADR-0012).
+   *
+   * Required, and resolved from the office's company on every write. A membership with no
+   * level is the defect the reference exists to prevent, and it would be invisible until
+   * a screen tried to read it — so the resolution throws rather than writing null.
+   */
+  @Prop({ type: String, required: true, index: true })
+  orgLevelId!: string;
+
+  /**
+   * **Derived from `orgLevelId`, never written on its own.**
+   *
+   * It stays because removing it means redesigning `Grantee`/`holds()` — a table that
+   * enumerates one row per level and therefore cannot describe a configurable ladder —
+   * plus `directCounts`, the five `role-badge` maps and every permission row. v1 seeds
+   * exactly one ladder, so the reference and the enum are one-to-one and the enum keeps
+   * working. That is debt with a name (P3.5-T8 AC-5), not an accident.
+   *
+   * Every write goes through `HierarchyService`, which sets it from the resolved level's
+   * `code`. Setting it directly is how the two come to disagree.
+   */
   @Prop({ type: String, enum: ['ab', 'aab', 'agent'], required: true })
   role!: HierarchyRole;
 

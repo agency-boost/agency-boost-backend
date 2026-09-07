@@ -167,7 +167,10 @@ export class RoleChangeService {
     }
 
     const fromRole = target.role;
-    await this.members.updateById(ctx, membershipId, { $set: { role: toRole } });
+    const fromOrgLevelId = target.orgLevelId;
+    // Through the hierarchy service, which writes the reference and the enum together.
+    // A `$set: { role }` here would leave `orgLevelId` on the rung they left.
+    const moved = await this.hierarchy.setLevel(ctx, membershipId, toRole);
 
     // Append-only: the open role edge is closed, and a new one opened. The Role change
     // log reads exactly these rows, and nothing else could reconstruct them.
@@ -183,6 +186,10 @@ export class RoleChangeService {
       eventType: 'role_changed',
       fromRole,
       toRole,
+      // The rungs those names referred to at the time. A company that later renames a
+      // level leaves this row still legible.
+      fromOrgLevelId,
+      toOrgLevelId: moved.orgLevelId,
       validFrom: this.clock.now(),
       validTo: null,
       actorMembershipId: me,

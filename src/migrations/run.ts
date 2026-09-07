@@ -1,0 +1,31 @@
+import 'dotenv/config';
+import mongoose from 'mongoose';
+import { SystemClock } from '@/common/clock/clock.port';
+import { up as membershipOrgLevel } from './0001-membership-org-level';
+
+/**
+ * Every migration, in order. Forward-only and idempotent, so running this twice is a
+ * no-op rather than a second application.
+ */
+const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Date) => Promise<unknown>]> = [
+  ['0001-membership-org-level', membershipOrgLevel],
+];
+
+async function main(): Promise<void> {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) throw new Error('MONGODB_URI is not set');
+  await mongoose.connect(uri, { dbName: process.env.MONGODB_DB_NAME });
+  const clock = new SystemClock();
+
+  try {
+    for (const [name, run] of MIGRATIONS) {
+      const result = await run(mongoose.connection.db as mongoose.mongo.Db, clock.now());
+      // eslint-disable-next-line no-console
+      console.log(`${name}:`, JSON.stringify(result));
+    }
+  } finally {
+    await mongoose.disconnect();
+  }
+}
+
+void main();

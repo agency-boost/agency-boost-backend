@@ -16,7 +16,7 @@ import { OrgLevelService } from './org-level.service';
 import { CompanyOrgLevel, CompanyOrgLevelSchema } from './company-org-level.schema';
 import { Kpm, KpmSchema } from './kpm.schema';
 import { TenantService } from './tenant.service';
-import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
+import { clearCollections, seedLadder, startMongo, stopMongo } from '../../../test/mongo';
 
 const NOW = new Date('2026-09-05T02:00:00Z');
 
@@ -59,6 +59,9 @@ describe('TenantService', () => {
     const historyModel = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
     const repo = new MembershipRepository(memberModel as never);
     const clock = new FixedClock(NOW);
+    const orgLevels = new OrgLevelService(
+      levels as never, companies as never, new AuditService(auditModel as never), clock,
+    );
     service = new TenantService(
       kpms as never,
       companies as never,
@@ -66,9 +69,9 @@ describe('TenantService', () => {
       requests as never,
       new AuditService(auditModel as never),
       clock,
-      new HierarchyService(repo, kpms as never, historyModel as never, clock),
+      new HierarchyService(repo, kpms as never, historyModel as never, clock, orgLevels),
       repo,
-      new OrgLevelService(levels as never, companies as never, new AuditService(auditModel as never), clock),
+      orgLevels,
     );
   });
   afterAll(stopMongo);
@@ -79,6 +82,7 @@ describe('TenantService', () => {
       .model(Company.name)
       .create({ name: 'Prudential', slug: 'prudential', defaultTimezone: 'Asia/Jakarta' });
     companyId = String(company._id);
+    await seedLadder(companyId);
   });
 
   const input = () => ({ companyId, code: '0417', branchName: 'BSD City Branch' });
@@ -94,6 +98,10 @@ describe('TenantService', () => {
     mongoose.model(Membership.name).create({
       kpmId, userId, role, status: 'active', agentCode: `${kpmId.slice(-4)}-${userId}`,
       agentSeq: 1, leaderId: null, ancestorIds: [], depth: 0,
+      // Required now, and a placeholder is honest here: this helper deliberately skips
+      // `HierarchyService`, so nothing about it resolves a real rung. What it exercises
+      // is the counting, not the ladder.
+      orgLevelId: 'lvl-fixture',
     });
 
   describe('creating a company (P3.5-T14 AC-7)', () => {
@@ -212,6 +220,7 @@ describe('TenantService', () => {
     it('allows the same code under a different company', async () => {
       await service.createKpm(ctx({ superAdmin: true }), input());
       const other = await mongoose.model(Company.name).create({ name: 'Allianz', slug: 'allianz' });
+      await seedLadder(String(other._id));
       const kpm = await service.createKpm(ctx({ superAdmin: true }), {
         ...input(),
         companyId: String(other._id),
@@ -614,7 +623,7 @@ describe('TenantService', () => {
     const seedMemberFor = (kpmId: string, userId: string, admin = false) =>
       mongoose.model(Membership.name).create({
         kpmId, userId, role: 'ab', status: 'active', agentCode: `${kpmId.slice(-4)}-${userId}`,
-        agentSeq: 1, leaderId: null, ancestorIds: [], depth: 0,
+        agentSeq: 1, leaderId: null, ancestorIds: [], depth: 0, orgLevelId: 'lvl-fixture',
         ...(admin ? { adminAccess: { isKpmAdmin: true, grantedAt: NOW, grantedByUserId: 'u1', revokedAt: null } } : {}),
       });
 

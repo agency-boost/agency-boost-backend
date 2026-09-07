@@ -5,6 +5,7 @@ import {
   PERFORMANCE,
   RATIO_BENCHMARKS,
   TIME,
+  DEFAULT_ORG_LADDER,
   DEFAULT_TENANT_TIMEZONE,
   MINOR_UNITS_PER_MAJOR,
 } from './index';
@@ -91,5 +92,12 @@ describe('domain constants', () => {
   it('defaults tenants to Asia/Jakarta, never UTC', () => {
     expect(DEFAULT_TENANT_TIMEZONE).toBe('Asia/Jakarta');
     expect(DEFAULT_TENANT_TIMEZONE).not.toBe('UTC');
+
+    // The ladder every company starts with. Junior first, and the codes are the
+    // `HierarchyRole` values upper-cased — that one-to-one is what lets the enum keep
+    // working while `orgLevelId` becomes the stored truth (ADR-0012 §3).
+    expect(DEFAULT_ORG_LADDER.map((l) => l.code)).toEqual(['AGENT', 'AAB', 'AB']);
+    expect(DEFAULT_ORG_LADDER.map((l) => l.displayOrder)).toEqual([1, 2, 3]);
+    expect(DEFAULT_ORG_LADDER.map((l) => l.code.toLowerCase())).toEqual(['agent', 'aab', 'ab']);
   });
 });

@@ -17,7 +17,7 @@ import { KpmRequestService } from './kpm-request.service';
 import { OrgLevelService } from './org-level.service';
 import { CompanyOrgLevel, CompanyOrgLevelSchema } from './company-org-level.schema';
 import { TenantService } from './tenant.service';
-import { clearCollections, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
+import { clearCollections, seedLadder, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
 
 const NOW = new Date('2026-09-06T02:00:00Z');
 
@@ -49,10 +49,11 @@ describe('KpmRequestService (P3.5-T2)', () => {
     const clock = new FixedClock(NOW);
     const audit = new AuditService(auditModel as never);
 
+    const orgLevels = new OrgLevelService(levels as never, companies as never, audit, clock);
     tenants = new TenantService(
       kpms as never, companies as never, users as never, requests as never, audit, clock,
-      new HierarchyService(repo, kpms as never, historyModel as never, clock), repo,
-      new OrgLevelService(levels as never, companies as never, audit, clock),
+      new HierarchyService(repo, kpms as never, historyModel as never, clock, orgLevels), repo,
+      orgLevels,
     );
     service = new KpmRequestService(
       requests as never, companies as never, users as never, tenants, audit, clock,
@@ -66,6 +67,7 @@ describe('KpmRequestService (P3.5-T2)', () => {
     const company = await mongoose.model(Company.name).create({
       name: 'Prudential', slug: 'prudential', defaultTimezone: 'Asia/Jakarta',
     });
+    await seedLadder(String(company._id));
     companyId = String(company._id);
     const user = await mongoose.model(User.name).create({
       email: 'rangga@example.test', fullName: 'Rangga Wibisono', passwordHash: 'x',

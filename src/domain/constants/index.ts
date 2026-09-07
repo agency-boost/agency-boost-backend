@@ -83,6 +83,26 @@ export const PERFORMANCE = {
  */
 export const DEFAULT_TENANT_TIMEZONE = 'Asia/Jakarta';
 
+/**
+ * The ladder a new company starts with — Prudential's, which every company in v1 shares
+ * (`AgencyBoost_Superadmin.html:311`).
+ *
+ * A company **must** have one. `memberships.orgLevelId` references a rung, and every join
+ * resolves it from the office's company, so a company with no ladder is an office nobody
+ * can join — and nothing would say so until somebody tried. ADR-0012 §3 settles that v1
+ * ships one seeded ladder, so this is the seed, not a guess.
+ *
+ * The codes are upper-cased `HierarchyRole` values, which is what makes v1's reference and
+ * enum one-to-one and lets the enum keep working while the reference becomes the truth.
+ *
+ * Super Admin edits it afterwards at `/admin/org-levels`. Junior first.
+ */
+export const DEFAULT_ORG_LADDER = [
+  { code: 'AGENT', label: 'Agent', displayOrder: 1 },
+  { code: 'AAB', label: 'AAB', displayOrder: 2 },
+  { code: 'AB', label: 'AB', displayOrder: 3 },
+] as const;
+
 /** Currency minor units. IDR sen: 100 minor units to the rupiah. */
 export const MINOR_UNITS_PER_MAJOR = 100;
 export const DEFAULT_CURRENCY = 'IDR';

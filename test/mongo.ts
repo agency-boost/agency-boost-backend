@@ -1,4 +1,8 @@
 import mongoose from 'mongoose';
+import { DEFAULT_ORG_LADDER } from '@/domain/constants';
+import {
+  CompanyOrgLevel, CompanyOrgLevelSchema,
+} from '@/modules/tenants/company-org-level.schema';
 
 /**
  * An in-memory MongoDB for integration tests. No Docker needed, and each suite gets a
@@ -56,4 +60,24 @@ export async function syncIndexes(): Promise<void> {
 export async function clearCollections(): Promise<void> {
   const { collections } = mongoose.connection;
   await Promise.all(Object.values(collections).map((c) => c.deleteMany({})));
+}
+
+/**
+ * The ladder every company gets in production, for a fixture that creates one directly.
+ *
+ * `memberships.orgLevelId` resolves against a company's ladder on every join, so a
+ * company built through the model in a spec — bypassing `TenantService.createCompany`,
+ * which seeds it — has no rung to resolve and every join throws. Which is the design
+ * working: a membership with no level is the defect the reference exists to prevent.
+ */
+export async function seedLadder(companyId: string): Promise<void> {
+  const model = mongoose.models[CompanyOrgLevel.name]
+    ?? mongoose.model(CompanyOrgLevel.name, CompanyOrgLevelSchema);
+  for (const { code, label, displayOrder } of DEFAULT_ORG_LADDER) {
+    if (await model.findOne({ companyId, code, deletedAt: null }).exec()) continue;
+    await model.create({
+      companyId, code, label, displayOrder,
+      status: 'active', archivedAt: null, deletedAt: null,
+    });
+  }
 }

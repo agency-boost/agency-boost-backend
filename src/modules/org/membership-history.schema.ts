@@ -46,6 +46,23 @@ export class MembershipHistory {
   @Prop({ type: String, default: null })
   toRole!: HierarchyRole | null;
 
+  /**
+   * The rungs the role names referred to **at the time** (P3.5-T8 AC-3).
+   *
+   * `fromRole`/`toRole` are labels, and a label is renameable: a company that renames
+   * `AAB` to *Associate Agency Business* would otherwise leave every past promotion
+   * describing a rung by a name that no longer exists. The reference survives the rename,
+   * so a history row stays legible after it.
+   *
+   * Nullable because rows written before this existed have none, and backfilling history
+   * would be inventing a fact rather than recording one.
+   */
+  @Prop({ type: String, default: null })
+  fromOrgLevelId!: string | null;
+
+  @Prop({ type: String, default: null })
+  toOrgLevelId!: string | null;
+
   @Prop({ type: String, default: null })
   fromLeaderId!: string | null;
 

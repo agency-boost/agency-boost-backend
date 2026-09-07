@@ -20,9 +20,13 @@ import { RemovalService } from './removal.service';
 import { RoleChangeService } from './role-change.service';
 import { InviteCode, InviteCodeSchema } from './invite-code.schema';
 import { AuditService } from '@/modules/audit/audit.service';
+import { OrgLevelService } from '@/modules/tenants/org-level.service';
+import {
+  CompanyOrgLevel, CompanyOrgLevelSchema,
+} from '@/modules/tenants/company-org-level.schema';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
-import { clearCollections, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
+import { clearCollections, seedLadder, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
 
 /** A clock that can be moved, so as-of-date history is testable without sleeping. */
 class MovableClock extends Clock {
@@ -83,7 +87,13 @@ describe('organisation', () => {
     users = userModel();
     clock = new MovableClock(new Date('2026-03-01T02:00:00Z'));
     members = new MembershipRepository(memberModel as never);
-    hierarchy = new HierarchyService(members, kpmModel as never, historyModel as never, clock);
+    const orgLevels = new OrgLevelService(
+      mongoose.model(CompanyOrgLevel.name, CompanyOrgLevelSchema) as never,
+      mongoose.model(Company.name, CompanySchema) as never,
+      new AuditService(mongoose.model(AuditLog.name, AuditLogSchema) as never),
+      clock,
+    );
+    hierarchy = new HierarchyService(members, kpmModel as never, historyModel as never, clock, orgLevels);
     directory = new DirectoryService(members, users as never);
 
     sent = [];
@@ -178,6 +188,7 @@ describe('organisation', () => {
     const company = await mongoose.model(Company.name).create({
       name: 'Prudential', slug: `prudential-${Math.random()}`,
     });
+    await seedLadder(String(company._id));
     for (const [id, code] of [[KPM_A, '0417'], [KPM_B, '0555']]) {
       await mongoose.model(Kpm.name).create({
         _id: id, companyId: String(company._id), code, branchName: `Branch ${code}`,
@@ -2052,7 +2063,9 @@ describe('organisation', () => {
       const add = (leaderId: string | null, ancestors: string[], role: string) => {
         const id = String(new mongoose.Types.ObjectId());
         docs.push({
-          _id: id, kpmId, userId: `u-${id}`, role, leaderId,
+          // The scale fixture writes 500 rows straight to the model; a real rung per row
+          // would be measuring the ladder rather than the index this test is about.
+          _id: id, kpmId, userId: `u-${id}`, role, orgLevelId: `lvl-${role}`, leaderId,
           ancestorIds: ancestors, depth: ancestors.length, status: 'active',
           agentSeq: ++seq, agentCode: `PERF-${seq}`,
           directCounts: { ab: 0, aab: 0, agent: 0, total: 0 }, subtreeCount: 0,
@@ -3098,6 +3111,131 @@ describe('organisation', () => {
 
         expect(await roles.log(abCtx)).toEqual([]);
       });
+    });
+  });
+
+  /**
+   * P3.5-T8. `orgLevelId` is the stored truth about where somebody stands; `role` is a
+   * projection of it that survives only because v1 seeds one ladder (ADR-0012 §3).
+   */
+  describe('the org level reference (P3.5-T8)', () => {
+    const owner = ctx(KPM_A, { isKpmOwner: true });
+    const levelOf = async (membershipId: string) => {
+      const stored = await members.findById(ctx(KPM_A), membershipId);
+      const level = await mongoose
+        .model(CompanyOrgLevel.name)
+        .findById(stored!.orgLevelId)
+        .exec();
+      return { stored: stored!, code: level?.get('code') as string | undefined };
+    };
+
+    it('AC-1: every join writes the rung, resolved from the office\u2019s company', async () => {
+      const id = await join(KPM_A, 'agent');
+      const { stored, code } = await levelOf(id);
+      expect(stored.orgLevelId).toEqual(expect.any(String));
+      expect(code).toBe('AGENT');
+    });
+
+    it('AC-2: the stored role comes off the rung, not off the caller', async () => {
+      // The whole point. `input.role` is a lookup key; the value written is taken from
+      // what came back, so there is one source and it is the ladder.
+      const id = await join(KPM_A, 'aab');
+      const { stored, code } = await levelOf(id);
+      expect(stored.role).toBe(String(code).toLowerCase());
+    });
+
+    it('AC-2: a promotion moves both, so they cannot drift apart', async () => {
+      const leader = await join(KPM_A, 'ab');
+      const id = await join(KPM_A, 'agent', leader);
+
+      await roles.change(owner, id, 'aab', 'Ready to lead');
+
+      const { stored, code } = await levelOf(id);
+      expect(stored.role).toBe('aab');
+      expect(code).toBe('AAB');
+    });
+
+    it('AC-3: history keeps the rungs the role names referred to', async () => {
+      // A company that renames AAB later leaves this row legible: the reference survives
+      // the rename, the label does not.
+      const leader = await join(KPM_A, 'ab');
+      const id = await join(KPM_A, 'agent', leader);
+      const before = await members.findById(ctx(KPM_A), id);
+
+      await roles.change(owner, id, 'aab');
+
+      const row = await mongoose
+        .model(MembershipHistory.name)
+        .findOne({ membershipId: id, eventType: 'role_changed' })
+        .exec();
+      expect(row?.get('fromOrgLevelId')).toBe(before!.orgLevelId);
+      expect(row?.get('toOrgLevelId')).toEqual(expect.any(String));
+      expect(row?.get('toOrgLevelId')).not.toBe(before!.orgLevelId);
+    });
+
+    it('AC-3: joining records the rung too, not only the role name', async () => {
+      const id = await join(KPM_A, 'agent');
+      const row = await mongoose
+        .model(MembershipHistory.name)
+        .findOne({ membershipId: id, eventType: 'joined' })
+        .exec();
+      expect(row?.get('toOrgLevelId')).toEqual(expect.any(String));
+      expect(row?.get('toRole')).toBe('agent');
+    });
+
+    it('AC-4: a promotion keeps the leader they already had (ADR-0014)', async () => {
+      // The alternative — reparenting a new AB to the office root — would move somebody
+      // out of the unit that grew them on the day they were rewarded for it, and would
+      // silently rewrite the recruiting leader's subtree counts. The code already did
+      // this; ADR-0014 makes it deliberate, and this makes it enforced.
+      const leader = await join(KPM_A, 'ab');
+      const id = await join(KPM_A, 'agent', leader);
+
+      await roles.change(owner, id, 'ab', 'Ready to build');
+
+      const after = await members.findById(ctx(KPM_A), id);
+      expect(after!.role).toBe('ab');
+      expect(after!.leaderId).toBe(leader);
+      // And the office therefore nests an AB under an AB, which is ordinary rather than
+      // a state to repair.
+      expect((await members.findById(ctx(KPM_A), leader))!.role).toBe('ab');
+      expect(after!.ancestorIds).toContain(leader);
+    });
+
+    it('AC-4: promoting changes the leader\u2019s counts without moving anybody', async () => {
+      const leader = await join(KPM_A, 'ab');
+      const id = await join(KPM_A, 'agent', leader);
+      expect((await members.findById(ctx(KPM_A), leader))!.directCounts).toMatchObject({
+        agent: 1, aab: 0, total: 1,
+      });
+
+      await roles.change(owner, id, 'aab');
+
+      // Same person, same leader, different rung — so the breakdown moves and the total
+      // does not.
+      expect((await members.findById(ctx(KPM_A), leader))!.directCounts).toMatchObject({
+        agent: 0, aab: 1, total: 1,
+      });
+    });
+
+    it('refuses to place somebody on a rung the ladder has archived', async () => {
+      // Loudly, rather than writing a membership with no level — which would be
+      // invisible until a screen tried to read it.
+      const leader = await join(KPM_A, 'ab');
+      const id = await join(KPM_A, 'agent', leader);
+      await mongoose
+        .model(CompanyOrgLevel.name)
+        .updateOne({ code: 'AAB' }, { $set: { status: 'archived' } })
+        .exec();
+
+      await expect(roles.change(owner, id, 'aab')).rejects.toMatchObject({
+        code: 'ORG_LEVEL_NOT_ON_LADDER',
+      });
+
+      await mongoose
+        .model(CompanyOrgLevel.name)
+        .updateOne({ code: 'AAB' }, { $set: { status: 'active' } })
+        .exec();
     });
   });
 });

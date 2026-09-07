@@ -35,6 +35,9 @@ describe('ContextResolver', () => {
     const seq = Math.floor(Math.random() * 900) + 100;
     return mongoose.model(Membership.name).create({
       kpmId, userId, agentCode: `KPM0417-${seq}`, agentSeq: seq,
+      // A placeholder rung, deliberately: this helper writes straight to the model to
+      // build a context, and what it exercises is the resolver, not the ladder.
+      orgLevelId: 'lvl-fixture',
       role: 'ab', status: 'active', ...over,
     });
   }

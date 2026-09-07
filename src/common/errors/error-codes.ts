@@ -33,6 +33,12 @@ export const ErrorCode = {
    * quietly come to mean the new one.
    */
   ORG_LEVEL_CODE_TAKEN: 'ORG_LEVEL_CODE_TAKEN',
+  /**
+   * A membership was to be written against a rung the company's ladder does not have, or
+   * has archived. Never expected in normal use — every company is seeded with a ladder —
+   * so it is a loud refusal rather than a silent null on the membership.
+   */
+  ORG_LEVEL_NOT_ON_LADDER: 'ORG_LEVEL_NOT_ON_LADDER',
   /** Somebody with an open request asked for a second office. */
   TENANT_REQUEST_ALREADY_OPEN: 'TENANT_REQUEST_ALREADY_OPEN',
   /** A KPM request was approved or declined already; the second decision says which. */
