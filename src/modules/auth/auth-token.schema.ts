@@ -4,7 +4,11 @@ import { baseSchemaOptions } from '@/common/schema/base.schema';
 
 export type AuthTokenDocument = HydratedDocument<AuthToken>;
 
-export type AuthTokenKind = 'refresh' | 'email_verification' | 'password_reset';
+export type AuthTokenKind =
+  | 'refresh'
+  | 'email_verification'
+  | 'password_reset'
+  | 'impersonation';
 
 /**
  * Credentials live apart from identity, so rotating one never touches the other.
@@ -18,7 +22,17 @@ export class AuthToken {
   @Prop({ type: String, required: true, index: true })
   userId!: string;
 
-  @Prop({ type: String, required: true, enum: ['refresh', 'email_verification', 'password_reset'] })
+  /**
+   * `impersonation` is the odd one: the access token it names is a stateless JWT, so this
+   * row is not the credential — it is the **switch that can turn the credential off**.
+   * Without it `end()` had nothing to revoke and a support session stayed valid for its
+   * whole TTL after the operator pressed stop.
+   */
+  @Prop({
+    type: String,
+    required: true,
+    enum: ['refresh', 'email_verification', 'password_reset', 'impersonation'],
+  })
   kind!: AuthTokenKind;
 
   /** SHA-256 of the token. The raw value exists only in the response that issued it. */

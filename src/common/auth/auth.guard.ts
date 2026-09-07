@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { ContextResolver } from '@/modules/auth/context-resolver';
+import { ImpersonationService } from '@/modules/auth/impersonation.service';
 import { TokenSigner } from '@/modules/auth/token-signer';
 import { IS_PUBLIC } from './auth.decorators';
 
@@ -18,6 +19,7 @@ export class AuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly signer: TokenSigner,
     private readonly resolver: ContextResolver,
+    private readonly impersonation: ImpersonationService,
   ) {}
 
   async canActivate(execution: ExecutionContext): Promise<boolean> {
@@ -56,6 +58,25 @@ export class AuthGuard implements CanActivate {
     // An impersonation session encodes the real actor in `sid` as `imp:<userId>`, so
     // both actors reach the audit log.
     const impersonator = claims.sid.startsWith('imp:') ? claims.sid.slice(4) : null;
+
+    /**
+     * A support session can be **ended**, and ending it has to bite.
+     *
+     * The access token is a stateless JWT — that is what keeps every ordinary request off
+     * the database — so nothing here consults it except this one branch. Before it,
+     * `impersonation/end` wrote an audit row and the token stayed valid for the rest of
+     * its hour; anyone holding a copy kept acting as the target.
+     *
+     * Only `imp:` tokens pay for the lookup, and they are rare by design.
+     */
+    if (impersonator && !(await this.impersonation.isLive(token))) {
+      throw new DomainException(
+        ErrorCode.AUTH_TOKEN_EXPIRED,
+        'That support session has ended.',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+
     request.context = await this.resolver.resolve(claims.sub, impersonator);
     return true;
   }

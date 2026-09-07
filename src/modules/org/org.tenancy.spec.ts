@@ -94,7 +94,7 @@ describe('organisation', () => {
       clock,
     );
     hierarchy = new HierarchyService(members, kpmModel as never, historyModel as never, clock, orgLevels);
-    directory = new DirectoryService(members, users as never);
+    directory = new DirectoryService(members, users as never, kpmModel as never);
 
     sent = [];
     const notifications = {
@@ -2657,6 +2657,47 @@ describe('organisation', () => {
         expect((await members.findById(ctx(KPM_A), aab))!.status).toBe('active');
       });
 
+      it('refuses a destination the actor cannot reach, so a peer cannot be handed a unit', async () => {
+        // The defect this closes. `reparent` checks the destination exists in the tenant,
+        // is not removed and makes no cycle — all true of a **peer's** membership. An AB
+        // removing their own AAB could therefore name a peer AB and hand them a unit they
+        // never led: a write at `own-unit` changing what a different `own-unit` reader
+        // sees, through `ancestorIds`, on every screen built on it.
+        const peer = await join(KPM_A, 'ab');
+
+        await expect(
+          removals.remove(abCtx, aab, {
+            ...CONFIRM,
+            subtree: { action: 'reassign', toMembershipId: peer },
+          }),
+        ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+        // Nothing moved, and the removal did not half-happen.
+        expect((await members.findById(ctx(KPM_A), under))!.leaderId).toBe(aab);
+        expect((await members.findById(ctx(KPM_A), aab))!.status).toBe('active');
+      });
+
+      it('lets the office name anybody, because its reach is the whole tenant', async () => {
+        const peer = await join(KPM_A, 'ab');
+        await removals.remove(ctx(KPM_A, { isKpmOwner: true }), aab, {
+          ...CONFIRM,
+          subtree: { action: 'reassign', toMembershipId: peer },
+        });
+        expect((await members.findById(ctx(KPM_A), under))!.leaderId).toBe(peer);
+      });
+
+      it('lets a leader name somebody inside their own downline', async () => {
+        // Not just themselves: an AB may move a unit to another AAB they lead. `visibleTo`
+        // is the same function the roster reads through, so "where you may put people" and
+        // "who you can see" cannot drift apart.
+        const sibling = await join(KPM_A, 'aab', ab);
+        await removals.remove(abCtx, aab, {
+          ...CONFIRM,
+          subtree: { action: 'reassign', toMembershipId: sibling },
+        });
+        expect((await members.findById(ctx(KPM_A), under))!.leaderId).toBe(sibling);
+      });
+
       it('reassigns them, and the moved person keeps a legible history', async () => {
         await removals.remove(abCtx, aab, {
           ...CONFIRM,
@@ -3167,6 +3208,51 @@ describe('organisation', () => {
 
       const one = await directory.read(outsider(me), me);
       expect(one.canRemove).toBe(false);
+    });
+
+    it('H-1: the office\u2019s owner cannot be removed or demoted, after a transfer', async () => {
+      // The root check catches an owner *usually*, because a new owner is created with no
+      // leader. Not after an ordinary transfer: ownership moving to somebody already in
+      // the office keeps their existing row, `leaderId` and all. An Admin could then
+      // remove them — leaving `kpms.ownerUserId` naming a person with no membership, so
+      // nobody resolves as Owner and `kpm_admin:grant` is Owner-reserved. The office
+      // would have no working administration until a Super Admin re-ran `assignOwner`.
+      const root = await join(KPM_A, 'ab');
+      const sari = await join(KPM_A, 'ab', root);
+      const sariRow = await members.findById(ctx(KPM_A), sari);
+      await mongoose
+        .model(Kpm.name)
+        .updateOne({ _id: KPM_A }, { $set: { ownerUserId: sariRow!.userId } });
+
+      const admin = ctx(KPM_A, { isKpmOwner: false, membershipId: 'mem-admin' });
+      (admin.membership as { isKpmAdmin: boolean }).isKpmAdmin = true;
+
+      await expect(removals.remove(admin, sari, { confirmation: 'REMOVE' })).rejects.toMatchObject({
+        code: 'ORG_REMOVAL_NOT_PERMITTED',
+        message: expect.stringContaining('own this office'),
+      });
+      await expect(roles.change(admin, sari, 'agent')).rejects.toMatchObject({
+        code: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
+      });
+
+      // And the screen is not offered either control — the flag and the refusal agree.
+      const seen = await directory.read(ctx(KPM_A, { isKpmOwner: true }), sari);
+      expect(seen).toMatchObject({ isKpmOwner: true, canRemove: false, canChangeRole: false });
+    });
+
+    it('H-1: the roster can finally say who owns the office', async () => {
+      // `isKpmOwner` was hardcoded `false`, so the roster's `Owner` tag — gated on it —
+      // could never appear on any row.
+      const root = await join(KPM_A, 'ab');
+      const rootRow = await members.findById(ctx(KPM_A), root);
+      const other = await join(KPM_A, 'agent', root);
+      await mongoose
+        .model(Kpm.name)
+        .updateOne({ _id: KPM_A }, { $set: { ownerUserId: rootRow!.userId } });
+
+      const office = ctx(KPM_A, { isKpmOwner: true });
+      expect((await directory.read(office, root)).isKpmOwner).toBe(true);
+      expect((await directory.read(office, other)).isKpmOwner).toBe(false);
     });
 
     it('AC-4: the office root cannot be removed, even by the office', async () => {

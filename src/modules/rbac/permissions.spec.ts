@@ -70,6 +70,10 @@ describe('permission matrix', () => {
         'membership, which a Super Admin has none of — the grant would produce ' +
         'MissingTenantContextError, not access. A Super Admin reaches an office by ' +
         'impersonation; a cross-tenant console route is Phase 3.5.',
+      'org_tree:read/SUPER_ADMIN': 'as member:change_role — and this one was granted for a ' +
+        'while: GET /members/tree passed the guard and then answered 500 INTERNAL_ERROR, ' +
+        'because the repository throws MissingTenantContextError when there is no kpmId. ' +
+        'Found at the Phase 3.5 exit review.',
       'member:invite/SUPER_ADMIN': 'as member:change_role',
       'member:read_profile/SUPER_ADMIN': 'as member:change_role',
       'member:remove_from_team/SUPER_ADMIN': 'as member:change_role',

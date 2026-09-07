@@ -51,7 +51,7 @@ import { GroupService } from '@/modules/org/group.service';
 import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { RemovalService } from '@/modules/org/removal.service';
 import { RoleChangeService } from '@/modules/org/role-change.service';
-import { AuthToken, AuthTokenSchema } from './auth-token.schema';
+import { AuthToken, AuthTokenDocument, AuthTokenSchema } from './auth-token.schema';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ContextResolver } from './context-resolver';
@@ -392,6 +392,49 @@ describe('auth and admin over HTTP', () => {
 
       const after = await api().get('/api/v1/admin/overview').set(auth).expect(200);
       expect(after.body.companies[0].ladder).toEqual(['Agent', 'AB', 'Senior AB']);
+    });
+
+    it('exit review B-2: ending a session revokes the token, not just the audit trail', async () => {
+      // `end()` used to write an audit row and nothing else. The access token is a
+      // stateless JWT, so it stayed valid for the rest of its hour — anyone holding a
+      // copy kept acting as the target, and the banner's Stop button was decoration.
+      const sa = await makeUser('sa-revoke@agencyboost.test', 'super_admin');
+      const target = await makeUser('revoke-target@kpm.test');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+
+      const started = await api().post(`/api/v1/admin/impersonate/${target.id}`)
+        .set(auth).send({ reason: 'Cannot see their roster' }).expect(201);
+      const asThem = { Authorization: `Bearer ${started.body.accessToken}` };
+
+      // Live: the session reads as the target.
+      const before = await api().get('/api/v1/auth/me').set(asThem).expect(200);
+      expect(before.body.isImpersonating).toBe(true);
+
+      await api().post('/api/v1/admin/impersonate/end').set(asThem).expect(200);
+
+      // Dead, from the very next request — and with the same token, which is the point.
+      const after = await api().get('/api/v1/auth/me').set(asThem).expect(401);
+      expect(after.body.error.code).toBe('AUTH_TOKEN_EXPIRED');
+      expect(after.body.error.message).toContain('support session has ended');
+
+      // The Super Admin's own token is untouched.
+      await api().get('/api/v1/auth/me').set(auth).expect(200);
+    });
+
+    it('exit review B-2: a session minted with no row is refused, not trusted', async () => {
+      // A token from before this existed, or one whose row was pruned. Failing closed is
+      // the only safe reading of "I cannot find this session".
+      const sa = await makeUser('sa-norow@agencyboost.test', 'super_admin');
+      const target = await makeUser('norow-target@kpm.test');
+      const started = await api().post(`/api/v1/admin/impersonate/${target.id}`)
+        .set({ Authorization: `Bearer ${sa.accessToken}` })
+        .send({ reason: 'Support' }).expect(201);
+
+      const tokens = app.get<Model<AuthTokenDocument>>(getModelToken(AuthToken.name));
+      await tokens.deleteMany({ kind: 'impersonation' });
+
+      await api().get('/api/v1/auth/me')
+        .set({ Authorization: `Bearer ${started.body.accessToken}` }).expect(401);
     });
 
     it('P3.5-T11 AC-5: an impersonation can actually be ended, and answers 200', async () => {

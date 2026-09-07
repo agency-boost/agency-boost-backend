@@ -9,6 +9,8 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
+import { AuthToken, AuthTokenDocument } from './auth-token.schema';
+import { PasswordService } from './password.service';
 import { TokenSigner } from './token-signer';
 
 export const IMPERSONATION_MAX_MINUTES = 60;
@@ -25,7 +27,9 @@ export class ImpersonationService {
   constructor(
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
+    @InjectModel(AuthToken.name) private readonly tokens: Model<AuthTokenDocument>,
     private readonly signer: TokenSigner,
+    private readonly passwords: PasswordService,
     private readonly audit: AuditService,
     private readonly clock: Clock,
   ) {}
@@ -99,22 +103,74 @@ export class ImpersonationService {
       after: { reason: reason.trim(), minutes },
     });
 
-    return {
-      // `sid` records who is really acting, so the resolved context can carry both.
-      accessToken: this.signer.sign(
-        { sub: targetUserId, sid: `imp:${ctx.userId}` },
-        ttlSeconds,
-      ),
-      expiresAt: new Date(this.clock.now().getTime() + ttlSeconds * 1000),
-    };
+    // `sid` records who is really acting, so the resolved context can carry both.
+    const accessToken = this.signer.sign({ sub: targetUserId, sid: `imp:${ctx.userId}` }, ttlSeconds);
+    const expiresAt = new Date(this.clock.now().getTime() + ttlSeconds * 1000);
+
+    /**
+     * **The session, so that ending it can mean something.**
+     *
+     * The access token is a stateless JWT: nothing about presenting it consults the
+     * database, which is what makes every other request cheap. It also meant `end()` had
+     * nothing to revoke — it wrote an audit row and the token stayed valid for the rest
+     * of its hour. Anyone holding a copy kept acting as the target.
+     *
+     * The row is keyed by the token's own hash, like every other credential here, so the
+     * guard can ask one indexed question and only for the rare request that carries an
+     * `imp:` session.
+     */
+    await this.tokens.create({
+      userId: targetUserId,
+      kind: 'impersonation',
+      tokenHash: this.passwords.hashToken(accessToken),
+      // The real operator, so an audit reader can group a session by who ran it.
+      familyId: ctx.userId,
+      expiresAt,
+      usedAt: null,
+      revokedAt: null,
+      revokedReason: null,
+    });
+
+    return { accessToken, expiresAt };
   }
 
+  /**
+   * End the session, and mean it.
+   *
+   * Every open impersonation row for this person is revoked, not just the token that made
+   * this request: an operator who somehow holds two should lose both, and the caller
+   * cannot present a token it does not have. The guard refuses a revoked session from the
+   * next request onward.
+   */
   async end(ctx: RequestContext): Promise<void> {
     if (!ctx.isImpersonating) return;
+
+    await this.tokens
+      .updateMany(
+        { userId: ctx.userId, kind: 'impersonation', revokedAt: null },
+        { $set: { revokedAt: this.clock.now(), revokedReason: 'session ended' } },
+      )
+      .exec();
+
     await this.audit.record(ctx, {
       action: 'impersonation.ended',
       targetCollection: 'users',
       targetId: ctx.userId,
     });
+  }
+
+  /**
+   * Is this impersonation token still live?
+   *
+   * Called by `AuthGuard`, and **only** for a token carrying an `imp:` session — a
+   * refresh-token round trip on every ordinary request would be the wrong trade. A
+   * session with no row is refused too: a token minted before this existed, or one whose
+   * row was pruned, is not something to trust.
+   */
+  async isLive(rawToken: string): Promise<boolean> {
+    const row = await this.tokens
+      .findOne({ tokenHash: this.passwords.hashToken(rawToken), kind: 'impersonation' })
+      .exec();
+    return Boolean(row && !row.revokedAt && row.expiresAt.getTime() > this.clock.now().getTime());
   }
 }

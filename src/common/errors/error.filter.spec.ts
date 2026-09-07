@@ -1,6 +1,7 @@
 import { BadRequestException, HttpStatus, InternalServerErrorException } from '@nestjs/common';
 import { DomainExceptionFilter } from './error.filter';
 import { NotFoundException, PermissionDeniedException, VersionConflictException } from './domain.exception';
+import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 
 function makeHost(requestId = 'req-1') {
   const json = jest.fn();
@@ -99,5 +100,26 @@ describe('DomainExceptionFilter', () => {
     };
     filter.catch(new NotFoundException('Lead'), host as never);
     expect(json.mock.calls[0][0].error.requestId).toBe('unknown');
+  });
+
+  it('renders the tenancy backstop as a refusal, not a server fault', () => {
+    // It fired as 500 INTERNAL_ERROR for a whole phase, on `GET /members/tree` with a
+    // Super Admin token: the guard passed a grant the route could not honour, the
+    // repository stopped the query correctly, and the caller was told the server broke.
+    // A backstop working is not a fault.
+    const { host, status, json } = makeHost();
+    filter.catch(new MissingTenantContextError('memberships', 'find'), host as never);
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.FORBIDDEN);
+    expect(json).toHaveBeenCalledWith({
+      error: {
+        code: 'TENANT_NO_MEMBERSHIP',
+        message: 'This request needs an office, and yours resolves to none.',
+        requestId: 'req-1',
+      },
+    });
+    // The error's own message names the collection and the operation. That is for the
+    // log; a caller learns their request had no tenant and nothing else.
+    expect(JSON.stringify(json.mock.calls[0])).not.toContain('memberships');
   });
 });

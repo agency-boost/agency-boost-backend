@@ -192,8 +192,14 @@ export const PERMISSIONS = {
   // a tenant admin sees the office, everyone else sees themselves and their downline.
   // An agent's tree is degenerate — their leader and themselves — and it is granted
   // anyway so the API answers rather than 403s; the nav hides it for them.
+  //
+  // **No `SUPER_ADMIN` grant, deliberately.** `GET /members/tree` resolves `kpmId` from
+  // the caller's membership, which a Super Admin has none of — so the guard passed, the
+  // repository threw `MissingTenantContextError`, and the route answered **500** rather
+  // than a tree. That is the same trap `member:read_profile/SUPER_ADMIN` was deferred to
+  // avoid; this one was granted anyway. A Super Admin reaches an office by impersonation
+  // until a cross-tenant console route exists. Registered in the spec's `DEFERRED` list.
   'org_tree:read': [
-    { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
     { grantee: AB, scope: 'own-downline' },

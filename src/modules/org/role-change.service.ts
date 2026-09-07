@@ -139,6 +139,18 @@ export class RoleChangeService {
     if (!target || target.status === 'removed') throw new NotFoundException('Membership');
     if (target.role === toRole) return this.team(ctx);
 
+    // The same reasoning as removal: an Owner demoted out of AB keeps owning the office
+    // while losing the rung that goes with it, and only the platform can reassign an
+    // office. Refused for everybody, including the Owner themselves.
+    if (await this.hierarchy.ownsTheOffice(ctx, target)) {
+      throw new DomainException(
+        ErrorCode.ORG_ROLE_CHANGE_NOT_PERMITTED,
+        'They own this office. Transfer it first — only the platform can do that.',
+        HttpStatus.FORBIDDEN,
+        { membershipId, fromRole: target.role, toRole },
+      );
+    }
+
     const rules = this.permitted(ctx, target);
     const involvesAb = target.role === 'ab' || toRole === 'ab';
     if (involvesAb ? !rules.anythingWithAb : !rules.agentAndAab) {

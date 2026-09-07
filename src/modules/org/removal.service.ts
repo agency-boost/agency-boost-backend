@@ -11,6 +11,7 @@ import { NotificationTemplate } from '@/modules/notifications/notification.types
 import { HierarchyService } from './hierarchy.service';
 import { MembershipHistory, MembershipHistoryDocument } from './membership-history.schema';
 import { MembershipRepository } from './membership.repository';
+import { visibleTo } from './directory.service';
 import { RoleChangeService, TeamMember } from './role-change.service';
 
 /** Where the reports of somebody being removed are to go. */
@@ -113,6 +114,26 @@ export class RemovalService {
       );
     }
 
+    /**
+     * **The office's owner cannot be removed from inside the office.**
+     *
+     * The root check above catches them *usually*, because `ensureOwnerMembership`
+     * creates an owner with no leader. It does not catch the ordinary transfer case: when
+     * ownership moves to somebody who is already a member, their existing row keeps its
+     * `leaderId`. A KPM Admin could then remove them — leaving `kpms.ownerUserId` naming
+     * somebody with no membership, so nobody resolves as Owner, and `kpm_admin:grant` is
+     * Owner-reserved. The office would have no working administration until a Super Admin
+     * re-ran `assignOwner`.
+     */
+    if (await this.hierarchy.ownsTheOffice(ctx, target)) {
+      throw new DomainException(
+        ErrorCode.ORG_REMOVAL_NOT_PERMITTED,
+        'They own this office. Transfer it first — only the platform can do that.',
+        HttpStatus.FORBIDDEN,
+        { membershipId },
+      );
+    }
+
     const tenantAdmin = Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
     if (!tenantAdmin && target.leaderId !== me) {
       throw new DomainException(
@@ -149,6 +170,30 @@ export class RemovalService {
           HttpStatus.BAD_REQUEST,
           { membershipId, directCount: reports.length },
         );
+      }
+
+      /**
+       * **The destination has to be somewhere this actor can already reach.**
+       *
+       * `reparent` checks that it exists in the tenant, is not removed, and would not
+       * make a cycle — all true of a *peer's* membership. Without this, an AB removing
+       * their own AAB could name a peer AB as the destination and hand that peer a unit
+       * they never led: a write at `own-unit` changing what a different `own-unit` reader
+       * can see, through `ancestorIds`, on every screen built on it.
+       *
+       * `visibleTo` is the same function the roster and the tree read through, so "where
+       * you may put people" and "who you can see" cannot drift apart. A tenant admin gets
+       * `{}` and may name anybody in the office.
+       *
+       * **404, not 403** — a destination outside your reach reads exactly like one that
+       * does not exist, which is the rule everywhere else in this module.
+       */
+      if (destination) {
+        const reachable = await this.members.findOne(ctx, {
+          _id: destination,
+          ...visibleTo(ctx, 'member:remove_from_team'),
+        });
+        if (!reachable) throw new NotFoundException('Membership');
       }
 
       for (const report of reports) {

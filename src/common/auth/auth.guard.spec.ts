@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { RequestContext } from '@/common/context/request-context';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { ContextResolver } from '@/modules/auth/context-resolver';
+import { ImpersonationService } from '@/modules/auth/impersonation.service';
 import { TokenSigner } from '@/modules/auth/token-signer';
 import { AuthGuard } from './auth.guard';
 
@@ -39,13 +40,20 @@ describe('AuthGuard', () => {
     ),
   } as unknown as ContextResolver;
 
+  /**
+   * Only an `imp:` token reaches `isLive`, so every case below leaves it untouched. The
+   * impersonation cases set it explicitly.
+   */
+  const live = (answer = true) =>
+    ({ isLive: jest.fn(async () => answer) }) as unknown as ImpersonationService;
+
   beforeEach(() => jest.clearAllMocks());
 
   it('lets a public route through without looking at the header', async () => {
     const signer = { verify: jest.fn() } as unknown as TokenSigner;
     const { context, reflector } = execution(undefined, true);
 
-    await expect(new AuthGuard(reflector, signer, resolver).canActivate(context))
+    await expect(new AuthGuard(reflector, signer, resolver, live()).canActivate(context))
       .resolves.toBe(true);
     expect(signer.verify).not.toHaveBeenCalled();
   });
@@ -54,7 +62,7 @@ describe('AuthGuard', () => {
     const signer = { verify: jest.fn() } as unknown as TokenSigner;
     const { context, reflector } = execution(undefined);
 
-    await expect(new AuthGuard(reflector, signer, resolver).canActivate(context))
+    await expect(new AuthGuard(reflector, signer, resolver, live()).canActivate(context))
       .rejects.toMatchObject({ code: ErrorCode.AUTH_TOKEN_INVALID });
   });
 
@@ -62,7 +70,7 @@ describe('AuthGuard', () => {
     const signer = { verify: jest.fn() } as unknown as TokenSigner;
     const { context, reflector } = execution('Basic abc123');
 
-    await expect(new AuthGuard(reflector, signer, resolver).canActivate(context))
+    await expect(new AuthGuard(reflector, signer, resolver, live()).canActivate(context))
       .rejects.toMatchObject({ code: ErrorCode.AUTH_TOKEN_INVALID });
     expect(signer.verify).not.toHaveBeenCalled();
   });
@@ -75,7 +83,7 @@ describe('AuthGuard', () => {
     } as unknown as TokenSigner;
     const { context, reflector } = execution('Bearer tampered.token.here');
 
-    await expect(new AuthGuard(reflector, signer, resolver).canActivate(context))
+    await expect(new AuthGuard(reflector, signer, resolver, live()).canActivate(context))
       .rejects.toMatchObject({ code: ErrorCode.AUTH_TOKEN_EXPIRED, status: 401 });
   });
 
@@ -85,7 +93,7 @@ describe('AuthGuard', () => {
     } as unknown as TokenSigner;
     const { context, reflector, request } = execution('Bearer good.token');
 
-    await expect(new AuthGuard(reflector, signer, resolver).canActivate(context))
+    await expect(new AuthGuard(reflector, signer, resolver, live()).canActivate(context))
       .resolves.toBe(true);
     // Roles come from `resolve`, which reads the row — that is what makes revoking a
     // grant take effect on the next request rather than at the next sign-in.
@@ -100,7 +108,7 @@ describe('AuthGuard', () => {
     } as unknown as TokenSigner;
     const { context, reflector, request } = execution('Bearer impersonating.token');
 
-    await new AuthGuard(reflector, signer, resolver).canActivate(context);
+    await new AuthGuard(reflector, signer, resolver, live()).canActivate(context);
     expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR);
     expect((request.context as RequestContext).isImpersonating).toBe(true);
   });

@@ -107,6 +107,20 @@ export class HierarchyService {
    *
    * Returns the rung, so the caller can record it in history.
    */
+  /**
+   * Is this membership the one that owns the office?
+   *
+   * Ownership lives on `kpms.ownerUserId`, not on the membership — `ContextResolver`
+   * derives `isKpmOwner` by comparing the two — so anything that needs the answer has to
+   * make the same join. Here because this service already holds the Kpm model, and
+   * because both callers that need it already depend on it.
+   */
+  async ownsTheOffice(ctx: RequestContext, membership: { userId: string }): Promise<boolean> {
+    if (!ctx.kpmId) return false;
+    const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).exec();
+    return Boolean(kpm?.ownerUserId) && kpm!.ownerUserId === membership.userId;
+  }
+
   async setLevel(
     ctx: RequestContext,
     membershipId: string,

@@ -3,6 +3,8 @@ import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
+import { AuthToken, AuthTokenSchema } from './auth-token.schema';
+import { PasswordService } from './password.service';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { ImpersonationService, IMPERSONATION_MAX_MINUTES } from './impersonation.service';
@@ -28,7 +30,9 @@ describe('ImpersonationService', () => {
     service = new ImpersonationService(
       mongoose.model(User.name, UserSchema) as never,
       mongoose.model(Kpm.name, KpmSchema) as never,
+      mongoose.model(AuthToken.name, AuthTokenSchema) as never,
       signer,
+      new PasswordService(),
       new AuditService(mongoose.model(AuditLog.name, AuditLogSchema) as never),
       clock,
     );

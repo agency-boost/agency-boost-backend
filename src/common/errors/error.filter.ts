@@ -4,6 +4,7 @@ import {
 import { Request, Response } from 'express';
 import { DomainException } from './domain.exception';
 import { ErrorCode } from './error-codes';
+import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 
 interface ErrorEnvelope {
   error: {
@@ -52,6 +53,34 @@ export class DomainExceptionFilter implements ExceptionFilter {
       return {
         status: exception.getStatus(),
         body: { error: { ...payload, requestId } },
+      };
+    }
+
+    /**
+     * The tenancy backstop, firing.
+     *
+     * `MissingTenantContextError` means a scoped query was attempted with no office to
+     * scope it to — a grant the route cannot honour, or a service reached without a
+     * membership. It is a **refusal**, not a fault: rendering it as 500 told the caller
+     * the server broke and put an "unhandled error" line in the log for something the
+     * system detected correctly and stopped. `org_tree:read`'s Super Admin grant spent a
+     * phase doing exactly that.
+     *
+     * 403 rather than 404 because there is nothing to hide: the caller learns their
+     * request had no tenant, not whether anything exists in one.
+     */
+    if (exception instanceof MissingTenantContextError) {
+      return {
+        status: HttpStatus.FORBIDDEN,
+        body: {
+          error: {
+            code: ErrorCode.TENANT_NO_MEMBERSHIP,
+            message: 'This request needs an office, and yours resolves to none.',
+            // No details: the error's own message names the collection and the
+            // operation, which is for the log and not for the caller.
+            requestId,
+          },
+        },
       };
     }
 

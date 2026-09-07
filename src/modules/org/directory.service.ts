@@ -5,6 +5,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { Permission, scopeFor } from '@/modules/rbac/permissions';
 import { NotFoundException } from '@/common/errors/domain.exception';
 import { User, UserDocument } from '@/modules/users/user.schema';
+import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole, MembershipDocument, MembershipStatus } from './membership.schema';
 
@@ -155,7 +156,18 @@ export class DirectoryService {
   constructor(
     private readonly members: MembershipRepository,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
+    // The office, for one field: `kpms.ownerUserId`. Ownership is not on the membership
+    // — `ContextResolver` derives `isKpmOwner` by comparing the two — so a roster that
+    // wants to say who owns the office has to make the same join.
+    @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
   ) {}
+
+  /** The office's owner, as a user id. Null for an office nobody administers yet. */
+  private async ownerUserId(ctx: RequestContext): Promise<string | null> {
+    if (!ctx.kpmId) return null;
+    const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).exec();
+    return kpm?.ownerUserId ?? null;
+  }
 
   /**
    * What this requester may see.
@@ -268,8 +280,9 @@ export class DirectoryService {
       ]),
     );
 
+    const owner = await this.ownerUserId(ctx);
     return rows.map((m) =>
-      this.present(m, byUser.get(m.userId), leaderName.get(m.leaderId ?? '') ?? null, ctx),
+      this.present(m, byUser.get(m.userId), leaderName.get(m.leaderId ?? '') ?? null, ctx, owner),
     );
   }
 
@@ -278,11 +291,16 @@ export class DirectoryService {
     user: UserDocument | undefined,
     leaderNameValue: string | null,
     ctx?: RequestContext,
+    ownerUserId?: string | null,
   ): DirectoryMember {
     const fullName = user?.fullName ?? 'Unknown';
     const tenantAdmin = Boolean(ctx?.membership?.isKpmOwner || ctx?.membership?.isKpmAdmin);
     const isDirectLeader = Boolean(ctx?.membershipId) && m.leaderId === ctx?.membershipId;
     const removed = m.status === 'removed';
+    // **This used to be hardcoded `false`**, so the roster's `Owner` tag — gated on it —
+    // could never appear. It is also what stops an Admin removing the person who owns the
+    // office and leaving it with no working administration.
+    const isOwner = Boolean(ownerUserId) && m.userId === ownerUserId;
     return {
       membershipId: String(m._id),
       agentCode: m.agentCode,
@@ -300,7 +318,7 @@ export class DirectoryService {
       // Leadership is a graph property, not a role (OD-23). An AAB with no reports
       // leads nobody, and every surface gated on this is asking about people you lead.
       isLeader: (m.directCounts?.total ?? 0) > 0,
-      isKpmOwner: false,
+      isKpmOwner: isOwner,
       isKpmAdmin: m.adminAccess?.isKpmAdmin ?? false,
       joinedAt: m.joinedAt ? m.joinedAt.toISOString() : null,
       removedAt: m.removedAt ? m.removedAt.toISOString() : null,
@@ -308,10 +326,17 @@ export class DirectoryService {
       // where these are actually enforced. A refusal the screen did not anticipate is a
       // worse experience than a control that was never offered, so they are computed the
       // same way — but the service is still the gate.
-      canChangeRole: !removed && (tenantAdmin || isDirectLeader),
-      canPromoteToAb: !removed && tenantAdmin,
+      // The Owner's rung is not the office's to change: demoting them from AB would
+      // strip the rights that come with owning it, and only the platform can reassign an
+      // office. `RoleChangeService` refuses it too.
+      canChangeRole: !removed && !isOwner && (tenantAdmin || isDirectLeader),
+      canPromoteToAb: !removed && !isOwner && tenantAdmin,
       canRemove:
         !removed &&
+        // Not the office's owner. Normally they are also the root, but after a transfer
+        // to somebody who was already a member they keep their old leader — and then
+        // nothing else here would stop an Admin removing them.
+        !isOwner &&
         // Not yourself, and not the office's root — it has no leader, so removing it
         // would leave the whole office pointing at nothing.
         String(m._id) !== ctx?.membershipId &&
