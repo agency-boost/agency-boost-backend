@@ -1,7 +1,7 @@
 import {
   Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Req, Res,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import type { Request, Response } from 'express';
@@ -132,6 +132,14 @@ export class AuthController {
   }
 
   @Public()
+  /**
+   * The body is **optional**: the refresh token normally arrives in the
+   * `agencyboost_refresh` cookie, and `RefreshDto` is the fallback for a client that
+   * cannot hold one. `dto?:` is erased before Swagger sees it, so the document said
+   * required until P3.5-T11 — a generated client would have refused to call it without a
+   * body it does not have.
+   */
+  @ApiBody({ type: RefreshDto, required: false })
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -154,6 +162,14 @@ export class AuthController {
   }
 
   @Public()
+  /**
+   * The body is **optional**: the refresh token normally arrives in the
+   * `agencyboost_refresh` cookie, and `RefreshDto` is the fallback for a client that
+   * cannot hold one. `dto?:` is erased before Swagger sees it, so the document said
+   * required until P3.5-T11 — a generated client would have refused to call it without a
+   * body it does not have.
+   */
+  @ApiBody({ type: RefreshDto, required: false })
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'End this session' })

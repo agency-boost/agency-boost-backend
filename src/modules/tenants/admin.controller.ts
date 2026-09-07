@@ -247,6 +247,25 @@ export class AdminController {
     return this.audit.findForTenant(scope, 100);
   }
 
+  /**
+   * **Declared before `impersonate/:userId`, and that is load-bearing.** Nest matches in
+   * declaration order, so with the parameterised route first this one was never reached:
+   * `POST /admin/impersonate/end` bound `userId = 'end'` and was refused with
+   * `PERM_DENIED` naming `impersonation:start`. Ending a support session was impossible,
+   * and nothing said so — no test exercised the route, and the OpenAPI document lists
+   * both paths because it reads decorators rather than the router.
+   */
+  @Post('impersonate/end')
+  // A POST defaults to 201, and this one answers 200 — it ends a session rather than
+  // creating anything. The document said 201 until P3.5-T11; a client checking the status
+  // would have treated every successful call as a failure.
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'End the current impersonation session' })
+  async endImpersonation(@Ctx() ctx: RequestContext) {
+    await this.impersonation.end(ctx);
+    return { status: 'ended' };
+  }
+
   @Post('impersonate/:userId')
   @RequirePermission('impersonation:start')
   @ApiOperation({
@@ -264,10 +283,4 @@ export class AdminController {
     return this.impersonation.start(ctx, userId, dto.reason, dto.durationMinutes);
   }
 
-  @Post('impersonate/end')
-  @ApiOperation({ summary: 'End the current impersonation session' })
-  async endImpersonation(@Ctx() ctx: RequestContext) {
-    await this.impersonation.end(ctx);
-    return { status: 'ended' };
-  }
 }

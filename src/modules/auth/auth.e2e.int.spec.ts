@@ -394,6 +394,25 @@ describe('auth and admin over HTTP', () => {
       expect(after.body.companies[0].ladder).toEqual(['Agent', 'AB', 'Senior AB']);
     });
 
+    it('P3.5-T11 AC-5: an impersonation can actually be ended, and answers 200', async () => {
+      // Two defects in one route, and the second only surfaced because the first was
+      // being tested. The document said 201 while the server said 200 — nothing asserted
+      // it, so it drifted for two phases. And `impersonate/:userId` was declared *before*
+      // `impersonate/end`, so Nest bound `userId = 'end'` and the route was unreachable:
+      // ending a support session was impossible and nothing said so.
+      const sa = await makeUser('sa-imp@agencyboost.test', 'super_admin');
+      const target = await makeUser('imp-target@kpm.test');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+
+      const started = await api().post(`/api/v1/admin/impersonate/${target.id}`)
+        .set(auth).send({ reason: 'They cannot see their roster' }).expect(201);
+
+      const ended = await api().post('/api/v1/admin/impersonate/end')
+        .set({ Authorization: `Bearer ${started.body.accessToken}` });
+      expect(ended.status).toBe(200);
+      expect(ended.body).toEqual({ status: 'ended' });
+    });
+
     it('refuses tenant creation to a non-Super-Admin with PERM_DENIED', async () => {
       const plain = await makeUser('plain@kpm.test');
       const res = await api().post('/api/v1/admin/tenants')
