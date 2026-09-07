@@ -446,13 +446,13 @@
             "bearer": []
           }
         ],
-        "summary": "List principal insurers",
+        "summary": "List every company",
         "tags": [
           "admin (Super Admin)"
         ]
       },
       "post": {
-        "description": "Audited: an insurer is the parent every office inherits its currency, locale and time zone from, so its creation is a platform-level change worth recording.",
+        "description": "Audited: a company is the parent every office inherits its currency, locale and time zone from, so its creation is a platform-level change worth recording. A slug already in use is refused with COMPANY_SLUG_TAKEN, naming the company that holds it.",
         "operationId": "AdminController_createCompany_v1",
         "parameters": [],
         "requestBody": {
@@ -475,7 +475,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create a principal insurer",
+        "summary": "Create a company",
         "tags": [
           "admin (Super Admin)"
         ]
@@ -2067,11 +2067,16 @@
         "properties": {
           "name": {
             "type": "string",
-            "example": "Prudential"
+            "example": "Prudential",
+            "minLength": 2,
+            "maxLength": 120
           },
           "slug": {
             "type": "string",
-            "example": "prudential"
+            "example": "prudential",
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Derived from the name by the console and editable there. Unique among companies that have not been deleted; a clash is refused with COMPANY_SLUG_TAKEN."
           }
         },
         "required": [
@@ -2106,7 +2111,10 @@
           "timezone": {
             "type": "string",
             "example": "Asia/Jakarta",
-            "description": "Canonical for every day boundary in this office. Inherited from the company if omitted."
+            "enum": [
+              "Asia/Jakarta"
+            ],
+            "description": "v1 runs on a single time zone. Asia/Jakarta is the only accepted value; omit it and the office inherits the same value from its company (ADR-0016)."
           }
         },
         "required": [
