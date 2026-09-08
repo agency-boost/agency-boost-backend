@@ -6,8 +6,8 @@ import {
 import { InboxDto, InboxItemDto } from '@/modules/notifications/notification.response.dto';
 import {
   DelegatedAdminDto, DirectoryMemberDto, DirectoryPageDto, GroupSummaryDto, InvitePreviewDto,
-  IssuedInviteDto, JoinStateDto, KpmDirectoryEntryDto, LeaderChoiceDto, MemberTagsDto,
-  OrgTreeDto, PendingRequestDto, RoleChangeEntryDto, RoutingChoiceDto, TeamMemberDto,
+  JoinStateDto, KpmDirectoryEntryDto, LeaderChoiceDto, MemberTagsDto,
+  MyLeaderCodeDto, OrgTreeDto, PendingRequestDto, RoleChangeEntryDto, RoutingChoiceDto, TeamMemberDto,
   UntaggedMemberDto,
 } from '@/modules/org/org.response.dto';
 import {
@@ -58,9 +58,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   OnboardingController_leaders: { type: LeaderChoiceDto, isArray: true },
   OnboardingController_request: { type: JoinStateDto },
   OnboardingController_cancel: { type: JoinStateDto },
-  OnboardingController_listInvites: { type: IssuedInviteDto, isArray: true },
-  OnboardingController_issueInvite: { type: IssuedInviteDto },
-  OnboardingController_revokeInvite: { type: IssuedInviteDto },
+  OnboardingController_myLeaderCode: { type: MyLeaderCodeDto },
   OnboardingController_previewInvite: { type: InvitePreviewDto },
   OnboardingController_redeem: { type: RedeemedInviteDto },
   OnboardingController_inbox: { type: PendingRequestDto, isArray: true },

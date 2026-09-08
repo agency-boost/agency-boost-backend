@@ -44,8 +44,7 @@ import { OrgController } from '@/modules/org/org.controller';
 import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { OnboardingService } from '@/modules/org/onboarding.service';
 import { OnboardingController } from '@/modules/org/onboarding.controller';
-import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
-import { InviteService } from '@/modules/org/invite.service';
+import { LeaderCodeService } from '@/modules/org/leader-code.service';
 import { ApprovalsService } from '@/modules/org/approvals.service';
 import { Group, GroupSchema } from '@/modules/org/group.schema';
 import { AdminDelegationService } from '@/modules/org/admin-delegation.service';
@@ -95,7 +94,6 @@ describe('auth and admin over HTTP', () => {
           { name: Membership.name, schema: MembershipSchema },
           { name: MembershipHistory.name, schema: MembershipHistorySchema },
           { name: JoinRequest.name, schema: JoinRequestSchema },
-          { name: InviteCode.name, schema: InviteCodeSchema },
           { name: Group.name, schema: GroupSchema },
         ]),
       ],
@@ -119,7 +117,7 @@ describe('auth and admin over HTTP', () => {
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService, OrgLevelService,
-        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, InviteService, ApprovalsService, RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService,
+        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, LeaderCodeService, ApprovalsService, RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService,
         AuthGuard, PermissionsGuard,
       ],
     }).compile();
@@ -957,76 +955,80 @@ describe('auth and admin over HTTP', () => {
       return { kpmId: String(kpm.body._id), auth: { Authorization: `Bearer ${owner.accessToken}` } };
     }
 
-    it('issues a code and a link that are the same invite', async () => {
+    it('hands a leader their own code, with the link that carries it', async () => {
       const { auth } = await leaderInOffice();
-      // 201, not 200: this creates a resource, the same as a company or a tenant does.
-      const res = await api().post('/api/v1/join/invites').set(auth).send({}).expect(201);
+      const res = await api().get('/api/v1/join/my-code').set(auth).expect(200);
 
       expect(res.body.code).toMatch(/^[A-Z2-9]{6}$/);
       expect(res.body.url).toContain(`/join?code=${res.body.code}`);
-      expect(res.body.state).toBe('active');
+      // Two fields. `state`, `maxUses`, `useCount`, `expiresAt`, `revokedAt` and `label`
+      // went with the lifecycle they described (P3.6-T1).
+      expect(Object.keys(res.body).sort()).toEqual(['code', 'url']);
+    });
+
+    it('gives the same code back every time, and offers no way to change it', async () => {
+      const { auth } = await leaderInOffice();
+      const first = await api().get('/api/v1/join/my-code').set(auth).expect(200);
+      const again = await api().get('/api/v1/join/my-code').set(auth).expect(200);
+      expect(again.body.code).toBe(first.body.code);
+
+      // The three routes that used to manage an invite are gone, not merely forbidden.
+      await api().post('/api/v1/join/invites').set(auth).send({}).expect(404);
+      await api().get('/api/v1/join/invites').set(auth).expect(404);
+      await api().delete('/api/v1/join/invites/anything').set(auth).expect(404);
     });
 
     it('walks the whole redemption: preview, then accept', async () => {
       const { auth, kpmId } = await leaderInOffice();
-      const issued = await api().post('/api/v1/join/invites').set(auth).send({}).expect(201);
+      const mine = await api().get('/api/v1/join/my-code').set(auth).expect(200);
 
       const joiner = await makeUser(`inv-joiner-${Math.random()}@kpm.test`);
       const asJoiner = { Authorization: `Bearer ${joiner.accessToken}` };
 
       // Lower case on purpose: people type a code as they read it.
       const preview = await api()
-        .get(`/api/v1/join/invite?code=${issued.body.code.toLowerCase()}`)
+        .get(`/api/v1/join/invite?code=${mine.body.code.toLowerCase()}`)
         .set(asJoiner).expect(200);
       expect(preview.body.kpmLabel).toContain('Invite Branch');
       expect(preview.body.leaderName).toBeTruthy();
 
       const redeemed = await api().post('/api/v1/join/redeem')
-        .set(asJoiner).send({ code: issued.body.code }).expect(200);
+        .set(asJoiner).send({ code: mine.body.code }).expect(200);
       expect(redeemed.body.kpmId).toBe(kpmId);
 
-      // Active straight away, tagged to the issuer, and no request in anybody's inbox.
+      // Active straight away, tagged to the code's owner, and no request in any inbox.
       const me = await api().get('/api/v1/join/me').set(asJoiner).expect(200);
       expect(me.body.status).toBe('active');
       expect(me.body.leaderName).toBeTruthy();
       expect(me.body.pendingRequestTo).toBeNull();
     });
 
-    it('refuses a withdrawn invite exactly as it refuses one nobody issued', async () => {
+    it('needs an account before it will say whose code this is', async () => {
+      // Settled 2026-09-09. The code space is 32^6 and the preview names a real office
+      // and a real person, so a prober must have an account first — and an account is
+      // auditable. `request-context.ts` claimed the opposite in a comment for two phases
+      // while the route was never `@Public()`.
       const { auth } = await leaderInOffice();
-      const issued = await api().post('/api/v1/join/invites').set(auth).send({}).expect(201);
-      await api().delete(`/api/v1/join/invites/${issued.body.inviteId}`).set(auth).expect(200);
+      const mine = await api().get('/api/v1/join/my-code').set(auth).expect(200);
 
+      await api().get(`/api/v1/join/invite?code=${mine.body.code}`).expect(401);
+      await api().post('/api/v1/join/redeem').send({ code: mine.body.code }).expect(401);
+    });
+
+    it('refuses a code nobody holds, and refuses it the same way twice', async () => {
+      // Six characters, and the reward for guessing one is joining somebody's unit. The
+      // departed-leader and suspended-office cases answer identically; those are pinned
+      // at the service level, where the state can actually be arranged.
       const joiner = await makeUser(`inv-late-${Math.random()}@kpm.test`);
       const asJoiner = { Authorization: `Bearer ${joiner.accessToken}` };
 
-      const withdrawn = await api().post('/api/v1/join/redeem')
-        .set(asJoiner).send({ code: issued.body.code }).expect(410);
-      const unknown = await api().post('/api/v1/join/redeem')
+      const first = await api().post('/api/v1/join/redeem')
         .set(asJoiner).send({ code: 'ZZZZZZ' }).expect(410);
+      const second = await api().post('/api/v1/join/redeem')
+        .set(asJoiner).send({ code: 'YYYYYY' }).expect(410);
 
-      expect(withdrawn.body.error.code).toBe(unknown.body.error.code);
-      expect(withdrawn.body.error.message).toBe(unknown.body.error.message);
-    });
-
-    it('refuses an agent issuing one — an invite is a leader artefact', async () => {
-      const { auth, kpmId } = await leaderInOffice();
-      const issued = await api().post('/api/v1/join/invites').set(auth).send({}).expect(201);
-
-      const joiner = await makeUser(`inv-agent-${Math.random()}@kpm.test`);
-      const asJoiner = { Authorization: `Bearer ${joiner.accessToken}` };
-      await api().post('/api/v1/join/redeem').set(asJoiner).send({ code: issued.body.code }).expect(200);
-      expect(kpmId).toBeDefined();
-
-      const res = await api().post('/api/v1/join/invites').set(asJoiner).send({}).expect(403);
-      expect(res.body.error.details.permission).toBe('member:invite');
-    });
-
-    it('validates the limits rather than clamping them silently', async () => {
-      const { auth } = await leaderInOffice();
-      await api().post('/api/v1/join/invites').set(auth).send({ maxUses: 0 }).expect(400);
-      await api().post('/api/v1/join/invites').set(auth).send({ expiresInDays: 900 }).expect(400);
-      await api().post('/api/v1/join/invites').set(auth).send({ code: 'MINE01' }).expect(400);
+      expect(first.body.error.code).toBe('ORG_INVITE_EXPIRED');
+      expect(first.body.error.message).toBe(second.body.error.message);
     });
   });
 

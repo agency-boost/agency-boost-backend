@@ -12,7 +12,6 @@ import { KpmSchema } from '@/modules/tenants/kpm.schema';
 import { KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { UserSchema } from '@/modules/users/user.schema';
 import { GroupSchema } from '@/modules/org/group.schema';
-import { InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { MembershipHistorySchema } from '@/modules/org/membership-history.schema';
 import { MembershipSchema } from '@/modules/org/membership.schema';
@@ -34,7 +33,6 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['memberships', MembershipSchema],
   ['membershipHistory', MembershipHistorySchema],
   ['joinRequests', JoinRequestSchema],
-  ['inviteCodes', InviteCodeSchema],
   ['groups', GroupSchema],
 ];
 
@@ -84,6 +82,11 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
  * a decision somebody made rather than an oversight.
  */
 const CROSS_TENANT_INDEXES: Record<string, string> = {
+  'memberships:leaderCode':
+    'the leader code a joiner types before they belong anywhere. There is no tenant to ' +
+    'scope the lookup to — it is the code that names the office — so it is unique ' +
+    'globally and indexed that way. `inviteCodes` carried the same index for the same ' +
+    'reason until P3.6-T1 retired it.',
   'notifications:userId,readAt,createdAt':
     "the recipient's own inbox. kpmId is nullable here because email verification and " +
     'password reset are sent before a user has joined any KPM, so the inbox query is ' +
@@ -105,7 +108,6 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [KpmSchema, 'KpmSchema'],
   [UserSchema, 'UserSchema'],
   [GroupSchema, 'GroupSchema'],
-  [InviteCodeSchema, 'InviteCodeSchema'],
   [JoinRequestSchema, 'JoinRequestSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [MembershipSchema, 'MembershipSchema'],

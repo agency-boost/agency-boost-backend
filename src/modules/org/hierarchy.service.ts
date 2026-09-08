@@ -10,6 +10,7 @@ import { User, UserDocument } from '@/modules/users/user.schema';
 import { MembershipHistory, MembershipHistoryDocument, MembershipEvent } from './membership-history.schema';
 import { MembershipRepository } from './membership.repository';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
+import { generateLeaderCode } from './leader-code';
 import { HierarchyRole, MembershipDocument } from './membership.schema';
 
 export interface CreateMembershipInput {
@@ -67,6 +68,30 @@ export class HierarchyService {
       .exec();
     if (!kpm) throw new NotFoundException('KPM');
     return { agentSeq: kpm.counters?.nextMemberSeq ?? 1 };
+  }
+
+  /**
+   * A leader code nobody else holds.
+   *
+   * Unique across every office and generated rather than derived, so a collision is
+   * possible and has to be handled: probe, and try again. Five attempts against a space
+   * of 32⁶ is not a real limit — it is a way of failing loudly if the generator ever
+   * stops being random, rather than looping until the request times out.
+   *
+   * The probe is deliberately **unscoped**. The uniqueness is global, and asking within
+   * one office would hand two offices the same code.
+   */
+  private async freshLeaderCode(): Promise<string> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const code = generateLeaderCode();
+      const taken = await this.members.existsWithLeaderCode(code);
+      if (!taken) return code;
+    }
+    throw new DomainException(
+      ErrorCode.INTERNAL_ERROR,
+      'Could not allocate a leader code.',
+      HttpStatus.INTERNAL_SERVER_ERROR,
+    );
   }
 
   /** The insurer an office belongs to. The ladder and the agent code both hang off it. */
@@ -199,6 +224,7 @@ export class HierarchyService {
     const companyId = await this.companyOf(kpmId);
     const agentCode = await this.agentCodeOf(input.userId, companyId);
     const { agentSeq } = await this.nextMemberSeq(kpmId);
+    const leaderCode = await this.freshLeaderCode();
 
     // **The level is resolved first, and `role` is taken from what came back.**
     //
@@ -213,6 +239,7 @@ export class HierarchyService {
       userId: input.userId,
       agentCode,
       agentSeq,
+      leaderCode,
       orgLevelId: String(level._id),
       role,
       leaderId: leader ? String(leader._id) : null,

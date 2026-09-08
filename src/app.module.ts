@@ -53,8 +53,7 @@ import { OrgController } from '@/modules/org/org.controller';
 import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { OnboardingService } from '@/modules/org/onboarding.service';
 import { OnboardingController } from '@/modules/org/onboarding.controller';
-import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
-import { InviteService } from '@/modules/org/invite.service';
+import { LeaderCodeService } from '@/modules/org/leader-code.service';
 import { ApprovalsService } from '@/modules/org/approvals.service';
 import { Group, GroupSchema } from '@/modules/org/group.schema';
 import { AdminDelegationService } from '@/modules/org/admin-delegation.service';
@@ -97,7 +96,6 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: Membership.name, schema: MembershipSchema },
       { name: MembershipHistory.name, schema: MembershipHistorySchema },
       { name: JoinRequest.name, schema: JoinRequestSchema },
-      { name: InviteCode.name, schema: InviteCodeSchema },
       { name: Group.name, schema: GroupSchema },
     ]),
   ],
@@ -140,7 +138,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     HierarchyService,
     DirectoryService,
     OnboardingService,
-    InviteService,
+    LeaderCodeService,
     ApprovalsService,
     RoleChangeService,
     RemovalService,

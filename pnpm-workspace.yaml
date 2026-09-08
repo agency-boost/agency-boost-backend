@@ -1,0 +1,5 @@
+allowBuilds:
+  '@nestjs/core': set this to true or false
+  '@scarf/scarf': set this to true or false
+  argon2: set this to true or false
+  mongodb-memory-server: set this to true or false

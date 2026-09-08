@@ -4008,10 +4008,10 @@
         "description": "**Requires `leader_request:cancel`.** See `docs/00-product/roles-and-permissions.md`."
       }
     },
-    "/api/v1/join/invites": {
+    "/api/v1/join/my-code": {
       "get": {
-        "description": "Revoked and spent ones stay in the list, so you can see what has been out there rather than only what still works.\n\n**Requires `member:invite`.** See `docs/00-product/roles-and-permissions.md`.",
-        "operationId": "OnboardingController_listInvites_v1",
+        "description": "One code, generated with your membership and never reissued. It replaced GET/POST/DELETE /join/invites in P3.6-T1: no prototype has ever had a control that creates or withdraws one, and a code that cannot be reissued must not be revocable — withdrawing it would leave you unable to invite anybody.\n\n**Any signed-in user.** No further permission.",
+        "operationId": "OnboardingController_myLeaderCode_v1",
         "parameters": [],
         "responses": {
           "200": {
@@ -4019,26 +4019,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/IssuedInviteDto"
-                  }
+                  "$ref": "#/components/schemas/MyLeaderCodeDto"
                 }
               }
             }
           },
           "401": {
             "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `member:invite`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4063,171 +4050,15 @@
             "bearer": []
           }
         ],
-        "summary": "The invites you have issued",
+        "summary": "Your leader code, and the link that carries it",
         "tags": [
           "joining an office"
-        ],
-        "x-required-permission": "member:invite"
-      },
-      "post": {
-        "description": "Returns the code and the link; a QR is that link rendered. Anyone who redeems it joins your office tagged to you, with no approval — which is why it can carry a use limit and an expiry, and can be revoked.\n\n**Requires `member:invite`.** See `docs/00-product/roles-and-permissions.md`.",
-        "operationId": "OnboardingController_issueInvite_v1",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IssueInviteDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IssuedInviteDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `member:invite`. `details.permission` names it.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Issue an invite",
-        "tags": [
-          "joining an office"
-        ],
-        "x-required-permission": "member:invite"
-      }
-    },
-    "/api/v1/join/invites/{inviteId}": {
-      "delete": {
-        "description": "Kills the code, the link and the QR at once — they are one artefact.\n\n**Requires `member:revoke_invite`.** See `docs/00-product/roles-and-permissions.md`.",
-        "operationId": "OnboardingController_revokeInvite_v1",
-        "parameters": [
-          {
-            "name": "inviteId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IssuedInviteDto"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `member:revoke_invite`. `details.permission` names it.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Revoke an invite",
-        "tags": [
-          "joining an office"
-        ],
-        "x-required-permission": "member:revoke_invite"
+        ]
       }
     },
     "/api/v1/join/invite": {
       "get": {
-        "description": "Whose unit and which office, so somebody can see what they are accepting before they accept it. Unknown, revoked and expired all answer alike.\n\n**Any signed-in user.** No further permission.",
+        "description": "Whose unit and which office, so somebody can see what they are accepting before they accept it. Authenticated, deliberately: the code space is 32^6 and this names a real office and a real person, so a prober needs an account first. A code nobody holds and one whose leader has left answer alike.\n\n**Any signed-in user.** No further permission.",
         "operationId": "OnboardingController_previewInvite_v1",
         "parameters": [
           {
@@ -4287,7 +4118,7 @@
             "bearer": []
           }
         ],
-        "summary": "What an invite is for",
+        "summary": "What a code is for",
         "tags": [
           "joining an office"
         ]
@@ -5594,28 +5425,6 @@
           "leaderMembershipId"
         ]
       },
-      "IssueInviteDto": {
-        "type": "object",
-        "properties": {
-          "label": {
-            "type": "string",
-            "example": "Hiring push, September",
-            "description": "A note for you. Never shown to whoever redeems it."
-          },
-          "maxUses": {
-            "type": "number",
-            "minimum": 1,
-            "maximum": 500,
-            "description": "How many people may use it. Omitted means no ceiling."
-          },
-          "expiresInDays": {
-            "type": "number",
-            "minimum": 1,
-            "maximum": 365,
-            "description": "Days until it stops working. Omitted means it runs until revoked."
-          }
-        }
-      },
       "ApproveRequestDto": {
         "type": "object",
         "properties": {
@@ -6064,61 +5873,21 @@
           "requestSent"
         ]
       },
-      "IssuedInviteDto": {
+      "MyLeaderCodeDto": {
         "type": "object",
         "properties": {
-          "inviteId": {
-            "type": "string"
-          },
           "code": {
-            "type": "string"
+            "type": "string",
+            "example": "JOR417"
           },
           "url": {
-            "type": "string"
-          },
-          "label": {
             "type": "string",
-            "nullable": true
-          },
-          "autoApprove": {
-            "type": "boolean"
-          },
-          "maxUses": {
-            "type": "number",
-            "nullable": true
-          },
-          "useCount": {
-            "type": "number"
-          },
-          "expiresAt": {
-            "type": "string",
-            "nullable": true
-          },
-          "revokedAt": {
-            "type": "string",
-            "nullable": true
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "active",
-              "revoked",
-              "expired",
-              "exhausted"
-            ]
+            "description": "The shareable form. The QR encodes exactly this."
           }
         },
         "required": [
-          "inviteId",
           "code",
-          "url",
-          "label",
-          "autoApprove",
-          "maxUses",
-          "useCount",
-          "expiresAt",
-          "revokedAt",
-          "state"
+          "url"
         ]
       },
       "InvitePreviewDto": {

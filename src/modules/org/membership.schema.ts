@@ -53,6 +53,24 @@ export class Membership {
   agentSeq!: number;
 
   /**
+   * The code this person shares to bring somebody into their unit.
+   *
+   * **One per membership, generated with it, never reissued and never withdrawn**
+   * (P3.6-T1). The prototype shows exactly this — a link, a code and a QR, all three
+   * *copyable*, over a value that already exists (`Overall.html:3578-3596`,
+   * `User_Management_Section.html:446-454`). It has no create button and no revoke, and
+   * neither do we any more: a code that cannot be reissued must not be revocable, or
+   * withdrawing it leaves that leader permanently unable to invite anybody.
+   *
+   * **Unique across every office**, not within one. A joiner presents it before they
+   * belong anywhere, so there is no office to scope the lookup to — it is the code that
+   * names the office, not the reverse. Scoped to live rows, so a soft-deleted membership
+   * releases its code.
+   */
+  @Prop({ type: String, required: true, uppercase: true, trim: true })
+  leaderCode!: string;
+
+  /**
    * → `companyOrgLevels._id`. **The stored truth about where somebody stands** (ADR-0012).
    *
    * Required, and resolved from the office's company on every write. A membership with no
@@ -157,6 +175,20 @@ export const MembershipSchema = SchemaFactory.createForClass(Membership);
  * roster's code search, which is what it was really doing all along.
  */
 MembershipSchema.index({ kpmId: 1, agentCode: 1 });
+
+/**
+ * The leader code is looked up by code alone, so it is unique globally and indexed that
+ * way — the one index on this collection that deliberately does not lead with `kpmId`.
+ *
+ * That is not a hole in invariant §1. The rule guards against a query plan wandering
+ * across tenants while *serving one tenant's request*; this lookup has no tenant yet,
+ * because the person doing it has no office. `inviteCodes` carried the same index for the
+ * same reason before it retired.
+ */
+MembershipSchema.index(
+  { leaderCode: 1 },
+  { unique: true, partialFilterExpression: { deletedAt: null } },
+);
 
 /**
  * At most one live membership per person per office, enforced by the database rather

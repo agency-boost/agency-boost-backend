@@ -5,7 +5,7 @@ import type { KpmDirectoryEntry, LeaderChoice, JoinState } from './onboarding.se
 import type { PendingRequest, RoutingChoice, UntaggedMember } from './approvals.service';
 import type { DelegatedAdmin } from './admin-delegation.service';
 import type { TeamMember, RoleChangeEntry } from './role-change.service';
-import type { IssuedInvite, InvitePreview } from './invite.service';
+import type { InvitePreview, MyLeaderCode } from './leader-code.service';
 import type { OrgTreeNode, OrgTreeLeader, OrgTree } from './org-tree.service';
 import type { HierarchyRole, MembershipStatus } from './membership.schema';
 
@@ -377,37 +377,19 @@ export class RoleChangeEntryDto implements RoleChangeEntry {
 
 }
 
-export class IssuedInviteDto implements IssuedInvite {
-  @ApiProperty({ type: String })
-  inviteId!: string;
-
-  @ApiProperty({ type: String })
+/**
+ * The leader's own code. Two fields, because there is no lifecycle to describe any more.
+ *
+ * This was `IssuedInviteDto` and carried `label`, `autoApprove`, `maxUses`, `useCount`,
+ * `expiresAt`, `revokedAt` and a derived `state` — every one of them a way to bound a
+ * credential somebody could mint again (P3.6-T1).
+ */
+export class MyLeaderCodeDto implements MyLeaderCode {
+  @ApiProperty({ type: String, example: 'JOR417' })
   code!: string;
 
-  @ApiProperty({ type: String })
+  @ApiProperty({ type: String, description: 'The shareable form. The QR encodes exactly this.' })
   url!: string;
-
-  @ApiProperty({ type: String, nullable: true })
-  label!: string | null;
-
-  @ApiProperty({ type: Boolean })
-  autoApprove!: boolean;
-
-  @ApiProperty({ type: Number, nullable: true })
-  maxUses!: number | null;
-
-  @ApiProperty({ type: Number })
-  useCount!: number;
-
-  @ApiProperty({ type: String, nullable: true })
-  expiresAt!: string | null;
-
-  @ApiProperty({ type: String, nullable: true })
-  revokedAt!: string | null;
-
-  @ApiProperty({ enum: ['active', 'revoked', 'expired', 'exhausted'], type: String })
-  state!: 'active' | 'revoked' | 'expired' | 'exhausted';
-
 }
 
 export class InvitePreviewDto implements InvitePreview {

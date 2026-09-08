@@ -19,6 +19,32 @@ export class MembershipRepository extends TenantScopedRepository<MembershipDocum
   }
 
   /**
+   * Is this leader code already taken, anywhere?
+   *
+   * **Deliberately unscoped, and named so.** Leader codes are unique across every office
+   * because a joiner presents one before they belong to any — so asking within a tenant
+   * would let two offices hold the same code and hand the second joiner to the wrong
+   * leader. Invariant §1 asks that a cross-tenant read be an explicitly named method
+   * rather than an absent filter, and this is one.
+   *
+   * Live rows only, matching the partial index: a soft-deleted membership releases its
+   * code.
+   */
+  async existsWithLeaderCode(code: string): Promise<boolean> {
+    return (await this.model.exists({ leaderCode: code, deletedAt: null })) !== null;
+  }
+
+  /**
+   * The membership a leader code belongs to, wherever it is.
+   *
+   * The other half of the same escape, and the only way `POST /join/redeem` can work:
+   * the caller has no office, so there is no context to scope by.
+   */
+  async findByLeaderCode(code: string): Promise<MembershipDocument | null> {
+    return this.model.findOne({ leaderCode: code, deletedAt: null }).exec();
+  }
+
+  /**
    * Re-point a whole subtree's materialised ancestors in one operation.
    *
    * Every descendant needs a *different* new array — its own tail spliced onto the moved

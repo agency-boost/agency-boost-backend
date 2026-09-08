@@ -25,13 +25,13 @@ import {
   CompanyOrgLevel, CompanyOrgLevelSchema,
 } from '@/modules/tenants/company-org-level.schema';
 import { DEFAULT_KPM_SETTINGS, Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
+import { generateLeaderCode } from '@/modules/org/leader-code';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import {
   MembershipHistory, MembershipHistorySchema,
 } from '@/modules/org/membership-history.schema';
 import { Group, GroupSchema } from '@/modules/org/group.schema';
 import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
-import { InviteCode, InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { Notification, NotificationSchema } from '@/modules/notifications/notification.schema';
@@ -73,7 +73,6 @@ async function main(): Promise<void> {
   const History = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
   const Groups = mongoose.model(Group.name, GroupSchema);
   const JoinRequests = mongoose.model(JoinRequest.name, JoinRequestSchema);
-  const Invites = mongoose.model(InviteCode.name, InviteCodeSchema);
   const KpmRequests = mongoose.model(KpmRequest.name, KpmRequestSchema);
   const Audit = mongoose.model(AuditLog.name, AuditLogSchema);
   const Notifications = mongoose.model(Notification.name, NotificationSchema);
@@ -84,7 +83,7 @@ async function main(): Promise<void> {
     // one — and emptying named collections will not take out a database someone pointed
     // at by mistake.
     const owned = [
-      'memberships', 'membershipHistory', 'joinRequests', 'inviteCodes', 'groups', 'kpms', 'companies', 'users',
+      'memberships', 'membershipHistory', 'joinRequests', 'groups', 'kpms', 'companies', 'users',
       'authTokens', 'auditLog', 'notifications', 'notificationPreferences', 'assets',
       'kpmRequests',
     ];
@@ -245,6 +244,8 @@ async function main(): Promise<void> {
       kpmId,
       userId,
       agentCode,
+      // The same generator production uses, so a seeded code is shaped like a real one.
+      leaderCode: generateLeaderCode(),
       agentSeq: seq,
       orgLevelId: String(level._id),
       role,
@@ -481,33 +482,18 @@ async function main(): Promise<void> {
     { $set: { isCoreLeader: true } },
   ).exec();
 
-  /**
-   * Invites, fixed rather than random so the sign-in panel and the docs can quote them.
-   * The service generates a random code; these are written directly, which is the one
-   * thing the seed does differently from the API — and it is why they are readable.
+  /*
+   * Readable leader codes, so the sign-in panel and the docs can quote them.
+   *
+   * `HierarchyService` generates a random six-character code with every membership; the
+   * seed overwrites two of them with something a person can read off a page. That is the
+   * one thing it does differently from the API, and it is why they are quotable.
+   *
+   * There is nothing else to seed here. Invites used to have four states — working, spent,
+   * withdrawn, expired — and each needed a fixture. A leader code has one (P3.6-T1).
    */
-  const INVITES = [
-    { code: 'SARI01', issuedBy: sari.id, label: 'Sari — no limit, runs until withdrawn', maxUses: null, expiresAt: null, revokedAt: null },
-    { code: 'ONCE01', issuedBy: ab.id, label: 'Agus — one use only', maxUses: 1, expiresAt: null, revokedAt: null },
-    { code: 'GONE01', issuedBy: ab.id, label: 'Agus — withdrawn', maxUses: null, expiresAt: null, revokedAt: clock.now() },
-    {
-      code: 'PAST01', issuedBy: sari.id, label: 'Sari — already expired',
-      maxUses: null, expiresAt: new Date(clock.now().getTime() - 86_400_000), revokedAt: null,
-    },
-  ];
-  for (const invite of INVITES) {
-    if (await Invites.findOne({ kpmId: id0417, code: invite.code }).exec()) continue;
-    await Invites.create({
-      kpmId: id0417,
-      code: invite.code,
-      issuedByMembershipId: invite.issuedBy,
-      autoApprove: true,
-      maxUses: invite.maxUses,
-      useCount: 0,
-      expiresAt: invite.expiresAt,
-      revokedAt: invite.revokedAt,
-      label: invite.label,
-    });
+  for (const [membershipId, code] of [[sari.id, 'SARI01'], [ab.id, 'AGUS01']] as const) {
+    await Memberships.updateOne({ _id: membershipId }, { $set: { leaderCode: code } });
   }
 
   // ------------------------------------------------- KPM 0555, for cross-tenant checks
@@ -876,11 +862,13 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     The log also accumulates from real API use, so expect more than the seed writes —
     run with --reset for only these.
 
-  INVITE CODES for KPM 0417, at /join?code=<code>
-    SARI01   works — Sari's, no limit
-    ONCE01   works once — Agus's
-    GONE01   withdrawn, and refused exactly like a code nobody issued
-    PAST01   expired, refused the same way
+  LEADER CODES for KPM 0417, at /join?code=<code>
+    SARI01   Sari's. Redeeming it lands you in her unit, active, with no approval
+    AGUS01   Agus's, the same
+    Everybody else has one too — a random six characters, on their own membership.
+    There is nothing to withdraw and nothing that expires: a code is issued once,
+    with the membership, and lasts as long as it does. Sign in first — the preview
+    and the redemption both need an account.
 
 Sign in at POST /api/v1/auth/login, then send the access token as
   Authorization: Bearer <accessToken>

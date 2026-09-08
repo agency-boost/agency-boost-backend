@@ -74,7 +74,6 @@ describe('permission matrix', () => {
         'while: GET /members/tree passed the guard and then answered 500 INTERNAL_ERROR, ' +
         'because the repository throws MissingTenantContextError when there is no kpmId. ' +
         'Found at the Phase 3.5 exit review.',
-      'member:invite/SUPER_ADMIN': 'as member:change_role',
       'member:read_profile/SUPER_ADMIN': 'as member:change_role',
       'member:remove_from_team/SUPER_ADMIN': 'as member:change_role',
       'notification:receive/KPM_OWNER': 'notifications are delivered but not yet subscribed ' +

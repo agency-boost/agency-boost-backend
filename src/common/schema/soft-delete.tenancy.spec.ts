@@ -11,7 +11,6 @@ import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schem
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
 import { KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { GroupSchema } from '@/modules/org/group.schema';
-import { InviteCodeSchema } from '@/modules/org/invite-code.schema';
 import { JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { MembershipHistorySchema } from '@/modules/org/membership-history.schema';
 import { MembershipSchema } from '@/modules/org/membership.schema';
@@ -37,7 +36,6 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['memberships', MembershipSchema],
   ['membershipHistory', MembershipHistorySchema],
   ['joinRequests', JoinRequestSchema],
-  ['inviteCodes', InviteCodeSchema],
   ['groups', GroupSchema],
 ];
 
@@ -62,7 +60,6 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [MembershipSchema, 'MembershipSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [JoinRequestSchema, 'JoinRequestSchema'],
-  [InviteCodeSchema, 'InviteCodeSchema'],
   [GroupSchema, 'GroupSchema'],
   [AuditLogSchema, 'AuditLogSchema'],
   [AuthTokenSchema, 'AuthTokenSchema'],

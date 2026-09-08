@@ -103,7 +103,7 @@ describe('TenantService', () => {
   const seedMember = (kpmId: string, userId: string, role: 'ab' | 'aab' | 'agent') =>
     mongoose.model(Membership.name).create({
       kpmId, userId, role, status: 'active', agentCode: `${kpmId.slice(-4)}-${userId}`,
-      agentSeq: 1, leaderId: null, ancestorIds: [], depth: 0,
+      agentSeq: 1, leaderCode: nextCode(), leaderId: null, ancestorIds: [], depth: 0,
       // Required now, and a placeholder is honest here: this helper deliberately skips
       // `HierarchyService`, so nothing about it resolves a real rung. What it exercises
       // is the counting, not the ladder.
@@ -642,7 +642,7 @@ describe('TenantService', () => {
     const seedMemberFor = (kpmId: string, userId: string, admin = false) =>
       mongoose.model(Membership.name).create({
         kpmId, userId, role: 'ab', status: 'active', agentCode: `${kpmId.slice(-4)}-${userId}`,
-        agentSeq: 1, leaderId: null, ancestorIds: [], depth: 0, orgLevelId: 'lvl-fixture',
+        agentSeq: 1, leaderCode: nextCode(), leaderId: null, ancestorIds: [], depth: 0, orgLevelId: 'lvl-fixture',
         ...(admin ? { adminAccess: { isKpmAdmin: true, grantedAt: NOW, grantedByUserId: 'u1', revokedAt: null } } : {}),
       });
 

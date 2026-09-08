@@ -8,7 +8,6 @@ import {
   ApproveRequestDto,
   DeclineRequestDto,
   InviteCodeQueryDto,
-  IssueInviteDto,
   KpmSearchDto,
   LeaderSearchDto,
   RedeemInviteDto,
@@ -16,7 +15,7 @@ import {
   RequestLeaderDto,
   UntaggedSearchDto,
 } from './org.dto';
-import { InviteService } from './invite.service';
+import { LeaderCodeService } from './leader-code.service';
 import { ApprovalsService } from './approvals.service';
 import { KpmRequestService } from '@/modules/tenants/kpm-request.service';
 import { CreateKpmRequestDto } from '@/modules/tenants/tenant.dto';
@@ -34,7 +33,7 @@ import { CreateKpmRequestDto } from '@/modules/tenants/tenant.dto';
 export class OnboardingController {
   constructor(
     private readonly onboarding: OnboardingService,
-    private readonly invites: InviteService,
+    private readonly leaderCodes: LeaderCodeService,
     private readonly approvals: ApprovalsService,
     private readonly kpmRequests: KpmRequestService,
     private readonly config: ConfigService,
@@ -147,52 +146,32 @@ export class OnboardingController {
     return this.onboarding.cancelRequest(ctx);
   }
 
-  // ---- Invites: one artefact, three presentations. ----
+  // ---- The leader code: one artefact, three presentations. ----
 
-  @Get('invites')
-  @RequirePermission('member:invite')
+  @Get('my-code')
   @ApiOperation({
-    summary: 'The invites you have issued',
+    summary: 'Your leader code, and the link that carries it',
     description:
-      'Revoked and spent ones stay in the list, so you can see what has been out there ' +
-      'rather than only what still works.',
+      'One code, generated with your membership and never reissued. It replaced ' +
+      'GET/POST/DELETE /join/invites in P3.6-T1: no prototype has ever had a control ' +
+      'that creates or withdraws one, and a code that cannot be reissued must not be ' +
+      'revocable — withdrawing it would leave you unable to invite anybody.',
   })
-  async listInvites(@Ctx() ctx: RequestContext) {
-    return this.invites.mine(ctx, this.appOrigin);
-  }
-
-  @Post('invites')
-  @RequirePermission('member:invite')
-  @ApiOperation({
-    summary: 'Issue an invite',
-    description:
-      'Returns the code and the link; a QR is that link rendered. Anyone who redeems it ' +
-      'joins your office tagged to you, with no approval — which is why it can carry a ' +
-      'use limit and an expiry, and can be revoked.',
-  })
-  async issueInvite(@Ctx() ctx: RequestContext, @Body() dto: IssueInviteDto) {
-    return this.invites.issue(ctx, dto, this.appOrigin);
-  }
-
-  @Delete('invites/:inviteId')
-  @RequirePermission('member:revoke_invite')
-  @ApiOperation({
-    summary: 'Revoke an invite',
-    description: 'Kills the code, the link and the QR at once — they are one artefact.',
-  })
-  async revokeInvite(@Ctx() ctx: RequestContext, @Param('inviteId') inviteId: string) {
-    return this.invites.revoke(ctx, inviteId);
+  async myLeaderCode(@Ctx() ctx: RequestContext) {
+    return this.leaderCodes.mine(ctx, this.appOrigin);
   }
 
   @Get('invite')
   @ApiOperation({
-    summary: 'What an invite is for',
+    summary: 'What a code is for',
     description:
       'Whose unit and which office, so somebody can see what they are accepting before ' +
-      'they accept it. Unknown, revoked and expired all answer alike.',
+      'they accept it. Authenticated, deliberately: the code space is 32^6 and this ' +
+      'names a real office and a real person, so a prober needs an account first. ' +
+      'A code nobody holds and one whose leader has left answer alike.',
   })
   async previewInvite(@Query() query: InviteCodeQueryDto) {
-    return this.invites.preview(query.code);
+    return this.leaderCodes.preview(query.code);
   }
 
   // ---- The leader's side: deciding, and pulling somebody in. ----
@@ -292,6 +271,6 @@ export class OnboardingController {
       'sit in their inbox asking them to approve something that already happened.',
   })
   async redeem(@Ctx() ctx: RequestContext, @Body() dto: RedeemInviteDto) {
-    return this.invites.redeem(ctx, dto.code);
+    return this.leaderCodes.redeem(ctx, dto.code);
   }
 }

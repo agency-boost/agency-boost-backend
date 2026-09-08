@@ -34,7 +34,9 @@ describe('ContextResolver', () => {
   async function join(userId: string, kpmId: string, over: Record<string, unknown> = {}) {
     const seq = Math.floor(Math.random() * 900) + 100;
     return mongoose.model(Membership.name).create({
-      kpmId, userId, agentCode: `KPM0417-${seq}`, agentSeq: seq,
+      kpmId, userId, agentCode: `PRU-${seq}`, agentSeq: seq,
+      // Every membership carries one, generated with it (P3.6-T1).
+      leaderCode: `LC${String(seq).padStart(4, '0')}`,
       // A placeholder rung, deliberately: this helper writes straight to the model to
       // build a context, and what it exercises is the resolver, not the ladder.
       orgLevelId: 'lvl-fixture',
