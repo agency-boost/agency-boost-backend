@@ -52,7 +52,9 @@ describe('KpmRequestService (P3.5-T2)', () => {
     const orgLevels = new OrgLevelService(levels as never, companies as never, audit, clock);
     tenants = new TenantService(
       kpms as never, companies as never, users as never, requests as never, audit, clock,
-      new HierarchyService(repo, kpms as never, historyModel as never, clock, orgLevels), repo,
+      new HierarchyService(
+        repo, kpms as never, users as never, historyModel as never, clock, orgLevels,
+      ), repo,
       orgLevels,
     );
     service = new KpmRequestService(
@@ -71,6 +73,9 @@ describe('KpmRequestService (P3.5-T2)', () => {
     companyId = String(company._id);
     const user = await mongoose.model(User.name).create({
       email: 'rangga@example.test', fullName: 'Rangga Wibisono', passwordHash: 'x',
+      // Approving a request creates the office and puts the asker in it, so they need
+      // the insurer that issued their code (ADR-0017).
+      companyId, agentCode: 'PRU-60001',
     });
     requesterId = String(user._id);
   });
@@ -217,6 +222,7 @@ describe('KpmRequestService (P3.5-T2)', () => {
     it('shows the platform the queue, pending first', async () => {
       const other = await mongoose.model(User.name).create({
         email: 'sari@example.test', fullName: 'Sari Handayani', passwordHash: 'x',
+        companyId, agentCode: 'PRU-60002',
       });
       const first = await service.create(asker(requesterId), ask());
       await service.create(asker(String(other._id)), { ...ask(), branchName: 'Medan Branch' });

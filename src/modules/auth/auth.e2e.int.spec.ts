@@ -21,16 +21,18 @@ import {
 } from '@/modules/notifications/notification.service';
 import { ConsoleTemplateRenderer } from '@/modules/notifications/console-renderer';
 import { User, UserDocument, UserSchema } from '@/modules/users/user.schema';
-import { Company, CompanySchema } from '@/modules/tenants/company.schema';
+import { Company, CompanyDocument, CompanySchema } from '@/modules/tenants/company.schema';
+import { DEFAULT_ORG_LADDER } from '@/domain/constants';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { TenantService } from '@/modules/tenants/tenant.service';
 import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import {
-  CompanyOrgLevel, CompanyOrgLevelSchema,
+  CompanyOrgLevel, CompanyOrgLevelDocument, CompanyOrgLevelSchema,
 } from '@/modules/tenants/company-org-level.schema';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { KpmRequestService } from '@/modules/tenants/kpm-request.service';
 import { AdminController } from '@/modules/tenants/admin.controller';
+import { CompanyController } from '@/modules/tenants/company.controller';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import {
   MembershipHistory, MembershipHistorySchema,
@@ -97,7 +99,9 @@ describe('auth and admin over HTTP', () => {
           { name: Group.name, schema: GroupSchema },
         ]),
       ],
-      controllers: [AuthController, AdminController, OrgController, OnboardingController],
+      controllers: [
+        AuthController, AdminController, CompanyController, OrgController, OnboardingController,
+      ],
       providers: [
         Reflector,
         { provide: Clock, useClass: SystemClock },
@@ -165,10 +169,44 @@ describe('auth and admin over HTTP', () => {
   const api = () => request(app.getHttpServer());
   const PASSWORD = 'correct horse battery';
 
+  /**
+   * The insurer registration names (ADR-0017), created once per test.
+   *
+   * Each test starts from an empty database, so this is find-or-create rather than a
+   * fixture built in `beforeAll`.
+   */
+  let e2eCodeSeq = 0;
+  async function anInsurer(): Promise<string> {
+    const companies = app.get<Model<CompanyDocument>>(getModelToken(Company.name));
+    // Named the thing the assertions below expect. A person and the office they own must
+    // belong to one insurer (ADR-0017), so a fixture insurer separate from the office's
+    // would make every owner assignment a 404 — which is the rule working, not a bug.
+    const existing = await companies.findOne({ slug: 'prudential' }).exec();
+    if (existing) return String(existing._id);
+    const made = await companies.create({ name: 'Prudential', slug: 'prudential' });
+
+    // **And its ladder.** `createCompany` seeds `DEFAULT_ORG_LADDER`; writing straight to
+    // the model skips that, and a company with no rungs cannot place anybody —
+    // `HierarchyService.create` resolves the role against the ladder (ADR-0012), so every
+    // owner assignment would 409 with `ORG_LEVEL_NOT_ON_LADDER`.
+    const levels = app.get<Model<CompanyOrgLevelDocument>>(getModelToken(CompanyOrgLevel.name));
+    await levels.insertMany(
+      DEFAULT_ORG_LADDER.map((rung) => ({
+        ...rung, companyId: String(made._id), status: 'active', deletedAt: null,
+      })),
+    );
+    return String(made._id);
+  }
+
   /** Registers, reads the verification token from the notification, and signs in. */
   async function makeUser(email: string, platformRole: 'super_admin' | 'none' = 'none') {
+    const companyId = await anInsurer();
+    e2eCodeSeq += 1;
     await api().post('/api/v1/auth/register')
-      .send({ email, password: PASSWORD, fullName: 'Test Person' }).expect(201);
+      .send({
+        email, password: PASSWORD, fullName: 'Test Person',
+        companyId, agentCode: `PRU-${9000 + e2eCodeSeq}`,
+      }).expect(201);
 
     const users = app.get<Model<UserDocument>>(getModelToken(User.name));
     const notifications = app.get<Model<NotificationDocument>>(getModelToken(Notification.name));
@@ -217,6 +255,43 @@ describe('auth and admin over HTTP', () => {
       ]);
     });
 
+    /*
+     * P3.6-T3 AC-2. Registration asks which insurer issued your code, and it is the one
+     * company question a person can ask before they have an account: `GET /admin/companies`
+     * is `company:crud`, Super Admin only.
+     */
+    it('lists insurers to somebody with no account, and tells them nothing else', async () => {
+      const sa = await makeUser(`sa-co-${Math.random()}@agencyboost.test`, 'super_admin');
+      await api().post('/api/v1/admin/companies')
+        .set({ Authorization: `Bearer ${sa.accessToken}` })
+        .send({ name: 'Allianz', slug: 'allianz' }).expect(201);
+
+      // No Authorization header at all.
+      const res = await api().get('/api/v1/companies').expect(200);
+      const names = res.body.map((c: { name: string }) => c.name);
+      expect(names).toContain('Allianz');
+      expect(names).toContain('Prudential');
+      // By name, so the selector is not in insertion order.
+      expect(names).toEqual([...names].sort());
+      // An id and a name, and nothing else — not the slug, not the defaults, not the
+      // counts. Which insurers exist is not a secret; how each is configured is.
+      for (const row of res.body) expect(Object.keys(row).sort()).toEqual(['_id', 'name']);
+    });
+
+    it('refuses an agent code that is not text, rather than upper-casing a number', async () => {
+      // The DTO upper-cases what arrives, because a code is read off a contract and typed
+      // by hand. A JSON number has no `toUpperCase`, so the transform has to leave it be
+      // and let `@IsString` refuse it — otherwise the request is a 500.
+      const companyId = await anInsurer();
+      const res = await api().post('/api/v1/auth/register')
+        .send({
+          email: `num-${Math.random()}@kpm.test`, password: PASSWORD, fullName: 'N',
+          companyId, agentCode: 88213,
+        })
+        .expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    });
+
     it('refuses /auth/me without a token', async () => {
       const res = await api().get('/api/v1/auth/me').expect(401);
       expect(res.body.error.code).toBe('AUTH_TOKEN_INVALID');
@@ -226,11 +301,10 @@ describe('auth and admin over HTTP', () => {
       const sa = await makeUser('sa@agencyboost.test', 'super_admin');
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
 
-      const company = await api().post('/api/v1/admin/companies')
-        .set(auth).send({ name: 'Prudential', slug: 'prudential' }).expect(201);
+      const companyId = await anInsurer();
 
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
-        .send({ companyId: String(company.body._id), code: '0417', branchName: 'BSD City Branch' })
+        .send({ companyId: companyId, code: '0417', branchName: 'BSD City Branch' })
         .expect(201);
 
       expect(kpm.body.code).toBe('0417');
@@ -248,10 +322,9 @@ describe('auth and admin over HTTP', () => {
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
       await makeUser('rina@kpm0417.test'); // `makeUser` names everybody 'Test Person'.
 
-      const company = await api().post('/api/v1/admin/companies')
-        .set(auth).send({ name: 'Prudential', slug: 'prudential' }).expect(201);
+      const companyId = await anInsurer();
       const created = await api().post('/api/v1/admin/tenants').set(auth)
-        .send({ companyId: String(company.body._id), code: '0417', branchName: 'BSD City Branch' })
+        .send({ companyId: companyId, code: '0417', branchName: 'BSD City Branch' })
         .expect(201);
 
       expect(created.body.ownerName).toBeNull();
@@ -337,9 +410,7 @@ describe('auth and admin over HTTP', () => {
       const plain = await makeUser('plain-ladder@kpm.test');
       const theirs = { Authorization: `Bearer ${plain.accessToken}` };
 
-      const company = await api().post('/api/v1/admin/companies')
-        .set(auth).send({ name: 'Prudential', slug: 'prudential' }).expect(201);
-      const companyId = String(company.body._id);
+      const companyId = await anInsurer();
 
       // A company arrives with a ladder (P3.5-T8): `memberships.orgLevelId` resolves
       // against it on every join, so a company without one is an office nobody can join.
@@ -373,9 +444,7 @@ describe('auth and admin over HTTP', () => {
     it('P3.5-T7 AC-5: the overview card carries the ladder, from data', async () => {
       const sa = await makeUser('sa-card@agencyboost.test', 'super_admin');
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
-      const company = await api().post('/api/v1/admin/companies')
-        .set(auth).send({ name: 'Prudential', slug: 'prudential' }).expect(201);
-      const companyId = String(company.body._id);
+      const companyId = await anInsurer();
 
       // Seeded at creation, so the card is right from the first moment.
       const seeded = await api().get('/api/v1/admin/overview').set(auth).expect(200);
@@ -472,10 +541,9 @@ describe('auth and admin over HTTP', () => {
       const owner = await makeUser('owner2@kpm.test');
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
 
-      const company = await api().post('/api/v1/admin/companies')
-        .set(auth).send({ name: 'Allianz', slug: 'allianz' }).expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
-        .send({ companyId: String(company.body._id), code: '0289', branchName: 'BGC' }).expect(201);
+        .send({ companyId, code: '0289', branchName: 'BGC' }).expect(201);
 
       await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
         .set(auth).send({ userId: owner.id }).expect(200);
@@ -496,10 +564,9 @@ describe('auth and admin over HTTP', () => {
       const owner = await makeUser('owner3@kpm.test');
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
 
-      const company = await api().post('/api/v1/admin/companies')
-        .set(auth).send({ name: 'Manulife', slug: 'manulife' }).expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
-        .send({ companyId: String(company.body._id), code: '0731', branchName: 'Kuningan' }).expect(201);
+        .send({ companyId, code: '0731', branchName: 'Kuningan' }).expect(201);
       await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
         .set(auth).send({ userId: owner.id }).expect(200);
 
@@ -518,12 +585,11 @@ describe('auth and admin over HTTP', () => {
       const owner = await makeUser('owner4@kpm.test');
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
 
-      const company = await api().post('/api/v1/admin/companies')
-        .set(auth).send({ name: 'AXA', slug: 'axa' }).expect(201);
+      const companyId = await anInsurer();
       const mine = await api().post('/api/v1/admin/tenants').set(auth)
-        .send({ companyId: String(company.body._id), code: '0801', branchName: 'Mine' }).expect(201);
+        .send({ companyId, code: '0801', branchName: 'Mine' }).expect(201);
       const theirs = await api().post('/api/v1/admin/tenants').set(auth)
-        .send({ companyId: String(company.body._id), code: '0802', branchName: 'Theirs' }).expect(201);
+        .send({ companyId, code: '0802', branchName: 'Theirs' }).expect(201);
       await api().patch(`/api/v1/admin/tenants/${mine.body._id}/owner`)
         .set(auth).send({ userId: owner.id }).expect(200);
 
@@ -538,10 +604,9 @@ describe('auth and admin over HTTP', () => {
       const sa = await makeUser('sa6@agencyboost.test', 'super_admin');
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
 
-      const company = await api().post('/api/v1/admin/companies')
-        .set(auth).send({ name: 'Generali', slug: 'generali' }).expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
-        .send({ companyId: String(company.body._id), code: '1001', branchName: 'Menteng' }).expect(201);
+        .send({ companyId, code: '1001', branchName: 'Menteng' }).expect(201);
 
       const res = await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
         .set(auth).send({ email: 'nobody@nowhere.test' }).expect(404);
@@ -556,10 +621,9 @@ describe('auth and admin over HTTP', () => {
       const owner = await makeUser('owner7@kpm.test');
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
 
-      const company = await api().post('/api/v1/admin/companies')
-        .set(auth).send({ name: 'BNI Life', slug: 'bni-life' }).expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
-        .send({ companyId: String(company.body._id), code: '1002', branchName: 'Thamrin' }).expect(201);
+        .send({ companyId, code: '1002', branchName: 'Thamrin' }).expect(201);
 
       // Pasted addresses carry whitespace and case. @IsEmail runs before the service
       // normalises, so the trim has to happen on the DTO or HTTP rejects what the
@@ -572,11 +636,9 @@ describe('auth and admin over HTTP', () => {
     it('P3.5-T1: the overview counts the platform, and refuses an Owner', async () => {
       const sa = await makeUser(`sa-ov-${Math.random()}@agencyboost.test`, 'super_admin');
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
-      const company = await api().post('/api/v1/admin/companies').set(auth)
-        .send({ name: `Ins ${Math.random()}`, slug: `o${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
-        .expect(201);
+      const companyId = await anInsurer();
       await api().post('/api/v1/admin/tenants').set(auth)
-        .send({ companyId: String(company.body._id), code: '7001', branchName: 'Overview Branch' })
+        .send({ companyId, code: '7001', branchName: 'Overview Branch' })
         .expect(201);
 
       const res = await api().get('/api/v1/admin/overview').set(auth).expect(200);
@@ -594,11 +656,9 @@ describe('auth and admin over HTTP', () => {
       const sa = await makeUser(`sa-ta-${Math.random()}@agencyboost.test`, 'super_admin');
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
       const owner = await makeUser(`own-ta-${Math.random()}@kpm.test`);
-      const company = await api().post('/api/v1/admin/companies').set(auth)
-        .send({ name: `Ins ${Math.random()}`, slug: `t${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
-        .expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
-        .send({ companyId: String(company.body._id), code: '7002', branchName: 'Roster Branch' })
+        .send({ companyId, code: '7002', branchName: 'Roster Branch' })
         .expect(201);
       await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
         .set(auth).send({ userId: owner.id }).expect(200);
@@ -618,9 +678,7 @@ describe('auth and admin over HTTP', () => {
     it('P3.5-T2: somebody with no office can ask for one, and the platform decides', async () => {
       const sa = await makeUser(`sa-rq-${Math.random()}@agencyboost.test`, 'super_admin');
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
-      const company = await api().post('/api/v1/admin/companies').set(auth)
-        .send({ name: `Ins ${Math.random()}`, slug: `r${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
-        .expect(201);
+      const companyId = await anInsurer();
 
       const asker = await makeUser(`ask-${Math.random()}@example.test`);
       const asking = { Authorization: `Bearer ${asker.accessToken}` };
@@ -628,13 +686,13 @@ describe('auth and admin over HTTP', () => {
         .toEqual({ request: null });
 
       const filed = await api().post('/api/v1/join/kpm-request').set(asking)
-        .send({ companyId: String(company.body._id), branchName: 'Surabaya Branch' })
+        .send({ companyId, branchName: 'Surabaya Branch' })
         .expect(201);
       expect(filed.body.status).toBe('pending');
 
       // One at a time.
       const second = await api().post('/api/v1/join/kpm-request').set(asking)
-        .send({ companyId: String(company.body._id), branchName: 'Medan Branch' })
+        .send({ companyId, branchName: 'Medan Branch' })
         .expect(409);
       expect(second.body.error.code).toBe('TENANT_REQUEST_ALREADY_OPEN');
 
@@ -669,10 +727,9 @@ describe('auth and admin over HTTP', () => {
       const sa = await makeUser('sa5@agencyboost.test', 'super_admin');
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
 
-      const company = await api().post('/api/v1/admin/companies')
-        .set(auth).send({ name: 'Sequis', slug: 'sequis' }).expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
-        .send({ companyId: String(company.body._id), code: '0912', branchName: 'Sudirman' }).expect(201);
+        .send({ companyId, code: '0912', branchName: 'Sudirman' }).expect(201);
 
       // A Super Admin has no tenant, so their actions carry a null kpmId. Reading the
       // default scope must find them; asking for an office must not.
@@ -692,11 +749,9 @@ describe('auth and admin over HTTP', () => {
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
       const owner = await makeUser(`owner-join-${Math.random()}@kpm.test`);
 
-      const company = await api().post('/api/v1/admin/companies').set(auth)
-        .send({ name: `Insurer ${Math.random()}`, slug: `slug-${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
-        .expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
-        .send({ companyId: String(company.body._id), code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'Join Branch' })
+        .send({ companyId, code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'Join Branch' })
         .expect(201);
       await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
         .set(auth).send({ userId: owner.id }).expect(200);
@@ -818,11 +873,9 @@ describe('auth and admin over HTTP', () => {
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
       const owner = await makeUser(`owner-ros-${Math.random()}@kpm.test`);
 
-      const company = await api().post('/api/v1/admin/companies').set(auth)
-        .send({ name: `Insurer ${Math.random()}`, slug: `s${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
-        .expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
-        .send({ companyId: String(company.body._id), code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'Roster Branch' })
+        .send({ companyId, code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'Roster Branch' })
         .expect(201);
       await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
         .set(auth).send({ userId: owner.id }).expect(200);
@@ -830,7 +883,7 @@ describe('auth and admin over HTTP', () => {
       return { kpmId: String(kpm.body._id), owner, auth: { Authorization: `Bearer ${owner.accessToken}` } };
     }
 
-    it('returns the Owner as an AB at the root, with an issued code', async () => {
+    it('returns the Owner as an AB at the root, carrying their own code', async () => {
       const { auth } = await officeWithOwner();
       const res = await api().get('/api/v1/members').set(auth).expect(200);
 
@@ -838,7 +891,9 @@ describe('auth and admin over HTTP', () => {
       expect(res.body.members[0]).toMatchObject({
         role: 'ab', status: 'active', leaderId: null, isLeader: false,
       });
-      expect(res.body.members[0].agentCode).toMatch(/^KPM\d+-001$/);
+      // Their insurer's producer id (ADR-0017), not a code the office minted. This
+      // asserted /^KPM\d+-001$/ until 2026-09-08.
+      expect(res.body.members[0].agentCode).toMatch(/^PRU-\d+$/);
       expect(res.body.nextCursor).toBeNull();
     });
 
@@ -888,12 +943,10 @@ describe('auth and admin over HTTP', () => {
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
       const owner = await makeUser(`owner-inv-${Math.random()}@kpm.test`);
 
-      const company = await api().post('/api/v1/admin/companies').set(auth)
-        .send({ name: `Insurer ${Math.random()}`, slug: `i${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
-        .expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
         .send({
-          companyId: String(company.body._id),
+          companyId: companyId,
           code: `${Math.floor(Math.random() * 9000) + 1000}`,
           branchName: 'Invite Branch',
         })
@@ -983,12 +1036,10 @@ describe('auth and admin over HTTP', () => {
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
       const owner = await makeUser(`owner-app-${Math.random()}@kpm.test`);
 
-      const company = await api().post('/api/v1/admin/companies').set(auth)
-        .send({ name: `Insurer ${Math.random()}`, slug: `a${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
-        .expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
         .send({
-          companyId: String(company.body._id),
+          companyId: companyId,
           code: `${Math.floor(Math.random() * 9000) + 1000}`,
           branchName: 'Approval Branch',
         })
@@ -1124,12 +1175,10 @@ describe('auth and admin over HTTP', () => {
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
       const owner = await makeUser(`owner-role-${Math.random()}@kpm.test`);
 
-      const company = await api().post('/api/v1/admin/companies').set(auth)
-        .send({ name: `Insurer ${Math.random()}`, slug: `r${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
-        .expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
         .send({
-          companyId: String(company.body._id),
+          companyId: companyId,
           code: `${Math.floor(Math.random() * 9000) + 1000}`,
           branchName: 'Role Branch',
         })
@@ -1297,12 +1346,10 @@ describe('auth and admin over HTTP', () => {
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
       const owner = await makeUser(`owner-rm-${Math.random()}@kpm.test`);
 
-      const company = await api().post('/api/v1/admin/companies').set(auth)
-        .send({ name: `Insurer ${Math.random()}`, slug: `x${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
-        .expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
         .send({
-          companyId: String(company.body._id),
+          companyId: companyId,
           code: `${Math.floor(Math.random() * 9000) + 1000}`,
           branchName: 'Removal Branch',
         })
@@ -1407,7 +1454,7 @@ describe('auth and admin over HTTP', () => {
       expect(moved.body.leaderId).toBe(ownerId);
     });
 
-    it('AC-4: coming back is a new membership with a new code', async () => {
+    it('AC-4: coming back is a new membership, carrying the same code', async () => {
       const { kpmId, asOwner } = await office();
       const them = await joins(kpmId, asOwner);
       const before = await api().get(`/api/v1/members/${them.membershipId}`).set(asOwner).expect(200);
@@ -1427,8 +1474,13 @@ describe('auth and admin over HTTP', () => {
       const removed = await api().get('/api/v1/members?status=removed').set(asOwner).expect(200);
       expect(removed.body.members[0].agentCode).toBe(before.body.agentCode);
 
+      // **Reversed by ADR-0017.** This asserted `not.toBe` while the office minted codes.
+      // A producer id belongs to the person, so it comes back with them — and the
+      // production import reconciles their figures across the gap instead of splitting
+      // them between two producers who happen to share a name.
       const live = await api().get('/api/v1/members?status=pending').set(asOwner).expect(200);
-      expect(live.body.members[0].agentCode).not.toBe(before.body.agentCode);
+      expect(live.body.members[0].agentCode).toBe(before.body.agentCode);
+      expect(live.body.members[0].membershipId).not.toBe(them.membershipId);
     });
 
     it('refuses an agent the endpoint outright', async () => {
@@ -1478,12 +1530,10 @@ describe('auth and admin over HTTP', () => {
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
       const owner = await makeUser(`owner-tree-${Math.random()}@kpm.test`);
 
-      const company = await api().post('/api/v1/admin/companies').set(auth)
-        .send({ name: `Insurer ${Math.random()}`, slug: `t${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
-        .expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
         .send({
-          companyId: String(company.body._id),
+          companyId: companyId,
           code: `${Math.floor(Math.random() * 9000) + 1000}`,
           branchName: 'Tree Branch',
         })
@@ -1605,12 +1655,10 @@ describe('auth and admin over HTTP', () => {
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
       const owner = await makeUser(`owner-grp-${Math.random()}@kpm.test`);
 
-      const company = await api().post('/api/v1/admin/companies').set(auth)
-        .send({ name: `Insurer ${Math.random()}`, slug: `g${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
-        .expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
         .send({
-          companyId: String(company.body._id),
+          companyId: companyId,
           code: `${Math.floor(Math.random() * 9000) + 1000}`,
           branchName: 'Group Branch',
         })
@@ -1766,12 +1814,10 @@ describe('auth and admin over HTTP', () => {
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
       const owner = await makeUser(`owner-del-${Math.random()}@kpm.test`);
 
-      const company = await api().post('/api/v1/admin/companies').set(auth)
-        .send({ name: `Insurer ${Math.random()}`, slug: `d${Math.random()}`.replace(/[^a-z0-9-]/g, '') })
-        .expect(201);
+      const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
         .send({
-          companyId: String(company.body._id),
+          companyId: companyId,
           code: `${Math.floor(Math.random() * 9000) + 1000}`,
           branchName: 'Delegation Branch',
         })

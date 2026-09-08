@@ -74,9 +74,17 @@ export class Kpm {
   @Prop({ type: Object, default: () => ({ ...DEFAULT_KPM_SETTINGS }) })
   settings!: KpmSettings;
 
-  /** Server-issued agent-code sequence. Immutable per member once assigned. */
-  @Prop({ type: Object, default: () => ({ nextAgentCodeSeq: 1 }) })
-  counters!: { nextAgentCodeSeq: number };
+  /**
+   * Join order within the office. Allocated atomically, immutable once assigned.
+   *
+   * This was `nextAgentCodeSeq` and it minted the agent code. It does not any more
+   * (ADR-0017) — the code belongs to the person, issued by their insurer. What the
+   * sequence still does is order the directory: the roster cursor is a `$gt` on it and
+   * seven services sort by it, none of which cares who issued a code. Renamed so it
+   * stops naming something it no longer produces.
+   */
+  @Prop({ type: Object, default: () => ({ nextMemberSeq: 1 }) })
+  counters!: { nextMemberSeq: number };
 
   @Prop({ type: String, enum: ['active', 'suspended', 'archived'], default: 'active', index: true })
   status!: 'active' | 'suspended' | 'archived';

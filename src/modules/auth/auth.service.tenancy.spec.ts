@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { User, UserSchema } from '@/modules/users/user.schema';
+import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { AuthToken, AuthTokenSchema } from './auth-token.schema';
 import { AuthService } from './auth.service';
 import { PasswordService } from './password.service';
@@ -24,6 +25,7 @@ describe('AuthService', () => {
     service = new AuthService(
       users as never,
       tokens as never,
+      mongoose.model(Company.name, CompanySchema) as never,
       new PasswordService(),
       new Hs256TokenSigner('a'.repeat(40), clock),
       clock,
@@ -31,14 +33,41 @@ describe('AuthService', () => {
     );
   });
   afterAll(stopMongo);
+  let companyId: string;
+  let codeSeq = 0;
+
   beforeEach(async () => {
     await clearCollections();
     clock.set(NOW);
     sent = [];
+    // Registration names the insurer that issued the code (ADR-0017), so one has to
+    // exist. Recreated per test because `clearCollections` empties everything.
+    const company = await mongoose
+      .model(Company.name)
+      .create({ name: 'Prudential', slug: 'prudential' });
+    companyId = String(company._id);
+    codeSeq = 0;
   });
 
+  /** A registration payload with a fresh code, so two calls never collide by accident. */
+  function reg(
+    over: Partial<{
+      email: string; password: string; fullName: string; agentCode: string; companyId: string;
+    }> = {},
+  ) {
+    codeSeq += 1;
+    return {
+      email: 'rina@kpm.test',
+      password: PASSWORD,
+      fullName: 'Rina Wijaya',
+      companyId,
+      agentCode: `PRU-${1000 + codeSeq}`,
+      ...over,
+    };
+  }
+
   async function verifiedUser(email = 'rina@kpm.test') {
-    await service.register({ email, password: PASSWORD, fullName: 'Rina Wijaya' });
+    await service.register(reg({ email }));
     const token = sent.find((s) => s.templateId === 'auth.email_verification')!.payload.token as string;
     await service.verifyEmail(token);
     return email;
@@ -46,25 +75,72 @@ describe('AuthService', () => {
 
   describe('registration', () => {
     it('lower-cases the email and sends a verification', async () => {
-      await service.register({ email: '  Rina@KPM.test ', password: PASSWORD, fullName: 'Rina' });
+      await service.register(reg({ email: '  Rina@KPM.test ', fullName: 'Rina' }));
       const user = await mongoose.model(User.name).findOne({});
       expect(user?.get('email')).toBe('rina@kpm.test');
       expect(sent.map((s) => s.templateId)).toContain('auth.email_verification');
     });
 
     it('does not reveal that an address is already registered', async () => {
-      await service.register({ email: 'a@b.test', password: PASSWORD, fullName: 'A' });
+      await service.register(reg({ email: 'a@b.test', fullName: 'A' }));
       await expect(
-        service.register({ email: 'a@b.test', password: PASSWORD, fullName: 'Impostor' }),
+        service.register(reg({ email: 'a@b.test', fullName: 'Impostor' })),
       ).resolves.toBeDefined();
       expect(await mongoose.model(User.name).countDocuments({})).toBe(1);
       // And the impostor's name never overwrote the real one.
       expect((await mongoose.model(User.name).findOne({}))?.get('fullName')).toBe('A');
     });
 
+    /*
+     * ADR-0017. The code is the insurer's, so registration is where a person declares
+     * both — and it is the one place the pair can be checked before anything depends
+     * on it.
+     */
+    it('AC-1: stores the insurer and the code, upper-cased and trimmed', async () => {
+      await service.register(reg({ email: 'code@kpm.test', agentCode: '  pru-88213 ' }));
+      const user = await mongoose.model(User.name).findOne({ email: 'code@kpm.test' });
+      expect(user?.get('companyId')).toBe(companyId);
+      expect(user?.get('agentCode')).toBe('PRU-88213');
+    });
+
+    it('AC-1: refuses a code already registered at that insurer, and says so', async () => {
+      await service.register(reg({ email: 'first@kpm.test', agentCode: 'PRU-500' }));
+      /*
+       * **Said out loud, where a taken address is not.** Confirming an email is an
+       * enumeration oracle and the real owner is emailed instead. A person holding a card
+       * with this number on it cannot proceed either way, and staying quiet would send
+       * them off waiting for a verification email that is never coming.
+       */
+      await expect(
+        service.register(reg({ email: 'second@kpm.test', agentCode: 'pru-500' })),
+      ).rejects.toMatchObject({ code: 'AGENT_CODE_TAKEN' });
+      expect(await mongoose.model(User.name).countDocuments({})).toBe(1);
+    });
+
+    it('AC-1: accepts the same code at a different insurer', async () => {
+      const other = await mongoose
+        .model(Company.name)
+        .create({ name: 'Allianz', slug: `allianz-${Math.random()}` });
+      await service.register(reg({ email: 'a@kpm.test', agentCode: 'X-1' }));
+      await expect(
+        service.register(reg({ email: 'b@kpm.test', agentCode: 'X-1', companyId: String(other._id) })),
+      ).resolves.toBeDefined();
+      expect(await mongoose.model(User.name).countDocuments({})).toBe(2);
+    });
+
+    it('refuses an insurer that does not exist, and a malformed id, alike', async () => {
+      await expect(
+        service.register(reg({ email: 'ghost@kpm.test', companyId: String(new mongoose.Types.ObjectId()) })),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      // From a public form, so a mistyped id is "not here" rather than a 500.
+      await expect(
+        service.register(reg({ email: 'bad@kpm.test', companyId: 'not-an-objectid' })),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
     it('rejects a password below the minimum length', async () => {
       await expect(
-        service.register({ email: 'x@y.test', password: 'short', fullName: 'X' }),
+        service.register(reg({ email: 'x@y.test', password: 'short', fullName: 'X' })),
       ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
     });
   });
@@ -88,7 +164,7 @@ describe('AuthService', () => {
     });
 
     it('refuses an unverified account distinctly', async () => {
-      await service.register({ email: 'new@kpm.test', password: PASSWORD, fullName: 'New' });
+      await service.register(reg({ email: 'new@kpm.test', fullName: 'New' }));
       await expect(service.login('new@kpm.test', PASSWORD)).rejects.toMatchObject({
         code: 'AUTH_EMAIL_NOT_VERIFIED',
       });
@@ -265,7 +341,7 @@ describe('AuthService', () => {
 
   describe('email verification', () => {
     it('activates the account and is single-use', async () => {
-      await service.register({ email: 'v@kpm.test', password: PASSWORD, fullName: 'V' });
+      await service.register(reg({ email: 'v@kpm.test', fullName: 'V' }));
       const token = sent[0].payload.token as string;
       await service.verifyEmail(token);
 

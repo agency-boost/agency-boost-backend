@@ -141,8 +141,22 @@ export class Membership {
 
 export const MembershipSchema = SchemaFactory.createForClass(Membership);
 
-/** `kpmId` leads every index — a scoped index that does not invites a cross-tenant scan. */
-MembershipSchema.index({ kpmId: 1, agentCode: 1 }, { unique: true });
+/**
+ * `kpmId` leads every index, so no query plan can wander across tenants.
+ *
+ * **This was `unique` until 2026-09-08, and could not stay.** The code belongs to the
+ * person now (ADR-0017), so somebody who leaves and rejoins the same office brings the
+ * same one back — and their removed row is still there, because nothing is deleted. A
+ * unique index over both rows refused the return. Making it partial is not available
+ * either: Mongo's `partialFilterExpression` has no `$ne`, and "every row that is not
+ * removed" is exactly that shape.
+ *
+ * Nothing is lost. Uniqueness is enforced where the code is **owned** — `(companyId,
+ * agentCode)` on `users` — and a person may hold only one live membership per office, so
+ * two live rows in one office cannot carry one code. This index now exists to serve the
+ * roster's code search, which is what it was really doing all along.
+ */
+MembershipSchema.index({ kpmId: 1, agentCode: 1 });
 
 /**
  * At most one live membership per person per office, enforced by the database rather

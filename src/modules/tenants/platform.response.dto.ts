@@ -66,3 +66,18 @@ export class AuditEntryResponseDto {
   @ApiProperty({ type: String, format: 'date-time' })
   createdAt!: string;
 }
+
+/**
+ * What a visitor with no account may know about an insurer.
+ *
+ * Two fields, deliberately, and the service projects rather than filters — so a field
+ * added to `companies` later cannot arrive here by default. Which insurers exist is not a
+ * secret; how each is configured is.
+ */
+export class PublicCompanyDto {
+  @ApiProperty({ type: String })
+  _id!: string;
+
+  @ApiProperty({ type: String, example: 'Prudential' })
+  name!: string;
+}

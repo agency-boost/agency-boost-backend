@@ -93,7 +93,9 @@ describe('organisation', () => {
       new AuditService(mongoose.model(AuditLog.name, AuditLogSchema) as never),
       clock,
     );
-    hierarchy = new HierarchyService(members, kpmModel as never, historyModel as never, clock, orgLevels);
+    hierarchy = new HierarchyService(
+      members, kpmModel as never, users as never, historyModel as never, clock, orgLevels,
+    );
     directory = new DirectoryService(members, users as never, kpmModel as never);
 
     sent = [];
@@ -188,20 +190,32 @@ describe('organisation', () => {
     const company = await mongoose.model(Company.name).create({
       name: 'Prudential', slug: `prudential-${Math.random()}`,
     });
-    await seedLadder(String(company._id));
+    companyId = String(company._id);
+    await seedLadder(companyId);
     for (const [id, code] of [[KPM_A, '0417'], [KPM_B, '0555']]) {
       await mongoose.model(Kpm.name).create({
-        _id: id, companyId: String(company._id), code, branchName: `Branch ${code}`,
-        counters: { nextAgentCodeSeq: 1 }, status: 'active',
+        _id: id, companyId, code, branchName: `Branch ${code}`,
+        counters: { nextMemberSeq: 1 }, status: 'active',
       });
     }
+    seq = 0;
   });
 
+  let companyId: string;
   let seq = 0;
-  async function person(fullName = 'Rina Wijaya') {
+  /**
+   * An account, carrying the insurer that issued its code (ADR-0017).
+   *
+   * `HierarchyService.create` copies the code off the account and refuses a person whose
+   * company is not the office's, so a fixture without one is not a person this product
+   * can place anywhere.
+   */
+  async function person(fullName = 'Rina Wijaya', over: { companyId?: string } = {}) {
     seq += 1;
     const u = await users.create({
       email: `p${seq}@kpm.test`, passwordHash: 'x', fullName, status: 'active', platformRole: 'none',
+      companyId: over.companyId ?? companyId,
+      agentCode: `PRU-${1000 + seq}`,
     });
     return String(u._id);
   }
@@ -216,42 +230,86 @@ describe('organisation', () => {
     return String(m._id);
   }
 
-  describe('agent codes (P3-T1 AC-1)', () => {
-    it('issues from the office counter, prefixed and padded', async () => {
-      const first = await hierarchy.create(ctx(KPM_A), { userId: await person(), role: 'ab', status: 'active' });
-      const second = await hierarchy.create(ctx(KPM_A), { userId: await person(), role: 'agent', status: 'active' });
-      expect(first.agentCode).toBe('KPM0417-001');
-      expect(second.agentCode).toBe('KPM0417-002');
+  /*
+   * Rewritten for ADR-0017 (P3.6-T3). These asserted the opposite until 2026-09-08:
+   * `KPM0417-001`, minted from the office counter, *"not accepted from a caller — the
+   * input has no field for one"*. The code is the insurer's now, and the office's only
+   * remaining sequence is join order.
+   */
+  describe('agent codes (P3-T1 AC-1, ADR-0017)', () => {
+    it('is copied off the account, not minted here', async () => {
+      const userId = await person();
+      const account = await users.findById(userId);
+      const m = await hierarchy.create(ctx(KPM_A), { userId, role: 'ab', status: 'active' });
+      expect(m.agentCode).toBe(account!.get('agentCode'));
+      // And nothing about the office leaks into it — that was the old format's whole shape.
+      expect(m.agentCode).not.toMatch(/^KPM/);
     });
 
-    it('numbers each office independently — two offices may both have a -001', async () => {
-      const a = await hierarchy.create(ctx(KPM_A), { userId: await person(), role: 'ab', status: 'active' });
-      const b = await hierarchy.create(ctx(KPM_B), { userId: await person(), role: 'ab', status: 'active' });
-      expect(a.agentCode).toBe('KPM0417-001');
-      expect(b.agentCode).toBe('KPM0555-001');
+    it('is the same in both offices, because it belongs to the person', async () => {
+      // Two offices of one company. Under the old model these were `KPM0417-001` and
+      // `KPM0555-001`; a producer id does not change when somebody moves branch.
+      const userId = await person();
+      const a = await hierarchy.create(ctx(KPM_A), { userId, role: 'ab', status: 'active' });
+      await members.softDeleteById(ctx(KPM_A), String(a._id), new Date());
+      const b = await hierarchy.create(ctx(KPM_B), { userId, role: 'ab', status: 'active' });
+      expect(b.agentCode).toBe(a.agentCode);
     });
 
-    it('never hands two concurrent joins the same number', async () => {
+    it('refuses somebody whose insurer is not the office’s, as not found', async () => {
+      const other = await mongoose.model(Company.name).create({
+        name: 'Other Insurer', slug: `other-${Math.random()}`,
+      });
+      const outsider = await person('Outsider', { companyId: String(other._id) });
+      await expect(
+        hierarchy.create(ctx(KPM_A), { userId: outsider, role: 'agent', status: 'active' }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('refuses somebody whose account has gone, rather than crashing', async () => {
+      const userId = await person();
+      await users.deleteOne({ _id: userId });
+      await expect(
+        hierarchy.create(ctx(KPM_A), { userId, role: 'agent', status: 'active' }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('refuses an account with no code at all', async () => {
+      const u = await users.create({
+        email: `nocode-${Math.random()}@kpm.test`, passwordHash: 'x', fullName: 'No Code',
+        status: 'active', platformRole: 'none', companyId,
+      });
+      await expect(
+        hierarchy.create(ctx(KPM_A), { userId: String(u._id), role: 'agent', status: 'active' }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('never hands two concurrent joins the same join-order number', async () => {
       // The counter is incremented inside findOneAndUpdate, so the read and the bump are
-      // one operation. A read-then-write would collide here and the unique index would
-      // turn the race into a user-visible failure on a code nobody chose.
+      // one operation. A read-then-write would hand two rows the same `agentSeq`, and the
+      // roster cursor is a `$gt` on it — so one of them would simply never be paged.
       const people = await Promise.all([person(), person(), person(), person(), person()]);
       const created = await Promise.all(
         people.map((userId) => hierarchy.create(ctx(KPM_A), { userId, role: 'agent', status: 'active' })),
       );
-      const codes = created.map((c) => c.agentCode);
-      expect(new Set(codes).size).toBe(5);
+      expect(new Set(created.map((c) => c.agentSeq)).size).toBe(5);
     });
 
-    it('is not accepted from a caller — the input has no field for one', async () => {
-      const m = await hierarchy.create(ctx(KPM_A), {
-        userId: await person(),
-        role: 'agent',
-        status: 'active',
-        // @ts-expect-error the input type has no agentCode, deliberately
-        agentCode: 'KPM9999-999',
+    it('refuses a rejected join before it takes a number', async () => {
+      // The `$inc` is after the refusal, so a join that cannot happen leaves no gap in
+      // the office's ordering.
+      const other = await mongoose.model(Company.name).create({
+        name: 'Third Insurer', slug: `third-${Math.random()}`,
       });
-      expect(m.agentCode).toBe('KPM0417-001');
+      const before = (await mongoose.model(Kpm.name).findById(KPM_A))!.get('counters').nextMemberSeq;
+      await expect(
+        hierarchy.create(ctx(KPM_A), {
+          userId: await person('Outsider', { companyId: String(other._id) }),
+          role: 'agent', status: 'active',
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      const after = (await mongoose.model(Kpm.name).findById(KPM_A))!.get('counters').nextMemberSeq;
+      expect(after).toBe(before);
     });
   });
 
@@ -279,7 +337,7 @@ describe('organisation', () => {
       await join(KPM_B, 'ab');
       const page = await directory.list(ctx(KPM_A));
       expect(page.members).toHaveLength(1);
-      expect(page.members[0].agentCode).toBe('KPM0417-001');
+      expect(page.members[0].agentCode).toBe('PRU-1001');
     });
 
     it('pages by cursor, so a mid-scroll join does not skip a row', async () => {
@@ -291,7 +349,7 @@ describe('organisation', () => {
       expect(first.nextCursor).toBe('2');
 
       const second = await directory.list(ctx(KPM_A), { limit: 2, cursor: first.nextCursor! });
-      expect(second.members.map((m) => m.agentCode)).toEqual(['KPM0417-003', 'KPM0417-004']);
+      expect(second.members.map((m) => m.agentCode)).toEqual(['PRU-1003', 'PRU-1004']);
     });
 
     it('stops offering a cursor on the last page', async () => {
@@ -311,14 +369,14 @@ describe('organisation', () => {
     it('searches by name, email and agent code', async () => {
       const u = await users.create({
         email: 'budi@kpm0417.test', passwordHash: 'x', fullName: 'Budi Santoso',
-        status: 'active', platformRole: 'none',
+        status: 'active', platformRole: 'none', companyId, agentCode: 'PRU-77123',
       });
       await hierarchy.create(ctx(KPM_A), { userId: String(u._id), role: 'agent', status: 'active' });
       await join(KPM_A, 'agent');
 
       expect((await directory.list(ctx(KPM_A), { q: 'budi' })).members).toHaveLength(1);
       expect((await directory.list(ctx(KPM_A), { q: 'BUDI@' })).members).toHaveLength(1);
-      expect((await directory.list(ctx(KPM_A), { q: '0417-001' })).members).toHaveLength(1);
+      expect((await directory.list(ctx(KPM_A), { q: '77123' })).members).toHaveLength(1);
     });
 
     it('treats a search term as text, not as a pattern', async () => {
@@ -622,21 +680,27 @@ describe('organisation', () => {
       expect((await members.findById(ctx(KPM_A), ab))?.directCounts.total).toBe(0);
     });
 
-    it('orders the roster past 999, where the code alone sorts wrong', async () => {
-      // KPM0417-1000 sorts before KPM0417-999 as a string. Ordering on the sequence
-      // keeps the roster right, and keeps the cursor from skipping the whole 1000s.
-      await mongoose.model(Kpm.name).updateOne(
-        { _id: KPM_A },
-        { $set: { 'counters.nextAgentCodeSeq': 998 } },
-      );
-      for (let i = 0; i < 3; i += 1) await join(KPM_A, 'agent');
+    it('orders the roster by join order, not by the code, which sorts however it likes', async () => {
+      /*
+       * This used to be argued about `KPM0417-1000` sorting before `KPM0417-999`. The
+       * code is the insurer's now (ADR-0017), so it carries no sequence at all and could
+       * sort any way round — which makes the point harder, not softer: the cursor is a
+       * `$gt` on the sort key, and a roster ordered by a key the cursor does not use
+       * skips rows without saying so.
+       *
+       * So the three below are given codes whose alphabetical order is the exact reverse
+       * of the order they joined in. Ordering on the code would return them backwards.
+       */
+      for (const code of ['PRU-C', 'PRU-B', 'PRU-A']) {
+        const u = await users.create({
+          email: `${code}@kpm.test`, passwordHash: 'x', fullName: `Person ${code}`,
+          status: 'active', platformRole: 'none', companyId, agentCode: code,
+        });
+        await hierarchy.create(ctx(KPM_A), { userId: String(u._id), role: 'agent', status: 'active' });
+      }
 
       const page = await directory.list(ctx(KPM_A), { limit: 10 });
-      expect(page.members.map((m) => m.agentCode)).toEqual([
-        'KPM0417-998',
-        'KPM0417-999',
-        'KPM0417-1000',
-      ]);
+      expect(page.members.map((m) => m.agentCode)).toEqual(['PRU-C', 'PRU-B', 'PRU-A']);
     });
 
     it('counts the subtree, not just direct reports', async () => {
@@ -746,9 +810,9 @@ describe('organisation', () => {
 
       const row = await mongoose.model(Membership.name).findOne({ kpmId: KPM_A, userId });
       expect(row?.get('status')).toBe('pending');
-      // A code is issued even though nobody has approved them, so every membership row
-      // has one. A declined request leaves a gap in the numbering, which is fine.
-      expect(row?.get('agentCode')).toBe('KPM0417-001');
+      // The code came with them, so a membership has one from the moment it exists —
+      // there is nothing to allocate and nothing for a decline to leave a gap in.
+      expect(row?.get('agentCode')).toBe('PRU-1001');
     });
 
     it('refuses a second registration rather than moving somebody silently', async () => {
@@ -2928,7 +2992,16 @@ describe('organisation', () => {
     });
 
     describe('AC-4: coming back', () => {
-      it('gives a new membership and a new agent code, keeping the old row', async () => {
+      it('gives a new membership and keeps the same agent code, which is theirs', async () => {
+        /*
+         * **Reversed by ADR-0017.** This asserted `not.toBe` on the code until
+         * 2026-09-08, because the office minted one per membership. The insurer issues it
+         * now, so coming back does not change who somebody is — and the production import
+         * gains by it: their figures reconcile across the gap rather than splitting into
+         * two producers who happen to share a name.
+         *
+         * The membership is still new. That is the part that mattered, and it holds.
+         */
         const oldRow = await members.findById(ctx(KPM_A), agent);
         const userId = oldRow!.userId;
         await removals.remove(abCtx, agent, CONFIRM);
@@ -2936,7 +3009,9 @@ describe('organisation', () => {
         const rejoined = await hierarchy.create(ctx(KPM_A), { userId, role: 'agent', status: 'pending' });
 
         expect(String(rejoined._id)).not.toBe(agent);
-        expect(rejoined.agentCode).not.toBe(oldRow!.agentCode);
+        expect(rejoined.agentCode).toBe(oldRow!.agentCode);
+        // A new number in the office's own ordering, though — they arrived again.
+        expect(rejoined.agentSeq).toBeGreaterThan(oldRow!.agentSeq);
         // Both rows are theirs, and both stay.
         const all = await members.find(ctx(KPM_A), { userId });
         expect(all).toHaveLength(2);

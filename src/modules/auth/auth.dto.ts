@@ -1,5 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsInt, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import {
+  IsEmail, IsEnum, IsInt, IsMongoId, IsOptional, IsString, Matches, Max, MaxLength, Min,
+  MinLength,
+} from 'class-validator';
 import { PasswordService } from './password.service';
 
 export class RegisterDto {
@@ -16,6 +20,28 @@ export class RegisterDto {
   @IsString()
   @MinLength(1)
   fullName!: string;
+
+  @ApiProperty({ description: 'From GET /companies.', example: '65f1a0c2e4b0a1b2c3d4e5f6' })
+  @IsMongoId()
+  companyId!: string;
+
+  /**
+   * The producer id the insurer issued them (ADR-0017).
+   *
+   * Upper-cased on the way in, because it is read off a contract and typed by hand, and
+   * `pru-88213` and `PRU-88213` are the same code to everybody except a unique index.
+   * The pattern is deliberately loose — every insurer numbers its own way, and refusing
+   * a real code because it does not match our idea of one is worse than storing it.
+   */
+  @ApiProperty({ example: 'PRU-88213', maxLength: 32 })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value))
+  @IsString()
+  @MinLength(3)
+  @MaxLength(32)
+  @Matches(/^[A-Z0-9][A-Z0-9./-]*$/, {
+    message: 'agentCode may contain letters, digits, and . / - only',
+  })
+  agentCode!: string;
 }
 
 export class LoginDto {

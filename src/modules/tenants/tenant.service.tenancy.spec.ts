@@ -69,7 +69,9 @@ describe('TenantService', () => {
       requests as never,
       new AuditService(auditModel as never),
       clock,
-      new HierarchyService(repo, kpms as never, historyModel as never, clock, orgLevels),
+      new HierarchyService(
+        repo, kpms as never, users as never, historyModel as never, clock, orgLevels,
+      ),
       repo,
       orgLevels,
     );
@@ -86,6 +88,10 @@ describe('TenantService', () => {
   });
 
   const input = () => ({ companyId, code: '0417', branchName: 'BSD City Branch' });
+
+  /** A fresh producer id per fixture account: they are unique per company (ADR-0017). */
+  let codeSeq = 0;
+  const nextCode = () => `PRU-${(codeSeq += 1) + 5000}`;
 
   /**
    * Seeds a membership straight through the model.
@@ -202,12 +208,12 @@ describe('TenantService', () => {
         onTrackPaceThreshold: 0.9,
         activityDailyMaxCount: 999,
       });
-      // Read from the document, not the response. `counters.nextAgentCodeSeq` is the
+      // Read from the document, not the response. `counters.nextMemberSeq` is the
       // internal agent-code sequence and the read shape deliberately stops carrying it —
       // an office's next code is nobody's business but the server's. The seeding is still
       // an invariant, so it is still asserted, one layer down.
       const stored = await mongoose.model(Kpm.name).findById(kpm._id).exec();
-      expect(stored?.get('counters').nextAgentCodeSeq).toBe(1);
+      expect(stored?.get('counters').nextMemberSeq).toBe(1);
     });
 
     it('rejects a duplicate code within the same company', async () => {
@@ -239,6 +245,7 @@ describe('TenantService', () => {
       await users.create({
         email: 'owner@kpm0417.test', fullName: 'Rina Wijaya', passwordHash: 'x',
         platformRole: 'none', status: 'active', emailVerifiedAt: NOW, deletedAt: null,
+        companyId, agentCode: nextCode(),
       });
       const owned = await service.assignOwner(ctx({ superAdmin: true }), created._id, {
         email: 'owner@kpm0417.test',
@@ -263,6 +270,7 @@ describe('TenantService', () => {
       const ghost = await users.create({
         email: 'ghost@kpm0417.test', fullName: 'Gone Away', passwordHash: 'x',
         platformRole: 'none', status: 'active', emailVerifiedAt: NOW, deletedAt: null,
+        companyId, agentCode: nextCode(),
       });
       const created = await service.createKpm(ctx({ superAdmin: true }), input());
       await mongoose.model(Kpm.name).updateOne(
@@ -283,6 +291,7 @@ describe('TenantService', () => {
       const owner = await users.create({
         email: 'many@kpm0417.test', fullName: 'Many Offices', passwordHash: 'x',
         platformRole: 'none', status: 'active', emailVerifiedAt: NOW, deletedAt: null,
+        companyId, agentCode: nextCode(),
       });
       for (const code of ['0417', '0418', '0419']) {
         const k = await service.createKpm(ctx({ superAdmin: true }), { ...input(), code });
@@ -324,6 +333,10 @@ describe('TenantService', () => {
         fullName: email,
         status,
         platformRole: 'none',
+        // The insurer that issued their code. Without it no office can place them, which
+        // is the point of ADR-0017 and not something a fixture gets to skip.
+        companyId,
+        agentCode: nextCode(),
       });
       return String(user._id);
     }
@@ -402,8 +415,10 @@ describe('TenantService', () => {
       expect(membership?.get('role')).toBe('ab');
       expect(membership?.get('status')).toBe('active');
       expect(membership?.get('leaderId')).toBeNull();
-      // Server-issued from the office counter, never supplied by a caller.
-      expect(membership?.get('agentCode')).toBe('KPM0417-001');
+      // Copied off their account, never minted here (ADR-0017). This asserted
+      // `KPM0417-001` until 2026-09-08, when the office still issued codes.
+      const account = await users.findById(owner);
+      expect(membership?.get('agentCode')).toBe(account!.get('agentCode'));
     });
 
     it('writes the joined history row from the first day, before any screen reads it', async () => {
@@ -569,6 +584,7 @@ describe('TenantService', () => {
       const sa = ctx({ superAdmin: true });
       const asker = await users.create({
         email: 'asker@kpm.test', fullName: 'Rangga Wibisono', passwordHash: 'x',
+        companyId, agentCode: nextCode(),
       });
       await mongoose.model(KpmRequest.name).create({
         requestedByUserId: String(asker._id), companyId, branchName: 'Surabaya Branch',
@@ -612,7 +628,10 @@ describe('TenantService', () => {
       // empty queue is the honest answer; four invented rows would read as finished.
       const sa = ctx({ superAdmin: true });
       const kpm = await service.createKpm(sa, input());
-      const user = await users.create({ email: 'o@kpm.test', fullName: 'Owner', passwordHash: 'x' });
+      const user = await users.create({
+        email: 'o@kpm.test', fullName: 'Owner', passwordHash: 'x',
+        companyId, agentCode: nextCode(),
+      });
       await service.assignOwner(sa, String(kpm._id), { userId: String(user._id) });
 
       expect((await service.platformOverview(sa)).attention).toEqual([]);
@@ -636,7 +655,10 @@ describe('TenantService', () => {
     it('AC-1: lists the Owner of every office, with which office it is', async () => {
       const sa = ctx({ superAdmin: true });
       const kpm = await service.createKpm(sa, input());
-      const owner = await users.create({ email: 'o@kpm.test', fullName: 'Wilson Tanoto', passwordHash: 'x' });
+      const owner = await users.create({
+        email: 'o@kpm.test', fullName: 'Wilson Tanoto', passwordHash: 'x',
+        companyId, agentCode: nextCode(),
+      });
       await service.assignOwner(sa, String(kpm._id), { userId: String(owner._id) });
 
       const [row] = await service.platformAdmins(sa);
@@ -653,7 +675,10 @@ describe('TenantService', () => {
     it('AC-1: lists a delegated Admin with when their access was granted', async () => {
       const sa = ctx({ superAdmin: true });
       const kpm = await service.createKpm(sa, input());
-      const person = await users.create({ email: 'a@kpm.test', fullName: 'Agus Prasetyo', passwordHash: 'x' });
+      const person = await users.create({
+        email: 'a@kpm.test', fullName: 'Agus Prasetyo', passwordHash: 'x',
+        companyId, agentCode: nextCode(),
+      });
       await seedMemberFor(String(kpm._id), String(person._id), true);
 
       const [row] = await service.platformAdmins(sa);
@@ -664,7 +689,10 @@ describe('TenantService', () => {
     it('AC-1: an Owner who is also a delegated Admin is one row, not two', async () => {
       const sa = ctx({ superAdmin: true });
       const kpm = await service.createKpm(sa, input());
-      const owner = await users.create({ email: 'both@kpm.test', fullName: 'Both Roles', passwordHash: 'x' });
+      const owner = await users.create({
+        email: 'both@kpm.test', fullName: 'Both Roles', passwordHash: 'x',
+        companyId, agentCode: nextCode(),
+      });
       await service.assignOwner(sa, String(kpm._id), { userId: String(owner._id) });
       await mongoose.model(Membership.name).updateOne(
         { kpmId: String(kpm._id), userId: String(owner._id) },

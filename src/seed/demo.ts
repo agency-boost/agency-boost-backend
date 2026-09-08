@@ -36,7 +36,6 @@ import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.sche
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { Notification, NotificationSchema } from '@/modules/notifications/notification.schema';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
-import { formatAgentCode } from '@/modules/org/agent-code';
 
 loadEnv();
 
@@ -92,23 +91,56 @@ async function main(): Promise<void> {
     for (const name of owned) {
       const { deletedCount } = await mongoose.connection.collection(name).deleteMany({});
       if (deletedCount) console.log(`cleared ${deletedCount} from ${name}`);
+      /*
+       * **And the indexes.** Emptying a collection leaves its indexes exactly as they
+       * were, so a database seeded before a schema change keeps enforcing the old shape —
+       * `memberships { kpmId, agentCode }` was unique until ADR-0017, and a reseed hit
+       * `E11000` on the member who leaves and rejoins. Mongoose rebuilds what the schema
+       * says on the next write. A deployed database gets the same thing from migration
+       * `0002`; this is `--reset` meaning reset.
+       */
+      await mongoose.connection.collection(name).dropIndexes().catch(() => undefined);
     }
     console.log(`reset ${dbName}`);
   }
 
   /** Idempotent: running the seed twice must not mint a second of anything. */
+  /**
+   * A person, and the insurer that issued them a code.
+   *
+   * `companyId` and `agentCode` are on the account, not the membership (ADR-0017): the
+   * code is the insurer's and it exists before any office admits them. A Super Admin
+   * sells for nobody and carries neither, which is the pair the unique index excludes.
+   *
+   * The codes below deliberately do **not** look like `KPM0417-001`. That format was ours
+   * and it is gone; a real Prudential producer id is what a demo should show.
+   */
+  let issued = 0;
   async function user(
     email: string,
     fullName: string,
-    opts: { password?: string; platformRole?: 'super_admin' | 'none'; status?: string } = {},
+    opts: {
+      password?: string;
+      platformRole?: 'super_admin' | 'none';
+      status?: string;
+      companyId?: string;
+      agentCode?: string;
+    } = {},
   ) {
     const existing = await Users.findOne({ email }).exec();
     if (existing) return existing;
+    const platformRole = opts.platformRole ?? 'none';
+    const sellsForSomebody = platformRole !== 'super_admin';
+    issued += 1;
     return Users.create({
       email,
       passwordHash: await passwords.hash(opts.password ?? FIELD_PASSWORD),
       fullName,
-      platformRole: opts.platformRole ?? 'none',
+      platformRole,
+      companyId: sellsForSomebody ? (opts.companyId ?? String(prudential._id)) : null,
+      agentCode: sellsForSomebody
+        ? (opts.agentCode ?? `PRU-${String(80000 + issued)}`)
+        : null,
       status: opts.status ?? 'active',
       // Pre-verified: the point of a demo tenant is to sign in, not to chase an inbox.
       emailVerifiedAt: clock.now(),
@@ -187,10 +219,17 @@ async function main(): Promise<void> {
 
     const counted = await Kpms.findOneAndUpdate(
       { _id: kpm._id },
-      { $inc: { 'counters.nextAgentCodeSeq': 1 } },
+      { $inc: { 'counters.nextMemberSeq': 1 } },
       { new: false },
     ).exec();
-    const seq = (counted?.get('counters')?.nextAgentCodeSeq as number) ?? 1;
+    const seq = (counted?.get('counters')?.nextMemberSeq as number) ?? 1;
+
+    // Copied off the account, never minted here. The membership carries it so the roster,
+    // the search and the production import have one field to read; it cannot drift,
+    // because the code is immutable and an office sits inside one company.
+    const account = await Users.findOne({ _id: userId }).exec();
+    const agentCode = account?.get('agentCode') as string | null;
+    if (!agentCode) throw new Error(`No agent code on the account for ${userId}`);
     const status = opts.status ?? 'active';
     const leaderId = leader ? leader.id : null;
 
@@ -205,7 +244,7 @@ async function main(): Promise<void> {
     const created = await Memberships.create({
       kpmId,
       userId,
-      agentCode: formatAgentCode(kpm.code, seq),
+      agentCode,
       agentSeq: seq,
       orgLevelId: String(level._id),
       role,
@@ -297,13 +336,17 @@ async function main(): Promise<void> {
 
   // ---------------------------------------------------------------- platform
 
+  // **The insurer first.** `user()` defaults everybody who is not a Super Admin to a
+  // Prudential account, and reading a `const` before its declaration throws. The two
+  // operators below happen to skip that branch, so ordering it the other way round
+  // survived only by short-circuit evaluation — which is not a thing to rely on.
+  const prudential = await company('Prudential', 'prudential');
+
   const superAdmin = await user('superadmin@agencyboost.test', 'Platform Operator', {
     password: 'demo super admin', platformRole: 'super_admin',
   });
   // A second one, because "a Super Admin cannot be impersonated" needs two to show.
   await user('root@agencyboost.test', 'Second Operator', { platformRole: 'super_admin' });
-
-  const prudential = await company('Prudential', 'prudential');
 
   /**
    * Prudential's ladder (P3.5-T7 AC-5), junior first, exactly as the prototype writes it:

@@ -27,6 +27,7 @@ export const ErrorCode = {
    * name the company they collided with.
    */
   COMPANY_SLUG_TAKEN: 'COMPANY_SLUG_TAKEN',
+  AGENT_CODE_TAKEN: 'AGENT_CODE_TAKEN',
   /**
    * A company already has a level with that code — **including an archived one**. An
    * archived code is never reused: a membership still pointing at the old rung would

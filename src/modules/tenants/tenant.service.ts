@@ -211,6 +211,22 @@ export class TenantService {
   }
 
   /**
+   * The same list, for somebody who is not signed in yet.
+   *
+   * A projection rather than a filter on the way out: `find(..., { name: 1 })` means a
+   * field added to `companies` later cannot leak through this route by default. The one
+   * above returns whole documents because its only caller is a Super Admin.
+   */
+  async listCompaniesForRegistration(): Promise<{ _id: string; name: string }[]> {
+    const rows = await this.companies
+      .find({ deletedAt: null }, { name: 1 })
+      .sort({ name: 1 })
+      .lean()
+      .exec();
+    return rows.map((c) => ({ _id: String(c._id), name: String(c.name) }));
+  }
+
+  /**
    * Create a company.
    *
    * A duplicate slug used to reach Mongo's unique index unguarded, and `E11000` is
@@ -317,7 +333,7 @@ export class TenantService {
       locale: company.defaultLocale,
       currency: company.defaultCurrency,
       settings: { ...DEFAULT_KPM_SETTINGS },
-      counters: { nextAgentCodeSeq: 1 },
+      counters: { nextMemberSeq: 1 },
       status: 'active',
       ownerUserId: null,
       deletedAt: null,

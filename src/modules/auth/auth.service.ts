@@ -3,8 +3,9 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import { Clock } from '@/common/clock/clock.port';
-import { DomainException } from '@/common/errors/domain.exception';
+import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { User, UserDocument } from '@/modules/users/user.schema';
@@ -35,6 +36,7 @@ export class AuthService {
   constructor(
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
     @InjectModel(AuthToken.name) private readonly tokens: Model<AuthTokenDocument>,
+    @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
     private readonly passwords: PasswordService,
     private readonly signer: TokenSigner,
     private readonly clock: Clock,
@@ -43,7 +45,13 @@ export class AuthService {
 
   // ---------------------------------------------------------------- registration
 
-  async register(input: { email: string; password: string; fullName: string }): Promise<UserDocument> {
+  async register(input: {
+    email: string;
+    password: string;
+    fullName: string;
+    companyId: string;
+    agentCode: string;
+  }): Promise<UserDocument> {
     const problems = this.passwords.validate(input.password);
     if (problems.length) {
       throw new DomainException(
@@ -64,10 +72,45 @@ export class AuthService {
       return existing;
     }
 
+    // The insurer has to exist before we can hold somebody's code against it.
+    const company = await this.companies
+      .findOne({ _id: input.companyId, deletedAt: null })
+      .exec()
+      // A malformed id is "not here", not a 500 — this arrives from a public form.
+      .catch(() => null);
+    if (!company) throw new NotFoundException('Company');
+
+    const agentCode = input.agentCode.trim().toUpperCase();
+
+    /*
+     * **This one says so, where the email above deliberately does not.**
+     *
+     * A taken address is answered silently because confirming it is an enumeration
+     * oracle and the real owner is emailed instead. A taken agent code has no such
+     * escape: the person is holding a card with that number on it, they cannot proceed
+     * until somebody sorts it out, and staying quiet would send them away waiting for a
+     * verification email that is never coming. The leak — that this code is in use at
+     * this insurer — is smaller than stranding the person who owns it.
+     */
+    const clash = await this.users
+      .findOne({ companyId: input.companyId, agentCode, deletedAt: null })
+      .exec();
+    if (clash) {
+      throw new DomainException(
+        ErrorCode.AGENT_CODE_TAKEN,
+        `Agent code ${agentCode} is already registered at ${company.name}. ` +
+          'Check the code on your contract, or ask your office to sort it out.',
+        HttpStatus.CONFLICT,
+        { field: 'agentCode', agentCode },
+      );
+    }
+
     const user = await this.users.create({
       email,
       passwordHash: await this.passwords.hash(input.password),
       fullName: input.fullName.trim(),
+      companyId: input.companyId,
+      agentCode,
       status: 'invited',
       platformRole: 'none',
     });

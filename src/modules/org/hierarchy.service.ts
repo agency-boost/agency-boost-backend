@@ -6,7 +6,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
-import { formatAgentCode } from './agent-code';
+import { User, UserDocument } from '@/modules/users/user.schema';
 import { MembershipHistory, MembershipHistoryDocument, MembershipEvent } from './membership-history.schema';
 import { MembershipRepository } from './membership.repository';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
@@ -36,6 +36,7 @@ export class HierarchyService {
   constructor(
     private readonly members: MembershipRepository,
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
+    @InjectModel(User.name) private readonly users: Model<UserDocument>,
     @InjectModel(MembershipHistory.name)
     private readonly history: Model<MembershipHistoryDocument>,
     private readonly clock: Clock,
@@ -44,28 +45,52 @@ export class HierarchyService {
   ) {}
 
   /**
-   * Allocate the next agent code for an office.
+   * Take the next join-order number for an office.
+   *
+   * **This used to mint the agent code too.** It does not any more (ADR-0017): the code
+   * belongs to the person, issued by their insurer and entered when they registered. What
+   * survives is the sequence, because the directory cursor is a `$gt` on it and seven
+   * services sort by it — none of which has anything to do with who issues a code.
    *
    * `findOneAndUpdate` with `$inc` so the read and the increment are one atomic
-   * operation. A read-then-write would hand two concurrent joins the same number, and
-   * the unique index would then reject one of them — turning a race into a user-visible
-   * failure on a code nobody chose.
+   * operation. A read-then-write would hand two concurrent joins the same number, and the
+   * sort index would then hold two rows the cursor cannot separate — one of which the
+   * roster would skip.
    */
-  private async nextAgentCode(
-    kpmId: string,
-  ): Promise<{ agentCode: string; agentSeq: number; companyId: string }> {
+  private async nextMemberSeq(kpmId: string): Promise<{ agentSeq: number }> {
     const kpm = await this.kpms
       .findOneAndUpdate(
         { _id: kpmId, deletedAt: null },
-        { $inc: { 'counters.nextAgentCodeSeq': 1 } },
+        { $inc: { 'counters.nextMemberSeq': 1 } },
         { new: false },
       )
       .exec();
     if (!kpm) throw new NotFoundException('KPM');
-    const agentSeq = kpm.counters?.nextAgentCodeSeq ?? 1;
-    // The company comes back with it. The ladder a membership references belongs to the
-    // company, and this read has already paid for the document.
-    return { agentCode: formatAgentCode(kpm.code, agentSeq), agentSeq, companyId: kpm.companyId };
+    return { agentSeq: kpm.counters?.nextMemberSeq ?? 1 };
+  }
+
+  /** The insurer an office belongs to. The ladder and the agent code both hang off it. */
+  private async companyOf(kpmId: string): Promise<string> {
+    const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
+    if (!kpm) throw new NotFoundException('KPM');
+    return kpm.companyId;
+  }
+
+  /**
+   * The agent code this person carries, checked against the office they are joining.
+   *
+   * The code is the insurer's, so an office may only admit somebody the insurer issued a
+   * code for — and only its own insurer's. A user whose company differs from the office's
+   * reads as **not found**, the same answer as an office that does not exist, because
+   * confirming otherwise would let anybody map which insurer runs which office.
+   */
+  private async agentCodeOf(userId: string, companyId: string): Promise<string> {
+    const user = await this.users.findOne({ _id: userId, deletedAt: null }).exec();
+    if (!user) throw new NotFoundException('User');
+    if (!user.agentCode || user.companyId !== companyId) {
+      throw new NotFoundException('KPM');
+    }
+    return user.agentCode;
   }
 
   private async record(
@@ -168,7 +193,12 @@ export class HierarchyService {
 
     const leader = input.leaderId ? await this.requireLeader(ctx, input.leaderId) : null;
 
-    const { agentCode, agentSeq, companyId } = await this.nextAgentCode(kpmId);
+    // **The refusal comes before the increment.** `nextMemberSeq` is a `$inc`, and a
+    // rejected join that had already taken a number would leave a gap in the office's
+    // ordering for somebody who never arrived.
+    const companyId = await this.companyOf(kpmId);
+    const agentCode = await this.agentCodeOf(input.userId, companyId);
+    const { agentSeq } = await this.nextMemberSeq(kpmId);
 
     // **The level is resolved first, and `role` is taken from what came back.**
     //

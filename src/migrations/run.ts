@@ -2,6 +2,7 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 import { SystemClock } from '@/common/clock/clock.port';
 import { up as membershipOrgLevel } from './0001-membership-org-level';
+import { up as userCompanyAgentCode } from './0002-user-company-agent-code';
 
 /**
  * Every migration, in order. Forward-only and idempotent, so running this twice is a
@@ -9,6 +10,7 @@ import { up as membershipOrgLevel } from './0001-membership-org-level';
  */
 const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Date) => Promise<unknown>]> = [
   ['0001-membership-org-level', membershipOrgLevel],
+  ['0002-user-company-agent-code', userCompanyAgentCode],
 ];
 
 async function main(): Promise<void> {

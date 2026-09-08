@@ -13,7 +13,9 @@ import {
 import {
   KpmRequestRowDto, KpmViewDto, OrgLevelRowDto, PlatformAdminRowDto, PlatformOverviewDto,
 } from '@/modules/tenants/tenant.response.dto';
-import { AuditEntryResponseDto, CompanyResponseDto } from '@/modules/tenants/platform.response.dto';
+import {
+  AuditEntryResponseDto, CompanyResponseDto, PublicCompanyDto,
+} from '@/modules/tenants/platform.response.dto';
 
 /** What one operation answers with: a class, and whether it comes back as an array. */
 export interface ResponseShape {
@@ -96,6 +98,9 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AdminController_approveKpmRequest: { type: KpmRequestRowDto, isArray: true },
   AdminController_declineKpmRequest: { type: KpmRequestRowDto, isArray: true },
   AdminController_listCompanies: { type: CompanyResponseDto, isArray: true },
+  // Public, and two fields only — a visitor asking which insurer issued their agent
+  // code has no business knowing how each one is configured (ADR-0017).
+  CompanyController_list: { type: PublicCompanyDto, isArray: true },
   AdminController_createCompany: { type: CompanyResponseDto },
   AdminController_listOrgLevels: { type: OrgLevelRowDto, isArray: true },
   AdminController_createOrgLevel: { type: OrgLevelRowDto, isArray: true },
