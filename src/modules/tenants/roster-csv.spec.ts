@@ -83,6 +83,62 @@ describe('the roster file (P3.6-T4)', () => {
     });
   });
 
+  describe('pasted from a spreadsheet', () => {
+    /*
+     * The point of accepting this at all: copying cells out of Excel, Google Sheets,
+     * LibreOffice or Numbers puts **tab**-delimited text on the clipboard. Somebody who
+     * pastes never opens a file, never saves one, and never learns what CSV is — which
+     * was the complaint.
+     */
+    const tsv = (...rows: string[]) => rows.join('\n');
+
+    it('reads tab-separated rows the same as comma-separated ones', () => {
+      const { rows, issues } = parseRoster(tsv(
+        'fullName\temail\tagentCode\trole\tleaderAgentCode',
+        'Rina Wijaya\trina@k.test\tPRU-1\tagent\tPRU-9',
+      ));
+      expect(issues).toEqual([]);
+      expect(rows[0]).toMatchObject({ fullName: 'Rina Wijaya', agentCode: 'PRU-1' });
+    });
+
+    it('takes rows with no header at all, which is what somebody selects', () => {
+      // A person highlights the rows they typed, not the header above them.
+      const { rows, issues } = parseRoster(tsv(
+        'Agus Prasetyo\tagus@k.test\tPRU-1\tab\t',
+        'Rina Wijaya\trina@k.test\tPRU-2\tagent\tPRU-1',
+      ));
+      expect(issues).toEqual([]);
+      expect(rows.map((r) => r.agentCode)).toEqual(['PRU-1', 'PRU-2']);
+      // And the first row is line 1, because there is no header above it.
+      expect(rows[0].line).toBe(1);
+    });
+
+    it('keeps a comma inside a cell, because the delimiter is the tab', () => {
+      // Excel does not quote a comma when the clipboard delimiter is a tab, so this
+      // arrives bare — and splitting on commas would tear the name in half.
+      const { rows } = parseRoster('Puspita, Sari\tsari@k.test\tPRU-1\taab\t');
+      expect(rows[0].fullName).toBe('Puspita, Sari');
+    });
+
+    it('still says "download the template" for a header somebody got wrong', () => {
+      // Any cell naming a column marks it as a header attempt, so this is answered with
+      // the template rather than with a confusing complaint about column counts.
+      const { issues } = parseRoster('name,email\nRina,r@k.test\n');
+      expect(issues[0].message).toContain('Download the template');
+    });
+
+    it('reads a headerless paste with a comma in the middle as one shape, not two', () => {
+      // The delimiter is decided once, from the first line. Deciding per row would let a
+      // stray character change how a single line is read.
+      const { rows, issues } = parseRoster(tsv(
+        'Agus\tagus@k.test\tPRU-1\tab\t',
+        'Wijaya, Rina\trina@k.test\tPRU-2\tagent\tPRU-1',
+      ));
+      expect(issues).toEqual([]);
+      expect(rows[1].fullName).toBe('Wijaya, Rina');
+    });
+  });
+
   describe('the template', () => {
     it('carries worked examples that cannot import', () => {
       // A template with live examples is a trap: somebody types under them and imports

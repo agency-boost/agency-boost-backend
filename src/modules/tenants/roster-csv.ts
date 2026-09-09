@@ -108,14 +108,19 @@ export function generateTemporaryPassword(): string {
 }
 
 /**
- * Split one CSV line, honouring quotes.
+ * Split one line, honouring quotes.
  *
  * Not a full RFC 4180 parser and not trying to be: a name with a comma in it is the case
  * that actually turns up, and a quoted field with an embedded newline is not something a
  * roster export produces. What it must not do is split *"Wijaya, Rina"* into two columns
  * and report a mystifying issue about a missing agent code.
+ *
+ * The delimiter is a parameter because the same rows arrive two ways: comma-separated
+ * from a downloaded file, and **tab**-separated from a clipboard. Copying cells out of
+ * Excel, Google Sheets, LibreOffice or Numbers puts tab-delimited text on the clipboard —
+ * which is the whole reason somebody can paste a roster without knowing what CSV is.
  */
-function splitLine(line: string): string[] {
+function splitLine(line: string, delimiter: string): string[] {
   const out: string[] = [];
   let field = '';
   let quoted = false;
@@ -126,7 +131,7 @@ function splitLine(line: string): string[] {
       else if (c === '"') quoted = false;
       else field += c;
     } else if (c === '"') quoted = true;
-    else if (c === ',') { out.push(field); field = ''; }
+    else if (c === delimiter) { out.push(field); field = ''; }
     else field += c;
   }
   out.push(field);
@@ -141,7 +146,32 @@ function splitLine(line: string): string[] {
  * so a code somebody already holds, or a leader who is neither in the file nor in the
  * office, is the service's to report.
  */
-export function parseRoster(csv: string): { rows: RosterRow[]; issues: RosterIssue[] } {
+/**
+ * Tab or comma, decided by the first surviving line.
+ *
+ * A tab cannot appear in any of our column names or in a plausible agent code, so its
+ * presence is unambiguous — and a clipboard paste always has one. Guessing per row would
+ * let a single stray character change how one line is read; the file has one shape.
+ */
+function delimiterOf(firstLine: string): string {
+  return firstLine.includes('\t') ? '\t' : ',';
+}
+
+/**
+ * Is this line the column names, rather than a person?
+ *
+ * **Any** cell naming a column is enough. Requiring the first one meant `name,email` —
+ * somebody's own header, wrong — was read as a person, and answered with *"expected 5
+ * columns, found 2"* instead of *"download the template"*. A data row would have to hold
+ * a cell equal to `email` or `role` to be misread this way, and an email cell is never
+ * literally the word `email`.
+ */
+function looksLikeHeader(cells: string[]): boolean {
+  const names = new Set<string>(ROSTER_COLUMNS.map((c) => c.toLowerCase()));
+  return cells.some((cell) => names.has(cell.toLowerCase().replace(/^﻿/, '')));
+}
+
+export function parseRoster(text: string): { rows: RosterRow[]; issues: RosterIssue[] } {
   const issues: RosterIssue[] = [];
 
   /*
@@ -152,7 +182,7 @@ export function parseRoster(csv: string): { rows: RosterRow[]; issues: RosterIss
    * this, and the template ships with eleven comment lines — so every issue would have
    * been reported eleven lines off, pointing the reader at somebody else's row.
    */
-  const lines = csv
+  const lines = text
     .split(/\r?\n/)
     .map((text, index) => ({ text, line: index + 1 }))
     .filter(({ text }) => text.trim() !== '' && !text.trimStart().startsWith(COMMENT_PREFIX));
@@ -162,8 +192,23 @@ export function parseRoster(csv: string): { rows: RosterRow[]; issues: RosterIss
     return { rows: [], issues };
   }
 
-  const header = splitLine(lines[0].text).map((h) => h.replace(/^﻿/, ''));
-  if (header.join(',').toLowerCase() !== ROSTER_TEMPLATE_HEADER.toLowerCase()) {
+  const delimiter = delimiterOf(lines[0].text);
+  const firstCells = splitLine(lines[0].text, delimiter).map((h) => h.replace(/^﻿/, ''));
+
+  /*
+   * **The header is optional.**
+   *
+   * A downloaded file always has one. A paste often does not: somebody selects the rows
+   * they typed and copies those, which is the natural thing to do and would otherwise be
+   * rejected for a reason they could not act on.
+   *
+   * So: a first line that names the columns is a header; a first line that *starts* to —
+   * `fullName` in the first cell but the rest wrong — is a header somebody got wrong, and
+   * saying so beats reading their column names as a person's details; anything else is
+   * data, and the first row is line 1.
+   */
+  const hasHeader = looksLikeHeader(firstCells);
+  if (hasHeader && firstCells.join(',').toLowerCase() !== ROSTER_TEMPLATE_HEADER.toLowerCase()) {
     issues.push({
       line: lines[0].line,
       column: 'file',
@@ -176,9 +221,9 @@ export function parseRoster(csv: string): { rows: RosterRow[]; issues: RosterIss
   const seenEmail = new Map<string, number>();
   const seenCode = new Map<string, number>();
 
-  for (let i = 1; i < lines.length; i += 1) {
+  for (let i = hasHeader ? 1 : 0; i < lines.length; i += 1) {
     const { line } = lines[i];
-    const cells = splitLine(lines[i].text);
+    const cells = splitLine(lines[i].text, delimiter);
     if (cells.length !== ROSTER_COLUMNS.length) {
       issues.push({
         line,

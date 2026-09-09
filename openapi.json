@@ -1884,7 +1884,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RosterCsvDto"
+                "$ref": "#/components/schemas/RosterRowsDto"
               }
             }
           }
@@ -1982,7 +1982,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RosterCsvDto"
+                "$ref": "#/components/schemas/RosterRowsDto"
               }
             }
           }
@@ -5496,17 +5496,17 @@
           "status"
         ]
       },
-      "RosterCsvDto": {
+      "RosterRowsDto": {
         "type": "object",
         "properties": {
-          "csv": {
+          "rows": {
             "type": "string",
-            "description": "The file contents. The header must match GET /admin/tenants/roster-template.",
+            "description": "The rows, as text. Comma-separated from a file, tab-separated from a spreadsheet paste. The header row is optional.",
             "maxLength": 512000
           }
         },
         "required": [
-          "csv"
+          "rows"
         ]
       },
       "ImpersonateDto": {

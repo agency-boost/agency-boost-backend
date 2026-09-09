@@ -239,20 +239,28 @@ export class CreateKpmRequestDto {
 }
 
 /**
- * A roster file, as text.
+ * The roster, as text.
  *
- * Sent as JSON rather than `multipart/form-data`: the file is a few kilobytes of CSV, the
- * screen has already read it to show a preview, and a multipart body would mean a second
- * parser, a size limit of its own and a different shape for preview and commit. The cap
- * is 512 KB, which is a roster of tens of thousands and far past the 500-member office
- * ceiling `performance-and-scale.md` sets.
+ * Named `rows` rather than `csv` because it is not always CSV: the screen sends a
+ * downloaded file's contents, or the **tab-separated** text a spreadsheet puts on the
+ * clipboard when somebody copies cells. One field, because the parser decides the
+ * delimiter from the first line and neither the caller nor the reader gains from saying
+ * which it is.
+ *
+ * Sent as JSON rather than `multipart/form-data`: the payload is a few kilobytes, the
+ * screen has already read it to show a preview, and multipart would mean a second parser,
+ * a size limit of its own, and a different shape for preview and commit — and no shape at
+ * all for a paste, which is not a file. The cap is 512 KB, which is a roster of tens of
+ * thousands and far past the 500-member office ceiling `performance-and-scale.md` sets.
  */
-export class RosterCsvDto {
+export class RosterRowsDto {
   @ApiProperty({
-    description: 'The file contents. The header must match GET /admin/tenants/roster-template.',
+    description:
+      'The rows, as text. Comma-separated from a file, tab-separated from a spreadsheet '
+      + 'paste. The header row is optional.',
     maxLength: 512_000,
   })
   @IsString()
   @MaxLength(512_000)
-  csv!: string;
+  rows!: string;
 }

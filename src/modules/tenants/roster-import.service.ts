@@ -177,11 +177,11 @@ export class RosterImportService {
     return issues;
   }
 
-  async preview(ctx: RequestContext, kpmId: string, csv: string): Promise<RosterPreview> {
+  async preview(ctx: RequestContext, kpmId: string, text: string): Promise<RosterPreview> {
     this.require(ctx);
     const kpm = await this.office(ctx, kpmId);
 
-    const { rows, issues } = parseRoster(csv);
+    const { rows, issues } = parseRoster(text);
     const all = [...issues, ...(await this.issuesAgainstTheOffice(kpm, rows))]
       .sort((a, b) => a.line - b.line || a.column.localeCompare(b.column));
 
@@ -194,11 +194,11 @@ export class RosterImportService {
     };
   }
 
-  async commit(ctx: RequestContext, kpmId: string, csv: string): Promise<RosterCommitResult> {
+  async commit(ctx: RequestContext, kpmId: string, text: string): Promise<RosterCommitResult> {
     this.require(ctx);
     const kpm = await this.office(ctx, kpmId);
 
-    const { rows, issues } = parseRoster(csv);
+    const { rows, issues } = parseRoster(text);
     const all = [...issues, ...(await this.issuesAgainstTheOffice(kpm, rows))];
     if (all.length > 0) {
       throw new DomainException(

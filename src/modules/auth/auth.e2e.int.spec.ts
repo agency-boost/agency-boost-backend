@@ -1114,12 +1114,12 @@ describe('auth and admin over HTTP', () => {
       ).replace(/RT-0\./, 'RT-');
 
       const preview = await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
-        .set(auth).send({ csv }).expect(200);
+        .set(auth).send({ rows: csv }).expect(200);
       expect(preview.body.issues).toEqual([]);
       expect(preview.body.willCreate).toBe(1);
 
       const committed = await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
-        .set(auth).send({ csv }).expect(201);
+        .set(auth).send({ rows: csv }).expect(201);
       expect(committed.body.created).toHaveLength(1);
       // The password comes back once, and nowhere else.
       expect(committed.body.created[0].temporaryPassword).toMatch(/^[a-z2-9-]+$/);
@@ -1133,7 +1133,7 @@ describe('auth and admin over HTTP', () => {
       const csv = file(`Imported Person,${email},IMP-${Date.now()},ab,`);
 
       const committed = await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
-        .set(auth).send({ csv }).expect(201);
+        .set(auth).send({ rows: csv }).expect(201);
       const { temporaryPassword } = committed.body.created[0];
 
       const login = await api().post('/api/v1/auth/login')
@@ -1163,14 +1163,14 @@ describe('auth and admin over HTTP', () => {
       );
 
       const refused = await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
-        .set(auth).send({ csv }).expect(400);
+        .set(auth).send({ rows: csv }).expect(400);
       expect(refused.body.error.details.issues).toHaveLength(1);
 
       // And the good row did not land either.
       const roster = await api().get('/api/v1/admin/tenants').set(auth).expect(200);
       expect(roster.body.find((k: { _id: string }) => k._id === kpmId)).toBeDefined();
       const preview = await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
-        .set(auth).send({ csv: file(`Good,good2-${Math.random()}@k.test,GD2-${Date.now()},ab,`) })
+        .set(auth).send({ rows: file(`Good,good2-${Math.random()}@k.test,GD2-${Date.now()},ab,`) })
         .expect(200);
       expect(preview.body.willCreate).toBe(1);
     });
@@ -1187,15 +1187,15 @@ describe('auth and admin over HTTP', () => {
 
       await api().get('/api/v1/admin/tenants/roster-template').set(theirs).expect(200);
       const mine = await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
-        .set(theirs).send({ csv: file(`R,r-${Math.random()}@k.test,OW-${Date.now()},agent,`) })
+        .set(theirs).send({ rows: file(`R,r-${Math.random()}@k.test,OW-${Date.now()},agent,`) })
         .expect(200);
       expect(mine.body.willCreate).toBe(1);
 
       const somebodyElse = await anOffice();
       await api().post(`/api/v1/admin/tenants/${somebodyElse.kpmId}/roster/preview`)
-        .set(theirs).send({ csv: file() }).expect(404);
+        .set(theirs).send({ rows: file() }).expect(404);
       await api().post(`/api/v1/admin/tenants/${somebodyElse.kpmId}/roster`)
-        .set(theirs).send({ csv: file() }).expect(404);
+        .set(theirs).send({ rows: file() }).expect(404);
     });
 
     it('refuses a leader, who administers nothing', async () => {
@@ -1204,7 +1204,7 @@ describe('auth and admin over HTTP', () => {
       const theirs = { Authorization: `Bearer ${leader.accessToken}` };
 
       await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
-        .set(theirs).send({ csv: file() }).expect(403);
+        .set(theirs).send({ rows: file() }).expect(403);
     });
   });
 

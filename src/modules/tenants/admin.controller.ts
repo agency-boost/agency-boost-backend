@@ -13,7 +13,7 @@ import {
   CreateKpmDto,
   CreateOrgLevelDto,
   DeclineKpmRequestDto,
-  RosterCsvDto,
+  RosterRowsDto,
   SetStatusDto,
   UpdateOrgLevelDto,
 } from './tenant.dto';
@@ -264,9 +264,9 @@ export class AdminController {
   async previewRoster(
     @Ctx() ctx: RequestContext,
     @Param('id') id: string,
-    @Body() dto: RosterCsvDto,
+    @Body() dto: RosterRowsDto,
   ) {
-    return this.roster.preview(ctx, id, dto.csv);
+    return this.roster.preview(ctx, id, dto.rows);
   }
 
   @Post('tenants/:id/roster')
@@ -283,9 +283,9 @@ export class AdminController {
   async importRoster(
     @Ctx() ctx: RequestContext,
     @Param('id') id: string,
-    @Body() dto: RosterCsvDto,
+    @Body() dto: RosterRowsDto,
   ) {
-    return this.roster.commit(ctx, id, dto.csv);
+    return this.roster.commit(ctx, id, dto.rows);
   }
 
   @Get('audit')
