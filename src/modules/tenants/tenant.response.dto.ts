@@ -243,6 +243,13 @@ export class RosterTemplateDto {
 
   @ApiProperty({ type: [String] })
   columns!: string[];
+
+  /**
+   * The whole file, examples included. Every example line is commented, so a person can
+   * copy one, edit it, or leave it alone — and none of those creates anybody.
+   */
+  @ApiProperty({ type: String })
+  template!: string;
 }
 
 export class RosterIssueDto {

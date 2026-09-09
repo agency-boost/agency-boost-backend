@@ -86,17 +86,67 @@ describe('RosterImportService (P3.6-T4)', () => {
   const file = (...rows: string[]) => [H, ...rows].join('\n');
 
   describe('who may run it', () => {
-    it('is a platform operation, not an office one', async () => {
-      const owner = new RequestContext('u-owner', 'none', {
-        membershipId: 'mem-1', kpmId, hierarchyRole: 'ab', status: 'active',
-        isKpmOwner: true, isKpmAdmin: false, directCount: 0,
+    const memberOf = (id: string, over: Record<string, unknown> = {}) =>
+      new RequestContext('u-member', 'none', {
+        membershipId: 'mem-1', kpmId: id, hierarchyRole: 'ab', status: 'active',
+        isKpmOwner: false, isKpmAdmin: false, directCount: 0, ...over,
       });
-      await expect(service.preview(owner, kpmId, file())).rejects.toMatchObject({
+
+    it('lets an Owner fill their own office', async () => {
+      // An office that hires ten people at once is the case this exists for; routing it
+      // through a platform operator would be the reason nobody uses it.
+      const owner = memberOf(kpmId, { isKpmOwner: true });
+      const preview = await service.preview(owner, kpmId, file('Rina,rina@k.test,PRU-1,ab,'));
+      expect(preview.issues).toEqual([]);
+      expect(preview.willCreate).toBe(1);
+    });
+
+    it('lets an Admin do the same', async () => {
+      const admin = memberOf(kpmId, { isKpmAdmin: true });
+      await expect(
+        service.commit(admin, kpmId, file('Rina,rina@k.test,PRU-1,ab,')),
+      ).resolves.toMatchObject({ created: [{ agentCode: 'PRU-1' }] });
+    });
+
+    it('refuses a leader, who administers nothing', async () => {
+      await expect(service.preview(memberOf(kpmId), kpmId, file())).rejects.toMatchObject({
         code: 'PERM_DENIED',
       });
-      await expect(service.commit(owner, kpmId, file())).rejects.toMatchObject({
-        code: 'PERM_DENIED',
+    });
+
+    /*
+     * **The check the wider grant turns on.**
+     *
+     * `kpm:import_roster` is `own-kpm` for an Owner, and the office id arrives in the URL
+     * — so nothing but this stops one office filling another with accounts it controls
+     * the passwords for. It answers 404, never 403: a 403 would confirm the id is real.
+     */
+    it('refuses an Owner any office but their own, as not found', async () => {
+      const other = await mongoose.model(Kpm.name).create({
+        companyId, code: '0555', branchName: 'Somebody Else', status: 'active',
+        counters: { nextMemberSeq: 1 },
       });
+      const owner = memberOf(kpmId, { isKpmOwner: true });
+
+      for (const call of [
+        () => service.preview(owner, String(other._id), file('R,r@k.test,PRU-1,ab,')),
+        () => service.commit(owner, String(other._id), file('R,r@k.test,PRU-1,ab,')),
+      ]) {
+        await expect(call()).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      }
+      expect(await mongoose.model(User.name).countDocuments({})).toBe(0);
+    });
+
+    it('writes as the Owner, not as a platform operator', async () => {
+      // `superAdminInTenant` names an office for somebody who is in none. Reaching for it
+      // unconditionally would attribute every membership an Owner imported to a platform
+      // operator, and promote their context for the duration of the write.
+      const owner = memberOf(kpmId, { isKpmOwner: true });
+      await service.commit(owner, kpmId, file('Rina,rina@k.test,PRU-1,ab,'));
+
+      const row = await mongoose.model(AuditLog.name).findOne({ action: 'roster.imported' });
+      expect(row?.get('actorUserId')).toBe('u-member');
+      expect(row?.get('actorMembershipId')).toBe('mem-1');
     });
 
     it('404s an office that is not there, and a malformed id alike', async () => {

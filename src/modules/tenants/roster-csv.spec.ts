@@ -2,6 +2,7 @@ import {
   generateTemporaryPassword,
   inLeaderFirstOrder,
   parseRoster,
+  ROSTER_TEMPLATE,
   ROSTER_TEMPLATE_HEADER,
 } from './roster-csv';
 
@@ -79,6 +80,49 @@ describe('the roster file (P3.6-T4)', () => {
         { line: 3, column: 'email', message: 'Already on line 2.' },
         { line: 4, column: 'agentCode', message: 'Already on line 2.' },
       ]);
+    });
+  });
+
+  describe('the template', () => {
+    it('carries worked examples that cannot import', () => {
+      // A template with live examples is a trap: somebody types under them and imports
+      // Rina Wijaya along with their actual roster.
+      const { rows, issues } = parseRoster(ROSTER_TEMPLATE);
+      expect(issues).toEqual([]);
+      expect(rows).toEqual([]);
+      // And they are there to be read.
+      expect(ROSTER_TEMPLATE).toContain('Agus Prasetyo');
+      expect(ROSTER_TEMPLATE).toContain('"Puspita, Sari"');
+    });
+
+    it('shows what each column takes, and the one that is left empty', () => {
+      // The leader column is the one people get wrong: it is an agent code, not a name,
+      // and somebody at the top of the office has none.
+      expect(ROSTER_TEMPLATE).toContain('LEAVE IT EMPTY');
+      expect(ROSTER_TEMPLATE).toContain('ab, aab or agent');
+    });
+
+    it('shows a chain, so the leader column is unambiguous', () => {
+      // Agus leads Sari leads Rina, by code — which is what the column takes.
+      expect(ROSTER_TEMPLATE).toContain('PRU-88002,aab,PRU-88001');
+      expect(ROSTER_TEMPLATE).toContain('PRU-88003,agent,PRU-88002');
+    });
+
+    it('imports what somebody adds under the examples, and nothing else', () => {
+      const filled = `${ROSTER_TEMPLATE}Budi Santoso,budi@k.test,PRU-1,agent,\n`;
+      const { rows, issues } = parseRoster(filled);
+      expect(issues).toEqual([]);
+      expect(rows.map((r) => r.fullName)).toEqual(['Budi Santoso']);
+    });
+
+    it('reports the line a spreadsheet shows, not the line after filtering', () => {
+      // The template is eleven lines of comment before the header. Numbering the survivors
+      // instead of carrying their real positions would point the reader at a row they
+      // cannot see.
+      const filled = `${ROSTER_TEMPLATE},not-an-email,,director,\n`;
+      const { issues } = parseRoster(filled);
+      const linesInFile = ROSTER_TEMPLATE.split('\n').length;
+      expect(new Set(issues.map((i) => i.line))).toEqual(new Set([linesInFile]));
     });
   });
 

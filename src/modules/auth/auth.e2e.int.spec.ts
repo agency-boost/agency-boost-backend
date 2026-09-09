@@ -1175,17 +1175,35 @@ describe('auth and admin over HTTP', () => {
       expect(preview.body.willCreate).toBe(1);
     });
 
-    it('is a platform operation: an Owner is refused every route', async () => {
+    it('lets an Owner fill their own office, and no other', async () => {
+      // An office that hires ten people at once is the case this exists for. The office
+      // id is in the URL, so what stops one office filling another is the check that
+      // answers **404** — never 403, which would confirm the id is real.
       const { auth, kpmId } = await anOffice();
       const owner = await makeUser(`ro-${Math.random()}@k.test`);
       await api().patch(`/api/v1/admin/tenants/${kpmId}/owner`)
         .set(auth).send({ userId: owner.id }).expect(200);
       const theirs = { Authorization: `Bearer ${owner.accessToken}` };
 
-      await api().get('/api/v1/admin/tenants/roster-template').set(theirs).expect(403);
+      await api().get('/api/v1/admin/tenants/roster-template').set(theirs).expect(200);
+      const mine = await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
+        .set(theirs).send({ csv: file(`R,r-${Math.random()}@k.test,OW-${Date.now()},agent,`) })
+        .expect(200);
+      expect(mine.body.willCreate).toBe(1);
+
+      const somebodyElse = await anOffice();
+      await api().post(`/api/v1/admin/tenants/${somebodyElse.kpmId}/roster/preview`)
+        .set(theirs).send({ csv: file() }).expect(404);
+      await api().post(`/api/v1/admin/tenants/${somebodyElse.kpmId}/roster`)
+        .set(theirs).send({ csv: file() }).expect(404);
+    });
+
+    it('refuses a leader, who administers nothing', async () => {
+      const { kpmId } = await anOffice();
+      const leader = await makeUser(`rl-${Math.random()}@k.test`);
+      const theirs = { Authorization: `Bearer ${leader.accessToken}` };
+
       await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
-        .set(theirs).send({ csv: file() }).expect(403);
-      await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
         .set(theirs).send({ csv: file() }).expect(403);
     });
   });

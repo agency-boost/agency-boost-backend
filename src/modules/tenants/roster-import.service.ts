@@ -5,6 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { can } from '@/modules/rbac/permissions';
 import { AuditService } from '@/modules/audit/audit.service';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
@@ -63,24 +64,48 @@ export class RosterImportService {
   ) {}
 
   private require(ctx: RequestContext): void {
-    if (!ctx.isSuperAdmin) {
+    if (!can(ctx, 'kpm:import_roster')) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'Only a platform operator may import a roster.',
+        'You do not have permission to import a roster.',
         HttpStatus.FORBIDDEN,
         { permission: 'kpm:import_roster' },
       );
     }
   }
 
-  private async office(kpmId: string): Promise<KpmDocument> {
+  /**
+   * The office, and the check that the caller may reach *this* one.
+   *
+   * A Super Admin holds the permission at `all` and provisions offices they are not in.
+   * An Owner or an Admin holds it at `own-kpm` — so naming somebody else's office has to
+   * be refused, and refused as **404**, the same answer as an office that does not exist.
+   * A 403 would confirm the id is real, which is the rule everywhere else in this product.
+   */
+  private async office(ctx: RequestContext, kpmId: string): Promise<KpmDocument> {
     const kpm = await this.kpms
       .findOne({ _id: kpmId, deletedAt: null })
       .exec()
       // A malformed id is "not here", not a 500 — it arrives from a URL.
       .catch(() => null);
     if (!kpm) throw new NotFoundException('KPM');
+    if (!ctx.isSuperAdmin && ctx.kpmId !== String(kpm._id)) throw new NotFoundException('KPM');
     return kpm;
+  }
+
+  /**
+   * The context the writes run under.
+   *
+   * An Owner or Admin importing into their own office writes as themselves, so the
+   * history and audit rows name the person who did it. Only a Super Admin — who is a
+   * member of nothing — needs the office named for them.
+   *
+   * Reaching for `superAdminInTenant` unconditionally would have quietly promoted every
+   * importing Owner to `platformRole: 'super_admin'` for the duration of the write, and
+   * every membership they created would have been attributed to a platform operator.
+   */
+  private writeContext(ctx: RequestContext, kpmId: string): RequestContext {
+    return ctx.kpmId === kpmId ? ctx : RequestContext.superAdminInTenant(ctx.userId, kpmId);
   }
 
   /**
@@ -154,7 +179,7 @@ export class RosterImportService {
 
   async preview(ctx: RequestContext, kpmId: string, csv: string): Promise<RosterPreview> {
     this.require(ctx);
-    const kpm = await this.office(kpmId);
+    const kpm = await this.office(ctx, kpmId);
 
     const { rows, issues } = parseRoster(csv);
     const all = [...issues, ...(await this.issuesAgainstTheOffice(kpm, rows))]
@@ -171,7 +196,7 @@ export class RosterImportService {
 
   async commit(ctx: RequestContext, kpmId: string, csv: string): Promise<RosterCommitResult> {
     this.require(ctx);
-    const kpm = await this.office(kpmId);
+    const kpm = await this.office(ctx, kpmId);
 
     const { rows, issues } = parseRoster(csv);
     const all = [...issues, ...(await this.issuesAgainstTheOffice(kpm, rows))];
@@ -195,7 +220,7 @@ export class RosterImportService {
     // Checked above, so this cannot be null — but the ordering is what makes the loop
     // below work at all, and reading it from the same function keeps the two in step.
     const ordered = inLeaderFirstOrder(rows) as RosterRow[];
-    const scoped = RequestContext.superAdminInTenant(ctx.userId, String(kpm._id));
+    const scoped = this.writeContext(ctx, String(kpm._id));
     const created: RosterCommitResult['created'] = [];
     // Codes created in this run, so a leader named by somebody later in the file resolves.
     const madeInThisRun = new Map<string, string>();

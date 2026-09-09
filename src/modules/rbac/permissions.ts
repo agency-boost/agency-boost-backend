@@ -85,9 +85,23 @@ export const PERMISSIONS = {
   /** The company tag is Super Admin's alone — the prototype disables the field. */
   'kpm:update_company_tag': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:suspend': [{ grantee: SUPER_ADMIN, scope: 'all' }],
-  // Filling a new office from a spreadsheet (P3.6-T4). It creates accounts and hands
-  // back the passwords they start on, which is why it goes no wider than the platform.
-  'kpm:import_roster': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
+   * Filling an office from a spreadsheet (P3.6-T4).
+   *
+   * It creates accounts and hands back the passwords they start on, so it is deliberately
+   * narrow — but not platform-only: an office that hires ten people at once is the case
+   * this exists for, and waiting on a platform operator to run it would be the reason
+   * nobody uses it. An Owner and an Admin reach **their own office and no other**, which
+   * `RosterImportService.office` enforces as a 404 rather than a 403.
+   *
+   * A leader does not hold it. Creating accounts is administration, not recruitment, and
+   * `member:search_untagged_pool` plus a leader code already cover a leader's side.
+   */
+  'kpm:import_roster': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
   'kpm:activate': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:archive': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:assign_owner': [{ grantee: SUPER_ADMIN, scope: 'all' }],

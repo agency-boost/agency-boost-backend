@@ -19,6 +19,45 @@ export const ROSTER_COLUMNS = [
 
 export const ROSTER_TEMPLATE_HEADER = ROSTER_COLUMNS.join(',');
 
+/**
+ * A line the importer ignores entirely.
+ *
+ * This exists so the template can carry **worked examples** without them becoming people.
+ * A template with live example rows is a trap: somebody types under them, uploads, and
+ * imports Rina Wijaya along with their actual roster — or, if the examples happen to be
+ * invalid, gets four issues about rows they did not write and cannot see the point of.
+ *
+ * Commented out, they can be read, copied over, or left alone, and none of those creates
+ * anybody.
+ */
+export const COMMENT_PREFIX = '#';
+
+/**
+ * The template a person downloads: the header, then three examples they cannot import.
+ *
+ * The three are chosen to answer the questions the columns raise — what does a name with
+ * a comma look like, what goes in the leader column for somebody at the top, and how does
+ * a chain read. A blank template answers none of them, and the issue list is a worse place
+ * to learn than the file itself.
+ */
+export const ROSTER_TEMPLATE = [
+  `${COMMENT_PREFIX} AgencyBoost roster template.`,
+  `${COMMENT_PREFIX} Add one row per person below. Lines starting with ${COMMENT_PREFIX} are ignored,`,
+  `${COMMENT_PREFIX} so the examples never import — delete them or leave them, either is fine.`,
+  `${COMMENT_PREFIX}`,
+  `${COMMENT_PREFIX} fullName          the person's name. Quote it if it contains a comma.`,
+  `${COMMENT_PREFIX} email             where their password is sent. Nobody may have registered it yet.`,
+  `${COMMENT_PREFIX} agentCode         the producer id their insurer issued. Unique within the insurer.`,
+  `${COMMENT_PREFIX} role              ab, aab or agent. Nothing else.`,
+  `${COMMENT_PREFIX} leaderAgentCode   the agent code of whoever they report to.`,
+  `${COMMENT_PREFIX}                   LEAVE IT EMPTY for somebody who reports to nobody.`,
+  ROSTER_TEMPLATE_HEADER,
+  `${COMMENT_PREFIX} Agus Prasetyo,agus@example.test,PRU-88001,ab,`,
+  `${COMMENT_PREFIX} "Puspita, Sari",sari@example.test,PRU-88002,aab,PRU-88001`,
+  `${COMMENT_PREFIX} Rina Wijaya,rina@example.test,PRU-88003,agent,PRU-88002`,
+  '',
+].join('\n');
+
 export interface RosterRow {
   /** 1-based, and counting the header — so it is the line number a spreadsheet shows. */
   line: number;
@@ -104,17 +143,29 @@ function splitLine(line: string): string[] {
  */
 export function parseRoster(csv: string): { rows: RosterRow[]; issues: RosterIssue[] } {
   const issues: RosterIssue[] = [];
-  const lines = csv.split(/\r?\n/).filter((l) => l.trim() !== '');
+
+  /*
+   * **The line number a spreadsheet shows, carried rather than recomputed.**
+   *
+   * Blank lines and commented ones are dropped, but each surviving line keeps the number
+   * it had in the file. Filtering first and numbering afterwards was the first version of
+   * this, and the template ships with eleven comment lines — so every issue would have
+   * been reported eleven lines off, pointing the reader at somebody else's row.
+   */
+  const lines = csv
+    .split(/\r?\n/)
+    .map((text, index) => ({ text, line: index + 1 }))
+    .filter(({ text }) => text.trim() !== '' && !text.trimStart().startsWith(COMMENT_PREFIX));
 
   if (lines.length === 0) {
     issues.push({ line: 1, column: 'file', message: 'The file is empty.' });
     return { rows: [], issues };
   }
 
-  const header = splitLine(lines[0]).map((h) => h.replace(/^﻿/, ''));
+  const header = splitLine(lines[0].text).map((h) => h.replace(/^﻿/, ''));
   if (header.join(',').toLowerCase() !== ROSTER_TEMPLATE_HEADER.toLowerCase()) {
     issues.push({
-      line: 1,
+      line: lines[0].line,
       column: 'file',
       message: `The header must read exactly: ${ROSTER_TEMPLATE_HEADER}. Download the template.`,
     });
@@ -126,8 +177,8 @@ export function parseRoster(csv: string): { rows: RosterRow[]; issues: RosterIss
   const seenCode = new Map<string, number>();
 
   for (let i = 1; i < lines.length; i += 1) {
-    const line = i + 1;
-    const cells = splitLine(lines[i]);
+    const { line } = lines[i];
+    const cells = splitLine(lines[i].text);
     if (cells.length !== ROSTER_COLUMNS.length) {
       issues.push({
         line,

@@ -20,7 +20,7 @@ import {
 import { KpmRequestService } from './kpm-request.service';
 import { OrgLevelService } from './org-level.service';
 import { RosterImportService } from './roster-import.service';
-import { ROSTER_COLUMNS, ROSTER_TEMPLATE_HEADER } from './roster-csv';
+import { ROSTER_COLUMNS, ROSTER_TEMPLATE, ROSTER_TEMPLATE_HEADER } from './roster-csv';
 import { TenantService } from './tenant.service';
 
 /**
@@ -203,11 +203,12 @@ export class AdminController {
   @ApiOperation({
     summary: 'The roster template',
     description:
-      'The header row, exactly as the importer expects it. Declared above the routes '
-      + 'that take an `:id`, because Nest would otherwise read "roster-template" as one.',
+      'The file to download: the header, plus worked examples **commented out**, so they '
+      + 'can be read and copied without ever importing. Declared above the routes that '
+      + 'take an `:id`, because Nest would otherwise read "roster-template" as one.',
   })
   async rosterTemplate() {
-    return { header: ROSTER_TEMPLATE_HEADER, columns: ROSTER_COLUMNS };
+    return { header: ROSTER_TEMPLATE_HEADER, columns: ROSTER_COLUMNS, template: ROSTER_TEMPLATE };
   }
 
   @Get('tenants/:id')
