@@ -339,6 +339,63 @@ describe('AuthService', () => {
     });
   });
 
+  /*
+   * P3.6-T4. The roster import generates a password, an admin reads it and emails it on,
+   * so the person holding the session has demonstrated control of a mailbox and nothing
+   * more. `AuthGuard` refuses everything but three routes until it is replaced; these are
+   * the two things that replace it.
+   */
+  describe('a password somebody else chose', () => {
+    async function imported(email = 'imported@kpm.test') {
+      await service.register(reg({ email }));
+      await mongoose.model(User.name).updateOne(
+        { email },
+        { $set: { mustChangePassword: true, emailVerifiedAt: NOW, status: 'active' } },
+      );
+      return email;
+    }
+
+    it('is cleared by changing it, and by nothing short of that', async () => {
+      const email = await imported();
+      const user = await mongoose.model(User.name).findOne({ email });
+      expect(user?.get('mustChangePassword')).toBe(true);
+
+      // Signing in does not clear it: that is the whole point.
+      await service.login(email, PASSWORD);
+      expect(
+        (await mongoose.model(User.name).findOne({ email }))?.get('mustChangePassword'),
+      ).toBe(true);
+
+      await service.changePassword(String(user!._id), PASSWORD, 'a different long password');
+      expect(
+        (await mongoose.model(User.name).findOne({ email }))?.get('mustChangePassword'),
+      ).toBe(false);
+    });
+
+    it('refuses replacing it with itself', async () => {
+      const email = await imported();
+      const user = await mongoose.model(User.name).findOne({ email });
+      await expect(
+        service.changePassword(String(user!._id), PASSWORD, PASSWORD),
+      ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      // And the gate is still down, so the credential the admin holds still opens nothing.
+      expect(
+        (await mongoose.model(User.name).findOne({ email }))?.get('mustChangePassword'),
+      ).toBe(true);
+    });
+
+    it('is cleared by a reset, so somebody who never got the email is not locked out', async () => {
+      const email = await imported();
+      await service.forgotPassword(email);
+      const token = sent.find((x) => x.templateId === 'auth.password_reset')!.payload.token as string;
+      await service.resetPassword(token, 'a different long password');
+
+      expect(
+        (await mongoose.model(User.name).findOne({ email }))?.get('mustChangePassword'),
+      ).toBe(false);
+    });
+  });
+
   describe('email verification', () => {
     it('activates the account and is single-use', async () => {
       await service.register(reg({ email: 'v@kpm.test', fullName: 'V' }));

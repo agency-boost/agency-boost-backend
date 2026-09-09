@@ -28,6 +28,7 @@ export const ErrorCode = {
    */
   COMPANY_SLUG_TAKEN: 'COMPANY_SLUG_TAKEN',
   AGENT_CODE_TAKEN: 'AGENT_CODE_TAKEN',
+  AUTH_PASSWORD_CHANGE_REQUIRED: 'AUTH_PASSWORD_CHANGE_REQUIRED',
   /**
    * A company already has a level with that code — **including an archived one**. An
    * archived code is never reused: a membership still pointing at the old rung would

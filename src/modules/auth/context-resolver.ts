@@ -64,7 +64,10 @@ export class ContextResolver {
       }
     }
 
-    return new RequestContext(userId, user.platformRole, membership, impersonatorUserId);
+    return new RequestContext(
+      userId, user.platformRole, membership, impersonatorUserId, null,
+      user.mustChangePassword === true,
+    );
   }
 
   /**

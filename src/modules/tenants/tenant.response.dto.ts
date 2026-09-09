@@ -235,3 +235,75 @@ export class OrgLevelRowDto implements OrgLevelRow {
 
 }
 
+
+/** The roster template's header row, so a client can offer the download. */
+export class RosterTemplateDto {
+  @ApiProperty({ type: String, example: 'fullName,email,agentCode,role,leaderAgentCode' })
+  header!: string;
+
+  @ApiProperty({ type: [String] })
+  columns!: string[];
+}
+
+export class RosterIssueDto {
+  @ApiProperty({ type: Number, description: 'The line a spreadsheet shows, header counted.' })
+  line!: number;
+
+  @ApiProperty({ type: String })
+  column!: string;
+
+  @ApiProperty({ type: String })
+  message!: string;
+}
+
+export class RosterPreviewRowDto {
+  @ApiProperty({ type: Number })
+  line!: number;
+
+  @ApiProperty({ type: String })
+  fullName!: string;
+
+  @ApiProperty({ type: String })
+  email!: string;
+
+  @ApiProperty({ type: String })
+  agentCode!: string;
+
+  @ApiProperty({ type: String })
+  role!: string;
+}
+
+export class RosterPreviewDto {
+  @ApiProperty({ type: RosterIssueDto, isArray: true })
+  issues!: RosterIssueDto[];
+
+  @ApiProperty({ type: Number, description: 'Zero whenever anything is wrong: it is all or nothing.' })
+  willCreate!: number;
+
+  @ApiProperty({ type: RosterPreviewRowDto, isArray: true })
+  rows!: RosterPreviewRowDto[];
+}
+
+export class ImportedPersonDto {
+  @ApiProperty({ type: String })
+  fullName!: string;
+
+  @ApiProperty({ type: String })
+  email!: string;
+
+  @ApiProperty({ type: String })
+  agentCode!: string;
+
+  /**
+   * **The only place this exists.** Not stored in plaintext, not in the audit row, not
+   * recoverable — if the operator loses it before sending it on, the person uses
+   * Forgot your password instead.
+   */
+  @ApiProperty({ type: String, example: 'kfmp-3xqz-7bdn-r4vw' })
+  temporaryPassword!: string;
+}
+
+export class RosterCommitDto {
+  @ApiProperty({ type: ImportedPersonDto, isArray: true })
+  created!: ImportedPersonDto[];
+}

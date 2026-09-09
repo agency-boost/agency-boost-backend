@@ -24,6 +24,7 @@ describe('AdminController', () => {
       {} as never,
       {} as never,
       audit as never,
+      {} as never,
     );
     return { controller, audit };
   }

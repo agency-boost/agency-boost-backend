@@ -116,6 +116,13 @@ export class MeDto {
   @ApiProperty({ type: String, nullable: true, description: 'The real Super Admin, when this is a support session.' })
   impersonatedBy!: string | null;
 
+  @ApiProperty({
+    type: Boolean,
+    description: 'They are on a password somebody else generated. Every route but this one, '
+      + 'change-password and logout answers 403 until it is replaced (P3.6-T4).',
+  })
+  mustChangePassword!: boolean;
+
   @ApiProperty({ type: String, isArray: true, description: 'Resolved from the database on every request.' })
   permissions!: string[];
 }

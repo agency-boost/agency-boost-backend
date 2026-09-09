@@ -5,7 +5,7 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { ContextResolver } from '@/modules/auth/context-resolver';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
 import { TokenSigner } from '@/modules/auth/token-signer';
-import { IS_PUBLIC } from './auth.decorators';
+import { ALLOWS_TEMPORARY_PASSWORD, IS_PUBLIC } from './auth.decorators';
 
 /**
  * Verifies the access token and attaches the resolved RequestContext.
@@ -77,7 +77,36 @@ export class AuthGuard implements CanActivate {
       );
     }
 
-    request.context = await this.resolver.resolve(claims.sub, impersonator);
+    const context = await this.resolver.resolve(claims.sub, impersonator);
+
+    /*
+     * **A temporary password buys three routes and nothing else.**
+     *
+     * The roster import generates a password, an admin reads it and emails it on, and the
+     * person who signs in with it has demonstrated control of a mailbox — not that the
+     * account is theirs. Anybody who saw the email, or the admin's screen, or the
+     * spreadsheet it was pasted into, holds the same credential.
+     *
+     * Enforced here rather than by a redirect on the client, because a redirect leaves
+     * the temporary password working against the API for as long as the account exists —
+     * and the API is the part somebody with a copy of the credential would use.
+     */
+    if (context.mustChangePassword) {
+      const allowed = this.reflector.getAllAndOverride<boolean>(ALLOWS_TEMPORARY_PASSWORD, [
+        execution.getHandler(),
+        execution.getClass(),
+      ]);
+      if (!allowed) {
+        throw new DomainException(
+          ErrorCode.AUTH_PASSWORD_CHANGE_REQUIRED,
+          'Choose your own password before you go any further. The one you signed in with '
+            + 'was generated for you, and somebody else has seen it.',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+    }
+
+    request.context = context;
     return true;
   }
 }

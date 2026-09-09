@@ -12,6 +12,7 @@ import {
 } from '@/modules/org/org.response.dto';
 import {
   KpmRequestRowDto, KpmViewDto, OrgLevelRowDto, PlatformAdminRowDto, PlatformOverviewDto,
+  RosterCommitDto, RosterPreviewDto, RosterTemplateDto,
 } from '@/modules/tenants/tenant.response.dto';
 import {
   AuditEntryResponseDto, CompanyResponseDto, PublicCompanyDto,
@@ -108,6 +109,9 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AdminController_readTenant: { type: KpmViewDto },
   AdminController_assignOwner: { type: KpmViewDto },
   AdminController_setStatus: { type: KpmViewDto },
+  AdminController_rosterTemplate: { type: RosterTemplateDto },
+  AdminController_previewRoster: { type: RosterPreviewDto },
+  AdminController_importRoster: { type: RosterCommitDto },
   AdminController_readAudit: { type: AuditEntryResponseDto, isArray: true },
   AdminController_impersonate: { type: ImpersonationSessionDto },
   AdminController_endImpersonation: { type: StatusAckDto },

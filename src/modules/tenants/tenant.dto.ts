@@ -237,3 +237,22 @@ export class CreateKpmRequestDto {
   @MaxLength(500)
   note?: string;
 }
+
+/**
+ * A roster file, as text.
+ *
+ * Sent as JSON rather than `multipart/form-data`: the file is a few kilobytes of CSV, the
+ * screen has already read it to show a preview, and a multipart body would mean a second
+ * parser, a size limit of its own and a different shape for preview and commit. The cap
+ * is 512 KB, which is a roster of tens of thousands and far past the 500-member office
+ * ceiling `performance-and-scale.md` sets.
+ */
+export class RosterCsvDto {
+  @ApiProperty({
+    description: 'The file contents. The header must match GET /admin/tenants/roster-template.',
+    maxLength: 512_000,
+  })
+  @IsString()
+  @MaxLength(512_000)
+  csv!: string;
+}

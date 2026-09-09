@@ -33,6 +33,7 @@ import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { KpmRequestService } from '@/modules/tenants/kpm-request.service';
 import { AdminController } from '@/modules/tenants/admin.controller';
 import { CompanyController } from '@/modules/tenants/company.controller';
+import { RosterImportService } from '@/modules/tenants/roster-import.service';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import {
   MembershipHistory, MembershipHistorySchema,
@@ -117,6 +118,7 @@ describe('auth and admin over HTTP', () => {
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService, OrgLevelService,
+        RosterImportService,
         MembershipRepository, HierarchyService, DirectoryService, OnboardingService, LeaderCodeService, ApprovalsService, RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService,
         AuthGuard, PermissionsGuard,
       ],
@@ -224,6 +226,7 @@ describe('auth and admin over HTTP', () => {
     const refreshCookie = (cookies ?? []).find((c) => c.startsWith('agencyboost_refresh='));
     return {
       id: String(user!._id),
+      email,
       accessToken: (login.body as { accessToken: string }).accessToken,
       refreshCookie: refreshCookie ?? '',
     };
@@ -288,6 +291,54 @@ describe('auth and admin over HTTP', () => {
         })
         .expect(400);
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    });
+
+    /*
+     * P3.6-T4, and the reason the gate is in `AuthGuard` rather than in a redirect.
+     *
+     * A roster-imported account signs in on a password an admin generated, read, and put
+     * in an email. Anybody who saw that email — or the admin's screen, or the spreadsheet
+     * it was pasted into — holds the same credential. A client-side redirect would leave
+     * it working against the API for the life of the account, and the API is exactly what
+     * somebody with a copy would use.
+     */
+    it('lets a temporary password reach three routes and no others', async () => {
+      const person = await makeUser(`temp-${Math.random()}@kpm.test`);
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      await users.updateOne({ _id: person.id }, { $set: { mustChangePassword: true } });
+      const auth = { Authorization: `Bearer ${person.accessToken}` };
+
+      // The three that let them fix it.
+      await api().get('/api/v1/auth/me').set(auth).expect(200);
+
+      // Everything else, including the routes a brand-new person would otherwise reach.
+      // `/members` is a permission the person does not hold anyway — which is the point:
+      // the guard refuses before `PermissionsGuard` is ever consulted, so the answer is
+      // about the password rather than about the grant.
+      for (const path of ['/api/v1/join/me', '/api/v1/join/kpms', '/api/v1/members']) {
+        const res = await api().get(path).set(auth).expect(403);
+        expect(res.body.error.code).toBe('AUTH_PASSWORD_CHANGE_REQUIRED');
+      }
+    });
+
+    it('opens the rest of the product the moment the password is theirs', async () => {
+      const person = await makeUser(`temp2-${Math.random()}@kpm.test`);
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      await users.updateOne({ _id: person.id }, { $set: { mustChangePassword: true } });
+      const auth = { Authorization: `Bearer ${person.accessToken}` };
+
+      await api().get('/api/v1/join/me').set(auth).expect(403);
+
+      await api().post('/api/v1/auth/change-password').set(auth)
+        .send({ currentPassword: PASSWORD, newPassword: 'a different long password' })
+        .expect(200);
+
+      // Changing a password signs every session out, so this is a fresh one — which is
+      // itself the point: the token minted under the temporary password is dead.
+      const again = await api().post('/api/v1/auth/login')
+        .send({ email: person.email, password: 'a different long password' }).expect(200);
+      await api().get('/api/v1/join/me')
+        .set({ Authorization: `Bearer ${again.body.accessToken}` }).expect(200);
     });
 
     it('refuses /auth/me without a token', async () => {
@@ -1029,6 +1080,113 @@ describe('auth and admin over HTTP', () => {
 
       expect(first.body.error.code).toBe('ORG_INVITE_EXPIRED');
       expect(first.body.error.message).toBe(second.body.error.message);
+    });
+  });
+
+  describe('filling an office from a spreadsheet (P3.6-T4)', () => {
+    async function anOffice() {
+      const sa = await makeUser(`sa-roster-${Math.random()}@agencyboost.test`, 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const companyId = await anInsurer();
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({
+          companyId,
+          code: `${Math.floor(Math.random() * 9000) + 1000}`,
+          branchName: 'Roster Branch',
+        })
+        .expect(201);
+      return { auth, kpmId: String(kpm.body._id) };
+    }
+
+    const file = (...rows: string[]) =>
+      ['fullName,email,agentCode,role,leaderAgentCode', ...rows].join('\n');
+
+    it('offers the template, on a route an :id would otherwise swallow', async () => {
+      const { auth } = await anOffice();
+      const res = await api().get('/api/v1/admin/tenants/roster-template').set(auth).expect(200);
+      expect(res.body.header).toBe('fullName,email,agentCode,role,leaderAgentCode');
+    });
+
+    it('previews without writing, then commits the whole file', async () => {
+      const { auth, kpmId } = await anOffice();
+      const csv = file(
+        `Root,root-${Math.random()}@k.test,RT-${Math.random()},ab,`,
+      ).replace(/RT-0\./, 'RT-');
+
+      const preview = await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
+        .set(auth).send({ csv }).expect(200);
+      expect(preview.body.issues).toEqual([]);
+      expect(preview.body.willCreate).toBe(1);
+
+      const committed = await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
+        .set(auth).send({ csv }).expect(201);
+      expect(committed.body.created).toHaveLength(1);
+      // The password comes back once, and nowhere else.
+      expect(committed.body.created[0].temporaryPassword).toMatch(/^[a-z2-9-]+$/);
+    });
+
+    it('signs an imported person in, and lets them nowhere until they choose a password', async () => {
+      // The whole point of the flow, end to end: an operator emails a password on, the
+      // person signs in with it, and the product is shut to them until it is theirs.
+      const { auth, kpmId } = await anOffice();
+      const email = `imported-${Math.random()}@k.test`;
+      const csv = file(`Imported Person,${email},IMP-${Date.now()},ab,`);
+
+      const committed = await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
+        .set(auth).send({ csv }).expect(201);
+      const { temporaryPassword } = committed.body.created[0];
+
+      const login = await api().post('/api/v1/auth/login')
+        .send({ email, password: temporaryPassword }).expect(200);
+      const theirs = { Authorization: `Bearer ${login.body.accessToken}` };
+
+      await api().get('/api/v1/auth/me').set(theirs).expect(200);
+      const refused = await api().get('/api/v1/join/me').set(theirs).expect(403);
+      expect(refused.body.error.code).toBe('AUTH_PASSWORD_CHANGE_REQUIRED');
+
+      await api().post('/api/v1/auth/change-password').set(theirs)
+        .send({ currentPassword: temporaryPassword, newPassword: 'a password of my own' })
+        .expect(200);
+
+      const again = await api().post('/api/v1/auth/login')
+        .send({ email, password: 'a password of my own' }).expect(200);
+      const mine = await api().get('/api/v1/join/me')
+        .set({ Authorization: `Bearer ${again.body.accessToken}` }).expect(200);
+      expect(mine.body.status).toBe('active');
+    });
+
+    it('refuses the whole file for one bad row, and writes nothing', async () => {
+      const { auth, kpmId } = await anOffice();
+      const csv = file(
+        `Good,good-${Math.random()}@k.test,GD-${Date.now()},ab,`,
+        'Bad,not-an-email,BD-1,agent,',
+      );
+
+      const refused = await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
+        .set(auth).send({ csv }).expect(400);
+      expect(refused.body.error.details.issues).toHaveLength(1);
+
+      // And the good row did not land either.
+      const roster = await api().get('/api/v1/admin/tenants').set(auth).expect(200);
+      expect(roster.body.find((k: { _id: string }) => k._id === kpmId)).toBeDefined();
+      const preview = await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
+        .set(auth).send({ csv: file(`Good,good2-${Math.random()}@k.test,GD2-${Date.now()},ab,`) })
+        .expect(200);
+      expect(preview.body.willCreate).toBe(1);
+    });
+
+    it('is a platform operation: an Owner is refused every route', async () => {
+      const { auth, kpmId } = await anOffice();
+      const owner = await makeUser(`ro-${Math.random()}@k.test`);
+      await api().patch(`/api/v1/admin/tenants/${kpmId}/owner`)
+        .set(auth).send({ userId: owner.id }).expect(200);
+      const theirs = { Authorization: `Bearer ${owner.accessToken}` };
+
+      await api().get('/api/v1/admin/tenants/roster-template').set(theirs).expect(403);
+      await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
+        .set(theirs).send({ csv: file() }).expect(403);
+      await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
+        .set(theirs).send({ csv: file() }).expect(403);
     });
   });
 

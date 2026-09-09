@@ -12,6 +12,21 @@ export const RequirePermission = (permission: Permission) =>
   SetMetadata(REQUIRED_PERMISSION, permission);
 
 /**
+ * Reachable while somebody is still on a password they did not choose.
+ *
+ * An account created by the roster import (P3.6-T4) arrives with a generated password
+ * that an admin has read, written down and sent by email. Until it is replaced, the
+ * session proves control of a mailbox and nothing more — so `AuthGuard` refuses every
+ * route that does not carry this.
+ *
+ * The list is deliberately tiny: see who you are, change the password, sign out. It is a
+ * decorator rather than a path list inside the guard so that a route joining the list is
+ * a visible edit next to that route, not a string somebody appended to an array.
+ */
+export const ALLOWS_TEMPORARY_PASSWORD = 'allowsTemporaryPassword';
+export const AllowTemporaryPassword = () => SetMetadata(ALLOWS_TEMPORARY_PASSWORD, true);
+
+/**
  * Reads the context AuthGuard attached.
  *
  * Exported separately from the decorator because `createParamDecorator` keeps its

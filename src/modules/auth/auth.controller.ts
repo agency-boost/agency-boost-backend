@@ -5,7 +5,7 @@ import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nes
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import type { Request, Response } from 'express';
-import { Ctx, Public } from '@/common/auth/auth.decorators';
+import { AllowTemporaryPassword, Ctx, Public } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
@@ -170,6 +170,9 @@ export class AuthController {
    * body it does not have.
    */
   @ApiBody({ type: RefreshDto, required: false })
+  // The three routes somebody on a generated password may reach: see who they are,
+  // replace it, or leave (P3.6-T4).
+  @AllowTemporaryPassword()
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'End this session' })
@@ -219,6 +222,9 @@ export class AuthController {
   }
 
   @ApiBearerAuth()
+  // The three routes somebody on a generated password may reach: see who they are,
+  // replace it, or leave (P3.6-T4).
+  @AllowTemporaryPassword()
   @Post('change-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Change your password', description: 'Revokes your other sessions.' })
@@ -228,6 +234,9 @@ export class AuthController {
   }
 
   @ApiBearerAuth()
+  // The three routes somebody on a generated password may reach: see who they are,
+  // replace it, or leave (P3.6-T4).
+  @AllowTemporaryPassword()
   @Get('me')
   @ApiOperation({
     summary: 'Who am I, and what may I do',
@@ -252,6 +261,15 @@ export class AuthController {
       membership: ctx.membership,
       isImpersonating: ctx.isImpersonating,
       impersonatedBy: ctx.impersonatorUserId,
+      /*
+       * The reason every other route is answering 403 (P3.6-T4).
+       *
+       * `/auth/me` is one of the three routes a temporary password may reach, so it is
+       * the only place the client can learn what state it is in. Carried here rather than
+       * inferred from a 403 on some other call: one screen redirects on it, and inferring
+       * it would mean every screen guessing separately.
+       */
+      mustChangePassword: ctx.mustChangePassword,
       permissions,
     };
   }

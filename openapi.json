@@ -1532,6 +1532,65 @@
         "x-required-permission": "kpm:create"
       }
     },
+    "/api/v1/admin/tenants/roster-template": {
+      "get": {
+        "description": "The header row, exactly as the importer expects it. Declared above the routes that take an `:id`, because Nest would otherwise read \"roster-template\" as one.\n\n**Requires `kpm:import_roster`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AdminController_rosterTemplate_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RosterTemplateDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `kpm:import_roster`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The roster template",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "kpm:import_roster"
+      }
+    },
     "/api/v1/admin/tenants/{id}": {
       "get": {
         "operationId": "AdminController_readTenant_v1",
@@ -1804,6 +1863,202 @@
           "admin (Super Admin)"
         ],
         "x-required-permission": "kpm:suspend"
+      }
+    },
+    "/api/v1/admin/tenants/{id}/roster/preview": {
+      "post": {
+        "description": "Every problem in the file, per row, in one pass — shape, blanks, duplicates, a code the insurer already issued, a leader who is in neither the file nor the office. Writes nothing.\n\n**Requires `kpm:import_roster`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AdminController_previewRoster_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RosterCsvDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RosterPreviewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `kpm:import_roster`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "What a roster file would do",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "kpm:import_roster"
+      }
+    },
+    "/api/v1/admin/tenants/{id}/roster": {
+      "post": {
+        "description": "All or nothing: one bad row and nothing is written, because a half-imported roster cannot be told from a whole one. Returns each account with the password it starts on — **the only place those exist** — for the operator to pass on. Every one of them is refused every route but change-password until it is replaced.\n\n**Requires `kpm:import_roster`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AdminController_importRoster_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RosterCsvDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RosterCommitDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `kpm:import_roster`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create everybody in the file",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "kpm:import_roster"
       }
     },
     "/api/v1/admin/audit": {
@@ -5241,6 +5496,19 @@
           "status"
         ]
       },
+      "RosterCsvDto": {
+        "type": "object",
+        "properties": {
+          "csv": {
+            "type": "string",
+            "description": "The file contents. The header must match GET /admin/tenants/roster-template.",
+            "maxLength": 512000
+          }
+        },
+        "required": [
+          "csv"
+        ]
+      },
       "ImpersonateDto": {
         "type": "object",
         "properties": {
@@ -5668,6 +5936,10 @@
             "nullable": true,
             "description": "The real Super Admin, when this is a support session."
           },
+          "mustChangePassword": {
+            "type": "boolean",
+            "description": "They are on a password somebody else generated. Every route but this one, change-password and logout answers 403 until it is replaced (P3.6-T4)."
+          },
           "permissions": {
             "description": "Resolved from the database on every request.",
             "type": "array",
@@ -5681,6 +5953,7 @@
           "membership",
           "isImpersonating",
           "impersonatedBy",
+          "mustChangePassword",
           "permissions"
         ]
       },
@@ -6949,6 +7222,136 @@
           "suspendedAt",
           "suspendedReason",
           "createdAt"
+        ]
+      },
+      "RosterTemplateDto": {
+        "type": "object",
+        "properties": {
+          "header": {
+            "type": "string",
+            "example": "fullName,email,agentCode,role,leaderAgentCode"
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "header",
+          "columns"
+        ]
+      },
+      "RosterIssueDto": {
+        "type": "object",
+        "properties": {
+          "line": {
+            "type": "number",
+            "description": "The line a spreadsheet shows, header counted."
+          },
+          "column": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "line",
+          "column",
+          "message"
+        ]
+      },
+      "RosterPreviewRowDto": {
+        "type": "object",
+        "properties": {
+          "line": {
+            "type": "number"
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "agentCode": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "line",
+          "fullName",
+          "email",
+          "agentCode",
+          "role"
+        ]
+      },
+      "RosterPreviewDto": {
+        "type": "object",
+        "properties": {
+          "issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RosterIssueDto"
+            }
+          },
+          "willCreate": {
+            "type": "number",
+            "description": "Zero whenever anything is wrong: it is all or nothing."
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RosterPreviewRowDto"
+            }
+          }
+        },
+        "required": [
+          "issues",
+          "willCreate",
+          "rows"
+        ]
+      },
+      "ImportedPersonDto": {
+        "type": "object",
+        "properties": {
+          "fullName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "agentCode": {
+            "type": "string"
+          },
+          "temporaryPassword": {
+            "type": "string",
+            "example": "kfmp-3xqz-7bdn-r4vw"
+          }
+        },
+        "required": [
+          "fullName",
+          "email",
+          "agentCode",
+          "temporaryPassword"
+        ]
+      },
+      "RosterCommitDto": {
+        "type": "object",
+        "properties": {
+          "created": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportedPersonDto"
+            }
+          }
+        },
+        "required": [
+          "created"
         ]
       },
       "AuditEntryResponseDto": {

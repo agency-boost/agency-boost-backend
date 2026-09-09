@@ -85,6 +85,9 @@ export const PERMISSIONS = {
   /** The company tag is Super Admin's alone — the prototype disables the field. */
   'kpm:update_company_tag': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:suspend': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  // Filling a new office from a spreadsheet (P3.6-T4). It creates accounts and hands
+  // back the passwords they start on, which is why it goes no wider than the platform.
+  'kpm:import_roster': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:activate': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:archive': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:assign_owner': [{ grantee: SUPER_ADMIN, scope: 'all' }],

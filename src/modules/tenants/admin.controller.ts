@@ -13,11 +13,14 @@ import {
   CreateKpmDto,
   CreateOrgLevelDto,
   DeclineKpmRequestDto,
+  RosterCsvDto,
   SetStatusDto,
   UpdateOrgLevelDto,
 } from './tenant.dto';
 import { KpmRequestService } from './kpm-request.service';
 import { OrgLevelService } from './org-level.service';
+import { RosterImportService } from './roster-import.service';
+import { ROSTER_COLUMNS, ROSTER_TEMPLATE_HEADER } from './roster-csv';
 import { TenantService } from './tenant.service';
 
 /**
@@ -38,6 +41,7 @@ export class AdminController {
     private readonly orgLevels: OrgLevelService,
     private readonly impersonation: ImpersonationService,
     private readonly audit: AuditService,
+    private readonly roster: RosterImportService,
   ) {}
 
   @Get('overview')
@@ -192,6 +196,20 @@ export class AdminController {
     return this.tenants.createKpm(ctx, dto);
   }
 
+  // ---- Filling a new office from a spreadsheet (P3.6-T4). ----
+
+  @Get('tenants/roster-template')
+  @RequirePermission('kpm:import_roster')
+  @ApiOperation({
+    summary: 'The roster template',
+    description:
+      'The header row, exactly as the importer expects it. Declared above the routes '
+      + 'that take an `:id`, because Nest would otherwise read "roster-template" as one.',
+  })
+  async rosterTemplate() {
+    return { header: ROSTER_TEMPLATE_HEADER, columns: ROSTER_COLUMNS };
+  }
+
   @Get('tenants/:id')
   @RequirePermission('kpm:read_profile')
   @ApiOperation({ summary: 'Read one KPM' })
@@ -230,6 +248,43 @@ export class AdminController {
     @Body() dto: SetStatusDto,
   ) {
     return this.tenants.setStatus(ctx, id, dto.status, dto.reason);
+  }
+
+  @Post('tenants/:id/roster/preview')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('kpm:import_roster')
+  @ApiOperation({
+    summary: 'What a roster file would do',
+    description:
+      'Every problem in the file, per row, in one pass — shape, blanks, duplicates, a '
+      + 'code the insurer already issued, a leader who is in neither the file nor the '
+      + 'office. Writes nothing.',
+  })
+  async previewRoster(
+    @Ctx() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() dto: RosterCsvDto,
+  ) {
+    return this.roster.preview(ctx, id, dto.csv);
+  }
+
+  @Post('tenants/:id/roster')
+  @RequirePermission('kpm:import_roster')
+  @ApiOperation({
+    summary: 'Create everybody in the file',
+    description:
+      'All or nothing: one bad row and nothing is written, because a half-imported '
+      + 'roster cannot be told from a whole one. Returns each account with the password '
+      + 'it starts on — **the only place those exist** — for the operator to pass on. '
+      + 'Every one of them is refused every route but change-password until it is '
+      + 'replaced.',
+  })
+  async importRoster(
+    @Ctx() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() dto: RosterCsvDto,
+  ) {
+    return this.roster.commit(ctx, id, dto.csv);
   }
 
   @Get('audit')

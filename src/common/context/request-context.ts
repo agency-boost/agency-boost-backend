@@ -41,6 +41,18 @@ export class RequestContext {
      * does not exist.
      */
     private readonly actingInKpmId: string | null = null,
+    /**
+     * They are signed in on a password somebody else chose for them.
+     *
+     * Set on an account created by the roster import (P3.6-T4): the admin was handed a
+     * generated password to pass on, so until it is replaced, the person holding this
+     * session is not demonstrably the person the account belongs to.
+     *
+     * `AuthGuard` refuses everything but the handful of routes that let them fix it. The
+     * flag lives on the context rather than being re-read per route because the guard
+     * already resolves the user on every request — the check costs nothing.
+     */
+    readonly mustChangePassword: boolean = false,
   ) {
     Object.freeze(this);
   }

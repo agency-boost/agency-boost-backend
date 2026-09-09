@@ -42,6 +42,7 @@ import {
 } from '@/modules/tenants/company-org-level.schema';
 import { AdminController } from '@/modules/tenants/admin.controller';
 import { CompanyController } from '@/modules/tenants/company.controller';
+import { RosterImportService } from '@/modules/tenants/roster-import.service';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import {
   MembershipHistory, MembershipHistorySchema,
@@ -134,6 +135,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     TenantService,
     KpmRequestService,
     OrgLevelService,
+    RosterImportService,
     MembershipRepository,
     HierarchyService,
     DirectoryService,

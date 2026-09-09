@@ -299,7 +299,16 @@ export class AuthService {
     await this.users
       .updateOne(
         { _id: record.userId },
-        { $set: { passwordHash: await this.passwords.hash(newPassword) } },
+        {
+          $set: {
+            passwordHash: await this.passwords.hash(newPassword),
+            // A reset lifts the roster-import gate too (P3.6-T4). It proves control of
+            // the mailbox and produces a password nobody else has seen, which is the
+            // whole of what the gate is waiting for — and somebody who never received
+            // their generated password would otherwise be locked out with no way back.
+            mustChangePassword: false,
+          },
+        },
       )
       .exec();
 
@@ -328,7 +337,20 @@ export class AuthService {
       );
     }
 
+    if (next === current) {
+      // A generated password replaced by itself is not a replacement, and the guard would
+      // let them through on the credential the admin still has a copy of.
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED,
+        'Choose a different password from the one you are using now.',
+        HttpStatus.BAD_REQUEST,
+        { field: 'password' },
+      );
+    }
+
     user.passwordHash = await this.passwords.hash(next);
+    // The one thing that lifts the roster-import gate (P3.6-T4). Nothing else clears it.
+    user.mustChangePassword = false;
     await user.save();
     await this.logoutAll(userId, 'password changed');
   }

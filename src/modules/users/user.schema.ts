@@ -79,6 +79,20 @@ export class User {
   @Prop({ type: Date, default: null })
   emailVerifiedAt!: Date | null;
 
+  /**
+   * They are signed in on a password somebody else chose for them.
+   *
+   * Set by the roster import (P3.6-T4), which generates one and hands it to the admin to
+   * pass on. Until it is replaced, `AuthGuard` refuses every route but the ones that let
+   * them replace it — a screen-level redirect would leave the temporary password working
+   * against the API for as long as the account exists.
+   *
+   * Cleared by `POST /auth/change-password`, and by nothing else. A reset through the
+   * forgot-password flow clears it too, because that also proves control of the mailbox.
+   */
+  @Prop({ type: Boolean, default: false })
+  mustChangePassword!: boolean;
+
   @Prop({ type: Date, default: null })
   lastLoginAt!: Date | null;
 
