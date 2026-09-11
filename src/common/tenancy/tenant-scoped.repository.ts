@@ -139,6 +139,28 @@ export abstract class TenantScopedRepository<T extends Document> {
       .exec();
   }
 
+  /**
+   * Update every row matching a filter, scoped.
+   *
+   * A real operation rather than a convenience — cancelling every request somebody still
+   * has open is one write, and doing it as a read plus a loop would be several, none of
+   * them atomic with the others. `raw-writes.tenancy.spec.ts` exists because this shape
+   * was being hand-written; here the tenant is injected like everywhere else.
+   */
+  async updateMany(
+    ctx: RequestContext,
+    filter: FilterQuery<T>,
+    update: UpdateQuery<T>,
+  ): Promise<number> {
+    const result = await this.model
+      .updateMany(
+        this.scope(ctx, 'updateMany', filter),
+        { ...update, $set: { ...(update.$set ?? {}), updatedBy: ctx.membershipId } },
+      )
+      .exec();
+    return result.modifiedCount;
+  }
+
   /** Soft delete. There is no hard delete on this class, deliberately. */
   async softDeleteById(ctx: RequestContext, id: string, at: Date): Promise<T | null> {
     return this.model

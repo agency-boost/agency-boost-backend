@@ -1591,6 +1591,371 @@
         "x-required-permission": "kpm:import_roster"
       }
     },
+    "/api/v1/admin/companies/{companyId}/template/{kind}": {
+      "get": {
+        "description": "The draft if there is one, else the newest published, else a starting point built from the platform defaults — a company with nothing published is the normal state of a new insurer, and an empty answer would mean retyping twelve activity types from a PDF. `officesBehind` says how many of this company's offices are on something older, which is the count the Superadmin prototype puts on its front page.\n\n**Requires `platform_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AdminController_readTemplate_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformTemplateDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `platform_template:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A company's template of one kind",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "platform_template:read"
+      },
+      "put": {
+        "description": "The whole payload, not a patch: a template is edited and copied as one document, and merging two versions of an ordered list of codes has no answer anybody would predict. Creates the draft if this is the first edit since publishing.\n\n**Requires `platform_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AdminController_saveTemplateDraft_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveTemplateDraftDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformTemplateDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `platform_template:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save the working copy",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "platform_template:write"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/template/{kind}/history": {
+      "get": {
+        "description": "Newest first. A published version is immutable; this is the record of them.\n\n**Requires `platform_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AdminController_templateHistory_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlatformTemplateDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `platform_template:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every version of one template",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "platform_template:read"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/template/{kind}/publish": {
+      "post": {
+        "description": "Becomes the version new offices are seeded from. **Reaches nothing that already exists** — copy-on-provision means copy once, and an office that has diverged keeps its divergence. Refuses a payload that would produce a broken office, because the alternative is discovering it while creating one for a real branch.\n\n**Requires `platform_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AdminController_publishTemplate_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformTemplateDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `platform_template:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Publish the draft",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "platform_template:write"
+      }
+    },
     "/api/v1/admin/tenants/{id}": {
       "get": {
         "operationId": "AdminController_readTenant_v1",
@@ -6812,6 +7177,124 @@
         "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
       }
     },
+    "/api/v1/kpm/settings/publish-state": {
+      "get": {
+        "description": "What agents are working against, and whether the office has edited anything since. Compared by version rather than by timestamp: clocks and edit ordering are a worse comparison than a counter.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_publishState_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishStateDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Whether there is anything to publish",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:read"
+      }
+    },
+    "/api/v1/kpm/settings/publish": {
+      "post": {
+        "description": "Renders the live rows into one document. Until this is pressed, agents keep seeing the previous copy — an Owner restructuring a taxonomy does it in steps, and between them a ratio can name a type archived a minute ago that nobody can log against any more.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_publish_v1",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishStateDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Publish the working copy to this office's agents",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
     "/api/v1/kpm/settings/branch-info": {
       "get": {
         "description": "The same view the console reads. Company and Owner come back so the screen can show them the way the prototype does — disabled, and labelled *tagged by Superadmin*.\n\n**Requires `kpm:read_profile`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -7301,6 +7784,18 @@
           "companyId",
           "code",
           "branchName"
+        ]
+      },
+      "SaveTemplateDraftDto": {
+        "type": "object",
+        "properties": {
+          "payload": {
+            "type": "object",
+            "description": "The whole payload for this kind. Shape depends on the kind: `activity_taxonomy` is `{ categories, types }`, `lead_pipeline` is `{ statuses }`, `ratio_set` is `{ ratios }`."
+          }
+        },
+        "required": [
+          "payload"
         ]
       },
       "AssignOwnerDto": {
@@ -8617,6 +9112,69 @@
           "statuses"
         ]
       },
+      "PlatformTemplateDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Empty when nothing has been saved yet."
+          },
+          "companyId": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "activity_taxonomy",
+              "lead_pipeline",
+              "ratio_set",
+              "activation_checklist",
+              "training_taxonomy",
+              "capability_ladder"
+            ]
+          },
+          "version": {
+            "type": "number",
+            "description": "The version this is, or will be once published."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published",
+              "archived"
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "description": "Shape depends on `kind`."
+          },
+          "publishedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "publishedVersion": {
+            "type": "number",
+            "nullable": true,
+            "description": "What new offices are seeded from today. Null when nothing is published."
+          },
+          "officesBehind": {
+            "type": "number",
+            "description": "How many of this company's offices were built from something older — including those built before anything was published at all."
+          }
+        },
+        "required": [
+          "id",
+          "companyId",
+          "kind",
+          "version",
+          "status",
+          "payload",
+          "publishedAt",
+          "publishedVersion",
+          "officesBehind"
+        ]
+      },
       "RatioDefinitionDto": {
         "type": "object",
         "properties": {
@@ -8721,6 +9279,32 @@
           "ratios",
           "leadPipelines",
           "version"
+        ]
+      },
+      "PublishStateDto": {
+        "type": "object",
+        "properties": {
+          "publishedVersion": {
+            "type": "number",
+            "description": "What agents are on. 0 when nothing is published."
+          },
+          "workingVersion": {
+            "type": "number",
+            "description": "The highest live row version."
+          },
+          "hasUnpublishedChanges": {
+            "type": "boolean"
+          },
+          "publishedAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "publishedVersion",
+          "workingVersion",
+          "hasUnpublishedChanges",
+          "publishedAt"
         ]
       },
       "KpmViewDto": {

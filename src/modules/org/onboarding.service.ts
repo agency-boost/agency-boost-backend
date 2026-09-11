@@ -12,7 +12,7 @@ import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { HierarchyService } from './hierarchy.service';
-import { JoinRequest, JoinRequestDocument } from './join-request.schema';
+import { JoinRequestRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { MembershipDocument } from './membership.schema';
 
@@ -68,7 +68,7 @@ export class OnboardingService {
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
     @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
-    @InjectModel(JoinRequest.name) private readonly requests: Model<JoinRequestDocument>,
+    private readonly requests: JoinRequestRepository,
     private readonly audit: AuditService,
     private readonly notifications: NotificationService,
     private readonly clock: Clock,
@@ -126,9 +126,12 @@ export class OnboardingService {
     const kpm = await this.kpms.findOne({ _id: membership.kpmId, deletedAt: null }).exec();
     const company = kpm ? await this.companies.findOne({ _id: kpm.companyId }).exec() : null;
 
-    const request = await this.requests
-      .findOne({ kpmId: membership.kpmId, membershipId: String(membership._id), status: 'pending' })
-      .exec();
+    // The caller may be in no office yet, so this reads by membership across offices —
+    // the named cross-tenant escape rather than an absent filter (invariant §1).
+    const request = await this.requests.pendingForMembership(
+      membership.kpmId,
+      String(membership._id),
+    );
 
     return {
       kpmId: membership.kpmId,
@@ -232,9 +235,7 @@ export class OnboardingService {
     const byUser = new Map(users.map((u) => [String(u._id), u]));
 
     const mine = ctx.membershipId
-      ? await this.requests
-          .findOne({ kpmId: ctx.kpmId, membershipId: ctx.membershipId, status: 'pending' })
-          .exec()
+      ? await this.requests.findOne(ctx, { membershipId: ctx.membershipId, status: 'pending' })
       : null;
     const self = ctx.membershipId ? await this.members.findById(ctx, ctx.membershipId) : null;
 
@@ -308,15 +309,13 @@ export class OnboardingService {
 
     // Replace rather than stack: asking someone else is a change of mind, not a second
     // request, and two open rows would let two approvers both say yes.
-    await this.requests
-      .updateMany(
-        { kpmId: ctx.kpmId, membershipId: ctx.membershipId, status: 'pending' },
-        { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
-      )
-      .exec();
+    await this.requests.updateMany(
+      ctx,
+      { membershipId: ctx.membershipId, status: 'pending' },
+      { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
+    );
 
-    await this.requests.create({
-      kpmId: ctx.kpmId,
+    await this.requests.create(ctx, {
       membershipId: ctx.membershipId,
       leaderMembershipId,
       status: 'pending',
@@ -353,13 +352,12 @@ export class OnboardingService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const { modifiedCount } = await this.requests
-      .updateMany(
-        { kpmId: ctx.kpmId, membershipId: ctx.membershipId, status: 'pending' },
-        { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
-      )
-      .exec();
-    if (modifiedCount === 0) throw new NotFoundException('Join request');
+    const cancelled = await this.requests.updateMany(
+      ctx,
+      { membershipId: ctx.membershipId, status: 'pending' },
+      { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
+    );
+    if (cancelled === 0) throw new NotFoundException('Join request');
     return this.myState(ctx);
   }
 }

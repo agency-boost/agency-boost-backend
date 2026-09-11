@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Clock } from '@/common/clock/clock.port';
+import { RequestContext } from '@/common/context/request-context';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
@@ -9,7 +11,9 @@ import { ActivityCategory, ActivityCategoryDocument } from './activity-category.
 import { ActivityType, ActivityTypeDocument } from './activity-type.schema';
 import { LeadStatus, LeadStatusDocument } from './lead-status.schema';
 import { RatioDefinition, RatioDefinitionDocument } from './ratio-definition.schema';
+import { ConfigSnapshot, ConfigSnapshotDocument } from './config-snapshot.schema';
 import { PlatformTemplate, PlatformTemplateDocument } from './platform-template.schema';
+import { TenantConfigService } from './tenant-config.service';
 
 export interface ProvisionedTaxonomy {
   categories: number;
@@ -56,9 +60,40 @@ export class ProvisioningService {
     @InjectModel(ActivityType.name) private readonly types: Model<ActivityTypeDocument>,
     @InjectModel(LeadStatus.name) private readonly leadStatuses: Model<LeadStatusDocument>,
     @InjectModel(RatioDefinition.name) private readonly ratios: Model<RatioDefinitionDocument>,
+    @InjectModel(ConfigSnapshot.name)
+    private readonly snapshots: Model<ConfigSnapshotDocument>,
     @InjectModel(PlatformTemplate.name)
     private readonly templates: Model<PlatformTemplateDocument>,
+    private readonly clock: Clock,
+    // Reads the rows this service has just written, and renders them the way agents will
+    // read them — one renderer, so the snapshot and the live read cannot disagree.
+    private readonly renderer: TenantConfigService,
   ) {}
+
+  /**
+   * Publish the copy a brand-new office starts on (P4-T6).
+   *
+   * Written at provisioning rather than waiting for an Owner to press Publish: an office
+   * whose agents see nothing until somebody notices a button is a worse first day than one
+   * that simply works. The payload is rendered here from what was just copied, so it is
+   * consistent by construction.
+   */
+  async publishInitialSnapshotFor(kpmId: string, ctx: RequestContext): Promise<void> {
+    const payload = await this.renderer.read(ctx);
+    await this.snapshots.create({
+      kpmId,
+      version: 1,
+      sourceVersion: payload.version,
+      payload: payload as unknown as Record<string, unknown>,
+      publishedAt: this.clock.now(),
+      // Nobody pressed anything. Attributing it to the Super Admin who created the office
+      // would say they reviewed a taxonomy they have not seen.
+      publishedBy: null,
+      deletedAt: null,
+      createdBy: null,
+      updatedBy: null,
+    });
+  }
 
   /**
    * The newest **published** template of a kind for a company, or nothing.

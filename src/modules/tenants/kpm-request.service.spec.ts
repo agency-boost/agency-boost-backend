@@ -23,6 +23,9 @@ import { ActivityCategory, ActivityCategorySchema } from '@/modules/config/activ
 import { ActivityType, ActivityTypeSchema } from '@/modules/config/activity-type.schema';
 import { LeadStatus, LeadStatusSchema } from '@/modules/config/lead-status.schema';
 import { RatioDefinition, RatioDefinitionSchema } from '@/modules/config/ratio-definition.schema';
+import { ConfigSnapshot, ConfigSnapshotSchema } from '@/modules/config/config-snapshot.schema';
+import { configModule } from '../../../test/config-module';
+import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
 import {
   PlatformTemplate, PlatformTemplateSchema,
 } from '@/modules/config/platform-template.schema';
@@ -52,6 +55,7 @@ describe('KpmRequestService (P3.5-T2)', () => {
     const auditModel = mongoose.model(AuditLog.name, AuditLogSchema);
     const memberModel = mongoose.model(Membership.name, MembershipSchema);
     const historyModel = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
+    const historyRepo = new MembershipHistoryRepository(historyModel as never);
     const levels = mongoose.model(CompanyOrgLevel.name, CompanyOrgLevelSchema);
     const repo = new MembershipRepository(memberModel as never);
     const clock = new FixedClock(NOW);
@@ -63,12 +67,15 @@ describe('KpmRequestService (P3.5-T2)', () => {
       mongoose.model(ActivityType.name, ActivityTypeSchema) as never,
       mongoose.model(LeadStatus.name, LeadStatusSchema) as never,
       mongoose.model(RatioDefinition.name, RatioDefinitionSchema) as never,
+      mongoose.model(ConfigSnapshot.name, ConfigSnapshotSchema) as never,
       mongoose.model(PlatformTemplate.name, PlatformTemplateSchema) as never,
+      new FixedClock(NOW),
+      configModule(NOW).config,
     );
     tenants = new TenantService(
       kpms as never, companies as never, users as never, requests as never, audit, clock,
       new HierarchyService(
-        repo, kpms as never, users as never, historyModel as never, clock, orgLevels,
+        repo, kpms as never, users as never, historyRepo, clock, orgLevels,
       ), repo,
       orgLevels,
       provisioning,

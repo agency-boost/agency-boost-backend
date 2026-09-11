@@ -41,6 +41,7 @@ export class TenantConfigController {
     private readonly leadStatuses: LeadStatusService,
     private readonly ratios: RatioService,
     private readonly tenants: TenantService,
+    private readonly config: TenantConfigService,
   ) {}
 
   @Get('activity-types')
@@ -276,6 +277,35 @@ export class TenantConfigController {
     return this.ratios.restore(ctx, id);
   }
 
+  // ---- Publishing (P4-T6). ----
+
+  @Get('publish-state')
+  @RequirePermission('tenant_config:read')
+  @ApiOperation({
+    summary: 'Whether there is anything to publish',
+    description:
+      'What agents are working against, and whether the office has edited anything since. '
+      + 'Compared by version rather than by timestamp: clocks and edit ordering are a '
+      + 'worse comparison than a counter.',
+  })
+  async publishState(@Ctx() ctx: RequestContext) {
+    return this.config.state(ctx);
+  }
+
+  @Post('publish')
+  @RequirePermission('tenant_config:write')
+  @ApiOperation({
+    summary: 'Publish the working copy to this office\'s agents',
+    description:
+      'Renders the live rows into one document. Until this is pressed, agents keep seeing '
+      + 'the previous copy — an Owner restructuring a taxonomy does it in steps, and '
+      + 'between them a ratio can name a type archived a minute ago that nobody can log '
+      + 'against any more.',
+  })
+  async publish(@Ctx() ctx: RequestContext) {
+    return this.config.publish(ctx);
+  }
+
   // ---- Branch info (P4-T5). ----
 
   @Get('branch-info')
@@ -337,7 +367,7 @@ export class TenantConfigReadController {
       + 'requests to render one screen is how that budget is spent before anything is drawn.',
   })
   async readConfig(@Ctx() ctx: RequestContext, @Res({ passthrough: true }) res: Response) {
-    const config = await this.config.read(ctx);
+    const config = await this.config.readPublished(ctx);
     const etag = this.config.etag(config);
     res.setHeader('ETag', etag);
     // Revalidate every time rather than trusting a max-age: configuration changes rarely

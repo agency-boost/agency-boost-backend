@@ -12,7 +12,7 @@ import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { HierarchyService } from './hierarchy.service';
-import { JoinRequest, JoinRequestDocument } from './join-request.schema';
+import { JoinRequestRepository } from './org.repositories';
 import { leaderCodeUrl } from './leader-code';
 import { MembershipRepository } from './membership.repository';
 import { MembershipDocument } from './membership.schema';
@@ -54,7 +54,7 @@ export class LeaderCodeService {
   constructor(
     private readonly members: MembershipRepository,
     private readonly hierarchy: HierarchyService,
-    @InjectModel(JoinRequest.name) private readonly requests: Model<JoinRequestDocument>,
+    private readonly requests: JoinRequestRepository,
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
     @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
@@ -155,12 +155,11 @@ export class LeaderCodeService {
     });
 
     // Any request they had open is moot — they are in, and by another door.
-    await this.requests
-      .updateMany(
-        { kpmId: scoped.kpmId, membershipId: String(membership._id), status: 'pending' },
-        { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
-      )
-      .exec();
+    await this.requests.updateMany(
+      scoped,
+      { membershipId: String(membership._id), status: 'pending' },
+      { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
+    );
 
     const joiner = await this.users.findOne({ _id: ctx.userId }).exec();
     await this.notifications.send({

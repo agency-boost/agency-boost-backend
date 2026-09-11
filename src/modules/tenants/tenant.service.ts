@@ -368,6 +368,17 @@ export class TenantService {
     await this.provisioning.seedRatioDefinitions(
       String(kpm._id), input.companyId, seeded.typeCodes,
     );
+
+    /*
+     * And publish what was just copied (P4-T6), so the office's agents have something to
+     * work against from the first minute rather than after somebody notices a Publish
+     * button. Rendered here from the rows that were written above, so it is consistent by
+     * construction.
+     */
+    await this.provisioning.publishInitialSnapshotFor(
+      String(kpm._id),
+      this.contextFor(ctx, String(kpm._id)),
+    );
     kpm.seededFromTemplateId = seeded.seededFromTemplateId;
     kpm.seededFromVersion = seeded.seededFromVersion;
     await kpm.save();
@@ -386,6 +397,17 @@ export class TenantService {
     });
 
     return this.toView(kpm);
+  }
+
+  /**
+   * A context scoped to an office that is being created.
+   *
+   * The caller is a Super Admin who is in no tenant, and the tenant-scoped repository fails
+   * closed without a `kpmId` — correctly, because forgetting one is a cross-tenant leak.
+   * This is the narrow, named exception: an office that exists as of three lines ago.
+   */
+  private contextFor(ctx: RequestContext, kpmId: string): RequestContext {
+    return RequestContext.superAdminInTenant(ctx.userId, kpmId);
   }
 
   /**

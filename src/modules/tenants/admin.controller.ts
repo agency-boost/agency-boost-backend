@@ -1,4 +1,7 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Put,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
@@ -27,6 +30,9 @@ import {
   ROSTER_TEMPLATE_HEADER,
 } from './roster-csv';
 import { TenantService } from './tenant.service';
+import { TemplateService } from '@/modules/config/template.service';
+import { SaveTemplateDraftDto } from '@/modules/config/template.dto';
+import { TEMPLATE_KINDS, type TemplateKind } from '@/modules/config/platform-template.schema';
 
 /**
  * The Super Admin console.
@@ -47,6 +53,7 @@ export class AdminController {
     private readonly impersonation: ImpersonationService,
     private readonly audit: AuditService,
     private readonly roster: RosterImportService,
+    private readonly templates: TemplateService,
   ) {}
 
   @Get('overview')
@@ -222,6 +229,87 @@ export class AdminController {
       template: ROSTER_TEMPLATE,
       examples: ROSTER_EXAMPLES,
     };
+  }
+
+  // ---- A company's KPM template (P4-T8, ADR-0018). Above `tenants/:id` for the same
+  // reason `roster-template` is: a literal segment must be declared before a parameter
+  // that would swallow it.
+
+  @Get('companies/:companyId/template/:kind')
+  @RequirePermission('platform_template:read')
+  @ApiOperation({
+    summary: 'A company\'s template of one kind',
+    description:
+      'The draft if there is one, else the newest published, else a starting point built '
+      + 'from the platform defaults — a company with nothing published is the normal state '
+      + 'of a new insurer, and an empty answer would mean retyping twelve activity types '
+      + 'from a PDF. `officesBehind` says how many of this company\'s offices are on '
+      + 'something older, which is the count the Superadmin prototype puts on its front page.',
+  })
+  async readTemplate(
+    @Param('companyId') companyId: string,
+    @Param('kind') kind: string,
+  ) {
+    return this.templates.read(companyId, this.kindOf(kind));
+  }
+
+  @Get('companies/:companyId/template/:kind/history')
+  @RequirePermission('platform_template:read')
+  @ApiOperation({
+    summary: 'Every version of one template',
+    description: 'Newest first. A published version is immutable; this is the record of them.',
+  })
+  async templateHistory(
+    @Param('companyId') companyId: string,
+    @Param('kind') kind: string,
+  ) {
+    return this.templates.history(companyId, this.kindOf(kind));
+  }
+
+  @Put('companies/:companyId/template/:kind')
+  @RequirePermission('platform_template:write')
+  @ApiOperation({
+    summary: 'Save the working copy',
+    description:
+      'The whole payload, not a patch: a template is edited and copied as one document, '
+      + 'and merging two versions of an ordered list of codes has no answer anybody would '
+      + 'predict. Creates the draft if this is the first edit since publishing.',
+  })
+  async saveTemplateDraft(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Param('kind') kind: string,
+    @Body() dto: SaveTemplateDraftDto,
+  ) {
+    return this.templates.saveDraft(ctx, companyId, this.kindOf(kind), dto.payload);
+  }
+
+  @Post('companies/:companyId/template/:kind/publish')
+  @RequirePermission('platform_template:write')
+  @ApiOperation({
+    summary: 'Publish the draft',
+    description:
+      'Becomes the version new offices are seeded from. **Reaches nothing that already '
+      + 'exists** — copy-on-provision means copy once, and an office that has diverged '
+      + 'keeps its divergence. Refuses a payload that would produce a broken office, '
+      + 'because the alternative is discovering it while creating one for a real branch.',
+  })
+  async publishTemplate(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Param('kind') kind: string,
+  ) {
+    return this.templates.publish(ctx, companyId, this.kindOf(kind));
+  }
+
+  /** An unknown kind is a 400 naming the ones that exist, not an empty answer. */
+  private kindOf(raw: string): TemplateKind {
+    if (!(TEMPLATE_KINDS as readonly string[]).includes(raw)) {
+      throw new BadRequestException(
+        `Unknown template kind "${raw}". One of: ${TEMPLATE_KINDS.join(', ')}.`,
+      );
+    }
+    return raw as TemplateKind;
   }
 
   @Get('tenants/:id')

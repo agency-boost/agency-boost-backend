@@ -18,6 +18,7 @@ import { Kpm, KpmSchema } from './kpm.schema';
 import { OrgLevelService } from './org-level.service';
 import { RosterImportService } from './roster-import.service';
 import { ROSTER_TEMPLATE_HEADER } from './roster-csv';
+import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
 
 const H = ROSTER_TEMPLATE_HEADER;
 const NOW = new Date('2026-09-09T02:00:00.000Z');
@@ -52,7 +53,7 @@ describe('RosterImportService (P3.6-T4)', () => {
       members,
       kpms as never,
       users as never,
-      mongoose.model(MembershipHistory.name) as never,
+      new MembershipHistoryRepository(mongoose.model(MembershipHistory.name) as never),
       clock,
       orgLevels,
     );

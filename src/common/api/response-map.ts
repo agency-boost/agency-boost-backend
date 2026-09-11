@@ -19,7 +19,7 @@ import {
 } from '@/modules/tenants/platform.response.dto';
 import {
   ActivityCategoryDto, ActivityTypeDto, LeadPipelineDto, LeadStatusDto, RatioDefinitionDto,
-  TenantConfigDto,
+  PlatformTemplateDto, PublishStateDto, TenantConfigDto,
 } from '@/modules/config/config.response.dto';
 
 /** What one operation answers with: a class, and whether it comes back as an array. */
@@ -88,7 +88,13 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_setTerminal: { type: LeadPipelineDto },
   TenantConfigController_archiveLeadStatus: { type: LeadStatusDto },
   TenantConfigController_restoreLeadStatus: { type: LeadStatusDto },
+  AdminController_readTemplate: { type: PlatformTemplateDto },
+  AdminController_templateHistory: { type: PlatformTemplateDto, isArray: true },
+  AdminController_saveTemplateDraft: { type: PlatformTemplateDto },
+  AdminController_publishTemplate: { type: PlatformTemplateDto },
   TenantConfigReadController_readConfig: { type: TenantConfigDto },
+  TenantConfigController_publishState: { type: PublishStateDto },
+  TenantConfigController_publish: { type: PublishStateDto },
   TenantConfigController_readBranchInfo: { type: KpmViewDto },
   TenantConfigController_updateBranchInfo: { type: KpmViewDto },
   TenantConfigController_listRatios: { type: RatioDefinitionDto, isArray: true },

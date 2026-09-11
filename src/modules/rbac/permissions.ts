@@ -135,6 +135,17 @@ export const PERMISSIONS = {
   // The company role ladder (ADR-0012). Read is Super Admin only *for now*: nothing
   // tenant-side consumes it until the role-badge maps become server-supplied, and a
   // grant nobody exercises is the opposite of a permission.
+  /*
+   * The company's KPM template (ADR-0018, P4-T8).
+   *
+   * Super Admin only, and separate from `company:crud` because they are different acts: one
+   * creates the company, the other decides what every office of it starts life counting.
+   * A future platform role that maintains presets without creating companies is then a
+   * grant rather than a refactor — which is the same argument `kpm_request:read` and
+   * `kpm_request:decide` were split on.
+   */
+  'platform_template:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  'platform_template:write': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'org_level:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'org_level:crud': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'super_admin:grant': [{ grantee: SUPER_ADMIN, scope: 'all' }],

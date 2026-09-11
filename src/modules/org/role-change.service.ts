@@ -11,7 +11,7 @@ import { NotificationTemplate } from '@/modules/notifications/notification.types
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { initialsOf } from './directory.service';
 import { HierarchyService } from './hierarchy.service';
-import { MembershipHistory, MembershipHistoryDocument } from './membership-history.schema';
+import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole } from './membership.schema';
 
@@ -58,8 +58,7 @@ export class RoleChangeService {
   constructor(
     private readonly members: MembershipRepository,
     private readonly hierarchy: HierarchyService,
-    @InjectModel(MembershipHistory.name)
-    private readonly history: Model<MembershipHistoryDocument>,
+    private readonly history: MembershipHistoryRepository,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
     private readonly audit: AuditService,
     private readonly notifications: NotificationService,
@@ -186,14 +185,12 @@ export class RoleChangeService {
 
     // Append-only: the open role edge is closed, and a new one opened. The Role change
     // log reads exactly these rows, and nothing else could reconstruct them.
-    await this.history
-      .updateMany(
-        { kpmId: ctx.kpmId, membershipId, eventType: 'role_changed', validTo: null },
-        { $set: { validTo: this.clock.now() } },
-      )
-      .exec();
-    await this.history.create({
-      kpmId: ctx.kpmId,
+    await this.history.updateMany(
+      ctx,
+      { membershipId, eventType: 'role_changed', validTo: null },
+      { $set: { validTo: this.clock.now() } },
+    );
+    await this.history.create(ctx, {
       membershipId,
       eventType: 'role_changed',
       fromRole,
@@ -242,11 +239,11 @@ export class RoleChangeService {
   async log(ctx: RequestContext, limit = 100): Promise<RoleChangeEntry[]> {
     this.requireMember(ctx);
 
-    const rows = await this.history
-      .find({ kpmId: ctx.kpmId, eventType: 'role_changed', deletedAt: null })
-      .sort({ validFrom: -1 })
-      .limit(limit)
-      .exec();
+    const rows = await this.history.find(
+      ctx,
+      { eventType: 'role_changed' },
+      { sort: { validFrom: -1 }, limit },
+    );
     if (rows.length === 0) return [];
 
     const memberships = await this.members.find(ctx, {

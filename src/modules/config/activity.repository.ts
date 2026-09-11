@@ -6,6 +6,7 @@ import { ActivityCategory, ActivityCategoryDocument } from './activity-category.
 import { ActivityType, ActivityTypeDocument } from './activity-type.schema';
 import { LeadStatus, LeadStatusDocument } from './lead-status.schema';
 import { RatioDefinition, RatioDefinitionDocument } from './ratio-definition.schema';
+import { ConfigSnapshot, ConfigSnapshotDocument } from './config-snapshot.schema';
 
 /**
  * The office's activity categories. No escape hatch to the raw model, by design — the
@@ -40,5 +41,13 @@ export class LeadStatusRepository extends TenantScopedRepository<LeadStatusDocum
 export class RatioDefinitionRepository extends TenantScopedRepository<RatioDefinitionDocument> {
   constructor(@InjectModel(RatioDefinition.name) model: Model<RatioDefinitionDocument>) {
     super(model, 'ratioDefinitions');
+  }
+}
+
+/** The office's published configuration copies. */
+@Injectable()
+export class ConfigSnapshotRepository extends TenantScopedRepository<ConfigSnapshotDocument> {
+  constructor(@InjectModel(ConfigSnapshot.name) model: Model<ConfigSnapshotDocument>) {
+    super(model, 'configSnapshots');
   }
 }

@@ -33,11 +33,14 @@ import {
   RatioDefinition, RatioDefinitionSchema,
 } from '@/modules/config/ratio-definition.schema';
 import {
+  ConfigSnapshot, ConfigSnapshotSchema,
+} from '@/modules/config/config-snapshot.schema';
+import {
   PlatformTemplate, PlatformTemplateSchema,
 } from '@/modules/config/platform-template.schema';
 import {
-  ActivityCategoryRepository, ActivityTypeRepository, LeadStatusRepository,
-  RatioDefinitionRepository,
+  ActivityCategoryRepository, ActivityTypeRepository, ConfigSnapshotRepository,
+  LeadStatusRepository, RatioDefinitionRepository,
 } from '@/modules/config/activity.repository';
 import { LeadStatusService } from '@/modules/config/lead-status.service';
 import { RatioService } from '@/modules/config/ratio.service';
@@ -47,6 +50,9 @@ import {
   TenantConfigController, TenantConfigReadController,
 } from '@/modules/config/config.controller';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
+import { TemplateService } from '@/modules/config/template.service';
+import { OfficeCounter } from '@/modules/config/office-counter.port';
+import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { AuthToken, AuthTokenSchema } from '@/modules/auth/auth-token.schema';
@@ -74,6 +80,9 @@ import {
   MembershipHistory, MembershipHistorySchema,
 } from '@/modules/org/membership-history.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import {
+  GroupRepository, JoinRequestRepository, MembershipHistoryRepository,
+} from '@/modules/org/org.repositories';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { DirectoryService } from '@/modules/org/directory.service';
 import { OrgController } from '@/modules/org/org.controller';
@@ -128,6 +137,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: ActivityType.name, schema: ActivityTypeSchema },
       { name: LeadStatus.name, schema: LeadStatusSchema },
       { name: RatioDefinition.name, schema: RatioDefinitionSchema },
+      { name: ConfigSnapshot.name, schema: ConfigSnapshotSchema },
       { name: PlatformTemplate.name, schema: PlatformTemplateSchema },
     ]),
   ],
@@ -191,7 +201,10 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     LeadStatusService,
     RatioDefinitionRepository,
     RatioService,
+    ConfigSnapshotRepository,
     TenantConfigService,
+    TemplateService,
+    { provide: OfficeCounter, useClass: KpmOfficeCounter },
     ProvisioningService,
     AuditService,
     NotificationService,
@@ -205,6 +218,9 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     OrgLevelService,
     RosterImportService,
     MembershipRepository,
+    GroupRepository,
+    JoinRequestRepository,
+    MembershipHistoryRepository,
     HierarchyService,
     DirectoryService,
     OnboardingService,

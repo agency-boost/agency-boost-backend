@@ -7,7 +7,8 @@ import { DomainException, NotFoundException } from '@/common/errors/domain.excep
 import { ErrorCode } from '@/common/errors/error-codes';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
-import { MembershipHistory, MembershipHistoryDocument, MembershipEvent } from './membership-history.schema';
+import { MembershipEvent, MembershipHistory } from './membership-history.schema';
+import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { generateLeaderCode } from './leader-code';
@@ -38,8 +39,7 @@ export class HierarchyService {
     private readonly members: MembershipRepository,
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
-    @InjectModel(MembershipHistory.name)
-    private readonly history: Model<MembershipHistoryDocument>,
+    private readonly history: MembershipHistoryRepository,
     private readonly clock: Clock,
     // No cycle: OrgLevelService knows nothing about the hierarchy.
     private readonly orgLevels: OrgLevelService,
@@ -124,8 +124,7 @@ export class HierarchyService {
     eventType: MembershipEvent,
     fields: Partial<MembershipHistory> = {},
   ): Promise<void> {
-    await this.history.create({
-      kpmId: ctx.kpmId,
+    await this.history.create(ctx, {
       membershipId,
       eventType,
       validFrom: this.clock.now(),
@@ -139,22 +138,22 @@ export class HierarchyService {
   /**
    * Close the open edge of a kind, so a change never overwrites what came before.
    *
-   * `kpmId` leads the filter because it leads every index on `membershipHistory`
-   * (`{kpmId, membershipId, validFrom}`) — without it this is a collection scan. It is
-   * also invariant §1: a query is scoped because the collection is scoped, not because
-   * the id it happens to use is unique enough to get away with it.
+   * The tenant comes from the repository now rather than from an argument. It still leads
+   * the filter — it leads every index on `membershipHistory` — and it is still invariant
+   * §1: a query is scoped because the *collection* is scoped, not because the id it
+   * happens to use is unique enough to get away with it. What changed is that it can no
+   * longer be left out by hand.
    */
   private async closeEdge(
-    kpmId: string,
+    ctx: RequestContext,
     membershipId: string,
     eventType: MembershipEvent,
   ): Promise<void> {
-    await this.history
-      .updateMany(
-        { kpmId, membershipId, eventType, validTo: null },
-        { $set: { validTo: this.clock.now() } },
-      )
-      .exec();
+    await this.history.updateMany(
+      ctx,
+      { membershipId, eventType, validTo: null },
+      { $set: { validTo: this.clock.now() } },
+    );
   }
 
   /**
@@ -390,7 +389,7 @@ export class HierarchyService {
 
     // The membership's own tenant, not the context's: it was just read through the
     // tenant repository so the two agree, and this one is typed non-null.
-    await this.closeEdge(String(member.kpmId), membershipId, 're_parented');
+    await this.closeEdge(ctx, membershipId, 're_parented');
     await this.record(ctx, membershipId, 're_parented', {
       fromLeaderId: previousLeaderId,
       toLeaderId: member.leaderId,
@@ -443,17 +442,16 @@ export class HierarchyService {
    * date and had not yet closed.
    */
   async leaderAsOf(ctx: RequestContext, membershipId: string, at: Date): Promise<string | null> {
-    const edges = await this.history
-      .find({
-        kpmId: ctx.kpmId,
+    const edges = await this.history.find(
+      ctx,
+      {
         membershipId,
         eventType: { $in: ['joined', 're_parented'] },
         validFrom: { $lte: at },
         $or: [{ validTo: null }, { validTo: { $gt: at } }],
-      })
-      .sort({ validFrom: -1 })
-      .limit(1)
-      .exec();
+      },
+      { sort: { validFrom: -1 }, limit: 1 },
+    );
     return edges[0]?.toLeaderId ?? null;
   }
 }

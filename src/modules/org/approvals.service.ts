@@ -11,8 +11,9 @@ import { NotificationTemplate } from '@/modules/notifications/notification.types
 import { can } from '@/modules/rbac/permissions';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { HierarchyService } from './hierarchy.service';
-import { JoinRequest, JoinRequestDocument } from './join-request.schema';
-import { MembershipHistory, MembershipHistoryDocument } from './membership-history.schema';
+import { JoinRequestDocument } from './join-request.schema';
+import { JoinRequestRepository } from './org.repositories';
+import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole, MembershipDocument } from './membership.schema';
 
@@ -86,9 +87,8 @@ export class ApprovalsService {
   constructor(
     private readonly members: MembershipRepository,
     private readonly hierarchy: HierarchyService,
-    @InjectModel(JoinRequest.name) private readonly requests: Model<JoinRequestDocument>,
-    @InjectModel(MembershipHistory.name)
-    private readonly history: Model<MembershipHistoryDocument>,
+    private readonly requests: JoinRequestRepository,
+    private readonly history: MembershipHistoryRepository,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
     private readonly audit: AuditService,
     private readonly notifications: NotificationService,
@@ -128,16 +128,16 @@ export class ApprovalsService {
     // whole queue — `leader_request:approve` grants them `own-kpm`, and a request nobody
     // answers is the failure this screen exists to prevent.
     const rows = await this.requests
-      .find({
-        kpmId: ctx.kpmId,
-        deletedAt: null,
-        status: 'pending',
-        ...(this.isTenantAdmin(ctx)
-          ? {}
-          : { $or: [{ leaderMembershipId: me }, { routedToMembershipId: me }] }),
-      })
-      .sort({ createdAt: -1 })
-      .exec();
+      .find(
+        ctx,
+        {
+          status: 'pending',
+          ...(this.isTenantAdmin(ctx)
+            ? {}
+            : { $or: [{ leaderMembershipId: me }, { routedToMembershipId: me }] }),
+        },
+        { sort: { createdAt: -1 } },
+      );
     if (rows.length === 0) return [];
 
     const memberships = await this.members.find(ctx, {
@@ -215,16 +215,12 @@ export class ApprovalsService {
 
     // Whose requests this reader is deciding — the same narrowing `inbox()` applies, so
     // the destinations always belong to a row the reader can actually see.
-    const open = await this.requests
-      .find({
-        kpmId: ctx.kpmId,
-        deletedAt: null,
-        status: 'pending',
-        ...(this.isTenantAdmin(ctx)
-          ? {}
-          : { $or: [{ leaderMembershipId: me }, { routedToMembershipId: me }] }),
-      })
-      .exec();
+    const open = await this.requests.find(ctx, {
+      status: 'pending',
+      ...(this.isTenantAdmin(ctx)
+        ? {}
+        : { $or: [{ leaderMembershipId: me }, { routedToMembershipId: me }] }),
+    });
     const leaders = [...new Set(open.map((r) => r.leaderMembershipId))];
     if (leaders.length === 0) return [];
 
@@ -252,12 +248,9 @@ export class ApprovalsService {
     requestId: string,
     me: string,
   ): Promise<JoinRequestDocument> {
-    const request = await this.requests
-      .findOne({ _id: requestId, kpmId: ctx.kpmId, deletedAt: null })
-      .exec()
-      // A malformed id is "not here", not a 500: these arrive from a URL, and an
-      // uncaught CastError renders as INTERNAL_ERROR and is logged as unhandled.
-      .catch(() => null);
+    // A malformed id is "not here", not a 500 — the repository answers `null` for an id
+    // that cannot match anything, so the `catch` this used to carry went with it.
+    const request = await this.requests.findOne(ctx, { _id: requestId });
     // Somebody else's request reads the same as one that does not exist — unless you
     // administer the office, in which case every request in it is yours to decide.
     const addressedToMe =
@@ -338,19 +331,14 @@ export class ApprovalsService {
     // changes no outcome today. It is here because a write addressed by `_id` alone is
     // one refactor away from being reachable without that proof, and the invariant is
     // that a tenant-scoped write carries its tenant (`domain-invariants.md` §1).
-    await this.requests
-      .updateOne(
-        { _id: requestId, kpmId: ctx.kpmId },
-        {
-          $set: {
-            status: 'approved',
-            decidedAt: this.clock.now(),
-            decidedByMembershipId: me,
-            routedToMembershipId: leaderId === requested ? null : leaderId,
-          },
-        },
-      )
-      .exec();
+    await this.requests.updateById(ctx, requestId, {
+      $set: {
+        status: 'approved',
+        decidedAt: this.clock.now(),
+        decidedByMembershipId: me,
+        routedToMembershipId: leaderId === requested ? null : leaderId,
+      },
+    });
 
     await this.notifications.send({
       userId: joiner.userId,
@@ -366,19 +354,14 @@ export class ApprovalsService {
     const me = this.requireLeader(ctx);
     const request = await this.openRequest(ctx, requestId, me);
 
-    await this.requests
-      .updateOne(
-        { _id: requestId, kpmId: ctx.kpmId },
-        {
-          $set: {
-            status: 'declined',
-            decidedAt: this.clock.now(),
-            decidedByMembershipId: me,
-            reason: reason?.trim() || null,
-          },
-        },
-      )
-      .exec();
+    await this.requests.updateById(ctx, requestId, {
+      $set: {
+        status: 'declined',
+        decidedAt: this.clock.now(),
+        decidedByMembershipId: me,
+        reason: reason?.trim() || null,
+      },
+    });
 
     // The membership stays `pending`. They are still registered to the office and may
     // ask somebody else — declining is not removal, and the prototype's version, which
@@ -510,12 +493,11 @@ export class ApprovalsService {
     await this.attach(ctx, target, me, { action: 'member.tagged_by_leader' });
 
     // Any request they had open is moot — they are in somebody's unit now.
-    await this.requests
-      .updateMany(
-        { kpmId: ctx.kpmId, membershipId, status: 'pending' },
-        { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
-      )
-      .exec();
+    await this.requests.updateMany(
+      ctx,
+      { membershipId, status: 'pending' },
+      { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
+    );
 
     await this.notifications.send({
       userId: target.userId,
@@ -580,19 +562,12 @@ export class ApprovalsService {
 
     // The joined edge was opened when they registered; this closes it and opens the one
     // that names their leader. Nothing is overwritten.
-    await this.history
-      .updateMany(
-        {
-          kpmId: ctx.kpmId,
-          membershipId: String(member._id),
-          eventType: 'joined',
-          validTo: null,
-        },
-        { $set: { validTo: this.clock.now() } },
-      )
-      .exec();
-    await this.history.create({
-      kpmId: ctx.kpmId,
+    await this.history.updateMany(
+      ctx,
+      { membershipId: String(member._id), eventType: 'joined', validTo: null },
+      { $set: { validTo: this.clock.now() } },
+    );
+    await this.history.create(ctx, {
       membershipId: String(member._id),
       eventType: wasPending ? 'joined' : 're_parented',
       toRole: member.role,

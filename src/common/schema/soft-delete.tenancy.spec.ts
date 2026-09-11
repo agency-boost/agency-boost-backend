@@ -21,6 +21,7 @@ import {
 import { ActivityTypeSchema } from '@/modules/config/activity-type.schema';
 import { LeadStatusSchema } from '@/modules/config/lead-status.schema';
 import { RatioDefinitionSchema } from '@/modules/config/ratio-definition.schema';
+import { ConfigSnapshotSchema } from '@/modules/config/config-snapshot.schema';
 import { PlatformTemplateSchema } from '@/modules/config/platform-template.schema';
 
 /**
@@ -48,6 +49,7 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['activityTypes', ActivityTypeSchema],
   ['leadStatuses', LeadStatusSchema],
   ['ratioDefinitions', RatioDefinitionSchema],
+  ['configSnapshots', ConfigSnapshotSchema],
   ['platformTemplates', PlatformTemplateSchema],
 ];
 
@@ -73,6 +75,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [ActivityTypeSchema, 'ActivityTypeSchema'],
   [LeadStatusSchema, 'LeadStatusSchema'],
   [RatioDefinitionSchema, 'RatioDefinitionSchema'],
+  [ConfigSnapshotSchema, 'ConfigSnapshotSchema'],
   [PlatformTemplateSchema, 'PlatformTemplateSchema'],
   [MembershipSchema, 'MembershipSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],

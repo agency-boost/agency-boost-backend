@@ -1,18 +1,10 @@
 import mongoose from 'mongoose';
-import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
-import { AuditService } from '@/modules/audit/audit.service';
 import { SEED_ACTIVITY_TYPES } from '@/domain/constants';
-import { ActivityCategory, ActivityCategorySchema } from './activity-category.schema';
-import { ActivityType, ActivityTypeSchema } from './activity-type.schema';
-import { LeadStatus, LeadStatusSchema } from './lead-status.schema';
-import { PlatformTemplate, PlatformTemplateSchema } from './platform-template.schema';
-import { ActivityCategoryRepository, ActivityTypeRepository } from './activity.repository';
 import { ActivityConfigService } from './activity.service';
 import { ProvisioningService } from './provisioning.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
-import { RatioDefinition, RatioDefinitionSchema } from './ratio-definition.schema';
+import { configModule } from '../../../test/config-module';
 
 const NOW = new Date('2026-09-11T02:00:00Z');
 const KPM_A = '66f0000000000000000000a1';
@@ -38,25 +30,10 @@ describe('the office activity taxonomy (P4-T1)', () => {
 
   beforeAll(async () => {
     await startMongo();
-    const categories = mongoose.model(ActivityCategory.name, ActivityCategorySchema);
-    const types = mongoose.model(ActivityType.name, ActivityTypeSchema);
-    templates = mongoose.model(PlatformTemplate.name, PlatformTemplateSchema) as never;
-    const audit = new AuditService(
-      mongoose.model(AuditLog.name, AuditLogSchema) as never,
-    );
-    service = new ActivityConfigService(
-      new ActivityCategoryRepository(categories as never),
-      new ActivityTypeRepository(types as never),
-      audit,
-      new FixedClock(NOW),
-    );
-    provisioning = new ProvisioningService(
-      categories as never,
-      types as never,
-      mongoose.model(LeadStatus.name, LeadStatusSchema) as never,
-      mongoose.model(RatioDefinition.name, RatioDefinitionSchema) as never,
-      templates as never,
-    );
+    const wired = configModule(NOW);
+    service = wired.activity;
+    provisioning = wired.provisioning;
+    templates = wired.templates as never;
   });
 
   afterAll(stopMongo);

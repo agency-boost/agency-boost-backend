@@ -39,6 +39,9 @@ import {
   MembershipHistory, MembershipHistorySchema,
 } from '@/modules/org/membership-history.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import {
+  GroupRepository, JoinRequestRepository, MembershipHistoryRepository,
+} from '@/modules/org/org.repositories';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { DirectoryService } from '@/modules/org/directory.service';
 import { OrgController } from '@/modules/org/org.controller';
@@ -74,11 +77,14 @@ import {
   RatioDefinition, RatioDefinitionSchema,
 } from '@/modules/config/ratio-definition.schema';
 import {
+  ConfigSnapshot, ConfigSnapshotSchema,
+} from '@/modules/config/config-snapshot.schema';
+import {
   PlatformTemplate, PlatformTemplateSchema,
 } from '@/modules/config/platform-template.schema';
 import {
-  ActivityCategoryRepository, ActivityTypeRepository, LeadStatusRepository,
-  RatioDefinitionRepository,
+  ActivityCategoryRepository, ActivityTypeRepository, ConfigSnapshotRepository,
+  LeadStatusRepository, RatioDefinitionRepository,
 } from '@/modules/config/activity.repository';
 import { LeadStatusService } from '@/modules/config/lead-status.service';
 import { RatioService } from '@/modules/config/ratio.service';
@@ -88,6 +94,9 @@ import {
   TenantConfigController, TenantConfigReadController,
 } from '@/modules/config/config.controller';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
+import { TemplateService } from '@/modules/config/template.service';
+import { OfficeCounter } from '@/modules/config/office-counter.port';
+import { KpmOfficeCounter } from '@/modules/config/office-counter';
 
 /**
  * Boots the real controllers, guards and filter over a real database, and walks the
@@ -155,6 +164,7 @@ describe('auth and admin over HTTP', () => {
           { name: ActivityType.name, schema: ActivityTypeSchema },
           { name: LeadStatus.name, schema: LeadStatusSchema },
           { name: RatioDefinition.name, schema: RatioDefinitionSchema },
+          { name: ConfigSnapshot.name, schema: ConfigSnapshotSchema },
           { name: PlatformTemplate.name, schema: PlatformTemplateSchema },
         ]),
       ],
@@ -180,12 +190,20 @@ describe('auth and admin over HTTP', () => {
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         ActivityCategoryRepository, ActivityTypeRepository, ActivityConfigService,
         LeadStatusRepository, LeadStatusService, RatioDefinitionRepository, RatioService,
-        TenantConfigService,
+        ConfigSnapshotRepository,
+        TenantConfigService, TemplateService,
+        { provide: OfficeCounter, useClass: KpmOfficeCounter },
+    TemplateService,
+    { provide: OfficeCounter, useClass: KpmOfficeCounter },
         ProvisioningService,
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService, OrgLevelService,
         RosterImportService,
-        MembershipRepository, HierarchyService, DirectoryService, OnboardingService, LeaderCodeService, ApprovalsService, RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService,
+        MembershipRepository, GroupRepository, JoinRequestRepository,
+        MembershipHistoryRepository,
+    GroupRepository,
+    JoinRequestRepository,
+    MembershipHistoryRepository, HierarchyService, DirectoryService, OnboardingService, LeaderCodeService, ApprovalsService, RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService,
         AuthGuard, PermissionsGuard,
       ],
     }).compile();
@@ -1358,13 +1376,35 @@ describe('auth and admin over HTTP', () => {
       expect(second.body).toEqual({});
     });
 
-    it('changes the tag when the office changes what it counts', async () => {
+    it('P4-T6: an edit does not reach agents until it is published', async () => {
+      /*
+       * The gate this exists for. An Owner restructuring a taxonomy does it in steps, and
+       * between them a ratio can name a type archived a minute ago that nobody can log
+       * against. Agents stay on the published copy until somebody says otherwise.
+       */
       const { auth } = await anOfficeWithAgentAndOwner();
       const before = await api().get('/api/v1/kpm/config').set(auth).expect(200);
 
       const type = before.body.activity[1].types[0];
       await api().patch(`/api/v1/kpm/settings/activity-types/${type.id}`).set(auth)
         .send({ label: 'Renamed' }).expect(200);
+
+      // Unchanged, tag included — nothing an agent reads has moved.
+      await api().get('/api/v1/kpm/config')
+        .set({ ...auth, 'If-None-Match': before.headers.etag }).expect(304);
+
+      const state = await api().get('/api/v1/kpm/settings/publish-state').set(auth).expect(200);
+      expect(state.body.hasUnpublishedChanges).toBe(true);
+    });
+
+    it('P4-T6: changes the tag once it is published', async () => {
+      const { auth } = await anOfficeWithAgentAndOwner();
+      const before = await api().get('/api/v1/kpm/config').set(auth).expect(200);
+
+      const type = before.body.activity[1].types[0];
+      await api().patch(`/api/v1/kpm/settings/activity-types/${type.id}`).set(auth)
+        .send({ label: 'Renamed' }).expect(200);
+      await api().post('/api/v1/kpm/settings/publish').set(auth).expect(201);
 
       const after = await api().get('/api/v1/kpm/config')
         .set({ ...auth, 'If-None-Match': before.headers.etag }).expect(200);
@@ -1380,6 +1420,7 @@ describe('auth and admin over HTTP', () => {
       );
 
       await api().delete(`/api/v1/kpm/settings/activity-types/${type.id}`).set(auth).expect(200);
+      await api().post('/api/v1/kpm/settings/publish').set(auth).expect(201);
 
       const after = await api().get('/api/v1/kpm/config').set(auth).expect(200);
       const codes = after.body.activity

@@ -1,6 +1,4 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
@@ -9,7 +7,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { HierarchyService } from './hierarchy.service';
-import { MembershipHistory, MembershipHistoryDocument } from './membership-history.schema';
+import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { visibleTo } from './directory.service';
 import { RoleChangeService, TeamMember } from './role-change.service';
@@ -50,8 +48,7 @@ export class RemovalService {
     private readonly members: MembershipRepository,
     private readonly hierarchy: HierarchyService,
     private readonly roles: RoleChangeService,
-    @InjectModel(MembershipHistory.name)
-    private readonly history: Model<MembershipHistoryDocument>,
+    private readonly history: MembershipHistoryRepository,
     private readonly audit: AuditService,
     private readonly notifications: NotificationService,
     private readonly clock: Clock,
@@ -218,11 +215,8 @@ export class RemovalService {
     // Append-only. The open edge — whichever event opened it — is closed, and a
     // `removed` event opened in its place. Their agent code, role and leader at the
     // moment of removal all stay on the row; nothing is blanked.
-    await this.history
-      .updateMany({ kpmId: ctx.kpmId, membershipId, validTo: null }, { $set: { validTo: now } })
-      .exec();
-    await this.history.create({
-      kpmId: ctx.kpmId,
+    await this.history.updateMany(ctx, { membershipId, validTo: null }, { $set: { validTo: now } });
+    await this.history.create(ctx, {
       membershipId,
       eventType: 'removed',
       fromRole: target.role,

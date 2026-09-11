@@ -3,7 +3,9 @@ import type { ActivityCategoryView, ActivityTypeView } from './activity.service'
 import type { LeadPipelineView, LeadStatusView } from './lead-status.service';
 import { LEAD_PIPELINES, type LeadPipeline } from './lead-status.schema';
 import type { RatioDefinitionView } from './ratio.service';
-import type { TenantConfigView } from './tenant-config.service';
+import type { PublishState, TenantConfigView } from './tenant-config.service';
+import type { TemplateView } from './template.service';
+import { TEMPLATE_KINDS, type TemplateKind } from './platform-template.schema';
 import { RATIO_COMPARISONS, type RatioComparison } from './ratio-definition.schema';
 
 /**
@@ -173,4 +175,58 @@ export class TenantConfigDto implements TenantConfigView {
       + 'and not on a reorder, because a reorder rebinds nothing.',
   })
   version!: number;
+}
+
+/** A company's KPM template, as a Super Admin sees it (P4-T8, ADR-0018). */
+export class PlatformTemplateDto implements TemplateView {
+  @ApiProperty({ type: String, description: 'Empty when nothing has been saved yet.' })
+  id!: string;
+
+  @ApiProperty({ type: String })
+  companyId!: string;
+
+  @ApiProperty({ enum: TEMPLATE_KINDS })
+  kind!: TemplateKind;
+
+  @ApiProperty({ type: Number, description: 'The version this is, or will be once published.' })
+  version!: number;
+
+  @ApiProperty({ type: String, enum: ['draft', 'published', 'archived'] })
+  status!: 'draft' | 'published' | 'archived';
+
+  @ApiProperty({ type: Object, description: 'Shape depends on `kind`.' })
+  payload!: Record<string, unknown>;
+
+  @ApiProperty({ type: String, nullable: true })
+  publishedAt!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'What new offices are seeded from today. Null when nothing is published.',
+  })
+  publishedVersion!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    description:
+      'How many of this company\'s offices were built from something older — including '
+      + 'those built before anything was published at all.',
+  })
+  officesBehind!: number;
+}
+
+/** Whether the office has edited anything since agents last had a copy (P4-T6). */
+export class PublishStateDto implements PublishState {
+  @ApiProperty({ type: Number, description: 'What agents are on. 0 when nothing is published.' })
+  publishedVersion!: number;
+
+  @ApiProperty({ type: Number, description: 'The highest live row version.' })
+  workingVersion!: number;
+
+  @ApiProperty({ type: Boolean })
+  hasUnpublishedChanges!: boolean;
+
+  @ApiProperty({ type: String, nullable: true })
+  publishedAt!: string | null;
 }

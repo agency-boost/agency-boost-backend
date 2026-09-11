@@ -9,7 +9,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { User, UserDocument } from '@/modules/users/user.schema';
-import { MembershipHistory, MembershipHistoryDocument } from './membership-history.schema';
+import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole } from './membership.schema';
 
@@ -52,8 +52,7 @@ function initialsOf(name: string): string {
 export class AdminDelegationService {
   constructor(
     private readonly members: MembershipRepository,
-    @InjectModel(MembershipHistory.name)
-    private readonly history: Model<MembershipHistoryDocument>,
+    private readonly history: MembershipHistoryRepository,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
     private readonly audit: AuditService,
     private readonly notifications: NotificationService,
@@ -141,7 +140,7 @@ export class AdminDelegationService {
       },
     });
 
-    await this.record(ctx, kpmId, membershipId, 'admin_granted', now);
+    await this.record(ctx, membershipId, 'admin_granted', now);
 
     await this.notifications.send({
       userId: target.userId,
@@ -199,7 +198,7 @@ export class AdminDelegationService {
       },
     });
 
-    await this.record(ctx, kpmId, membershipId, 'admin_revoked', now);
+    await this.record(ctx, membershipId, 'admin_revoked', now);
 
     await this.notifications.send({
       userId: target.userId,
@@ -229,24 +228,20 @@ export class AdminDelegationService {
    */
   private async record(
     ctx: RequestContext,
-    kpmId: string,
     membershipId: string,
     eventType: 'admin_granted' | 'admin_revoked',
     at: Date,
   ): Promise<void> {
-    await this.history
-      .updateMany(
-        {
-          kpmId,
-          membershipId,
-          eventType: { $in: ['admin_granted', 'admin_revoked'] },
-          validTo: null,
-        },
-        { $set: { validTo: at } },
-      )
-      .exec();
-    await this.history.create({
-      kpmId,
+    await this.history.updateMany(
+      ctx,
+      {
+        membershipId,
+        eventType: { $in: ['admin_granted', 'admin_revoked'] },
+        validTo: null,
+      },
+      { $set: { validTo: at } },
+    );
+    await this.history.create(ctx, {
       membershipId,
       eventType,
       validFrom: at,

@@ -107,10 +107,19 @@ describe('raw-model writes are tenant-scoped', () => {
   const writes = rawWrites();
 
   it('finds the raw writes at all, so a silent zero cannot pass this suite', () => {
-    // The whole file is a regex over source. If a refactor changes how models are
-    // injected, every assertion below would pass vacuously — this is the tripwire.
-    expect(writes.length).toBeGreaterThanOrEqual(20);
-    expect(writes.some((w) => w.model === 'MembershipHistory')).toBe(true);
+    /*
+     * The whole file is a regex over source. If a refactor changes how models are
+     * injected, every assertion below would pass vacuously — this is the tripwire.
+     *
+     * **The floor goes down, not up.** It was 20, and anchored on `MembershipHistory`,
+     * until `P4-T11` moved `groups`, `joinRequests` and `membershipHistory` behind
+     * repositories — which is the point of that task, and is the suite's own success
+     * showing up as a failing number. It is anchored on `Notification` now: the one
+     * collection that is *declared* per-user rather than tenant-scoped
+     * (`CROSS_TENANT_INDEXES`), so it stays raw by design rather than by omission.
+     */
+    expect(writes.length).toBeGreaterThanOrEqual(10);
+    expect(writes.some((w) => w.model === 'Notification')).toBe(true);
   });
 
   it('every write to a tenant-scoped collection filters on kpmId', () => {

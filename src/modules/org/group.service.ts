@@ -7,7 +7,8 @@ import { DomainException, NotFoundException } from '@/common/errors/domain.excep
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
 import { User, UserDocument } from '@/modules/users/user.schema';
-import { Group, GroupDocument } from './group.schema';
+import { GroupDocument } from './group.schema';
+import { GroupRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 
 export interface GroupSummary {
@@ -51,7 +52,7 @@ export interface MemberTags {
 @Injectable()
 export class GroupService {
   constructor(
-    @InjectModel(Group.name) private readonly groups: Model<GroupDocument>,
+    private readonly groups: GroupRepository,
     private readonly members: MembershipRepository,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
     private readonly audit: AuditService,
@@ -70,12 +71,9 @@ export class GroupService {
   }
 
   async list(ctx: RequestContext): Promise<GroupSummary[]> {
-    const kpmId = this.requireTenantAdmin(ctx);
+    this.requireTenantAdmin(ctx);
 
-    const rows = await this.groups
-      .find({ kpmId, status: 'active', deletedAt: null })
-      .sort({ name: 1 })
-      .exec();
+    const rows = await this.groups.find(ctx, { status: 'active' }, { sort: { name: 1 } });
     if (rows.length === 0) return [];
 
     // One count for every group, rather than one query per group.
@@ -115,18 +113,17 @@ export class GroupService {
     ctx: RequestContext,
     input: { name: string; ownerMembershipId: string },
   ): Promise<GroupSummary[]> {
-    const kpmId = this.requireTenantAdmin(ctx);
+    this.requireTenantAdmin(ctx);
     const name = input.name.trim();
     await this.requireOwnerInOffice(ctx, input.ownerMembershipId);
-    await this.requireNameFree(kpmId, name, null);
+    await this.requireNameFree(ctx, name, null);
 
-    const created = await this.groups.create({
-      kpmId,
+    const created = await this.groups.create(ctx, {
       name,
       ownerMembershipId: input.ownerMembershipId,
       status: 'active',
       createdByMembershipId: ctx.membershipId,
-    });
+    } as Partial<GroupDocument>);
 
     await this.audit.record(ctx, {
       action: 'group.created',
@@ -143,16 +140,16 @@ export class GroupService {
     groupId: string,
     input: { name: string; ownerMembershipId: string },
   ): Promise<GroupSummary[]> {
-    const kpmId = this.requireTenantAdmin(ctx);
-    const group = await this.find(kpmId, groupId);
+    this.requireTenantAdmin(ctx);
+    const group = await this.find(ctx, groupId);
     const name = input.name.trim();
     await this.requireOwnerInOffice(ctx, input.ownerMembershipId);
-    await this.requireNameFree(kpmId, name, groupId);
+    await this.requireNameFree(ctx, name, groupId);
 
     const before = { name: group.name, ownerMembershipId: group.ownerMembershipId };
-    await this.groups
-      .updateOne({ _id: groupId, kpmId }, { $set: { name, ownerMembershipId: input.ownerMembershipId } })
-      .exec();
+    await this.groups.updateById(ctx, groupId, {
+      $set: { name, ownerMembershipId: input.ownerMembershipId },
+    });
 
     await this.audit.record(ctx, {
       action: 'group.updated',
@@ -175,15 +172,12 @@ export class GroupService {
    * still see who was in it.
    */
   async archive(ctx: RequestContext, groupId: string): Promise<GroupSummary[]> {
-    const kpmId = this.requireTenantAdmin(ctx);
-    const group = await this.find(kpmId, groupId);
+    this.requireTenantAdmin(ctx);
+    const group = await this.find(ctx, groupId);
 
-    await this.groups
-      .updateOne(
-        { _id: groupId, kpmId },
-        { $set: { status: 'archived', archivedAt: this.clock.now() } },
-      )
-      .exec();
+    await this.groups.updateById(ctx, groupId, {
+      $set: { status: 'archived', archivedAt: this.clock.now() },
+    });
 
     await this.audit.record(ctx, {
       action: 'group.archived',
@@ -218,7 +212,7 @@ export class GroupService {
     membershipId: string,
     input: { groupIds: string[]; isCoreLeader: boolean },
   ): Promise<MemberTags> {
-    const kpmId = this.requireTenantAdmin(ctx);
+    this.requireTenantAdmin(ctx);
     const member = await this.members.findById(ctx, membershipId);
     if (!member) throw new NotFoundException('Membership');
 
@@ -226,9 +220,7 @@ export class GroupService {
     // from another tenant would sit on the row unnoticed and count nowhere.
     const wanted = [...new Set(input.groupIds)];
     if (wanted.length > 0) {
-      const found = await this.groups
-        .find({ _id: { $in: wanted }, kpmId, status: 'active', deletedAt: null })
-        .exec();
+      const found = await this.groups.find(ctx, { _id: { $in: wanted }, status: 'active' });
       if (found.length !== wanted.length) {
         throw new DomainException(
           ErrorCode.ORG_GROUP_NOT_FOUND,
@@ -242,9 +234,7 @@ export class GroupService {
     // Tags on archived groups are kept — they are the record of a past cohort — so the
     // write is a union of what the panel offered and what it could not.
     const offered = new Set(
-      (await this.groups.find({ kpmId, status: 'active', deletedAt: null }).exec()).map((g) =>
-        String(g._id),
-      ),
+      (await this.groups.find(ctx, { status: 'active' })).map((g) => String(g._id)),
     );
     const retained = (member.groupIds ?? []).filter((id) => !offered.has(id));
     const groupIds = [...new Set([...wanted, ...retained])];
@@ -266,12 +256,14 @@ export class GroupService {
     return this.tagsFor(ctx, membershipId);
   }
 
-  private async find(kpmId: string, groupId: string): Promise<GroupDocument> {
-    const group = await this.groups
-      .findOne({ _id: groupId, kpmId, status: 'active', deletedAt: null })
-      .exec()
-      // A malformed id is "not here", not a 500.
-      .catch(() => null);
+  /**
+   * One live group of this office.
+   *
+   * A malformed id is "not here", not a 500 — the repository already answers `null` for an
+   * id that cannot match anything, so the `catch` this used to carry is gone with it.
+   */
+  private async find(ctx: RequestContext, groupId: string): Promise<GroupDocument> {
+    const group = await this.groups.findOne(ctx, { _id: groupId, status: 'active' });
     if (!group) throw new NotFoundException('Group');
     return group;
   }
@@ -288,10 +280,12 @@ export class GroupService {
     }
   }
 
-  private async requireNameFree(kpmId: string, name: string, exceptId: string | null): Promise<void> {
-    const clash = await this.groups
-      .findOne({ kpmId, name, status: 'active', deletedAt: null })
-      .exec();
+  private async requireNameFree(
+    ctx: RequestContext,
+    name: string,
+    exceptId: string | null,
+  ): Promise<void> {
+    const clash = await this.groups.findOne(ctx, { name, status: 'active' });
     if (clash && String(clash._id) !== exceptId) {
       throw new DomainException(
         ErrorCode.ORG_GROUP_NAME_TAKEN,

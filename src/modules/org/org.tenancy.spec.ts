@@ -26,6 +26,7 @@ import {
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { clearCollections, seedLadder, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
+import { GroupRepository, JoinRequestRepository, MembershipHistoryRepository } from './org.repositories';
 
 /** A clock that can be moved, so as-of-date history is testable without sleeping. */
 class MovableClock extends Clock {
@@ -82,6 +83,7 @@ describe('organisation', () => {
     await startMongo();
     const memberModel = mongoose.model(Membership.name, MembershipSchema);
     const historyModel = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
+    const historyRepo = new MembershipHistoryRepository(historyModel as never);
     const kpmModel = mongoose.model(Kpm.name, KpmSchema);
     users = userModel();
     clock = new MovableClock(new Date('2026-03-01T02:00:00Z'));
@@ -93,7 +95,7 @@ describe('organisation', () => {
       clock,
     );
     hierarchy = new HierarchyService(
-      members, kpmModel as never, users as never, historyModel as never, clock, orgLevels,
+      members, kpmModel as never, users as never, historyRepo, clock, orgLevels,
     );
     directory = new DirectoryService(members, users as never, kpmModel as never);
 
@@ -109,7 +111,9 @@ describe('organisation', () => {
       kpmModel as never,
       mongoose.model(Company.name, CompanySchema) as never,
       users as never,
-      mongoose.model(JoinRequest.name, JoinRequestSchema) as never,
+      new JoinRequestRepository(
+        mongoose.model(JoinRequest.name, JoinRequestSchema) as never,
+      ),
       new AuditService(mongoose.model(AuditLog.name, AuditLogSchema) as never),
       notifications as never,
       clock,
@@ -118,7 +122,7 @@ describe('organisation', () => {
     leaderCodes = new LeaderCodeService(
       members,
       hierarchy,
-      mongoose.model(JoinRequest.name) as never,
+      new JoinRequestRepository(mongoose.model(JoinRequest.name) as never),
       kpmModel as never,
       mongoose.model(Company.name) as never,
       users as never,
@@ -130,8 +134,8 @@ describe('organisation', () => {
     approvals = new ApprovalsService(
       members,
       hierarchy,
-      mongoose.model(JoinRequest.name) as never,
-      historyModel as never,
+      new JoinRequestRepository(mongoose.model(JoinRequest.name) as never),
+      historyRepo,
       users as never,
       new AuditService(mongoose.model(AuditLog.name) as never),
       notifications as never,
@@ -141,7 +145,7 @@ describe('organisation', () => {
     roles = new RoleChangeService(
       members,
       hierarchy,
-      historyModel as never,
+      historyRepo,
       users as never,
       new AuditService(mongoose.model(AuditLog.name) as never),
       notifications as never,
@@ -152,7 +156,7 @@ describe('organisation', () => {
       members,
       hierarchy,
       roles,
-      historyModel as never,
+      historyRepo,
       new AuditService(mongoose.model(AuditLog.name) as never),
       notifications as never,
       clock,
@@ -161,7 +165,7 @@ describe('organisation', () => {
     tree = new OrgTreeService(members, users as never);
 
     groups = new GroupService(
-      mongoose.model(Group.name, GroupSchema) as never,
+      new GroupRepository(mongoose.model(Group.name, GroupSchema) as never),
       members,
       users as never,
       new AuditService(mongoose.model(AuditLog.name) as never),
@@ -170,7 +174,7 @@ describe('organisation', () => {
 
     delegation = new AdminDelegationService(
       members,
-      historyModel as never,
+      historyRepo,
       users as never,
       new AuditService(mongoose.model(AuditLog.name) as never),
       notifications as never,

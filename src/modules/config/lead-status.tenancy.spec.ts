@@ -1,17 +1,9 @@
 import mongoose from 'mongoose';
-import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
-import { AuditService } from '@/modules/audit/audit.service';
-import { ActivityCategory, ActivityCategorySchema } from './activity-category.schema';
-import { ActivityType, ActivityTypeSchema } from './activity-type.schema';
-import { LeadStatus, LeadStatusSchema } from './lead-status.schema';
-import { PlatformTemplate, PlatformTemplateSchema } from './platform-template.schema';
-import { LeadStatusRepository } from './activity.repository';
 import { LeadStatusService } from './lead-status.service';
 import { ProvisioningService } from './provisioning.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
-import { RatioDefinition, RatioDefinitionSchema } from './ratio-definition.schema';
+import { configModule } from '../../../test/config-module';
 
 const NOW = new Date('2026-09-11T02:00:00Z');
 const KPM_A = '66f0000000000000000000a1';
@@ -32,20 +24,10 @@ describe('the office lead pipelines (P4-T3)', () => {
 
   beforeAll(async () => {
     await startMongo();
-    const statuses = mongoose.model(LeadStatus.name, LeadStatusSchema);
-    templates = mongoose.model(PlatformTemplate.name, PlatformTemplateSchema) as never;
-    service = new LeadStatusService(
-      new LeadStatusRepository(statuses as never),
-      new AuditService(mongoose.model(AuditLog.name, AuditLogSchema) as never),
-      new FixedClock(NOW),
-    );
-    provisioning = new ProvisioningService(
-      mongoose.model(ActivityCategory.name, ActivityCategorySchema) as never,
-      mongoose.model(ActivityType.name, ActivityTypeSchema) as never,
-      statuses as never,
-      mongoose.model(RatioDefinition.name, RatioDefinitionSchema) as never,
-      templates as never,
-    );
+    const wired = configModule(NOW);
+    service = wired.leads;
+    provisioning = wired.provisioning;
+    templates = wired.templates as never;
   });
 
   afterAll(stopMongo);
