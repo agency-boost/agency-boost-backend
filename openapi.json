@@ -1534,7 +1534,7 @@
     },
     "/api/v1/admin/tenants/roster-template": {
       "get": {
-        "description": "The file to download: the header, plus worked examples **commented out**, so they can be read and copied without ever importing. Declared above the routes that take an `:id`, because Nest would otherwise read \"roster-template\" as one.\n\n**Requires `kpm:import_roster`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The file to download: the header, plus worked examples **commented out**, so they can be read and copied without ever importing. `examples` carries the same three rows as cells, which is what the paste box shows — a screen splitting the CSV itself would be a second parser, disagreeing with this one over the quoted row. Declared above the routes that take an `:id`, because Nest would otherwise read \"roster-template\" as one.\n\n**Requires `kpm:import_roster`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_rosterTemplate_v1",
         "parameters": [],
         "responses": {

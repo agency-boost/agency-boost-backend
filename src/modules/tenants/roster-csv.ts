@@ -33,12 +33,31 @@ export const ROSTER_TEMPLATE_HEADER = ROSTER_COLUMNS.join(',');
 export const COMMENT_PREFIX = '#';
 
 /**
- * The template a person downloads: the header, then three examples they cannot import.
+ * The three worked examples, as **cells** rather than as a line.
  *
- * The three are chosen to answer the questions the columns raise — what does a name with
- * a comma look like, what goes in the leader column for somebody at the top, and how does
- * a chain read. A blank template answers none of them, and the issue list is a worse place
- * to learn than the file itself.
+ * They answer the questions the columns raise: what goes in the leader column for
+ * somebody at the top (nothing), that what goes in it is a *code* and not a name, and how
+ * a chain of three reads. A blank template answers none of them, and the issue list is a
+ * worse place to learn than the example itself.
+ *
+ * Cells, because two places need them in two shapes — the downloaded template writes them
+ * as commented CSV, and the paste box shows them tab-separated, the way a clipboard
+ * carries them. Deriving the second from the first would put a CSV splitter in the
+ * frontend: a second parser, disagreeing with this one over precisely the row that is
+ * here to demonstrate quoting.
+ */
+export const ROSTER_EXAMPLES: readonly (readonly string[])[] = [
+  ['Agus Prasetyo', 'agus@example.test', 'PRU-88001', 'ab', ''],
+  ['Puspita, Sari', 'sari@example.test', 'PRU-88002', 'aab', 'PRU-88001'],
+  ['Rina Wijaya', 'rina@example.test', 'PRU-88003', 'agent', 'PRU-88002'],
+];
+
+/** Quote a cell only where the delimiter would otherwise tear it in half. */
+const asCsvCell = (cell: string) => (cell.includes(',') ? `"${cell}"` : cell);
+
+/**
+ * The template a person downloads: the header, then the three examples, commented out so
+ * they cannot import.
  */
 export const ROSTER_TEMPLATE = [
   `${COMMENT_PREFIX} AgencyBoost roster template.`,
@@ -46,15 +65,14 @@ export const ROSTER_TEMPLATE = [
   `${COMMENT_PREFIX} so the examples never import — delete them or leave them, either is fine.`,
   `${COMMENT_PREFIX}`,
   `${COMMENT_PREFIX} fullName          the person's name. Quote it if it contains a comma.`,
-  `${COMMENT_PREFIX} email             where their password is sent. Nobody may have registered it yet.`,
+  `${COMMENT_PREFIX} email             their address. It must be one nobody has registered yet.`,
+  `${COMMENT_PREFIX}                   You send them their password yourself — nothing is emailed.`,
   `${COMMENT_PREFIX} agentCode         the producer id their insurer issued. Unique within the insurer.`,
   `${COMMENT_PREFIX} role              ab, aab or agent. Nothing else.`,
   `${COMMENT_PREFIX} leaderAgentCode   the agent code of whoever they report to.`,
   `${COMMENT_PREFIX}                   LEAVE IT EMPTY for somebody who reports to nobody.`,
   ROSTER_TEMPLATE_HEADER,
-  `${COMMENT_PREFIX} Agus Prasetyo,agus@example.test,PRU-88001,ab,`,
-  `${COMMENT_PREFIX} "Puspita, Sari",sari@example.test,PRU-88002,aab,PRU-88001`,
-  `${COMMENT_PREFIX} Rina Wijaya,rina@example.test,PRU-88003,agent,PRU-88002`,
+  ...ROSTER_EXAMPLES.map((cells) => `${COMMENT_PREFIX} ${cells.map(asCsvCell).join(',')}`),
   '',
 ].join('\n');
 

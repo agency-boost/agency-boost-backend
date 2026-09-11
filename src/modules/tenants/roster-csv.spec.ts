@@ -2,6 +2,7 @@ import {
   generateTemporaryPassword,
   inLeaderFirstOrder,
   parseRoster,
+  ROSTER_EXAMPLES,
   ROSTER_TEMPLATE,
   ROSTER_TEMPLATE_HEADER,
 } from './roster-csv';
@@ -158,10 +159,25 @@ describe('the roster file (P3.6-T4)', () => {
       expect(ROSTER_TEMPLATE).toContain('ab, aab or agent');
     });
 
+    it('does not imply the password is emailed, because nothing emails it', () => {
+      // `NOTIFICATION_ADAPTERS` is empty: no mail has ever left this system (OD-45). The
+      // importing admin reads each password off the commit screen and passes it on, and
+      // a column comment saying "where their password is sent" read as if the product
+      // did it for them.
+      expect(ROSTER_TEMPLATE).toContain('You send them their password yourself');
+      expect(ROSTER_TEMPLATE).not.toContain('where their password is sent');
+    });
+
     it('shows a chain, so the leader column is unambiguous', () => {
       // Agus leads Sari leads Rina, by code — which is what the column takes.
       expect(ROSTER_TEMPLATE).toContain('PRU-88002,aab,PRU-88001');
       expect(ROSTER_TEMPLATE).toContain('PRU-88003,agent,PRU-88002');
+    });
+
+    it('quotes an example name with a comma, and leaves the others bare', () => {
+      // The template is a CSV, so the comma has to be escaped here — and only here.
+      expect(ROSTER_TEMPLATE).toContain('# "Puspita, Sari",sari@example.test');
+      expect(ROSTER_TEMPLATE).toContain('# Agus Prasetyo,agus@example.test');
     });
 
     it('imports what somebody adds under the examples, and nothing else', () => {
@@ -179,6 +195,41 @@ describe('the roster file (P3.6-T4)', () => {
       const { issues } = parseRoster(filled);
       const linesInFile = ROSTER_TEMPLATE.split('\n').length;
       expect(new Set(issues.map((i) => i.line))).toEqual(new Set([linesInFile]));
+    });
+  });
+
+  describe('the worked examples', () => {
+    /*
+     * They are one list because two places show them: the downloaded template writes them
+     * as commented CSV, and the paste box shows them tab-separated. The guarantee worth
+     * pinning is that neither is a lie — an example a person copies must be one that
+     * would actually import.
+     */
+    const asPaste = () => ROSTER_EXAMPLES.map((cells) => cells.join('\t')).join('\n');
+
+    it('would import, exactly as the paste box shows them', () => {
+      const { rows, issues } = parseRoster(asPaste());
+      expect(issues).toEqual([]);
+      expect(rows.map((r) => r.agentCode)).toEqual(['PRU-88001', 'PRU-88002', 'PRU-88003']);
+    });
+
+    it('shows the leader column filled and empty, which is the column people get wrong', () => {
+      // One row at the top of the office with nothing in it, and two naming a code. A
+      // single example row can only ever demonstrate one of those.
+      expect(ROSTER_EXAMPLES.map((cells) => cells[4])).toEqual(['', 'PRU-88001', 'PRU-88002']);
+    });
+
+    it('reads as a chain, so the column is plainly a code and not a name', () => {
+      const { rows } = parseRoster(asPaste());
+      expect(inLeaderFirstOrder(rows)?.map((r) => r.agentCode))
+        .toEqual(['PRU-88001', 'PRU-88002', 'PRU-88003']);
+    });
+
+    it('needs no quoting when pasted, because the delimiter is the tab', () => {
+      // The same name is quoted in the CSV template. Showing it bare in the paste box is
+      // not an inconsistency — it is the difference between the two formats.
+      const { rows } = parseRoster(asPaste());
+      expect(rows[1].fullName).toBe('Puspita, Sari');
     });
   });
 

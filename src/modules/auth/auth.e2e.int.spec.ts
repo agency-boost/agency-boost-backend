@@ -1105,6 +1105,13 @@ describe('auth and admin over HTTP', () => {
       const { auth } = await anOffice();
       const res = await api().get('/api/v1/admin/tenants/roster-template').set(auth).expect(200);
       expect(res.body.header).toBe('fullName,email,agentCode,role,leaderAgentCode');
+      // The same three rows as cells, for the paste box. A screen splitting the CSV out
+      // of `template` would be a second parser, disagreeing over the quoted row.
+      expect(res.body.examples).toEqual([
+        ['Agus Prasetyo', 'agus@example.test', 'PRU-88001', 'ab', ''],
+        ['Puspita, Sari', 'sari@example.test', 'PRU-88002', 'aab', 'PRU-88001'],
+        ['Rina Wijaya', 'rina@example.test', 'PRU-88003', 'agent', 'PRU-88002'],
+      ]);
     });
 
     it('previews without writing, then commits the whole file', async () => {

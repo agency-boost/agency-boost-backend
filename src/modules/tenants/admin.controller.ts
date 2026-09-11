@@ -20,7 +20,12 @@ import {
 import { KpmRequestService } from './kpm-request.service';
 import { OrgLevelService } from './org-level.service';
 import { RosterImportService } from './roster-import.service';
-import { ROSTER_COLUMNS, ROSTER_TEMPLATE, ROSTER_TEMPLATE_HEADER } from './roster-csv';
+import {
+  ROSTER_COLUMNS,
+  ROSTER_EXAMPLES,
+  ROSTER_TEMPLATE,
+  ROSTER_TEMPLATE_HEADER,
+} from './roster-csv';
 import { TenantService } from './tenant.service';
 
 /**
@@ -204,11 +209,19 @@ export class AdminController {
     summary: 'The roster template',
     description:
       'The file to download: the header, plus worked examples **commented out**, so they '
-      + 'can be read and copied without ever importing. Declared above the routes that '
-      + 'take an `:id`, because Nest would otherwise read "roster-template" as one.',
+      + 'can be read and copied without ever importing. `examples` carries the same three '
+      + 'rows as cells, which is what the paste box shows — a screen splitting the CSV '
+      + 'itself would be a second parser, disagreeing with this one over the quoted row. '
+      + 'Declared above the routes that take an `:id`, because Nest would otherwise read '
+      + '"roster-template" as one.',
   })
   async rosterTemplate() {
-    return { header: ROSTER_TEMPLATE_HEADER, columns: ROSTER_COLUMNS, template: ROSTER_TEMPLATE };
+    return {
+      header: ROSTER_TEMPLATE_HEADER,
+      columns: ROSTER_COLUMNS,
+      template: ROSTER_TEMPLATE,
+      examples: ROSTER_EXAMPLES,
+    };
   }
 
   @Get('tenants/:id')
