@@ -5165,6 +5165,1847 @@
         ],
         "x-required-permission": "notification:mark_read"
       }
+    },
+    "/api/v1/kpm/settings/activity-types": {
+      "get": {
+        "description": "Categories with their types, in the order the Owner arranged them. `includeArchived=true` is what the settings screen asks for and the capture screen does not: an agent logging today should not be offered a retired type, and an Owner needs to see one in order to bring it back.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_listActivityTypes_v1",
+        "parameters": [
+          {
+            "name": "includeArchived",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ActivityCategoryDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office's activity taxonomy",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:read"
+      },
+      "post": {
+        "operationId": "TenantConfigController_createType_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateActivityTypeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityTypeDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add an activity type",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write",
+        "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
+      }
+    },
+    "/api/v1/kpm/settings/activity-categories": {
+      "post": {
+        "operationId": "TenantConfigController_createCategory_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateActivityCategoryDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityCategoryDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add a category",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write",
+        "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
+      }
+    },
+    "/api/v1/kpm/settings/activity-categories/{id}": {
+      "patch": {
+        "description": "The label only. The code is the identity every type under it holds.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_renameCategory_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameActivityCategoryDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityCategoryDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rename a category",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/kpm/settings/activity-types/reorder": {
+      "patch": {
+        "description": "Send every id, once each, in the order you want. Declared **above** `activity-types/:id`, or Nest reads \"reorder\" as an id.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_reorderTypes_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderActivityTypesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ActivityTypeDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reorder the activity types",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/kpm/settings/activity-types/{id}": {
+      "patch": {
+        "description": "Label, description and category. **Not the code** — a published code is what every activity log, ratio formula and goal target holds, and changing it would point all of them at nothing.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_updateType_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateActivityTypeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityTypeDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change what an activity type says",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      },
+      "delete": {
+        "description": "Archived, not deleted (invariant §3). It leaves the capture screen and stays readable wherever a historical activity log names it.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_archiveType_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityTypeDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Archive an activity type",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/kpm/settings/activity-types/{id}/restore": {
+      "post": {
+        "operationId": "TenantConfigController_restoreType_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityTypeDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Bring an archived activity type back",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write",
+        "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
+      }
+    },
+    "/api/v1/kpm/settings/lead-statuses": {
+      "get": {
+        "description": "Sales and recruitment, each in rank order. A lead holds a **code**, never a label — renaming a stage must not orphan every lead sitting on it.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_listLeadStatuses_v1",
+        "parameters": [
+          {
+            "name": "includeArchived",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LeadPipelineDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office's two lead pipelines",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:read"
+      },
+      "post": {
+        "description": "Appended to its pipeline, and never terminal: a pipeline has exactly one stage that closes it, and it already has one.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_createLeadStatus_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLeadStatusDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadStatusDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add a stage",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/kpm/settings/lead-statuses/reorder": {
+      "patch": {
+        "description": "Every id of that pipeline, once each. Declared above `:id`.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_reorderLeadStatuses_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderLeadStatusesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadPipelineDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reorder one pipeline",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/kpm/settings/lead-statuses/{id}": {
+      "patch": {
+        "description": "The label only.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_renameLeadStatus_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameLeadStatusDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadStatusDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rename a stage",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      },
+      "delete": {
+        "description": "Refused for the stage that closes the pipeline: archiving it would leave leads with no way to be marked successful, and nothing on the leads screen would say why.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_archiveLeadStatus_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadStatusDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Archive a stage",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/kpm/settings/lead-statuses/{id}/terminal": {
+      "post": {
+        "description": "Exactly one per pipeline. **Marking a lead successful is gated on it** — which is why it is a property of the stage rather than \"the last one in the list\", where adding a stage after it would silently move the gate.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_setTerminal_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadPipelineDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Make this the stage that closes its pipeline",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/kpm/settings/lead-statuses/{id}/restore": {
+      "post": {
+        "operationId": "TenantConfigController_restoreLeadStatus_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadStatusDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Bring an archived stage back",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write",
+        "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
+      }
+    },
+    "/api/v1/kpm/settings/ratio-benchmarks": {
+      "get": {
+        "description": "Each with the activity **codes** it is computed from, its benchmark and how the value is judged.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_listRatios_v1",
+        "parameters": [
+          {
+            "name": "includeArchived",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RatioDefinitionDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office's ratio definitions",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:read"
+      },
+      "post": {
+        "description": "Both code lists are checked against this office's **active** activity types, and an unknown code is named in the refusal. A ratio dividing by something nobody logs reads as 0.0% on every agent's screen and looks like an agent problem.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_createRatio_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRatioDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatioDefinitionDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add a ratio",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/kpm/settings/ratio-benchmarks/{id}": {
+      "patch": {
+        "description": "Label, benchmark, comparison and either code list. **Not the code**.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_updateRatio_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRatioDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatioDefinitionDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change a ratio",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      },
+      "delete": {
+        "operationId": "TenantConfigController_archiveRatio_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatioDefinitionDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Archive a ratio",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write",
+        "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
+      }
+    },
+    "/api/v1/kpm/settings/ratio-benchmarks/{id}/restore": {
+      "post": {
+        "operationId": "TenantConfigController_restoreRatio_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatioDefinitionDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Bring an archived ratio back",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write",
+        "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
+      }
+    },
+    "/api/v1/kpm/settings/branch-info": {
+      "get": {
+        "description": "The same view the console reads. Company and Owner come back so the screen can show them the way the prototype does — disabled, and labelled *tagged by Superadmin*.\n\n**Requires `kpm:read_profile`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_readBranchInfo_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KpmViewDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `kpm:read_profile`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office's own identity",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "kpm:read_profile"
+      },
+      "patch": {
+        "description": "Branch name, address, contact phone and the fiscal year start month. **The Owner's alone** — this is the row that says what the office is, and delegated administration does not extend to renaming the branch. Not company, not owner, and not locale, timezone or currency (ADR-0016).\n\n**Requires `kpm:update_identity`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_updateBranchInfo_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBranchInfoDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KpmViewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `kpm:update_identity`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change the office's identity",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "kpm:update_identity"
+      }
+    },
+    "/api/v1/kpm/config": {
+      "get": {
+        "description": "The taxonomy, the ratios and both lead pipelines, active rows only. Carries a strong `ETag`; send it back as `If-None-Match` and a repeat read answers `304`. The agent daily loop has to work on a mid-range Android over 4G, and three requests to render one screen is how that budget is spent before anything is drawn.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigReadController_readConfig_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantConfigDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The whole of this office's configuration",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:read"
+      }
     }
   },
   "info": {
@@ -5724,6 +7565,293 @@
         "required": [
           "code"
         ]
+      },
+      "CreateActivityCategoryDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SELLING",
+            "description": "Permanent once saved. Never reused."
+          },
+          "label": {
+            "type": "string",
+            "example": "Selling",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
+      "RenameActivityCategoryDto": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "example": "Penjualan",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "label"
+        ]
+      },
+      "CreateActivityTypeDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SELL_SUBMISSION",
+            "description": "Permanent once saved. Never reused."
+          },
+          "categoryCode": {
+            "type": "string",
+            "example": "SELLING",
+            "description": "An active category of this office, by code."
+          },
+          "label": {
+            "type": "string",
+            "example": "Submission polis",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "description": {
+            "type": "string",
+            "example": "telepon, WhatsApp, tatap muka, dll",
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "code",
+          "categoryCode",
+          "label"
+        ]
+      },
+      "ReorderActivityTypesDto": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "example": [
+              "66f0…a1",
+              "66f0…a2"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "ids"
+        ]
+      },
+      "UpdateActivityTypeDto": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "example": "Submission polis",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "description": {
+            "type": "string",
+            "example": "secara mandiri atau melalui BOP",
+            "maxLength": 200
+          },
+          "categoryCode": {
+            "type": "string",
+            "example": "RECRUITMENT"
+          }
+        }
+      },
+      "CreateLeadStatusDto": {
+        "type": "object",
+        "properties": {
+          "pipeline": {
+            "type": "string",
+            "enum": [
+              "sales",
+              "recruitment"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "example": "AWAITING_UNDERWRITING",
+            "description": "Permanent once saved: every lead holds it."
+          },
+          "label": {
+            "type": "string",
+            "example": "Awaiting underwriting",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "pipeline",
+          "code",
+          "label"
+        ]
+      },
+      "ReorderLeadStatusesDto": {
+        "type": "object",
+        "properties": {
+          "pipeline": {
+            "type": "string",
+            "enum": [
+              "sales",
+              "recruitment"
+            ]
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "pipeline",
+          "ids"
+        ]
+      },
+      "RenameLeadStatusDto": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "example": "Menunggu underwriting",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "label"
+        ]
+      },
+      "CreateRatioDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SELLING_SUCCESS_RATE"
+          },
+          "label": {
+            "type": "string",
+            "example": "Selling success rate",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "numerator": {
+            "example": [
+              "SELL_SUBMISSION"
+            ],
+            "description": "Activity type codes, summed. Codes — never the prototype's item numbers.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "denominator": {
+            "example": [
+              "SELL_PRESENTATION",
+              "SELL_FOLLOWUP"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "benchmark": {
+            "type": "number",
+            "example": 0.15,
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "comparison": {
+            "type": "string",
+            "enum": [
+              "gte",
+              "band"
+            ],
+            "description": "`gte` is at or above the benchmark. `band` is the balance rule, `abs(sellingPct − 50) × 2 ≤ benchmark` — a different shape, which is why this is a named rule rather than an operator."
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "numerator",
+          "denominator",
+          "benchmark",
+          "comparison"
+        ]
+      },
+      "UpdateRatioDto": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "numerator": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "denominator": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "benchmark": {
+            "type": "number",
+            "example": 0.2,
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "comparison": {
+            "type": "string",
+            "enum": [
+              "gte",
+              "band"
+            ]
+          }
+        }
+      },
+      "UpdateBranchInfoDto": {
+        "type": "object",
+        "properties": {
+          "branchName": {
+            "type": "string",
+            "example": "BSD City Branch",
+            "minLength": 2,
+            "maxLength": 120
+          },
+          "address": {
+            "type": "string",
+            "example": "Jl. BSD Grand Boulevard No. 1, Tangerang",
+            "maxLength": 400
+          },
+          "contactPhone": {
+            "type": "string",
+            "example": "+62 21 5555 0417",
+            "maxLength": 40
+          },
+          "fiscalYearStartMonth": {
+            "type": "number",
+            "example": 1,
+            "minimum": 1,
+            "maximum": 12,
+            "description": "The month the financial year starts. Read by Phase 14, stored now."
+          }
+        }
       },
       "ApiErrorBody": {
         "type": "object",
@@ -6313,6 +8441,384 @@
           "email",
           "agentCode",
           "role"
+        ]
+      },
+      "ActivityTypeDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "SELL_SUBMISSION",
+            "description": "The identity. Every activity log, ratio formula and goal target holds this, and nothing can change it — see `tenant-config.md`."
+          },
+          "categoryCode": {
+            "type": "string",
+            "example": "SELLING"
+          },
+          "label": {
+            "type": "string",
+            "example": "Submission polis"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "example": "secara mandiri atau melalui BOP"
+          },
+          "displayOrder": {
+            "type": "number",
+            "example": 6,
+            "description": "Presentation only, and reorderable. Nothing reads it back."
+          },
+          "version": {
+            "type": "number",
+            "example": 1,
+            "description": "The domain's version, bumped when what the office counts changes. Not a reorder."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "categoryCode",
+          "label",
+          "description",
+          "displayOrder",
+          "version",
+          "status"
+        ]
+      },
+      "ActivityCategoryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "SELLING"
+          },
+          "label": {
+            "type": "string",
+            "example": "Selling"
+          },
+          "displayOrder": {
+            "type": "number",
+            "example": 2
+          },
+          "version": {
+            "type": "number",
+            "example": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityTypeDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "label",
+          "displayOrder",
+          "version",
+          "status",
+          "types"
+        ]
+      },
+      "LeadStatusDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "pipeline": {
+            "type": "string",
+            "enum": [
+              "sales",
+              "recruitment"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "example": "PAID_AND_ISSUED",
+            "description": "What every lead holds. Renaming the label leaves this alone."
+          },
+          "label": {
+            "type": "string",
+            "example": "Paid and issued"
+          },
+          "rank": {
+            "type": "number",
+            "example": 5,
+            "description": "Order within its pipeline. Reorderable."
+          },
+          "isTerminal": {
+            "type": "boolean",
+            "description": "The stage that closes this pipeline, and what gates marking a lead successful. Exactly one per pipeline — a property, not \"the last one in the list\"."
+          },
+          "version": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "pipeline",
+          "code",
+          "label",
+          "rank",
+          "isTerminal",
+          "version",
+          "status"
+        ]
+      },
+      "LeadPipelineDto": {
+        "type": "object",
+        "properties": {
+          "pipeline": {
+            "type": "string",
+            "enum": [
+              "sales",
+              "recruitment"
+            ]
+          },
+          "statuses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeadStatusDto"
+            }
+          }
+        },
+        "required": [
+          "pipeline",
+          "statuses"
+        ]
+      },
+      "RatioDefinitionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "SELLING_SUCCESS_RATE"
+          },
+          "label": {
+            "type": "string",
+            "example": "Selling success rate"
+          },
+          "numerator": {
+            "example": [
+              "SELL_SUBMISSION"
+            ],
+            "description": "Activity type codes, summed. Never the prototype's item numbers.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "denominator": {
+            "example": [
+              "SELL_PRESENTATION",
+              "SELL_FOLLOWUP"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "benchmark": {
+            "type": "number",
+            "example": 0.15,
+            "description": "The office's own value."
+          },
+          "comparison": {
+            "type": "string",
+            "enum": [
+              "gte",
+              "band"
+            ]
+          },
+          "displayOrder": {
+            "type": "number"
+          },
+          "version": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "label",
+          "numerator",
+          "denominator",
+          "benchmark",
+          "comparison",
+          "displayOrder",
+          "version",
+          "status"
+        ]
+      },
+      "TenantConfigDto": {
+        "type": "object",
+        "properties": {
+          "activity": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityCategoryDto"
+            }
+          },
+          "ratios": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RatioDefinitionDto"
+            }
+          },
+          "leadPipelines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeadPipelineDto"
+            }
+          },
+          "version": {
+            "type": "number",
+            "description": "The highest version across everything above — one number to compare rather than three collections to reason about. It moves when what the office counts changes, and not on a reorder, because a reorder rebinds nothing."
+          }
+        },
+        "required": [
+          "activity",
+          "ratios",
+          "leadPipelines",
+          "version"
+        ]
+      },
+      "KpmViewDto": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "companyId": {
+            "type": "string"
+          },
+          "companyName": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "branchName": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true
+          },
+          "ownerUserId": {
+            "type": "string",
+            "nullable": true
+          },
+          "ownerName": {
+            "type": "string",
+            "nullable": true
+          },
+          "ownerEmail": {
+            "type": "string",
+            "nullable": true
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "locale": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "fiscalYearStartMonth": {
+            "type": "number",
+            "example": 1,
+            "description": "The month the office's financial year starts, 1–12 (P4-T5). Stored and shown now; read by the period computations in Phase 14."
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "suspended",
+              "archived"
+            ]
+          },
+          "suspendedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "suspendedReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_id",
+          "companyId",
+          "companyName",
+          "code",
+          "branchName",
+          "address",
+          "contactPhone",
+          "ownerUserId",
+          "ownerName",
+          "ownerEmail",
+          "timezone",
+          "locale",
+          "currency",
+          "fiscalYearStartMonth",
+          "settings",
+          "status",
+          "suspendedAt",
+          "suspendedReason",
+          "createdAt"
         ]
       },
       "TeamMemberDto": {
@@ -7130,98 +9636,6 @@
           "displayOrder",
           "status",
           "archivedAt"
-        ]
-      },
-      "KpmViewDto": {
-        "type": "object",
-        "properties": {
-          "_id": {
-            "type": "string"
-          },
-          "companyId": {
-            "type": "string"
-          },
-          "companyName": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          },
-          "branchName": {
-            "type": "string"
-          },
-          "address": {
-            "type": "string",
-            "nullable": true
-          },
-          "contactPhone": {
-            "type": "string",
-            "nullable": true
-          },
-          "ownerUserId": {
-            "type": "string",
-            "nullable": true
-          },
-          "ownerName": {
-            "type": "string",
-            "nullable": true
-          },
-          "ownerEmail": {
-            "type": "string",
-            "nullable": true
-          },
-          "timezone": {
-            "type": "string"
-          },
-          "locale": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "settings": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "active",
-              "suspended",
-              "archived"
-            ]
-          },
-          "suspendedAt": {
-            "type": "string",
-            "nullable": true
-          },
-          "suspendedReason": {
-            "type": "string",
-            "nullable": true
-          },
-          "createdAt": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "_id",
-          "companyId",
-          "companyName",
-          "code",
-          "branchName",
-          "address",
-          "contactPhone",
-          "ownerUserId",
-          "ownerName",
-          "ownerEmail",
-          "timezone",
-          "locale",
-          "currency",
-          "settings",
-          "status",
-          "suspendedAt",
-          "suspendedReason",
-          "createdAt"
         ]
       },
       "RosterTemplateDto": {

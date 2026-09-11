@@ -17,6 +17,14 @@ import { CompanyOrgLevel, CompanyOrgLevelSchema } from './company-org-level.sche
 import { Kpm, KpmSchema } from './kpm.schema';
 import { TenantService } from './tenant.service';
 import { clearCollections, seedLadder, startMongo, stopMongo } from '../../../test/mongo';
+import { ProvisioningService } from '@/modules/config/provisioning.service';
+import { ActivityCategory, ActivityCategorySchema } from '@/modules/config/activity-category.schema';
+import { ActivityType, ActivityTypeSchema } from '@/modules/config/activity-type.schema';
+import { LeadStatus, LeadStatusSchema } from '@/modules/config/lead-status.schema';
+import { RatioDefinition, RatioDefinitionSchema } from '@/modules/config/ratio-definition.schema';
+import {
+  PlatformTemplate, PlatformTemplateSchema,
+} from '@/modules/config/platform-template.schema';
 
 const NOW = new Date('2026-09-05T02:00:00Z');
 
@@ -62,6 +70,13 @@ describe('TenantService', () => {
     const orgLevels = new OrgLevelService(
       levels as never, companies as never, new AuditService(auditModel as never), clock,
     );
+    const provisioning = new ProvisioningService(
+      mongoose.model(ActivityCategory.name, ActivityCategorySchema) as never,
+      mongoose.model(ActivityType.name, ActivityTypeSchema) as never,
+      mongoose.model(LeadStatus.name, LeadStatusSchema) as never,
+      mongoose.model(RatioDefinition.name, RatioDefinitionSchema) as never,
+      mongoose.model(PlatformTemplate.name, PlatformTemplateSchema) as never,
+    );
     service = new TenantService(
       kpms as never,
       companies as never,
@@ -74,6 +89,7 @@ describe('TenantService', () => {
       ),
       repo,
       orgLevels,
+      provisioning,
     );
   });
   afterAll(stopMongo);

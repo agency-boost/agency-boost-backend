@@ -19,7 +19,7 @@ import {
 import {
   NOTIFICATION_ADAPTERS, NotificationService, TemplateRenderer,
 } from '@/modules/notifications/notification.service';
-import { ConsoleTemplateRenderer } from '@/modules/notifications/console-renderer';
+import { EmailTemplateRenderer } from '@/modules/notifications/email-renderer';
 import { User, UserDocument, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanyDocument, CompanySchema } from '@/modules/tenants/company.schema';
 import { DEFAULT_ORG_LADDER } from '@/domain/constants';
@@ -65,6 +65,29 @@ import { PasswordService } from './password.service';
 import { RateLimiter } from './rate-limiter';
 import { Hs256TokenSigner, TokenSigner } from './token-signer';
 import { startMongo, stopMongo } from '../../../test/mongo';
+import {
+  ActivityCategory, ActivityCategorySchema,
+} from '@/modules/config/activity-category.schema';
+import { ActivityType, ActivityTypeSchema } from '@/modules/config/activity-type.schema';
+import { LeadStatus, LeadStatusSchema } from '@/modules/config/lead-status.schema';
+import {
+  RatioDefinition, RatioDefinitionSchema,
+} from '@/modules/config/ratio-definition.schema';
+import {
+  PlatformTemplate, PlatformTemplateSchema,
+} from '@/modules/config/platform-template.schema';
+import {
+  ActivityCategoryRepository, ActivityTypeRepository, LeadStatusRepository,
+  RatioDefinitionRepository,
+} from '@/modules/config/activity.repository';
+import { LeadStatusService } from '@/modules/config/lead-status.service';
+import { RatioService } from '@/modules/config/ratio.service';
+import { ActivityConfigService } from '@/modules/config/activity.service';
+import { ProvisioningService } from '@/modules/config/provisioning.service';
+import {
+  TenantConfigController, TenantConfigReadController,
+} from '@/modules/config/config.controller';
+import { TenantConfigService } from '@/modules/config/tenant-config.service';
 
 /**
  * Boots the real controllers, guards and filter over a real database, and walks the
@@ -128,10 +151,17 @@ describe('auth and admin over HTTP', () => {
           { name: MembershipHistory.name, schema: MembershipHistorySchema },
           { name: JoinRequest.name, schema: JoinRequestSchema },
           { name: Group.name, schema: GroupSchema },
+          { name: ActivityCategory.name, schema: ActivityCategorySchema },
+          { name: ActivityType.name, schema: ActivityTypeSchema },
+          { name: LeadStatus.name, schema: LeadStatusSchema },
+          { name: RatioDefinition.name, schema: RatioDefinitionSchema },
+          { name: PlatformTemplate.name, schema: PlatformTemplateSchema },
         ]),
       ],
       controllers: [
         AuthController, AdminController, CompanyController, OrgController, OnboardingController,
+        TenantConfigController,
+        TenantConfigReadController,
       ],
       providers: [
         Reflector,
@@ -145,9 +175,13 @@ describe('auth and admin over HTTP', () => {
           inject: [Clock],
           useFactory: (clock: Clock) => new Hs256TokenSigner('a'.repeat(40), clock),
         },
-        { provide: TemplateRenderer, useClass: ConsoleTemplateRenderer },
+        { provide: TemplateRenderer, useClass: EmailTemplateRenderer },
         { provide: NOTIFICATION_ADAPTERS, useValue: [mailbox] },
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
+        ActivityCategoryRepository, ActivityTypeRepository, ActivityConfigService,
+        LeadStatusRepository, LeadStatusService, RatioDefinitionRepository, RatioService,
+        TenantConfigService,
+        ProvisioningService,
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService, OrgLevelService,
         RosterImportService,
@@ -1134,6 +1168,232 @@ describe('auth and admin over HTTP', () => {
 
       expect(first.body.error.code).toBe('ORG_INVITE_EXPIRED');
       expect(first.body.error.message).toBe(second.body.error.message);
+    });
+  });
+
+  describe('the office activity taxonomy, over HTTP (P4-T1)', () => {
+    /** An office with an Owner signed in, which is who edits a taxonomy. */
+    async function anOfficeWithOwner() {
+      const sa = await makeUser(`sa-cfg-${Math.random()}@agencyboost.test`, 'super_admin');
+      const saAuth = { Authorization: `Bearer ${sa.accessToken}` };
+      const companyId = await anInsurer();
+      const kpm = await api().post('/api/v1/admin/tenants').set(saAuth)
+        .send({
+          companyId,
+          code: `${Math.floor(Math.random() * 9000) + 1000}`,
+          branchName: 'Config Branch',
+        })
+        .expect(201);
+      const kpmId = String(kpm.body._id);
+
+      const owner = await makeUser(`owner-cfg-${Math.random()}@kpm.test`);
+      await api().patch(`/api/v1/admin/tenants/${kpmId}/owner`).set(saAuth)
+        .send({ email: owner.email }).expect(200);
+      // The grant lands on the membership, so the token has to be minted after it.
+      const again = await api().post('/api/v1/auth/login')
+        .send({ email: owner.email, password: PASSWORD }).expect(200);
+      return {
+        kpmId,
+        saAuth,
+        auth: { Authorization: `Bearer ${(again.body as { accessToken: string }).accessToken}` },
+      };
+    }
+
+    it('AC-4/AC-5: a brand-new office arrives with a taxonomy to work against', async () => {
+      // The company has published no template, so this is the platform-defaults path —
+      // which is the normal state of a new insurer's first office.
+      const { auth } = await anOfficeWithOwner();
+      const res = await api().get('/api/v1/kpm/settings/activity-types').set(auth).expect(200);
+
+      expect(res.body.map((c: { code: string }) => c.code)).toEqual([
+        'LEADS_GENERATION', 'SELLING', 'RECRUITMENT',
+        'PERSONAL_DEVELOPMENT', 'TEAM_DEVELOPMENT',
+      ]);
+      expect(res.body.flatMap((c: { types: unknown[] }) => c.types)).toHaveLength(12);
+    });
+
+    it('AC-6: archiving takes a type off the list and leaves it readable', async () => {
+      const { auth } = await anOfficeWithOwner();
+      const list = await api().get('/api/v1/kpm/settings/activity-types').set(auth).expect(200);
+      const type = list.body[1].types[2];
+      expect(type.code).toBe('SELL_SUBMISSION');
+
+      await api().delete(`/api/v1/kpm/settings/activity-types/${type.id}`).set(auth).expect(200);
+
+      const after = await api().get('/api/v1/kpm/settings/activity-types').set(auth).expect(200);
+      const codes = (rows: { types: { code: string }[] }[]) =>
+        rows.flatMap((c) => c.types).map((t) => t.code);
+      expect(codes(after.body)).not.toContain('SELL_SUBMISSION');
+
+      const withArchived = await api()
+        .get('/api/v1/kpm/settings/activity-types?includeArchived=true').set(auth).expect(200);
+      expect(codes(withArchived.body)).toContain('SELL_SUBMISSION');
+    });
+
+    it('refuses a duplicate code with 400, naming it', async () => {
+      const { auth } = await anOfficeWithOwner();
+      const res = await api().post('/api/v1/kpm/settings/activity-types').set(auth)
+        .send({ code: 'SELL_SUBMISSION', categoryCode: 'SELLING', label: 'Again' })
+        .expect(400);
+      expect(res.body.error.message).toContain('SELL_SUBMISSION');
+    });
+
+    it('refuses a code that is not a code, at the DTO', async () => {
+      const { auth } = await anOfficeWithOwner();
+      await api().post('/api/v1/kpm/settings/activity-types').set(auth)
+        .send({ code: 'has spaces', categoryCode: 'SELLING', label: 'x' })
+        .expect(400);
+    });
+
+    it('AC-7: refuses an agent the write, over HTTP and not only on the screen', async () => {
+      /*
+       * A permission expressed only in the frontend is a blocking defect. The screen hides
+       * these controls; this is the half that matters.
+       */
+      const { kpmId, auth } = await anOfficeWithOwner();
+      const code = await api().get('/api/v1/join/my-code').set(auth).expect(200);
+      const agent = await makeUser(`agent-cfg-${Math.random()}@kpm.test`);
+      const agentAuth = { Authorization: `Bearer ${agent.accessToken}` };
+      await api().post('/api/v1/join/redeem').set(agentAuth)
+        .send({ code: (code.body as { code: string }).code }).expect(200);
+
+      const mine = await api().post('/api/v1/auth/login')
+        .send({ email: agent.email, password: PASSWORD }).expect(200);
+      const asAgent = {
+        Authorization: `Bearer ${(mine.body as { accessToken: string }).accessToken}`,
+      };
+
+      // They read it — it is their capture screen.
+      const list = await api().get('/api/v1/kpm/settings/activity-types').set(asAgent).expect(200);
+      expect(list.body.length).toBeGreaterThan(0);
+
+      // And they cannot change it.
+      await api().post('/api/v1/kpm/settings/activity-types').set(asAgent)
+        .send({ code: 'AGENT_INVENTED', categoryCode: 'SELLING', label: 'x' })
+        .expect(403);
+      void kpmId;
+    });
+
+    it('refuses another office\'s type as a 404, never a 403', async () => {
+      const mine = await anOfficeWithOwner();
+      const theirs = await anOfficeWithOwner();
+      const list = await api().get('/api/v1/kpm/settings/activity-types')
+        .set(theirs.auth).expect(200);
+      const type = list.body[0].types[0];
+
+      await api().delete(`/api/v1/kpm/settings/activity-types/${type.id}`)
+        .set(mine.auth).expect(404);
+    });
+
+    it('reorders without changing a single code', async () => {
+      const { auth } = await anOfficeWithOwner();
+      const list = await api().get('/api/v1/kpm/settings/activity-types').set(auth).expect(200);
+      const types = list.body.flatMap((c: { types: { id: string; code: string }[] }) => c.types);
+      const reversed = [...types].reverse().map((t: { id: string }) => t.id);
+
+      const after = await api().patch('/api/v1/kpm/settings/activity-types/reorder').set(auth)
+        .send({ ids: reversed }).expect(200);
+
+      expect(after.body.map((t: { code: string }) => t.code))
+        .toEqual([...types].reverse().map((t: { code: string }) => t.code));
+      expect(new Set(after.body.map((t: { code: string }) => t.code)))
+        .toEqual(new Set(types.map((t: { code: string }) => t.code)));
+    });
+
+    it('refuses a partial reorder rather than guessing', async () => {
+      const { auth } = await anOfficeWithOwner();
+      const list = await api().get('/api/v1/kpm/settings/activity-types').set(auth).expect(200);
+      const first = list.body[0].types[0].id;
+      await api().patch('/api/v1/kpm/settings/activity-types/reorder').set(auth)
+        .send({ ids: [first] }).expect(400);
+    });
+  });
+
+  describe('the consolidated configuration read (P4-T7)', () => {
+    async function anOfficeWithAgentAndOwner() {
+      const sa = await makeUser(`sa-cfgread-${Math.random()}@agencyboost.test`, 'super_admin');
+      const saAuth = { Authorization: `Bearer ${sa.accessToken}` };
+      const companyId = await anInsurer();
+      const kpm = await api().post('/api/v1/admin/tenants').set(saAuth)
+        .send({
+          companyId,
+          code: `${Math.floor(Math.random() * 9000) + 1000}`,
+          branchName: 'Read Branch',
+        })
+        .expect(201);
+      const owner = await makeUser(`owner-cfgread-${Math.random()}@kpm.test`);
+      await api().patch(`/api/v1/admin/tenants/${String(kpm.body._id)}/owner`).set(saAuth)
+        .send({ email: owner.email }).expect(200);
+      const again = await api().post('/api/v1/auth/login')
+        .send({ email: owner.email, password: PASSWORD }).expect(200);
+      return {
+        auth: {
+          Authorization: `Bearer ${(again.body as { accessToken: string }).accessToken}`,
+        },
+      };
+    }
+
+    it('AC-1: answers the taxonomy, the ratios and both pipelines in one request', async () => {
+      // Three requests to render one screen is how a 4G budget is spent before anything
+      // is drawn.
+      const { auth } = await anOfficeWithAgentAndOwner();
+      const res = await api().get('/api/v1/kpm/config').set(auth).expect(200);
+
+      expect(res.body.activity).toHaveLength(5);
+      expect(res.body.activity.flatMap((c: { types: unknown[] }) => c.types)).toHaveLength(12);
+      expect(res.body.ratios).toHaveLength(5);
+      expect(res.body.leadPipelines.map((p: { pipeline: string }) => p.pipeline))
+        .toEqual(['sales', 'recruitment']);
+      expect(res.body.version).toBe(1);
+    });
+
+    it('AC-2: answers 304 to a repeat read carrying the tag', async () => {
+      const { auth } = await anOfficeWithAgentAndOwner();
+      const first = await api().get('/api/v1/kpm/config').set(auth).expect(200);
+      const etag = first.headers.etag;
+      expect(etag).toMatch(/^"/);
+
+      const second = await api().get('/api/v1/kpm/config')
+        .set({ ...auth, 'If-None-Match': etag }).expect(304);
+      expect(second.body).toEqual({});
+    });
+
+    it('changes the tag when the office changes what it counts', async () => {
+      const { auth } = await anOfficeWithAgentAndOwner();
+      const before = await api().get('/api/v1/kpm/config').set(auth).expect(200);
+
+      const type = before.body.activity[1].types[0];
+      await api().patch(`/api/v1/kpm/settings/activity-types/${type.id}`).set(auth)
+        .send({ label: 'Renamed' }).expect(200);
+
+      const after = await api().get('/api/v1/kpm/config')
+        .set({ ...auth, 'If-None-Match': before.headers.etag }).expect(200);
+      expect(after.headers.etag).not.toBe(before.headers.etag);
+      expect(after.body.version).toBe(2);
+    });
+
+    it('carries no archived row, because it is what can be logged against today', async () => {
+      const { auth } = await anOfficeWithAgentAndOwner();
+      const before = await api().get('/api/v1/kpm/config').set(auth).expect(200);
+      const type = before.body.activity[1].types.find(
+        (t: { code: string }) => t.code === 'SELL_SUBMISSION',
+      );
+
+      await api().delete(`/api/v1/kpm/settings/activity-types/${type.id}`).set(auth).expect(200);
+
+      const after = await api().get('/api/v1/kpm/config').set(auth).expect(200);
+      const codes = after.body.activity
+        .flatMap((c: { types: { code: string }[] }) => c.types)
+        .map((t: { code: string }) => t.code);
+      expect(codes).not.toContain('SELL_SUBMISSION');
+    });
+
+    it('tells a caller not to trust the copy without asking', async () => {
+      // Configuration changes rarely and unpredictably. An agent looking at a taxonomy
+      // their Owner edited an hour ago is worse than one conditional request.
+      const { auth } = await anOfficeWithAgentAndOwner();
+      const res = await api().get('/api/v1/kpm/config').set(auth).expect(200);
+      expect(res.headers['cache-control']).toBe('private, no-cache');
     });
   });
 

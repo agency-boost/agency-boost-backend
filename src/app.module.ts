@@ -20,7 +20,33 @@ import {
   NOTIFICATION_ADAPTERS, NotificationService, TemplateRenderer,
 } from '@/modules/notifications/notification.service';
 import { NotificationController } from '@/modules/notifications/notification.controller';
-import { ConsoleTemplateRenderer } from '@/modules/notifications/console-renderer';
+import { EmailTemplateRenderer } from '@/modules/notifications/email-renderer';
+import { RecipientAddressBook, SmtpChannelAdapter } from '@/modules/notifications/smtp.adapter';
+import { UserAddressBook } from '@/modules/notifications/user-address-book';
+import { InAppChannelAdapter, LogEmailAdapter } from '@/modules/notifications/local-adapters';
+import {
+  ActivityCategory, ActivityCategorySchema,
+} from '@/modules/config/activity-category.schema';
+import { ActivityType, ActivityTypeSchema } from '@/modules/config/activity-type.schema';
+import { LeadStatus, LeadStatusSchema } from '@/modules/config/lead-status.schema';
+import {
+  RatioDefinition, RatioDefinitionSchema,
+} from '@/modules/config/ratio-definition.schema';
+import {
+  PlatformTemplate, PlatformTemplateSchema,
+} from '@/modules/config/platform-template.schema';
+import {
+  ActivityCategoryRepository, ActivityTypeRepository, LeadStatusRepository,
+  RatioDefinitionRepository,
+} from '@/modules/config/activity.repository';
+import { LeadStatusService } from '@/modules/config/lead-status.service';
+import { RatioService } from '@/modules/config/ratio.service';
+import { ActivityConfigService } from '@/modules/config/activity.service';
+import { ProvisioningService } from '@/modules/config/provisioning.service';
+import {
+  TenantConfigController, TenantConfigReadController,
+} from '@/modules/config/config.controller';
+import { TenantConfigService } from '@/modules/config/tenant-config.service';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { AuthToken, AuthTokenSchema } from '@/modules/auth/auth-token.schema';
@@ -98,6 +124,11 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: MembershipHistory.name, schema: MembershipHistorySchema },
       { name: JoinRequest.name, schema: JoinRequestSchema },
       { name: Group.name, schema: GroupSchema },
+      { name: ActivityCategory.name, schema: ActivityCategorySchema },
+      { name: ActivityType.name, schema: ActivityTypeSchema },
+      { name: LeadStatus.name, schema: LeadStatusSchema },
+      { name: RatioDefinition.name, schema: RatioDefinitionSchema },
+      { name: PlatformTemplate.name, schema: PlatformTemplateSchema },
     ]),
   ],
   controllers: [
@@ -108,6 +139,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     OrgController,
     OnboardingController,
     NotificationController,
+    TenantConfigController,
+    TenantConfigReadController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -117,14 +150,49 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       useFactory: (config: ConfigService, clock: Clock) =>
         new Hs256TokenSigner(config.getOrThrow<string>('JWT_ACCESS_SECRET'), clock),
     },
-    { provide: TemplateRenderer, useClass: ConsoleTemplateRenderer },
-    // No channel adapters wired yet: notifications are rendered to the log in
-    // development (ConsoleTemplateRenderer) and the email adapter lands with SMTP.
-    { provide: NOTIFICATION_ADAPTERS, useValue: [] },
+    { provide: TemplateRenderer, useClass: EmailTemplateRenderer },
+    { provide: RecipientAddressBook, useClass: UserAddressBook },
+    InAppChannelAdapter,
+    LogEmailAdapter,
+    SmtpChannelAdapter,
+    /*
+     * How mail actually leaves (P4-T14, ADR-0019).
+     *
+     * In-app always, because its delivery *is* the row the service writes — without an
+     * adapter every in-app send recorded `failed: 'no adapter'` beside a row that had
+     * been delivered.
+     *
+     * Email over SMTP, or into the log for a developer with no mail catcher.
+     * `MAIL_TRANSPORT=log` is refused in production by `env.validation.ts`, so this
+     * factory cannot quietly choose the wrong one there: the process will not have
+     * started.
+     */
+    {
+      provide: NOTIFICATION_ADAPTERS,
+      inject: [ConfigService, InAppChannelAdapter, LogEmailAdapter, SmtpChannelAdapter],
+      useFactory: (
+        config: ConfigService,
+        inApp: InAppChannelAdapter,
+        log: LogEmailAdapter,
+        smtp: SmtpChannelAdapter,
+      ) => [
+        inApp,
+        config.get<string>('MAIL_TRANSPORT') === 'log' ? log : smtp,
+      ],
+    },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },
     // Order matters: authenticate and resolve the context, then check the permission.
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    ActivityCategoryRepository,
+    ActivityTypeRepository,
+    ActivityConfigService,
+    LeadStatusRepository,
+    LeadStatusService,
+    RatioDefinitionRepository,
+    RatioService,
+    TenantConfigService,
+    ProvisioningService,
     AuditService,
     NotificationService,
     PasswordService,

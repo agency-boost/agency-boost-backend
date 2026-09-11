@@ -29,6 +29,15 @@ export const envSchema = z.object({
   SMTP_USER: z.string().default(''),
   SMTP_PASSWORD: z.string().default(''),
   MAIL_FROM: z.string().min(1),
+  /**
+   * How mail leaves: over SMTP, or into the log.
+   *
+   * `log` exists so a developer with no local mail catcher can still read the link and
+   * finish a registration. **It is refused in production** (ADR-0019): an API that accepts
+   * a registration and writes the verification link to stdout is the defect this key was
+   * added to make impossible, not a fallback. The refusal is below, in `superRefine`.
+   */
+  MAIL_TRANSPORT: z.enum(['smtp', 'log']).default('smtp'),
 
   APP_BASE_URL: z.string().url(),
   CORS_ORIGINS: z.string().default(''),
@@ -45,6 +54,17 @@ export const envSchema = z.object({
    * one. Runtime code reads kpm.timezone — never this value.
    */
   DEFAULT_TENANT_TIMEZONE: z.string().default(DEFAULT_TENANT_TIMEZONE),
+}).superRefine((env, ctx) => {
+  if (env.NODE_ENV === 'production' && env.MAIL_TRANSPORT === 'log') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['MAIL_TRANSPORT'],
+      message:
+        'must be "smtp" in production. A production API that logs verification links '
+        + 'instead of sending them accepts registrations it can never complete '
+        + '(ADR-0019).',
+    });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;

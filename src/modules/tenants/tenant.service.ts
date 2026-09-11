@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpStatus, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -14,6 +14,7 @@ import { initialsOf } from '@/modules/org/directory.service';
 import { Company, CompanyDocument } from './company.schema';
 import { KpmRequest, KpmRequestDocument } from './kpm-request.schema';
 import { OrgLevelService } from './org-level.service';
+import { ProvisioningService } from '@/modules/config/provisioning.service';
 import { DEFAULT_KPM_SETTINGS, Kpm, KpmDocument } from './kpm.schema';
 
 export interface CreateKpmInput {
@@ -69,6 +70,8 @@ export interface KpmView {
   timezone: string;
   locale: string;
   currency: string;
+  /** 1–12. Stored and shown now; read by the period computations in Phase 14 (P4-T5). */
+  fiscalYearStartMonth: number;
   settings: Record<string, number>;
   status: 'active' | 'suspended' | 'archived';
   suspendedAt: string | null;
@@ -133,6 +136,9 @@ export class TenantService {
     // Read-only here, and one-directional: OrgLevelService knows nothing about tenants,
     // so there is no cycle to break.
     private readonly orgLevels: OrgLevelService,
+    // Same shape: it copies a company template into a brand-new office and knows nothing
+    // about tenancy beyond the id it is handed.
+    private readonly provisioning: ProvisioningService,
   ) {}
 
   private require(ctx: RequestContext, permission: Parameters<typeof can>[1]): void {
@@ -185,6 +191,7 @@ export class TenantService {
         timezone: k.timezone,
         locale: k.locale,
         currency: k.currency,
+        fiscalYearStartMonth: k.fiscalYearStartMonth ?? 1,
         settings: { ...k.settings } as unknown as Record<string, number>,
         status: k.status,
         suspendedAt: k.suspendedAt ? k.suspendedAt.toISOString() : null,
@@ -339,11 +346,43 @@ export class TenantService {
       deletedAt: null,
     });
 
+    /*
+     * The office arrives with a taxonomy to work against (P4-T1, ADR-0018).
+     *
+     * Copied from its **own company's** published template, or from the platform defaults
+     * when that company has published none — which is the normal state of a new insurer's
+     * first office, and refusing it would make that office unreachable until somebody
+     * remembered to publish a preset.
+     *
+     * After the office row, not before: a taxonomy belonging to an office that failed to
+     * create would be orphaned rows nothing points at. There are no transactions
+     * (ADR-0002), so the order is the guarantee.
+     */
+    const seeded = await this.provisioning.seedActivityTaxonomy(
+      String(kpm._id),
+      input.companyId,
+    );
+    await this.provisioning.seedLeadPipelines(String(kpm._id), input.companyId);
+    // The ratios last, and checked against the taxonomy that was just copied: a formula
+    // naming a code the office does not have would read as `0.0%` on every agent's screen.
+    await this.provisioning.seedRatioDefinitions(
+      String(kpm._id), input.companyId, seeded.typeCodes,
+    );
+    kpm.seededFromTemplateId = seeded.seededFromTemplateId;
+    kpm.seededFromVersion = seeded.seededFromVersion;
+    await kpm.save();
+
     await this.audit.record(ctx, {
       action: 'kpm.created',
       targetCollection: 'kpms',
       targetId: String(kpm._id),
-      after: { code: kpm.code, branchName: kpm.branchName, companyId: kpm.companyId },
+      after: {
+        code: kpm.code,
+        branchName: kpm.branchName,
+        companyId: kpm.companyId,
+        seededFromTemplateId: seeded.seededFromTemplateId,
+        activityTypes: seeded.types,
+      },
     });
 
     return this.toView(kpm);
@@ -745,6 +784,73 @@ export class TenantService {
       // uncaught CastError renders as INTERNAL_ERROR and is logged as unhandled.
       .catch(() => null);
     if (!kpm) throw new NotFoundException('KPM');
+    return this.toView(kpm);
+  }
+
+  /**
+   * The office's own identity (P4-T5, `KPM_Owner.html:1807-1812`).
+   *
+   * **The Owner's, not the Admin's.** `route-registry.md` puts Branch info alone among the
+   * Settings screens at KPM_OWNER only, and the permission matrix agrees — it is the row
+   * that says what this office *is*, and delegated administration does not extend to
+   * renaming the branch.
+   *
+   * **Company and KPM Owner are not here.** The prototype disables both fields and labels
+   * the first *"tagged by Superadmin"*, which is where the platform-owned boundary was
+   * first written down. `kpm:update_company_tag` is Super Admin's alone.
+   *
+   * **Nor locale, timezone or currency.** ADR-0016 fixes all three for v1, and the office
+   * overview already shows them read-only. `kpms.timezone` stays a real column and every
+   * day boundary reads it — the thing that rule guards against is the *server's* clock.
+   *
+   * The fiscal year start month is stored, displayed, and read by nobody until Phase 14.
+   * Writing it now costs nothing and means the first period computation does not have to
+   * ask every office to go and set it.
+   */
+  async updateIdentity(
+    ctx: RequestContext,
+    kpmId: string,
+    input: {
+      branchName?: string;
+      address?: string | null;
+      contactPhone?: string | null;
+      fiscalYearStartMonth?: number;
+    },
+  ): Promise<KpmView> {
+    this.require(ctx, 'kpm:update_identity');
+    if (!ctx.isSuperAdmin && ctx.kpmId !== kpmId) throw new NotFoundException('KPM');
+
+    const set: Record<string, unknown> = {};
+    if (input.branchName !== undefined) set.branchName = input.branchName.trim();
+    if (input.address !== undefined) set.address = input.address?.trim() || null;
+    if (input.contactPhone !== undefined) set.contactPhone = input.contactPhone?.trim() || null;
+    if (input.fiscalYearStartMonth !== undefined) {
+      set.fiscalYearStartMonth = input.fiscalYearStartMonth;
+    }
+    if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
+
+    const before = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec()
+      .catch(() => null);
+    if (!before) throw new NotFoundException('KPM');
+
+    const kpm = await this.kpms
+      .findOneAndUpdate({ _id: kpmId, deletedAt: null }, { $set: set }, { new: true })
+      .exec();
+    if (!kpm) throw new NotFoundException('KPM');
+
+    await this.audit.record(ctx, {
+      action: 'kpm.identity_updated',
+      targetCollection: 'kpms',
+      targetId: kpmId,
+      before: {
+        branchName: before.branchName,
+        address: before.address,
+        contactPhone: before.contactPhone,
+        fiscalYearStartMonth: before.fiscalYearStartMonth,
+      },
+      after: set,
+    });
+
     return this.toView(kpm);
   }
 }

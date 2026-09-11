@@ -13,6 +13,33 @@ const valid = {
 };
 
 describe('environment validation', () => {
+  describe('mail transport (P4-T14, ADR-0019)', () => {
+    it('defaults to SMTP, so the safe thing is what you get by not deciding', () => {
+      expect(validateEnv(valid).MAIL_TRANSPORT).toBe('smtp');
+    });
+
+    it('allows the log transport outside production, for a developer with no catcher', () => {
+      const env = validateEnv({ ...valid, MAIL_TRANSPORT: 'log' });
+      expect(env.MAIL_TRANSPORT).toBe('log');
+    });
+
+    it('refuses the log transport in production, by name', () => {
+      /*
+       * The failure this key exists to make impossible: an API that accepts a
+       * registration and writes the verification link to stdout. It answers 201, the
+       * person waits for mail that never comes, and nothing says so.
+       */
+      expect(() => validateEnv({ ...valid, NODE_ENV: 'production', MAIL_TRANSPORT: 'log' }))
+        .toThrow(/MAIL_TRANSPORT/);
+      expect(() => validateEnv({ ...valid, NODE_ENV: 'production', MAIL_TRANSPORT: 'log' }))
+        .toThrow(/must be "smtp" in production/);
+    });
+
+    it('leaves production alone when the transport is right', () => {
+      expect(validateEnv({ ...valid, NODE_ENV: 'production' }).MAIL_TRANSPORT).toBe('smtp');
+    });
+  });
+
   it('accepts a complete configuration and applies defaults', () => {
     const env = validateEnv(valid);
     expect(env.PORT).toBe(3001);

@@ -15,6 +15,13 @@ import { JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { MembershipHistorySchema } from '@/modules/org/membership-history.schema';
 import { MembershipSchema } from '@/modules/org/membership.schema';
 import { unclassified } from './registered-schemas';
+import {
+  ActivityCategorySchema,
+} from '@/modules/config/activity-category.schema';
+import { ActivityTypeSchema } from '@/modules/config/activity-type.schema';
+import { LeadStatusSchema } from '@/modules/config/lead-status.schema';
+import { RatioDefinitionSchema } from '@/modules/config/ratio-definition.schema';
+import { PlatformTemplateSchema } from '@/modules/config/platform-template.schema';
 
 /**
  * P2-T8: soft delete everywhere.
@@ -37,6 +44,11 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['membershipHistory', MembershipHistorySchema],
   ['joinRequests', JoinRequestSchema],
   ['groups', GroupSchema],
+  ['activityCategories', ActivityCategorySchema],
+  ['activityTypes', ActivityTypeSchema],
+  ['leadStatuses', LeadStatusSchema],
+  ['ratioDefinitions', RatioDefinitionSchema],
+  ['platformTemplates', PlatformTemplateSchema],
 ];
 
 /**
@@ -57,6 +69,11 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [AssetSchema, 'AssetSchema'],
   [NotificationSchema, 'NotificationSchema'],
   [NotificationPreferencesSchema, 'NotificationPreferencesSchema'],
+  [ActivityCategorySchema, 'ActivityCategorySchema'],
+  [ActivityTypeSchema, 'ActivityTypeSchema'],
+  [LeadStatusSchema, 'LeadStatusSchema'],
+  [RatioDefinitionSchema, 'RatioDefinitionSchema'],
+  [PlatformTemplateSchema, 'PlatformTemplateSchema'],
   [MembershipSchema, 'MembershipSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [JoinRequestSchema, 'JoinRequestSchema'],

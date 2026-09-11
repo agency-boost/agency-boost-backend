@@ -10,19 +10,7 @@
  * provisioning. Runtime code reads the tenant's own value; these are the seed.
  */
 
-/** Ratio benchmarks. Overall.html:5208-5273, KPM_Owner.html:1451-1490. */
-export const RATIO_BENCHMARKS = {
-  /** Submissions ÷ (presentations + follow-ups). Overall.html:5235. Tenant-configurable. */
-  SELLING_SUCCESS_RATE: 0.15,
-  /** Agent codes ÷ (NBO presentations + follow-ups). Overall.html:5247. Tenant-configurable. */
-  RECRUITMENT_SUCCESS_RATE: 0.15,
-  /** New prospects ÷ lead-gen activities. Overall.html:5259. Tenant-configurable. */
-  LEADS_PER_ACTIVITY: 0.3,
-  /** (Sales + recruitment presentations) ÷ prospect contacts. Overall.html:5271. */
-  MEETING_PER_APPROACH: 1.5,
-  /** Selling/recruitment lean tolerance, in percentage points either side. Overall.html:5225. */
-  BALANCE_BAND_PP: 30,
-} as const;
+export { RATIO_BENCHMARKS } from './benchmarks';
 
 /** Goal calculator defaults. Overall.html:2872-2996, :5919-5940. All tenant-configurable. */
 export const GOAL_DEFAULTS = {
@@ -106,3 +94,14 @@ export const DEFAULT_ORG_LADDER = [
 /** Currency minor units. IDR sen: 100 minor units to the rupiah. */
 export const MINOR_UNITS_PER_MAJOR = 100;
 export const DEFAULT_CURRENCY = 'IDR';
+
+export {
+  SEED_RATIO_DEFINITIONS,
+  type SeedRatioDefinition,
+  SEED_ACTIVITY_CATEGORIES,
+  SEED_ACTIVITY_TYPES,
+  SEED_LEAD_STATUSES,
+  type SeedActivityCategory,
+  type SeedActivityType,
+  type SeedLeadStatus,
+} from './activity-taxonomy';

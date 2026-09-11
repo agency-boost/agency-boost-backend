@@ -264,3 +264,47 @@ export class RosterRowsDto {
   @MaxLength(512_000)
   rows!: string;
 }
+
+
+/**
+ * The office's own identity (P4-T5, `KPM_Owner.html:1807-1812`).
+ *
+ * **No company and no owner.** The prototype disables both fields and labels the first
+ * *"tagged by Superadmin"* — that is where the platform-owned boundary was first written
+ * down, and `kpm:update_company_tag` is Super Admin's alone.
+ *
+ * **No locale, timezone or currency.** ADR-0016 fixes all three for v1 and no screen
+ * offers them.
+ */
+export class UpdateBranchInfoDto {
+  @ApiPropertyOptional({ example: 'BSD City Branch', minLength: 2, maxLength: 120 })
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  branchName?: string;
+
+  @ApiPropertyOptional({ example: 'Jl. BSD Grand Boulevard No. 1, Tangerang', maxLength: 400 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  address?: string;
+
+  @ApiPropertyOptional({ example: '+62 21 5555 0417', maxLength: 40 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  contactPhone?: string;
+
+  @ApiPropertyOptional({
+    example: 1,
+    minimum: 1,
+    maximum: 12,
+    description: 'The month the financial year starts. Read by Phase 14, stored now.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  fiscalYearStartMonth?: number;
+}

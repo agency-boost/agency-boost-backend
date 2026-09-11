@@ -18,6 +18,14 @@ import { OrgLevelService } from './org-level.service';
 import { CompanyOrgLevel, CompanyOrgLevelSchema } from './company-org-level.schema';
 import { TenantService } from './tenant.service';
 import { clearCollections, seedLadder, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
+import { ProvisioningService } from '@/modules/config/provisioning.service';
+import { ActivityCategory, ActivityCategorySchema } from '@/modules/config/activity-category.schema';
+import { ActivityType, ActivityTypeSchema } from '@/modules/config/activity-type.schema';
+import { LeadStatus, LeadStatusSchema } from '@/modules/config/lead-status.schema';
+import { RatioDefinition, RatioDefinitionSchema } from '@/modules/config/ratio-definition.schema';
+import {
+  PlatformTemplate, PlatformTemplateSchema,
+} from '@/modules/config/platform-template.schema';
 
 const NOW = new Date('2026-09-06T02:00:00Z');
 
@@ -50,12 +58,20 @@ describe('KpmRequestService (P3.5-T2)', () => {
     const audit = new AuditService(auditModel as never);
 
     const orgLevels = new OrgLevelService(levels as never, companies as never, audit, clock);
+    const provisioning = new ProvisioningService(
+      mongoose.model(ActivityCategory.name, ActivityCategorySchema) as never,
+      mongoose.model(ActivityType.name, ActivityTypeSchema) as never,
+      mongoose.model(LeadStatus.name, LeadStatusSchema) as never,
+      mongoose.model(RatioDefinition.name, RatioDefinitionSchema) as never,
+      mongoose.model(PlatformTemplate.name, PlatformTemplateSchema) as never,
+    );
     tenants = new TenantService(
       kpms as never, companies as never, users as never, requests as never, audit, clock,
       new HierarchyService(
         repo, kpms as never, users as never, historyModel as never, clock, orgLevels,
       ), repo,
       orgLevels,
+      provisioning,
     );
     service = new KpmRequestService(
       requests as never, companies as never, users as never, tenants, audit, clock,

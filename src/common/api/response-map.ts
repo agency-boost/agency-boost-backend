@@ -17,6 +17,10 @@ import {
 import {
   AuditEntryResponseDto, CompanyResponseDto, PublicCompanyDto,
 } from '@/modules/tenants/platform.response.dto';
+import {
+  ActivityCategoryDto, ActivityTypeDto, LeadPipelineDto, LeadStatusDto, RatioDefinitionDto,
+  TenantConfigDto,
+} from '@/modules/config/config.response.dto';
 
 /** What one operation answers with: a class, and whether it comes back as an array. */
 export interface ResponseShape {
@@ -69,6 +73,29 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   OnboardingController_untagged: { type: UntaggedMemberDto, isArray: true },
   OnboardingController_tag: { type: UntaggedMemberDto, isArray: true },
 
+  TenantConfigController_listActivityTypes: { type: ActivityCategoryDto, isArray: true },
+  TenantConfigController_createCategory: { type: ActivityCategoryDto },
+  TenantConfigController_renameCategory: { type: ActivityCategoryDto },
+  TenantConfigController_createType: { type: ActivityTypeDto },
+  TenantConfigController_reorderTypes: { type: ActivityTypeDto, isArray: true },
+  TenantConfigController_updateType: { type: ActivityTypeDto },
+  TenantConfigController_archiveType: { type: ActivityTypeDto },
+  TenantConfigController_restoreType: { type: ActivityTypeDto },
+  TenantConfigController_listLeadStatuses: { type: LeadPipelineDto, isArray: true },
+  TenantConfigController_createLeadStatus: { type: LeadStatusDto },
+  TenantConfigController_reorderLeadStatuses: { type: LeadPipelineDto },
+  TenantConfigController_renameLeadStatus: { type: LeadStatusDto },
+  TenantConfigController_setTerminal: { type: LeadPipelineDto },
+  TenantConfigController_archiveLeadStatus: { type: LeadStatusDto },
+  TenantConfigController_restoreLeadStatus: { type: LeadStatusDto },
+  TenantConfigReadController_readConfig: { type: TenantConfigDto },
+  TenantConfigController_readBranchInfo: { type: KpmViewDto },
+  TenantConfigController_updateBranchInfo: { type: KpmViewDto },
+  TenantConfigController_listRatios: { type: RatioDefinitionDto, isArray: true },
+  TenantConfigController_createRatio: { type: RatioDefinitionDto },
+  TenantConfigController_updateRatio: { type: RatioDefinitionDto },
+  TenantConfigController_archiveRatio: { type: RatioDefinitionDto },
+  TenantConfigController_restoreRatio: { type: RatioDefinitionDto },
   OrgController_myTeam: { type: TeamMemberDto, isArray: true },
   OrgController_changeRole: { type: TeamMemberDto, isArray: true },
   OrgController_remove: { type: TeamMemberDto, isArray: true },

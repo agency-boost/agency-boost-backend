@@ -5,7 +5,8 @@ import {
   Notification, NotificationPreferences, NotificationPreferencesSchema, NotificationSchema,
 } from './notification.schema';
 import { NotificationService } from './notification.service';
-import { ConsoleTemplateRenderer } from './console-renderer';
+import { TemplateRenderer } from './notification.service';
+import { RenderedMessage } from './notification.types';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 
 const NOW = new Date('2026-09-06T02:00:00Z');
@@ -37,6 +38,13 @@ function person(userId: string, kpmId: string | null) {
   );
 }
 
+/** The words are not what this file is about; isolation is. */
+class StubRenderer extends TemplateRenderer {
+  render(templateId: string): RenderedMessage {
+    return { subject: templateId, body: '' };
+  }
+}
+
 describe('notifications — one inbox per person (P3.5-T10)', () => {
   let service: NotificationService;
 
@@ -45,7 +53,7 @@ describe('notifications — one inbox per person (P3.5-T10)', () => {
     service = new NotificationService(
       mongoose.model(Notification.name, NotificationSchema) as never,
       mongoose.model(NotificationPreferences.name, NotificationPreferencesSchema) as never,
-      new ConsoleTemplateRenderer(),
+      new StubRenderer(),
       new FixedClock(NOW),
       [],
     );

@@ -86,6 +86,33 @@ export class Kpm {
   @Prop({ type: Object, default: () => ({ nextMemberSeq: 1 }) })
   counters!: { nextMemberSeq: number };
 
+  /**
+   * Which company template this office's configuration was copied from (ADR-0018, P4-T1).
+   *
+   * `null` on both means the platform defaults were used, because the company had
+   * published nothing yet — the normal state of the first office of a new insurer. Kept so
+   * that *"six of eight KPMs haven't reviewed the new default activation checklist"*, which
+   * the Superadmin prototype puts on its front page, is answerable at all.
+   *
+   * It is a record of provenance, not a link: copy-on-provision means publishing a new
+   * version never reaches back into an office that has already diverged.
+   */
+  /**
+   * The month the office's financial year starts, 1–12 (P4-T5).
+   *
+   * Stored and displayed now; **read by nobody until Phase 14**. Writing it here costs
+   * nothing and means the first period computation does not have to go back and ask every
+   * office to set it. January by default, which is what every office in v1 uses.
+   */
+  @Prop({ type: Number, default: 1, min: 1, max: 12 })
+  fiscalYearStartMonth!: number;
+
+  @Prop({ type: String, default: null })
+  seededFromTemplateId!: string | null;
+
+  @Prop({ type: Number, default: null })
+  seededFromVersion!: number | null;
+
   @Prop({ type: String, enum: ['active', 'suspended', 'archived'], default: 'active', index: true })
   status!: 'active' | 'suspended' | 'archived';
 

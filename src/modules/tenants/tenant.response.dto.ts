@@ -56,6 +56,15 @@ export class KpmViewDto implements KpmView {
   @ApiProperty({ type: String })
   currency!: string;
 
+  @ApiProperty({
+    type: Number,
+    example: 1,
+    description:
+      'The month the office\'s financial year starts, 1–12 (P4-T5). Stored and shown now; '
+      + 'read by the period computations in Phase 14.',
+  })
+  fiscalYearStartMonth!: number;
+
   @ApiProperty({ type: 'object', additionalProperties: true })
   settings!: Record<string, number>;
 

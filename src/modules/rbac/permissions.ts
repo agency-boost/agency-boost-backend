@@ -102,6 +102,31 @@ export const PERMISSIONS = {
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
+  /*
+   * Tenant configuration: the taxonomies an office's agent screens are driven by (P4-T1).
+   *
+   * **Read is wide, write is narrow.** Every agent surface renders the office's own
+   * activity types, so every member of the office reads them — a taxonomy nobody may read
+   * is a capture screen nobody can use. Writing is the Owner and the Admin: it is the
+   * settings group the Owner prototype puts them both in, and a leader changing what the
+   * office counts would silently change every ratio in it.
+   *
+   * `own-kpm`, never `all` for a tenant: Super Admin edits the **company template**
+   * (ADR-0018, `P4-T8`), not an office's own copy, and the two are different documents on
+   * purpose — an office that has diverged keeps its divergence.
+   */
+  'tenant_config:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-kpm' },
+    { grantee: AAB, scope: 'own-kpm' },
+    { grantee: AGENT, scope: 'own-kpm' },
+  ],
+  'tenant_config:write': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
   'kpm:activate': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:archive': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:assign_owner': [{ grantee: SUPER_ADMIN, scope: 'all' }],

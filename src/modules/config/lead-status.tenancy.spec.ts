@@ -1,0 +1,195 @@
+import mongoose from 'mongoose';
+import { FixedClock } from '@/common/clock/clock.port';
+import { RequestContext } from '@/common/context/request-context';
+import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
+import { AuditService } from '@/modules/audit/audit.service';
+import { ActivityCategory, ActivityCategorySchema } from './activity-category.schema';
+import { ActivityType, ActivityTypeSchema } from './activity-type.schema';
+import { LeadStatus, LeadStatusSchema } from './lead-status.schema';
+import { PlatformTemplate, PlatformTemplateSchema } from './platform-template.schema';
+import { LeadStatusRepository } from './activity.repository';
+import { LeadStatusService } from './lead-status.service';
+import { ProvisioningService } from './provisioning.service';
+import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
+import { RatioDefinition, RatioDefinitionSchema } from './ratio-definition.schema';
+
+const NOW = new Date('2026-09-11T02:00:00Z');
+const KPM_A = '66f0000000000000000000a1';
+const KPM_B = '66f0000000000000000000b1';
+const COMPANY = '66f0000000000000000000c1';
+
+function ctx(kpmId: string) {
+  return new RequestContext('u1', 'none', {
+    membershipId: `mem-${kpmId}`, kpmId, hierarchyRole: 'ab', status: 'active',
+    isKpmOwner: true, isKpmAdmin: false, directCount: 0,
+  });
+}
+
+describe('the office lead pipelines (P4-T3)', () => {
+  let service: LeadStatusService;
+  let provisioning: ProvisioningService;
+  let templates: mongoose.Model<never>;
+
+  beforeAll(async () => {
+    await startMongo();
+    const statuses = mongoose.model(LeadStatus.name, LeadStatusSchema);
+    templates = mongoose.model(PlatformTemplate.name, PlatformTemplateSchema) as never;
+    service = new LeadStatusService(
+      new LeadStatusRepository(statuses as never),
+      new AuditService(mongoose.model(AuditLog.name, AuditLogSchema) as never),
+      new FixedClock(NOW),
+    );
+    provisioning = new ProvisioningService(
+      mongoose.model(ActivityCategory.name, ActivityCategorySchema) as never,
+      mongoose.model(ActivityType.name, ActivityTypeSchema) as never,
+      statuses as never,
+      mongoose.model(RatioDefinition.name, RatioDefinitionSchema) as never,
+      templates as never,
+    );
+  });
+
+  afterAll(stopMongo);
+  beforeEach(clearCollections);
+
+  describe('the seeded ladders (AC-2)', () => {
+    beforeEach(() => provisioning.seedLeadPipelines(KPM_A, COMPANY));
+
+    it('is five sales stages and seven recruitment ones, by code', async () => {
+      const [sales, recruitment] = await service.list(ctx(KPM_A));
+      expect(sales.statuses.map((s) => s.code)).toEqual([
+        'NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED',
+        'APPROVED_NOT_PAID', 'PAID_AND_ISSUED',
+      ]);
+      expect(recruitment.statuses).toHaveLength(7);
+      expect(recruitment.statuses.at(-1)!.code).toBe('NEW_ACTIVE_AGENT');
+    });
+
+    it('gives each pipeline exactly one terminal stage (AC-3)', async () => {
+      // *Mark successful* is gated on it: two would be ambiguous, none unreachable.
+      for (const pipeline of await service.list(ctx(KPM_A))) {
+        expect(pipeline.statuses.filter((s) => s.isTerminal)).toHaveLength(1);
+      }
+    });
+
+    it('marks the terminal stage as a property, not as the last row', async () => {
+      /*
+       * The prototype compares against the end of a hardcoded array. An office adding a
+       * stage after *Paid and issued* would silently move the gate — so a new stage is
+       * appended and is deliberately not terminal.
+       */
+      await service.create(ctx(KPM_A), {
+        pipeline: 'sales', code: 'AFTER_THE_END', label: 'After the end',
+      });
+      const [sales] = await service.list(ctx(KPM_A));
+      expect(sales.statuses.at(-1)!.code).toBe('AFTER_THE_END');
+      expect(sales.statuses.at(-1)!.isTerminal).toBe(false);
+      expect(sales.statuses.find((s) => s.isTerminal)!.code).toBe('PAID_AND_ISSUED');
+    });
+  });
+
+  describe('changing a ladder', () => {
+    beforeEach(() => provisioning.seedLeadPipelines(KPM_A, COMPANY));
+
+    it('renames a stage without touching the code every lead holds', async () => {
+      const [sales] = await service.list(ctx(KPM_A));
+      const stage = sales.statuses[0];
+      const renamed = await service.rename(ctx(KPM_A), stage.id, 'Belum didekati');
+      expect(renamed.label).toBe('Belum didekati');
+      expect(renamed.code).toBe(stage.code);
+    });
+
+    it('moves the terminal flag, leaving exactly one behind', async () => {
+      const [sales] = await service.list(ctx(KPM_A));
+      const submitted = sales.statuses.find((s) => s.code === 'POLICY_SUBMITTED')!;
+
+      const after = await service.setTerminal(ctx(KPM_A), submitted.id);
+      const terminals = after.statuses.filter((s) => s.isTerminal);
+      expect(terminals).toHaveLength(1);
+      expect(terminals[0].code).toBe('POLICY_SUBMITTED');
+    });
+
+    it('refuses to archive the stage that closes the pipeline', async () => {
+      // Leads would have no way to be marked successful, and nothing on the leads screen
+      // would say why the tick stopped working.
+      const [sales] = await service.list(ctx(KPM_A));
+      const terminal = sales.statuses.find((s) => s.isTerminal)!;
+      await expect(service.archive(ctx(KPM_A), terminal.id))
+        .rejects.toThrow('Make another one terminal first');
+    });
+
+    it('refuses to make an archived stage the terminal one', async () => {
+      const [sales] = await service.list(ctx(KPM_A));
+      const stage = sales.statuses[1];
+      await service.archive(ctx(KPM_A), stage.id);
+      await expect(service.setTerminal(ctx(KPM_A), stage.id))
+        .rejects.toThrow('archived status cannot be the one that closes');
+    });
+
+    it('refuses a duplicate code across both pipelines, not just within one', async () => {
+      // A lead carries a status code and a type; one code meaning two things in one
+      // office would make the first cross-pipeline report guess which.
+      await expect(service.create(ctx(KPM_A), {
+        pipeline: 'recruitment', code: 'FOLLOW_UP', label: 'Follow-up',
+      })).rejects.toThrow('already has a lead status called FOLLOW_UP');
+    });
+
+    it('reorders one pipeline and leaves the other alone', async () => {
+      const before = await service.list(ctx(KPM_A));
+      const salesIds = [...before[0].statuses].reverse().map((s) => s.id);
+
+      const after = await service.reorder(ctx(KPM_A), 'sales', salesIds);
+      expect(after.statuses.map((s) => s.code))
+        .toEqual([...before[0].statuses].reverse().map((s) => s.code));
+      const [, recruitment] = await service.list(ctx(KPM_A));
+      expect(recruitment.statuses.map((s) => s.code))
+        .toEqual(before[1].statuses.map((s) => s.code));
+    });
+
+    it('refuses a reorder that does not name the whole pipeline', async () => {
+      const [sales] = await service.list(ctx(KPM_A));
+      await expect(service.reorder(ctx(KPM_A), 'sales', [sales.statuses[0].id]))
+        .rejects.toThrow('every sales status, once each');
+    });
+  });
+
+  describe('provisioning and isolation', () => {
+    it('refuses a template whose pipeline can never be closed', async () => {
+      /*
+       * A pipeline with no terminal stage looks like a leads bug for weeks before anybody
+       * traces it back to a template — so it is refused at the moment of copying, where
+       * the bad template is still the obvious suspect.
+       */
+      await templates.create({
+        companyId: COMPANY, kind: 'lead_pipeline', version: 1, status: 'published',
+        publishedAt: NOW,
+        payload: {
+          statuses: [
+            { pipeline: 'sales', code: 'ONE', label: 'One', rank: 1, isTerminal: false },
+            { pipeline: 'recruitment', code: 'TWO', label: 'Two', rank: 1, isTerminal: true },
+          ],
+        },
+      } as never);
+
+      await expect(provisioning.seedLeadPipelines(KPM_A, COMPANY))
+        .rejects.toThrow(/sales pipeline 0 terminal stages/);
+    });
+
+    it('keeps two offices’ ladders apart', async () => {
+      await provisioning.seedLeadPipelines(KPM_A, COMPANY);
+      await provisioning.seedLeadPipelines(KPM_B, COMPANY);
+      const [sales] = await service.list(ctx(KPM_A));
+      await service.rename(ctx(KPM_A), sales.statuses[0].id, 'Only in A');
+
+      const [theirs] = await service.list(ctx(KPM_B));
+      expect(theirs.statuses[0].label).toBe('Not yet approached');
+    });
+
+    it('cannot rename another office’s stage — 404, never 403', async () => {
+      await provisioning.seedLeadPipelines(KPM_A, COMPANY);
+      await provisioning.seedLeadPipelines(KPM_B, COMPANY);
+      const [theirs] = await service.list(ctx(KPM_B));
+      await expect(service.rename(ctx(KPM_A), theirs.statuses[0].id, 'mine'))
+        .rejects.toThrow('Lead status');
+    });
+  });
+});
