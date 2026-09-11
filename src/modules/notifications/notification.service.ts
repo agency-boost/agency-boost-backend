@@ -114,7 +114,19 @@ export class NotificationService {
       membershipId: request.membershipId ?? null,
       userId: request.userId,
       templateId: request.templateId,
-      payload: request.payload,
+      /*
+       * **The payload is kept only for a row somebody can actually read** (ADR-0019).
+       *
+       * `EMAIL_VERIFICATION` and `PASSWORD_RESET` carry a live single-use token in theirs,
+       * and neither has an `in_app` channel — so the row they write is never rendered by
+       * anything, because the inbox filters to `IN_APP_TEMPLATES`. It sat there holding a
+       * credential nobody would ever read on purpose.
+       *
+       * `authTokens` deliberately stores only `tokenHash`, so that a database read cannot
+       * reset somebody's password. Persisting the raw token in the row beside it undid
+       * exactly that, for no benefit at all.
+       */
+      payload: IN_APP_TEMPLATES.includes(request.templateId) ? request.payload : {},
       delivery,
       readAt: null,
     });

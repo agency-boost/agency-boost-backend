@@ -54,6 +54,9 @@ import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { RemovalService } from '@/modules/org/removal.service';
 import { RoleChangeService } from '@/modules/org/role-change.service';
 import { AuthToken, AuthTokenDocument, AuthTokenSchema } from './auth-token.schema';
+import {
+  NotificationChannel, NotificationChannelAdapter, RenderedMessage, SendRequest,
+} from '@/modules/notifications/notification.types';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ContextResolver } from './context-resolver';
@@ -71,6 +74,35 @@ import { startMongo, stopMongo } from '../../../test/mongo';
  * This is the test that proves the Swagger surface is actually usable — the service
  * tests do not exercise routing, guards or the error envelope.
  */
+/**
+ * The mail the product would have sent, captured at the channel.
+ *
+ * The verification token used to be read out of the notification row's stored payload,
+ * which is where it no longer is: a live single-use token at rest, on a row nothing ever
+ * renders, is what ADR-0019 removed. An adapter is where a token legitimately arrives —
+ * a real mailer needs it to build the link — so reading it here exercises the path the
+ * email adapter will take in `P4-T14`, instead of a storage detail that had to leak.
+ */
+class Mailbox extends NotificationChannelAdapter {
+  readonly channel: NotificationChannel = 'email';
+  readonly sent: Array<{ to: SendRequest; rendered: RenderedMessage }> = [];
+
+  async send(to: SendRequest, rendered: RenderedMessage): Promise<void> {
+    this.sent.push({ to, rendered });
+  }
+
+  /** The most recent token sent to this person, for the template asked about. */
+  tokenFor(userId: string, templateId: string): string {
+    const hit = [...this.sent].reverse().find(
+      (m) => m.to.userId === userId && m.to.templateId === templateId,
+    );
+    if (!hit) throw new Error(`no ${templateId} was sent to ${userId}`);
+    return (hit.to.payload as { token: string }).token;
+  }
+}
+
+const mailbox = new Mailbox();
+
 describe('auth and admin over HTTP', () => {
   let app: INestApplication;
   let mongoUri: string;
@@ -114,7 +146,7 @@ describe('auth and admin over HTTP', () => {
           useFactory: (clock: Clock) => new Hs256TokenSigner('a'.repeat(40), clock),
         },
         { provide: TemplateRenderer, useClass: ConsoleTemplateRenderer },
-        { provide: NOTIFICATION_ADAPTERS, useValue: [] },
+        { provide: NOTIFICATION_ADAPTERS, useValue: [mailbox] },
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService, OrgLevelService,
@@ -209,12 +241,9 @@ describe('auth and admin over HTTP', () => {
       }).expect(201);
 
     const users = app.get<Model<UserDocument>>(getModelToken(User.name));
-    const notifications = app.get<Model<NotificationDocument>>(getModelToken(Notification.name));
     const user = await users.findOne({ email }).exec();
 
-    const note = await notifications
-      .findOne({ userId: String(user!._id), templateId: 'auth.email_verification' }).exec();
-    const token = (note!.get('payload') as { token: string }).token;
+    const token = mailbox.tokenFor(String(user!._id), 'auth.email_verification');
 
     await api().post('/api/v1/auth/verify-email').send({ token }).expect(200);
     if (platformRole === 'super_admin') {
@@ -229,10 +258,35 @@ describe('auth and admin over HTTP', () => {
       email,
       accessToken: (login.body as { accessToken: string }).accessToken,
       refreshCookie: refreshCookie ?? '',
+      /** What the mailer was handed — so a test can assert it is not also in the database. */
+      verificationToken: token,
     };
   }
 
   describe('the journey a reviewer walks', () => {
+    it('writes no live token to the database, where nothing would ever read it (ADR-0019)', async () => {
+      /*
+       * `authTokens` stores only `tokenHash`, so that reading the database cannot verify
+       * an address or reset a password. The notification row used to store the raw token
+       * beside it — and `auth.email_verification` has no `in_app` channel, so that row is
+       * never rendered by anything. This asserts it at the storage layer, which is the
+       * layer the guarantee is actually about.
+       */
+      const email = 'no-token-at-rest@kpm.test';
+      const user = await makeUser(email);
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      const account = await users.findOne({ email }).exec();
+      const notifications = app.get<Model<NotificationDocument>>(getModelToken(Notification.name));
+
+      const rows = await notifications.find({ userId: String(account!._id) }).exec();
+      const verification = rows.find((r) => r.get('templateId') === 'auth.email_verification');
+
+      // The row exists — it is the delivery record — and carries nothing to sign in with.
+      expect(verification).toBeDefined();
+      expect(verification!.get('payload')).toEqual({});
+      expect(JSON.stringify(verification!.toObject())).not.toContain(user.verificationToken);
+    });
+
     it('registers, verifies, signs in and reads its own context', async () => {
       const user = await makeUser('journey@kpm.test');
 

@@ -133,6 +133,40 @@ describe('NotificationService', () => {
     });
   });
 
+  it('never persists a live token on the row, because nothing will ever read it (ADR-0019)', async () => {
+    /*
+     * `authTokens` stores only `tokenHash`, so that reading the database cannot reset
+     * somebody's password. The notification row was storing the raw token beside it —
+     * and `PASSWORD_RESET` has no `in_app` channel, so the row is never rendered by
+     * anything. A plaintext credential at rest, for nobody.
+     */
+    const { service, created } = makeService({ adapters: [new RecordingAdapter('email')] });
+
+    await service.send({
+      userId: 'u1',
+      templateId: NotificationTemplate.PASSWORD_RESET,
+      payload: { token: 'raw-reset-token', fullName: 'Rina' },
+    });
+
+    expect(created[0].payload).toEqual({});
+    expect(JSON.stringify(created[0])).not.toContain('raw-reset-token');
+    // The delivery record is the point of the row, and it survives.
+    expect(created[0].delivery).toHaveProperty('email');
+  });
+
+  it('keeps the payload of a row somebody can actually read', async () => {
+    // The inbox renders its copy from the payload, so stripping every row would empty it.
+    const { service, created } = makeService({ adapters: [new RecordingAdapter('in_app')] });
+
+    await service.send({
+      userId: 'u1',
+      templateId: NotificationTemplate.JOIN_REQUEST_APPROVED,
+      payload: { kpmLabel: 'KPM 0417' },
+    });
+
+    expect(created[0].payload).toEqual({ kpmLabel: 'KPM 0417' });
+  });
+
   it('accepts an adapter registered after construction — the WhatsApp seam', async () => {
     const { service } = makeService({ adapters: [] });
     const late = new RecordingAdapter('in_app');
