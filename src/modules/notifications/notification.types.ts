@@ -27,6 +27,15 @@ export const NotificationTemplate = {
   GOAL_PROPOSED_BY_LEADER: 'goal.proposed_by_leader',
   COACHING_SESSION_FINALIZED: 'coaching.session_finalized',
   EVENT_REMINDER: 'event.reminder',
+  /*
+   * A support session, announced to the person and their Owner (§3.13, P4-T10).
+   *
+   * `in_app` **and** email, deliberately: this is the one class of notification whose
+   * whole purpose is that it cannot be missed, and the inbox is only read by somebody who
+   * opens the product.
+   */
+  IMPERSONATION_STARTED: 'impersonation.started',
+  IMPERSONATION_ELEVATED: 'impersonation.elevated',
   EMAIL_VERIFICATION: 'auth.email_verification',
   PASSWORD_RESET: 'auth.password_reset',
 } as const;
@@ -53,6 +62,8 @@ export const TEMPLATE_CHANNELS: Record<NotificationTemplateId, readonly Notifica
   [NotificationTemplate.GOAL_PROPOSED_BY_LEADER]: ['in_app', 'email'],
   [NotificationTemplate.COACHING_SESSION_FINALIZED]: ['in_app'],
   [NotificationTemplate.EVENT_REMINDER]: ['in_app', 'email'],
+  [NotificationTemplate.IMPERSONATION_STARTED]: ['in_app', 'email'],
+  [NotificationTemplate.IMPERSONATION_ELEVATED]: ['in_app', 'email'],
   [NotificationTemplate.EMAIL_VERIFICATION]: ['email'],
   [NotificationTemplate.PASSWORD_RESET]: ['email'],
 };

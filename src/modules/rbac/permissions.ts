@@ -154,6 +154,15 @@ export const PERMISSIONS = {
   // ---- Impersonation. ----
   'impersonation:start': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'impersonation:target_kpm_admin_or_owner': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
+   * Approving a support session to write (§3.13, P4-T10).
+   *
+   * Held by every Super Admin, and that is not the control — the control is that the
+   * approver may not be the operator running the session. A permission cannot express
+   * "somebody other than you", so `ImpersonationService.elevate` checks the session's own
+   * starter. A grant list that tried to say it would read as two people and mean one.
+   */
+  'impersonation:elevate_to_write': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   /**
    * Granted to nobody, deliberately. A Super Admin impersonating another Super Admin
    * would erase the only attribution that makes the feature auditable at all.
@@ -429,8 +438,67 @@ export function isOwnerReserved(permission: Permission): boolean {
   );
 }
 
+/**
+ * Powers that are refused **inside a support session**, however it was elevated (P4-T10,
+ * §3.13).
+ *
+ * These are the actions whose blast radius reaches past the office being supported, or
+ * that would let a session widen itself. A Super Admin has every one of them in their own
+ * right; the point is that acting *as somebody else* is not the way to use them. If the
+ * support case genuinely needs one, the operator ends the session and does it as
+ * themselves, where the audit row says so plainly.
+ *
+ * Cross-tenant reads are absent from the list because they are structurally impossible: a
+ * session's token is pinned to one person, and every scoped read resolves from their
+ * membership.
+ */
+export const BLOCKED_WHILE_IMPERSONATING: readonly Permission[] = [
+  'impersonation:start',
+  'super_admin:grant',
+  'kpm:create',
+  'kpm:archive',
+  'kpm:transfer_ownership',
+  'kpm_admin:grant',
+  'kpm_admin:revoke',
+  'notification_preference:manage',
+];
+
+const BLOCKED = new Set<string>(BLOCKED_WHILE_IMPERSONATING);
+
+/** Is this one of the powers a support session may never use? */
+export function isBlockedWhileImpersonating(permission: Permission): boolean {
+  return BLOCKED.has(permission);
+}
+
 export function can(ctx: RequestContext, permission: Permission): boolean {
+  /*
+   * The hard-blocked list, checked at the one place every permission question passes
+   * through (P4-T10). Putting it in each controller would mean remembering it in each
+   * controller — and the row that matters most, `kpm_admin:grant`, was reachable by a
+   * Super Admin impersonating an Owner precisely because nothing central said no.
+   */
+  if (ctx.isImpersonating && BLOCKED.has(permission)) return false;
+
+  /*
+   * A read-only session may read anything the target can and write nothing.
+   *
+   * The distinction is made from the permission's own verb rather than from the HTTP
+   * method, because the method is the controller's business and this is not: a `POST`
+   * that only reads is still a read, and a permission named `:archive` is a write on any
+   * verb. Every permission in the registry is `resource:action`, and the read-shaped
+   * actions are a short closed list.
+   */
+  if (ctx.impersonationReadOnly && !isReadLike(permission)) return false;
+
   return scopeFor(ctx, permission) !== null;
+}
+
+/** Actions that only read. Everything else is treated as a write. */
+const READ_LIKE = /^(read|list|search|preview|view|export)/;
+
+function isReadLike(permission: Permission): boolean {
+  const action = permission.split(':')[1] ?? '';
+  return READ_LIKE.test(action) || action.endsWith('_read');
 }
 
 function holds(ctx: RequestContext, grant: Grant): boolean {

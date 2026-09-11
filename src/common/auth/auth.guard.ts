@@ -69,15 +69,27 @@ export class AuthGuard implements CanActivate {
      *
      * Only `imp:` tokens pay for the lookup, and they are rare by design.
      */
-    if (impersonator && !(await this.impersonation.isLive(token))) {
-      throw new DomainException(
-        ErrorCode.AUTH_TOKEN_EXPIRED,
-        'That support session has ended.',
-        HttpStatus.UNAUTHORIZED,
-      );
+    let readOnlySession = false;
+    if (impersonator) {
+      const session = await this.impersonation.liveSession(token);
+      if (!session) {
+        throw new DomainException(
+          ErrorCode.AUTH_TOKEN_EXPIRED,
+          'That support session has ended.',
+          HttpStatus.UNAUTHORIZED,
+        );
+      }
+      /*
+       * Read from the **session row**, not from the token (P4-T10).
+       *
+       * Elevation happens after the token is minted — a second Super Admin approves a
+       * session already running — so a flag baked into the JWT could never move. The row
+       * is already being read here to check the session is live, so this costs nothing.
+       */
+      readOnlySession = session.readOnly;
     }
 
-    const context = await this.resolver.resolve(claims.sub, impersonator);
+    const context = await this.resolver.resolve(claims.sub, impersonator, readOnlySession);
 
     /*
      * **A temporary password buys three routes and nothing else.**

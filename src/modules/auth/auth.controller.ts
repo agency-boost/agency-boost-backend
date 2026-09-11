@@ -369,6 +369,8 @@ export class AuthController {
       },
       membership: ctx.membership,
       isImpersonating: ctx.isImpersonating,
+      // So the banner can say which kind of session this is (P4-T10).
+      impersonationReadOnly: ctx.impersonationReadOnly,
       impersonatedBy: ctx.impersonatorUserId,
       /*
        * The reason every other route is answering 403 (P3.6-T4).

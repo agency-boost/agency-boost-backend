@@ -6,7 +6,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
-import { ImpersonateDto } from '@/modules/auth/auth.dto';
+import { ElevateImpersonationDto, ImpersonateDto } from '@/modules/auth/auth.dto';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
 import {
   ApproveKpmRequestDto,
@@ -310,6 +310,40 @@ export class AdminController {
       );
     }
     return raw as TemplateKind;
+  }
+
+  // ---- Support sessions (P4-T10, §3.13). ----
+
+  @Post('impersonation/:sessionId/elevate')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission('impersonation:elevate_to_write')
+  @ApiOperation({
+    summary: 'Approve a support session to write',
+    description:
+      '**A second Super Admin, never the one running it.** An admin session can rewrite '
+      + 'the configuration every member of an office depends on, and the operator best '
+      + 'placed to notice that is a bad idea is somebody other than the one having it. '
+      + 'The reason is typed again and the office\'s Owner reads it. `403` for the '
+      + 'session\'s own starter; `404` for one that has ended or expired.',
+  })
+  async elevateSession(
+    @Ctx() ctx: RequestContext,
+    @Param('sessionId') sessionId: string,
+    @Body() dto: ElevateImpersonationDto,
+  ) {
+    await this.impersonation.elevate(ctx, sessionId, dto.reason);
+  }
+
+  @Get('tenants/:id/impersonation-sessions')
+  @RequirePermission('impersonation:read_session_log')
+  @ApiOperation({
+    summary: 'Support sessions run inside one office',
+    description:
+      'Newest first. An Owner reads their own office\'s — support an office cannot see is '
+      + 'support an office cannot question. Another office is a **404**, never a 403.',
+  })
+  async sessionLog(@Ctx() ctx: RequestContext, @Param('id') id: string) {
+    return this.impersonation.sessionLog(ctx, id);
   }
 
   @Get('tenants/:id')

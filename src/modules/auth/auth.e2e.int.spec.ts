@@ -56,7 +56,10 @@ import { GroupService } from '@/modules/org/group.service';
 import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { RemovalService } from '@/modules/org/removal.service';
 import { RoleChangeService } from '@/modules/org/role-change.service';
-import { AuthToken, AuthTokenDocument, AuthTokenSchema } from './auth-token.schema';
+import { AuthToken, AuthTokenSchema } from './auth-token.schema';
+import {
+  ImpersonationSession, ImpersonationSessionDocument, ImpersonationSessionSchema,
+} from './impersonation-session.schema';
 import {
   NotificationChannel, NotificationChannelAdapter, RenderedMessage, SendRequest,
 } from '@/modules/notifications/notification.types';
@@ -149,6 +152,7 @@ describe('auth and admin over HTTP', () => {
         MongooseModule.forFeature([
           { name: User.name, schema: UserSchema },
           { name: AuthToken.name, schema: AuthTokenSchema },
+          { name: ImpersonationSession.name, schema: ImpersonationSessionSchema },
           { name: Company.name, schema: CompanySchema },
           { name: Kpm.name, schema: KpmSchema },
           { name: KpmRequest.name, schema: KpmRequestSchema },
@@ -654,11 +658,138 @@ describe('auth and admin over HTTP', () => {
         .set({ Authorization: `Bearer ${sa.accessToken}` })
         .send({ reason: 'Support' }).expect(201);
 
-      const tokens = app.get<Model<AuthTokenDocument>>(getModelToken(AuthToken.name));
-      await tokens.deleteMany({ kind: 'impersonation' });
+      // The session row is the switch (P4-T10): it moved out of `authTokens` when the
+      // session gained properties a credential has no business carrying — read-only,
+      // who approved writing, which office.
+      const sessions = app.get<Model<ImpersonationSessionDocument>>(
+        getModelToken(ImpersonationSession.name),
+      );
+      await sessions.deleteMany({});
 
       await api().get('/api/v1/auth/me')
         .set({ Authorization: `Bearer ${started.body.accessToken}` }).expect(401);
+    });
+
+    it('P4-T10: a session may look and not touch', async () => {
+      /*
+       * The control §3.13 described and the code did not honour. A session resolved the
+       * target's full rights, so a Super Admin impersonating an Owner could rewrite the
+       * office. It reads now and writes nothing.
+       */
+      const sa = await makeUser(`sa-ro-${Math.random()}@agencyboost.test`, 'super_admin');
+      const target = await makeUser(`ro-target-${Math.random()}@kpm.test`);
+      const started = await api().post(`/api/v1/admin/impersonate/${target.id}`)
+        .set({ Authorization: `Bearer ${sa.accessToken}` })
+        .send({ reason: 'Support' }).expect(201);
+      const asThem = { Authorization: `Bearer ${started.body.accessToken}` };
+
+      expect(started.body.readOnly).toBe(true);
+      // Reading is exactly as it was.
+      await api().get('/api/v1/auth/me').set(asThem).expect(200);
+      // Writing is not.
+      await api().post('/api/v1/join/kpm').set(asThem)
+        .send({ kpmId: '66f0000000000000000000a1' }).expect(403);
+    });
+
+    it('P4-T10: the hard-blocked list is refused inside a session, elevated or not', async () => {
+      /*
+       * `kpm_admin:grant` is the row that mattered: a Super Admin impersonating an Owner
+       * could hand somebody administrative rights over an office, and nothing central
+       * said no. The check is in `can()` — putting it in each controller would mean
+       * remembering it in each controller.
+       */
+      const sa = await makeUser(`sa-blocked-${Math.random()}@agencyboost.test`, 'super_admin');
+      const target = await makeUser(`blocked-target-${Math.random()}@kpm.test`);
+      const started = await api().post(`/api/v1/admin/impersonate/${target.id}`)
+        .set({ Authorization: `Bearer ${sa.accessToken}` })
+        .send({ reason: 'Support' }).expect(201);
+      const asThem = { Authorization: `Bearer ${started.body.accessToken}` };
+
+      // Starting a second session from inside one, and creating an office.
+      await api().post(`/api/v1/admin/impersonate/${sa.id}`).set(asThem)
+        .send({ reason: 'again' }).expect(403);
+      await api().post('/api/v1/admin/tenants').set(asThem)
+        .send({ companyId: 'x', code: '9999', branchName: 'B' }).expect(403);
+    });
+
+    it('P4-T10: a second Super Admin can let a session write, and the first cannot', async () => {
+      const sa = await makeUser(`sa-elev-${Math.random()}@agencyboost.test`, 'super_admin');
+      const other = await makeUser(`sa-two-${Math.random()}@agencyboost.test`, 'super_admin');
+      const target = await makeUser(`elev-target-${Math.random()}@kpm.test`);
+      const started = await api().post(`/api/v1/admin/impersonate/${target.id}`)
+        .set({ Authorization: `Bearer ${sa.accessToken}` })
+        .send({ reason: 'Support' }).expect(201);
+
+      // The operator running it cannot approve their own session — the whole rule.
+      await api().post(`/api/v1/admin/impersonation/${started.body.sessionId}/elevate`)
+        .set({ Authorization: `Bearer ${sa.accessToken}` })
+        .send({ reason: 'I would like to fix this myself.' }).expect(403);
+
+      await api().post(`/api/v1/admin/impersonation/${started.body.sessionId}/elevate`)
+        .set({ Authorization: `Bearer ${other.accessToken}` })
+        .send({ reason: 'Their taxonomy has a duplicate code.' }).expect(204);
+
+      // The same token now writes — elevation reaches a session already running, which is
+      // why `readOnly` lives on the row and not in the JWT.
+      const asThem = { Authorization: `Bearer ${started.body.accessToken}` };
+      await api().get('/api/v1/auth/me').set(asThem).expect(200);
+      // Past the permission gate now — a 404 for an office that does not exist is the
+      // service answering, which is the proof that `can()` let it through.
+      await api().post('/api/v1/join/kpm').set(asThem)
+        .send({ kpmId: '66f0000000000000000000a1' }).expect(404);
+    });
+
+    it('P4-T10: an Owner reads the support sessions run in their office', async () => {
+      // Support an office cannot see is support an office cannot question.
+      const sa = await makeUser(`sa-log-${Math.random()}@agencyboost.test`, 'super_admin');
+      const saAuth = { Authorization: `Bearer ${sa.accessToken}` };
+      const companyId = await anInsurer();
+      const kpm = await api().post('/api/v1/admin/tenants').set(saAuth)
+        .send({
+          companyId,
+          code: `${Math.floor(Math.random() * 9000) + 1000}`,
+          branchName: 'Log Branch',
+        }).expect(201);
+      const owner = await makeUser(`owner-log-${Math.random()}@kpm.test`);
+      await api().patch(`/api/v1/admin/tenants/${String(kpm.body._id)}/owner`).set(saAuth)
+        .send({ email: owner.email }).expect(200);
+
+      await api().post(`/api/v1/admin/impersonate/${owner.id}`).set(saAuth)
+        .send({ reason: 'Their overview will not load.' }).expect(201);
+
+      const again = await api().post('/api/v1/auth/login')
+        .send({ email: owner.email, password: PASSWORD }).expect(200);
+      const asOwner = {
+        Authorization: `Bearer ${(again.body as { accessToken: string }).accessToken}`,
+      };
+
+      const log = await api()
+        .get(`/api/v1/admin/tenants/${String(kpm.body._id)}/impersonation-sessions`)
+        .set(asOwner).expect(200);
+
+      expect(log.body).toHaveLength(1);
+      expect(log.body[0]).toMatchObject({
+        readOnly: true,
+        reason: 'Their overview will not load.',
+        subjectName: expect.any(String),
+      });
+    });
+
+    it('P4-T10: refuses another office’s session log as a 404', async () => {
+      const sa = await makeUser(`sa-log2-${Math.random()}@agencyboost.test`, 'super_admin');
+      const saAuth = { Authorization: `Bearer ${sa.accessToken}` };
+      const companyId = await anInsurer();
+      const theirs = await api().post('/api/v1/admin/tenants').set(saAuth)
+        .send({
+          companyId,
+          code: `${Math.floor(Math.random() * 9000) + 1000}`,
+          branchName: 'Theirs',
+        }).expect(201);
+
+      const outsider = await makeUser(`outsider-${Math.random()}@kpm.test`);
+      await api().get(`/api/v1/admin/tenants/${String(theirs.body._id)}/impersonation-sessions`)
+        .set({ Authorization: `Bearer ${outsider.accessToken}` })
+        .expect(403);
     });
 
     it('P3.5-T11 AC-5: an impersonation can actually be ended, and answers 200', async () => {

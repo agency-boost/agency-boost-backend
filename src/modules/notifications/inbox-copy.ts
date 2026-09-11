@@ -66,6 +66,22 @@ export function describeNotification(
       return { title: 'Your leader proposed a goal', detail: 'Open Goals to accept it or talk about it.' };
     case NotificationTemplate.COACHING_SESSION_FINALIZED:
       return { title: 'A coaching session was finalised', detail: 'What was agreed is now on the record.' };
+    case NotificationTemplate.IMPERSONATION_STARTED:
+      return payload.isSubject === true
+        ? {
+          title: 'Somebody from AgencyBoost is looking at your screens',
+          detail: `${name(payload, 'reason', 'A support session has started.')} `
+            + 'They can only look, unless a second person approves otherwise.',
+        }
+        : {
+          title: 'A support session started in your office',
+          detail: name(payload, 'reason', 'Somebody from AgencyBoost is helping a member.'),
+        };
+    case NotificationTemplate.IMPERSONATION_ELEVATED:
+      return {
+        title: 'That support session can now make changes',
+        detail: name(payload, 'reason', 'A second person from AgencyBoost approved it.'),
+      };
     case NotificationTemplate.EVENT_REMINDER:
       return {
         title: `${name(payload, 'title', 'An event')} is coming up`,

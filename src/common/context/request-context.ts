@@ -53,6 +53,18 @@ export class RequestContext {
      * already resolves the user on every request — the check costs nothing.
      */
     readonly mustChangePassword: boolean = false,
+    /**
+     * A support session that may look and not touch (P4-T10, §3.13).
+     *
+     * **True for every session until a second Super Admin says otherwise.** The operator
+     * who wants to write is not the one who decides they may — an admin session can
+     * rewrite the configuration every member's data depends on, and the person best
+     * placed to notice that was a bad idea is somebody other than the person having it.
+     *
+     * `false` outside a session, because a person acting as themselves is not being
+     * restrained; `can()` reads it and nothing else has to.
+     */
+    readonly impersonationReadOnly: boolean = false,
   ) {
     Object.freeze(this);
   }

@@ -45,6 +45,11 @@ const EXEMPT: Record<string, string> = {
   CompanyOrgLevel: 'platform-global. A company defines its ladder, not an office (ADR-0012).',
   KpmRequest: 'an office that does not exist yet, so there is no tenant to scope to.',
   AuthToken: 'platform-global. A session belongs to a user, not to an office.',
+  ImpersonationSession:
+    'a platform record of a platform action. `kpmId` is nullable because a target may be '
+    + 'in no office at all, and ending every session an operator has open is keyed by the '
+    + 'person, not by a tenant. An Owner\'s read is narrowed in the service, which refuses '
+    + 'another office as a 404.',
   AuditLog: 'written through AuditService, which stamps the tenant itself.',
   NotificationPreferences: 'per-user, for the same reason as Notification below.',
   Notification:

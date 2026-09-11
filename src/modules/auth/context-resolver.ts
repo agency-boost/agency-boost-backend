@@ -25,7 +25,17 @@ export class ContextResolver {
     @InjectModel(Membership.name) private readonly memberships: Model<MembershipDocument>,
   ) {}
 
-  async resolve(userId: string, impersonatorUserId: string | null = null): Promise<RequestContext> {
+  async resolve(
+    userId: string,
+    impersonatorUserId: string | null = null,
+    /**
+     * Whether the support session may write (P4-T10).
+     *
+     * Passed in by the guard, which has already looked the session up to check it is
+     * live — reading it a second time here would be a second question about the same row.
+     */
+    impersonationReadOnly = false,
+  ): Promise<RequestContext> {
     const user = await this.users.findOne({ _id: userId, deletedAt: null }).exec();
     if (!user) {
       throw new DomainException(
@@ -67,6 +77,8 @@ export class ContextResolver {
     return new RequestContext(
       userId, user.platformRole, membership, impersonatorUserId, null,
       user.mustChangePassword === true,
+      // Never outside a session: somebody acting as themselves is not being restrained.
+      impersonatorUserId !== null && impersonationReadOnly,
     );
   }
 

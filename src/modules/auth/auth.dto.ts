@@ -132,3 +132,23 @@ export class ImpersonateDto {
   @Max(60)
   durationMinutes?: number;
 }
+
+
+/**
+ * Approving a support session to write (P4-T10, §3.13).
+ *
+ * The reason is typed **again** rather than carried over from the session's own: the
+ * approver is a different person answering a different question — not "why look at this
+ * office" but "why is looking not enough". The office's Owner reads both.
+ */
+export class ElevateImpersonationDto {
+  @ApiProperty({
+    example: 'Their activity types were saved with a duplicate code and cannot be fixed from the screen.',
+    minLength: 10,
+    maxLength: 500,
+  })
+  @IsString()
+  @MinLength(10)
+  @MaxLength(500)
+  reason!: string;
+}

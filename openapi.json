@@ -2161,6 +2161,178 @@
         "x-required-permission": "platform_template:write"
       }
     },
+    "/api/v1/admin/impersonation/{sessionId}/elevate": {
+      "post": {
+        "description": "**A second Super Admin, never the one running it.** An admin session can rewrite the configuration every member of an office depends on, and the operator best placed to notice that is a bad idea is somebody other than the one having it. The reason is typed again and the office's Owner reads it. `403` for the session's own starter; `404` for one that has ended or expired.\n\n**Requires `impersonation:elevate_to_write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AdminController_elevateSession_v1",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ElevateImpersonationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `impersonation:elevate_to_write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Approve a support session to write",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "impersonation:elevate_to_write"
+      }
+    },
+    "/api/v1/admin/tenants/{id}/impersonation-sessions": {
+      "get": {
+        "description": "Newest first. An Owner reads their own office's — support an office cannot see is support an office cannot question. Another office is a **404**, never a 403.\n\n**Requires `impersonation:read_session_log`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AdminController_sessionLog_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ImpersonationLogEntryDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `impersonation:read_session_log`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Support sessions run inside one office",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "impersonation:read_session_log"
+      }
+    },
     "/api/v1/admin/tenants/{id}": {
       "get": {
         "operationId": "AdminController_readTenant_v1",
@@ -8003,6 +8175,20 @@
           "payload"
         ]
       },
+      "ElevateImpersonationDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "example": "Their activity types were saved with a duplicate code and cannot be fixed from the screen.",
+            "minLength": 10,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
       "AssignOwnerDto": {
         "type": "object",
         "properties": {
@@ -9359,6 +9545,61 @@
         "required": [
           "pipeline",
           "statuses"
+        ]
+      },
+      "ImpersonationLogEntryDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "operatorName": {
+            "type": "string",
+            "description": "The platform operator who ran it."
+          },
+          "subjectName": {
+            "type": "string",
+            "description": "Whose screens they saw."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Typed by the operator before it started."
+          },
+          "readOnly": {
+            "type": "boolean",
+            "description": "False only if a second Super Admin approved writing."
+          },
+          "elevatedByName": {
+            "type": "string",
+            "nullable": true
+          },
+          "elevationReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null while it is still running."
+          },
+          "expiresAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId",
+          "operatorName",
+          "subjectName",
+          "reason",
+          "readOnly",
+          "elevatedByName",
+          "elevationReason",
+          "startedAt",
+          "endedAt",
+          "expiresAt"
         ]
       },
       "PlatformTemplateDto": {

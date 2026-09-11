@@ -41,11 +41,17 @@ describe('AuthGuard', () => {
   } as unknown as ContextResolver;
 
   /**
-   * Only an `imp:` token reaches `isLive`, so every case below leaves it untouched. The
-   * impersonation cases set it explicitly.
+   * Only an `imp:` token reaches `liveSession`, so every case below leaves it untouched.
+   * The impersonation cases set it explicitly.
+   *
+   * It answers the **session row**, not a boolean: since P4-T10 the guard reads `readOnly`
+   * from it, because elevation happens after the token is minted and a flag baked into a
+   * JWT could never move.
    */
-  const live = (answer = true) =>
-    ({ isLive: jest.fn(async () => answer) }) as unknown as ImpersonationService;
+  const live = (answer = true, readOnly = true) =>
+    ({
+      liveSession: jest.fn(async () => (answer ? { readOnly } : null)),
+    }) as unknown as ImpersonationService;
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -97,7 +103,8 @@ describe('AuthGuard', () => {
       .resolves.toBe(true);
     // Roles come from `resolve`, which reads the row — that is what makes revoking a
     // grant take effect on the next request rather than at the next sign-in.
-    expect(resolver.resolve).toHaveBeenCalledWith(USER, null);
+    // `false`: a person acting as themselves is not being restrained (P4-T10).
+    expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false);
     expect((request.context as RequestContext).userId).toBe(USER);
   });
 
@@ -109,7 +116,8 @@ describe('AuthGuard', () => {
     const { context, reflector, request } = execution('Bearer impersonating.token');
 
     await new AuthGuard(reflector, signer, resolver, live()).canActivate(context);
-    expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR);
+    // `true`: every session is read-only until a second Super Admin says otherwise.
+    expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, true);
     expect((request.context as RequestContext).isImpersonating).toBe(true);
   });
 });

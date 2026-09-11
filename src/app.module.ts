@@ -56,6 +56,9 @@ import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { AuthToken, AuthTokenSchema } from '@/modules/auth/auth-token.schema';
+import {
+  ImpersonationSession, ImpersonationSessionSchema,
+} from '@/modules/auth/impersonation-session.schema';
 import { AuthService } from '@/modules/auth/auth.service';
 import { AuthController } from '@/modules/auth/auth.controller';
 import { PasswordService } from '@/modules/auth/password.service';
@@ -125,6 +128,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: Asset.name, schema: AssetSchema },
       { name: User.name, schema: UserSchema },
       { name: AuthToken.name, schema: AuthTokenSchema },
+      { name: ImpersonationSession.name, schema: ImpersonationSessionSchema },
       { name: Company.name, schema: CompanySchema },
       { name: Kpm.name, schema: KpmSchema },
       { name: KpmRequest.name, schema: KpmRequestSchema },

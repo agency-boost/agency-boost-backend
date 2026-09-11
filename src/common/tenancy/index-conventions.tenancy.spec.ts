@@ -23,6 +23,9 @@ import { ActivityTypeSchema } from '@/modules/config/activity-type.schema';
 import { LeadStatusSchema } from '@/modules/config/lead-status.schema';
 import { RatioDefinitionSchema } from '@/modules/config/ratio-definition.schema';
 import { ConfigSnapshotSchema } from '@/modules/config/config-snapshot.schema';
+import {
+  ImpersonationSessionSchema,
+} from '@/modules/auth/impersonation-session.schema';
 import { PlatformTemplateSchema } from '@/modules/config/platform-template.schema';
 
 /**
@@ -66,6 +69,13 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'identity is global: one person, one account, one login across every office they join',
   ],
   ['companies', CompanySchema, 'a company owns KPMs; it sits above the tenant, not inside one'],
+  [
+    'impersonationSessions',
+    ImpersonationSessionSchema,
+    'a platform record of a platform action: `kpmId` is nullable because a target may be '
+      + 'in no office, and Super Admin reads across every tenant. An Owner\'s read is '
+      + 'narrowed in the service, which refuses another office as a 404',
+  ],
   [
     'platformTemplates',
     PlatformTemplateSchema,
@@ -122,6 +132,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [LeadStatusSchema, 'LeadStatusSchema'],
   [RatioDefinitionSchema, 'RatioDefinitionSchema'],
   [ConfigSnapshotSchema, 'ConfigSnapshotSchema'],
+  [ImpersonationSessionSchema, 'ImpersonationSessionSchema'],
   [PlatformTemplateSchema, 'PlatformTemplateSchema'],
   [AssetSchema, 'AssetSchema'],
   [NotificationSchema, 'NotificationSchema'],

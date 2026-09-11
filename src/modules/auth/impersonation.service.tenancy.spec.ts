@@ -3,7 +3,11 @@ import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
-import { AuthToken, AuthTokenSchema } from './auth-token.schema';
+import {
+  ImpersonationSession, ImpersonationSessionSchema,
+} from './impersonation-session.schema';
+import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
+import { MembershipRepository } from '@/modules/org/membership.repository';
 import { PasswordService } from './password.service';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
@@ -16,6 +20,7 @@ const NOW = new Date('2026-09-05T02:00:00Z');
 describe('ImpersonationService', () => {
   let service: ImpersonationService;
   let signer: Hs256TokenSigner;
+  let notified: { userId: string; templateId: string }[];
   const clock = new FixedClock(NOW);
 
   const superAdmin = new RequestContext('sa-1', 'super_admin', null);
@@ -27,10 +32,17 @@ describe('ImpersonationService', () => {
   beforeAll(async () => {
     await startMongo();
     signer = new Hs256TokenSigner('a'.repeat(40), clock);
+    notified = [];
     service = new ImpersonationService(
       mongoose.model(User.name, UserSchema) as never,
       mongoose.model(Kpm.name, KpmSchema) as never,
-      mongoose.model(AuthToken.name, AuthTokenSchema) as never,
+      mongoose.model(ImpersonationSession.name, ImpersonationSessionSchema) as never,
+      new MembershipRepository(mongoose.model(Membership.name, MembershipSchema) as never),
+      // A recording double: what matters is *who* was told, and the real service is
+      // exercised in its own suite.
+      { send: async (r: { userId?: string; templateId: string }) => {
+        notified.push({ userId: r.userId ?? '', templateId: r.templateId });
+      } } as never,
       signer,
       new PasswordService(),
       new AuditService(mongoose.model(AuditLog.name, AuditLogSchema) as never),
@@ -152,4 +164,118 @@ describe('ImpersonationService', () => {
       expect(await mongoose.model(AuditLog.name).countDocuments({})).toBe(0);
     });
   });
+  describe('read-only by default (P4-T10, §3.13)', () => {
+    it('starts every session read-only, whoever starts it', async () => {
+      // The operator who wants to write is not the one who decides they may.
+      const target = await makeUser();
+      const { readOnly } = await service.start(superAdmin, String(target._id), 'ticket 42');
+      expect(readOnly).toBe(true);
+    });
+
+    it('lets a second Super Admin approve writing', async () => {
+      const target = await makeUser();
+      const started = await service.start(superAdmin, String(target._id), 'ticket 42');
+      const second = new RequestContext('sa-2', 'super_admin', null);
+
+      await service.elevate(second, started.sessionId, 'Their taxonomy has a duplicate code.');
+
+      const live = await service.liveSession(started.accessToken);
+      expect(live?.readOnly).toBe(false);
+      expect(live?.elevatedByUserId).toBe('sa-2');
+    });
+
+    it('refuses the operator who started it, which is the whole rule', async () => {
+      /*
+       * A two-person rule that lets one person be both is a one-person rule with extra
+       * steps. This is the assertion the control actually rests on.
+       */
+      const target = await makeUser();
+      const started = await service.start(superAdmin, String(target._id), 'ticket 42');
+
+      await expect(service.elevate(superAdmin, started.sessionId, 'I need to fix it.'))
+        .rejects.toThrow('not the one running the session');
+    });
+
+    it('refuses somebody who is not a Super Admin at all', async () => {
+      const target = await makeUser();
+      const started = await service.start(superAdmin, String(target._id), 'ticket 42');
+      await expect(service.elevate(owner, started.sessionId, 'Let me in.'))
+        .rejects.toThrow('Only a Super Admin');
+    });
+
+    it('refuses an approver who is themselves inside a session', async () => {
+      // Otherwise a session could approve itself by impersonating another Super Admin.
+      const target = await makeUser();
+      const started = await service.start(superAdmin, String(target._id), 'ticket 42');
+      const inSession = new RequestContext('sa-2', 'super_admin', null, 'sa-3');
+
+      await expect(service.elevate(inSession, started.sessionId, 'A good reason here.'))
+        .rejects.toThrow('End your own support session');
+    });
+
+    it('demands a reason the Owner can read', async () => {
+      const target = await makeUser();
+      const started = await service.start(superAdmin, String(target._id), 'ticket 42');
+      const second = new RequestContext('sa-2', 'super_admin', null);
+      await expect(service.elevate(second, started.sessionId, '   '))
+        .rejects.toThrow('Say why this session needs to write');
+    });
+
+    it('refuses to elevate a session that has ended', async () => {
+      const target = await makeUser();
+      const started = await service.start(superAdmin, String(target._id), 'ticket 42');
+      await service.end(new RequestContext(String(target._id), 'none', null, 'sa-1'));
+
+      const second = new RequestContext('sa-2', 'super_admin', null);
+      await expect(service.elevate(second, started.sessionId, 'Too late for this.'))
+        .rejects.toThrow('Support session');
+    });
+  });
+
+  describe('who is told (P4-T10, §3.13)', () => {
+    it('tells the person being impersonated, always', async () => {
+      // Not a per-office setting. Somebody being acted as has a right to know.
+      const target = await makeUser();
+      await service.start(superAdmin, String(target._id), 'ticket 42');
+
+      expect(notified).toContainEqual({
+        userId: String(target._id), templateId: 'impersonation.started',
+      });
+    });
+
+    it('tells the office’s Owner as well', async () => {
+      const ownerUser = await makeUser();
+      const kpm = await mongoose.model(Kpm.name).create({
+        companyId: 'c1', code: '0417', branchName: 'B', timezone: 'Asia/Jakarta',
+        locale: 'id-ID', currency: 'IDR', status: 'active', ownerUserId: String(ownerUser._id),
+      } as never);
+      void kpm;
+      const target = await makeUser();
+      await mongoose.model(Membership.name).create({
+        kpmId: String((kpm as unknown as { _id: unknown })._id),
+        userId: String(target._id),
+        role: 'agent', status: 'active', agentCode: 'A1', agentSeq: 1,
+        orgLevelId: 'level-agent',
+        leaderCode: `LC${Math.floor(Math.random() * 100000)}`,
+      } as never);
+
+      await service.start(superAdmin, String(target._id), 'ticket 42');
+      expect(notified.map((n) => n.userId)).toContain(String(ownerUser._id));
+    });
+
+    it('tells somebody once when they are both', async () => {
+      // An Owner being impersonated is the subject and the Owner; two identical notices
+      // would read as a bug rather than as thoroughness.
+      const ownerUser = await makeUser();
+      await mongoose.model(Kpm.name).create({
+        companyId: 'c1', code: '0418', branchName: 'B', timezone: 'Asia/Jakarta',
+        locale: 'id-ID', currency: 'IDR', status: 'active', ownerUserId: String(ownerUser._id),
+      } as never);
+
+      await service.start(superAdmin, String(ownerUser._id), 'ticket 42');
+      const toOwner = notified.filter((n) => n.userId === String(ownerUser._id));
+      expect(toOwner).toHaveLength(1);
+    });
+  });
+
 });

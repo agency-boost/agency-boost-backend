@@ -30,6 +30,23 @@ export class MembershipRepository extends TenantScopedRepository<MembershipDocum
    * Live rows only, matching the partial index: a soft-deleted membership releases its
    * code.
    */
+  /**
+   * The live membership of one person, in whichever office holds it.
+   *
+   * **Deliberately unscoped, and named so.** A Super Admin deciding whether they may
+   * impersonate somebody has to know which office that person is in and whether they
+   * administer it — and the Super Admin is in no office, so there is no tenant to ask
+   * within. Invariant §1 asks that a cross-tenant read be an explicitly named method
+   * rather than an absent filter, and this is one.
+   *
+   * v1 allows one live membership per person, so this is a single row or none.
+   */
+  async liveForUserAnywhere(userId: string): Promise<MembershipDocument | null> {
+    return this.model
+      .findOne({ userId, status: { $ne: 'removed' }, deletedAt: null })
+      .exec();
+  }
+
   async existsWithLeaderCode(code: string): Promise<boolean> {
     return (await this.model.exists({ leaderCode: code, deletedAt: null })) !== null;
   }
