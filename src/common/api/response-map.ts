@@ -101,6 +101,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AdminController_templateHistory: { type: PlatformTemplateDto, isArray: true },
   AdminController_saveTemplateDraft: { type: PlatformTemplateDto },
   AdminController_publishTemplate: { type: PlatformTemplateDto },
+  TenantConfigReadController_orgLevels: { type: OrgLevelRowDto, isArray: true },
   TenantConfigReadController_readConfig: { type: TenantConfigDto },
   TenantConfigController_publishState: { type: PublishStateDto },
   TenantConfigController_publish: { type: PublishStateDto },

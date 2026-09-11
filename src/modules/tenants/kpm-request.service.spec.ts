@@ -122,7 +122,7 @@ describe('KpmRequestService (P3.5-T2)', () => {
 
     it('AC-1: refuses somebody who already has an office', async () => {
       const member = new RequestContext(requesterId, 'none', {
-        membershipId: 'mem-1', kpmId: 'kpm-1', hierarchyRole: 'agent', status: 'active',
+        membershipId: 'mem-1', kpmId: 'kpm-1', orgLevelCode: 'AGENT', hierarchyRole: 'agent', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
       await expect(service.create(member, ask())).rejects.toMatchObject({
@@ -233,7 +233,7 @@ describe('KpmRequestService (P3.5-T2)', () => {
   describe('who may see and decide', () => {
     it('is the platform only — an office cannot read the queue or decide it', async () => {
       const owner = new RequestContext(requesterId, 'none', {
-        membershipId: 'mem-1', kpmId: 'kpm-1', hierarchyRole: 'ab', status: 'active',
+        membershipId: 'mem-1', kpmId: 'kpm-1', orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
         isKpmOwner: true, isKpmAdmin: false, directCount: 0,
       });
       await expect(service.queue(owner)).rejects.toMatchObject({ code: 'PERM_DENIED' });

@@ -356,6 +356,20 @@ export class TenantConfigReadController {
    * every agent reads. Nest resolves a controller prefix literally — `'../config'` is a
    * route segment called `..`, not a way out of one.
    */
+  @Get('org-levels')
+  @RequirePermission('org_level:read')
+  @ApiOperation({
+    summary: 'The ladder this office\'s company promotes people along',
+    description:
+      'Junior first, active rungs only. Every member reads it because every member\'s own '
+      + 'badge is drawn from it — before `P4-T9` the labels and colours were five '
+      + 'hard-coded maps in the frontend, which is a second definition of a company\'s own '
+      + 'vocabulary and cannot describe a rung a second insurer publishes.',
+  })
+  async orgLevels(@Ctx() ctx: RequestContext) {
+    return this.config.ladderFor(ctx);
+  }
+
   @Get('config')
   @RequirePermission('tenant_config:read')
   @ApiOperation({

@@ -25,7 +25,7 @@ describe('ImpersonationService', () => {
 
   const superAdmin = new RequestContext('sa-1', 'super_admin', null);
   const owner = new RequestContext('u-owner', 'none', {
-    membershipId: 'm', kpmId: 'k', hierarchyRole: 'ab', status: 'active',
+    membershipId: 'm', kpmId: 'k', orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
     isKpmOwner: true, isKpmAdmin: false, directCount: 0,
   });
 
@@ -255,7 +255,7 @@ describe('ImpersonationService', () => {
         kpmId: String((kpm as unknown as { _id: unknown })._id),
         userId: String(target._id),
         role: 'agent', status: 'active', agentCode: 'A1', agentSeq: 1,
-        orgLevelId: 'level-agent',
+        orgLevelId: 'level-agent', orgLevelCode: 'AGENT',
         leaderCode: `LC${Math.floor(Math.random() * 100000)}`,
       } as never);
 

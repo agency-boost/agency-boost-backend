@@ -89,7 +89,7 @@ describe('RosterImportService (P3.6-T4)', () => {
   describe('who may run it', () => {
     const memberOf = (id: string, over: Record<string, unknown> = {}) =>
       new RequestContext('u-member', 'none', {
-        membershipId: 'mem-1', kpmId: id, hierarchyRole: 'ab', status: 'active',
+        membershipId: 'mem-1', kpmId: id, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 0, ...over,
       });
 

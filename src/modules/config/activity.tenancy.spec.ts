@@ -15,7 +15,7 @@ function ctx(kpmId: string | null, opts: { owner?: boolean } = {}) {
   return new RequestContext('u1', kpmId ? 'none' : 'super_admin', kpmId ? {
     membershipId: `mem-${kpmId}`,
     kpmId,
-    hierarchyRole: 'ab',
+    orgLevelCode: 'AB', hierarchyRole: 'ab',
     status: 'active',
     isKpmOwner: opts.owner ?? true,
     isKpmAdmin: false,

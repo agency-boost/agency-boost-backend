@@ -248,6 +248,8 @@ async function main(): Promise<void> {
       leaderCode: generateLeaderCode(),
       agentSeq: seq,
       orgLevelId: String(level._id),
+      // What a permission grant reads (P4-T9), denormalised from the rung just resolved.
+      orgLevelCode: level.code,
       role,
       leaderId,
       ancestorIds: leader ? [...leader.ancestorIds, leader.id] : [],

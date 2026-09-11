@@ -89,6 +89,21 @@ export class OrgLevelService {
     ).map(OrgLevelService.row);
   }
 
+  /**
+   * One company's active rung codes, junior first.
+   *
+   * Unpermissioned on purpose: this is not a read of anybody's data, it is the shape of
+   * the company's own vocabulary, and `HierarchyService` needs it to seed a counts object
+   * that has an entry per rung rather than only per rung somebody happens to stand on.
+   */
+  async activeCodesFor(companyId: string): Promise<string[]> {
+    const rows = await this.levels
+      .find({ companyId, status: 'active', deletedAt: null })
+      .sort({ displayOrder: 1 })
+      .exec();
+    return rows.map((r) => r.code);
+  }
+
   /** Every company's ladder as one map, for the callers that render several at once. */
   async laddersByCompany(companyIds: string[]): Promise<Map<string, OrgLevelRow[]>> {
     if (companyIds.length === 0) return new Map();

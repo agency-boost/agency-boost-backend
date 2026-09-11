@@ -7808,6 +7808,68 @@
         "x-required-permission": "kpm:update_identity"
       }
     },
+    "/api/v1/kpm/org-levels": {
+      "get": {
+        "description": "Junior first, active rungs only. Every member reads it because every member's own badge is drawn from it — before `P4-T9` the labels and colours were five hard-coded maps in the frontend, which is a second definition of a company's own vocabulary and cannot describe a rung a second insurer publishes.\n\n**Requires `org_level:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigReadController_orgLevels_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OrgLevelRowDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `org_level:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The ladder this office's company promotes people along",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "org_level:read"
+      }
+    },
     "/api/v1/kpm/config": {
       "get": {
         "description": "The taxonomy, the ratios and both lead pipelines, active rows only. Carries a strong `ETag`; send it back as `If-None-Match` and a repeat read answers `304`. The agent daily loop has to work on a mid-range Android over 4G, and three requests to render one screen is how that budget is spent before anything is drawn.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -8935,13 +8997,19 @@
           "kpmId": {
             "type": "string"
           },
+          "orgLevelCode": {
+            "type": "string",
+            "example": "AB",
+            "description": "The rung of the company's ladder this person stands on (P4-T9). What a role badge is drawn from, and what a hierarchy permission is compared against."
+          },
           "hierarchyRole": {
             "type": "string",
             "enum": [
               "ab",
               "aab",
               "agent"
-            ]
+            ],
+            "description": "The v1 enum. Read by the services that sort and group; no longer an authorisation input."
           },
           "isKpmOwner": {
             "type": "boolean"
@@ -8965,6 +9033,7 @@
         "required": [
           "membershipId",
           "kpmId",
+          "orgLevelCode",
           "hierarchyRole",
           "isKpmOwner",
           "isKpmAdmin",
@@ -8989,6 +9058,10 @@
           "isImpersonating": {
             "type": "boolean"
           },
+          "impersonationReadOnly": {
+            "type": "boolean",
+            "description": "A support session that may look and not touch (§3.13). False outside a session, and false inside one a second Super Admin has approved to write."
+          },
           "impersonatedBy": {
             "type": "string",
             "nullable": true,
@@ -9010,6 +9083,7 @@
           "user",
           "membership",
           "isImpersonating",
+          "impersonationReadOnly",
           "impersonatedBy",
           "mustChangePassword",
           "permissions"
@@ -9663,6 +9737,46 @@
           "publishedAt",
           "publishedVersion",
           "officesBehind"
+        ]
+      },
+      "OrgLevelRowDto": {
+        "type": "object",
+        "properties": {
+          "orgLevelId": {
+            "type": "string"
+          },
+          "companyId": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "displayOrder": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "orgLevelId",
+          "companyId",
+          "code",
+          "label",
+          "displayOrder",
+          "status",
+          "archivedAt"
         ]
       },
       "RatioDefinitionDto": {
@@ -10670,46 +10784,6 @@
           "defaultLocale",
           "defaultTimezone",
           "status"
-        ]
-      },
-      "OrgLevelRowDto": {
-        "type": "object",
-        "properties": {
-          "orgLevelId": {
-            "type": "string"
-          },
-          "companyId": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          },
-          "label": {
-            "type": "string"
-          },
-          "displayOrder": {
-            "type": "number"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "active",
-              "archived"
-            ]
-          },
-          "archivedAt": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "required": [
-          "orgLevelId",
-          "companyId",
-          "code",
-          "label",
-          "displayOrder",
-          "status",
-          "archivedAt"
         ]
       },
       "RosterTemplateDto": {

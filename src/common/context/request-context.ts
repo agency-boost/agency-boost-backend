@@ -12,6 +12,22 @@ export type PlatformRole = 'super_admin' | 'none';
 export interface TenantMembership {
   readonly membershipId: string;
   readonly kpmId: string;
+  /**
+   * The rung of the **company's ladder** this person stands on (P4-T9, ADR-0012).
+   *
+   * `AGENT`, `AAB`, `AB` in v1's seeded ladder — and whatever a second insurer publishes
+   * after that. This is what a hierarchy grant is compared against; `hierarchyRole` below
+   * is the enum it used to be compared against, and cannot describe a ladder nobody has
+   * enumerated in advance.
+   */
+  readonly orgLevelCode: string;
+  /**
+   * The three-value enum, kept while it is one-to-one with the ladder.
+   *
+   * Still read by seven services that sort, group and label by it. Retiring the *field*
+   * is a data migration; retiring its use as an **authorisation input** is P4-T9, and that
+   * is what `orgLevelCode` above is for.
+   */
   readonly hierarchyRole: HierarchyRole;
   readonly status: 'active' | 'pending' | 'removed';
   readonly isKpmOwner: boolean;
@@ -122,6 +138,9 @@ export class RequestContext {
     return new RequestContext(`job:${jobName}`, 'none', {
       membershipId: `job:${jobName}`,
       kpmId,
+      // The most junior rung of the seeded ladder: a job holds no hierarchy grant, and
+      // giving it a senior one would be handing a background task rights nobody granted.
+      orgLevelCode: 'AGENT',
       hierarchyRole: 'agent',
       status: 'active',
       isKpmOwner: false,

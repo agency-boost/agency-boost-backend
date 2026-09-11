@@ -201,6 +201,7 @@ export class OnboardingService {
     return new RequestContext(membership.userId, 'none', {
       membershipId: String(membership._id),
       kpmId: membership.kpmId,
+      orgLevelCode: membership.orgLevelCode,
       hierarchyRole: membership.role,
       status: membership.status,
       isKpmOwner: false,

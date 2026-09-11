@@ -12,7 +12,7 @@ import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { generateLeaderCode } from './leader-code';
-import { HierarchyRole, MembershipDocument } from './membership.schema';
+import { DirectCounts, HierarchyRole, MembershipDocument } from './membership.schema';
 
 export interface CreateMembershipInput {
   userId: string;
@@ -200,7 +200,10 @@ export class HierarchyService {
     const level = await this.orgLevels.resolveByCode(kpm.companyId, toRole);
     const role = level.code.toLowerCase() as HierarchyRole;
     await this.members.updateById(ctx, membershipId, {
-      $set: { orgLevelId: String(level._id), role },
+      // All three together, always. `orgLevelCode` is what a permission grant reads and
+      // `role` is what the display services read; writing one without the others is how
+      // somebody comes to hold rights their badge does not show (P4-T9).
+      $set: { orgLevelId: String(level._id), orgLevelCode: level.code, role },
     });
     return { orgLevelId: String(level._id), role };
   }
@@ -240,6 +243,7 @@ export class HierarchyService {
       agentSeq,
       leaderCode,
       orgLevelId: String(level._id),
+      orgLevelCode: level.code,
       role,
       leaderId: leader ? String(leader._id) : null,
       ancestorIds: leader ? [...leader.ancestorIds, String(leader._id)] : [],
@@ -408,8 +412,25 @@ export class HierarchyService {
   async refreshCounts(ctx: RequestContext, leaderId: string | null): Promise<void> {
     if (!leaderId) return;
     const directs = await this.members.find(ctx, { leaderId, status: 'active' });
-    const counts = { ab: 0, aab: 0, agent: 0, total: directs.length };
-    for (const d of directs) counts[d.role] += 1;
+    /*
+     * Counted by **ladder code**, and built from what is actually there (P4-T9).
+     *
+     * It was three fixed keys seeded to zero, which counts nothing for a rung a second
+     * insurer publishes — a leader with four reports on a new rung would have read as
+     * leading nobody on every screen that groups by role, while `total` said four.
+     */
+    /*
+     * Seeded from the **company's own ladder**, so a rung nobody stands on reads `0`
+     * rather than being absent. That is what the old three fixed keys bought, and losing
+     * it would turn "no AABs yet" into "this screen has no idea".
+     */
+    const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).exec();
+    const ladder = kpm ? await this.orgLevels.activeCodesFor(kpm.companyId) : [];
+    const counts: DirectCounts = { total: directs.length };
+    for (const code of ladder) counts[code] = 0;
+    for (const d of directs) {
+      counts[d.orgLevelCode] = (counts[d.orgLevelCode] ?? 0) + 1;
+    }
 
     const subtreeCount = await this.members.count(ctx, {
       ancestorIds: leaderId,

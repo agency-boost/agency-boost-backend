@@ -1,4 +1,4 @@
-import { HierarchyRole, RequestContext } from '@/common/context/request-context';
+import { RequestContext } from '@/common/context/request-context';
 
 /**
  * The permission matrix as executable policy.
@@ -19,7 +19,19 @@ export type Scope = 'own' | 'own-unit' | 'own-downline' | 'own-kpm' | 'all';
 export type Grantee =
   | { kind: 'platform'; role: 'super_admin' }
   | { kind: 'tenant'; role: 'kpm_owner' | 'kpm_admin' }
-  | { kind: 'hierarchy'; role: HierarchyRole }
+  /**
+   * A rung of the **company's ladder**, by code (P4-T9, ADR-0012).
+   *
+   * `role: HierarchyRole` until P4-T9 — three fixed names, compared against an enum.
+   * That cannot describe a ladder a second insurer has not published yet: a company
+   * adding a rung between AAB and AB would have members standing on something no grant
+   * mentions, and every hierarchy permission would silently deny them.
+   *
+   * v1 seeds one ladder whose codes are the upper-cased enum values, so the two are
+   * one-to-one and no permission outcome changes — which `ladder-migration.spec.ts`
+   * asserts rather than assumes.
+   */
+  | { kind: 'hierarchy'; orgLevelCode: string }
   /**
    * Anyone signed in, membership or not. Exactly one permission uses it, and the
    * documentation says why: the office directory is `all` for every authenticated user
@@ -30,9 +42,9 @@ export type Grantee =
 export const SUPER_ADMIN: Grantee = { kind: 'platform', role: 'super_admin' };
 export const KPM_OWNER: Grantee = { kind: 'tenant', role: 'kpm_owner' };
 export const KPM_ADMIN: Grantee = { kind: 'tenant', role: 'kpm_admin' };
-export const AB: Grantee = { kind: 'hierarchy', role: 'ab' };
-export const AAB: Grantee = { kind: 'hierarchy', role: 'aab' };
-export const AGENT: Grantee = { kind: 'hierarchy', role: 'agent' };
+export const AB: Grantee = { kind: 'hierarchy', orgLevelCode: 'AB' };
+export const AAB: Grantee = { kind: 'hierarchy', orgLevelCode: 'AAB' };
+export const AGENT: Grantee = { kind: 'hierarchy', orgLevelCode: 'AGENT' };
 export const AUTHENTICATED: Grantee = { kind: 'authenticated' };
 
 export interface Grant {
@@ -146,7 +158,26 @@ export const PERMISSIONS = {
    */
   'platform_template:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'platform_template:write': [{ grantee: SUPER_ADMIN, scope: 'all' }],
-  'org_level:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
+   * The company's role ladder, readable by the offices that stand on it (P4-T9).
+   *
+   * Super Admin only until now, with the reason written down: *"nothing tenant-side
+   * consumes it until the role-badge maps become server-supplied, and a grant nobody
+   * exercises is the opposite of a permission."* P4-T9 is that change — the badge colours,
+   * the labels and the order all come from here now, so five hard-coded maps in the
+   * frontend stop being a second definition of a company's vocabulary.
+   *
+   * Every member reads it, because every member's own badge is drawn from it. Writing
+   * stays Super Admin's: the ladder belongs to the company, not to an office (ADR-0012).
+   */
+  'org_level:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-kpm' },
+    { grantee: AAB, scope: 'own-kpm' },
+    { grantee: AGENT, scope: 'own-kpm' },
+  ],
   'org_level:crud': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'super_admin:grant': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'super_admin:revoke': [{ grantee: SUPER_ADMIN, scope: 'all' }],
@@ -521,7 +552,9 @@ function holds(ctx: RequestContext, grant: Grant): boolean {
         status !== undefined &&
         status !== 'removed' &&
         (allowed as readonly string[]).includes(status) &&
-        ctx.membership!.hierarchyRole === grantee.role
+        // By ladder code, not by enum (P4-T9). Both sides are the company's own
+        // vocabulary; neither is a list this file enumerated in advance.
+        ctx.membership!.orgLevelCode === grantee.orgLevelCode
       );
     }
   }

@@ -51,7 +51,7 @@ function ctx(kpmId: string, over: Partial<{ membershipId: string; isKpmOwner: bo
   return new RequestContext('u-actor', 'none', {
     membershipId: over.membershipId ?? 'mem-actor',
     kpmId,
-    hierarchyRole: 'ab',
+    orgLevelCode: 'AB', hierarchyRole: 'ab',
     status: 'active',
     isKpmOwner: over.isKpmOwner ?? true,
     isKpmAdmin: false,
@@ -394,7 +394,7 @@ describe('organisation', () => {
       await join(KPM_A, 'agent', peer);
 
       const asAb = new RequestContext('u-ab', 'none', {
-        membershipId: ab, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+        membershipId: ab, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 1,
       });
       const seen = (await directory.list(asAb)).members.map((m) => m.membershipId);
@@ -407,7 +407,7 @@ describe('organisation', () => {
       const ab = await join(KPM_A, 'ab');
       const peer = await join(KPM_A, 'aab');
       const asAb = new RequestContext('u-ab', 'none', {
-        membershipId: ab, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+        membershipId: ab, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
       await expect(directory.read(asAb, peer)).rejects.toMatchObject({ code: 'NOT_FOUND' });
@@ -430,7 +430,7 @@ describe('organisation', () => {
       await join(KPM_A, 'agent', peer);
 
       const asAb = new RequestContext('u-ab', 'none', {
-        membershipId: ab, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+        membershipId: ab, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
       await expect(directory.reportsOf(asAb, peer)).rejects.toMatchObject({ code: 'NOT_FOUND' });
@@ -450,7 +450,7 @@ describe('organisation', () => {
       const me = await join(KPM_A, 'agent', ab);
       const peer = await join(KPM_A, 'agent', ab);
       const asAgent = new RequestContext('u-agent', 'none', {
-        membershipId: me, kpmId: KPM_A, hierarchyRole: 'agent', status: 'active',
+        membershipId: me, kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
       await expect(directory.read(asAgent, peer)).rejects.toMatchObject({ code: 'NOT_FOUND' });
@@ -461,7 +461,7 @@ describe('organisation', () => {
       const me = await join(KPM_A, 'agent', ab);
       await join(KPM_A, 'agent', ab);
       const asAgent = new RequestContext('u-agent', 'none', {
-        membershipId: me, kpmId: KPM_A, hierarchyRole: 'agent', status: 'active',
+        membershipId: me, kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
       // The leader is visible to the agent on no permission, and `reportsOf` is what
@@ -712,7 +712,7 @@ describe('organisation', () => {
       await hierarchy.refreshCounts(ctx(KPM_A), root);
 
       const row = await members.findById(ctx(KPM_A), root);
-      expect(row?.directCounts).toMatchObject({ aab: 1, total: 1 });
+      expect(row?.directCounts).toMatchObject({ AAB: 1, total: 1 });
       expect(row?.subtreeCount).toBe(2);
     });
   });
@@ -742,7 +742,7 @@ describe('organisation', () => {
       const agent = await join(KPM_A, 'agent', ab);
       const row = await members.findById(ctx(KPM_A), agent);
       const asAgent = new RequestContext(row!.userId, 'none', {
-        membershipId: agent, kpmId: KPM_A, hierarchyRole: 'agent', status: 'active',
+        membershipId: agent, kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
 
@@ -759,7 +759,7 @@ describe('organisation', () => {
       // A token outlives the row it was issued against — somebody removed mid-session.
       const stale = new RequestContext('u-gone', 'none', {
         membershipId: new mongoose.Types.ObjectId().toString(),
-        kpmId: KPM_A, hierarchyRole: 'agent', status: 'active',
+        kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
       expect((await onboarding.myState(stale)).kpmId).toBeNull();
@@ -822,7 +822,7 @@ describe('organisation', () => {
       await onboarding.registerKpm(newcomer(userId), KPM_A);
       const joined = await mongoose.model(Membership.name).findOne({ userId });
       const ctxAfter = new RequestContext(userId, 'none', {
-        membershipId: String(joined!._id), kpmId: KPM_A, hierarchyRole: 'agent',
+        membershipId: String(joined!._id), kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
         status: 'pending', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
       await expect(onboarding.registerKpm(ctxAfter, KPM_B)).rejects.toMatchObject({
@@ -844,7 +844,7 @@ describe('organisation', () => {
         await onboarding.registerKpm(newcomer(userId), KPM_A);
         const row = await mongoose.model(Membership.name).findOne({ kpmId: KPM_A, userId });
         joinerCtx = new RequestContext(userId, 'none', {
-          membershipId: String(row!._id), kpmId: KPM_A, hierarchyRole: 'agent',
+          membershipId: String(row!._id), kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
           status: 'pending', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
         });
       });
@@ -951,7 +951,7 @@ describe('organisation', () => {
       const row = await members.findById(ctx(KPM_A), leader);
       leaderCode = row!.leaderCode;
       leaderCtx = new RequestContext(row!.userId, 'none', {
-        membershipId: leader, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+        membershipId: leader, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
     });
@@ -1043,7 +1043,7 @@ describe('organisation', () => {
       await onboarding.registerKpm(newcomer(joinerId), KPM_A);
       const registered = await mongoose.model(Membership.name).findOne({ userId: joinerId });
       const asJoiner = new RequestContext(joinerId, 'none', {
-        membershipId: String(registered!._id), kpmId: KPM_A, hierarchyRole: 'agent',
+        membershipId: String(registered!._id), kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
         status: 'pending', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
       await onboarding.requestLeader(asJoiner, leader);
@@ -1153,7 +1153,7 @@ describe('organisation', () => {
         const otherId = await join(KPM_A, 'aab', leader);
         const otherRow = await members.findById(ctx(KPM_A), otherId);
         const otherCtx = new RequestContext(otherRow!.userId, 'none', {
-          membershipId: otherId, kpmId: KPM_A, hierarchyRole: 'aab', status: 'active',
+          membershipId: otherId, kpmId: KPM_A, orgLevelCode: 'AAB', hierarchyRole: 'aab', status: 'active',
           isKpmOwner: false, isKpmAdmin: false, directCount: 0,
         });
 
@@ -1191,7 +1191,8 @@ describe('organisation', () => {
       return new RequestContext(row!.userId, 'none', {
         membershipId,
         kpmId: KPM_A,
-        hierarchyRole: over.role ?? (row!.role as 'ab' | 'aab' | 'agent'),
+        orgLevelCode: (over.role ?? row!.role).toUpperCase(),
+      hierarchyRole: over.role ?? (row!.role as 'ab' | 'aab' | 'agent'),
         status: 'active',
         isKpmOwner: false,
         isKpmAdmin: false,
@@ -1205,7 +1206,7 @@ describe('organisation', () => {
       await onboarding.registerKpm(newcomer(userId), KPM_A);
       const row = await mongoose.model(Membership.name).findOne({ kpmId: KPM_A, userId });
       const joinerCtx = new RequestContext(userId, 'none', {
-        membershipId: String(row!._id), kpmId: KPM_A, hierarchyRole: 'agent',
+        membershipId: String(row!._id), kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
         status: 'pending', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
       await onboarding.requestLeader(joinerCtx, leaderId);
@@ -1306,7 +1307,7 @@ describe('organisation', () => {
       const owner = await join(KPM_A, 'ab');
       const ownerCtx = new RequestContext((await members.findById(ctx(KPM_A), owner))!.userId,
         'none', {
-          membershipId: owner, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+          membershipId: owner, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
           isKpmOwner: true, isKpmAdmin: false, directCount: 0,
         });
       await askedFor(ab);
@@ -1416,7 +1417,8 @@ describe('organisation', () => {
       async function asOwner(membershipId: string) {
         const row = await members.findById(ctx(KPM_A), membershipId);
         return new RequestContext(row!.userId, 'none', {
-          membershipId, kpmId: KPM_A, hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
+          membershipId, kpmId: KPM_A, orgLevelCode: row!.role.toUpperCase(),
+      hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
           status: 'active', isKpmOwner: true, isKpmAdmin: false,
           directCount: row!.directCounts?.total ?? 0,
         });
@@ -1487,7 +1489,7 @@ describe('organisation', () => {
         const theirOwner = new RequestContext(
           (await members.findById(ctx(KPM_B), theirRoot))!.userId, 'none',
           {
-            membershipId: theirRoot, kpmId: KPM_B, hierarchyRole: 'ab', status: 'active',
+            membershipId: theirRoot, kpmId: KPM_B, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
             isKpmOwner: true, isKpmAdmin: false, directCount: 0,
           },
         );
@@ -1619,7 +1621,8 @@ describe('organisation', () => {
       return new RequestContext(row!.userId, 'none', {
         membershipId,
         kpmId: KPM_A,
-        hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
+        orgLevelCode: row!.role.toUpperCase(),
+      hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
         status: 'active',
         isKpmOwner: over.isKpmOwner ?? false,
         isKpmAdmin: over.isKpmAdmin ?? false,
@@ -1749,7 +1752,7 @@ describe('organisation', () => {
           (await members.findById(ctx(KPM_B), theirRoot))!.userId,
           'none',
           {
-            membershipId: theirRoot, kpmId: KPM_B, hierarchyRole: 'ab', status: 'active',
+            membershipId: theirRoot, kpmId: KPM_B, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
             isKpmOwner: true, isKpmAdmin: false, directCount: 0,
           },
         );
@@ -1821,7 +1824,8 @@ describe('organisation', () => {
       return new RequestContext(row!.userId, 'none', {
         membershipId,
         kpmId: KPM_A,
-        hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
+        orgLevelCode: row!.role.toUpperCase(),
+      hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
         status: 'active',
         isKpmOwner: true,
         isKpmAdmin: false,
@@ -1855,7 +1859,7 @@ describe('organisation', () => {
         await hierarchy.refreshCounts(ctx(KPM_A), root);
 
         const asAb = new RequestContext((await members.findById(ctx(KPM_A), ab))!.userId, 'none', {
-          membershipId: ab, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+          membershipId: ab, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
           isKpmOwner: false, isKpmAdmin: false, directCount: 1,
         });
 
@@ -1877,7 +1881,7 @@ describe('organisation', () => {
         await groups.tag(owner, peer, { groupIds: [created.groupId], isCoreLeader: false });
 
         const asAb = new RequestContext((await members.findById(ctx(KPM_A), ab))!.userId, 'none', {
-          membershipId: ab, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+          membershipId: ab, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
           isKpmOwner: false, isKpmAdmin: false, directCount: 1,
         });
         expect((await tree.read(asAb)).nodes.map((n) => n.membershipId)).not.toContain(peer);
@@ -1888,7 +1892,7 @@ describe('organisation', () => {
           (await members.findById(ctx(KPM_A), agent))!.userId,
           'none',
           {
-            membershipId: agent, kpmId: KPM_A, hierarchyRole: 'agent', status: 'active',
+            membershipId: agent, kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent', status: 'active',
             isKpmOwner: false, isKpmAdmin: false, directCount: 0,
           },
         );
@@ -1977,7 +1981,7 @@ describe('organisation', () => {
           (await members.findById(ctx(KPM_B), theirRoot))!.userId,
           'none',
           {
-            membershipId: theirRoot, kpmId: KPM_B, hierarchyRole: 'ab', status: 'active',
+            membershipId: theirRoot, kpmId: KPM_B, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
             isKpmOwner: true, isKpmAdmin: false, directCount: 0,
           },
         );
@@ -2061,7 +2065,7 @@ describe('organisation', () => {
           (await members.findById(ctx(KPM_B), theirRoot))!.userId,
           'none',
           {
-            membershipId: theirRoot, kpmId: KPM_B, hierarchyRole: 'ab', status: 'active',
+            membershipId: theirRoot, kpmId: KPM_B, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
             isKpmOwner: true, isKpmAdmin: false, directCount: 0,
           },
         );
@@ -2133,7 +2137,8 @@ describe('organisation', () => {
         docs.push({
           // The scale fixture writes 500 rows straight to the model; a real rung per row
           // would be measuring the ladder rather than the index this test is about.
-          _id: id, kpmId, userId: `u-${id}`, role, orgLevelId: `lvl-${role}`, leaderId,
+          _id: id, kpmId, userId: `u-${id}`, role,
+          orgLevelId: `lvl-${role}`, orgLevelCode: role.toUpperCase(), leaderId,
           ancestorIds: ancestors, depth: ancestors.length, status: 'active',
           agentSeq: ++seq, agentCode: `PERF-${seq}`,
           // Off the row's own id: `seq` restarts per test and the leader-code index
@@ -2221,7 +2226,7 @@ describe('organisation', () => {
       const owner = new RequestContext(
         (await members.findById(ctx(KPM_A), root))!.userId, 'none',
         {
-          membershipId: root, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+          membershipId: root, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
           isKpmOwner: true, isKpmAdmin: false, directCount: 2,
         },
       );
@@ -2251,7 +2256,8 @@ describe('organisation', () => {
       return new RequestContext(row!.userId, 'none', {
         membershipId,
         kpmId: KPM_A,
-        hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
+        orgLevelCode: row!.role.toUpperCase(),
+      hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
         status: 'active',
         isKpmOwner: over.isKpmOwner ?? false,
         isKpmAdmin: over.isKpmAdmin ?? false,
@@ -2598,7 +2604,8 @@ describe('organisation', () => {
       return new RequestContext(row!.userId, 'none', {
         membershipId,
         kpmId: KPM_A,
-        hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
+        orgLevelCode: row!.role.toUpperCase(),
+      hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
         status: 'active',
         isKpmOwner: over.isKpmOwner ?? false,
         isKpmAdmin: over.isKpmAdmin ?? false,
@@ -2930,8 +2937,8 @@ describe('organisation', () => {
         await removals.remove(abCtx, agent, CONFIRM);
         const leader = await members.findById(ctx(KPM_A), ab);
         expect(leader!.directCounts.total).toBe(1);
-        expect(leader!.directCounts.agent).toBe(0);
-        expect(leader!.directCounts.aab).toBe(1);
+        expect(leader!.directCounts.AGENT).toBe(0);
+        expect(leader!.directCounts.AAB).toBe(1);
       });
 
       it('no longer lists them as a report', async () => {
@@ -3014,7 +3021,8 @@ describe('organisation', () => {
       return new RequestContext(row!.userId, 'none', {
         membershipId,
         kpmId: KPM_A,
-        hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
+        orgLevelCode: row!.role.toUpperCase(),
+      hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
         status: 'active',
         isKpmOwner: over.isKpmOwner ?? false,
         isKpmAdmin: over.isKpmAdmin ?? false,
@@ -3099,7 +3107,7 @@ describe('organisation', () => {
     it('updates the leader counts, which break down by role', async () => {
       await roles.change(abCtx, agent, 'aab');
       const leader = await members.findById(ctx(KPM_A), ab);
-      expect(leader?.directCounts).toMatchObject({ aab: 2, agent: 0, total: 2 });
+      expect(leader?.directCounts).toMatchObject({ AAB: 2, AGENT: 0, total: 2 });
     });
 
     it('tells them', async () => {
@@ -3227,7 +3235,7 @@ describe('organisation', () => {
         await roles.change(await (async () => {
           const row = await members.findById(ctx(KPM_B), theirAb);
           return new RequestContext(row!.userId, 'none', {
-            membershipId: theirAb, kpmId: KPM_B, hierarchyRole: 'ab', status: 'active',
+            membershipId: theirAb, kpmId: KPM_B, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
             isKpmOwner: false, isKpmAdmin: false, directCount: 1,
           });
         })(), theirAgent, 'aab');
@@ -3249,7 +3257,7 @@ describe('organisation', () => {
     const office = ctx(KPM_A, { isKpmOwner: true, membershipId: 'mem-owner' });
     const outsider = (membershipId: string) =>
       new RequestContext('u-other', 'none', {
-        membershipId, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+        membershipId, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
 
@@ -3386,7 +3394,7 @@ describe('organisation', () => {
   describe('placing people (exit re-review)', () => {
     const asLeader = (membershipId: string) =>
       new RequestContext('u-leader', 'none', {
-        membershipId, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+        membershipId, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
 
@@ -3483,7 +3491,7 @@ describe('organisation', () => {
       const placed = await join(KPM_A, 'agent', leader);
 
       const asPlaced = new RequestContext('u-placed', 'none', {
-        membershipId: placed, kpmId: KPM_A, hierarchyRole: 'agent', status: 'active',
+        membershipId: placed, kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
       await expect(onboarding.requestLeader(asPlaced, root)).rejects.toMatchObject({
@@ -3496,7 +3504,7 @@ describe('organisation', () => {
       // INTERNAL_ERROR for somebody who mistyped a character.
       const leader = await join(KPM_A, 'ab');
       const asLeader = new RequestContext('u-lead', 'none', {
-        membershipId: leader, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+        membershipId: leader, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
       await expect(approvals.approve(asLeader, 'not-an-objectid')).rejects.toMatchObject({
@@ -3535,14 +3543,14 @@ describe('organisation', () => {
       const below = String(belowDoc._id);
 
       const asOrphan = new RequestContext(orphanUser, 'none', {
-        membershipId: orphanLeader, kpmId: KPM_A, hierarchyRole: 'ab', status: 'active',
+        membershipId: orphanLeader, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 1,
       });
       // Allowed to ask: they have no leader, and `below` is an active AAB.
       await onboarding.requestLeader(asOrphan, below);
 
       const asBelow = new RequestContext(belowUser, 'none', {
-        membershipId: below, kpmId: KPM_A, hierarchyRole: 'aab', status: 'active',
+        membershipId: below, kpmId: KPM_A, orgLevelCode: 'AAB', hierarchyRole: 'aab', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
       const open = await approvals.inbox(asBelow);
@@ -3591,7 +3599,7 @@ describe('organisation', () => {
       new RequestContext(new mongoose.Types.ObjectId().toString(), 'none', {
         membershipId: new mongoose.Types.ObjectId().toString(),
         kpmId: KPM_A,
-        hierarchyRole: 'ab',
+        orgLevelCode: 'AB', hierarchyRole: 'ab',
         status: 'active',
         isKpmOwner: true,
         isKpmAdmin: false,
@@ -3731,8 +3739,10 @@ describe('organisation', () => {
     it('AC-4: promoting changes the leader\u2019s counts without moving anybody', async () => {
       const leader = await join(KPM_A, 'ab');
       const id = await join(KPM_A, 'agent', leader);
+      // Keyed by ladder code since P4-T9, and seeded from the company's own ladder — so
+      // a rung nobody stands on still reads `0` rather than being absent.
       expect((await members.findById(ctx(KPM_A), leader))!.directCounts).toMatchObject({
-        agent: 1, aab: 0, total: 1,
+        AGENT: 1, AAB: 0, total: 1,
       });
 
       await roles.change(owner, id, 'aab');
@@ -3740,7 +3750,7 @@ describe('organisation', () => {
       // Same person, same leader, different rung — so the breakdown moves and the total
       // does not.
       expect((await members.findById(ctx(KPM_A), leader))!.directCounts).toMatchObject({
-        agent: 0, aab: 1, total: 1,
+        AGENT: 0, AAB: 1, total: 1,
       });
     });
 

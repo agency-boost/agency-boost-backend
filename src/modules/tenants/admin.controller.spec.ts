@@ -10,7 +10,7 @@ describe('AdminController', () => {
   const owner = new RequestContext('u-owner', 'none', {
     membershipId: 'mem-owner',
     kpmId: 'kpm-a',
-    hierarchyRole: 'ab',
+    orgLevelCode: 'AB', hierarchyRole: 'ab',
     status: 'active',
     isKpmOwner: true,
     isKpmAdmin: false, directCount: 0,

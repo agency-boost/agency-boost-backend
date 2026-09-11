@@ -22,7 +22,7 @@ class StubStorage extends StoragePort {
 }
 
 const ctx = new RequestContext('u1', 'none', {
-  membershipId: 'mem-1', kpmId: 'kpm-a', hierarchyRole: 'agent',
+  membershipId: 'mem-1', kpmId: 'kpm-a', orgLevelCode: 'AGENT', hierarchyRole: 'agent',
   status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
 });
 

@@ -82,7 +82,22 @@ export class MeMembershipDto {
   @ApiProperty({ type: String })
   kpmId!: string;
 
-  @ApiProperty({ type: String, enum: ['ab', 'aab', 'agent'] })
+  @ApiProperty({
+    type: String,
+    example: 'AB',
+    description:
+      'The rung of the company\'s ladder this person stands on (P4-T9). What a role badge '
+      + 'is drawn from, and what a hierarchy permission is compared against.',
+  })
+  orgLevelCode!: string;
+
+  @ApiProperty({
+    type: String,
+    enum: ['ab', 'aab', 'agent'],
+    description:
+      'The v1 enum. Read by the services that sort and group; no longer an authorisation '
+      + 'input.',
+  })
   hierarchyRole!: string;
 
   @ApiProperty({ type: Boolean })

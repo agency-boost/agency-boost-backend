@@ -37,7 +37,7 @@ describe('OrgLevelService', () => {
   const sa = () => RequestContext.platform('root');
   const owner = () =>
     new RequestContext('u-owner', 'none', {
-      membershipId: 'mem-owner', kpmId: 'kpm-a', hierarchyRole: 'ab',
+      membershipId: 'mem-owner', kpmId: 'kpm-a', orgLevelCode: 'AB', hierarchyRole: 'ab',
       status: 'active', isKpmOwner: true, isKpmAdmin: false, directCount: 0,
     });
 
@@ -62,8 +62,22 @@ describe('OrgLevelService', () => {
       ).rejects.toMatchObject({ code: 'PERM_DENIED' });
     });
 
-    it('refuses a KPM Owner the right to read the ladder', async () => {
-      await expect(service.list(owner())).rejects.toMatchObject({ code: 'PERM_DENIED' });
+    it('lets a KPM Owner read the ladder, and still not change it (P4-T9)', async () => {
+      /*
+       * This asserted a refusal until P4-T9, and the reason was written down at the time:
+       * *"nothing tenant-side consumes it until the role-badge maps become
+       * server-supplied, and a grant nobody exercises is the opposite of a permission."*
+       *
+       * That is now what happens — every member's badge label, colour and order is drawn
+       * from the ladder rather than from five hard-coded maps in the frontend. Reading
+       * widened; writing did not, because the ladder belongs to the company (ADR-0012),
+       * and that is what the assertion above this one holds.
+       */
+      const [level] = await service.create(sa(), rung('AGENT', 'Agent', 1));
+      await expect(service.list(owner())).resolves.toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'AGENT' })]),
+      );
+      void level;
     });
   });
 

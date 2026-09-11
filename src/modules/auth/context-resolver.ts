@@ -106,6 +106,9 @@ export class ContextResolver {
     return {
       membershipId: String(membership._id),
       kpmId: membership.kpmId,
+      // The rung a permission grant is compared against (P4-T9). Denormalised onto the
+      // membership precisely so this path stays two lookups rather than three.
+      orgLevelCode: membership.orgLevelCode,
       hierarchyRole: membership.role,
       status: membership.status,
       isKpmOwner: owned !== null,

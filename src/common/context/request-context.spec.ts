@@ -70,7 +70,8 @@ describe('request context factories', () => {
       return new RequestContext(NEWCOMER, 'none', {
         membershipId: '65b1f0c2a4d3e5f6a7b8c9d3',
         kpmId: OFFICE,
-        hierarchyRole: role,
+        orgLevelCode: role.toUpperCase(),
+      hierarchyRole: role,
         status: 'active',
         isKpmOwner: false,
         isKpmAdmin: false,

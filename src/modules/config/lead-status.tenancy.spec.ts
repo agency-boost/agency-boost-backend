@@ -12,7 +12,7 @@ const COMPANY = '66f0000000000000000000c1';
 
 function ctx(kpmId: string) {
   return new RequestContext('u1', 'none', {
-    membershipId: `mem-${kpmId}`, kpmId, hierarchyRole: 'ab', status: 'active',
+    membershipId: `mem-${kpmId}`, kpmId, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
     isKpmOwner: true, isKpmAdmin: false, directCount: 0,
   });
 }

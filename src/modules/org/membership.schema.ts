@@ -5,6 +5,17 @@ import { baseSchemaOptions } from '@/common/schema/base.schema';
 export type MembershipDocument = HydratedDocument<Membership>;
 
 export type HierarchyRole = 'ab' | 'aab' | 'agent';
+
+/**
+ * Direct reports per ladder rung, plus the total.
+ *
+ * Keyed by rung **code**, so a company that publishes a fourth rung is counted rather
+ * than silently dropped.
+ */
+export interface DirectCounts {
+  total: number;
+  [orgLevelCode: string]: number;
+}
 export type MembershipStatus = 'active' | 'pending' | 'removed';
 
 /** Delegated tenant-admin rights. Orthogonal to hierarchy role — an AB may hold them. */
@@ -81,13 +92,32 @@ export class Membership {
   orgLevelId!: string;
 
   /**
+   * The rung's **code**, denormalised (P4-T9).
+   *
+   * `AGENT`, `AAB`, `AB` in v1's seeded ladder. Safe to copy because a published code
+   * never changes (ADR-0006) — the same argument `agentCode` already rests on — and it
+   * has to be here rather than joined because `ContextResolver` reads it on **every
+   * request**, and a third lookup on that path is not free.
+   *
+   * This is what a hierarchy permission grant is compared against since `P4-T9`. `role`
+   * below is the enum it used to be compared against, and an enum of three fixed names
+   * cannot describe a ladder a second insurer has not published yet.
+   */
+  @Prop({ type: String, required: true, uppercase: true, trim: true })
+  orgLevelCode!: string;
+
+  /**
    * **Derived from `orgLevelId`, never written on its own.**
    *
-   * It stays because removing it means redesigning `Grantee`/`holds()` — a table that
-   * enumerates one row per level and therefore cannot describe a configurable ladder —
-   * plus `directCounts`, the five `role-badge` maps and every permission row. v1 seeds
-   * exactly one ladder, so the reference and the enum are one-to-one and the enum keeps
-   * working. That is debt with a name (P3.5-T8 AC-5), not an accident.
+   * **No longer an authorisation input** (P4-T9). Permission grants compare against
+   * `orgLevelCode`; this is read by the services that sort, group and label — the org
+   * tree, the directory, the unit dashboard — where a stable three-value enum is a
+   * convenience rather than a constraint.
+   *
+   * It stays because removing the *field* is a data migration across seven services, and
+   * because v1 seeds exactly one ladder so the two are one-to-one. What P4-T9 removed is
+   * the part that mattered: an enum of three fixed names deciding who may do what, in a
+   * product whose ladder is company configuration (ADR-0012).
    *
    * Every write goes through `HierarchyService`, which sets it from the resolved level's
    * `code`. Setting it directly is how the two come to disagree.
@@ -110,8 +140,17 @@ export class Membership {
    * Caches, rebuilt on re-parenting. `total` is what makes someone a leader (OD-23) —
    * the role does not.
    */
-  @Prop({ type: Object, default: () => ({ ab: 0, aab: 0, agent: 0, total: 0 }) })
-  directCounts!: { ab: number; aab: number; agent: number; total: number };
+  /**
+   * Direct reports, counted **by ladder code** (P4-T9).
+   *
+   * `{ AGENT: 3, AAB: 1, total: 4 }`. It was `{ ab, aab, agent, total }` — three fixed
+   * keys, which silently counts nothing for a rung a second insurer publishes, and a
+   * screen reading it would show a leader with reports as leading nobody.
+   *
+   * `total` is what makes somebody a leader (OD-23); the rung does not.
+   */
+  @Prop({ type: Object, default: () => ({ total: 0 }) })
+  directCounts!: DirectCounts;
 
   @Prop({ type: Number, default: 0 })
   subtreeCount!: number;

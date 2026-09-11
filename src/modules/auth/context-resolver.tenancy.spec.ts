@@ -39,7 +39,7 @@ describe('ContextResolver', () => {
       leaderCode: `LC${String(seq).padStart(4, '0')}`,
       // A placeholder rung, deliberately: this helper writes straight to the model to
       // build a context, and what it exercises is the resolver, not the ladder.
-      orgLevelId: 'lvl-fixture',
+      orgLevelId: 'lvl-fixture', orgLevelCode: 'FIXTURE',
       role: 'ab', status: 'active', ...over,
     });
   }

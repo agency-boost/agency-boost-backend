@@ -25,6 +25,10 @@ import { LeadStatusService } from '@/modules/config/lead-status.service';
 import { RatioService } from '@/modules/config/ratio.service';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
 import { ProvisioningService } from '@/modules/config/provisioning.service';
+import { KpmSchema } from '@/modules/tenants/kpm.schema';
+import { CompanySchema } from '@/modules/tenants/company.schema';
+import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
+import { OrgLevelService } from '@/modules/tenants/org-level.service';
 
 /**
  * The configuration module, wired the way the app wires it.
@@ -64,10 +68,20 @@ export function configModule(now: Date) {
   const leads = new LeadStatusService(
     new LeadStatusRepository(leadStatuses as never), audit, clock,
   );
+  const kpms = model('KpmModelForConfig', KpmSchema);
+  const companyOrgLevels = model('CompanyOrgLevelModelForConfig', CompanyOrgLevelSchema);
+  const orgLevels = new OrgLevelService(
+    companyOrgLevels as never,
+    model('CompanyModelForConfig', CompanySchema) as never,
+    audit,
+    clock,
+  );
   const config = new TenantConfigService(
     activity, ratios, leads,
     new ConfigSnapshotRepository(snapshots as never),
     audit, clock,
+    kpms as never,
+    orgLevels,
   );
   const provisioning = new ProvisioningService(
     categories as never,

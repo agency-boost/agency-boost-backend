@@ -19,6 +19,7 @@ function ctx(opts: {
       : {
           membershipId: 'mem-1',
           kpmId: 'kpm-a',
+          orgLevelCode: (opts.role ?? 'agent').toUpperCase(),
           hierarchyRole: opts.role ?? 'agent',
           status: opts.status ?? 'active',
           isKpmOwner: opts.owner ?? false,
@@ -121,7 +122,7 @@ describe('permission matrix', () => {
     function implemented(permission: Permission): Array<Scope | null> {
       return COLUMNS.map((column) => {
         const grants = PERMISSIONS[permission] as ReadonlyArray<{
-          grantee: { kind: string; role?: string };
+          grantee: { kind: string; role?: string; orgLevelCode?: string };
           scope: Scope;
         }>;
         const held = grants.filter((g) => {
@@ -129,7 +130,9 @@ describe('permission matrix', () => {
           if (column === 'SUPER_ADMIN') return g.grantee.kind === 'platform';
           if (column === 'KPM_OWNER') return g.grantee.role === 'kpm_owner';
           if (column === 'KPM_ADMIN') return g.grantee.role === 'kpm_admin';
-          return g.grantee.role === column.toLowerCase();
+          // By ladder code since P4-T9: the column headings *are* the seeded ladder's
+          // codes, which is why this comparison got simpler rather than harder.
+          return g.grantee.kind === 'hierarchy' && g.grantee.orgLevelCode === column;
         });
         if (held.length === 0) return null;
         return held

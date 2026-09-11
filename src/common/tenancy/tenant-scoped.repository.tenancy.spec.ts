@@ -37,7 +37,7 @@ function ctxFor(kpmId: string, overrides: Partial<TenantMembership> = {}): Reque
   return new RequestContext('user-' + kpmId, 'none', {
     membershipId: 'mem-' + kpmId,
     kpmId,
-    hierarchyRole: 'agent',
+    orgLevelCode: 'AGENT', hierarchyRole: 'agent',
     status: 'active',
     isKpmOwner: false,
     isKpmAdmin: false, directCount: 0,

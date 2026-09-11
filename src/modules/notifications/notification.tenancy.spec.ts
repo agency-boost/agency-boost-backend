@@ -31,7 +31,7 @@ function person(userId: string, kpmId: string | null) {
     'none',
     kpmId
       ? {
-          membershipId: `mem-${userId}`, kpmId, hierarchyRole: 'agent', status: 'active',
+          membershipId: `mem-${userId}`, kpmId, orgLevelCode: 'AGENT', hierarchyRole: 'agent', status: 'active',
           isKpmOwner: false, isKpmAdmin: false, directCount: 0,
         }
       : null,

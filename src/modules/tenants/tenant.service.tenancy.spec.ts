@@ -39,7 +39,7 @@ function ctx(opts: { superAdmin?: boolean; owner?: boolean; admin?: boolean; kpm
       ? {
           membershipId: 'mem-1',
           kpmId: opts.kpmId ?? 'kpm-x',
-          hierarchyRole: 'ab',
+          orgLevelCode: 'AB', hierarchyRole: 'ab',
           status: 'active',
           isKpmOwner: opts.owner ?? false,
           isKpmAdmin: opts.admin ?? false, directCount: 0,
@@ -130,7 +130,7 @@ describe('TenantService', () => {
       // Required now, and a placeholder is honest here: this helper deliberately skips
       // `HierarchyService`, so nothing about it resolves a real rung. What it exercises
       // is the counting, not the ladder.
-      orgLevelId: 'lvl-fixture',
+      orgLevelId: 'lvl-fixture', orgLevelCode: 'FIXTURE',
     });
 
   describe('creating a company (P3.5-T14 AC-7)', () => {
@@ -665,7 +665,7 @@ describe('TenantService', () => {
     const seedMemberFor = (kpmId: string, userId: string, admin = false) =>
       mongoose.model(Membership.name).create({
         kpmId, userId, role: 'ab', status: 'active', agentCode: `${kpmId.slice(-4)}-${userId}`,
-        agentSeq: 1, leaderCode: nextCode(), leaderId: null, ancestorIds: [], depth: 0, orgLevelId: 'lvl-fixture',
+        agentSeq: 1, leaderCode: nextCode(), leaderId: null, ancestorIds: [], depth: 0, orgLevelId: 'lvl-fixture', orgLevelCode: 'FIXTURE',
         ...(admin ? { adminAccess: { isKpmAdmin: true, grantedAt: NOW, grantedByUserId: 'u1', revokedAt: null } } : {}),
       });
 

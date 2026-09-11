@@ -12,7 +12,7 @@ function makeService(createImpl?: jest.Mock) {
 }
 
 const agentCtx = new RequestContext('u1', 'none', {
-  membershipId: 'mem-agent', kpmId: 'kpm-a', hierarchyRole: 'agent',
+  membershipId: 'mem-agent', kpmId: 'kpm-a', orgLevelCode: 'AGENT', hierarchyRole: 'agent',
   status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
 });
 
@@ -30,7 +30,7 @@ describe('AuditService', () => {
 
   it('flags onBehalfOf when a leader acts on someone else’s record', async () => {
     const leaderCtx = new RequestContext('u2', 'none', {
-      membershipId: 'mem-leader', kpmId: 'kpm-a', hierarchyRole: 'ab',
+      membershipId: 'mem-leader', kpmId: 'kpm-a', orgLevelCode: 'AB', hierarchyRole: 'ab',
       status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
     });
     const { service, created } = makeService();
@@ -43,7 +43,7 @@ describe('AuditService', () => {
 
   it('records both actors during impersonation', async () => {
     const impersonated = new RequestContext('u-agent', 'none', {
-      membershipId: 'mem-agent', kpmId: 'kpm-a', hierarchyRole: 'agent',
+      membershipId: 'mem-agent', kpmId: 'kpm-a', orgLevelCode: 'AGENT', hierarchyRole: 'agent',
       status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
     }, 'u-superadmin');
     const { service, created } = makeService();
