@@ -62,19 +62,28 @@ export class ImpersonationService {
     reason: string,
     durationMinutes = IMPERSONATION_MAX_MINUTES,
   ): Promise<{ accessToken: string; expiresAt: Date; sessionId: string; readOnly: boolean }> {
+    /*
+     * **This one first, and the order is the point.**
+     *
+     * `impersonation:start` is on P4-T10's hard-blocked list, so `can()` already refuses
+     * it inside a session — which made this check unreachable and its message
+     * unreachable with it. A Super Admin who is mid-session and tries again deserves
+     * *"end that session first"*, not a flat "only a Super Admin can do this", which is
+     * both unhelpful and untrue of them.
+     */
+    if (ctx.isImpersonating) {
+      throw new DomainException(
+        ErrorCode.PERM_DENIED,
+        'You are already impersonating. End that session first.',
+        HttpStatus.FORBIDDEN,
+      );
+    }
     if (!can(ctx, 'impersonation:start')) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
         'Only a Super Admin can impersonate a user.',
         HttpStatus.FORBIDDEN,
         { permission: 'impersonation:start' },
-      );
-    }
-    if (ctx.isImpersonating) {
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        'You are already impersonating. End that session first.',
-        HttpStatus.FORBIDDEN,
       );
     }
     if (!reason?.trim()) {

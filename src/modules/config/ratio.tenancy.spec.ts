@@ -214,4 +214,82 @@ describe('the office ratio definitions (P4-T2)', () => {
       })).resolves.toMatchObject({ code: 'MINE' });
     });
   });
+  describe('the rest of the writes (P4-T12)', () => {
+    beforeEach(() => provision(KPM_A));
+
+    it('appends a new ratio and normalises its code', async () => {
+      const created = await ratios.create(ctx(KPM_A), {
+        code: 'referral_rate', label: 'Referral rate',
+        numerator: ['sell_submission'], denominator: ['leads_contacted'],
+        benchmark: 0.2, comparison: 'gte',
+      });
+      expect(created.code).toBe('REFERRAL_RATE');
+      // The formula's codes are normalised too, so a lower-case paste binds correctly.
+      expect(created.numerator).toEqual(['SELL_SUBMISSION']);
+      expect(created.displayOrder).toBe(6);
+    });
+
+    it('refuses a duplicate ratio code', async () => {
+      await expect(ratios.create(ctx(KPM_A), {
+        code: 'SELLING_SUCCESS_RATE', label: 'Again', numerator: ['SELL_SUBMISSION'],
+        denominator: ['SELL_PRESENTATION'], benchmark: 1, comparison: 'gte',
+      })).rejects.toThrow('already has a ratio called SELLING_SUCCESS_RATE');
+    });
+
+    it('refuses a ratio code that is not a code', async () => {
+      await expect(ratios.create(ctx(KPM_A), {
+        code: 'has spaces', label: 'x', numerator: ['SELL_SUBMISSION'],
+        denominator: ['SELL_PRESENTATION'], benchmark: 1, comparison: 'gte',
+      })).rejects.toThrow('3–40 characters');
+    });
+
+    it('refuses an empty numerator, for the same reason as an empty denominator', async () => {
+      await expect(ratios.create(ctx(KPM_A), {
+        code: 'NO_TOP', label: 'x', numerator: [],
+        denominator: ['SELL_PRESENTATION'], benchmark: 1, comparison: 'gte',
+      })).rejects.toThrow('at least one activity type in its numerator');
+    });
+
+    it('refuses the same type twice on the denominator too', async () => {
+      await expect(ratios.create(ctx(KPM_A), {
+        code: 'DOUBLED_BOTTOM', label: 'x', numerator: ['SELL_SUBMISSION'],
+        denominator: ['SELL_PRESENTATION', 'SELL_PRESENTATION'], benchmark: 1, comparison: 'gte',
+      })).rejects.toThrow('appears twice in the denominator');
+    });
+
+    it('renames a ratio and changes its comparison without touching the formula', async () => {
+      const ratio = (await ratios.list(ctx(KPM_A)))
+        .find((r) => r.code === 'LEADS_PER_ACTIVITY')!;
+      const updated = await ratios.update(ctx(KPM_A), ratio.id, {
+        label: '  Prospek per aktivitas  ', comparison: 'band',
+      });
+      expect(updated.label).toBe('Prospek per aktivitas');
+      expect(updated.comparison).toBe('band');
+      expect(updated.numerator).toEqual(ratio.numerator);
+    });
+
+    it('refuses an update that changes nothing', async () => {
+      const ratio = (await ratios.list(ctx(KPM_A)))[0];
+      await expect(ratios.update(ctx(KPM_A), ratio.id, {})).rejects.toThrow('Nothing to change');
+    });
+
+    it('archives a ratio and brings it back', async () => {
+      const ratio = (await ratios.list(ctx(KPM_A)))[0];
+      const archived = await ratios.archive(ctx(KPM_A), ratio.id);
+      expect(archived.status).toBe('archived');
+      expect((await ratios.list(ctx(KPM_A))).map((r) => r.code)).not.toContain(ratio.code);
+      expect((await ratios.list(ctx(KPM_A), true)).map((r) => r.code)).toContain(ratio.code);
+
+      const restored = await ratios.restore(ctx(KPM_A), ratio.id);
+      expect(restored.status).toBe('active');
+    });
+
+    it('refuses to archive or restore another office’s ratio', async () => {
+      await provision(KPM_B);
+      const theirs = (await ratios.list(ctx(KPM_B)))[0];
+      await expect(ratios.archive(ctx(KPM_A), theirs.id)).rejects.toThrow('Ratio');
+      await expect(ratios.restore(ctx(KPM_A), theirs.id)).rejects.toThrow('Ratio');
+    });
+  });
+
 });

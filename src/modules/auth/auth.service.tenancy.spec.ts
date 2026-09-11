@@ -409,4 +409,68 @@ describe('AuthService', () => {
       await expect(service.verifyEmail(token)).rejects.toBeDefined();
     });
   });
+  describe('resending verification (P4-T13)', () => {
+    it('sends another to somebody who has not verified', async () => {
+      await service.register(reg({ email: 'unverified@kpm.test' }));
+      sent = [];
+
+      await service.resendVerification('  Unverified@KPM.test  ');
+
+      const again = sent.find((m) => m.templateId === 'auth.email_verification');
+      expect(again).toBeDefined();
+      expect(again!.payload.token).toEqual(expect.any(String));
+    });
+
+    it('sends nothing to an address nobody has registered', async () => {
+      /*
+       * Silence rather than a refusal. The route answers `202` either way, and doing any
+       * work here that a caller could time would give back what the status code
+       * deliberately withholds.
+       */
+      await service.resendVerification('nobody@kpm.test');
+      expect(sent).toEqual([]);
+    });
+
+    it('sends nothing to somebody already verified', async () => {
+      const email = await verifiedUser('already@kpm.test');
+      sent = [];
+      await service.resendVerification(email);
+      expect(sent).toEqual([]);
+    });
+  });
+
+  describe('password rules, where they are actually enforced', () => {
+    it('refuses a reset to a password the rules reject, naming every problem', async () => {
+      // Every failure at once: telling somebody it is too short and then that it has a
+      // trailing space is two round trips for one decision.
+      const email = await verifiedUser('reset-rules@kpm.test');
+      await service.forgotPassword(email);
+      const token = sent.find((m) => m.templateId === 'auth.password_reset')!
+        .payload.token as string;
+
+      await expect(service.resetPassword(token, ' short ')).rejects.toMatchObject({
+        code: 'VALIDATION_FAILED',
+      });
+      await expect(service.resetPassword(token, ' short ')).rejects.toThrow(/at least 10/);
+    });
+
+    it('refuses a change to a password the rules reject', async () => {
+      const email = await verifiedUser('change-rules@kpm.test');
+      const user = await mongoose.model(User.name).findOne({ email }).exec();
+
+      await expect(service.changePassword(String(user!._id), PASSWORD, 'short'))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    });
+
+    it('refuses a change that replaces a password with itself', async () => {
+      // The guard would otherwise let somebody through on the credential an admin still
+      // has a copy of (P3.6-T4).
+      const email = await verifiedUser('same-again@kpm.test');
+      const user = await mongoose.model(User.name).findOne({ email }).exec();
+
+      await expect(service.changePassword(String(user!._id), PASSWORD, PASSWORD))
+        .rejects.toThrow(/different password/);
+    });
+  });
+
 });

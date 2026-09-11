@@ -174,4 +174,71 @@ describe('the office lead pipelines (P4-T3)', () => {
         .rejects.toThrow('Lead status');
     });
   });
+  describe('the rest of the writes (P4-T12)', () => {
+    beforeEach(() => provisioning.seedLeadPipelines(KPM_A, COMPANY));
+
+    it('normalises a new stage’s code', async () => {
+      const created = await service.create(ctx(KPM_A), {
+        pipeline: 'sales', code: '  awaiting_underwriting  ', label: '  Menunggu UW  ',
+      });
+      expect(created.code).toBe('AWAITING_UNDERWRITING');
+      expect(created.label).toBe('Menunggu UW');
+    });
+
+    it('refuses a code that is not a code', async () => {
+      await expect(service.create(ctx(KPM_A), {
+        pipeline: 'sales', code: 'has spaces', label: 'x',
+      })).rejects.toThrow('3–40 characters');
+    });
+
+    it('archives a non-terminal stage and brings it back', async () => {
+      const [sales] = await service.list(ctx(KPM_A));
+      const stage = sales.statuses.find((s) => !s.isTerminal)!;
+
+      const archived = await service.archive(ctx(KPM_A), stage.id);
+      expect(archived.status).toBe('archived');
+
+      const restored = await service.restore(ctx(KPM_A), stage.id);
+      expect(restored.status).toBe('active');
+      expect(restored.code).toBe(stage.code);
+    });
+
+    it('refuses to archive, restore or make terminal a stage that is not this office’s', async () => {
+      await provisioning.seedLeadPipelines(KPM_B, COMPANY);
+      const [theirs] = await service.list(ctx(KPM_B));
+      const stage = theirs.statuses.find((s) => !s.isTerminal)!;
+
+      await expect(service.archive(ctx(KPM_A), stage.id)).rejects.toThrow('Lead status');
+      await expect(service.restore(ctx(KPM_A), stage.id)).rejects.toThrow('Lead status');
+      await expect(service.setTerminal(ctx(KPM_A), stage.id)).rejects.toThrow('Lead status');
+    });
+
+    it('leaves the terminal flag alone when it is already on that stage', async () => {
+      // Setting it to where it is should not churn versions on every other row.
+      const [sales] = await service.list(ctx(KPM_A));
+      const terminal = sales.statuses.find((s) => s.isTerminal)!;
+      const after = await service.setTerminal(ctx(KPM_A), terminal.id);
+      expect(after.statuses.filter((s) => s.isTerminal)).toHaveLength(1);
+      expect(after.statuses.find((s) => s.isTerminal)!.code).toBe(terminal.code);
+    });
+
+    it('refuses to rename a stage that is not this office’s', async () => {
+      await provisioning.seedLeadPipelines(KPM_B, COMPANY);
+      const [theirs] = await service.list(ctx(KPM_B));
+      await expect(service.rename(ctx(KPM_A), theirs.statuses[0].id, 'mine'))
+        .rejects.toThrow('Lead status');
+    });
+
+    it('includes archived stages when asked, and not otherwise', async () => {
+      const [sales] = await service.list(ctx(KPM_A));
+      const stage = sales.statuses.find((s) => !s.isTerminal)!;
+      await service.archive(ctx(KPM_A), stage.id);
+
+      const [withoutArchived] = await service.list(ctx(KPM_A));
+      const [withArchived] = await service.list(ctx(KPM_A), true);
+      expect(withoutArchived.statuses.map((s) => s.code)).not.toContain(stage.code);
+      expect(withArchived.statuses.map((s) => s.code)).toContain(stage.code);
+    });
+  });
+
 });

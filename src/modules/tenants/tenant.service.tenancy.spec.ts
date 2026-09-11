@@ -4,13 +4,15 @@ import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
-import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
+import {
+  Membership, MembershipDocument, MembershipSchema,
+} from '@/modules/org/membership.schema';
 import {
   MembershipHistory, MembershipHistorySchema,
 } from '@/modules/org/membership-history.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
-import { Company, CompanySchema } from './company.schema';
+import { Company, CompanyDocument, CompanySchema } from './company.schema';
 import { KpmRequest, KpmRequestSchema } from './kpm-request.schema';
 import { OrgLevelService } from './org-level.service';
 import { CompanyOrgLevel, CompanyOrgLevelSchema } from './company-org-level.schema';
@@ -56,17 +58,20 @@ function userModel() {
 describe('TenantService', () => {
   let service: TenantService;
   let users: ReturnType<typeof userModel>;
+  let memberModel: mongoose.Model<MembershipDocument>;
+  let companyModel: mongoose.Model<CompanyDocument>;
   let companyId: string;
 
   beforeAll(async () => {
     await startMongo();
     const kpms = mongoose.model(Kpm.name, KpmSchema);
-    const companies = mongoose.model(Company.name, CompanySchema);
+    companyModel = mongoose.model(Company.name, CompanySchema) as never;
+    const companies = companyModel;
     const requests = mongoose.model(KpmRequest.name, KpmRequestSchema);
     const levels = mongoose.model(CompanyOrgLevel.name, CompanyOrgLevelSchema);
     const auditModel = mongoose.model(AuditLog.name, AuditLogSchema);
     users = userModel();
-    const memberModel = mongoose.model(Membership.name, MembershipSchema);
+    memberModel = mongoose.model(Membership.name, MembershipSchema) as never;
     const historyModel = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
     const historyRepo = new MembershipHistoryRepository(historyModel as never);
     const repo = new MembershipRepository(memberModel as never);
@@ -773,4 +778,239 @@ describe('TenantService', () => {
       await expect(service.listAll(ctx({ superAdmin: true }))).resolves.toEqual([]);
     });
   });
+  describe('branch info (P4-T5)', () => {
+    async function anOffice() {
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), {
+        companyId, code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'BSD City',
+      });
+      return kpm._id;
+    }
+
+    it('changes what the Owner may change, and audits both sides', async () => {
+      const id = await anOffice();
+      const updated = await service.updateIdentity(ctx({ owner: true, kpmId: id }), id, {
+        branchName: 'Serpong Branch',
+        address: '  Jl. Raya Serpong  ',
+        contactPhone: '',
+        fiscalYearStartMonth: 4,
+      });
+
+      expect(updated.branchName).toBe('Serpong Branch');
+      // Trimmed, and an emptied optional becomes null rather than an empty string — a
+      // blank address and an absent one are the same fact and should read alike.
+      expect(updated.address).toBe('Jl. Raya Serpong');
+      expect(updated.contactPhone).toBeNull();
+      expect(updated.fiscalYearStartMonth).toBe(4);
+    });
+
+    it('refuses an Admin, alone among the Settings screens', async () => {
+      const id = await anOffice();
+      await expect(
+        service.updateIdentity(ctx({ admin: true, kpmId: id }), id, { branchName: 'Nope' }),
+      ).rejects.toMatchObject({ code: 'PERM_DENIED' });
+    });
+
+    it('refuses another office as a 404, never a 403', async () => {
+      // A 403 would confirm the id is real, which is itself tenant information.
+      const mine = await anOffice();
+      const theirs = await anOffice();
+      await expect(
+        service.updateIdentity(ctx({ owner: true, kpmId: mine }), theirs, { branchName: 'Theirs' }),
+      ).rejects.toThrow('KPM');
+    });
+
+    it('refuses an empty change rather than writing an audit row about nothing', async () => {
+      const id = await anOffice();
+      await expect(
+        service.updateIdentity(ctx({ owner: true, kpmId: id }), id, {}),
+      ).rejects.toThrow('Nothing to change');
+    });
+
+    it('refuses an office that does not exist', async () => {
+      await expect(
+        service.updateIdentity(ctx({ superAdmin: true }), '66f0000000000000000000ff', {
+          branchName: 'Ghost',
+        }),
+      ).rejects.toThrow('KPM');
+    });
+  });
+
+  describe('companies', () => {
+    it('lists them to a Super Admin and to nobody else', async () => {
+      await expect(service.listCompanies(ctx({ owner: true }))).rejects.toMatchObject({
+        code: 'PERM_DENIED',
+      });
+      await expect(service.listCompanies(ctx({ superAdmin: true }))).resolves.toEqual(
+        expect.arrayContaining([expect.objectContaining({ _id: expect.anything() })]),
+      );
+    });
+
+    it('names the holder when a slug is taken', async () => {
+      // The refusal says who has it, because "taken" without a name sends somebody
+      // hunting through a list they may not be able to see.
+      const sa = ctx({ superAdmin: true });
+      await service.createCompany(sa, { name: 'Allianz Indonesia', slug: 'allianz-indonesia' });
+      await expect(
+        service.createCompany(sa, { name: 'Allianz Indonesia', slug: 'allianz-indonesia' }),
+      ).rejects.toMatchObject({ code: 'COMPANY_SLUG_TAKEN' });
+    });
+
+    it('lists insurers to somebody with no account, by name only', async () => {
+      /*
+       * A projection rather than a filter on the way out: a field added to `companies`
+       * later cannot leak through this route by default, which is the difference between
+       * an allowlist and a habit.
+       */
+      const rows = await service.listCompaniesForRegistration();
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(Object.keys(row).sort()).toEqual(['_id', 'name']);
+      }
+    });
+  });
+
+  describe('the Owner’s own membership', () => {
+    async function anOffice() {
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), {
+        companyId, code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'Owner Branch',
+      });
+      return kpm._id;
+    }
+
+    async function aPerson(email: string) {
+      return users.create({
+        email, fullName: 'Owner Person', passwordHash: 'x', platformRole: 'none',
+        status: 'active', emailVerifiedAt: NOW, deletedAt: null,
+        companyId, agentCode: nextCode(),
+      });
+    }
+
+    it('activates a pending membership rather than minting a second one', async () => {
+      /*
+       * The partial unique index would reject a second row, and the right answer is the
+       * one they already have. An Owner assigned to an office they had asked to join is
+       * the ordinary path into this branch.
+       */
+      const kpmId = await anOffice();
+      const person = await aPerson(`pending-owner-${Math.random()}@kpm.test`);
+      const sa = ctx({ superAdmin: true });
+
+      await service.assignOwner(sa, kpmId, { userId: String(person._id) });
+      const first = await memberModel.findOne({ userId: String(person._id), kpmId }).exec();
+      expect(first?.status).toBe('active');
+
+      // Set it back to pending and assign again: the row is reused, not duplicated.
+      await memberModel.updateOne({ _id: first!._id }, { $set: { status: 'pending' } }).exec();
+      await service.assignOwner(sa, kpmId, { userId: String(person._id) });
+
+      const rows = await memberModel.find({ userId: String(person._id), kpmId }).exec();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe('active');
+    });
+
+    it('leaves an already-active membership exactly as it is', async () => {
+      // An office may promote its Owner's account through the ranks like anybody else's,
+      // and re-assigning ownership must not quietly demote them.
+      const kpmId = await anOffice();
+      const person = await aPerson(`active-owner-${Math.random()}@kpm.test`);
+      const sa = ctx({ superAdmin: true });
+
+      await service.assignOwner(sa, kpmId, { userId: String(person._id) });
+      const before = await memberModel.findOne({ userId: String(person._id), kpmId }).exec();
+      await memberModel.updateOne({ _id: before!._id }, { $set: { role: 'ab' } }).exec();
+
+      await service.assignOwner(sa, kpmId, { userId: String(person._id) });
+
+      const after = await memberModel.findOne({ userId: String(person._id), kpmId }).exec();
+      expect(after?.role).toBe('ab');
+      expect(after?.joinedAt).toEqual(before?.joinedAt);
+    });
+  });
+
+  describe('the races and the edges', () => {
+    it('answers the index, not only the pre-check, when two creates collide', async () => {
+      /*
+       * The pre-check reads and then writes, so two callers can both read "free". The
+       * index is what actually decides, and `E11000` is neither a DomainException nor an
+       * HttpException — without this branch it renders as INTERNAL_ERROR and is logged as
+       * unhandled, for something a user did on purpose.
+       *
+       * Forced rather than raced: two concurrent creates are a coin toss about which
+       * guard fires, and a test that passes four times in five is worse than none.
+       */
+      const sa = ctx({ superAdmin: true });
+      const collide = jest
+        .spyOn(companyModel, 'create')
+        .mockRejectedValueOnce(Object.assign(new Error('E11000'), { code: 11000 }));
+
+      await expect(
+        service.createCompany(sa, { name: 'Prudential', slug: 'prudential' }),
+      ).rejects.toMatchObject({ code: 'COMPANY_SLUG_TAKEN' });
+
+      collide.mockRestore();
+    });
+
+    it('rethrows a write failure that is not a duplicate', async () => {
+      // Swallowing everything here would turn a connection fault into "that slug is
+      // taken", and somebody would spend an afternoon renaming a company.
+      const sa = ctx({ superAdmin: true });
+      const broken = jest
+        .spyOn(companyModel, 'create')
+        .mockRejectedValueOnce(new Error('connection reset'));
+
+      await expect(
+        service.createCompany(sa, { name: 'Manulife', slug: 'manulife' }),
+      ).rejects.toThrow('connection reset');
+
+      broken.mockRestore();
+    });
+
+    it('reads a malformed office id as not-here, not as a 500', async () => {
+      // These arrive from a URL. An uncaught CastError is INTERNAL_ERROR and a log line
+      // about an unhandled error, which is the wrong story about a typo.
+      await expect(
+        service.updateIdentity(ctx({ superAdmin: true }), 'not-an-id', { branchName: 'X' }),
+      ).rejects.toThrow('KPM');
+    });
+
+    it('orders the platform admin roster by office, then owner, then name', async () => {
+      /*
+       * Three keys, and the second is the one worth having: an office's Owner above its
+       * Admins answers the question the screen is for — who runs this one, and who else
+       * can act in it.
+       */
+      const sa = ctx({ superAdmin: true });
+      const kpm = await service.createKpm(sa, {
+        companyId, code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'Sorted',
+      });
+
+      const owner = await users.create({
+        email: `zzz-owner-${Math.random()}@kpm.test`, fullName: 'Zed Owner', passwordHash: 'x',
+        platformRole: 'none', status: 'active', emailVerifiedAt: NOW, deletedAt: null,
+        companyId, agentCode: nextCode(),
+      });
+      await service.assignOwner(sa, kpm._id, { userId: String(owner._id) });
+
+      const admin = await users.create({
+        email: `aaa-admin-${Math.random()}@kpm.test`, fullName: 'Ann Admin', passwordHash: 'x',
+        platformRole: 'none', status: 'active', emailVerifiedAt: NOW, deletedAt: null,
+        companyId, agentCode: nextCode(),
+      });
+      const adminMembership = await memberModel.create({
+        kpmId: kpm._id, userId: String(admin._id), role: 'ab', orgLevelId: 'lvl-ab',
+        orgLevelCode: 'AB', agentCode: nextCode(), agentSeq: 99,
+        leaderCode: `LC${Math.floor(Math.random() * 100000)}`, status: 'active',
+        adminAccess: { isKpmAdmin: true, grantedByUserId: 'u1', grantedAt: NOW, revokedAt: null },
+      } as never);
+      void adminMembership;
+
+      const rows = (await service.platformAdmins(sa))
+        .filter((r: { kpmLabel: string }) => r.kpmLabel.includes('Sorted'));
+
+      // The Owner first despite sorting after the Admin by name.
+      expect(rows.map((r: { fullName: string }) => r.fullName))
+        .toEqual(['Zed Owner', 'Ann Admin']);
+    });
+  });
+
 });

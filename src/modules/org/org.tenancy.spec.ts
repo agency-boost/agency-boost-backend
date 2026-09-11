@@ -3774,4 +3774,146 @@ describe('organisation', () => {
         .exec();
     });
   });
+  describe('the guards that fire before anything is read (P4-T12)', () => {
+    /** Somebody signed in with no office at all — the state a new account starts in. */
+    const noOffice = new RequestContext('u-none', 'none', null);
+
+    it('refuses every leader surface to somebody in no office', async () => {
+      // Failing closed here is what keeps the tenant repository from being asked for a
+      // tenant nobody named — which would be `MissingTenantContextError`, a 500, rather
+      // than the refusal this is.
+      await expect(approvals.inbox(noOffice)).rejects.toMatchObject({
+        code: 'TENANT_NO_MEMBERSHIP',
+      });
+    });
+
+    it('refuses a level change from a context with no office', async () => {
+      await expect(hierarchy.setLevel(noOffice, 'm1', 'aab')).rejects.toMatchObject({
+        code: 'TENANT_NO_MEMBERSHIP',
+      });
+    });
+
+    it('refuses a membership from a context with no office', async () => {
+      await expect(
+        hierarchy.create(noOffice, { userId: 'u1', role: 'agent', leaderId: null }),
+      ).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
+    });
+
+    it('refuses a group surface to somebody in no office', async () => {
+      await expect(groups.list(noOffice)).rejects.toMatchObject({
+        code: 'TENANT_NO_MEMBERSHIP',
+      });
+      await expect(
+        groups.create(noOffice, { name: 'Anything', ownerMembershipId: 'm1' }),
+      ).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
+    });
+
+    it('gives up on a leader code rather than looping for ever', async () => {
+      /*
+       * The alphabet is 32 characters over six places, so a collision is vanishingly
+       * unlikely — and "vanishingly unlikely" is exactly the kind of loop that runs for
+       * ever on the day the generator is broken. It gives up loudly instead.
+       */
+      const existing = jest
+        .spyOn(members, 'existsWithLeaderCode')
+        .mockResolvedValue(true);
+
+      await expect(
+        hierarchy.create(ctx(KPM_A), { userId: await person(), role: 'agent', leaderId: null }),
+      ).rejects.toMatchObject({ code: 'INTERNAL_ERROR' });
+
+      existing.mockRestore();
+    });
+  });
+
+  describe('when a referenced row has gone (P4-T12)', () => {
+    /*
+     * Every one of these is a deliberate choice the product made: render *Unknown* and
+     * keep going, rather than blank the field or throw. A screen that dies because one
+     * account was erased is worse than a screen with one odd-looking row, and PDP erasure
+     * (UU 27/2022) makes "that person's row is gone" an ordinary state rather than a bug.
+     */
+    it('names a group’s owner as Unknown when their account has been erased', async () => {
+      const ownerId = await join(KPM_A, 'ab');
+      await groups.create(ctx(KPM_A, { isKpmOwner: true }), {
+        name: 'Mentoring circle', ownerMembershipId: ownerId,
+      });
+
+      const membership = await members.findById(ctx(KPM_A), ownerId);
+      await users.deleteOne({ _id: membership!.userId }).exec();
+
+      const [group] = await groups.list(ctx(KPM_A, { isKpmOwner: true }));
+      expect(group.ownerName).toBe('Unknown');
+    });
+
+    it('names a tagged member as Unknown for the same reason', async () => {
+      const ownerId = await join(KPM_A, 'ab');
+      const memberId = await join(KPM_A, 'agent', ownerId);
+      const made = await groups.create(ctx(KPM_A, { isKpmOwner: true }), {
+        name: 'Task force', ownerMembershipId: ownerId,
+      });
+      const group = made.find((g) => g.name === 'Task force')!;
+      await groups.tag(ctx(KPM_A, { isKpmOwner: true }), memberId, {
+        groupIds: [group.groupId], isCoreLeader: false,
+      });
+
+      const membership = await members.findById(ctx(KPM_A), memberId);
+      await users.deleteOne({ _id: membership!.userId }).exec();
+
+      const tags = await groups.tagsFor(ctx(KPM_A, { isKpmOwner: true }), memberId);
+      expect(tags.fullName).toBe('Unknown');
+    });
+
+    it('keeps a tag on an archived group, because it is the record of a past cohort', async () => {
+      /*
+       * The prototype splices the row and strips the id from everybody in one breath, so
+       * the record that these people were ever a cohort is gone. Here the tag survives
+       * the group being retired — and survives a later edit that does not offer it.
+       */
+      const ownerId = await join(KPM_A, 'ab');
+      const memberId = await join(KPM_A, 'agent', ownerId);
+      const admin = ctx(KPM_A, { isKpmOwner: true });
+      // `create` answers the whole list, sorted by name — so destructuring the first
+      // entry is not the group just made.
+      await groups.create(admin, { name: 'Last year’s circle', ownerMembershipId: ownerId });
+      const all = await groups.create(admin, {
+        name: 'This year’s circle', ownerMembershipId: ownerId,
+      });
+      const retired = all.find((g) => g.name === 'Last year’s circle')!;
+      const live = all.find((g) => g.name === 'This year’s circle')!;
+
+      await groups.tag(admin, memberId, {
+        groupIds: [retired.groupId, live.groupId], isCoreLeader: false,
+      });
+      await groups.archive(admin, retired.groupId);
+
+      // The panel now offers only the live group, and an edit that names just it must not
+      // silently drop the archived tag.
+      await groups.tag(admin, memberId, { groupIds: [live.groupId], isCoreLeader: false });
+
+      const membership = await members.findById(ctx(KPM_A), memberId);
+      expect(membership!.groupIds).toEqual(
+        expect.arrayContaining([retired.groupId, live.groupId]),
+      );
+    });
+
+    it('refuses a leader code to somebody whose membership has gone', async () => {
+      const gone = new RequestContext('u-ghost', 'none', {
+        membershipId: '66f00000000000000000dead', kpmId: KPM_A,
+        orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
+        isKpmOwner: false, isKpmAdmin: false, directCount: 1,
+      });
+      await expect(leaderCodes.mine(gone, 'https://app.test')).rejects.toThrow('Membership');
+    });
+
+    it('previews a code whose office row is gone without crashing the preview', async () => {
+      // The preview is what somebody sees before accepting, so it has to render even
+      // when part of what it describes has been removed underneath it.
+      const leaderId = await join(KPM_A, 'ab');
+      const membership = await members.findById(ctx(KPM_A), leaderId);
+      const preview = await leaderCodes.preview(membership!.leaderCode);
+      expect(preview.kpmLabel).toEqual(expect.any(String));
+    });
+  });
+
 });

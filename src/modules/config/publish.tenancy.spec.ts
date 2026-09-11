@@ -146,4 +146,46 @@ describe('publishing an office’s configuration (P4-T6)', () => {
         .not.toContain('Only in A');
     });
   });
+  describe('the ladder and the tag (P4-T9, P4-T7)', () => {
+    it('answers an empty ladder for somebody in no office', async () => {
+      // A Super Admin reads this too, and they belong to no office — an empty answer is
+      // the honest one rather than a throw on a screen that merely draws badges.
+      const platform = new RequestContext('u-root', 'super_admin', null);
+      await expect(config.ladderFor(platform)).resolves.toEqual([]);
+    });
+
+    it('answers an empty ladder when the office row has gone', async () => {
+      // A session outliving its office is rare and survivable; a 500 drawing a badge is
+      // neither.
+      await expect(config.ladderFor(ctx('66f00000000000000000dead'))).resolves.toEqual([]);
+    });
+
+    it('gives the same tag for the same configuration, and a different one otherwise', async () => {
+      /*
+       * Hashed from the rendered body rather than composed from timestamps: the body is
+       * what a client caches, so its sameness is the only thing worth asserting.
+       */
+      const before = await config.read(ctx(KPM_A));
+      expect(config.etag(before)).toBe(config.etag(await config.read(ctx(KPM_A))));
+
+      const type = (await activity.list(ctx(KPM_A))).flatMap((c) => c.types)[0];
+      await activity.updateType(ctx(KPM_A), type.id, { label: 'Changed' });
+
+      expect(config.etag(await config.read(ctx(KPM_A)))).not.toBe(config.etag(before));
+    });
+
+    it('is a strong tag, quoted, and short enough to sit in a header', async () => {
+      const tag = config.etag(await config.read(ctx(KPM_A)));
+      expect(tag).toMatch(/^"[A-Za-z0-9_-]{32}"$/);
+    });
+
+    it('reads version 0 for an office with nothing configured at all', async () => {
+      // Not an error: an office created before its company published anything, read
+      // before provisioning has run.
+      const empty = await config.read(ctx('66f00000000000000000beef'));
+      expect(empty.version).toBe(0);
+      expect(empty.activity).toEqual([]);
+    });
+  });
+
 });

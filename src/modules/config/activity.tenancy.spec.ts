@@ -293,4 +293,92 @@ describe('the office activity taxonomy (P4-T1)', () => {
       ]));
     });
   });
+  describe('categories (P4-T12 coverage of the writes)', () => {
+    beforeEach(() => provisioning.seedActivityTaxonomy(KPM_A, COMPANY));
+
+    it('appends a new category rather than inserting it', async () => {
+      // Somebody adding one has not said where it goes, and guessing would renumber rows
+      // they did not touch.
+      const created = await service.createCategory(ctx(KPM_A), {
+        code: 'referrals', label: 'Referrals',
+      });
+      expect(created.code).toBe('REFERRALS');
+      expect(created.displayOrder).toBe(6);
+      expect(created.types).toEqual([]);
+    });
+
+    it('refuses a duplicate category code, counting archived ones', async () => {
+      await expect(service.createCategory(ctx(KPM_A), { code: 'SELLING', label: 'Again' }))
+        .rejects.toThrow('already has a category called SELLING');
+    });
+
+    it('refuses a category code that is not a code', async () => {
+      await expect(service.createCategory(ctx(KPM_A), { code: 'no spaces', label: 'x' }))
+        .rejects.toThrow('3–40 characters');
+    });
+
+    it('renames a category without touching the code its types hold', async () => {
+      const category = (await service.list(ctx(KPM_A)))
+        .find((c) => c.code === 'SELLING')!;
+      const renamed = await service.renameCategory(ctx(KPM_A), category.id, '  Penjualan  ');
+
+      expect(renamed.label).toBe('Penjualan');
+      expect(renamed.code).toBe('SELLING');
+      expect(renamed.version).toBe(2);
+      // The types under it still point at the same code.
+      const after = (await service.list(ctx(KPM_A))).find((c) => c.code === 'SELLING')!;
+      expect(after.types.length).toBeGreaterThan(0);
+    });
+
+    it('refuses to rename another office’s category — 404, never 403', async () => {
+      await provisioning.seedActivityTaxonomy(KPM_B, COMPANY);
+      const theirs = (await service.list(ctx(KPM_B)))[0];
+      await expect(service.renameCategory(ctx(KPM_A), theirs.id, 'mine'))
+        .rejects.toThrow('Activity category');
+    });
+
+    it('takes a type with a description, and trims an empty one to null', async () => {
+      const withText = await service.createType(ctx(KPM_A), {
+        code: 'SELL_REFERRAL', categoryCode: 'SELLING', label: 'Referral',
+        description: '  from an existing client  ',
+      });
+      expect(withText.description).toBe('from an existing client');
+
+      const blank = await service.createType(ctx(KPM_A), {
+        code: 'SELL_WALKIN', categoryCode: 'SELLING', label: 'Walk-in', description: '   ',
+      });
+      // A blank description and an absent one are the same fact and should read alike.
+      expect(blank.description).toBeNull();
+    });
+
+    it('moves a type to another category, and refuses one that is not active', async () => {
+      const type = (await service.list(ctx(KPM_A))).flatMap((c) => c.types)[0];
+      const moved = await service.updateType(ctx(KPM_A), type.id, { categoryCode: 'selling' });
+      expect(moved.categoryCode).toBe('SELLING');
+
+      await expect(service.updateType(ctx(KPM_A), type.id, { categoryCode: 'NOT_A_CATEGORY' }))
+        .rejects.toThrow('No active category called NOT_A_CATEGORY');
+    });
+
+    it('refuses an update that changes nothing', async () => {
+      // An audit row about nothing is noise in the one place noise costs most.
+      const type = (await service.list(ctx(KPM_A))).flatMap((c) => c.types)[0];
+      await expect(service.updateType(ctx(KPM_A), type.id, {}))
+        .rejects.toThrow('Nothing to change');
+    });
+
+    it('clears a description back to null through an update', async () => {
+      const type = (await service.list(ctx(KPM_A))).flatMap((c) => c.types)
+        .find((t) => t.description !== null)!;
+      const cleared = await service.updateType(ctx(KPM_A), type.id, { description: '' });
+      expect(cleared.description).toBeNull();
+    });
+
+    it('refuses to restore a type from another office', async () => {
+      await provisioning.seedActivityTaxonomy(KPM_B, COMPANY);
+      const theirs = (await service.list(ctx(KPM_B))).flatMap((c) => c.types)[0];
+      await expect(service.restoreType(ctx(KPM_A), theirs.id)).rejects.toThrow('Activity type');
+    });
+  });
+
 });

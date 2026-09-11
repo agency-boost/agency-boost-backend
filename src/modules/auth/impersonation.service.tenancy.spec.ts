@@ -278,4 +278,90 @@ describe('ImpersonationService', () => {
     });
   });
 
+  describe('the refusals (P4-T12)', () => {
+    it('refuses a second session from inside one', async () => {
+      // Otherwise a chain of sessions has no real actor at its end — the audit row would
+      // name whoever the previous session was already pretending to be.
+      const target = await makeUser();
+      const inSession = new RequestContext('sa-1', 'super_admin', null, 'sa-0');
+      await expect(service.start(inSession, String(target._id), 'again'))
+        .rejects.toThrow('already impersonating');
+    });
+
+    it('needs a separate grant to act as an office’s Owner or Admin', async () => {
+      /*
+       * §3.13 permits it — refusing outright would make the highest-value support cases
+       * unsupportable, since tenant admins are exactly the users whose screens break —
+       * and constrains it with its own permission. `start()` checked only for another
+       * Super Admin until P4-T10.
+       */
+      const ownerUser = await makeUser();
+      await mongoose.model(Kpm.name).create({
+        companyId: 'c1', code: '0419', branchName: 'B', timezone: 'Asia/Jakarta',
+        locale: 'id-ID', currency: 'IDR', status: 'active', ownerUserId: String(ownerUser._id),
+      } as never);
+
+      // A Super Admin holds the grant, so this is allowed.
+      await expect(service.start(superAdmin, String(ownerUser._id), 'their overview'))
+        .resolves.toMatchObject({ readOnly: true });
+    });
+
+    it('refuses an id that is not an id, rather than answering 500', async () => {
+      const second = new RequestContext('sa-2', 'super_admin', null);
+      await expect(service.elevate(second, 'not-an-id', 'A good enough reason.'))
+        .rejects.toThrow('Support session');
+    });
+
+    it('refuses the session log to somebody without the grant', async () => {
+      const agent = new RequestContext('u-agent', 'none', {
+        membershipId: 'm', kpmId: 'k', orgLevelCode: 'AGENT', hierarchyRole: 'agent',
+        status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      });
+      await expect(service.sessionLog(agent, 'k')).rejects.toMatchObject({ code: 'PERM_DENIED' });
+    });
+
+    it('refuses an Owner another office’s log as a 404, never a 403', async () => {
+      // A 403 confirms the id is real, which is itself tenant information.
+      await expect(service.sessionLog(owner, 'another-office')).rejects.toThrow('KPM');
+    });
+
+    it('answers an empty log rather than nothing at all', async () => {
+      await expect(service.sessionLog(owner, 'k')).resolves.toEqual([]);
+    });
+
+    it('names the operator, the subject and both reasons in the log', async () => {
+      const target = await makeUser({ fullName: 'Rina Wijaya' });
+      const operator = await makeUser({ fullName: 'Root Operator', platformRole: 'super_admin' });
+      const approver = await makeUser({ fullName: 'Second Operator', platformRole: 'super_admin' });
+      const office = await mongoose.model(Kpm.name).create({
+        companyId: 'c1', code: '0420', branchName: 'B', timezone: 'Asia/Jakarta',
+        locale: 'id-ID', currency: 'IDR', status: 'active',
+      } as never);
+      const officeId = String((office as unknown as { _id: unknown })._id);
+      await mongoose.model(Membership.name).create({
+        kpmId: officeId, userId: String(target._id), role: 'agent', status: 'active',
+        agentCode: 'A9', agentSeq: 9, orgLevelId: 'lvl-agent', orgLevelCode: 'AGENT',
+        leaderCode: `LC${Math.floor(Math.random() * 100000)}`,
+      } as never);
+
+      const asOperator = new RequestContext(String(operator._id), 'super_admin', null);
+      const started = await service.start(asOperator, String(target._id), 'Their overview.');
+      await service.elevate(
+        new RequestContext(String(approver._id), 'super_admin', null),
+        started.sessionId,
+        'A duplicate code they cannot fix.',
+      );
+
+      const [row] = await service.sessionLog(superAdmin, officeId);
+      expect(row).toMatchObject({
+        operatorName: 'Root Operator',
+        subjectName: 'Rina Wijaya',
+        reason: 'Their overview.',
+        readOnly: false,
+        elevatedByName: 'Second Operator',
+        elevationReason: 'A duplicate code they cannot fix.',
+      });
+    });
+  });
+
 });
