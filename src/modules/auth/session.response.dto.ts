@@ -1,3 +1,4 @@
+import type { SessionView } from './auth.service';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -149,4 +150,38 @@ export class RedeemedInviteDto {
 export class MyKpmRequestDto {
   @ApiPropertyOptional({ type: 'object', additionalProperties: true, nullable: true })
   request!: unknown;
+}
+
+
+/**
+ * One place this account is signed in (P4-T13).
+ *
+ * A **session**, not a token: a refresh rotates on every use, so a fortnight-old session
+ * has a few hundred rows behind it and a person wants to know about their phone and their
+ * laptop.
+ */
+export class SessionDto implements SessionView {
+  @ApiProperty({ type: String, description: 'The token family. Revoking it ends the session.' })
+  sessionId!: string;
+
+  @ApiProperty({ type: String, nullable: true, example: 'Mozilla/5.0 (Linux; Android 13)' })
+  userAgent!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  ip!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, description: 'When it last refreshed.' })
+  lastUsedAt!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, description: 'When signing in created it.' })
+  startedAt!: string | null;
+
+  @ApiProperty({ type: String })
+  expiresAt!: string;
+
+  @ApiProperty({
+    type: Boolean,
+    description: 'The session this request came from. Revoking it signs the caller out here.',
+  })
+  current!: boolean;
 }

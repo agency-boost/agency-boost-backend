@@ -1189,6 +1189,95 @@ describe('auth and admin over HTTP', () => {
     });
   });
 
+  describe('the rest of the auth surface (P4-T13)', () => {
+    it('AC-1: lists where an account is signed in, one row per session', async () => {
+      /*
+       * One row per **session**, not per token. A refresh rotates on every use, so a
+       * session alive a fortnight has a few hundred rows behind it — and somebody reading
+       * this wants to know about their phone and their laptop.
+       */
+      const user = await makeUser(`sessions-${Math.random()}@kpm.test`);
+      const auth = { Authorization: `Bearer ${user.accessToken}` };
+
+      // Refresh twice: same session, three token rows, one answer.
+      await api().post('/api/v1/auth/refresh').set('Cookie', user.refreshCookie).expect(200);
+
+      const res = await api().get('/api/v1/auth/sessions').set(auth).expect(200);
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0]).toMatchObject({ current: false });
+      expect(res.body[0].sessionId).toEqual(expect.any(String));
+    });
+
+    it('AC-1: signs out one device without touching the others', async () => {
+      const user = await makeUser(`revoke-${Math.random()}@kpm.test`);
+      const auth = { Authorization: `Bearer ${user.accessToken}` };
+      // A second sign-in is a second session.
+      await api().post('/api/v1/auth/login')
+        .send({ email: user.email, password: PASSWORD }).expect(200);
+
+      const before = await api().get('/api/v1/auth/sessions').set(auth).expect(200);
+      expect(before.body).toHaveLength(2);
+
+      await api().delete(`/api/v1/auth/sessions/${before.body[0].sessionId}`)
+        .set(auth).expect(204);
+
+      const after = await api().get('/api/v1/auth/sessions').set(auth).expect(200);
+      expect(after.body).toHaveLength(1);
+    });
+
+    it('refuses another account’s session as a 404', async () => {
+      const mine = await makeUser(`mine-${Math.random()}@kpm.test`);
+      const theirs = await makeUser(`theirs-${Math.random()}@kpm.test`);
+      const auth = { Authorization: `Bearer ${theirs.accessToken}` };
+
+      const list = await api().get('/api/v1/auth/sessions')
+        .set({ Authorization: `Bearer ${mine.accessToken}` }).expect(200);
+
+      await api().delete(`/api/v1/auth/sessions/${list.body[0].sessionId}`)
+        .set(auth).expect(404);
+    });
+
+    it('AC-1: signs out everywhere, and the refresh cookie stops working', async () => {
+      const user = await makeUser(`logout-all-${Math.random()}@kpm.test`);
+      const auth = { Authorization: `Bearer ${user.accessToken}` };
+
+      await api().post('/api/v1/auth/logout-all').set(auth).expect(204);
+      await api().post('/api/v1/auth/refresh').set('Cookie', user.refreshCookie).expect(401);
+    });
+
+    it('AC-1: resends a verification email, and answers the same either way', async () => {
+      /*
+       * `agent/01-getting-started.md` has told readers to request another since Phase 2,
+       * against a route that did not exist. `202` whether or not the address exists or is
+       * already verified — anything else is an account-enumeration oracle.
+       */
+      const stranger = await api().post('/api/v1/auth/resend-verification')
+        .send({ email: `nobody-${Math.random()}@kpm.test` }).expect(202);
+      expect(stranger.body).toEqual({ status: 'accepted' });
+
+      const user = await makeUser(`resend-${Math.random()}@kpm.test`);
+      const verified = await api().post('/api/v1/auth/resend-verification')
+        .send({ email: user.email }).expect(202);
+      expect(verified.body).toEqual({ status: 'accepted' });
+    });
+
+    it('AC-2: rate-limits refreshing, per session', async () => {
+      // Per session, not per IP: a shared office IP would ration everybody together, and
+      // the thing worth catching is one client stuck in a loop.
+      const user = await makeUser(`refresh-limit-${Math.random()}@kpm.test`);
+      let cookie = user.refreshCookie;
+
+      let limited = false;
+      for (let i = 0; i < 70; i += 1) {
+        const res = await api().post('/api/v1/auth/refresh').set('Cookie', cookie);
+        if (res.status === 429) { limited = true; break; }
+        const next = (res.headers['set-cookie'] as unknown as string[] | undefined) ?? [];
+        cookie = next.find((c) => c.startsWith('agencyboost_refresh=')) ?? cookie;
+      }
+      expect(limited).toBe(true);
+    });
+  });
+
   describe('the office activity taxonomy, over HTTP (P4-T1)', () => {
     /** An office with an Owner signed in, which is who edits a taxonomy. */
     async function anOfficeWithOwner() {

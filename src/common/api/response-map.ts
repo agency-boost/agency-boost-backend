@@ -1,7 +1,7 @@
 import { Type } from '@nestjs/common';
 import {
   AccessTokenDto, ImpersonationSessionDto, MeDto, MyKpmRequestDto, ReadinessDto,
-  RedeemedInviteDto, StatusAckDto,
+  RedeemedInviteDto, SessionDto, StatusAckDto,
 } from '@/modules/auth/session.response.dto';
 import { InboxDto, InboxItemDto } from '@/modules/notifications/notification.response.dto';
 import {
@@ -41,6 +41,8 @@ export interface ResponseShape {
  * their interfaces, so the *shape* cannot drift either. This table only says which one.
  */
 export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
+  AuthController_resendVerification: { type: StatusAckDto },
+  AuthController_sessions: { type: SessionDto, isArray: true },
   HealthController_live: { type: StatusAckDto },
   HealthController_ready: { type: ReadinessDto },
 
@@ -48,6 +50,11 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AuthController_login: { type: AccessTokenDto },
   AuthController_refresh: { type: AccessTokenDto },
   AuthController_logout: { type: StatusAckDto },
+  // 204 both: nothing to say beyond "it is done", and a body would invite a client to
+  // read one. They are in the table anyway, because the table is where completeness is
+  // visible and a route missing from it is a route nobody checked.
+  AuthController_logoutAll: { type: StatusAckDto },
+  AuthController_revokeSession: { type: StatusAckDto },
   AuthController_verifyEmail: { type: StatusAckDto },
   AuthController_forgotPassword: { type: StatusAckDto },
   AuthController_resetPassword: { type: StatusAckDto },

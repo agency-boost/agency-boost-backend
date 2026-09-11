@@ -1,7 +1,10 @@
 import {
   Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Req, Res,
+  Delete,
+  Param,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import type { Request, Response } from 'express';
@@ -32,10 +35,21 @@ import {
 const REFRESH_COOKIE = 'agencyboost_refresh';
 const REFRESH_COOKIE_MAX_AGE_MS = 30 * 86_400_000;
 
-const LOGIN_LIMIT = 5;
 const LOGIN_WINDOW_SECONDS = 15 * 60;
 const FORGOT_LIMIT = 3;
 const FORGOT_WINDOW_SECONDS = 60 * 60;
+const RESEND_LIMIT = 3;
+const RESEND_WINDOW_SECONDS = 60 * 60;
+
+/**
+ * Refreshing, per session, per hour (P4-T13).
+ *
+ * A refresh rotates the token, so a healthy client asks about four times an hour on a
+ * fifteen-minute access token. Sixty is far above that and far below a loop: it catches a
+ * client stuck in one without ever refusing a person using the product.
+ */
+const REFRESH_LIMIT = 60;
+const REFRESH_WINDOW_SECONDS = 60 * 60;
 
 @ApiTags('auth')
 @Controller('auth')
@@ -43,8 +57,20 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly limiter: RateLimiter,
+    private readonly config: ConfigService,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
   ) {}
+
+  /**
+   * The login limit, **read from the environment**.
+   *
+   * `RATE_LIMIT_LOGIN_PER_15M` has been validated at boot since Phase 1 and read by
+   * nothing: `LOGIN_LIMIT` was a literal here, so changing the variable did nothing and
+   * an operator tightening it under attack would have had no effect and no clue why.
+   */
+  private get loginLimit(): number {
+    return this.config.get<number>('RATE_LIMIT_LOGIN_PER_15M') ?? 5;
+  }
 
   private setRefreshCookie(res: Response, token: string): void {
     res.cookie(REFRESH_COOKIE, token, {
@@ -72,6 +98,11 @@ export class AuthController {
       );
     }
     return token;
+  }
+
+  /** The presented refresh token, or nothing — for a route that works either way. */
+  private refreshTokenFromOrNull(req: Request): string | null {
+    return (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE] ?? null;
   }
 
   private limit(key: string, limit: number, windowSeconds: number): void {
@@ -115,8 +146,12 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const ip = req.ip ?? 'unknown';
-    this.limit(`login:ip:${ip}`, LOGIN_LIMIT, LOGIN_WINDOW_SECONDS);
-    this.limit(`login:email:${dto.email.toLowerCase()}`, LOGIN_LIMIT, LOGIN_WINDOW_SECONDS);
+    this.limit(`login:ip:${ip}`, this.loginLimit, LOGIN_WINDOW_SECONDS);
+    this.limit(
+      `login:email:${dto.email.toLowerCase()}`,
+      this.loginLimit,
+      LOGIN_WINDOW_SECONDS,
+    );
 
     const pair = await this.auth.login(dto.email, dto.password, {
       ip,
@@ -153,7 +188,19 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
     @Body() dto?: RefreshDto,
   ) {
-    const pair = await this.auth.refresh(this.refreshTokenFrom(req, dto), {
+    /*
+     * Per session, not per IP (P4-T13). A shared office IP would otherwise ration
+     * everybody together, and the thing worth catching — a client stuck in a refresh loop
+     * — is one session asking over and over.
+     */
+    const presented = this.refreshTokenFrom(req, dto);
+    this.limit(
+      `refresh:${(await this.auth.familyOf(presented)) ?? 'unknown'}`,
+      REFRESH_LIMIT,
+      REFRESH_WINDOW_SECONDS,
+    );
+
+    const pair = await this.auth.refresh(presented, {
       ip: req.ip ?? null,
       userAgent: req.headers['user-agent'] ?? null,
     });
@@ -219,6 +266,68 @@ export class AuthController {
   async resetPassword(@Body() dto: ResetPasswordDto) {
     await this.auth.resetPassword(dto.token, dto.newPassword);
     return { status: 'reset' };
+  }
+
+  @Public()
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Send the verification email again',
+    description:
+      'Always `202`, whether or not the address exists or is already verified — anything '
+      + 'else is an account-enumeration oracle, the same reason `forgot-password` answers '
+      + 'this way. `agent/01-getting-started.md` has told readers to request another since '
+      + 'Phase 2, against a route that did not exist.',
+  })
+  async resendVerification(@Body() dto: ForgotPasswordDto) {
+    const email = dto.email.toLowerCase().trim();
+    this.limit(`resend:${email}`, RESEND_LIMIT, RESEND_WINDOW_SECONDS);
+    // Deliberately not awaited into a different answer: the reply is the same either way.
+    await this.auth.resendVerification(email);
+    return { status: 'accepted' };
+  }
+
+  @ApiBearerAuth()
+  @Post('logout-all')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Sign out everywhere',
+    description:
+      'Revokes every refresh session for this account, this one included. What somebody '
+      + 'does when they think a device was lost.',
+  })
+  async logoutAll(@Ctx() ctx: RequestContext, @Res({ passthrough: true }) res: Response) {
+    await this.auth.logoutAll(ctx.userId, 'signed out everywhere');
+    this.clearRefreshCookie(res);
+  }
+
+  @ApiBearerAuth()
+  @Get('sessions')
+  @ApiOperation({
+    summary: 'Where this account is signed in',
+    description:
+      'One row per session, not per token: a refresh rotates on every use, so a fortnight '
+      + '-old session has a few hundred rows behind it and a person wants to know about '
+      + 'their phone and their laptop. `current` marks the one they are reading from.',
+  })
+  async sessions(@Ctx() ctx: RequestContext, @Req() req: Request) {
+    const presented = this.refreshTokenFromOrNull(req);
+    const family = presented ? await this.auth.familyOf(presented) : null;
+    return this.auth.sessions(ctx.userId, family);
+  }
+
+  @ApiBearerAuth()
+  @Delete('sessions/:sessionId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Sign out one device',
+    description:
+      'Revokes the whole token family — revoking only its newest token would leave an '
+      + 'attacker holding an older one that still rotates. `404` for a session that is not '
+      + 'this account\'s.',
+  })
+  async revokeSession(@Ctx() ctx: RequestContext, @Param('sessionId') sessionId: string) {
+    await this.auth.revokeSession(ctx.userId, sessionId);
   }
 
   @ApiBearerAuth()

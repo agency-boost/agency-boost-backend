@@ -1,5 +1,8 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { RateLimiter } from '@/modules/auth/rate-limiter';
+import { DomainException } from '@/common/errors/domain.exception';
+import { ErrorCode } from '@/common/errors/error-codes';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
@@ -37,7 +40,31 @@ export class OnboardingController {
     private readonly approvals: ApprovalsService,
     private readonly kpmRequests: KpmRequestService,
     private readonly config: ConfigService,
+    private readonly limiter: RateLimiter,
   ) {}
+
+  /**
+   * The leader-code routes, rate limited per caller (P4-T13).
+   *
+   * The code space is 32⁶ and the reward for guessing is joining a stranger's unit — and
+   * the preview hands back the office and the leader's real name for any valid code.
+   * Both routes are authenticated, so a prober needs an account first; this makes the
+   * account they need expensive to use.
+   *
+   * Twenty an hour. Somebody typing a code off a WhatsApp message gets it wrong twice,
+   * not twenty times.
+   */
+  private limitCodeAttempts(ctx: RequestContext): void {
+    const retryAfter = this.limiter.check(`join-code:${ctx.userId}`, 20, 60 * 60);
+    if (retryAfter !== null) {
+      throw new DomainException(
+        ErrorCode.AUTH_RATE_LIMITED,
+        `Too many code attempts. Try again in ${Math.ceil(retryAfter / 60)} minute(s).`,
+        HttpStatus.TOO_MANY_REQUESTS,
+        { retryAfterSeconds: retryAfter },
+      );
+    }
+  }
 
   /**
    * Where a shared link points.
@@ -170,7 +197,8 @@ export class OnboardingController {
       'names a real office and a real person, so a prober needs an account first. ' +
       'A code nobody holds and one whose leader has left answer alike.',
   })
-  async previewInvite(@Query() query: InviteCodeQueryDto) {
+  async previewInvite(@Ctx() ctx: RequestContext, @Query() query: InviteCodeQueryDto) {
+    this.limitCodeAttempts(ctx);
     return this.leaderCodes.preview(query.code);
   }
 
@@ -271,6 +299,7 @@ export class OnboardingController {
       'sit in their inbox asking them to approve something that already happened.',
   })
   async redeem(@Ctx() ctx: RequestContext, @Body() dto: RedeemInviteDto) {
+    this.limitCodeAttempts(ctx);
     return this.leaderCodes.redeem(ctx, dto.code);
   }
 }
