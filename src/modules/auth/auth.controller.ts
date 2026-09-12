@@ -8,7 +8,9 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import type { Request, Response } from 'express';
-import { AllowTemporaryPassword, Ctx, Public } from '@/common/auth/auth.decorators';
+import {
+  AllowTemporaryPassword, AllowWhileReadOnly, Ctx, Public,
+} from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
@@ -221,6 +223,8 @@ export class AuthController {
   // replace it, or leave (P3.6-T4).
   @AllowTemporaryPassword()
   @Post('logout')
+  // Signing out is always available, support session or not.
+  @AllowWhileReadOnly()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'End this session' })
   async logout(

@@ -508,7 +508,7 @@ export function can(ctx: RequestContext, permission: Permission): boolean {
    * controller — and the row that matters most, `kpm_admin:grant`, was reachable by a
    * Super Admin impersonating an Owner precisely because nothing central said no.
    */
-  if (ctx.isImpersonating && BLOCKED.has(permission)) return false;
+  if (ctx.isImpersonating && isBlockedWhileImpersonating(permission)) return false;
 
   /*
    * A read-only session may read anything the target can and write nothing.
@@ -529,7 +529,13 @@ const READ_LIKE = /^(read|list|search|preview|view|export)/;
 
 function isReadLike(permission: Permission): boolean {
   const action = permission.split(':')[1] ?? '';
-  return READ_LIKE.test(action) || action.endsWith('_read');
+  /*
+   * Prefix only. An `endsWith('_read')` clause used to sit here, and the one permission
+   * in the registry it admitted was `notification:mark_read` — which writes. A read-only
+   * session could destroy the target's unread state, including the notice telling them
+   * the session had started.
+   */
+  return READ_LIKE.test(action);
 }
 
 function holds(ctx: RequestContext, grant: Grant): boolean {

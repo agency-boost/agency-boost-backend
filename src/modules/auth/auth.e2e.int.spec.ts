@@ -691,6 +691,51 @@ describe('auth and admin over HTTP', () => {
         .send({ kpmId: '66f0000000000000000000a1' }).expect(403);
     });
 
+    it('P4-T10: a route that declares no permission is still refused a write', async () => {
+      /*
+       * The exit review's finding, and the reason `PermissionsGuard` no longer returns
+       * early on an unannotated route. `can()` enforced the read-only rule from the
+       * permission's verb, which cannot fire where there is no permission — and fourteen
+       * routes on this controller declare none. Four of them write.
+       *
+       * This asserted nothing before the fix: the request returned 200 and the office
+       * Owner's name changed, inside a session whose own response said `readOnly: true`.
+       */
+      const sa = await makeUser(`sa-unann-${Math.random()}@agencyboost.test`, 'super_admin');
+      const target = await makeUser(`unann-target-${Math.random()}@kpm.test`);
+      const started = await api().post(`/api/v1/admin/impersonate/${target.id}`)
+        .set({ Authorization: `Bearer ${sa.accessToken}` })
+        .send({ reason: 'Support' }).expect(201);
+      const asThem = { Authorization: `Bearer ${started.body.accessToken}` };
+
+      const before = await api().get('/api/v1/auth/me').set(asThem).expect(200);
+
+      await api().patch('/api/v1/auth/me').set(asThem)
+        .send({ fullName: 'Renamed By Support' }).expect(403);
+      await api().post('/api/v1/auth/logout-all').set(asThem).expect(403);
+      await api().delete('/api/v1/auth/sessions/66f0000000000000000000a1').set(asThem).expect(403);
+
+      const after = await api().get('/api/v1/auth/me').set(asThem).expect(200);
+      expect(after.body.user.fullName).toBe(before.body.user.fullName);
+    });
+
+    it('P4-T10: ending the session and signing out survive the read-only block', async () => {
+      /*
+       * The other half. Both routes declare no permission and both are POSTs, so a
+       * fail-closed guard refuses them unless they say otherwise — and an operator who
+       * cannot end a support session is stuck inside it. `POST /admin/impersonate/end`
+       * has been unreachable once already, for a different reason, with nothing saying so.
+       */
+      const sa = await makeUser(`sa-exit-${Math.random()}@agencyboost.test`, 'super_admin');
+      const target = await makeUser(`exit-target-${Math.random()}@kpm.test`);
+      const started = await api().post(`/api/v1/admin/impersonate/${target.id}`)
+        .set({ Authorization: `Bearer ${sa.accessToken}` })
+        .send({ reason: 'Support' }).expect(201);
+
+      await api().post('/api/v1/admin/impersonate/end')
+        .set({ Authorization: `Bearer ${started.body.accessToken}` }).expect(200);
+    });
+
     it('P4-T10: the hard-blocked list is refused inside a session, elevated or not', async () => {
       /*
        * `kpm_admin:grant` is the row that mattered: a Super Admin impersonating an Owner

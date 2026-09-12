@@ -48,3 +48,20 @@ export function resolveCtx(_data: unknown, ctx: ExecutionContext): RequestContex
 
 /** Injects the resolved RequestContext. Never build one by hand in a handler. */
 export const Ctx = createParamDecorator(resolveCtx);
+
+/**
+ * Reachable inside a read-only support session (P4-T10).
+ *
+ * `PermissionsGuard` refuses every mutating request a read-only session makes, including
+ * on routes that declare no permission at all — because the guarantee the Owner was given
+ * is about *writes*, not about which routes somebody remembered to annotate. The exit
+ * review found `PATCH /auth/me` renaming the office Owner from inside a session whose own
+ * response said `readOnly: true`.
+ *
+ * Two routes have to survive that: ending the session, and signing out. Blocking either
+ * strands the operator inside the session they are trying to leave — which is how
+ * `POST /admin/impersonate/end` was already unreachable once, for a different reason, and
+ * nothing said so.
+ */
+export const ALLOWED_WHILE_READ_ONLY = 'allowedWhileReadOnly';
+export const AllowWhileReadOnly = () => SetMetadata(ALLOWED_WHILE_READ_ONLY, true);

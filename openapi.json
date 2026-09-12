@@ -1338,7 +1338,7 @@
     },
     "/api/v1/admin/org-levels": {
       "get": {
-        "description": "Every rung of every company’s ladder, junior first — archived ones included, because a screen that hid them would show a ladder that does not explain the people standing on it. Narrow with ?companyId.\n\n**Requires `org_level:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every rung of every company’s ladder, junior first — archived ones included, because a screen that hid them would show a ladder that does not explain the people standing on it. Narrow with ?companyId.\n\n**Requires `org_level:crud`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_listOrgLevels_v1",
         "parameters": [
           {
@@ -1385,7 +1385,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `org_level:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `org_level:crud`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1414,7 +1414,7 @@
         "tags": [
           "admin (Super Admin)"
         ],
-        "x-required-permission": "org_level:read"
+        "x-required-permission": "org_level:crud"
       },
       "post": {
         "description": "The ladder belongs to the company, not to any office (ADR-0012): a KPM cannot add, rename or remove a rung. `code` is stable and semantic and is never reused — not even after archiving — because it is what every membership holds.\n\n**Requires `org_level:crud`.** See `docs/00-product/roles-and-permissions.md`.",

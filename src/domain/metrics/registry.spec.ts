@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ACTIVATION, PERFORMANCE, RATIO_BENCHMARKS } from '@/domain/constants';
-import { METRIC_IDS, METRIC_REGISTRY, metric } from './registry';
+import { METRIC_IDS, METRIC_REGISTRY, metric, define } from './registry';
 
 const DOC = join(__dirname, '../../../../docs/00-product/metrics-and-definitions.md');
 
@@ -103,6 +103,25 @@ describe('the metric registry (P4-T4)', () => {
       for (const id of METRIC_IDS) {
         expect(metric(id).availableFrom).toBeGreaterThanOrEqual(4);
       }
+    });
+  });
+
+  describe('§8: one definition per metric', () => {
+    it('refuses a registry that defines the same id twice', () => {
+      /*
+       * The rule the whole file exists for, and it was asserted nowhere: the throw fires
+       * at module load, so the shipped registry passing proves only that *it* has no
+       * duplicate — not that a duplicate would be caught. The prototypes carry three
+       * conflicting definitions of "active agent"; this is what stops a fourth.
+       */
+      const entry = { id: 'X', label: 'X', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 1 } as never;
+      expect(() => define([entry, entry])).toThrow(/defined twice/);
+    });
+
+    it('keeps every distinct id', () => {
+      const one = { id: 'A', label: 'A', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 1 } as never;
+      const two = { id: 'B', label: 'B', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 1 } as never;
+      expect([...define([one, two]).keys()]).toEqual(['A', 'B']);
     });
   });
 });

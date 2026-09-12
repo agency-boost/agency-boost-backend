@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { RequestContext } from '@/common/context/request-context';
 import { AdminController } from './admin.controller';
 
@@ -53,4 +55,26 @@ describe('AdminController', () => {
   // duplicate slug had nowhere to be caught. It lives in TenantService now, and so does
   // its test: `tenant.service.tenancy.spec.ts` has a real database, which is the only
   // way to prove the unique index and the pre-check agree.
+
+  /*
+   * The gate the exit review found missing (P4-T9 fallout).
+   *
+   * Read from the decorator rather than through HTTP, because the defect was not a
+   * behaviour anybody could see — the route answered 200 exactly as designed. It was a
+   * *permission name* that widened underneath a route which had been correct for a year.
+   * A test that calls the endpoint asserts the answer; this asserts the reason.
+   */
+  describe('the platform-wide ladder read', () => {
+    const source = readFileSync(join(__dirname, 'admin.controller.ts'), 'utf8');
+
+    it('is gated on a permission only Super Admin holds', () => {
+      const route = source.slice(source.indexOf("@Get('org-levels')"));
+      const permission = /@RequirePermission\('([^']+)'\)/.exec(route)?.[1];
+
+      expect(permission).toBe('org_level:crud');
+      // The one that widened. Naming it here means a future widening of `org_level:read`
+      // cannot quietly re-open this route.
+      expect(permission).not.toBe('org_level:read');
+    });
+  });
 });

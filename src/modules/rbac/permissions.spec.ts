@@ -10,6 +10,9 @@ function ctx(opts: {
   admin?: boolean;
   status?: 'active' | 'pending' | 'removed';
   noMembership?: boolean;
+  /** Inside a support session, and whether it may write (P4-T10). */
+  impersonatedBy?: string;
+  readOnly?: boolean;
 }): RequestContext {
   return new RequestContext(
     'u1',
@@ -25,10 +28,46 @@ function ctx(opts: {
           isKpmOwner: opts.owner ?? false,
           isKpmAdmin: opts.admin ?? false, directCount: 0,
         },
+    opts.impersonatedBy ?? null,
+    null,
+    false,
+    opts.readOnly ?? false,
   );
 }
 
 describe('permission matrix', () => {
+  /*
+   * P4-T10's two controls, at the level `can()` actually decides them. The e2e suite
+   * covered them through HTTP, which meant the classifier's own edges were never asserted
+   * — and one of them was wrong: `notification:mark_read` ends in `_read` and writes.
+   */
+  describe('P4-T10: a read-only support session', () => {
+    const session = (extra: Parameters<typeof ctx>[0] = {}) =>
+      ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: true, ...extra });
+
+    it('reads what the target can read', () => {
+      expect(can(session(), 'notification:read_inbox')).toBe(true);
+      expect(can(session(), 'org_tree:read')).toBe(true);
+    });
+
+    it('refuses a write however its permission is spelled', () => {
+      // `mark_read` is the trap: it ends in `_read` and destroys unread state — including
+      // the notice telling the target their account is being impersonated.
+      expect(can(session(), 'notification:mark_read')).toBe(false);
+      expect(can(session(), 'tenant_config:write')).toBe(false);
+      expect(can(session(), 'member:remove_from_team')).toBe(false);
+    });
+
+    it('still refuses the hard-blocked list once it may write', () => {
+      const elevated = ctx({ role: 'ab', owner: true, impersonatedBy: 'sa-1', readOnly: false });
+      expect(can(elevated, 'kpm_admin:grant')).toBe(false);
+    });
+
+    it('leaves an ordinary session alone', () => {
+      expect(can(ctx({ role: 'ab' }), 'notification:mark_read')).toBe(true);
+    });
+  });
+
   describe('code and documentation agree', () => {
     // The matrix is documented for humans and executed by machines. If the two drift,
     // one of them is lying and reviewers cannot tell which.

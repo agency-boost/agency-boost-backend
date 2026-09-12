@@ -57,7 +57,13 @@ export interface MetricDefinition {
   readonly availableFrom: number;
 }
 
-function define(entries: readonly MetricDefinition[]): ReadonlyMap<string, MetricDefinition> {
+/**
+ * Exported for its own test. The duplicate-id throw is the one thing this registry exists
+ * to prevent (§8), and it fires at module load — so the only way to assert it is to build
+ * a second registry from a fixture. A rule whose enforcement is untested is a rule that
+ * has never been shown to work.
+ */
+export function define(entries: readonly MetricDefinition[]): ReadonlyMap<string, MetricDefinition> {
   const map = new Map<string, MetricDefinition>();
   for (const entry of entries) {
     if (map.has(entry.id)) {

@@ -3,7 +3,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
+import { AllowWhileReadOnly, Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
 import { ElevateImpersonationDto, ImpersonateDto } from '@/modules/auth/auth.dto';
@@ -148,7 +148,14 @@ export class AdminController {
   }
 
   @Get('org-levels')
-  @RequirePermission('org_level:read')
+  /*
+   * `org_level:crud`, not `org_level:read`. P4-T9 widened the read to every member so that
+   * badges could be drawn from the company's own ladder — and silently widened this route
+   * with it, which returns *every* company's ladder with no filter. An agent reached
+   * nineteen insurers' promotion structures with an ordinary token. Members read their own
+   * company's ladder at `GET /kpm/org-levels`, which narrows by the caller's office.
+   */
+  @RequirePermission('org_level:crud')
   @ApiOperation({
     summary: 'The role ladders companies define',
     description:
@@ -447,6 +454,8 @@ export class AdminController {
    * both paths because it reads decorators rather than the router.
    */
   @Post('impersonate/end')
+  // Blocking this would strand the operator inside the session they are leaving.
+  @AllowWhileReadOnly()
   // A POST defaults to 201, and this one answers 200 — it ends a session rather than
   // creating anything. The document said 201 until P3.5-T11; a client checking the status
   // would have treated every successful call as a failure.

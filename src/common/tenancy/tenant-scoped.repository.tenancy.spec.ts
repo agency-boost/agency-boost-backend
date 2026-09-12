@@ -268,6 +268,36 @@ describe('TenantScopedRepository — cross-tenant isolation', () => {
 
       expect(updated?.updatedBy).toBe('mem-other');
     });
+
+    it('updateMany writes inside the tenant and nowhere else', async () => {
+      /*
+       * `updateMany` had no test at all until the Phase 4 exit review — in the one module
+       * the ratchet holds at 100% branch, which is where an untested write is least
+       * acceptable. It is the sharpest method on the class: a single call with a filter
+       * that reached across tenants would rewrite another office's rows in one statement.
+       */
+      const a = ctxFor(KPM_A);
+      const b = ctxFor(KPM_B);
+      await repo.create(a, { name: 'mine' } as Partial<WidgetDoc>);
+      await repo.create(a, { name: 'mine too' } as Partial<WidgetDoc>);
+      await repo.create(b, { name: 'theirs' } as Partial<WidgetDoc>);
+
+      const changed = await repo.updateMany(a, {}, { $set: { name: 'renamed' } } as never);
+
+      expect(changed).toBe(2);
+      expect((await repo.find(b, {})).map((w) => w.name)).toEqual(['theirs']);
+    });
+
+    it('updateMany stamps updatedBy on an update carrying no $set of its own', async () => {
+      // The `update.$set ?? {}` half, on the bulk path. If the spread were wrong the stamp
+      // would replace the caller's update rather than merge with it.
+      const a = ctxFor(KPM_A);
+      await repo.create(a, { name: 'x' } as Partial<WidgetDoc>);
+      const other = ctxFor(KPM_A, { membershipId: 'mem-bulk' });
+
+      expect(await repo.updateMany(other, {}, { $unset: { originalName: '' } } as never)).toBe(1);
+      expect((await repo.find(a, {}))[0].updatedBy).toBe('mem-bulk');
+    });
   });
 
   describe('includeDeleted opt-in', () => {

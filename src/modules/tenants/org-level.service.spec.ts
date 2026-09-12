@@ -62,6 +62,29 @@ describe('OrgLevelService', () => {
       ).rejects.toMatchObject({ code: 'PERM_DENIED' });
     });
 
+    it('spans every company when no company is named — so the route must be narrow', async () => {
+      /*
+       * The exit review's blocking finding. `list()` with no `companyId` is unfiltered by
+       * design: the Super Admin console shows every insurer's ladder on one screen. That
+       * is correct here and lethal one layer up — P4-T9 widened `org_level:read` from
+       * Super Admin to all six roles so that badges could be drawn from the company's own
+       * ladder, and `GET /admin/org-levels` shared the permission name. A KPM Owner with
+       * an ordinary token read fifty-seven rungs across nineteen companies.
+       *
+       * This test states what the service does; `admin.controller.spec.ts` states the gate
+       * it therefore needs. Members read their own company's ladder through
+       * `GET /kpm/org-levels`, which narrows by the caller's office.
+       */
+      const other = await mongoose.model(Company.name).create({ name: 'Allianz', slug: 'allianz-x' });
+      await service.create(sa(), rung('AB', 'AB', 3));
+      await service.create(sa(), {
+        companyId: String(other._id), code: 'AB', label: 'Agency Manager', displayOrder: 3,
+      });
+
+      const rows = await service.list(sa());
+      expect(new Set(rows.map((l) => l.companyId)).size).toBe(2);
+    });
+
     it('lets a KPM Owner read the ladder, and still not change it (P4-T9)', async () => {
       /*
        * This asserted a refusal until P4-T9, and the reason was written down at the time:
