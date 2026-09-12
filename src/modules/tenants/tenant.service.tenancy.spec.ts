@@ -77,7 +77,8 @@ describe('TenantService', () => {
     const repo = new MembershipRepository(memberModel as never);
     const clock = new FixedClock(NOW);
     const orgLevels = new OrgLevelService(
-      levels as never, companies as never, new AuditService(auditModel as never), clock,
+      levels as never, companies as never, kpms as never,
+      new AuditService(auditModel as never), clock,
     );
     const provisioning = new ProvisioningService(
       mongoose.model(ActivityCategory.name, ActivityCategorySchema) as never,

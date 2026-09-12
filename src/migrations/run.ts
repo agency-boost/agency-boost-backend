@@ -5,6 +5,7 @@ import { up as membershipOrgLevel } from './0001-membership-org-level';
 import { up as userCompanyAgentCode } from './0002-user-company-agent-code';
 import { up as membershipLeaderCode } from './0003-membership-leader-code';
 import { up as membershipOrgLevelCode } from './0004-membership-org-level-code';
+import { up as ratioOriginAndApplicability } from './0005-ratio-origin-and-applicability';
 
 /**
  * Every migration, in order. Forward-only and idempotent, so running this twice is a
@@ -15,6 +16,7 @@ const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Date) => P
   ['0002-user-company-agent-code', userCompanyAgentCode],
   ['0003-membership-leader-code', membershipLeaderCode],
   ['0004-membership-org-level-code', membershipOrgLevelCode],
+  ['0005-ratio-origin-and-applicability', ratioOriginAndApplicability],
 ];
 
 async function main(): Promise<void> {

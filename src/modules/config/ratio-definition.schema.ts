@@ -7,6 +7,9 @@ export type RatioDefinitionDocument = HydratedDocument<RatioDefinition>;
 export const RATIO_COMPARISONS = ['gte', 'band'] as const;
 export type RatioComparison = (typeof RATIO_COMPARISONS)[number];
 
+export const RATIO_ORIGINS = ['platform', 'office'] as const;
+export type RatioOrigin = (typeof RATIO_ORIGINS)[number];
+
 /**
  * One ratio the office measures its agents by (P4-T2).
  *
@@ -47,6 +50,37 @@ export class RatioDefinition {
 
   @Prop({ type: String, required: true, enum: RATIO_COMPARISONS })
   comparison!: RatioComparison;
+
+  /**
+   * Whose formula this is (ADR-0021).
+   *
+   * `platform` is everything provisioning wrote — the platform defaults *and* a company's
+   * published `ratio_set`. From the office's point of view both are vocabulary handed
+   * down, exactly like the company ladder (ADR-0012) and the KPM template (ADR-0018), and
+   * both are the ones a comparison across offices would ever want to put in one column.
+   * Their `numerator` and `denominator` are not the tenant's to change; their `benchmark`
+   * is, because a target is precisely the thing an office should set for itself.
+   *
+   * `office` is anything an Owner created. Free in every respect, and never comparable —
+   * which costs nothing, because it never was.
+   */
+  @Prop({ type: String, required: true, enum: RATIO_ORIGINS, default: 'office' })
+  origin!: RatioOrigin;
+
+  /**
+   * The ladder rungs this ratio is a question about (ADR-0020).
+   *
+   * **Empty means every rung**, so an office that never opens the control never has to
+   * understand it. A member whose rung is absent does not see the ratio at all — hidden,
+   * never shown as failed, because a plain agent reading 100% Selling on the balance ratio
+   * is not doing badly at recruitment, they are not being asked about it.
+   *
+   * Rung **codes**, not the `role` enum (invariant §4, ADR-0012): a company publishing a
+   * fourth rung gets a ratio that can name it, and P4-T9 removed the enum from every
+   * authorisation path for exactly this reason.
+   */
+  @Prop({ type: [String], required: true, default: [] })
+  appliesToOrgLevelCodes!: string[];
 
   @Prop({ type: Number, required: true })
   displayOrder!: number;

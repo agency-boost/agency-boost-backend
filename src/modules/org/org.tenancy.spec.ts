@@ -91,6 +91,7 @@ describe('organisation', () => {
     const orgLevels = new OrgLevelService(
       mongoose.model(CompanyOrgLevel.name, CompanyOrgLevelSchema) as never,
       mongoose.model(Company.name, CompanySchema) as never,
+      mongoose.model(Kpm.name) as never,
       new AuditService(mongoose.model(AuditLog.name, AuditLogSchema) as never),
       clock,
     );

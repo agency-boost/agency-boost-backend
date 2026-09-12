@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import type { ActivityCategoryView, ActivityTypeView } from './activity.service';
 import type { LeadPipelineView, LeadStatusView } from './lead-status.service';
 import { LEAD_PIPELINES, type LeadPipeline } from './lead-status.schema';
+import { RATIO_ORIGINS, type RatioOrigin } from './ratio-definition.schema';
 import type { RatioDefinitionView } from './ratio.service';
 import type { PublishState, TenantConfigView } from './tenant-config.service';
 import type { TemplateView } from './template.service';
@@ -142,6 +143,22 @@ export class RatioDefinitionDto implements RatioDefinitionView {
 
   @ApiProperty({ type: Number, example: 0.15, description: 'The office\'s own value.' })
   benchmark!: number;
+
+  @ApiProperty({
+    enum: RATIO_ORIGINS,
+    description:
+      '`platform` rows were provisioned \u2014 their numerator and denominator are fixed so '
+      + 'that two offices\u2019 figures mean the same thing. `office` rows are the office\u2019s '
+      + 'own and free in every respect.',
+  })
+  origin!: RatioOrigin;
+
+  @ApiProperty({
+    type: [String],
+    example: ['AB', 'AAB'],
+    description: 'Ladder rung codes. **Empty means every rung.**',
+  })
+  appliesToOrgLevelCodes!: string[];
 
   @ApiProperty({ enum: RATIO_COMPARISONS })
   comparison!: RatioComparison;

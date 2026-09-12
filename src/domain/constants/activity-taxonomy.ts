@@ -196,6 +196,13 @@ export interface SeedRatioDefinition {
   readonly benchmark: number;
   readonly comparison: 'gte' | 'band';
   readonly displayOrder: number;
+  /**
+   * Ladder rung codes this ratio is a question about (ADR-0020). Omitted means every rung.
+   *
+   * A **seed default**, not a rule. An office whose agents do recruit adds `AGENT` and the
+   * ratio returns for everyone; nothing here is enforced after provisioning.
+   */
+  readonly appliesToOrgLevelCodes?: readonly string[];
 }
 
 /** `activity-management.md:211-215`, bound to codes. */
@@ -208,6 +215,14 @@ export const SEED_RATIO_DEFINITIONS: readonly SeedRatioDefinition[] = [
     benchmark: RATIO_BENCHMARKS.BALANCE_BAND_PP,
     comparison: 'band',
     displayOrder: 1,
+    /*
+     * The rungs that carry a recruiting mandate on v1's ladder (ADR-0020).
+     *
+     * An agent with no such mandate logs no recruitment activity, so their denominator is
+     * zero every month: they read 100% Selling, sit outside the ±30pp band, and carry a
+     * standing alert for doing their job exactly as instructed.
+     */
+    appliesToOrgLevelCodes: ['AB', 'AAB'],
   },
   {
     code: 'SELLING_SUCCESS_RATE',
@@ -226,6 +241,8 @@ export const SEED_RATIO_DEFINITIONS: readonly SeedRatioDefinition[] = [
     benchmark: RATIO_BENCHMARKS.RECRUITMENT_SUCCESS_RATE,
     comparison: 'gte',
     displayOrder: 3,
+    // Same shape, same reason: a denominator that is structurally zero for this rung.
+    appliesToOrgLevelCodes: ['AB', 'AAB'],
   },
   {
     code: 'LEADS_PER_ACTIVITY',

@@ -9,6 +9,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { DEFAULT_ORG_LADDER } from '@/domain/constants';
 import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from './company.schema';
+import { Kpm, KpmDocument } from './kpm.schema';
 import { CompanyOrgLevel, CompanyOrgLevelDocument } from './company-org-level.schema';
 
 /** One rung, as the console reads it. */
@@ -48,9 +49,30 @@ export class OrgLevelService {
     @InjectModel(CompanyOrgLevel.name)
     private readonly levels: Model<CompanyOrgLevelDocument>,
     @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
+    @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
     private readonly audit: AuditService,
     private readonly clock: Clock,
   ) {}
+
+  /**
+   * The active ladder the caller's own office stands on.
+   *
+   * Here rather than in each consumer because two now need it — `TenantConfigService`
+   * serves it to every member's badge (P4-T9) and `RatioService` validates applicability
+   * against it (P4-T15) — and "find the office, read its company, list that company's
+   * rungs" derived twice is two chances to disagree about which rungs an office has.
+   *
+   * Empty for a caller in no office. That is a valid state, not an error: a person who has
+   * registered and not yet joined has no ladder, and every consumer renders that as
+   * "no constraint" rather than as a failure.
+   */
+  async ladderForOffice(ctx: RequestContext): Promise<OrgLevelRow[]> {
+    const kpmId = ctx.kpmId;
+    if (!kpmId) return [];
+    const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
+    if (!kpm) return [];
+    return this.list(ctx, kpm.companyId);
+  }
 
   private require(ctx: RequestContext, permission: Parameters<typeof can>[1]): void {
     if (!can(ctx, permission)) {

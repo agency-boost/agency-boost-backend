@@ -8727,6 +8727,17 @@
               "band"
             ],
             "description": "`gte` is at or above the benchmark. `band` is the balance rule, `abs(sellingPct − 50) × 2 ≤ benchmark` — a different shape, which is why this is a named rule rather than an operator."
+          },
+          "appliesToOrgLevelCodes": {
+            "example": [
+              "AB",
+              "AAB"
+            ],
+            "description": "Ladder rung codes this ratio applies to. **Empty means every rung.** A member whose rung is absent does not see the ratio at all — hidden, never shown as failed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -8770,6 +8781,17 @@
               "gte",
               "band"
             ]
+          },
+          "appliesToOrgLevelCodes": {
+            "example": [
+              "AB",
+              "AAB"
+            ],
+            "description": "Ladder rung codes this ratio applies to. **Empty means every rung.** A member whose rung is absent does not see the ratio at all — hidden, never shown as failed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -9818,6 +9840,25 @@
             "example": 0.15,
             "description": "The office's own value."
           },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "platform",
+              "office"
+            ],
+            "description": "`platform` rows were provisioned — their numerator and denominator are fixed so that two offices’ figures mean the same thing. `office` rows are the office’s own and free in every respect."
+          },
+          "appliesToOrgLevelCodes": {
+            "example": [
+              "AB",
+              "AAB"
+            ],
+            "description": "Ladder rung codes. **Empty means every rung.**",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "comparison": {
             "type": "string",
             "enum": [
@@ -9846,6 +9887,8 @@
           "numerator",
           "denominator",
           "benchmark",
+          "origin",
+          "appliesToOrgLevelCodes",
           "comparison",
           "displayOrder",
           "version",

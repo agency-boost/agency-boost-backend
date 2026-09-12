@@ -252,6 +252,15 @@ export class ProvisioningService {
       benchmark: r.benchmark,
       comparison: r.comparison,
       displayOrder: r.displayOrder,
+      /*
+       * Everything provisioning writes is the platform's, including a company's own
+       * published `ratio_set` (ADR-0021). From the office's point of view both are
+       * vocabulary handed down, like the company ladder and the KPM template — and both
+       * are what a comparison across offices would want in one column. Only an Owner
+       * creating a ratio afterwards produces an `office` row.
+       */
+      origin: 'platform',
+      appliesToOrgLevelCodes: [...(r.appliesToOrgLevelCodes ?? [])],
       version: 1,
       status: 'active',
       archivedAt: null,

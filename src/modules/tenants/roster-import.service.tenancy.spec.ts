@@ -46,6 +46,7 @@ describe('RosterImportService (P3.6-T4)', () => {
     const orgLevels = new OrgLevelService(
       mongoose.model(CompanyOrgLevel.name) as never,
       mongoose.model(Company.name) as never,
+      mongoose.model(Kpm.name) as never,
       new AuditService(mongoose.model(AuditLog.name) as never),
       clock,
     );

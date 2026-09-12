@@ -68,9 +68,29 @@ export class CreateRatioDto {
   })
   @IsIn(RATIO_COMPARISONS as unknown as string[])
   comparison!: RatioComparison;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['AB', 'AAB'],
+    description:
+      'Ladder rung codes this ratio applies to. **Empty means every rung.** A member whose '
+      + 'rung is absent does not see the ratio at all \u2014 hidden, never shown as failed.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  appliesToOrgLevelCodes?: string[];
 }
 
-/** No `code`. Everything computed from this ratio holds it. */
+/**
+ * No `code`. Everything computed from this ratio holds it.
+ *
+ * `numerator` and `denominator` are accepted here and refused by the service on a
+ * `platform` ratio (ADR-0021). Deliberately not split into two DTOs: the shape of the
+ * request does not depend on which row it addresses, and two DTOs would put the rule in
+ * the routing table where a reader of the service cannot see it.
+ */
 export class UpdateRatioDto {
   @ApiPropertyOptional({ minLength: 1, maxLength: 80 })
   @IsOptional()
@@ -107,4 +127,17 @@ export class UpdateRatioDto {
   @IsOptional()
   @IsIn(RATIO_COMPARISONS as unknown as string[])
   comparison?: RatioComparison;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['AB', 'AAB'],
+    description:
+      'Ladder rung codes this ratio applies to. **Empty means every rung.** A member whose '
+      + 'rung is absent does not see the ratio at all \u2014 hidden, never shown as failed.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  appliesToOrgLevelCodes?: string[];
 }

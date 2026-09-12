@@ -62,9 +62,6 @@ export function configModule(now: Date) {
     audit,
     clock,
   );
-  const ratios = new RatioService(
-    new RatioDefinitionRepository(ratioDefinitions as never), activity, audit, clock,
-  );
   const leads = new LeadStatusService(
     new LeadStatusRepository(leadStatuses as never), audit, clock,
   );
@@ -73,14 +70,19 @@ export function configModule(now: Date) {
   const orgLevels = new OrgLevelService(
     companyOrgLevels as never,
     model('CompanyModelForConfig', CompanySchema) as never,
+    kpms as never,
     audit,
     clock,
+  );
+  // After `orgLevels`: P4-T15 made the ratio service validate applicability against the
+  // company's ladder, so it reads the ladder rather than owning a copy of it.
+  const ratios = new RatioService(
+    new RatioDefinitionRepository(ratioDefinitions as never), activity, orgLevels, audit, clock,
   );
   const config = new TenantConfigService(
     activity, ratios, leads,
     new ConfigSnapshotRepository(snapshots as never),
     audit, clock,
-    kpms as never,
     orgLevels,
   );
   const provisioning = new ProvisioningService(
@@ -94,7 +96,12 @@ export function configModule(now: Date) {
     config,
   );
 
-  return { activity, ratios, leads, config, provisioning, templates, audit, clock };
+  // `orgLevels` and `kpms` are exposed since P4-T15: a ratio's applicability validates
+  // against the company's ladder, so a spec exercising it has to be able to publish one.
+  return {
+    activity, ratios, leads, config, provisioning, templates, audit, clock,
+    orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema),
+  };
 }
 
 /** Copy a whole configuration into an office, the way creating one does. */

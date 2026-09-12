@@ -4,7 +4,8 @@ import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
 import { ActivityConfigService } from './activity.service';
 import { RatioDefinitionRepository } from './activity.repository';
-import { RatioComparison, RatioDefinitionDocument } from './ratio-definition.schema';
+import { OrgLevelService } from '@/modules/tenants/org-level.service';
+import { RatioComparison, RatioDefinitionDocument, RatioOrigin } from './ratio-definition.schema';
 
 export interface RatioDefinitionView {
   id: string;
@@ -17,6 +18,10 @@ export interface RatioDefinitionView {
   displayOrder: number;
   version: number;
   status: 'active' | 'archived';
+  /** Whose formula it is (ADR-0021). `platform` rows have a fixed numerator and denominator. */
+  origin: RatioOrigin;
+  /** Ladder rung codes. Empty means every rung (ADR-0020). */
+  appliesToOrgLevelCodes: string[];
 }
 
 const CODE_SHAPE = /^[A-Z][A-Z0-9_]{2,39}$/;
@@ -39,6 +44,7 @@ export class RatioService {
   constructor(
     private readonly ratios: RatioDefinitionRepository,
     private readonly activity: ActivityConfigService,
+    private readonly orgLevels: OrgLevelService,
     private readonly audit: AuditService,
     private readonly clock: Clock,
   ) {}
@@ -53,7 +59,7 @@ export class RatioService {
     ctx: RequestContext,
     input: {
       code: string; label: string; numerator: string[]; denominator: string[];
-      benchmark: number; comparison: RatioComparison;
+      benchmark: number; comparison: RatioComparison; appliesToOrgLevelCodes?: string[];
     },
   ): Promise<RatioDefinitionView> {
     const code = this.normaliseCode(input.code);
@@ -70,6 +76,10 @@ export class RatioService {
       denominator,
       benchmark: input.benchmark,
       comparison: input.comparison,
+      // An office's own, by construction. Nothing a tenant creates is platform-standard —
+      // `platform` is written by provisioning and by nothing else (ADR-0021).
+      origin: 'office',
+      appliesToOrgLevelCodes: await this.checkedRungs(ctx, input.appliesToOrgLevelCodes ?? []),
       displayOrder: (await this.ratios.count(ctx, {})) + 1,
       version: 1,
       status: 'active',
@@ -79,19 +89,43 @@ export class RatioService {
     return this.view(created);
   }
 
-  /** Label, benchmark, comparison and the two code lists. Never the code. */
+  /**
+   * Label, benchmark, comparison, applicability and — on an office's own ratio — the two
+   * code lists. Never the code.
+   *
+   * **A platform ratio refuses a formula change and accepts everything else in the same
+   * request** (ADR-0021). A 403 on the whole request would be the easier implementation
+   * and the worse answer: an Owner adjusting a benchmark and a formula together would
+   * have both rejected and be told only that they may not do "this".
+   */
   async update(
     ctx: RequestContext,
     id: string,
     input: {
       label?: string; benchmark?: number; comparison?: RatioComparison;
-      numerator?: string[]; denominator?: string[];
+      numerator?: string[]; denominator?: string[]; appliesToOrgLevelCodes?: string[];
     },
   ): Promise<RatioDefinitionView> {
+    const existing = await this.ratios.findById(ctx, id);
+    if (!existing) throw new NotFoundException('Ratio');
+
+    const formula = input.numerator !== undefined || input.denominator !== undefined;
+    if (formula && existing.origin === 'platform') {
+      throw new BadRequestException(
+        `${existing.code} is one of the five ratios every office measures the same way, so `
+          + 'its formula is fixed — that is what makes two offices\u2019 figures comparable. '
+          + 'Its benchmark, label and who it applies to are yours to change. To count '
+          + 'something else, add a ratio of your own.',
+      );
+    }
+
     const set: Record<string, unknown> = {};
     if (input.label !== undefined) set.label = input.label.trim();
     if (input.benchmark !== undefined) set.benchmark = input.benchmark;
     if (input.comparison !== undefined) set.comparison = input.comparison;
+    if (input.appliesToOrgLevelCodes !== undefined) {
+      set.appliesToOrgLevelCodes = await this.checkedRungs(ctx, input.appliesToOrgLevelCodes);
+    }
     if (input.numerator !== undefined) {
       set.numerator = await this.checkedCodes(ctx, input.numerator, 'numerator');
     }
@@ -104,6 +138,33 @@ export class RatioService {
     if (!updated) throw new NotFoundException('Ratio');
     await this.record(ctx, 'ratio.updated', id, set);
     return this.view(updated);
+  }
+
+  /**
+   * Every rung must be on the company's own ladder (ADR-0020, ADR-0012).
+   *
+   * Against `OrgLevelService`, never against a list here: the ladder belongs to the
+   * company and a second copy of it in this module would be a second answer to what rungs
+   * an office has. Archived rungs are refused — binding a ratio to a rung the company has
+   * retired makes it apply to nobody, silently.
+   *
+   * An empty list is the common case and means every rung, so it short-circuits without
+   * reading the ladder at all.
+   */
+  private async checkedRungs(ctx: RequestContext, codes: string[]): Promise<string[]> {
+    if (codes.length === 0) return [];
+    const normalised = [...new Set(codes.map((c) => c.trim().toUpperCase()))];
+    const ladder = await this.orgLevels.ladderForOffice(ctx);
+    const active = new Set(ladder.filter((l) => l.status === 'active').map((l) => l.code));
+    const unknown = normalised.filter((c) => !active.has(c));
+    if (unknown.length) {
+      throw new BadRequestException(
+        `${unknown.join(', ')} is not an active rung on your company\u2019s ladder. A ratio `
+          + 'applies to rungs the company promotes people along; the platform defines those, '
+          + 'not the office.',
+      );
+    }
+    return normalised;
   }
 
   async archive(ctx: RequestContext, id: string): Promise<RatioDefinitionView> {
@@ -182,6 +243,8 @@ export class RatioService {
       displayOrder: doc.displayOrder,
       version: doc.version,
       status: doc.status,
+      origin: doc.origin,
+      appliesToOrgLevelCodes: doc.appliesToOrgLevelCodes,
     };
   }
 

@@ -61,7 +61,7 @@ describe('KpmRequestService (P3.5-T2)', () => {
     const clock = new FixedClock(NOW);
     const audit = new AuditService(auditModel as never);
 
-    const orgLevels = new OrgLevelService(levels as never, companies as never, audit, clock);
+    const orgLevels = new OrgLevelService(levels as never, companies as never, kpms as never, audit, clock);
     const provisioning = new ProvisioningService(
       mongoose.model(ActivityCategory.name, ActivityCategorySchema) as never,
       mongoose.model(ActivityType.name, ActivityTypeSchema) as never,

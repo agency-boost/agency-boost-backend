@@ -9,9 +9,24 @@ import { up } from './0001-membership-org-level';
 describe('0001 — backfilling the membership org level', () => {
   beforeAll(startMongo);
   afterAll(stopMongo);
-  beforeEach(clearCollections);
 
   const db = () => mongoose.connection.db as mongoose.mongo.Db;
+  /*
+   * By name, because this spec registers no mongoose models and `clearCollections`
+   * iterates the ones that are registered — so on its own it clears nothing here.
+   *
+   * That was invisible while `companies.slug`'s unique index happened not to exist in
+   * this worker's database. Adding a spec file shifted the worker split, a neighbouring
+   * file built the index, and every `legacyOffice()` after the first collided on
+   * `slug: "prudential"`. `0004` and `0005` already clear by name for the same reason.
+   */
+  beforeEach(async () => {
+    await clearCollections();
+    for (const name of ['companies', 'kpms', 'memberships', 'companyOrgLevels']) {
+      await db().collection(name).deleteMany({});
+    }
+  });
+
   const NOW = new Date('2026-09-07T02:00:00.000Z');
   const run = () => up(db(), NOW);
 

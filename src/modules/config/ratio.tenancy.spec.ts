@@ -24,6 +24,7 @@ describe('the office ratio definitions (P4-T2)', () => {
   let activity: ActivityConfigService;
   let provisioning: ProvisioningService;
   let templates: mongoose.Model<never>;
+  let wired: ReturnType<typeof configModule>;
 
   async function provision(kpmId: string, companyId = COMPANY) {
     const seeded = await provisioning.seedActivityTaxonomy(kpmId, companyId);
@@ -32,7 +33,7 @@ describe('the office ratio definitions (P4-T2)', () => {
 
   beforeAll(async () => {
     await startMongo();
-    const wired = configModule(NOW);
+    wired = configModule(NOW);
     ratios = wired.ratios;
     activity = wired.activity;
     provisioning = wired.provisioning;
@@ -143,13 +144,25 @@ describe('the office ratio definitions (P4-T2)', () => {
     });
 
     it('rebinds a formula rather than leaving it pointing at nothing', async () => {
-      const ratio = (await ratios.list(ctx(KPM_A)))
-        .find((r) => r.code === 'LEADS_PER_ACTIVITY')!;
-      const updated = await ratios.update(ctx(KPM_A), ratio.id, {
+      /*
+       * This rebound `LEADS_PER_ACTIVITY` until P4-T15. ADR-0021 made the seeded five
+       * platform-standard, so their formulas are no longer a tenant's to change and that
+       * refusal is asserted in this file's P4-T15 section.
+       *
+       * The rule *this* test exists for — a formula follows the taxonomy rather than
+       * rotting against it — is unchanged and still worth pinning, so it moves to the
+       * ratios an office owns, where rebinding remains free.
+       */
+      const mine = await ratios.create(ctx(KPM_A), {
+        code: 'OWN_RATE', label: 'Our own rate',
+        numerator: ['LEADS_NEW_PROSPECT'], denominator: ['LEADS_GEN_ACTIVITY'],
+        benchmark: 1, comparison: 'gte',
+      });
+      const updated = await ratios.update(ctx(KPM_A), mine.id, {
         denominator: ['LEADS_CONTACTED'],
       });
       expect(updated.denominator).toEqual(['LEADS_CONTACTED']);
-      expect(updated.code).toBe('LEADS_PER_ACTIVITY');
+      expect(updated.code).toBe('OWN_RATE');
       expect(updated.version).toBe(2);
     });
 
@@ -292,4 +305,154 @@ describe('the office ratio definitions (P4-T2)', () => {
     });
   });
 
+
+  /**
+   * P4-T15 — ADR-0020 and ADR-0021.
+   *
+   * Both add a field, and the two interact: applicability is editable on a platform ratio
+   * while its formula is not, so the tests that matter are the ones that cross.
+   */
+  describe('who a ratio is for, and who owns its formula (P4-T15)', () => {
+    /** The company ladder an office's applicability is checked against (ADR-0012). */
+    /** The harness returns its models untyped, so the cast is at the use site as elsewhere. */
+    const companies = () => wired.companies as mongoose.Model<never>;
+    const kpms = () => wired.kpms as mongoose.Model<never>;
+
+    async function publishLadder(companyId = COMPANY, codes = ['AGENT', 'AAB', 'AB']) {
+      await companies().create({ _id: companyId, name: 'Prudential', slug: `p-${companyId}` } as never);
+      const sa = RequestContext.platform('root');
+      for (const [i, code] of codes.entries()) {
+        await wired.orgLevels.create(sa, {
+          companyId, code, label: code, displayOrder: i + 1,
+        });
+      }
+      await kpms().create({
+        _id: KPM_A, companyId, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta',
+      } as never);
+    }
+
+    beforeEach(async () => {
+      await publishLadder();
+      await provision(KPM_A);
+    });
+
+    describe('AC-2: everything provisioning writes is the platform’s', () => {
+      it('marks the seeded five `platform`, and an Owner’s own `office`', async () => {
+        const seeded = await ratios.list(ctx(KPM_A));
+        expect(seeded.every((r) => r.origin === 'platform')).toBe(true);
+
+        const mine = await ratios.create(ctx(KPM_A), {
+          code: 'REFERRAL_RATE', label: 'Referral rate',
+          numerator: ['LEADS_NEW_PROSPECT'], denominator: ['LEADS_CONTACTED'],
+          benchmark: 0.2, comparison: 'gte',
+        });
+        expect(mine.origin).toBe('office');
+      });
+    });
+
+    describe('AC-3: a platform ratio’s formula is fixed, and the rest of it is not', () => {
+      const platform = async () =>
+        (await ratios.list(ctx(KPM_A))).find((r) => r.code === 'SELLING_SUCCESS_RATE')!;
+
+      it('refuses a numerator or denominator change, naming the ratio and the way out', async () => {
+        const row = await platform();
+        for (const change of [
+          { numerator: ['SELL_PRESENTATION'] },
+          { denominator: ['SELL_SUBMISSION'] },
+        ]) {
+          await expect(ratios.update(ctx(KPM_A), row.id, change))
+            .rejects.toThrow(/SELLING_SUCCESS_RATE.*comparable/s);
+        }
+        // Refused, not partially applied.
+        expect(await platform()).toMatchObject({
+          numerator: ['SELL_SUBMISSION'], version: row.version,
+        });
+      });
+
+      it('accepts the benchmark, the label and the applicability on the same row', async () => {
+        const row = await platform();
+        const updated = await ratios.update(ctx(KPM_A), row.id, {
+          benchmark: 0.42, label: 'Closing rate', appliesToOrgLevelCodes: ['AGENT'],
+        });
+        expect(updated).toMatchObject({
+          benchmark: 0.42, label: 'Closing rate', appliesToOrgLevelCodes: ['AGENT'],
+          // The identity never moves, whatever the label says (invariant §4).
+          code: 'SELLING_SUCCESS_RATE',
+        });
+      });
+
+      it('lets an office change its own ratio’s formula', async () => {
+        const mine = await ratios.create(ctx(KPM_A), {
+          code: 'REFERRAL_RATE', label: 'Referral rate',
+          numerator: ['LEADS_NEW_PROSPECT'], denominator: ['LEADS_CONTACTED'],
+          benchmark: 0.2, comparison: 'gte',
+        });
+        const updated = await ratios.update(ctx(KPM_A), mine.id, {
+          numerator: ['SELL_SUBMISSION'],
+        });
+        expect(updated.numerator).toEqual(['SELL_SUBMISSION']);
+      });
+
+      it('404s another office’s ratio before saying anything about its origin', async () => {
+        // The refusal must not become a way to learn that a ratio exists elsewhere.
+        await kpms().create({
+          _id: KPM_B, companyId: COMPANY, code: '0418', branchName: 'B', timezone: 'Asia/Jakarta',
+        } as never);
+        await provision(KPM_B);
+        const theirs = (await ratios.list(ctx(KPM_B)))[0];
+        await expect(ratios.update(ctx(KPM_A), theirs.id, { numerator: ['SELL_SUBMISSION'] }))
+          .rejects.toThrow('Ratio');
+      });
+    });
+
+    describe('AC-1: applicability binds to the company’s ladder', () => {
+      it('seeds the two recruitment ratios to the rungs that recruit (AC-4)', async () => {
+        const byCode = new Map((await ratios.list(ctx(KPM_A))).map((r) => [r.code, r]));
+        expect(byCode.get('SELLING_VS_RECRUITMENT')!.appliesToOrgLevelCodes).toEqual(['AB', 'AAB']);
+        expect(byCode.get('RECRUITMENT_SUCCESS_RATE')!.appliesToOrgLevelCodes).toEqual(['AB', 'AAB']);
+      });
+
+      it('leaves every other ratio applying to every rung', async () => {
+        const byCode = new Map((await ratios.list(ctx(KPM_A))).map((r) => [r.code, r]));
+        // Empty is the common case and means "everyone" — an office that never opens the
+        // control never has to understand it.
+        expect(byCode.get('SELLING_SUCCESS_RATE')!.appliesToOrgLevelCodes).toEqual([]);
+      });
+
+      it('refuses a rung the company does not have, naming it', async () => {
+        const row = (await ratios.list(ctx(KPM_A)))[0];
+        await expect(ratios.update(ctx(KPM_A), row.id, { appliesToOrgLevelCodes: ['DIRECTOR'] }))
+          .rejects.toThrow(/DIRECTOR is not an active rung/);
+      });
+
+      it('refuses a rung the company has archived', async () => {
+        /*
+         * The sharp one: an archived rung is still readable, so a naive "does it exist"
+         * check passes and the ratio silently applies to nobody.
+         */
+        const sa = RequestContext.platform('root');
+        const ladder = await wired.orgLevels.list(sa, COMPANY);
+        const aab = ladder.find((l) => l.code === 'AAB')!;
+        await wired.orgLevels.update(sa, aab.orgLevelId, { status: 'archived' });
+
+        const row = (await ratios.list(ctx(KPM_A)))[0];
+        await expect(ratios.update(ctx(KPM_A), row.id, { appliesToOrgLevelCodes: ['AAB'] }))
+          .rejects.toThrow(/AAB is not an active rung/);
+      });
+
+      it('normalises case and drops a repeat', async () => {
+        const row = (await ratios.list(ctx(KPM_A)))[0];
+        const updated = await ratios.update(ctx(KPM_A), row.id, {
+          appliesToOrgLevelCodes: ['ab', 'AB', 'aab'],
+        });
+        expect(updated.appliesToOrgLevelCodes).toEqual(['AB', 'AAB']);
+      });
+
+      it('accepts an empty list without reading the ladder at all', async () => {
+        const row = (await ratios.list(ctx(KPM_A))).find((r) => r.code === 'SELLING_VS_RECRUITMENT')!;
+        const updated = await ratios.update(ctx(KPM_A), row.id, { appliesToOrgLevelCodes: [] });
+        expect(updated.appliesToOrgLevelCodes).toEqual([]);
+      });
+    });
+  });
 });

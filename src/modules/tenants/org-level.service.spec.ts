@@ -6,6 +6,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { clearCollections, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
 import { Company, CompanySchema } from './company.schema';
 import { CompanyOrgLevel, CompanyOrgLevelSchema } from './company-org-level.schema';
+import { Kpm, KpmSchema } from './kpm.schema';
 import { OrgLevelService } from './org-level.service';
 
 const NOW = new Date('2026-09-07T02:00:00.000Z');
@@ -23,7 +24,10 @@ describe('OrgLevelService', () => {
     const levels = mongoose.model(CompanyOrgLevel.name, CompanyOrgLevelSchema);
     const companies = mongoose.model(Company.name, CompanySchema);
     const audit = new AuditService(mongoose.model(AuditLog.name, AuditLogSchema) as never);
-    service = new OrgLevelService(levels as never, companies as never, audit, new FixedClock(NOW));
+    const kpms = mongoose.model(Kpm.name, KpmSchema);
+    service = new OrgLevelService(
+      levels as never, companies as never, kpms as never, audit, new FixedClock(NOW),
+    );
     await syncIndexes();
   });
   afterAll(stopMongo);

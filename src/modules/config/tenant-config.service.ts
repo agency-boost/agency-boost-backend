@@ -1,8 +1,5 @@
 import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { OrgLevelRow, OrgLevelService } from '@/modules/tenants/org-level.service';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
@@ -59,7 +56,6 @@ export class TenantConfigService {
     private readonly snapshots: ConfigSnapshotRepository,
     private readonly audit: AuditService,
     private readonly clock: Clock,
-    @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
     private readonly orgLevels: OrgLevelService,
   ) {}
 
@@ -141,11 +137,9 @@ export class TenantConfigService {
    * and is written at `/admin/org-levels` (ADR-0012).
    */
   async ladderFor(ctx: RequestContext): Promise<OrgLevelRow[]> {
-    const kpmId = ctx.kpmId;
-    if (!kpmId) return [];
-    const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
-    if (!kpm) return [];
-    return this.orgLevels.list(ctx, kpm.companyId);
+    // Delegated since P4-T15, when `RatioService` became a second reader. Deriving it
+    // here as well would be two answers to "which rungs does this office have".
+    return this.orgLevels.ladderForOffice(ctx);
   }
 
   async read(ctx: RequestContext): Promise<TenantConfigView> {
