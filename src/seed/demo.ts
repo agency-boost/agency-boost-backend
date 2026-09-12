@@ -35,6 +35,18 @@ import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schem
 import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { Notification, NotificationSchema } from '@/modules/notifications/notification.schema';
+import {
+  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES, SEED_RATIO_DEFINITIONS,
+} from '@/domain/constants';
+import {
+  ActivityCategory, ActivityCategorySchema,
+} from '@/modules/config/activity-category.schema';
+import { ActivityType, ActivityTypeSchema } from '@/modules/config/activity-type.schema';
+import { LeadStatus, LeadStatusSchema } from '@/modules/config/lead-status.schema';
+import {
+  RatioDefinition, RatioDefinitionSchema,
+} from '@/modules/config/ratio-definition.schema';
+import { ConfigSnapshot, ConfigSnapshotSchema } from '@/modules/config/config-snapshot.schema';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 
 loadEnv();
@@ -69,6 +81,11 @@ async function main(): Promise<void> {
   const Companies = mongoose.model(Company.name, CompanySchema);
   const OrgLevels = mongoose.model(CompanyOrgLevel.name, CompanyOrgLevelSchema);
   const Kpms = mongoose.model(Kpm.name, KpmSchema);
+  const ActivityCategories = mongoose.model(ActivityCategory.name, ActivityCategorySchema);
+  const ActivityTypes = mongoose.model(ActivityType.name, ActivityTypeSchema);
+  const LeadStatuses = mongoose.model(LeadStatus.name, LeadStatusSchema);
+  const RatioDefinitions = mongoose.model(RatioDefinition.name, RatioDefinitionSchema);
+  const ConfigSnapshots = mongoose.model(ConfigSnapshot.name, ConfigSnapshotSchema);
   const Memberships = mongoose.model(Membership.name, MembershipSchema);
   const History = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
   const Groups = mongoose.model(Group.name, GroupSchema);
@@ -86,6 +103,12 @@ async function main(): Promise<void> {
       'memberships', 'membershipHistory', 'joinRequests', 'groups', 'kpms', 'companies', 'users',
       'authTokens', 'auditLog', 'notifications', 'notificationPreferences', 'assets',
       'kpmRequests',
+      // Phase 4 configuration. Without these a `--reset` leaves the previous run's
+      // taxonomy behind, orphaned against office ids that no longer exist — so every
+      // settings screen renders another run's rows and the publish bar compares versions
+      // across two different offices.
+      'activityCategories', 'activityTypes', 'leadStatuses', 'ratioDefinitions',
+      'configSnapshots',
     ];
     for (const name of owned) {
       const { deletedCount } = await mongoose.connection.collection(name).deleteMany({});
@@ -174,6 +197,81 @@ async function main(): Promise<void> {
       settings: { ...DEFAULT_KPM_SETTINGS },
       counters: { nextAgentCodeSeq: 1 },
       status: opts.status ?? 'active',
+    });
+  }
+
+  /**
+   * Copy the whole Phase 4 configuration into an office, the way creating one does.
+   *
+   * The seed builds offices through the model rather than through `TenantService`, so
+   * nothing had ever run `ProvisioningService` over them: every seeded office had no
+   * activity types, no ratios and no lead statuses, and all three settings screens were
+   * empty in a database whose whole purpose is to make screens exercisable.
+   *
+   * This mirrors what provisioning writes rather than calling it, because the service
+   * wants a Nest container and the seed is a script. The shapes are asserted against each
+   * other by `provisioning.tenancy.spec.ts`; what is duplicated here is the *call*, not
+   * the values, which come from `@/domain/constants` exactly as provisioning's do.
+   */
+  async function configure(kpmId: string) {
+    if (await ActivityTypes.findOne({ kpmId }).exec()) return;
+
+    await ActivityCategories.insertMany(SEED_ACTIVITY_CATEGORIES.map((c) => ({
+      kpmId, code: c.code, label: c.label, displayOrder: c.displayOrder,
+      version: 1, status: 'active', archivedAt: null, deletedAt: null,
+    })));
+    await ActivityTypes.insertMany(SEED_ACTIVITY_TYPES.map((t) => ({
+      kpmId, code: t.code, categoryCode: t.categoryCode, label: t.label,
+      description: t.description ?? null, displayOrder: t.displayOrder,
+      version: 1, status: 'active', archivedAt: null, deletedAt: null,
+    })));
+    await LeadStatuses.insertMany(SEED_LEAD_STATUSES.map((l) => ({
+      kpmId, pipeline: l.pipeline, code: l.code, label: l.label, rank: l.rank,
+      isTerminal: l.isTerminal, version: 1, status: 'active', archivedAt: null, deletedAt: null,
+    })));
+    await RatioDefinitions.insertMany(SEED_RATIO_DEFINITIONS.map((r) => ({
+      kpmId, code: r.code, label: r.label,
+      numerator: [...r.numerator], denominator: [...r.denominator],
+      benchmark: r.benchmark, comparison: r.comparison, displayOrder: r.displayOrder,
+      origin: 'platform',
+      appliesToOrgLevelCodes: [...(r.appliesToOrgLevelCodes ?? [])],
+      version: 1, status: 'active', archivedAt: null, deletedAt: null,
+    })));
+  }
+
+  /**
+   * Publish an office's configuration, so agents are on a copy rather than on nothing.
+   *
+   * `readPublished` falls back to the live rows when no snapshot exists, so an unpublished
+   * office looks fine — and then the publish bar has only one state to show and nobody
+   * ever sees the gate P4-T6 exists for. One office below is left deliberately unpublished
+   * for that reason.
+   */
+  async function publish(kpmId: string, at: Date) {
+    if (await ConfigSnapshots.findOne({ kpmId }).exec()) return;
+    const [cats, types, ratios, statuses] = await Promise.all([
+      ActivityCategories.find({ kpmId, status: 'active' }).sort({ displayOrder: 1 }).lean().exec(),
+      ActivityTypes.find({ kpmId, status: 'active' }).sort({ displayOrder: 1 }).lean().exec(),
+      RatioDefinitions.find({ kpmId, status: 'active' }).sort({ displayOrder: 1 }).lean().exec(),
+      LeadStatuses.find({ kpmId, status: 'active' }).sort({ rank: 1 }).lean().exec(),
+    ]);
+    const view = (rows: Record<string, unknown>[]): Record<string, unknown>[] =>
+      rows.map((r) => ({ ...r, id: String(r._id) }));
+    const payload = {
+      activity: view(cats as never).map((c) => ({
+        ...c,
+        types: view(types as never).filter((t) => t.categoryCode === c.code),
+      })) as unknown[],
+      ratios: view(ratios as never),
+      leadPipelines: ['sales', 'recruitment'].map((pipeline) => ({
+        pipeline,
+        statuses: view(statuses as never).filter((l) => l.pipeline === pipeline),
+      })),
+      version: 1,
+    };
+    await ConfigSnapshots.create({
+      kpmId, version: 1, sourceVersion: 1, payload,
+      publishedAt: at, publishedBy: null, deletedAt: null,
     });
   }
 
@@ -383,6 +481,66 @@ async function main(): Promise<void> {
   };
   const id0417 = String(kpm0417._id);
 
+  await configure(id0417);
+  // Published a while back, then edited — so 0417's publish bar shows the state that
+  // matters: agents on one copy while the Owner works on another. 0555 is the clean
+  // counterpart.
+  await publish(id0417, daysAgo(45));
+
+  /*
+   * The states a settings screen can only show if something is in them.
+   *
+   * Every one of these was unreachable in a seeded database: nothing was ever archived, so
+   * *Show archived* was an empty checkbox; every ratio was the platform's, so the two row
+   * kinds P4-T15 added looked identical; and nothing had been touched since publishing, so
+   * the publish bar only ever had one thing to say.
+   */
+  if (!(await ActivityTypes.findOne({ kpmId: id0417, status: 'archived' }).exec())) {
+    // Retired, not deleted (invariant §3): its history still renders wherever it is named.
+    await ActivityTypes.updateOne(
+      { kpmId: id0417, code: 'DEV_COACHING_RECEIVED' },
+      { $set: { status: 'archived', archivedAt: daysAgo(12), version: 2 } },
+    );
+    await LeadStatuses.updateOne(
+      { kpmId: id0417, code: 'APPROVED_NOT_PAID' },
+      { $set: { status: 'archived', archivedAt: daysAgo(9), version: 2 } },
+    );
+  }
+
+  /*
+   * An edit since publishing, on a row that is still **active**.
+   *
+   * `hasUnpublishedChanges` compares the highest *live* version against the version the
+   * snapshot was rendered from, so bumping a row and archiving it in the same breath
+   * leaves the bar reading clean — which is what the first version of this seed did, and
+   * the state it was written to produce never appeared.
+   */
+  await RatioDefinitions.updateOne(
+    { kpmId: id0417, code: 'SELLING_SUCCESS_RATE', version: 1 },
+    { $set: { benchmark: 0.18, version: 2 } },
+  );
+
+  if (!(await RatioDefinitions.findOne({ kpmId: id0417, origin: 'office' }).exec())) {
+    // An office's own (ADR-0021): formula included, and comparable with nobody.
+    await RatioDefinitions.create({
+      kpmId: id0417,
+      code: 'REFERRAL_RATE',
+      label: 'Referral rate',
+      numerator: ['LEADS_NEW_PROSPECT'],
+      denominator: ['LEADS_CONTACTED'],
+      benchmark: 0.35,
+      comparison: 'gte',
+      displayOrder: 6,
+      origin: 'office',
+      // Their referral push is the senior rungs' programme this quarter (ADR-0020).
+      appliesToOrgLevelCodes: ['AB', 'AAB'],
+      version: 1,
+      status: 'active',
+      archivedAt: null,
+      deletedAt: null,
+    });
+  }
+
   const owner = await place(office0417, String(ownerUser._id), 'ab', null);
 
   // Admin rights are orthogonal to hierarchy role: this one is an AB as well.
@@ -510,6 +668,11 @@ async function main(): Promise<void> {
     code: kpm0555.get('code') as string,
     companyId: kpm0555.get('companyId') as string,
   };
+  await configure(String(kpm0555._id));
+  // Published and untouched since, so its publish bar reads clean — the state 0417 is
+  // deliberately *not* in.
+  await publish(String(kpm0555._id), daysAgo(30));
+
   const owner0555 = await place(office0555, String(owner0555User._id), 'ab', null);
   const agent0555User = await user('agent@kpm0555.test', 'Lina Marlina');
   await place(office0555, String(agent0555User._id), 'agent', owner0555);
@@ -522,6 +685,8 @@ async function main(): Promise<void> {
     ownerUserId: String(suspendedOwnerUser._id),
     status: 'suspended',
   });
+  await configure(String(kpm0999._id));
+  await publish(String(kpm0999._id), daysAgo(120));
   await place(
     {
       _id: kpm0999._id,

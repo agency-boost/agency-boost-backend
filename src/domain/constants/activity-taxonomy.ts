@@ -125,7 +125,10 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
     code: 'DEV_TEAM_ACTIVITY',
     categoryCode: 'TEAM_DEVELOPMENT',
     label: 'Aktivitas team development',
-    description: null,
+    // `KPM_Owner.html:1440`. Dropped when this was first transcribed, and it is the one
+    // description an agent most needs: without it the item reads as a category heading
+    // rather than as something to log.
+    description: '1-on-1 coaching, unit meeting, role-play, JFW, memberikan training',
     displayOrder: 12,
   },
 ];
