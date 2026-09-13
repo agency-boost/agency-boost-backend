@@ -171,7 +171,7 @@ export class TemplateService {
           + 'immutable, because offices record which one they were built from.',
       );
     }
-    this.refuseEmpty(kind, draft.payload);
+    await this.refuseBroken(companyId, kind, draft.payload);
 
     const published = await this.newestPublished(companyId, kind);
     draft.version = (published?.version ?? 0) + 1;
@@ -231,6 +231,62 @@ export class TemplateService {
    * a Super Admin creating an office for a real branch, and a failure naming a template
    * they published three weeks ago.
    */
+  /**
+   * Refuse a payload that would produce a broken office.
+   *
+   * The promise `super-admin/08` makes is that this happens **here**, not at office
+   * creation — the alternative is a Super Admin discovering it midway through setting up a
+   * real branch, naming a template they published three weeks ago.
+   *
+   * `ratio_set` had no branch at all until P4-T20, so a ratio naming a code the taxonomy
+   * did not declare published cleanly and then threw at provisioning: exactly the failure
+   * the promise rules out.
+   */
+  private async refuseBroken(
+    companyId: string, kind: TemplateKind, payload: Record<string, unknown>,
+  ): Promise<void> {
+    this.refuseEmpty(kind, payload);
+
+    if (kind !== 'ratio_set') return;
+
+    const { ratios } = payload as { ratios?: { code: string; numerator: string[]; denominator: string[] }[] };
+    if (!ratios?.length) {
+      throw new BadRequestException('A ratio set with no ratios gives every new office nothing to measure.');
+    }
+
+    /*
+     * Against the **published** taxonomy, and its platform fallback — because that is what
+     * provisioning reads (`provisioning.service.ts`). Checking the taxonomy *draft* would
+     * pass here and still break the office, which is the defect wearing a different hat.
+     */
+    const taxonomy = await this.newestPublished(companyId, 'activity_taxonomy');
+    const source = (taxonomy?.payload ?? STARTING_PAYLOAD.activity_taxonomy?.() ?? {}) as {
+      types?: { code: string }[];
+    };
+    const known = new Set((source.types ?? []).map((t) => t.code));
+
+    const missing = [...new Set(
+      ratios.flatMap((r) => [...(r.numerator ?? []), ...(r.denominator ?? [])]),
+    )].filter((code) => !known.has(code));
+
+    if (missing.length) {
+      throw new BadRequestException(
+        `${missing.join(', ')} is named by a ratio and declared by no activity type in this `
+          + `company\u2019s published taxonomy${taxonomy ? ` (version ${taxonomy.version})` : ''}. `
+          + 'Publish the taxonomy first, or point the ratio at a code it has.',
+      );
+    }
+
+    for (const ratio of ratios) {
+      if (!ratio.denominator?.length) {
+        throw new BadRequestException(
+          `${ratio.code} has nothing in its denominator. That is a division by zero dressed `
+            + 'up as configuration, and it renders as ∞ on every agent\u2019s screen.',
+        );
+      }
+    }
+  }
+
   private refuseEmpty(kind: TemplateKind, payload: Record<string, unknown>): void {
     if (kind === 'activity_taxonomy') {
       const { categories, types } = payload as { categories?: unknown[]; types?: unknown[] };

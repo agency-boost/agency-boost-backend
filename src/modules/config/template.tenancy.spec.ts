@@ -211,4 +211,73 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
       expect(published.officesBehind).toBe(0);
     });
   });
+
+  describe('a ratio set is refused at publish, not at office creation (P4-T20)', () => {
+    /*
+     * `super-admin/08` promises the refusal happens here — the alternative is a Super
+     * Admin discovering it midway through setting up a real branch. `ratio_set` had no
+     * validation branch at all, so it was the one kind the promise did not cover.
+     */
+    const ratioSet = (codes: string[]) => ({
+      ratios: [{
+        code: 'REFERRAL_RATE', label: 'Referral rate',
+        numerator: [codes[0]], denominator: [codes[1] ?? codes[0]],
+        benchmark: 0.3, comparison: 'gte', displayOrder: 1,
+      }],
+    });
+
+    it('refuses a code the published taxonomy does not declare, naming it', async () => {
+      await service.saveDraft(ctx(), companyId, 'ratio_set', ratioSet(['NO_SUCH_CODE', 'SELL_SUBMISSION']));
+      await expect(service.publish(ctx(), companyId, 'ratio_set'))
+        .rejects.toThrow(/NO_SUCH_CODE is named by a ratio/);
+    });
+
+    it('accepts codes the platform defaults declare, when the company has published none', async () => {
+      // The fallback provisioning itself uses. Refusing here would make the first ratio
+      // set of every new company unpublishable.
+      await service.saveDraft(ctx(), companyId, 'ratio_set', ratioSet(['SELL_SUBMISSION', 'SELL_PRESENTATION']));
+      await expect(service.publish(ctx(), companyId, 'ratio_set')).resolves.toMatchObject({
+        kind: 'ratio_set', status: 'published', version: 1,
+      });
+    });
+
+    it('checks the published taxonomy, not the draft — provisioning reads the published one', async () => {
+      /*
+       * The trap. A taxonomy draft declaring a code makes the ratio look fine here and
+       * still breaks the office, because `ProvisioningService` reads
+       * `status: 'published'`. Getting this backwards reproduces the defect.
+       */
+      await service.saveDraft(ctx(), companyId, 'activity_taxonomy', {
+        categories: [{ code: 'REFERRALS', label: 'Referrals', displayOrder: 1 }],
+        types: [{ code: 'REF_INTRO', categoryCode: 'REFERRALS', label: 'Intro', displayOrder: 1 }],
+      });
+      await service.saveDraft(ctx(), companyId, 'ratio_set', ratioSet(['REF_INTRO', 'REF_INTRO']));
+
+      await expect(service.publish(ctx(), companyId, 'ratio_set'))
+        .rejects.toThrow(/REF_INTRO is named by a ratio/);
+
+      // Publish the taxonomy and the same ratio set goes through.
+      await service.publish(ctx(), companyId, 'activity_taxonomy');
+      await expect(service.publish(ctx(), companyId, 'ratio_set')).resolves.toMatchObject({
+        status: 'published',
+      });
+    });
+
+    it('refuses an empty denominator, which renders as ∞ on every agent’s screen', async () => {
+      await service.saveDraft(ctx(), companyId, 'ratio_set', {
+        ratios: [{
+          code: 'BROKEN', label: 'Broken', numerator: ['SELL_SUBMISSION'], denominator: [],
+          benchmark: 1, comparison: 'gte', displayOrder: 1,
+        }],
+      });
+      await expect(service.publish(ctx(), companyId, 'ratio_set'))
+        .rejects.toThrow(/BROKEN has nothing in its denominator/);
+    });
+
+    it('refuses a ratio set with no ratios at all', async () => {
+      await service.saveDraft(ctx(), companyId, 'ratio_set', { ratios: [] });
+      await expect(service.publish(ctx(), companyId, 'ratio_set'))
+        .rejects.toThrow(/nothing to measure/);
+    });
+  });
 });
