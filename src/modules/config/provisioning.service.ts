@@ -12,7 +12,7 @@ import { ActivityType, ActivityTypeDocument } from './activity-type.schema';
 import { LeadStatus, LeadStatusDocument } from './lead-status.schema';
 import { RatioDefinition, RatioDefinitionDocument } from './ratio-definition.schema';
 import { ConfigSnapshot, ConfigSnapshotDocument } from './config-snapshot.schema';
-import { PlatformTemplate, PlatformTemplateDocument } from './platform-template.schema';
+import { CompanyTemplate, CompanyTemplateDocument } from './company-template.schema';
 import { TenantConfigService } from './tenant-config.service';
 
 export interface ProvisionedTaxonomy {
@@ -62,8 +62,8 @@ export class ProvisioningService {
     @InjectModel(RatioDefinition.name) private readonly ratios: Model<RatioDefinitionDocument>,
     @InjectModel(ConfigSnapshot.name)
     private readonly snapshots: Model<ConfigSnapshotDocument>,
-    @InjectModel(PlatformTemplate.name)
-    private readonly templates: Model<PlatformTemplateDocument>,
+    @InjectModel(CompanyTemplate.name)
+    private readonly templates: Model<CompanyTemplateDocument>,
     private readonly clock: Clock,
     // Reads the rows this service has just written, and renders them the way agents will
     // read them — one renderer, so the snapshot and the live read cannot disagree.

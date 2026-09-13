@@ -14,8 +14,8 @@ import {
   ConfigSnapshot, ConfigSnapshotSchema,
 } from '@/modules/config/config-snapshot.schema';
 import {
-  PlatformTemplate, PlatformTemplateSchema,
-} from '@/modules/config/platform-template.schema';
+  CompanyTemplate, CompanyTemplateSchema,
+} from '@/modules/config/company-template.schema';
 import {
   ActivityCategoryRepository, ActivityTypeRepository, ConfigSnapshotRepository,
   LeadStatusRepository, RatioDefinitionRepository,
@@ -24,6 +24,7 @@ import { ActivityConfigService } from '@/modules/config/activity.service';
 import { LeadStatusService } from '@/modules/config/lead-status.service';
 import { RatioService } from '@/modules/config/ratio.service';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
+import { ConfigChangeService } from '@/modules/config/changes.service';
 import { ProvisioningService } from '@/modules/config/provisioning.service';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
@@ -51,17 +52,11 @@ export function configModule(now: Date) {
   const leadStatuses = model('LeadStatusModel', LeadStatusSchema);
   const ratioDefinitions = model('RatioDefinitionModel', RatioDefinitionSchema);
   const snapshots = model('ConfigSnapshotModel', ConfigSnapshotSchema);
-  const templates = model('PlatformTemplateModel', PlatformTemplateSchema);
+  const templates = model('CompanyTemplateModel', CompanyTemplateSchema);
 
   const clock: Clock = new FixedClock(now);
   const audit = new AuditService(model('AuditLogModel', AuditLogSchema) as never);
 
-  const activity = new ActivityConfigService(
-    new ActivityCategoryRepository(categories as never),
-    new ActivityTypeRepository(types as never),
-    audit,
-    clock,
-  );
   const leads = new LeadStatusService(
     new LeadStatusRepository(leadStatuses as never), audit, clock,
   );
@@ -74,8 +69,19 @@ export function configModule(now: Date) {
     audit,
     clock,
   );
-  // After `orgLevels`: P4-T15 made the ratio service validate applicability against the
-  // company's ladder, so it reads the ladder rather than owning a copy of it.
+  /*
+   * After `orgLevels`: since P4-T15 the ratio service validates applicability against the
+   * company's ladder, and since P4-T18 so does the activity service — both read the
+   * ladder rather than owning a copy of it.
+   */
+  const activity = new ActivityConfigService(
+    new ActivityCategoryRepository(categories as never),
+    new ActivityTypeRepository(types as never),
+    new RatioDefinitionRepository(ratioDefinitions as never),
+    orgLevels,
+    audit,
+    clock,
+  );
   const ratios = new RatioService(
     new RatioDefinitionRepository(ratioDefinitions as never), activity, orgLevels, audit, clock,
   );
@@ -98,8 +104,10 @@ export function configModule(now: Date) {
 
   // `orgLevels` and `kpms` are exposed since P4-T15: a ratio's applicability validates
   // against the company's ladder, so a spec exercising it has to be able to publish one.
+  const changes = new ConfigChangeService(activity, ratios, config, orgLevels);
+
   return {
-    activity, ratios, leads, config, provisioning, templates, audit, clock,
+    activity, ratios, leads, config, provisioning, templates, audit, clock, changes,
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema),
   };
 }
@@ -119,6 +127,6 @@ export async function provisionOffice(
 export {
   ActivityCategory, ActivityCategorySchema, ActivityType, ActivityTypeSchema,
   ConfigSnapshot, ConfigSnapshotSchema, LeadStatus, LeadStatusSchema,
-  PlatformTemplate, PlatformTemplateSchema, RatioDefinition, RatioDefinitionSchema,
+  CompanyTemplate, CompanyTemplateSchema, RatioDefinition, RatioDefinitionSchema,
   AuditLog, AuditLogSchema,
 };

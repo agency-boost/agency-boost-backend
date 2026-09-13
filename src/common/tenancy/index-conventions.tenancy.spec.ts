@@ -26,7 +26,7 @@ import { ConfigSnapshotSchema } from '@/modules/config/config-snapshot.schema';
 import {
   ImpersonationSessionSchema,
 } from '@/modules/auth/impersonation-session.schema';
-import { PlatformTemplateSchema } from '@/modules/config/platform-template.schema';
+import { CompanyTemplateSchema } from '@/modules/config/company-template.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -77,8 +77,8 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
       + 'narrowed in the service, which refuses another office as a 404',
   ],
   [
-    'platformTemplates',
-    PlatformTemplateSchema,
+    'companyTemplates',
+    CompanyTemplateSchema,
     'company-partitioned, not tenant-scoped (ADR-0018): the preset every office of one company '
       + 'is seeded from, written only by Super Admin and read before the office exists',
   ],
@@ -133,7 +133,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [RatioDefinitionSchema, 'RatioDefinitionSchema'],
   [ConfigSnapshotSchema, 'ConfigSnapshotSchema'],
   [ImpersonationSessionSchema, 'ImpersonationSessionSchema'],
-  [PlatformTemplateSchema, 'PlatformTemplateSchema'],
+  [CompanyTemplateSchema, 'CompanyTemplateSchema'],
   [AssetSchema, 'AssetSchema'],
   [NotificationSchema, 'NotificationSchema'],
   [NotificationPreferencesSchema, 'NotificationPreferencesSchema'],

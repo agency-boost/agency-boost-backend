@@ -6,7 +6,7 @@ import { RATIO_ORIGINS, type RatioOrigin } from './ratio-definition.schema';
 import type { RatioDefinitionView } from './ratio.service';
 import type { PublishState, TenantConfigView } from './tenant-config.service';
 import type { TemplateView } from './template.service';
-import { TEMPLATE_KINDS, type TemplateKind } from './platform-template.schema';
+import { TEMPLATE_KINDS, type TemplateKind } from './company-template.schema';
 import { RATIO_COMPARISONS, type RatioComparison } from './ratio-definition.schema';
 
 /**
@@ -38,6 +38,15 @@ export class ActivityTypeDto implements ActivityTypeView {
   description!: string | null;
 
   @ApiProperty({
+    type: [String],
+    example: ['AB', 'AAB'],
+    description:
+      'The rungs that may log this, **inherited from its category and never stored here**. '
+      + 'Empty means every rung.',
+  })
+  appliesToOrgLevelCodes!: string[];
+
+  @ApiProperty({
     type: Number,
     example: 6,
     description: 'Presentation only, and reorderable. Nothing reads it back.',
@@ -64,6 +73,18 @@ export class ActivityCategoryDto implements ActivityCategoryView {
 
   @ApiProperty({ type: String, example: 'Selling' })
   label!: string;
+
+  @ApiProperty({ type: String, nullable: true, example: 'What the office sells, and to whom' })
+  description!: string | null;
+
+  @ApiProperty({
+    type: [String],
+    example: ['AB', 'AAB'],
+    description:
+      'The rungs this section is a question for. **Empty means every rung**, and it '
+      + 'cascades to every type inside — a type has no applicability of its own.',
+  })
+  appliesToOrgLevelCodes!: string[];
 
   @ApiProperty({ type: Number, example: 2 })
   displayOrder!: number;
@@ -195,7 +216,7 @@ export class TenantConfigDto implements TenantConfigView {
 }
 
 /** A company's KPM template, as a Super Admin sees it (P4-T8, ADR-0018). */
-export class PlatformTemplateDto implements TemplateView {
+export class CompanyTemplateDto implements TemplateView {
   @ApiProperty({ type: String, description: 'Empty when nothing has been saved yet.' })
   id!: string;
 

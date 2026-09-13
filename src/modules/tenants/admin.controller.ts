@@ -32,7 +32,7 @@ import {
 import { TenantService } from './tenant.service';
 import { TemplateService } from '@/modules/config/template.service';
 import { SaveTemplateDraftDto } from '@/modules/config/template.dto';
-import { TEMPLATE_KINDS, type TemplateKind } from '@/modules/config/platform-template.schema';
+import { TEMPLATE_KINDS, type TemplateKind } from '@/modules/config/company-template.schema';
 
 /**
  * The Super Admin console.
@@ -243,7 +243,7 @@ export class AdminController {
   // that would swallow it.
 
   @Get('companies/:companyId/template/:kind')
-  @RequirePermission('platform_template:read')
+  @RequirePermission('company_template:read')
   @ApiOperation({
     summary: 'A company\'s template of one kind',
     description:
@@ -261,7 +261,7 @@ export class AdminController {
   }
 
   @Get('companies/:companyId/template/:kind/history')
-  @RequirePermission('platform_template:read')
+  @RequirePermission('company_template:read')
   @ApiOperation({
     summary: 'Every version of one template',
     description: 'Newest first. A published version is immutable; this is the record of them.',
@@ -274,7 +274,7 @@ export class AdminController {
   }
 
   @Put('companies/:companyId/template/:kind')
-  @RequirePermission('platform_template:write')
+  @RequirePermission('company_template:write')
   @ApiOperation({
     summary: 'Save the working copy',
     description:
@@ -292,7 +292,7 @@ export class AdminController {
   }
 
   @Post('companies/:companyId/template/:kind/publish')
-  @RequirePermission('platform_template:write')
+  @RequirePermission('company_template:write')
   @ApiOperation({
     summary: 'Publish the draft',
     description:

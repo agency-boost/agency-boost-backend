@@ -83,14 +83,15 @@ import {
   ConfigSnapshot, ConfigSnapshotSchema,
 } from '@/modules/config/config-snapshot.schema';
 import {
-  PlatformTemplate, PlatformTemplateSchema,
-} from '@/modules/config/platform-template.schema';
+  CompanyTemplate, CompanyTemplateSchema,
+} from '@/modules/config/company-template.schema';
 import {
   ActivityCategoryRepository, ActivityTypeRepository, ConfigSnapshotRepository,
   LeadStatusRepository, RatioDefinitionRepository,
 } from '@/modules/config/activity.repository';
 import { LeadStatusService } from '@/modules/config/lead-status.service';
 import { RatioService } from '@/modules/config/ratio.service';
+import { ConfigChangeService } from '@/modules/config/changes.service';
 import { ActivityConfigService } from '@/modules/config/activity.service';
 import { ProvisioningService } from '@/modules/config/provisioning.service';
 import {
@@ -169,7 +170,7 @@ describe('auth and admin over HTTP', () => {
           { name: LeadStatus.name, schema: LeadStatusSchema },
           { name: RatioDefinition.name, schema: RatioDefinitionSchema },
           { name: ConfigSnapshot.name, schema: ConfigSnapshotSchema },
-          { name: PlatformTemplate.name, schema: PlatformTemplateSchema },
+          { name: CompanyTemplate.name, schema: CompanyTemplateSchema },
         ]),
       ],
       controllers: [
@@ -195,7 +196,7 @@ describe('auth and admin over HTTP', () => {
         ActivityCategoryRepository, ActivityTypeRepository, ActivityConfigService,
         LeadStatusRepository, LeadStatusService, RatioDefinitionRepository, RatioService,
         ConfigSnapshotRepository,
-        TenantConfigService, TemplateService,
+        TenantConfigService, TemplateService, ConfigChangeService,
         { provide: OfficeCounter, useClass: KpmOfficeCounter },
     TemplateService,
     { provide: OfficeCounter, useClass: KpmOfficeCounter },

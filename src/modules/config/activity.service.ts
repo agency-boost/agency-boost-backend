@@ -1,8 +1,13 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
+import { DomainException } from '@/common/errors/domain.exception';
+import { ErrorCode } from '@/common/errors/error-codes';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
-import { ActivityCategoryRepository, ActivityTypeRepository } from './activity.repository';
+import {
+  ActivityCategoryRepository, ActivityTypeRepository, RatioDefinitionRepository,
+} from './activity.repository';
+import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { ActivityCategoryDocument } from './activity-category.schema';
 import { ActivityTypeDocument } from './activity-type.schema';
 
@@ -15,12 +20,27 @@ export interface ActivityTypeView {
   displayOrder: number;
   version: number;
   status: 'active' | 'archived';
+  /**
+   * **Derived from the category, never stored on the type** (ADR-0020, P4-T18).
+   *
+   * Resolved here so `/kpm/config` — and therefore the published snapshot, and therefore
+   * Phase 6's capture screen — carries one answer already computed. Three call sites
+   * already flatten types away from their categories, and making each re-find its parent
+   * would be three chances to get visibility wrong.
+   *
+   * A snapshot published before this existed carries the derivation of its own day. That
+   * is correct: a snapshot is what was published, not what would be published now.
+   */
+  appliesToOrgLevelCodes: string[];
 }
 
 export interface ActivityCategoryView {
   id: string;
   code: string;
   label: string;
+  description: string | null;
+  /** The stored truth. Empty means every rung; it cascades to every type inside. */
+  appliesToOrgLevelCodes: string[];
   displayOrder: number;
   version: number;
   status: 'active' | 'archived';
@@ -47,6 +67,13 @@ export class ActivityConfigService {
   constructor(
     private readonly categories: ActivityCategoryRepository,
     private readonly types: ActivityTypeRepository,
+    /*
+     * The **repository**, not `RatioService` — that service already depends on this one,
+     * and injecting it back would be a cycle. The cross-check only needs to read which
+     * ratios name this section's types, which is a query, not a policy.
+     */
+    private readonly ratios: RatioDefinitionRepository,
+    private readonly orgLevels: OrgLevelService,
     private readonly audit: AuditService,
     private readonly clock: Clock,
   ) {}
@@ -71,7 +98,8 @@ export class ActivityConfigService {
       ...this.categoryView(category),
       types: types
         .filter((t) => t.categoryCode === category.code)
-        .map((t) => this.typeView(t)),
+        // The cascade, resolved once here so nothing downstream re-derives it.
+        .map((t) => this.typeView(t, category.appliesToOrgLevelCodes)),
     }));
   }
 
@@ -85,7 +113,10 @@ export class ActivityConfigService {
 
   async createCategory(
     ctx: RequestContext,
-    input: { code: string; label: string },
+    input: {
+      code: string; label: string; description?: string | null;
+      appliesToOrgLevelCodes?: string[];
+    },
   ): Promise<ActivityCategoryView> {
     const code = this.normaliseCode(input.code);
     await this.refuseDuplicateCategory(ctx, code);
@@ -93,6 +124,10 @@ export class ActivityConfigService {
     const created = await this.categories.create(ctx, {
       code,
       label: input.label.trim(),
+      description: input.description?.trim() || null,
+      appliesToOrgLevelCodes: await this.orgLevels.checkedRungs(
+        ctx, input.appliesToOrgLevelCodes ?? [], 'section',
+      ),
       // Appended, not inserted. Somebody adding a category has not said where it goes,
       // and guessing would renumber rows they did not touch.
       displayOrder: (await this.categories.count(ctx, {})) + 1,
@@ -104,18 +139,106 @@ export class ActivityConfigService {
     return { ...this.categoryView(created), types: [] };
   }
 
-  async renameCategory(
+  /**
+   * Label, description and who the section is for. **Never the code** (ADR-0006).
+   *
+   * Narrowing `appliesToOrgLevelCodes` is checked against the ratios that count this
+   * section's types: a ratio that still applies to a rung this section no longer does
+   * divides by activity nobody on that rung can log, which reads on their screen as their
+   * own failure. That is the defect ADR-0020 closed from the other side, and closing it
+   * only at the ratio would leave the likelier door open — narrowing is the new control.
+   */
+  async updateCategory(
     ctx: RequestContext,
     id: string,
-    label: string,
+    input: { label?: string; description?: string | null; appliesToOrgLevelCodes?: string[] },
   ): Promise<ActivityCategoryView> {
+    const existing = await this.categories.findById(ctx, id);
+    if (!existing) throw new NotFoundException('Activity category');
+
+    const set: Record<string, unknown> = {};
+    if (input.label !== undefined) set.label = input.label.trim();
+    if (input.description !== undefined) set.description = input.description?.trim() || null;
+    if (input.appliesToOrgLevelCodes !== undefined) {
+      const rungs = await this.orgLevels.checkedRungs(ctx, input.appliesToOrgLevelCodes, 'section');
+      await this.refuseUnreachableInputs(ctx, existing.code, rungs);
+      set.appliesToOrgLevelCodes = rungs;
+    }
+    if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
+
     const updated = await this.categories.updateById(ctx, id, {
-      $set: { label: label.trim() },
-      $inc: { version: 1 },
+      $set: set, $inc: { version: 1 },
     });
     if (!updated) throw new NotFoundException('Activity category');
-    await this.record(ctx, 'activity_category.renamed', id, { label });
+    await this.record(ctx, 'activity_category.updated', id, set);
     return { ...this.categoryView(updated), types: [] };
+  }
+
+  /**
+   * Archive a section, **and the types inside it**.
+   *
+   * A live type in a retired section would be loggable from nowhere: the capture screen
+   * groups by category, so it would simply stop appearing while still counting as active
+   * to every validator that asks. Cascading is the honest state, and it is reversible —
+   * restoring the section leaves the types archived, because bringing back a section is
+   * not the same decision as bringing back everything that was ever in it.
+   *
+   * Archiving is not narrowing: it produces an honest absence rather than a number with
+   * nothing underneath it, so it needs no ratio cross-check. A ratio naming an archived
+   * type keeps computing over the history that type already has.
+   */
+  async archiveCategory(ctx: RequestContext, id: string): Promise<ActivityCategoryView> {
+    const at = this.clock.now();
+    const updated = await this.categories.updateById(ctx, id, {
+      $set: { status: 'archived', archivedAt: at }, $inc: { version: 1 },
+    });
+    if (!updated) throw new NotFoundException('Activity category');
+
+    const cascaded = await this.types.updateMany(
+      ctx,
+      { categoryCode: updated.code, status: 'active' },
+      { $set: { status: 'archived', archivedAt: at }, $inc: { version: 1 } },
+    );
+    await this.record(ctx, 'activity_category.archived', id, {
+      code: updated.code, typesArchived: cascaded,
+    });
+    return { ...this.categoryView(updated), types: [] };
+  }
+
+  async restoreCategory(ctx: RequestContext, id: string): Promise<ActivityCategoryView> {
+    const updated = await this.categories.updateById(ctx, id, {
+      $set: { status: 'active', archivedAt: null }, $inc: { version: 1 },
+    });
+    if (!updated) throw new NotFoundException('Activity category');
+    await this.record(ctx, 'activity_category.restored', id, { code: updated.code });
+    return { ...this.categoryView(updated), types: [] };
+  }
+
+  /**
+   * Reorder the sections, by naming all of them.
+   *
+   * Same contract as `reorderTypes` and the same reason: a single "move this to position
+   * 3" would make the server infer what happened to the rest, and two people dragging at
+   * once would interleave into an order neither asked for. **Bumps no version** — position
+   * is presentation, and nothing reads it back (invariant §4).
+   */
+  async reorderCategories(ctx: RequestContext, ids: string[]): Promise<ActivityCategoryView[]> {
+    const live = await this.categories.find(ctx, {});
+    const known = new Set(live.map((c) => String(c._id)));
+    if (ids.length !== known.size || ids.some((id) => !known.has(id))) {
+      throw new BadRequestException('Send every section, once each, in the order you want them.');
+    }
+
+    await Promise.all(
+      ids.map((id, i) => this.categories.updateById(ctx, id, { $set: { displayOrder: i + 1 } })),
+    );
+    await this.record(ctx, 'activity_category.reordered', ctx.kpmId ?? '', { count: ids.length });
+    return this.list(ctx, true);
+  }
+
+  /** Kept for the callers that only rename. */
+  renameCategory(ctx: RequestContext, id: string, label: string): Promise<ActivityCategoryView> {
+    return this.updateCategory(ctx, id, { label });
   }
 
   // ------------------------------------------------------------------ types
@@ -140,7 +263,7 @@ export class ActivityConfigService {
     } as Partial<ActivityTypeDocument>);
 
     await this.record(ctx, 'activity_type.created', String(created._id), { code, categoryCode });
-    return this.typeView(created);
+    return this.typeView(created, await this.rungsOf(ctx, created.categoryCode));
   }
 
   /**
@@ -168,7 +291,7 @@ export class ActivityConfigService {
     const updated = await this.types.updateById(ctx, id, { $set: set, $inc: { version: 1 } });
     if (!updated) throw new NotFoundException('Activity type');
     await this.record(ctx, 'activity_type.updated', id, set);
-    return this.typeView(updated);
+    return this.typeView(updated, await this.rungsOf(ctx, updated.categoryCode));
   }
 
   /**
@@ -194,7 +317,10 @@ export class ActivityConfigService {
       ids.map((id, index) => this.types.updateById(ctx, id, { $set: { displayOrder: index + 1 } })),
     );
     await this.record(ctx, 'activity_type.reordered', ctx.kpmId ?? '', { count: ids.length });
-    return (await this.types.find(ctx, {}, { sort: { displayOrder: 1 } })).map((t) => this.typeView(t));
+    const categories = await this.categories.find(ctx, {});
+    const rungs = new Map(categories.map((c) => [c.code, c.appliesToOrgLevelCodes]));
+    return (await this.types.find(ctx, {}, { sort: { displayOrder: 1 } }))
+      .map((t) => this.typeView(t, rungs.get(t.categoryCode) ?? []));
   }
 
   /** Archive, which is what this product means by delete (invariant §3). */
@@ -205,7 +331,7 @@ export class ActivityConfigService {
     });
     if (!updated) throw new NotFoundException('Activity type');
     await this.record(ctx, 'activity_type.archived', id, { code: updated.code });
-    return this.typeView(updated);
+    return this.typeView(updated, await this.rungsOf(ctx, updated.categoryCode));
   }
 
   async restoreType(ctx: RequestContext, id: string): Promise<ActivityTypeView> {
@@ -215,7 +341,7 @@ export class ActivityConfigService {
     });
     if (!updated) throw new NotFoundException('Activity type');
     await this.record(ctx, 'activity_type.restored', id, { code: updated.code });
-    return this.typeView(updated);
+    return this.typeView(updated, await this.rungsOf(ctx, updated.categoryCode));
   }
 
   // -------------------------------------------------------------- internals
@@ -256,19 +382,83 @@ export class ActivityConfigService {
       id: String(doc._id),
       code: doc.code,
       label: doc.label,
+      description: doc.description,
+      appliesToOrgLevelCodes: doc.appliesToOrgLevelCodes,
       displayOrder: doc.displayOrder,
       version: doc.version,
       status: doc.status,
     };
   }
 
-  private typeView(doc: ActivityTypeDocument): ActivityTypeView {
+  /**
+   * Refuse a narrowing that would leave a ratio dividing by activity nobody can log.
+   *
+   * With `effective(X) = X.length ? X : every active rung`, a ratio counting this
+   * section's types must satisfy `effective(section) ⊇ effective(ratio)`. The case a
+   * naive check misses is **ratio empty, section narrowed**: "empty" reads as
+   * unconstrained on both sides, and an unconstrained ratio over a narrowed section is
+   * exactly the permanent-alert defect ADR-0020 closed — an agent reading a figure with
+   * nothing underneath it, marked as their failure.
+   *
+   * Names the ratios, because "this would break a ratio" sends an Owner to read all six.
+   */
+  private async refuseUnreachableInputs(
+    ctx: RequestContext, categoryCode: string, rungs: string[],
+  ): Promise<void> {
+    if (rungs.length === 0) return; // Widening to everyone can break nothing.
+
+    const mine = new Set(
+      (await this.types.find(ctx, { categoryCode, status: 'active' })).map((t) => t.code),
+    );
+    if (mine.size === 0) return;
+
+    const ladder = await this.orgLevels.ladderForOffice(ctx);
+    const everyRung = ladder.filter((l) => l.status === 'active').map((l) => l.code);
+    const section = new Set(rungs);
+
+    const broken: string[] = [];
+    for (const ratio of await this.ratios.find(ctx, { status: 'active' })) {
+      const counts = [...ratio.numerator, ...ratio.denominator].some((c) => mine.has(c));
+      if (!counts) continue;
+      const applies = ratio.appliesToOrgLevelCodes.length
+        ? ratio.appliesToOrgLevelCodes
+        : everyRung;
+      if (applies.some((r) => !section.has(r))) broken.push(ratio.code);
+    }
+
+    if (broken.length) {
+      throw new DomainException(
+        ErrorCode.CONFIG_RATIO_UNREACHABLE_INPUT,
+        `${broken.join(', ')} counts activity in this section, and applies to rungs the `
+          + 'section would no longer be shown to. Those agents would be measured on '
+          + 'something they cannot log. Narrow the ratio first, or widen the section.',
+        HttpStatus.BAD_REQUEST,
+        { ratios: broken },
+      );
+    }
+  }
+
+  /**
+   * The rungs a type inherits, read from its category.
+   *
+   * A lookup per returned row would be wrong in a list; `list()` therefore resolves the
+   * cascade itself and this exists for the single-row paths, where one extra read is
+   * cheaper than making every caller remember the rule.
+   */
+  private async rungsOf(ctx: RequestContext, categoryCode: string): Promise<string[]> {
+    const [category] = await this.categories.find(ctx, { code: categoryCode });
+    return category?.appliesToOrgLevelCodes ?? [];
+  }
+
+  /** `appliesToOrgLevelCodes` comes from the category — the type never stores its own. */
+  private typeView(doc: ActivityTypeDocument, categoryRungs: string[]): ActivityTypeView {
     return {
       id: String(doc._id),
       code: doc.code,
       categoryCode: doc.categoryCode,
       label: doc.label,
       description: doc.description,
+      appliesToOrgLevelCodes: categoryRungs,
       displayOrder: doc.displayOrder,
       version: doc.version,
       status: doc.status,

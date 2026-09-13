@@ -25,7 +25,7 @@ import { ConfigSnapshotSchema } from '@/modules/config/config-snapshot.schema';
 import {
   ImpersonationSessionSchema,
 } from '@/modules/auth/impersonation-session.schema';
-import { PlatformTemplateSchema } from '@/modules/config/platform-template.schema';
+import { CompanyTemplateSchema } from '@/modules/config/company-template.schema';
 
 /**
  * P2-T8: soft delete everywhere.
@@ -54,7 +54,7 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['ratioDefinitions', RatioDefinitionSchema],
   ['configSnapshots', ConfigSnapshotSchema],
   ['impersonationSessions', ImpersonationSessionSchema],
-  ['platformTemplates', PlatformTemplateSchema],
+  ['companyTemplates', CompanyTemplateSchema],
 ];
 
 /**
@@ -81,7 +81,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [RatioDefinitionSchema, 'RatioDefinitionSchema'],
   [ConfigSnapshotSchema, 'ConfigSnapshotSchema'],
   [ImpersonationSessionSchema, 'ImpersonationSessionSchema'],
-  [PlatformTemplateSchema, 'PlatformTemplateSchema'],
+  [CompanyTemplateSchema, 'CompanyTemplateSchema'],
   [MembershipSchema, 'MembershipSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [JoinRequestSchema, 'JoinRequestSchema'],

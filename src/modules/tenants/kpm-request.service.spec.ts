@@ -27,8 +27,8 @@ import { ConfigSnapshot, ConfigSnapshotSchema } from '@/modules/config/config-sn
 import { configModule } from '../../../test/config-module';
 import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
 import {
-  PlatformTemplate, PlatformTemplateSchema,
-} from '@/modules/config/platform-template.schema';
+  CompanyTemplate, CompanyTemplateSchema,
+} from '@/modules/config/company-template.schema';
 
 const NOW = new Date('2026-09-06T02:00:00Z');
 
@@ -68,7 +68,7 @@ describe('KpmRequestService (P3.5-T2)', () => {
       mongoose.model(LeadStatus.name, LeadStatusSchema) as never,
       mongoose.model(RatioDefinition.name, RatioDefinitionSchema) as never,
       mongoose.model(ConfigSnapshot.name, ConfigSnapshotSchema) as never,
-      mongoose.model(PlatformTemplate.name, PlatformTemplateSchema) as never,
+      mongoose.model(CompanyTemplate.name, CompanyTemplateSchema) as never,
       new FixedClock(NOW),
       configModule(NOW).config,
     );

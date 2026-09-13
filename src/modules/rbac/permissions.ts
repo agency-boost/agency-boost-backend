@@ -156,8 +156,8 @@ export const PERMISSIONS = {
    * grant rather than a refactor — which is the same argument `kpm_request:read` and
    * `kpm_request:decide` were split on.
    */
-  'platform_template:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
-  'platform_template:write': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  'company_template:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  'company_template:write': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   /*
    * The company's role ladder, readable by the offices that stand on it (P4-T9).
    *

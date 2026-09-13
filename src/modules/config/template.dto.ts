@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsIn, IsObject } from 'class-validator';
-import { TEMPLATE_KINDS, type TemplateKind } from './platform-template.schema';
+import { TEMPLATE_KINDS, type TemplateKind } from './company-template.schema';
 
 export class SaveTemplateDraftDto {
   /**

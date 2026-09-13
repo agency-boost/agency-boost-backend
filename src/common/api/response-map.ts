@@ -19,7 +19,7 @@ import {
 } from '@/modules/tenants/platform.response.dto';
 import {
   ActivityCategoryDto, ActivityTypeDto, LeadPipelineDto, LeadStatusDto, RatioDefinitionDto,
-  PlatformTemplateDto, PublishStateDto, TenantConfigDto,
+  CompanyTemplateDto, PublishStateDto, TenantConfigDto,
 } from '@/modules/config/config.response.dto';
 
 /** What one operation answers with: a class, and whether it comes back as an array. */
@@ -82,7 +82,12 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
 
   TenantConfigController_listActivityTypes: { type: ActivityCategoryDto, isArray: true },
   TenantConfigController_createCategory: { type: ActivityCategoryDto },
-  TenantConfigController_renameCategory: { type: ActivityCategoryDto },
+  TenantConfigController_updateCategory: { type: ActivityCategoryDto },
+  TenantConfigController_archiveCategory: { type: ActivityCategoryDto },
+  TenantConfigController_restoreCategory: { type: ActivityCategoryDto },
+  TenantConfigController_reorderCategories: { type: ActivityCategoryDto, isArray: true },
+  // The working copy as it now stands — publishing is still a separate act.
+  TenantConfigController_applyChanges: { type: TenantConfigDto },
   TenantConfigController_createType: { type: ActivityTypeDto },
   TenantConfigController_reorderTypes: { type: ActivityTypeDto, isArray: true },
   TenantConfigController_updateType: { type: ActivityTypeDto },
@@ -97,10 +102,10 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_restoreLeadStatus: { type: LeadStatusDto },
   AdminController_elevateSession: { type: StatusAckDto },
   AdminController_sessionLog: { type: ImpersonationLogEntryDto, isArray: true },
-  AdminController_readTemplate: { type: PlatformTemplateDto },
-  AdminController_templateHistory: { type: PlatformTemplateDto, isArray: true },
-  AdminController_saveTemplateDraft: { type: PlatformTemplateDto },
-  AdminController_publishTemplate: { type: PlatformTemplateDto },
+  AdminController_readTemplate: { type: CompanyTemplateDto },
+  AdminController_templateHistory: { type: CompanyTemplateDto, isArray: true },
+  AdminController_saveTemplateDraft: { type: CompanyTemplateDto },
+  AdminController_publishTemplate: { type: CompanyTemplateDto },
   TenantConfigReadController_orgLevels: { type: OrgLevelRowDto, isArray: true },
   TenantConfigReadController_readConfig: { type: TenantConfigDto },
   TenantConfigController_publishState: { type: PublishStateDto },

@@ -36,14 +36,15 @@ import {
   ConfigSnapshot, ConfigSnapshotSchema,
 } from '@/modules/config/config-snapshot.schema';
 import {
-  PlatformTemplate, PlatformTemplateSchema,
-} from '@/modules/config/platform-template.schema';
+  CompanyTemplate, CompanyTemplateSchema,
+} from '@/modules/config/company-template.schema';
 import {
   ActivityCategoryRepository, ActivityTypeRepository, ConfigSnapshotRepository,
   LeadStatusRepository, RatioDefinitionRepository,
 } from '@/modules/config/activity.repository';
 import { LeadStatusService } from '@/modules/config/lead-status.service';
 import { RatioService } from '@/modules/config/ratio.service';
+import { ConfigChangeService } from '@/modules/config/changes.service';
 import { ActivityConfigService } from '@/modules/config/activity.service';
 import { ProvisioningService } from '@/modules/config/provisioning.service';
 import {
@@ -142,7 +143,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: LeadStatus.name, schema: LeadStatusSchema },
       { name: RatioDefinition.name, schema: RatioDefinitionSchema },
       { name: ConfigSnapshot.name, schema: ConfigSnapshotSchema },
-      { name: PlatformTemplate.name, schema: PlatformTemplateSchema },
+      { name: CompanyTemplate.name, schema: CompanyTemplateSchema },
     ]),
   ],
   controllers: [
@@ -205,6 +206,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     LeadStatusService,
     RatioDefinitionRepository,
     RatioService,
+    ConfigChangeService,
     ConfigSnapshotRepository,
     TenantConfigService,
     TemplateService,

@@ -9,8 +9,8 @@ import {
   SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES, SEED_RATIO_DEFINITIONS,
 } from '@/domain/constants';
 import {
-  PlatformTemplate, PlatformTemplateDocument, TemplateKind,
-} from './platform-template.schema';
+  CompanyTemplate, CompanyTemplateDocument, TemplateKind,
+} from './company-template.schema';
 import { OfficeCounter } from './office-counter.port';
 
 export interface TemplateView {
@@ -64,8 +64,8 @@ const STARTING_PAYLOAD: Record<string, () => Record<string, unknown>> = {
 @Injectable()
 export class TemplateService {
   constructor(
-    @InjectModel(PlatformTemplate.name)
-    private readonly templates: Model<PlatformTemplateDocument>,
+    @InjectModel(CompanyTemplate.name)
+    private readonly templates: Model<CompanyTemplateDocument>,
     @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
     private readonly audit: AuditService,
     private readonly clock: Clock,
@@ -137,8 +137,8 @@ export class TemplateService {
       });
 
     await this.audit.record(ctx, {
-      action: 'platform_template.draft_saved',
-      targetCollection: 'platformTemplates',
+      action: 'company_template.draft_saved',
+      targetCollection: 'companyTemplates',
       targetId: String(saved!._id),
       after: { companyId, kind },
     });
@@ -181,8 +181,8 @@ export class TemplateService {
     await draft.save();
 
     await this.audit.record(ctx, {
-      action: 'platform_template.published',
-      targetCollection: 'platformTemplates',
+      action: 'company_template.published',
+      targetCollection: 'companyTemplates',
       targetId: String(draft._id),
       after: { companyId, kind, version: draft.version },
     });
@@ -259,7 +259,7 @@ export class TemplateService {
   }
 
   private view(
-    doc: PlatformTemplateDocument,
+    doc: CompanyTemplateDocument,
     publishedVersion: number | null,
     officesBehind: number,
   ): TemplateView {

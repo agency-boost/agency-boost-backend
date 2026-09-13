@@ -1798,7 +1798,7 @@
     },
     "/api/v1/admin/companies/{companyId}/template/{kind}": {
       "get": {
-        "description": "The draft if there is one, else the newest published, else a starting point built from the platform defaults — a company with nothing published is the normal state of a new insurer, and an empty answer would mean retyping twelve activity types from a PDF. `officesBehind` says how many of this company's offices are on something older, which is the count the Superadmin prototype puts on its front page.\n\n**Requires `platform_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The draft if there is one, else the newest published, else a starting point built from the platform defaults — a company with nothing published is the normal state of a new insurer, and an empty answer would mean retyping twelve activity types from a PDF. `officesBehind` says how many of this company's offices are on something older, which is the count the Superadmin prototype puts on its front page.\n\n**Requires `company_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_readTemplate_v1",
         "parameters": [
           {
@@ -1824,7 +1824,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlatformTemplateDto"
+                  "$ref": "#/components/schemas/CompanyTemplateDto"
                 }
               }
             }
@@ -1840,7 +1840,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `platform_template:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `company_template:read`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1879,10 +1879,10 @@
         "tags": [
           "admin (Super Admin)"
         ],
-        "x-required-permission": "platform_template:read"
+        "x-required-permission": "company_template:read"
       },
       "put": {
-        "description": "The whole payload, not a patch: a template is edited and copied as one document, and merging two versions of an ordered list of codes has no answer anybody would predict. Creates the draft if this is the first edit since publishing.\n\n**Requires `platform_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The whole payload, not a patch: a template is edited and copied as one document, and merging two versions of an ordered list of codes has no answer anybody would predict. Creates the draft if this is the first edit since publishing.\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_saveTemplateDraft_v1",
         "parameters": [
           {
@@ -1918,7 +1918,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlatformTemplateDto"
+                  "$ref": "#/components/schemas/CompanyTemplateDto"
                 }
               }
             }
@@ -1944,7 +1944,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `platform_template:write`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `company_template:write`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1983,12 +1983,12 @@
         "tags": [
           "admin (Super Admin)"
         ],
-        "x-required-permission": "platform_template:write"
+        "x-required-permission": "company_template:write"
       }
     },
     "/api/v1/admin/companies/{companyId}/template/{kind}/history": {
       "get": {
-        "description": "Newest first. A published version is immutable; this is the record of them.\n\n**Requires `platform_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Newest first. A published version is immutable; this is the record of them.\n\n**Requires `company_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_templateHistory_v1",
         "parameters": [
           {
@@ -2016,7 +2016,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/PlatformTemplateDto"
+                    "$ref": "#/components/schemas/CompanyTemplateDto"
                   }
                 }
               }
@@ -2033,7 +2033,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `platform_template:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `company_template:read`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2072,12 +2072,12 @@
         "tags": [
           "admin (Super Admin)"
         ],
-        "x-required-permission": "platform_template:read"
+        "x-required-permission": "company_template:read"
       }
     },
     "/api/v1/admin/companies/{companyId}/template/{kind}/publish": {
       "post": {
-        "description": "Becomes the version new offices are seeded from. **Reaches nothing that already exists** — copy-on-provision means copy once, and an office that has diverged keeps its divergence. Refuses a payload that would produce a broken office, because the alternative is discovering it while creating one for a real branch.\n\n**Requires `platform_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Becomes the version new offices are seeded from. **Reaches nothing that already exists** — copy-on-provision means copy once, and an office that has diverged keeps its divergence. Refuses a payload that would produce a broken office, because the alternative is discovering it while creating one for a real branch.\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_publishTemplate_v1",
         "parameters": [
           {
@@ -2103,7 +2103,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlatformTemplateDto"
+                  "$ref": "#/components/schemas/CompanyTemplateDto"
                 }
               }
             }
@@ -2119,7 +2119,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `platform_template:write`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `company_template:write`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2158,7 +2158,7 @@
         "tags": [
           "admin (Super Admin)"
         ],
-        "x-required-permission": "platform_template:write"
+        "x-required-permission": "company_template:write"
       }
     },
     "/api/v1/admin/impersonation/{sessionId}/elevate": {
@@ -6066,6 +6066,85 @@
         "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
       }
     },
+    "/api/v1/kpm/settings/changes": {
+      "post": {
+        "description": "The settings screens stage every edit and send one request. **Validated entirely before anything is written**, so a refusal leaves the office exactly as it was, and so a `type.create` can name a section a `category.create` makes earlier in the same batch. Every change to an existing row carries the `version` the screen read: a row that moved on refuses the whole batch with `409 VERSION_CONFLICT`, naming what changed, rather than letting the second of two admins erase the first. Returns the working copy as it now stands — publishing is still a separate act.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_applyChanges_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyConfigChangesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantConfigDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Apply a batch of staged changes, or none of them",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
     "/api/v1/kpm/settings/activity-categories": {
       "post": {
         "operationId": "TenantConfigController_createCategory_v1",
@@ -6145,10 +6224,92 @@
         "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
       }
     },
+    "/api/v1/kpm/settings/activity-categories/reorder": {
+      "patch": {
+        "description": "Send every id, once each, in the order you want. Declared **above** `activity-categories/:id`, or Nest reads \"reorder\" as an id. Bumps no version: position is presentation, and nothing reads it back.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_reorderCategories_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderActivityTypesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ActivityCategoryDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reorder the categories",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
     "/api/v1/kpm/settings/activity-categories/{id}": {
       "patch": {
-        "description": "The label only. The code is the identity every type under it holds.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
-        "operationId": "TenantConfigController_renameCategory_v1",
+        "description": "Label, description and the rungs it applies to. **Never the code** — that is the identity every type under it holds. Narrowing the rungs is refused when a ratio counting this section still applies to a rung the section would lose.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_updateCategory_v1",
         "parameters": [
           {
             "name": "id",
@@ -6164,7 +6325,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RenameActivityCategoryDto"
+                "$ref": "#/components/schemas/UpdateActivityCategoryDto"
               }
             }
           }
@@ -6236,7 +6397,161 @@
             "bearer": []
           }
         ],
-        "summary": "Rename a category",
+        "summary": "Edit a category",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      },
+      "delete": {
+        "description": "Archiving, never deleting (invariant §3) — and it cascades to the section’s types, because a live type inside a retired section would still be loggable from nowhere. A ratio naming an archived type keeps computing over its history.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_archiveCategory_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityCategoryDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Archive a category, and everything in it",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/kpm/settings/activity-categories/{id}/restore": {
+      "post": {
+        "description": "The section returns; its types stay archived until restored one by one.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_restoreCategory_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityCategoryDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Bring a category back",
         "tags": [
           "tenant configuration"
         ],
@@ -8514,6 +8829,58 @@
           "code"
         ]
       },
+      "ConfigChangeDto": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "category.create",
+              "category.update",
+              "category.archive",
+              "category.restore",
+              "type.create",
+              "type.update",
+              "type.archive",
+              "type.restore",
+              "ratio.create",
+              "ratio.update",
+              "ratio.archive",
+              "ratio.restore"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "The row this op addresses. Absent on a `create`."
+          },
+          "expectedVersion": {
+            "type": "number",
+            "minimum": 1
+          },
+          "body": {
+            "type": "object",
+            "description": "The op’s own fields — the same shape its single-row route takes. Validated by the service that applies it, not here: one rule, one place."
+          }
+        },
+        "required": [
+          "op"
+        ]
+      },
+      "ApplyConfigChangesDto": {
+        "type": "object",
+        "properties": {
+          "ops": {
+            "description": "Applied in order. **Validated entirely before anything is written**, so an op that refuses leaves the office exactly as it was — and so `type.create` can name a category `category.create` makes earlier in the same batch.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigChangeDto"
+            }
+          }
+        },
+        "required": [
+          "ops"
+        ]
+      },
       "CreateActivityCategoryDto": {
         "type": "object",
         "properties": {
@@ -8527,6 +8894,22 @@
             "example": "Selling",
             "minLength": 1,
             "maxLength": 80
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "What the office sells, and to whom"
+          },
+          "appliesToOrgLevelCodes": {
+            "example": [
+              "AB",
+              "AAB"
+            ],
+            "description": "The ladder rungs this section is a question for. **Empty means every rung**, and it cascades to every activity type inside it.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -8534,7 +8917,25 @@
           "label"
         ]
       },
-      "RenameActivityCategoryDto": {
+      "ReorderActivityTypesDto": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "example": [
+              "66f0…a1",
+              "66f0…a2"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "ids"
+        ]
+      },
+      "UpdateActivityCategoryDto": {
         "type": "object",
         "properties": {
           "label": {
@@ -8542,11 +8943,24 @@
             "example": "Penjualan",
             "minLength": 1,
             "maxLength": 80
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "What the office sells, and to whom"
+          },
+          "appliesToOrgLevelCodes": {
+            "example": [
+              "AB",
+              "AAB"
+            ],
+            "description": "The ladder rungs this section is a question for. **Empty means every rung**, and it cascades to every activity type inside it.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
-        },
-        "required": [
-          "label"
-        ]
+        }
       },
       "CreateActivityTypeDto": {
         "type": "object",
@@ -8577,24 +8991,6 @@
           "code",
           "categoryCode",
           "label"
-        ]
-      },
-      "ReorderActivityTypesDto": {
-        "type": "object",
-        "properties": {
-          "ids": {
-            "example": [
-              "66f0…a1",
-              "66f0…a2"
-            ],
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "ids"
         ]
       },
       "UpdateActivityTypeDto": {
@@ -9493,6 +9889,17 @@
             "nullable": true,
             "example": "secara mandiri atau melalui BOP"
           },
+          "appliesToOrgLevelCodes": {
+            "example": [
+              "AB",
+              "AAB"
+            ],
+            "description": "The rungs that may log this, **inherited from its category and never stored here**. Empty means every rung.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "displayOrder": {
             "type": "number",
             "example": 6,
@@ -9517,6 +9924,7 @@
           "categoryCode",
           "label",
           "description",
+          "appliesToOrgLevelCodes",
           "displayOrder",
           "version",
           "status"
@@ -9535,6 +9943,22 @@
           "label": {
             "type": "string",
             "example": "Selling"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "example": "What the office sells, and to whom"
+          },
+          "appliesToOrgLevelCodes": {
+            "example": [
+              "AB",
+              "AAB"
+            ],
+            "description": "The rungs this section is a question for. **Empty means every rung**, and it cascades to every type inside — a type has no applicability of its own.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "displayOrder": {
             "type": "number",
@@ -9562,10 +9986,106 @@
           "id",
           "code",
           "label",
+          "description",
+          "appliesToOrgLevelCodes",
           "displayOrder",
           "version",
           "status",
           "types"
+        ]
+      },
+      "RatioDefinitionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "SELLING_SUCCESS_RATE"
+          },
+          "label": {
+            "type": "string",
+            "example": "Selling success rate"
+          },
+          "numerator": {
+            "example": [
+              "SELL_SUBMISSION"
+            ],
+            "description": "Activity type codes, summed. Never the prototype's item numbers.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "denominator": {
+            "example": [
+              "SELL_PRESENTATION",
+              "SELL_FOLLOWUP"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "benchmark": {
+            "type": "number",
+            "example": 0.15,
+            "description": "The office's own value."
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "platform",
+              "office"
+            ],
+            "description": "`platform` rows were provisioned — their numerator and denominator are fixed so that two offices’ figures mean the same thing. `office` rows are the office’s own and free in every respect."
+          },
+          "appliesToOrgLevelCodes": {
+            "example": [
+              "AB",
+              "AAB"
+            ],
+            "description": "Ladder rung codes. **Empty means every rung.**",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "comparison": {
+            "type": "string",
+            "enum": [
+              "gte",
+              "band"
+            ]
+          },
+          "displayOrder": {
+            "type": "number"
+          },
+          "version": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "label",
+          "numerator",
+          "denominator",
+          "benchmark",
+          "origin",
+          "appliesToOrgLevelCodes",
+          "comparison",
+          "displayOrder",
+          "version",
+          "status"
         ]
       },
       "LeadStatusDto": {
@@ -9643,6 +10163,39 @@
           "statuses"
         ]
       },
+      "TenantConfigDto": {
+        "type": "object",
+        "properties": {
+          "activity": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityCategoryDto"
+            }
+          },
+          "ratios": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RatioDefinitionDto"
+            }
+          },
+          "leadPipelines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeadPipelineDto"
+            }
+          },
+          "version": {
+            "type": "number",
+            "description": "The highest version across everything above — one number to compare rather than three collections to reason about. It moves when what the office counts changes, and not on a reorder, because a reorder rebinds nothing."
+          }
+        },
+        "required": [
+          "activity",
+          "ratios",
+          "leadPipelines",
+          "version"
+        ]
+      },
       "ImpersonationLogEntryDto": {
         "type": "object",
         "properties": {
@@ -9698,7 +10251,7 @@
           "expiresAt"
         ]
       },
-      "PlatformTemplateDto": {
+      "CompanyTemplateDto": {
         "type": "object",
         "properties": {
           "id": {
@@ -9799,133 +10352,6 @@
           "displayOrder",
           "status",
           "archivedAt"
-        ]
-      },
-      "RatioDefinitionDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string",
-            "example": "SELLING_SUCCESS_RATE"
-          },
-          "label": {
-            "type": "string",
-            "example": "Selling success rate"
-          },
-          "numerator": {
-            "example": [
-              "SELL_SUBMISSION"
-            ],
-            "description": "Activity type codes, summed. Never the prototype's item numbers.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "denominator": {
-            "example": [
-              "SELL_PRESENTATION",
-              "SELL_FOLLOWUP"
-            ],
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "benchmark": {
-            "type": "number",
-            "example": 0.15,
-            "description": "The office's own value."
-          },
-          "origin": {
-            "type": "string",
-            "enum": [
-              "platform",
-              "office"
-            ],
-            "description": "`platform` rows were provisioned — their numerator and denominator are fixed so that two offices’ figures mean the same thing. `office` rows are the office’s own and free in every respect."
-          },
-          "appliesToOrgLevelCodes": {
-            "example": [
-              "AB",
-              "AAB"
-            ],
-            "description": "Ladder rung codes. **Empty means every rung.**",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "comparison": {
-            "type": "string",
-            "enum": [
-              "gte",
-              "band"
-            ]
-          },
-          "displayOrder": {
-            "type": "number"
-          },
-          "version": {
-            "type": "number"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "active",
-              "archived"
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "code",
-          "label",
-          "numerator",
-          "denominator",
-          "benchmark",
-          "origin",
-          "appliesToOrgLevelCodes",
-          "comparison",
-          "displayOrder",
-          "version",
-          "status"
-        ]
-      },
-      "TenantConfigDto": {
-        "type": "object",
-        "properties": {
-          "activity": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ActivityCategoryDto"
-            }
-          },
-          "ratios": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RatioDefinitionDto"
-            }
-          },
-          "leadPipelines": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/LeadPipelineDto"
-            }
-          },
-          "version": {
-            "type": "number",
-            "description": "The highest version across everything above — one number to compare rather than three collections to reason about. It moves when what the office counts changes, and not on a reorder, because a reorder rebinds nothing."
-          }
-        },
-        "required": [
-          "activity",
-          "ratios",
-          "leadPipelines",
-          "version"
         ]
       },
       "PublishStateDto": {

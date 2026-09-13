@@ -66,6 +66,41 @@ export class OrgLevelService {
    * registered and not yet joined has no ladder, and every consumer renders that as
    * "no constraint" rather than as a failure.
    */
+  /**
+   * Normalise a list of rung codes, refusing any the caller's company does not have.
+   *
+   * Here rather than in each consumer for the same reason `ladderForOffice` is — two
+   * copies would be two answers to which rungs an office has, and they would drift in the
+   * message before they drifted in the rule.
+   *
+   * **Empty means every rung**, so it short-circuits without reading the ladder at all:
+   * an office that never opens the control never pays for it, and a caller cannot
+   * accidentally narrow something to nothing by sending `[]`.
+   *
+   * **Archived rungs are refused.** An archived rung is still readable, so a naive
+   * "does it exist" check passes and the thing bound to it silently applies to nobody.
+   *
+   * `subject` names what is being scoped, because the same refusal has to read sensibly
+   * for a ratio and for an activity category.
+   */
+  async checkedRungs(ctx: RequestContext, codes: string[], subject: string): Promise<string[]> {
+    if (codes.length === 0) return [];
+    const normalised = [...new Set(codes.map((c) => c.trim().toUpperCase()))];
+    const ladder = await this.ladderForOffice(ctx);
+    const active = new Set(ladder.filter((l) => l.status === 'active').map((l) => l.code));
+    const unknown = normalised.filter((c) => !active.has(c));
+    if (unknown.length) {
+      throw new DomainException(
+        ErrorCode.CONFIG_RUNG_UNKNOWN,
+        `${unknown.join(', ')} is not an active rung on your company\u2019s ladder. A `
+          + `${subject} applies to rungs the company promotes people along; the platform `
+          + 'defines those, not the office.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return normalised;
+  }
+
   async ladderForOffice(ctx: RequestContext): Promise<OrgLevelRow[]> {
     const kpmId = ctx.kpmId;
     if (!kpmId) return [];

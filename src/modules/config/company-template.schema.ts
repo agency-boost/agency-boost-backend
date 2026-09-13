@@ -2,7 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { configSchemaOptions } from '@/common/schema/base.schema';
 
-export type PlatformTemplateDocument = HydratedDocument<PlatformTemplate>;
+export type CompanyTemplateDocument = HydratedDocument<CompanyTemplate>;
 
 /** What a template can be a template of. Grows as Phase 5 lands its catalogs. */
 export const TEMPLATE_KINDS = [
@@ -18,10 +18,14 @@ export type TemplateKind = (typeof TEMPLATE_KINDS)[number];
 /**
  * The preset every new office of one company starts from (ADR-0018).
  *
+ * Called the **Company template** since ADR-0023. The frozen prototype says *KPM template*
+ * and the quotations below keep its words; the product does not, because the template is
+ * a company's and "KPM" names only the shape of the thing it is copied into.
+ *
  * **`companyId` is required, and that is the decision.** The ERD carried
  * `companyId | null` since Phase 0 with no document explaining what a template belonging
  * to nobody would mean. It means nothing: Prudential's activation checklist is not
- * Allianz's, the prototype says so twice (`Superadmin.html:304`, and the **KPM template**
+ * Allianz's, the prototype says so twice (`Superadmin.html:304`, and its *KPM template*
  * item sitting in the Companies nav group at `:179`), and ADR-0012 already decided the
  * same thing for the company's role ladder.
  *
@@ -34,8 +38,8 @@ export type TemplateKind = (typeof TEMPLATE_KINDS)[number];
  * read by the offices of its own company. `products` and `companyOrgLevels` are the same
  * shape.
  */
-@Schema({ ...configSchemaOptions, collection: 'platformTemplates' })
-export class PlatformTemplate {
+@Schema({ ...configSchemaOptions, collection: 'companyTemplates' })
+export class CompanyTemplate {
   @Prop({ type: String, required: true, index: true })
   companyId!: string;
 
@@ -70,13 +74,13 @@ export class PlatformTemplate {
   updatedBy!: string | null;
 }
 
-export const PlatformTemplateSchema = SchemaFactory.createForClass(PlatformTemplate);
+export const CompanyTemplateSchema = SchemaFactory.createForClass(CompanyTemplate);
 
 /** One version of one kind per company. */
-PlatformTemplateSchema.index(
+CompanyTemplateSchema.index(
   { companyId: 1, kind: 1, version: 1 },
   { unique: true, partialFilterExpression: { deletedAt: null } },
 );
 
 /** The provisioning read: this company's current published template of this kind. */
-PlatformTemplateSchema.index({ companyId: 1, kind: 1, status: 1, version: -1 });
+CompanyTemplateSchema.index({ companyId: 1, kind: 1, status: 1, version: -1 });

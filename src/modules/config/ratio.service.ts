@@ -1,4 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
+import { DomainException } from '@/common/errors/domain.exception';
+import { ErrorCode } from '@/common/errors/error-codes';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -93,10 +95,14 @@ export class RatioService {
    * Label, benchmark, comparison, applicability and — on an office's own ratio — the two
    * code lists. Never the code.
    *
-   * **A platform ratio refuses a formula change and accepts everything else in the same
-   * request** (ADR-0021). A 403 on the whole request would be the easier implementation
-   * and the worse answer: an Owner adjusting a benchmark and a formula together would
-   * have both rejected and be told only that they may not do "this".
+   * **A platform ratio refuses a formula change, and the whole request with it**
+   * (ADR-0021). Applying the acceptable half and reporting an error on the rest would
+   * leave an Owner unable to answer "did my benchmark save?" from the response they got —
+   * a half-applied write is worse than a refused one. The refusal names the ratio and the
+   * way out, which is what makes it actionable rather than merely correct.
+   *
+   * This docstring claimed the opposite until P4-T18, and the ADR and the error catalog
+   * followed it. The code and its test have always refused the whole request.
    */
   async update(
     ctx: RequestContext,
@@ -111,11 +117,14 @@ export class RatioService {
 
     const formula = input.numerator !== undefined || input.denominator !== undefined;
     if (formula && existing.origin === 'platform') {
-      throw new BadRequestException(
+      throw new DomainException(
+        ErrorCode.CONFIG_RATIO_FORMULA_FIXED,
         `${existing.code} is one of the five ratios every office measures the same way, so `
           + 'its formula is fixed — that is what makes two offices\u2019 figures comparable. '
           + 'Its benchmark, label and who it applies to are yours to change. To count '
           + 'something else, add a ratio of your own.',
+        HttpStatus.BAD_REQUEST,
+        { code: existing.code },
       );
     }
 
@@ -151,20 +160,11 @@ export class RatioService {
    * An empty list is the common case and means every rung, so it short-circuits without
    * reading the ladder at all.
    */
-  private async checkedRungs(ctx: RequestContext, codes: string[]): Promise<string[]> {
-    if (codes.length === 0) return [];
-    const normalised = [...new Set(codes.map((c) => c.trim().toUpperCase()))];
-    const ladder = await this.orgLevels.ladderForOffice(ctx);
-    const active = new Set(ladder.filter((l) => l.status === 'active').map((l) => l.code));
-    const unknown = normalised.filter((c) => !active.has(c));
-    if (unknown.length) {
-      throw new BadRequestException(
-        `${unknown.join(', ')} is not an active rung on your company\u2019s ladder. A ratio `
-          + 'applies to rungs the company promotes people along; the platform defines those, '
-          + 'not the office.',
-      );
-    }
-    return normalised;
+  private checkedRungs(ctx: RequestContext, codes: string[]): Promise<string[]> {
+    // One implementation, on `OrgLevelService` beside `ladderForOffice` — activity
+    // categories scope the same way since P4-T18, and two copies of this would drift in
+    // the message long before they drifted in the rule.
+    return this.orgLevels.checkedRungs(ctx, codes, 'ratio');
   }
 
   async archive(ctx: RequestContext, id: string): Promise<RatioDefinitionView> {

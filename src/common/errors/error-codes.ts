@@ -83,6 +83,14 @@ export const ErrorCode = {
   PERM_OWNER_ONLY: 'PERM_OWNER_ONLY',
   PERM_LAST_OWNER: 'PERM_LAST_OWNER',
 
+  // Configuration
+  /** A platform ratio's formula is not the tenant's to change (ADR-0021). */
+  CONFIG_RATIO_FORMULA_FIXED: 'CONFIG_RATIO_FORMULA_FIXED',
+  /** A rung named in an applicability list is not active on the company's ladder. */
+  CONFIG_RUNG_UNKNOWN: 'CONFIG_RUNG_UNKNOWN',
+  /** A ratio counts activity nobody on one of its rungs can log (ADR-0020). */
+  CONFIG_RATIO_UNREACHABLE_INPUT: 'CONFIG_RATIO_UNREACHABLE_INPUT',
+
   // Validation
   VALIDATION_FAILED: 'VALIDATION_FAILED',
   VALIDATION_UNKNOWN_FIELD: 'VALIDATION_UNKNOWN_FIELD',

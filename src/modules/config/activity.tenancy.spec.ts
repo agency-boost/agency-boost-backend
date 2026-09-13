@@ -27,10 +27,11 @@ describe('the office activity taxonomy (P4-T1)', () => {
   let service: ActivityConfigService;
   let provisioning: ProvisioningService;
   let templates: mongoose.Model<never>;
+  let wired: ReturnType<typeof configModule>;
 
   beforeAll(async () => {
     await startMongo();
-    const wired = configModule(NOW);
+    wired = configModule(NOW);
     service = wired.activity;
     provisioning = wired.provisioning;
     templates = wired.templates as never;
@@ -381,4 +382,157 @@ describe('the office activity taxonomy (P4-T1)', () => {
     });
   });
 
+
+  /**
+   * P4-T18 — a section says who it is for, and it cascades.
+   */
+  describe('who a section is for (P4-T18)', () => {
+    const companies = () => wired.companies as mongoose.Model<never>;
+    const kpms = () => wired.kpms as mongoose.Model<never>;
+
+    async function office(codes = ['AGENT', 'AAB', 'AB']) {
+      await companies().create({ _id: COMPANY, name: 'Prudential', slug: `p-${COMPANY}` } as never);
+      const sa = RequestContext.platform('root');
+      for (const [i, code] of codes.entries()) {
+        await wired.orgLevels.create(sa, { companyId: COMPANY, code, label: code, displayOrder: i + 1 });
+      }
+      await kpms().create({
+        _id: KPM_A, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta',
+      } as never);
+      const seeded = await provisioning.seedActivityTaxonomy(KPM_A, COMPANY);
+      await provisioning.seedRatioDefinitions(KPM_A, COMPANY, seeded.typeCodes);
+    }
+
+    beforeEach(() => office());
+
+    it('starts every section applying to everyone', async () => {
+      const list = await service.list(ctx(KPM_A));
+      expect(list.every((c) => c.appliesToOrgLevelCodes.length === 0)).toBe(true);
+    });
+
+    it('cascades a section’s rungs onto every type inside it, and stores them on neither', async () => {
+      /*
+       * The cascade is resolved in `list()` so `/kpm/config` — and the published snapshot,
+       * and Phase 6's capture screen — carries one answer already computed. Three call
+       * sites flatten types away from their categories; making each re-find its parent
+       * would be three chances to get visibility wrong.
+       */
+      // `PERSONAL_DEVELOPMENT`, because no seeded ratio counts it — narrowing a section
+      // that *is* counted is refused, and that is the test below this one.
+      const dev = (await service.list(ctx(KPM_A))).find((c) => c.code === 'PERSONAL_DEVELOPMENT')!;
+      await service.updateCategory(ctx(KPM_A), dev.id, { appliesToOrgLevelCodes: ['AB', 'AAB'] });
+
+      const after = (await service.list(ctx(KPM_A))).find((c) => c.code === 'PERSONAL_DEVELOPMENT')!;
+      expect(after.appliesToOrgLevelCodes).toEqual(['AB', 'AAB']);
+      expect(after.types.every((t) => t.appliesToOrgLevelCodes.join() === 'AB,AAB')).toBe(true);
+
+      // Untouched sections still mean everyone.
+      const leads = (await service.list(ctx(KPM_A))).find((c) => c.code === 'LEADS_GENERATION')!;
+      expect(leads.types.every((t) => t.appliesToOrgLevelCodes.length === 0)).toBe(true);
+    });
+
+    it('refuses a rung the company does not have, naming it', async () => {
+      const [first] = await service.list(ctx(KPM_A));
+      await expect(
+        service.updateCategory(ctx(KPM_A), first.id, { appliesToOrgLevelCodes: ['DIRECTOR'] }),
+      ).rejects.toMatchObject({ code: 'CONFIG_RUNG_UNKNOWN' });
+    });
+
+    it('takes a description, on create and on update', async () => {
+      const made = await service.createCategory(ctx(KPM_A), {
+        code: 'REFERRALS', label: 'Referrals', description: '  Who sent them  ',
+      });
+      expect(made.description).toBe('Who sent them');
+
+      const cleared = await service.updateCategory(ctx(KPM_A), made.id, { description: '' });
+      expect(cleared.description).toBeNull();
+    });
+
+    describe('narrowing a section is checked against the ratios that count it', () => {
+      it('refuses when a ratio would divide by activity its own rungs cannot log', async () => {
+        /*
+         * The case a naive check misses: the ratio applies to **everyone** because its
+         * list is empty, and "empty" reads as unconstrained on both sides. Narrowing
+         * SELLING to AB leaves every AGENT measured on a figure with nothing underneath —
+         * which is exactly the permanent alert ADR-0020 closed from the other side.
+         */
+        const selling = (await service.list(ctx(KPM_A))).find((c) => c.code === 'SELLING')!;
+        await expect(
+          service.updateCategory(ctx(KPM_A), selling.id, { appliesToOrgLevelCodes: ['AB'] }),
+        ).rejects.toMatchObject({
+          code: 'CONFIG_RATIO_UNREACHABLE_INPUT',
+          message: expect.stringContaining('SELLING_SUCCESS_RATE'),
+        });
+      });
+
+      it('allows it once the ratio is narrowed to the same rungs or fewer', async () => {
+        const selling = (await service.list(ctx(KPM_A))).find((c) => c.code === 'SELLING')!;
+        for (const r of await wired.ratios.list(ctx(KPM_A))) {
+          const counts = [...r.numerator, ...r.denominator]
+            .some((c) => selling.types.some((t) => t.code === c));
+          if (counts) await wired.ratios.update(ctx(KPM_A), r.id, { appliesToOrgLevelCodes: ['AB'] });
+        }
+
+        const ok = await service.updateCategory(ctx(KPM_A), selling.id, {
+          appliesToOrgLevelCodes: ['AB'],
+        });
+        expect(ok.appliesToOrgLevelCodes).toEqual(['AB']);
+      });
+
+      it('lets a widening through without reading a single ratio', async () => {
+        const selling = (await service.list(ctx(KPM_A))).find((c) => c.code === 'SELLING')!;
+        const back = await service.updateCategory(ctx(KPM_A), selling.id, {
+          appliesToOrgLevelCodes: [],
+        });
+        expect(back.appliesToOrgLevelCodes).toEqual([]);
+      });
+    });
+
+    describe('archiving a section', () => {
+      it('takes its types with it, because a live type in a retired section is loggable from nowhere', async () => {
+        const selling = (await service.list(ctx(KPM_A))).find((c) => c.code === 'SELLING')!;
+        await service.archiveCategory(ctx(KPM_A), selling.id);
+
+        const all = await service.list(ctx(KPM_A), true);
+        const after = all.find((c) => c.code === 'SELLING')!;
+        expect(after.status).toBe('archived');
+        expect(after.types.every((t) => t.status === 'archived')).toBe(true);
+        // And it is gone from the active view entirely.
+        expect((await service.list(ctx(KPM_A))).some((c) => c.code === 'SELLING')).toBe(false);
+      });
+
+      it('brings the section back without its types, which is a separate decision', async () => {
+        const selling = (await service.list(ctx(KPM_A))).find((c) => c.code === 'SELLING')!;
+        await service.archiveCategory(ctx(KPM_A), selling.id);
+        const back = await service.restoreCategory(ctx(KPM_A), selling.id);
+
+        expect(back.status).toBe('active');
+        const after = (await service.list(ctx(KPM_A), true)).find((c) => c.code === 'SELLING')!;
+        expect(after.types.every((t) => t.status === 'archived')).toBe(true);
+      });
+
+      it('404s another office’s section', async () => {
+        const selling = (await service.list(ctx(KPM_A)))[0];
+        await expect(service.archiveCategory(ctx(KPM_B), selling.id)).rejects.toThrow();
+      });
+    });
+
+    describe('reordering sections', () => {
+      it('names all of them, and bumps no version', async () => {
+        const before = await service.list(ctx(KPM_A), true);
+        const reversed = [...before].reverse().map((c) => c.id);
+
+        const after = await service.reorderCategories(ctx(KPM_A), reversed);
+
+        expect(after.map((c) => c.code)).toEqual([...before].reverse().map((c) => c.code));
+        expect(after.map((c) => c.version)).toEqual([...before].reverse().map((c) => c.version));
+      });
+
+      it('refuses a partial list', async () => {
+        const all = await service.list(ctx(KPM_A), true);
+        await expect(service.reorderCategories(ctx(KPM_A), [all[0].id]))
+          .rejects.toThrow(/every section, once each/);
+      });
+    });
+  });
 });

@@ -27,16 +27,60 @@ export class CreateActivityCategoryDto {
   @MaxLength(80)
   @trim
   label!: string;
+
+  @ApiPropertyOptional({ maxLength: 200, example: 'What the office sells, and to whom' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  @trim
+  description?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['AB', 'AAB'],
+    description:
+      'The ladder rungs this section is a question for. **Empty means every rung**, and it '
+      + 'cascades to every activity type inside it.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  appliesToOrgLevelCodes?: string[];
 }
 
-export class RenameActivityCategoryDto {
-  @ApiProperty({ example: 'Penjualan', minLength: 1, maxLength: 80 })
+
+/** No `code`: every activity, ratio and goal points at it (ADR-0006). */
+export class UpdateActivityCategoryDto {
+  @ApiPropertyOptional({ example: 'Penjualan', minLength: 1, maxLength: 80 })
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(80)
   @trim
-  label!: string;
+  label?: string;
+
+  @ApiPropertyOptional({ maxLength: 200, example: 'What the office sells, and to whom' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  @trim
+  description?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['AB', 'AAB'],
+    description:
+      'The ladder rungs this section is a question for. **Empty means every rung**, and it '
+      + 'cascades to every activity type inside it.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  appliesToOrgLevelCodes?: string[];
 }
+
 
 export class CreateActivityTypeDto {
   @ApiProperty({ example: CODE_EXAMPLE, description: 'Permanent once saved. Never reused.' })

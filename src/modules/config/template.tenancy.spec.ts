@@ -6,7 +6,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { SEED_ACTIVITY_TYPES } from '@/domain/constants';
-import { PlatformTemplate, PlatformTemplateSchema } from './platform-template.schema';
+import { CompanyTemplate, CompanyTemplateSchema } from './company-template.schema';
 import { TemplateService } from './template.service';
 import { KpmOfficeCounter } from './office-counter';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
@@ -28,7 +28,7 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
     companies = mongoose.model(Company.name, CompanySchema) as never;
     kpms = mongoose.model(Kpm.name, KpmSchema) as never;
     service = new TemplateService(
-      mongoose.model(PlatformTemplate.name, PlatformTemplateSchema) as never,
+      mongoose.model(CompanyTemplate.name, CompanyTemplateSchema) as never,
       companies as never,
       new AuditService(mongoose.model(AuditLog.name, AuditLogSchema) as never),
       new FixedClock(NOW),

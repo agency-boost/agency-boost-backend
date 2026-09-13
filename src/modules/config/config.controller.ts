@@ -19,10 +19,12 @@ import {
 import {
   CreateActivityCategoryDto,
   CreateActivityTypeDto,
-  RenameActivityCategoryDto,
   ReorderActivityTypesDto,
+  UpdateActivityCategoryDto,
   UpdateActivityTypeDto,
 } from './activity.dto';
+import { ApplyConfigChangesDto } from './changes.dto';
+import { ConfigChangeService } from './changes.service';
 
 /**
  * The office's own configuration (P4-T1).
@@ -42,6 +44,7 @@ export class TenantConfigController {
     private readonly ratios: RatioService,
     private readonly tenants: TenantService,
     private readonly config: TenantConfigService,
+    private readonly changes: ConfigChangeService,
   ) {}
 
   @Get('activity-types')
@@ -61,6 +64,24 @@ export class TenantConfigController {
     return this.activity.list(ctx, includeArchived === 'true');
   }
 
+  @Post('changes')
+  @RequirePermission('tenant_config:write')
+  @ApiOperation({
+    summary: 'Apply a batch of staged changes, or none of them',
+    description:
+      'The settings screens stage every edit and send one request. **Validated entirely '
+      + 'before anything is written**, so a refusal leaves the office exactly as it was, '
+      + 'and so a `type.create` can name a section a `category.create` makes earlier in '
+      + 'the same batch. Every change to an existing row carries the `version` the screen '
+      + 'read: a row that moved on refuses the whole batch with `409 VERSION_CONFLICT`, '
+      + 'naming what changed, rather than letting the second of two admins erase the '
+      + 'first. Returns the working copy as it now stands — publishing is still a '
+      + 'separate act.',
+  })
+  async applyChanges(@Ctx() ctx: RequestContext, @Body() dto: ApplyConfigChangesDto) {
+    return this.changes.apply(ctx, dto.ops);
+  }
+
   @Post('activity-categories')
   @RequirePermission('tenant_config:write')
   @ApiOperation({ summary: 'Add a category' })
@@ -68,18 +89,57 @@ export class TenantConfigController {
     return this.activity.createCategory(ctx, dto);
   }
 
+  @Patch('activity-categories/reorder')
+  @RequirePermission('tenant_config:write')
+  @ApiOperation({
+    summary: 'Reorder the categories',
+    description:
+      'Send every id, once each, in the order you want. Declared **above** '
+      + '`activity-categories/:id`, or Nest reads "reorder" as an id. Bumps no version: '
+      + 'position is presentation, and nothing reads it back.',
+  })
+  async reorderCategories(@Ctx() ctx: RequestContext, @Body() dto: ReorderActivityTypesDto) {
+    return this.activity.reorderCategories(ctx, dto.ids);
+  }
+
   @Patch('activity-categories/:id')
   @RequirePermission('tenant_config:write')
   @ApiOperation({
-    summary: 'Rename a category',
-    description: 'The label only. The code is the identity every type under it holds.',
+    summary: 'Edit a category',
+    description:
+      'Label, description and the rungs it applies to. **Never the code** — that is the '
+      + 'identity every type under it holds. Narrowing the rungs is refused when a ratio '
+      + 'counting this section still applies to a rung the section would lose.',
   })
-  async renameCategory(
+  async updateCategory(
     @Ctx() ctx: RequestContext,
     @Param('id') id: string,
-    @Body() dto: RenameActivityCategoryDto,
+    @Body() dto: UpdateActivityCategoryDto,
   ) {
-    return this.activity.renameCategory(ctx, id, dto.label);
+    return this.activity.updateCategory(ctx, id, dto);
+  }
+
+  @Delete('activity-categories/:id')
+  @RequirePermission('tenant_config:write')
+  @ApiOperation({
+    summary: 'Archive a category, and everything in it',
+    description:
+      'Archiving, never deleting (invariant §3) — and it cascades to the section\u2019s '
+      + 'types, because a live type inside a retired section would still be loggable from '
+      + 'nowhere. A ratio naming an archived type keeps computing over its history.',
+  })
+  async archiveCategory(@Ctx() ctx: RequestContext, @Param('id') id: string) {
+    return this.activity.archiveCategory(ctx, id);
+  }
+
+  @Post('activity-categories/:id/restore')
+  @RequirePermission('tenant_config:write')
+  @ApiOperation({
+    summary: 'Bring a category back',
+    description: 'The section returns; its types stay archived until restored one by one.',
+  })
+  async restoreCategory(@Ctx() ctx: RequestContext, @Param('id') id: string) {
+    return this.activity.restoreCategory(ctx, id);
   }
 
   @Post('activity-types')

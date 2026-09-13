@@ -23,6 +23,26 @@ export class ActivityCategory {
   label!: string;
 
   /** Presentation only, and reorderable — which is why nothing references it. */
+  /** Optional, and shown under the heading. Mirrors `activityTypes.description`. */
+  @Prop({ type: String, default: null, trim: true })
+  description!: string | null;
+
+  /**
+   * The ladder rungs this whole section is a question for (ADR-0020, P4-T18).
+   *
+   * **Empty means every rung**, exactly as it does on `ratioDefinitions` — same field
+   * name, same semantics, because a second spelling would be a second concept.
+   *
+   * **It cascades to the types inside it, and a type has no applicability of its own.**
+   * One axis, not two: two would give four combinations and a reader would have to know
+   * which one wins before they could read the screen. A member whose rung is absent does
+   * not see the category or anything in it — hidden, never shown as failed.
+   *
+   * Rung **codes**, not the retired `role` enum (invariant §4, ADR-0012).
+   */
+  @Prop({ type: [String], required: true, default: [] })
+  appliesToOrgLevelCodes!: string[];
+
   @Prop({ type: Number, required: true })
   displayOrder!: number;
 
