@@ -80,6 +80,15 @@ describe('the office lead pipelines (P4-T3)', () => {
       expect(renamed.code).toBe(stage.code);
     });
 
+    it('refuses a blank name on the service itself, and keeps the one it had (ADR-0030)', async () => {
+      const [sales] = await service.list(ctx(KPM_A));
+      const stage = sales.statuses[0];
+      await expect(service.rename(ctx(KPM_A), stage.id, '   '))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      const [after] = await service.list(ctx(KPM_A));
+      expect(after.statuses[0].label).toBe(stage.label);
+    });
+
     it('moves the terminal flag, leaving exactly one behind', async () => {
       const [sales] = await service.list(ctx(KPM_A));
       const submitted = sales.statuses.find((s) => s.code === 'POLICY_SUBMITTED')!;

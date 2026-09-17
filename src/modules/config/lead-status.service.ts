@@ -4,6 +4,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
 import { LeadStatusRepository } from './activity.repository';
 import { LeadPipeline, LeadStatusDocument } from './lead-status.schema';
+import { checkLeadStatusCreate, checkLeadStatusLabel } from './config-input';
 
 export interface LeadStatusView {
   id: string;
@@ -20,8 +21,6 @@ export interface LeadPipelineView {
   pipeline: LeadPipeline;
   statuses: LeadStatusView[];
 }
-
-const CODE_SHAPE = /^[A-Z][A-Z0-9_]{2,39}$/;
 
 /**
  * The office's two lead pipelines (P4-T3).
@@ -50,9 +49,11 @@ export class LeadStatusService {
 
   async create(
     ctx: RequestContext,
-    input: { pipeline: LeadPipeline; code: string; label: string },
+    body: { pipeline: LeadPipeline; code: string; label: string },
   ): Promise<LeadStatusView> {
-    const code = this.normaliseCode(input.code);
+    // The body's own rules first, however it arrived (ADR-0030).
+    const input = checkLeadStatusCreate(body);
+    const { code } = input;
     // Across both pipelines: one code must not mean two things in one office.
     if (await this.statuses.exists(ctx, { code })) {
       throw new BadRequestException(`This office already has a lead status called ${code}.`);
@@ -62,7 +63,7 @@ export class LeadStatusService {
     const created = await this.statuses.create(ctx, {
       pipeline: input.pipeline,
       code,
-      label: input.label.trim(),
+      label: input.label,
       // Appended. A new stage at the end of a ladder is the common case, and inserting
       // would renumber rows nobody touched.
       rank: inPipeline + 1,
@@ -77,9 +78,10 @@ export class LeadStatusService {
   }
 
   /** The label only. The code is what every lead holds. */
-  async rename(ctx: RequestContext, id: string, label: string): Promise<LeadStatusView> {
+  async rename(ctx: RequestContext, id: string, raw: string): Promise<LeadStatusView> {
+    const label = checkLeadStatusLabel(raw);
     const updated = await this.statuses.updateById(ctx, id, {
-      $set: { label: label.trim() },
+      $set: { label },
       $inc: { version: 1 },
     });
     if (!updated) throw new NotFoundException('Lead status');
@@ -158,17 +160,6 @@ export class LeadStatusService {
     if (!updated) throw new NotFoundException('Lead status');
     await this.record(ctx, 'lead_status.restored', id, { code: updated.code });
     return this.view(updated);
-  }
-
-  private normaliseCode(raw: string): string {
-    const code = raw.trim().toUpperCase();
-    if (!CODE_SHAPE.test(code)) {
-      throw new BadRequestException(
-        'A code is 3–40 characters of A–Z, 0–9 and underscore, starting with a letter. '
-          + 'It is permanent once saved: every lead holds it.',
-      );
-    }
-    return code;
   }
 
   private view(doc: LeadStatusDocument): LeadStatusView {

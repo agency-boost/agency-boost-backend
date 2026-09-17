@@ -314,6 +314,12 @@ describe('the office activity taxonomy (P4-T1)', () => {
         .rejects.toThrow('already has a category called SELLING');
     });
 
+    it('refuses a label longer than 80 characters on the service itself (ADR-0030)', async () => {
+      await expect(service.createCategory(ctx(KPM_A), { code: 'LONG_ONE', label: 'x'.repeat(81) }))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      expect((await service.list(ctx(KPM_A), true)).some((c) => c.code === 'LONG_ONE')).toBe(false);
+    });
+
     it('refuses a category code that is not a code', async () => {
       await expect(service.createCategory(ctx(KPM_A), { code: 'no spaces', label: 'x' }))
         .rejects.toThrow('3–40 characters');

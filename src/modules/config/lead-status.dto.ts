@@ -5,9 +5,9 @@ import {
 } from 'class-validator';
 import { LEAD_PIPELINES, type LeadPipeline } from './lead-status.schema';
 
-const CODE_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,39}$/;
-const CODE_MESSAGE =
-  'A code is 3–40 characters of A–Z, 0–9 and underscore, starting with a letter.';
+import { CODE_MESSAGE, CODE_PATTERN, CONFIG_BOUNDS } from './config-input';
+
+const { leadStatusLabel } = CONFIG_BOUNDS;
 const trim = Transform(({ value }: { value: unknown }) =>
   (typeof value === 'string' ? value.trim() : value));
 
@@ -25,20 +25,20 @@ export class CreateLeadStatusDto {
   @trim
   code!: string;
 
-  @ApiProperty({ example: 'Awaiting underwriting', minLength: 1, maxLength: 80 })
+  @ApiProperty({ example: 'Awaiting underwriting', minLength: leadStatusLabel.min, maxLength: leadStatusLabel.max })
   @IsString()
-  @MinLength(1)
-  @MaxLength(80)
+  @MinLength(leadStatusLabel.min)
+  @MaxLength(leadStatusLabel.max)
   @trim
   label!: string;
 }
 
 /** The label only. The code is what every lead holds. */
 export class RenameLeadStatusDto {
-  @ApiProperty({ example: 'Menunggu underwriting', minLength: 1, maxLength: 80 })
+  @ApiProperty({ example: 'Menunggu underwriting', minLength: leadStatusLabel.min, maxLength: leadStatusLabel.max })
   @IsString()
-  @MinLength(1)
-  @MaxLength(80)
+  @MinLength(leadStatusLabel.min)
+  @MaxLength(leadStatusLabel.max)
   @trim
   label!: string;
 }

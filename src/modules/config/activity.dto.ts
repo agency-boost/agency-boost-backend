@@ -5,10 +5,10 @@ import {
   MinLength,
 } from 'class-validator';
 
+import { CODE_MESSAGE, CODE_PATTERN, CONFIG_BOUNDS } from './config-input';
+
 const CODE_EXAMPLE = 'SELL_SUBMISSION';
-const CODE_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,39}$/;
-const CODE_MESSAGE =
-  'A code is 3–40 characters of A–Z, 0–9 and underscore, starting with a letter.';
+const { categoryLabel, typeLabel, description, rungs } = CONFIG_BOUNDS;
 
 /** Trim before validating, so a pasted value with a stray space is accepted rather than refused. */
 const trim = Transform(({ value }: { value: unknown }) =>
@@ -21,17 +21,17 @@ export class CreateActivityCategoryDto {
   @trim
   code!: string;
 
-  @ApiProperty({ example: 'Selling', minLength: 1, maxLength: 80 })
+  @ApiProperty({ example: 'Selling', minLength: categoryLabel.min, maxLength: categoryLabel.max })
   @IsString()
-  @MinLength(1)
-  @MaxLength(80)
+  @MinLength(categoryLabel.min)
+  @MaxLength(categoryLabel.max)
   @trim
   label!: string;
 
-  @ApiPropertyOptional({ maxLength: 200, example: 'What the office sells, and to whom' })
+  @ApiPropertyOptional({ maxLength: description.max, example: 'What the office sells, and to whom' })
   @IsOptional()
   @IsString()
-  @MaxLength(200)
+  @MaxLength(description.max)
   @trim
   description?: string;
 
@@ -44,7 +44,7 @@ export class CreateActivityCategoryDto {
   })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(20)
+  @ArrayMaxSize(rungs.max)
   @IsString({ each: true })
   appliesToOrgLevelCodes?: string[];
 }
@@ -52,18 +52,18 @@ export class CreateActivityCategoryDto {
 
 /** No `code`: every activity, ratio and goal points at it (ADR-0006). */
 export class UpdateActivityCategoryDto {
-  @ApiPropertyOptional({ example: 'Penjualan', minLength: 1, maxLength: 80 })
+  @ApiPropertyOptional({ example: 'Penjualan', minLength: categoryLabel.min, maxLength: categoryLabel.max })
   @IsOptional()
   @IsString()
-  @MinLength(1)
-  @MaxLength(80)
+  @MinLength(categoryLabel.min)
+  @MaxLength(categoryLabel.max)
   @trim
   label?: string;
 
-  @ApiPropertyOptional({ maxLength: 200, example: 'What the office sells, and to whom' })
+  @ApiPropertyOptional({ maxLength: description.max, example: 'What the office sells, and to whom' })
   @IsOptional()
   @IsString()
-  @MaxLength(200)
+  @MaxLength(description.max)
   @trim
   description?: string;
 
@@ -76,7 +76,7 @@ export class UpdateActivityCategoryDto {
   })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(20)
+  @ArrayMaxSize(rungs.max)
   @IsString({ each: true })
   appliesToOrgLevelCodes?: string[];
 }
@@ -95,35 +95,35 @@ export class CreateActivityTypeDto {
   @trim
   categoryCode!: string;
 
-  @ApiProperty({ example: 'Submission polis', minLength: 1, maxLength: 200 })
+  @ApiProperty({ example: 'Submission polis', minLength: typeLabel.min, maxLength: typeLabel.max })
   @IsString()
-  @MinLength(1)
-  @MaxLength(200)
+  @MinLength(typeLabel.min)
+  @MaxLength(typeLabel.max)
   @trim
   label!: string;
 
-  @ApiPropertyOptional({ example: 'telepon, WhatsApp, tatap muka, dll', maxLength: 200 })
+  @ApiPropertyOptional({ example: 'telepon, WhatsApp, tatap muka, dll', maxLength: description.max })
   @IsOptional()
   @IsString()
-  @MaxLength(200)
+  @MaxLength(description.max)
   @trim
   description?: string;
 }
 
 /** No `code`. A published code is the identity every log and formula holds — see the service. */
 export class UpdateActivityTypeDto {
-  @ApiPropertyOptional({ example: 'Submission polis', minLength: 1, maxLength: 200 })
+  @ApiPropertyOptional({ example: 'Submission polis', minLength: typeLabel.min, maxLength: typeLabel.max })
   @IsOptional()
   @IsString()
-  @MinLength(1)
-  @MaxLength(200)
+  @MinLength(typeLabel.min)
+  @MaxLength(typeLabel.max)
   @trim
   label?: string;
 
-  @ApiPropertyOptional({ example: 'secara mandiri atau melalui BOP', maxLength: 200 })
+  @ApiPropertyOptional({ example: 'secara mandiri atau melalui BOP', maxLength: description.max })
   @IsOptional()
   @IsString()
-  @MaxLength(200)
+  @MaxLength(description.max)
   @trim
   description?: string;
 

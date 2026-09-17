@@ -11,6 +11,7 @@ import {
   defaultDisplayUnitFor, resolveDisplayUnit, type RatioDisplayUnit,
 } from '@/domain/constants';
 import { RatioComparison, RatioDefinitionDocument, RatioOrigin } from './ratio-definition.schema';
+import { checkRatioCreate, checkRatioUpdate } from './config-input';
 
 export interface RatioDefinitionView {
   id: string;
@@ -44,8 +45,6 @@ export interface RatioDefinitionView {
   /** Ladder rung codes. Empty means every rung (ADR-0020). */
   appliesToOrgLevelCodes: string[];
 }
-
-const CODE_SHAPE = /^[A-Z][A-Z0-9_]{2,39}$/;
 
 /** Two formula sides are the same set of codes. Order is display, never meaning. */
 const sameCodes = (a: readonly string[], b: readonly string[]) =>
@@ -94,13 +93,15 @@ export class RatioService {
 
   async create(
     ctx: RequestContext,
-    input: {
+    body: {
       code: string; label: string; numerator: string[]; denominator: string[];
       benchmark: number; comparison: RatioComparison; displayUnit?: string;
       appliesToOrgLevelCodes?: string[];
     },
   ): Promise<RatioDefinitionView> {
-    const code = this.normaliseCode(input.code);
+    // The body's own rules first, however it arrived — a route or the batch (ADR-0030).
+    const input = checkRatioCreate(body);
+    const { code } = input;
     const displayUnit = this.resolvedUnit(code, input.comparison, input.displayUnit);
     if (await this.ratios.exists(ctx, { code })) {
       throw new BadRequestException(`This office already has a ratio called ${code}.`);
@@ -110,7 +111,7 @@ export class RatioService {
 
     const created = await this.ratios.create(ctx, {
       code,
-      label: input.label.trim(),
+      label: input.label,
       numerator,
       denominator,
       benchmark: input.benchmark,
@@ -119,7 +120,7 @@ export class RatioService {
       // An office's own, by construction. Nothing a tenant creates is platform-standard —
       // `platform` is written by provisioning and by nothing else (ADR-0021).
       origin: 'office',
-      appliesToOrgLevelCodes: await this.checkedRungs(ctx, input.appliesToOrgLevelCodes ?? []),
+      appliesToOrgLevelCodes: await this.checkedRungs(ctx, input.appliesToOrgLevelCodes),
       displayOrder: (await this.ratios.count(ctx, {})) + 1,
       version: 1,
       status: 'active',
@@ -145,11 +146,12 @@ export class RatioService {
   async update(
     ctx: RequestContext,
     id: string,
-    input: {
+    body: {
       label?: string; benchmark?: number; comparison?: RatioComparison; displayUnit?: string;
       numerator?: string[]; denominator?: string[]; appliesToOrgLevelCodes?: string[];
     },
   ): Promise<RatioDefinitionView> {
+    const input = checkRatioUpdate(body);
     const existing = await this.ratios.findById(ctx, id);
     if (!existing) throw new NotFoundException('Ratio');
 
@@ -160,7 +162,7 @@ export class RatioService {
      * What the office writes here is what the office's own people are measured by.
      */
     const set: Record<string, unknown> = {};
-    if (input.label !== undefined) set.label = input.label.trim();
+    if (input.label !== undefined) set.label = input.label;
     if (input.benchmark !== undefined) set.benchmark = input.benchmark;
     if (input.comparison !== undefined) set.comparison = input.comparison;
     /*
@@ -236,16 +238,13 @@ export class RatioService {
    * Every code in the list must be an **active** activity type of this office.
    *
    * Named in the message, because "invalid formula" sends an Owner to compare two lists by
-   * eye. A denominator that is empty is refused too: it is a division by zero dressed up
-   * as configuration, and it would render as `∞` or `NaN` on every agent's screen.
+   * eye. An empty side never reaches here: `checkRatioCreate` and `checkRatioUpdate` refuse
+   * it first, on every path a write takes (ADR-0030).
    */
   private async checkedCodes(
     ctx: RequestContext, codes: string[], side: string,
   ): Promise<string[]> {
     const normalised = codes.map((c) => c.trim().toUpperCase());
-    if (normalised.length === 0) {
-      throw new BadRequestException(`A ratio needs at least one activity type in its ${side}.`);
-    }
     const duplicates = normalised.filter((c, i) => normalised.indexOf(c) !== i);
     if (duplicates.length) {
       // Counting one type twice is almost always a mis-click, and it silently doubles
@@ -286,16 +285,6 @@ export class RatioService {
       );
     }
     return resolved.unit;
-  }
-
-  private normaliseCode(raw: string): string {
-    const code = raw.trim().toUpperCase();
-    if (!CODE_SHAPE.test(code)) {
-      throw new BadRequestException(
-        'A code is 3–40 characters of A–Z, 0–9 and underscore, starting with a letter.',
-      );
-    }
-    return code;
   }
 
   private view(doc: RatioDefinitionDocument): RatioDefinitionView {

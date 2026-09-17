@@ -9,6 +9,31 @@ import { resolveDisplayUnit, type RatioDisplayUnit } from '@/domain/constants';
 import { RatioService } from './ratio.service';
 import { TenantConfigService, type TenantConfigView } from './tenant-config.service';
 import type { ChangeOp, ConfigChangeDto } from './changes.dto';
+import {
+  checkCategoryCreate, checkCategoryUpdate, checkNoFields, checkRatioCreate, checkRatioUpdate,
+  checkTypeCreate, checkTypeUpdate,
+} from './config-input';
+
+/**
+ * Each op's own field rules — the checker its service runs (ADR-0030).
+ *
+ * Run by the validate pass as well as by the service, and that is the point: a body refused
+ * only when its service applies it is refused after the ops before it have been written.
+ */
+const CHECKERS: Record<ChangeOp, (body: unknown) => object | void> = {
+  'category.create': checkCategoryCreate,
+  'category.update': checkCategoryUpdate,
+  'category.archive': checkNoFields,
+  'category.restore': checkNoFields,
+  'type.create': checkTypeCreate,
+  'type.update': checkTypeUpdate,
+  'type.archive': checkNoFields,
+  'type.restore': checkNoFields,
+  'ratio.create': checkRatioCreate,
+  'ratio.update': checkRatioUpdate,
+  'ratio.archive': checkNoFields,
+  'ratio.restore': checkNoFields,
+};
 
 /** One live row, reduced to what the validate pass needs to reason about. */
 interface Known {
@@ -36,11 +61,13 @@ interface Known {
  *   validation runs against a *projection* — the live rows with the earlier ops folded in
  *   — rather than against the database.
  *
- * **What the projection checks, and what it does not.** It checks the things only a batch
- * can get wrong: a stale `expectedVersion`, a code that collides with a live row *or with
- * an earlier op in the same batch*, a `categoryCode` naming nothing, a rung the company
- * does not have, a formula change on a platform ratio. Each op's own remaining rules stay
- * in the service that owns them — one rule, one place — and are checked as it is applied.
+ * **What the projection checks, and what it does not.** Every op's own field rules first —
+ * lengths, ranges, types, unknown fields — through the checker its service runs (ADR-0030).
+ * Then the things only a batch can get wrong: a stale `expectedVersion`, a code that
+ * collides with a live row *or with an earlier op in the same batch*, a `categoryCode`
+ * naming nothing, a rung the company does not have. Rules that need more of the database
+ * than the projection holds stay in the service that owns them, and are checked as it is
+ * applied.
  *
  * That leaves a residual: a rule this pass does not model could refuse op *n* after ops
  * `1..n-1` are written. It is rare by construction (the pass models every refusal these
@@ -99,9 +126,20 @@ export class ConfigChangeService {
         throw this.atOp(index, op.op, new DomainException(code, message, HttpStatus.BAD_REQUEST));
       };
 
+      // An op nothing handles is refused before anything is written, not skipped quietly.
+      const checker = CHECKERS[op.op] as ((body: unknown) => object | void) | undefined;
+      if (!checker) fail(`Unknown change ${String(op.op)}.`);
+
+      // The body by its own rules before anything about it is believed — its code included.
+      let checked: { code?: string; categoryCode?: string } = {};
+      try {
+        checked = (checker!(op.body) ?? {}) as typeof checked;
+      } catch (err) {
+        throw this.atOp(index, op.op, err);
+      }
+
       if (op.op.endsWith('.create')) {
-        const code = String(op.body?.code ?? '').trim().toUpperCase();
-        if (!code) fail('A create needs a code.');
+        const code = checked.code!;
         // Counting archived rows, and counting earlier ops: a code is never reused once
         // published (ADR-0006), and two creates in one batch must not collide either.
         if ([...rows.values()].some((r) => r.code === code)) {
@@ -110,7 +148,7 @@ export class ConfigChangeService {
         rows.set(`pending:${index}`, { id: `pending:${index}`, code, version: 1, status: 'active' });
 
         if (op.op === 'type.create') {
-          const parent = String(op.body?.categoryCode ?? '').trim().toUpperCase();
+          const parent = checked.categoryCode!;
           if (![...categories.values()].some((c) => c.code === parent && c.status === 'active')) {
             fail(`No active section called ${parent}. Add the section first, or check the code.`);
           }
@@ -202,29 +240,31 @@ export class ConfigChangeService {
 
   // --------------------------------------------------------------------- apply
 
-  /** Each op hands off to the service that owns the rule, unchanged. */
+  /**
+   * Each op hands off to the service that owns the rule, unchanged.
+   *
+   * A table rather than a switch, and with no default: the validate pass has already refused
+   * any op without a checker, and `Record<ChangeOp, …>` makes a new op without a handler a
+   * compile error rather than a branch nothing can reach.
+   */
   private async run(ctx: RequestContext, op: ConfigChangeDto): Promise<void> {
     const body = (op.body ?? {}) as never;
     const id = op.id ?? '';
-    switch (op.op) {
-      case 'category.create': await this.activity.createCategory(ctx, body); return;
-      case 'category.update': await this.activity.updateCategory(ctx, id, body); return;
-      case 'category.archive': await this.activity.archiveCategory(ctx, id); return;
-      case 'category.restore': await this.activity.restoreCategory(ctx, id); return;
-      case 'type.create': await this.activity.createType(ctx, body); return;
-      case 'type.update': await this.activity.updateType(ctx, id, body); return;
-      case 'type.archive': await this.activity.archiveType(ctx, id); return;
-      case 'type.restore': await this.activity.restoreType(ctx, id); return;
-      case 'ratio.create': await this.ratios.create(ctx, body); return;
-      case 'ratio.update': await this.ratios.update(ctx, id, body); return;
-      case 'ratio.archive': await this.ratios.archive(ctx, id); return;
-      case 'ratio.restore': await this.ratios.restore(ctx, id); return;
-      default: throw new DomainException(
-        ErrorCode.VALIDATION_FAILED,
-        `Unknown change ${String(op.op)}.`,
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    const handlers: Record<ChangeOp, () => Promise<unknown>> = {
+      'category.create': () => this.activity.createCategory(ctx, body),
+      'category.update': () => this.activity.updateCategory(ctx, id, body),
+      'category.archive': () => this.activity.archiveCategory(ctx, id),
+      'category.restore': () => this.activity.restoreCategory(ctx, id),
+      'type.create': () => this.activity.createType(ctx, body),
+      'type.update': () => this.activity.updateType(ctx, id, body),
+      'type.archive': () => this.activity.archiveType(ctx, id),
+      'type.restore': () => this.activity.restoreType(ctx, id),
+      'ratio.create': () => this.ratios.create(ctx, body),
+      'ratio.update': () => this.ratios.update(ctx, id, body),
+      'ratio.archive': () => this.ratios.archive(ctx, id),
+      'ratio.restore': () => this.ratios.restore(ctx, id),
+    };
+    await handlers[op.op]();
   }
 
   /**

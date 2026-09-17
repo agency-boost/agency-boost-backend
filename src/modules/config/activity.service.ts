@@ -10,6 +10,9 @@ import {
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { ActivityCategoryDocument } from './activity-category.schema';
 import { ActivityTypeDocument } from './activity-type.schema';
+import {
+  checkCategoryCreate, checkCategoryUpdate, checkTypeCreate, checkTypeUpdate,
+} from './config-input';
 
 export interface ActivityTypeView {
   id: string;
@@ -46,9 +49,6 @@ export interface ActivityCategoryView {
   status: 'active' | 'archived';
   types: ActivityTypeView[];
 }
-
-/** A code somebody typed. Upper snake, because that is what every published code is. */
-const CODE_SHAPE = /^[A-Z][A-Z0-9_]{2,39}$/;
 
 /**
  * The office's activity taxonomy (P4-T1).
@@ -113,20 +113,22 @@ export class ActivityConfigService {
 
   async createCategory(
     ctx: RequestContext,
-    input: {
+    body: {
       code: string; label: string; description?: string | null;
       appliesToOrgLevelCodes?: string[];
     },
   ): Promise<ActivityCategoryView> {
-    const code = this.normaliseCode(input.code);
+    // The body's own rules first, however it arrived — a route or the batch (ADR-0030).
+    const input = checkCategoryCreate(body);
+    const { code } = input;
     await this.refuseDuplicateCategory(ctx, code);
 
     const created = await this.categories.create(ctx, {
       code,
-      label: input.label.trim(),
-      description: input.description?.trim() || null,
+      label: input.label,
+      description: input.description,
       appliesToOrgLevelCodes: await this.orgLevels.checkedRungs(
-        ctx, input.appliesToOrgLevelCodes ?? [], 'section',
+        ctx, input.appliesToOrgLevelCodes, 'section',
       ),
       // Appended, not inserted. Somebody adding a category has not said where it goes,
       // and guessing would renumber rows they did not touch.
@@ -151,14 +153,15 @@ export class ActivityConfigService {
   async updateCategory(
     ctx: RequestContext,
     id: string,
-    input: { label?: string; description?: string | null; appliesToOrgLevelCodes?: string[] },
+    body: { label?: string; description?: string | null; appliesToOrgLevelCodes?: string[] },
   ): Promise<ActivityCategoryView> {
+    const input = checkCategoryUpdate(body);
     const existing = await this.categories.findById(ctx, id);
     if (!existing) throw new NotFoundException('Activity category');
 
     const set: Record<string, unknown> = {};
-    if (input.label !== undefined) set.label = input.label.trim();
-    if (input.description !== undefined) set.description = input.description?.trim() || null;
+    if (input.label !== undefined) set.label = input.label;
+    if (input.description !== undefined) set.description = input.description;
     if (input.appliesToOrgLevelCodes !== undefined) {
       const rungs = await this.orgLevels.checkedRungs(ctx, input.appliesToOrgLevelCodes, 'section');
       await this.refuseUnreachableInputs(ctx, existing.code, rungs);
@@ -245,18 +248,17 @@ export class ActivityConfigService {
 
   async createType(
     ctx: RequestContext,
-    input: { code: string; categoryCode: string; label: string; description?: string | null },
+    body: { code: string; categoryCode: string; label: string; description?: string | null },
   ): Promise<ActivityTypeView> {
-    const code = this.normaliseCode(input.code);
-    const categoryCode = this.normaliseCode(input.categoryCode);
+    const { code, categoryCode, label, description } = checkTypeCreate(body);
     await this.refuseDuplicateType(ctx, code);
     await this.requireLiveCategory(ctx, categoryCode);
 
     const created = await this.types.create(ctx, {
       code,
       categoryCode,
-      label: input.label.trim(),
-      description: input.description?.trim() || null,
+      label,
+      description,
       displayOrder: (await this.types.count(ctx, {})) + 1,
       version: 1,
       status: 'active',
@@ -276,15 +278,15 @@ export class ActivityConfigService {
   async updateType(
     ctx: RequestContext,
     id: string,
-    input: { label?: string; description?: string | null; categoryCode?: string },
+    body: { label?: string; description?: string | null; categoryCode?: string },
   ): Promise<ActivityTypeView> {
+    const input = checkTypeUpdate(body);
     const set: Record<string, unknown> = {};
-    if (input.label !== undefined) set.label = input.label.trim();
-    if (input.description !== undefined) set.description = input.description?.trim() || null;
+    if (input.label !== undefined) set.label = input.label;
+    if (input.description !== undefined) set.description = input.description;
     if (input.categoryCode !== undefined) {
-      const categoryCode = this.normaliseCode(input.categoryCode);
-      await this.requireLiveCategory(ctx, categoryCode);
-      set.categoryCode = categoryCode;
+      await this.requireLiveCategory(ctx, input.categoryCode);
+      set.categoryCode = input.categoryCode;
     }
     if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
 
@@ -345,17 +347,6 @@ export class ActivityConfigService {
   }
 
   // -------------------------------------------------------------- internals
-
-  private normaliseCode(raw: string): string {
-    const code = raw.trim().toUpperCase();
-    if (!CODE_SHAPE.test(code)) {
-      throw new BadRequestException(
-        'A code is 3–40 characters of A–Z, 0–9 and underscore, starting with a letter. '
-          + 'It is permanent once saved, so it names the thing rather than describing it.',
-      );
-    }
-    return code;
-  }
 
   private async refuseDuplicateCategory(ctx: RequestContext, code: string): Promise<void> {
     // Archived rows count. A retired code that came back as something else would change

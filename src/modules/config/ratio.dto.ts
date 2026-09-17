@@ -7,20 +7,14 @@ import {
 import { RATIO_DISPLAY_UNITS, type RatioDisplayUnit } from '@/domain/constants';
 import { RATIO_COMPARISONS, type RatioComparison } from './ratio-definition.schema';
 
-const CODE_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,39}$/;
-const CODE_MESSAGE =
-  'A code is 3–40 characters of A–Z, 0–9 and underscore, starting with a letter.';
+import { CODE_MESSAGE, CODE_PATTERN, CONFIG_BOUNDS } from './config-input';
+
+const { ratioLabel, formulaTerms, rungs } = CONFIG_BOUNDS;
 const trim = Transform(({ value }: { value: unknown }) =>
   (typeof value === 'string' ? value.trim() : value));
 
-/**
- * A benchmark's range.
- *
- * `gte` ratios are proportions — 0.15, 1.50 — and `band` is percentage points either side
- * of an even split, so 30 means ±30pp. One field covers both, and 0–1000 is wide enough
- * for either while still refusing a typo that slipped a decimal point.
- */
-const BENCHMARK = { min: 0, max: 1000 };
+/** A benchmark's range — why it is 0–1000 is written beside the number, in `config-input.ts`. */
+const BENCHMARK = CONFIG_BOUNDS.benchmark;
 
 export class CreateRatioDto {
   @ApiProperty({ example: 'SELLING_SUCCESS_RATE' })
@@ -29,10 +23,10 @@ export class CreateRatioDto {
   @trim
   code!: string;
 
-  @ApiProperty({ example: 'Selling success rate', minLength: 1, maxLength: 80 })
+  @ApiProperty({ example: 'Selling success rate', minLength: ratioLabel.min, maxLength: ratioLabel.max })
   @IsString()
-  @MinLength(1)
-  @MaxLength(80)
+  @MinLength(ratioLabel.min)
+  @MaxLength(ratioLabel.max)
   @trim
   label!: string;
 
@@ -42,15 +36,15 @@ export class CreateRatioDto {
     description: 'Activity type codes, summed. Codes — never the prototype\'s item numbers.',
   })
   @IsArray()
-  @ArrayMinSize(1)
-  @ArrayMaxSize(50)
+  @ArrayMinSize(formulaTerms.min)
+  @ArrayMaxSize(formulaTerms.max)
   @IsString({ each: true })
   numerator!: string[];
 
   @ApiProperty({ type: [String], example: ['SELL_PRESENTATION', 'SELL_FOLLOWUP'] })
   @IsArray()
-  @ArrayMinSize(1)
-  @ArrayMaxSize(50)
+  @ArrayMinSize(formulaTerms.min)
+  @ArrayMaxSize(formulaTerms.max)
   @IsString({ each: true })
   denominator!: string[];
 
@@ -90,7 +84,7 @@ export class CreateRatioDto {
   })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(20)
+  @ArrayMaxSize(rungs.max)
   @IsString({ each: true })
   appliesToOrgLevelCodes?: string[];
 }
@@ -104,27 +98,27 @@ export class CreateRatioDto {
  * the routing table where a reader of the service cannot see it.
  */
 export class UpdateRatioDto {
-  @ApiPropertyOptional({ minLength: 1, maxLength: 80 })
+  @ApiPropertyOptional({ minLength: ratioLabel.min, maxLength: ratioLabel.max })
   @IsOptional()
   @IsString()
-  @MinLength(1)
-  @MaxLength(80)
+  @MinLength(ratioLabel.min)
+  @MaxLength(ratioLabel.max)
   @trim
   label?: string;
 
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
-  @ArrayMaxSize(50)
+  @ArrayMinSize(formulaTerms.min)
+  @ArrayMaxSize(formulaTerms.max)
   @IsString({ each: true })
   numerator?: string[];
 
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
-  @ArrayMaxSize(50)
+  @ArrayMinSize(formulaTerms.min)
+  @ArrayMaxSize(formulaTerms.max)
   @IsString({ each: true })
   denominator?: string[];
 
@@ -160,7 +154,7 @@ export class UpdateRatioDto {
   })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(20)
+  @ArrayMaxSize(rungs.max)
   @IsString({ each: true })
   appliesToOrgLevelCodes?: string[];
 }

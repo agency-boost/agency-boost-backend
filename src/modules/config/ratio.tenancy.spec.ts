@@ -256,6 +256,14 @@ describe('the office ratio definitions (P4-T2)', () => {
       })).rejects.toThrow('3–40 characters');
     });
 
+    it('refuses a benchmark out of range on the service itself, whichever path reaches it (ADR-0030)', async () => {
+      // The single route's DTO always refused 5000; the service wrote it for anybody else.
+      const [ratio] = await ratios.list(ctx(KPM_A));
+      await expect(ratios.update(ctx(KPM_A), ratio.id, { benchmark: 5000 }))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      expect((await ratios.list(ctx(KPM_A)))[0].benchmark).toBe(ratio.benchmark);
+    });
+
     it('refuses an empty numerator, for the same reason as an empty denominator', async () => {
       await expect(ratios.create(ctx(KPM_A), {
         code: 'NO_TOP', label: 'x', numerator: [],

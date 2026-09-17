@@ -166,19 +166,87 @@ describe('staged configuration changes (P4-T19)', () => {
     });
   });
 
+  describe('each body by its own rules, before anything is written (ADR-0030)', () => {
+    /*
+     * OD-51. An op's body never met the DTO its single-operation route applies, so through the
+     * batch — the only path the screens use — a label of any length and a benchmark of any size
+     * were written, a misspelt field was dropped in silence, and a label sent as a number failed
+     * at `.trim()` *after* the ops ahead of it had landed.
+     */
+    const refusedWith = (ops: Parameters<typeof wired.changes.apply>[1]) =>
+      wired.changes.apply(ctx(KPM_A), ops).then(
+        () => { throw new Error('the batch was applied'); },
+        (err: unknown) => err as { code: string; message: string },
+      );
+    const referralsExists = async () =>
+      (await wired.activity.list(ctx(KPM_A), true)).some((c) => c.code === 'REFERRALS');
+
+    it('refuses a benchmark out of range, and writes none of the ops ahead of it', async () => {
+      const ratio = (await wired.ratios.list(ctx(KPM_A)))[0];
+      const err = await refusedWith([
+        { op: 'category.create', body: { code: 'REFERRALS', label: 'Referrals' } },
+        { op: 'ratio.update', id: ratio.id, expectedVersion: ratio.version, body: { benchmark: 99999 } },
+      ]);
+
+      expect(err.code).toBe('VALIDATION_FAILED');
+      expect(err.message).toBe('Change 2 (ratio.update): benchmark must be a number from 0 to 1000.');
+      expect(await referralsExists()).toBe(false);
+      expect((await wired.ratios.list(ctx(KPM_A)))[0].benchmark).toBe(ratio.benchmark);
+    });
+
+    it('refuses a label that is not text before anything is written, not while it is', async () => {
+      const submission = await typeNamed('SELL_SUBMISSION');
+      const err = await refusedWith([
+        { op: 'category.create', body: { code: 'REFERRALS', label: 'Referrals' } },
+        { op: 'type.update', id: submission.id, expectedVersion: submission.version, body: { label: 42 } },
+      ]);
+
+      expect(err.message).toBe('Change 2 (type.update): label must be text.');
+      expect(await referralsExists()).toBe(false);
+    });
+
+    it('refuses a label longer than the single route would take', async () => {
+      const err = await refusedWith([
+        { op: 'category.create', body: { code: 'REFERRALS', label: 'x'.repeat(81) } },
+      ]);
+      expect(err.message).toBe('Change 1 (category.create): label must be 1–80 characters.');
+      expect(await referralsExists()).toBe(false);
+    });
+
+    it('refuses a field no op accepts, where it used to be dropped in silence', async () => {
+      const ratio = (await wired.ratios.list(ctx(KPM_A)))[0];
+      const err = await refusedWith([
+        { op: 'ratio.update', id: ratio.id, expectedVersion: ratio.version, body: { benchmrk: 0.2 } },
+      ]);
+      expect(err.message).toBe('Change 1 (ratio.update): property benchmrk should not exist');
+    });
+
+    it('refuses anything carried on an archive, which names a row and nothing more', async () => {
+      const ratio = (await wired.ratios.list(ctx(KPM_A)))[0];
+      const err = await refusedWith([
+        { op: 'ratio.archive', id: ratio.id, expectedVersion: ratio.version, body: { label: 'x' } },
+      ]);
+      expect(err.message).toBe('Change 1 (ratio.archive): property label should not exist');
+      expect((await wired.ratios.list(ctx(KPM_A)))[0].status).toBe('active');
+    });
+  });
+
   it('names the op when a rule the projection does not model refuses at apply time', async () => {
     /*
      * The residual this endpoint's docstring states: validation passes, and the service
      * refuses while applying. It is rare by construction and it is not impossible, and the
      * catch that names which op failed had never been exercised.
      */
+    // An empty side used to stand in for such a rule here. Since ADR-0030 the validate pass
+    // refuses that itself, so this names a type the office does not have: resolving a
+    // formula's codes needs the activity types, which the projection does not hold.
     await expect(wired.changes.apply(ctx(KPM_A), [{
       op: 'ratio.create',
       body: {
-        code: 'NO_TOP', label: 'Broken', numerator: [], denominator: ['SELL_SUBMISSION'],
-        benchmark: 1, comparison: 'gte',
+        code: 'NO_SUCH_TYPE', label: 'Broken', numerator: ['NOT_A_TYPE'],
+        denominator: ['SELL_SUBMISSION'], benchmark: 1, comparison: 'gte',
       },
-    }])).rejects.toThrow(/Change 1 \(ratio.create\).*at least one activity type/s);
+    }])).rejects.toThrow(/Change 1 \(ratio.create\).*no active activity type/s);
   });
 
   it('applies a batch in order', async () => {
