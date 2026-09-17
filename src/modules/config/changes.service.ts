@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException } from '@/common/errors/domain.exception';
+import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import type { ErrorCodeValue } from '@/common/errors/error-codes';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
@@ -117,7 +117,19 @@ export class ConfigChangeService {
         }
       } else {
         const row = op.id ? rows.get(op.id) : undefined;
-        if (!row) fail('That row is not in this office.', ErrorCode.NOT_FOUND);
+        if (!row) {
+          /*
+           * **404, the way every single-operation route answers this** — and `fail` cannot
+           * produce one, because it fixes the status at `400`.
+           *
+           * The projection above is built from `ctx`-scoped reads, so an id belonging to
+           * another office lands in exactly this branch. Answering `400` told that caller
+           * their request was malformed, when what is true is that the row is not theirs —
+           * a different question, and the one `NotFoundException` exists to answer without
+           * confirming the id exists somewhere (ADR-0002).
+           */
+          throw this.atOp(index, op.op, new NotFoundException('That row'));
+        }
         if (op.expectedVersion === undefined) {
           fail('Every change to an existing row must say which version it was read at.');
         }

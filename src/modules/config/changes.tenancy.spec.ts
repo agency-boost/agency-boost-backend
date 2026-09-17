@@ -5,6 +5,7 @@ import { configModule } from '../../../test/config-module';
 
 const NOW = new Date('2026-09-13T02:00:00Z');
 const KPM_A = '66f0000000000000000000a1';
+const KPM_B = '66f0000000000000000000b1';
 const COMPANY = '66f0000000000000000000c1';
 
 function ctx(kpmId: string) {
@@ -46,6 +47,139 @@ describe('staged configuration changes (P4-T19)', () => {
 
   const typeNamed = async (code: string) =>
     (await wired.activity.list(ctx(KPM_A), true)).flatMap((c) => c.types).find((t) => t.code === code)!;
+
+  /** A second office of the same company, provisioned the ordinary way. */
+  async function provisionB(): Promise<void> {
+    await (wired.kpms as mongoose.Model<never>).create({
+      _id: KPM_B, companyId: COMPANY, code: '0418', branchName: 'B', timezone: 'Asia/Jakarta',
+    } as never);
+    const seeded = await wired.provisioning.seedActivityTaxonomy(KPM_B, COMPANY);
+    await wired.provisioning.seedRatioDefinitions(KPM_B, COMPANY, seeded.typeCodes);
+  }
+
+  describe('another office’s row', () => {
+    /*
+     * The batch had **no cross-tenant test at all** — the only file in this module without
+     * one, which is how the defect below survived: every sibling spec asserts 404 for a row
+     * in another office, and this one asserted nothing.
+     */
+    it('is not found — 404, the way every single-operation route answers it', async () => {
+      await provisionB();
+      const theirs = (await wired.ratios.list(ctx(KPM_B)))[0];
+
+      const err = await wired.changes.apply(ctx(KPM_A), [{
+        op: 'ratio.update', id: theirs.id, expectedVersion: theirs.version, body: { benchmark: 0.9 },
+      }]).then(
+        () => { throw new Error('the batch accepted another office’s row'); },
+        (e: { code: string; getStatus(): number }) => e,
+      );
+
+      /*
+       * It answered `400` until 2026-09-17. The projection is built from `ctx`-scoped reads,
+       * so another office's id lands in the not-found branch — and `fail` fixes the status
+       * at 400, which told the caller their request was malformed rather than that the row
+       * is not theirs.
+       */
+      expect(err.code).toBe('NOT_FOUND');
+      expect(err.getStatus()).toBe(404);
+    });
+
+    it('is left exactly as it was', async () => {
+      await provisionB();
+      const theirs = (await wired.ratios.list(ctx(KPM_B)))[0];
+      await wired.changes.apply(ctx(KPM_A), [{
+        op: 'ratio.update', id: theirs.id, expectedVersion: theirs.version, body: { benchmark: 0.9 },
+      }]).catch(() => undefined);
+
+      expect((await wired.ratios.list(ctx(KPM_B)))[0]).toMatchObject({
+        benchmark: theirs.benchmark, version: theirs.version,
+      });
+    });
+  });
+
+  describe('every operation reaches the service that owns it', () => {
+    /*
+     * Six of the twelve cases in the dispatch switch were never exercised through the batch.
+     * A copy-paste mapping `category.restore` to `archiveCategory` would have passed the
+     * whole suite, because each op's *rule* is tested on its own service and nothing tested
+     * the wiring between them.
+     */
+    it('archives and restores a section', async () => {
+      const before = (await wired.activity.list(ctx(KPM_A), true))[0];
+      await wired.changes.apply(ctx(KPM_A), [
+        { op: 'category.archive', id: before.id, expectedVersion: before.version },
+      ]);
+      expect((await wired.activity.list(ctx(KPM_A), true))
+        .find((c) => c.id === before.id)!.status).toBe('archived');
+
+      const archived = (await wired.activity.list(ctx(KPM_A), true)).find((c) => c.id === before.id)!;
+      await wired.changes.apply(ctx(KPM_A), [
+        { op: 'category.restore', id: before.id, expectedVersion: archived.version },
+      ]);
+      expect((await wired.activity.list(ctx(KPM_A), true))
+        .find((c) => c.id === before.id)!.status).toBe('active');
+    });
+
+    it('archives and restores an activity type', async () => {
+      const type = await typeNamed('SELL_SUBMISSION');
+      await wired.changes.apply(ctx(KPM_A), [
+        { op: 'type.archive', id: type.id, expectedVersion: type.version },
+      ]);
+      expect((await typeNamed('SELL_SUBMISSION')).status).toBe('archived');
+
+      const archived = await typeNamed('SELL_SUBMISSION');
+      await wired.changes.apply(ctx(KPM_A), [
+        { op: 'type.restore', id: archived.id, expectedVersion: archived.version },
+      ]);
+      expect((await typeNamed('SELL_SUBMISSION')).status).toBe('active');
+    });
+
+    it('creates, archives and restores a ratio', async () => {
+      await wired.changes.apply(ctx(KPM_A), [{
+        op: 'ratio.create',
+        body: {
+          code: 'REFERRAL_RATE', label: 'Referral rate',
+          numerator: ['SELL_SUBMISSION'], denominator: ['LEADS_CONTACTED'],
+          benchmark: 0.2, comparison: 'gte',
+        },
+      }]);
+      const made = (await wired.ratios.list(ctx(KPM_A), true)).find((r) => r.code === 'REFERRAL_RATE')!;
+      expect(made.origin).toBe('office');
+
+      await wired.changes.apply(ctx(KPM_A), [
+        { op: 'ratio.archive', id: made.id, expectedVersion: made.version },
+      ]);
+      const gone = (await wired.ratios.list(ctx(KPM_A), true)).find((r) => r.code === 'REFERRAL_RATE')!;
+      expect(gone.status).toBe('archived');
+
+      await wired.changes.apply(ctx(KPM_A), [
+        { op: 'ratio.restore', id: gone.id, expectedVersion: gone.version },
+      ]);
+      expect((await wired.ratios.list(ctx(KPM_A))).some((r) => r.code === 'REFERRAL_RATE')).toBe(true);
+    });
+
+    it('refuses an operation it has no case for, rather than doing nothing quietly', async () => {
+      const ratio = (await wired.ratios.list(ctx(KPM_A)))[0];
+      await expect(wired.changes.apply(ctx(KPM_A), [
+        { op: 'ratio.frobnicate' as never, id: ratio.id, expectedVersion: ratio.version },
+      ])).rejects.toThrow(/Unknown change/);
+    });
+  });
+
+  it('names the op when a rule the projection does not model refuses at apply time', async () => {
+    /*
+     * The residual this endpoint's docstring states: validation passes, and the service
+     * refuses while applying. It is rare by construction and it is not impossible, and the
+     * catch that names which op failed had never been exercised.
+     */
+    await expect(wired.changes.apply(ctx(KPM_A), [{
+      op: 'ratio.create',
+      body: {
+        code: 'NO_TOP', label: 'Broken', numerator: [], denominator: ['SELL_SUBMISSION'],
+        benchmark: 1, comparison: 'gte',
+      },
+    }])).rejects.toThrow(/Change 1 \(ratio.create\).*at least one activity type/s);
+  });
 
   it('applies a batch in order', async () => {
     const submission = await typeNamed('SELL_SUBMISSION');
