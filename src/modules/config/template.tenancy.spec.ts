@@ -165,14 +165,33 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
       companyId, code: String(Math.random()).slice(2, 6), branchName: 'B',
       timezone: 'Asia/Jakarta', locale: 'id-ID', currency: 'IDR', status: 'active', ...over,
     });
+    /** An office's record for one kind, as provisioning writes it since P5-T12. */
+    const seeded = (kinds: Record<string, number | null>) => ({
+      seededFrom: Object.fromEntries(Object.entries(kinds).map(([kind, version]) => [
+        kind, { templateId: version === null ? null : `tpl-${kind}-${version}`, version },
+      ])),
+    });
+    const taxonomy = {
+      categories: [{ code: 'A', label: 'A', displayOrder: 1 }],
+      types: [{ code: 'B', categoryCode: 'A', label: 'B', description: null, displayOrder: 1 }],
+    };
+    const publishTimes = async (kind: 'activity_taxonomy' | 'lead_pipeline', times: number) => {
+      for (let i = 0; i < times; i += 1) {
+        const payload = kind === 'activity_taxonomy'
+          ? taxonomy
+          : (await service.read(companyId, 'lead_pipeline')).payload;
+        await service.saveDraft(ctx(), companyId, kind, payload);
+        await service.publish(ctx(), companyId, kind);
+      }
+    };
 
     it('counts an office built before anything was published', async () => {
       /*
-       * Its `seededFromVersion` is null: the company had published nothing when it was
-       * created, so it runs a taxonomy the company never chose. That is exactly the case
-       * a Super Admin wants to see.
+       * Its record for the taxonomy has a null version: the company had published nothing
+       * when it was created, so it runs a taxonomy the company never chose. That is exactly
+       * the case a Super Admin wants to see.
        */
-      await kpms.create(office({ seededFromVersion: null }) as never);
+      await kpms.create(office(seeded({ activity_taxonomy: null })) as never);
       await service.saveDraft(ctx(), companyId, 'activity_taxonomy', {
         categories: [{ code: 'A', label: 'A', displayOrder: 1 }],
         types: [{ code: 'B', categoryCode: 'A', label: 'B', description: null, displayOrder: 1 }],
@@ -187,7 +206,7 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
         types: [{ code: 'B', categoryCode: 'A', label: 'B', description: null, displayOrder: 1 }],
       });
       await service.publish(ctx(), companyId, 'activity_taxonomy');
-      await kpms.create(office({ seededFromVersion: 1 }) as never);
+      await kpms.create(office(seeded({ activity_taxonomy: 1 })) as never);
 
       const view = await service.read(companyId, 'activity_taxonomy');
       expect(view.officesBehind).toBe(0);
@@ -199,7 +218,7 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
         defaultLocale: 'id-ID', defaultTimezone: 'Asia/Jakarta', status: 'active',
       } as never);
       await kpms.create({
-        ...office({ seededFromVersion: null }),
+        ...office(seeded({ activity_taxonomy: null })),
         companyId: String((other as unknown as { _id: unknown })._id),
       } as never);
 
@@ -209,6 +228,81 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
       });
       const published = await service.publish(ctx(), companyId, 'activity_taxonomy');
       expect(published.officesBehind).toBe(0);
+    });
+
+    describe('per template kind (P5-T12)', () => {
+      /*
+       * `countBehind` took no kind and compared one `seededFromVersion` — written from the
+       * activity taxonomy's seed alone — against whichever kind's version it was handed, while
+       * template versions count separately per kind. Every tab but Activity types counted
+       * against the wrong template.
+       */
+      it('AC-3: counts each tab against its own kind’s version', async () => {
+        await publishTimes('activity_taxonomy', 3);
+        await publishTimes('lead_pipeline', 1);
+        await kpms.create(office(seeded({
+          activity_taxonomy: 3, lead_pipeline: 1, ratio_set: null,
+        })) as never);
+
+        expect((await service.read(companyId, 'activity_taxonomy')).officesBehind).toBe(0);
+        expect((await service.read(companyId, 'lead_pipeline')).officesBehind).toBe(0);
+
+        await publishTimes('lead_pipeline', 1);
+
+        // Behind on the one it is behind on, and still current on the other.
+        expect((await service.read(companyId, 'lead_pipeline')).officesBehind).toBe(1);
+        expect((await service.read(companyId, 'activity_taxonomy')).officesBehind).toBe(0);
+      });
+
+      it('AC-1: no longer reads a lead pipeline tab against the taxonomy’s version', async () => {
+        /*
+         * The case the old comparison got wrong in the loud direction: the office is on the
+         * current lead pipeline (v3), but its *taxonomy* record is v1, and v1 < 3 — so it was
+         * reported behind on a tab where it is not.
+         */
+        await publishTimes('activity_taxonomy', 1);
+        await publishTimes('lead_pipeline', 3);
+        await kpms.create(office(seeded({ activity_taxonomy: 1, lead_pipeline: 3 })) as never);
+
+        expect((await service.read(companyId, 'lead_pipeline')).officesBehind).toBe(0);
+      });
+
+      it('AC-2: counts an office built from the platform defaults as behind', async () => {
+        await publishTimes('lead_pipeline', 1);
+        await kpms.create(office(seeded({ activity_taxonomy: null, lead_pipeline: null })) as never);
+
+        const view = await service.read(companyId, 'lead_pipeline');
+        expect(view).toMatchObject({ officesBehind: 1, officesUnrecorded: 0 });
+      });
+
+      it('AC-2: counts an office with no record for the kind apart, as unrecorded', async () => {
+        /*
+         * Created before provisioning recorded this kind. It may be entirely current, so it
+         * is not "running something older" — folding it into that number would have told a
+         * Super Admin every existing office was behind on this tab.
+         */
+        await publishTimes('lead_pipeline', 1);
+        await kpms.create(office(seeded({ activity_taxonomy: 1 })) as never);
+
+        const view = await service.read(companyId, 'lead_pipeline');
+        expect(view).toMatchObject({ officesBehind: 0, officesUnrecorded: 1 });
+      });
+
+      it('reports nothing for a kind nothing has been published of', async () => {
+        await kpms.create(office(seeded({ activity_taxonomy: 1 })) as never);
+
+        expect(await service.read(companyId, 'lead_pipeline'))
+          .toMatchObject({ officesBehind: 0, officesUnrecorded: 0 });
+      });
+
+      it('ignores a deleted office, on both counts', async () => {
+        await publishTimes('lead_pipeline', 2);
+        await kpms.create({ ...office(seeded({ lead_pipeline: 1 })), deletedAt: NOW } as never);
+        await kpms.create({ ...office({}), deletedAt: NOW } as never);
+
+        expect(await service.read(companyId, 'lead_pipeline'))
+          .toMatchObject({ officesBehind: 0, officesUnrecorded: 0 });
+      });
     });
   });
 

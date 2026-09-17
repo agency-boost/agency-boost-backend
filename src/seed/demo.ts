@@ -275,6 +275,19 @@ async function main(): Promise<void> {
       kpmId, version: 1, sourceVersion: 1, payload,
       publishedAt: at, publishedBy: null, deletedAt: null,
     });
+
+    /*
+     * What was copied, recorded the way provisioning records it (P5-T12): the platform
+     * defaults for all three kinds, so a null version each. Without it every demo office read
+     * as *unrecorded* on every tab of the Company template — true of offices configured before
+     * this line existed, which is why the early return above leaves those alone.
+     */
+    const defaults = { templateId: null, version: null };
+    await Kpms.updateOne({ _id: kpmId }, {
+      $set: {
+        seededFrom: { activity_taxonomy: defaults, lead_pipeline: defaults, ratio_set: defaults },
+      },
+    }).exec();
   }
 
   /**

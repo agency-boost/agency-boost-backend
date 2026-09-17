@@ -12,7 +12,10 @@ import {
 import {
   CompanyTemplate, CompanyTemplateDocument, TemplateKind,
 } from './company-template.schema';
-import { OfficeCounter } from './office-counter.port';
+import { OfficeCounter, type OfficeStanding } from './office-counter.port';
+
+/** No version to stand against — nothing published, or a history row that is not current. */
+const NO_STANDING: OfficeStanding = { behind: 0, unrecorded: 0 };
 
 export interface TemplateView {
   id: string;
@@ -24,8 +27,16 @@ export interface TemplateView {
   publishedAt: string | null;
   /** The version offices are currently seeded from, or `null` if nothing is published. */
   publishedVersion: number | null;
-  /** How many offices of this company were seeded from something older than that. */
+  /**
+   * How many offices of this company were built from an older version of **this kind**, or
+   * from the platform defaults when nothing of it was published.
+   */
   officesBehind: number;
+  /**
+   * How many were created before provisioning recorded this kind, so whether they are current
+   * is not known (P5-T12). Counted apart from `officesBehind` rather than folded into it.
+   */
+  officesUnrecorded: number;
 }
 
 /** What an empty template of each kind starts from, so a Super Admin edits rather than types. */
@@ -88,10 +99,10 @@ export class TemplateService {
       .findOne({ companyId, kind, status: 'draft', deletedAt: null }).exec();
     const published = await this.newestPublished(companyId, kind);
 
-    const behind = await this.officesBehind(companyId, published?.version ?? null);
+    const standing = await this.standing(companyId, kind, published?.version ?? null);
 
-    if (draft) return this.view(draft, published?.version ?? null, behind);
-    if (published) return this.view(published, published.version, behind);
+    if (draft) return this.view(draft, published?.version ?? null, standing);
+    if (published) return this.view(published, published.version, standing);
 
     return {
       id: '',
@@ -102,7 +113,8 @@ export class TemplateService {
       payload: STARTING_PAYLOAD[kind]?.() ?? {},
       publishedAt: null,
       publishedVersion: null,
-      officesBehind: behind,
+      officesBehind: standing.behind,
+      officesUnrecorded: standing.unrecorded,
     };
   }
 
@@ -148,7 +160,7 @@ export class TemplateService {
     return this.view(
       saved!,
       published?.version ?? null,
-      await this.officesBehind(companyId, published?.version ?? null),
+      await this.standing(companyId, kind, published?.version ?? null),
     );
   }
 
@@ -188,7 +200,7 @@ export class TemplateService {
       after: { companyId, kind, version: draft.version },
     });
 
-    return this.view(draft, draft.version, await this.officesBehind(companyId, draft.version));
+    return this.view(draft, draft.version, await this.standing(companyId, kind, draft.version));
   }
 
   /** Every version of every kind for one company, newest first. The history panel. */
@@ -199,7 +211,7 @@ export class TemplateService {
       .sort({ version: -1 })
       .exec();
     const published = rows.find((r) => r.status === 'published');
-    return rows.map((r) => this.view(r, published?.version ?? null, 0));
+    return rows.map((r) => this.view(r, published?.version ?? null, NO_STANDING));
   }
 
   // -------------------------------------------------------------- internals
@@ -220,9 +232,13 @@ export class TemplateService {
     if (!company) throw new NotFoundException('Company');
   }
 
-  private async officesBehind(companyId: string, publishedVersion: number | null) {
-    if (publishedVersion === null) return 0;
-    return this.officesOf.countBehind(companyId, publishedVersion);
+  /** Where this company's offices stand against the published version of one kind. */
+  private async standing(
+    companyId: string, kind: TemplateKind, publishedVersion: number | null,
+  ): Promise<OfficeStanding> {
+    // Nothing published of this kind: there is no version to be behind, or unrecorded against.
+    if (publishedVersion === null) return NO_STANDING;
+    return this.officesOf.standing(companyId, kind, publishedVersion);
   }
 
   /**
@@ -336,7 +352,7 @@ export class TemplateService {
   private view(
     doc: CompanyTemplateDocument,
     publishedVersion: number | null,
-    officesBehind: number,
+    standing: OfficeStanding,
   ): TemplateView {
     return {
       id: String(doc._id),
@@ -347,7 +363,8 @@ export class TemplateService {
       payload: doc.payload,
       publishedAt: doc.publishedAt ? doc.publishedAt.toISOString() : null,
       publishedVersion,
-      officesBehind,
+      officesBehind: standing.behind,
+      officesUnrecorded: standing.unrecorded,
     };
   }
 }

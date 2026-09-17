@@ -362,10 +362,10 @@ export class TenantService {
       String(kpm._id),
       input.companyId,
     );
-    await this.provisioning.seedLeadPipelines(String(kpm._id), input.companyId);
+    const leads = await this.provisioning.seedLeadPipelines(String(kpm._id), input.companyId);
     // The ratios last, and checked against the taxonomy that was just copied: a formula
     // naming a code the office does not have would read as `0.0%` on every agent's screen.
-    await this.provisioning.seedRatioDefinitions(
+    const ratios = await this.provisioning.seedRatioDefinitions(
       String(kpm._id), input.companyId, seeded.typeCodes,
     );
 
@@ -379,8 +379,12 @@ export class TenantService {
       String(kpm._id),
       this.contextFor(ctx, String(kpm._id)),
     );
-    kpm.seededFromTemplateId = seeded.seededFromTemplateId;
-    kpm.seededFromVersion = seeded.seededFromVersion;
+    // One record per kind, each from the template that kind's seed actually copied (P5-T12).
+    kpm.seededFrom = {
+      activity_taxonomy: seeded.seededFrom,
+      lead_pipeline: leads.seededFrom,
+      ratio_set: ratios.seededFrom,
+    };
     await kpm.save();
 
     await this.audit.record(ctx, {
@@ -391,7 +395,7 @@ export class TenantService {
         code: kpm.code,
         branchName: kpm.branchName,
         companyId: kpm.companyId,
-        seededFromTemplateId: seeded.seededFromTemplateId,
+        seededFrom: kpm.seededFrom,
         activityTypes: seeded.types,
       },
     });

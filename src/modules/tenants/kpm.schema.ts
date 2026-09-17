@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
+import type { SeedRecord, TemplateKind } from '@/modules/config/company-template.schema';
 import { baseSchemaOptions } from '@/common/schema/base.schema';
 import {
   ACTIVATION, DEFAULT_CURRENCY, DEFAULT_TENANT_TIMEZONE, PERFORMANCE, ACTIVITY, TIME,
@@ -107,11 +108,21 @@ export class Kpm {
   @Prop({ type: Number, default: 1, min: 1, max: 12 })
   fiscalYearStartMonth!: number;
 
-  @Prop({ type: String, default: null })
-  seededFromTemplateId!: string | null;
-
-  @Prop({ type: Number, default: null })
-  seededFromVersion!: number | null;
+  /**
+   * The published template of **each kind** this office was built from (P5-T12).
+   *
+   * It was one pair, `seededFromTemplateId` / `seededFromVersion`, written from the
+   * **activity taxonomy's** seed alone — while template versions count separately per
+   * company *and kind*. So the Lead statuses and Ratio benchmarks tabs of the Company
+   * template compared every office against the wrong template's version, and would have
+   * done the same for every Phase 5 tab.
+   *
+   * Keyed by kind. An entry with `version: null` is an office built from the platform
+   * defaults; a missing entry is an office created before that kind was recorded. The two
+   * are counted apart, because only one of them is known to be behind.
+   */
+  @Prop({ type: Object, default: {} })
+  seededFrom!: Partial<Record<TemplateKind, SeedRecord>>;
 
   @Prop({ type: String, enum: ['active', 'suspended', 'archived'], default: 'active', index: true })
   status!: 'active' | 'suspended' | 'archived';

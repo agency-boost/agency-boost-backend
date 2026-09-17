@@ -245,6 +245,26 @@ describe('TenantService', () => {
       expect(stored?.get('counters').nextMemberSeq).toBe(1);
     });
 
+    it('P5-T12: records which version of each kind the office was built from', async () => {
+      /*
+       * One record per kind, each taken from the template that kind's seed actually copied.
+       * It was a single pair written from the taxonomy's seed alone, so every other tab of the
+       * Company template compared this office against the wrong version.
+       */
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
+
+      const stored = await mongoose.model(Kpm.name).findById(kpm._id).lean().exec() as
+        { seededFrom: Record<string, unknown>; seededFromVersion?: unknown } | null;
+      // Nothing is published for this company, so every kind came from the platform defaults
+      // — a known answer, recorded as a null version rather than left out.
+      expect(stored?.seededFrom).toEqual({
+        activity_taxonomy: { templateId: null, version: null },
+        lead_pipeline: { templateId: null, version: null },
+        ratio_set: { templateId: null, version: null },
+      });
+      expect(stored).not.toHaveProperty('seededFromVersion');
+    });
+
     it('rejects a duplicate code within the same company', async () => {
       await service.createKpm(ctx({ superAdmin: true }), input());
       await expect(service.createKpm(ctx({ superAdmin: true }), input())).rejects.toMatchObject({

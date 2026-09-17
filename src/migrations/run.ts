@@ -10,6 +10,7 @@ import { up as companyTemplates } from './0006-company-templates';
 import { up as categoryAppliesTo } from './0007-category-applies-to';
 import { up as ratioDisplayUnit } from './0008-ratio-display-unit';
 import { up as ratioStandardFormula } from './0009-ratio-standard-formula';
+import { up as kpmSeedRecordPerKind } from './0010-kpm-seed-record-per-kind';
 
 /**
  * Every migration, in order. Forward-only and idempotent, so running this twice is a
@@ -25,6 +26,7 @@ const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Date) => P
   ['0007-category-applies-to', categoryAppliesTo],
   ['0008-ratio-display-unit', ratioDisplayUnit],
   ['0009-ratio-standard-formula', ratioStandardFormula],
+  ['0010-kpm-seed-record-per-kind', kpmSeedRecordPerKind],
 ];
 
 async function main(): Promise<void> {

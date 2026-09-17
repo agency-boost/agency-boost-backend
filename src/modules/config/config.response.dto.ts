@@ -281,10 +281,19 @@ export class CompanyTemplateDto implements TemplateView {
   @ApiProperty({
     type: Number,
     description:
-      'How many of this company\'s offices were built from something older — including '
-      + 'those built before anything was published at all.',
+      'How many of this company\'s offices were built from an older version of this kind — '
+      + 'including those built from the platform defaults because nothing of it was published.',
   })
   officesBehind!: number;
+
+  @ApiProperty({
+    type: Number,
+    description:
+      'How many were created before provisioning recorded this kind, so whether they are '
+      + 'current is not known. Counted apart from `officesBehind`, which only counts offices '
+      + 'known to be behind (P5-T12).',
+  })
+  officesUnrecorded!: number;
 }
 
 /** Whether the office has edited anything since agents last had a copy (P4-T6). */

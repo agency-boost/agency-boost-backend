@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { SeedRecord } from './company-template.schema';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { InjectModel } from '@nestjs/mongoose';
@@ -21,10 +22,27 @@ export interface ProvisionedTaxonomy {
   types: number;
   /** What was actually copied — what the ratios must be checkable against. */
   typeCodes: string[];
-  /** The template it came from, or `null` when the platform defaults were used. */
-  seededFromTemplateId: string | null;
-  seededFromVersion: number | null;
+  /** The template it came from, or a `null` version when the platform defaults were used. */
+  seededFrom: SeedRecord;
 }
+
+/** What one kind's seed copied, and from which published version (P5-T12). */
+export interface ProvisionedKind {
+  rows: number;
+  seededFrom: SeedRecord;
+}
+
+/**
+ * The record of what a seed read, taken from the **same** template document it copied.
+ *
+ * Returned by each seed rather than looked up afterwards: a second query could land on a
+ * version published in between, and then the record would describe something the office was
+ * never built from.
+ */
+const recordOf = (template: { _id: unknown; version: number } | null): SeedRecord => ({
+  templateId: template ? String(template._id) : null,
+  version: template ? template.version : null,
+});
 
 interface ActivityTaxonomyPayload {
   categories?: SeedActivityCategory[];
@@ -117,7 +135,7 @@ export class ProvisioningService {
    * successful* is gated on it, and an office whose leads can never be closed would look
    * like a leads bug for weeks before anybody traced it to a template.
    */
-  async seedLeadPipelines(kpmId: string, companyId: string): Promise<number> {
+  async seedLeadPipelines(kpmId: string, companyId: string): Promise<ProvisionedKind> {
     const template = await this.publishedTemplate(companyId, 'lead_pipeline');
     const fromTemplate = (template?.payload as { statuses?: SeedLeadStatus[] })?.statuses;
     const statuses = fromTemplate?.length ? fromTemplate : SEED_LEAD_STATUSES;
@@ -148,7 +166,7 @@ export class ProvisioningService {
       createdBy: null,
       updatedBy: null,
     })));
-    return statuses.length;
+    return { rows: statuses.length, seededFrom: recordOf(template) };
   }
 
   async seedActivityTaxonomy(kpmId: string, companyId: string): Promise<ProvisionedTaxonomy> {
@@ -211,8 +229,7 @@ export class ProvisioningService {
       categories: categories.length,
       types: usable.length,
       typeCodes: usable.map((t) => t.code),
-      seededFromTemplateId: template ? String(template._id) : null,
-      seededFromVersion: template ? template.version : null,
+      seededFrom: recordOf(template),
     };
   }
 
@@ -228,7 +245,7 @@ export class ProvisioningService {
     kpmId: string,
     companyId: string,
     availableCodes: readonly string[],
-  ): Promise<number> {
+  ): Promise<ProvisionedKind> {
     const template = await this.publishedTemplate(companyId, 'ratio_set');
     const fromTemplate = (template?.payload as { ratios?: SeedRatioDefinition[] })?.ratios;
     const ratios = fromTemplate?.length ? fromTemplate : SEED_RATIO_DEFINITIONS;
@@ -296,6 +313,6 @@ export class ProvisioningService {
       createdBy: null,
       updatedBy: null,
     })));
-    return ratios.length;
+    return { rows: ratios.length, seededFrom: recordOf(template) };
   }
 }

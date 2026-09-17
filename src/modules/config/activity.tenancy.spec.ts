@@ -49,7 +49,8 @@ describe('the office activity taxonomy (P4-T1)', () => {
        */
       const result = await provisioning.seedActivityTaxonomy(KPM_A, COMPANY);
 
-      expect(result.seededFromTemplateId).toBeNull();
+      // A record whose version is null: nothing published, so the platform defaults (P5-T12).
+      expect(result.seededFrom).toEqual({ templateId: null, version: null });
       expect(result.types).toBe(SEED_ACTIVITY_TYPES.length);
       const taxonomy = await service.list(ctx(KPM_A));
       expect(taxonomy.map((c) => c.code)).toEqual([
@@ -77,7 +78,7 @@ describe('the office activity taxonomy (P4-T1)', () => {
 
       const result = await provisioning.seedActivityTaxonomy(KPM_A, COMPANY);
 
-      expect(result.seededFromVersion).toBe(3);
+      expect(result.seededFrom.version).toBe(3);
       const taxonomy = await service.list(ctx(KPM_A));
       expect(taxonomy).toHaveLength(1);
       expect(taxonomy[0].types.map((t) => t.code)).toEqual(['ONLY_THING']);

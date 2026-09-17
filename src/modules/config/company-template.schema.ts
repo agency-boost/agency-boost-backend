@@ -16,6 +16,19 @@ export const TEMPLATE_KINDS = [
 export type TemplateKind = (typeof TEMPLATE_KINDS)[number];
 
 /**
+ * Which published version of one template kind an office was built from (P5-T12).
+ *
+ * `version: null` means provisioning looked, found nothing of this kind published for the
+ * company, and copied the platform defaults. That is a known answer — the office is on
+ * something the company never chose — and it is different from **no record at all**, which
+ * means the office was created before provisioning recorded this kind.
+ */
+export interface SeedRecord {
+  templateId: string | null;
+  version: number | null;
+}
+
+/**
  * The preset every new office of one company starts from (ADR-0018).
  *
  * Called the **Company template** since ADR-0023. The frozen prototype says *KPM template*
