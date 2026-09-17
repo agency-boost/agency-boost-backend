@@ -231,9 +231,11 @@ export const PERMISSIONS = {
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
+  // The Owner's alone until ADR-0028. No route reads it yet; when one does, it is both of theirs.
   'audit_log:export': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
 
   // ---- Membership. ----
@@ -452,11 +454,12 @@ export function scopeFor(ctx: RequestContext, permission: Permission): Scope | n
 /**
  * Is this a power the office's Owner keeps to themselves?
  *
- * True when no tenant grantee but `KPM_OWNER` appears — granting and revoking admin
- * access, and the audit log export. It lets a refusal say *which* wall was hit: an Admin
- * denied one of these is not missing a role, they are being told the Owner reserved it.
- * Derived from the grant list rather than a second list of "owner things", which would
- * drift — Branch info stopped being one (ADR-0027) without this function changing.
+ * True when no tenant grantee but `KPM_OWNER` appears — since ADR-0028, granting and
+ * revoking admin access and nothing else: a KPM Admin holds every other power the Owner
+ * does. It lets a refusal say *which* wall was hit: an Admin denied one of these is not
+ * missing a role, they are being told the Owner reserved it. Derived from the grant list
+ * rather than a second list of "owner things", which would drift — Branch info and the
+ * audit log export stopped being ones (ADR-0027, ADR-0028) without this function changing.
  */
 export function isOwnerReserved(permission: Permission): boolean {
   const grants = PERMISSIONS[permission] as readonly Grant[];

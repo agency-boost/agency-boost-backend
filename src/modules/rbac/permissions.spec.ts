@@ -301,15 +301,43 @@ describe('permission matrix', () => {
       expect(can(ctx({ superAdmin: true, noMembership: true }), 'tenant_config:write')).toBe(false);
     });
 
-    it('holds back from an Admin only managing admins, and an export nothing calls (ADR-0027)', () => {
+    it('holds back from an Admin nothing but managing admins (ADR-0028)', () => {
       /*
-       * The product owner's account of the role, made executable: an Admin runs the office on
-       * the Owner's behalf, and only deciding who else may do that is held back. A new entry
-       * here is a product decision about what an Admin may not do, so it fails the build until
-       * somebody has made it on purpose. `audit_log:export` has no route; OD-34 is open for it.
+       * The product owner's rule, made executable: a KPM Admin can do everything the KPM Owner
+       * can, in every feature built and every one to come, except grant or revoke admin
+       * access. A new entry here is a product decision about what an Admin may not do, so it
+       * fails the build until somebody has made it on purpose, with an ADR.
        */
       const reserved = (Object.keys(PERMISSIONS) as Permission[]).filter(isOwnerReserved).sort();
-      expect(reserved).toEqual(['audit_log:export', 'kpm_admin:grant', 'kpm_admin:revoke']);
+      expect(reserved).toEqual(['kpm_admin:grant', 'kpm_admin:revoke']);
+    });
+
+    it('grants the Admin exactly what it grants the Owner, scope and status alike (ADR-0028)', () => {
+      /*
+       * Stronger than the test above, which only sees a permission the Owner holds *alone*. An
+       * Admin granted a narrower scope than the Owner — `own-unit` against `own-kpm` — would
+       * pass that one and still break the rule, so this compares the two grants whole.
+       */
+      type TenantGrant = {
+        grantee: { kind: string; role?: string };
+        scope: Scope;
+        whileStatus?: readonly string[];
+      };
+      const as = (grants: readonly TenantGrant[], role: 'kpm_owner' | 'kpm_admin') =>
+        grants
+          .filter((g) => g.grantee.kind === 'tenant' && g.grantee.role === role)
+          .map((g) => `${g.scope}|${[...(g.whileStatus ?? ['active'])].sort().join(',')}`)
+          .sort();
+
+      const differ = (Object.keys(PERMISSIONS) as Permission[])
+        .filter((permission) => {
+          const grants = PERMISSIONS[permission] as readonly TenantGrant[];
+          return JSON.stringify(as(grants, 'kpm_owner')) !== JSON.stringify(as(grants, 'kpm_admin'));
+        })
+        .sort();
+      expect(differ).toEqual(['kpm_admin:grant', 'kpm_admin:revoke']);
+      // And the one that used to differ is now held by both.
+      expect(can(ctx({ admin: true }), 'audit_log:export')).toBe(true);
     });
   });
 
