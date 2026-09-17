@@ -89,11 +89,6 @@ export const PERMISSIONS = {
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
-  /** Branch info: the office's own identity, editable by its Owner. */
-  'kpm:update_identity': [
-    { grantee: SUPER_ADMIN, scope: 'all' },
-    { grantee: KPM_OWNER, scope: 'own-kpm' },
-  ],
   /** The company tag is Super Admin's alone — the prototype disables the field. */
   'kpm:update_company_tag': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:suspend': [{ grantee: SUPER_ADMIN, scope: 'all' }],
@@ -135,6 +130,12 @@ export const PERMISSIONS = {
     { grantee: AAB, scope: 'own-kpm' },
     { grantee: AGENT, scope: 'own-kpm' },
   ],
+  /*
+   * **Every page under Settings, Branch info included** (ADR-0027) — one permission rather
+   * than one per screen, because every such page is reached by the same people. Branch info
+   * had its own Owner-only `kpm:update_identity` until the product owner gave the Admin the
+   * same write; a page that one day needs a different rule gets its own permission then.
+   */
   'tenant_config:write': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
@@ -451,10 +452,11 @@ export function scopeFor(ctx: RequestContext, permission: Permission): Scope | n
 /**
  * Is this a power the office's Owner keeps to themselves?
  *
- * True when no tenant grantee but `KPM_OWNER` appears — admin delegation, ownership
- * transfer, branch info. It lets a refusal say *which* wall was hit: an Admin denied one
- * of these is not missing a role, they are being told the Owner reserved it. Derived
- * from the grant list rather than a second list of "owner things", which would drift.
+ * True when no tenant grantee but `KPM_OWNER` appears — granting and revoking admin
+ * access, and the audit log export. It lets a refusal say *which* wall was hit: an Admin
+ * denied one of these is not missing a role, they are being told the Owner reserved it.
+ * Derived from the grant list rather than a second list of "owner things", which would
+ * drift — Branch info stopped being one (ADR-0027) without this function changing.
  */
 export function isOwnerReserved(permission: Permission): boolean {
   const grants = PERMISSIONS[permission] as readonly Grant[];

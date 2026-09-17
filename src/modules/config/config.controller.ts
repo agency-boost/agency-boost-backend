@@ -382,14 +382,13 @@ export class TenantConfigController {
   }
 
   @Patch('branch-info')
-  @RequirePermission('kpm:update_identity')
+  @RequirePermission('tenant_config:write')
   @ApiOperation({
     summary: 'Change the office\'s identity',
     description:
       'Branch name, address, contact phone and the fiscal year start month. **The Owner\'s '
-      + 'alone** — this is the row that says what the office is, and delegated '
-      + 'administration does not extend to renaming the branch. Not company, not owner, '
-      + 'and not locale, timezone or currency (ADR-0016).',
+      + 'and the Admin\'s**, under the same permission as every other page under Settings '
+      + '(ADR-0027). Not company, not owner, and not locale, timezone or currency (ADR-0016).',
   })
   async updateBranchInfo(@Ctx() ctx: RequestContext, @Body() dto: UpdateBranchInfoDto) {
     return this.tenants.updateIdentity(ctx, ctx.kpmId ?? '', dto);

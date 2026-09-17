@@ -7965,7 +7965,7 @@
         "x-required-permission": "kpm:read_profile"
       },
       "patch": {
-        "description": "Branch name, address, contact phone and the fiscal year start month. **The Owner's alone** — this is the row that says what the office is, and delegated administration does not extend to renaming the branch. Not company, not owner, and not locale, timezone or currency (ADR-0016).\n\n**Requires `kpm:update_identity`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Branch name, address, contact phone and the fiscal year start month. **The Owner's and the Admin's**, under the same permission as every other page under Settings (ADR-0027). Not company, not owner, and not locale, timezone or currency (ADR-0016).\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TenantConfigController_updateBranchInfo_v1",
         "parameters": [],
         "requestBody": {
@@ -8010,7 +8010,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `kpm:update_identity`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8039,7 +8039,7 @@
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "kpm:update_identity"
+        "x-required-permission": "tenant_config:write"
       }
     },
     "/api/v1/kpm/org-levels": {

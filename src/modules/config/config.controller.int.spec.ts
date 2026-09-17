@@ -30,6 +30,9 @@ const OWNER = new RequestContext('u-owner', 'none', member() as never);
 const AGENT = new RequestContext('u-agent', 'none', member({
   membershipId: 'mem-b', orgLevelCode: 'AGENT', hierarchyRole: 'agent', isKpmOwner: false,
 }) as never);
+const ADMIN = new RequestContext('u-admin', 'none', member({
+  membershipId: 'mem-c', isKpmOwner: false, isKpmAdmin: true,
+}) as never);
 
 /** Whoever the current test is signed in as. The real guard runs behind this. */
 let current: RequestContext = OWNER;
@@ -152,8 +155,8 @@ describe('the configuration controllers', () => {
        * gated on a read-shaped name would let that session through — the inverse of OD-49,
        * and the one worth failing a build over.
        *
-       * `kpm:update_identity` is why this does not simply require `:write`. It is a write
-       * and reads as one; the name is about what it changes, not which screen it belongs to.
+       * Kept apart from the test below on purpose: that one pins a product decision, which
+       * an ADR may one day change, and this one pins a guard rule, which no ADR should.
        */
       const readLike = /^(read|list|search|preview|view|export)/;
       const found = [
@@ -165,6 +168,24 @@ describe('the configuration controllers', () => {
       expect(writes
         .filter((r) => readLike.test(r.permission?.split(':')[1] ?? ''))
         .map((r) => r.name)).toEqual([]);
+    });
+
+    it('gates every write on tenant_config:write, Branch info included (ADR-0027)', () => {
+      /*
+       * One permission for every page under Settings, held by the Owner and the Admin and by
+       * nobody else. A write here under any other name is a page that has been given a rule of
+       * its own — a product decision, with an ADR — or a mistake. Branch info was the one
+       * exception, behind an Owner-only permission, until the product owner removed it.
+       */
+      const found = [
+        ...routes(Object.create(TenantConfigController.prototype) as object),
+        ...routes(Object.create(TenantConfigReadController.prototype) as object),
+      ];
+      const writes = found.filter((r) => r.method !== RequestMethod.GET);
+      expect(writes.length).toBeGreaterThan(0);
+      expect(writes
+        .filter((r) => r.permission !== 'tenant_config:write')
+        .map((r) => `${r.name}: ${r.permission}`)).toEqual([]);
     });
 
     it('gates every read on a read-shaped permission, so a support session can look', () => {
@@ -375,15 +396,22 @@ describe('the configuration controllers', () => {
   });
 
   describe('branch info', () => {
-    it('is readable, and writable only by an Owner', async () => {
+    it('is readable, and writable by the Owner and the Admin alike (ADR-0027)', async () => {
       await request(app.getHttpServer()).get('/kpm/settings/branch-info').expect(200);
 
       await request(app.getHttpServer())
         .patch('/kpm/settings/branch-info').send({ branchName: 'BSD City Branch' }).expect(200);
 
+      // It answered PERM_OWNER_ONLY to an Admin until 2026-09-17.
+      current = ADMIN;
+      const renamed = await request(app.getHttpServer())
+        .patch('/kpm/settings/branch-info').send({ branchName: 'Serpong Branch' }).expect(200);
+      expect(renamed.body.branchName).toBe('Serpong Branch');
+
       current = AGENT;
-      await request(app.getHttpServer())
+      const refused = await request(app.getHttpServer())
         .patch('/kpm/settings/branch-info').send({ branchName: 'Mine now' }).expect(403);
+      expect(refused.body.error.code).toBe('PERM_DENIED');
     });
   });
 });

@@ -824,10 +824,19 @@ describe('TenantService', () => {
       expect(updated.fiscalYearStartMonth).toBe(4);
     });
 
-    it('refuses an Admin, alone among the Settings screens', async () => {
+    it('changes it for an Admin too, like every page under Settings (ADR-0027)', async () => {
+      const id = await anOffice();
+      const updated = await service.updateIdentity(ctx({ admin: true, kpmId: id }), id, {
+        branchName: 'Serpong Branch',
+      });
+      expect(updated.branchName).toBe('Serpong Branch');
+    });
+
+    it('refuses a Super Admin, who writes no office\u2019s settings (ADR-0027)', async () => {
+      // The company's template is theirs; an office's copy is the office's.
       const id = await anOffice();
       await expect(
-        service.updateIdentity(ctx({ admin: true, kpmId: id }), id, { branchName: 'Nope' }),
+        service.updateIdentity(ctx({ superAdmin: true }), id, { branchName: 'From the platform' }),
       ).rejects.toMatchObject({ code: 'PERM_DENIED' });
     });
 
@@ -848,10 +857,11 @@ describe('TenantService', () => {
     });
 
     it('refuses an office that does not exist', async () => {
+      // A membership naming an office that has since gone — the only way to reach the read
+      // now that no platform grant passes the permission.
+      const ghost = '66f0000000000000000000ff';
       await expect(
-        service.updateIdentity(ctx({ superAdmin: true }), '66f0000000000000000000ff', {
-          branchName: 'Ghost',
-        }),
+        service.updateIdentity(ctx({ owner: true, kpmId: ghost }), ghost, { branchName: 'Ghost' }),
       ).rejects.toThrow('KPM');
     });
   });
@@ -990,7 +1000,9 @@ describe('TenantService', () => {
       // These arrive from a URL. An uncaught CastError is INTERNAL_ERROR and a log line
       // about an unhandled error, which is the wrong story about a typo.
       await expect(
-        service.updateIdentity(ctx({ superAdmin: true }), 'not-an-id', { branchName: 'X' }),
+        service.updateIdentity(ctx({ owner: true, kpmId: 'not-an-id' }), 'not-an-id', {
+          branchName: 'X',
+        }),
       ).rejects.toThrow('KPM');
     });
 

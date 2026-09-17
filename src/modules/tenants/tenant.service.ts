@@ -535,7 +535,7 @@ export class TenantService {
 
   /**
    * A tenant may not be left ownerless. Clearing the owner without naming a successor
-   * would leave nobody able to grant admin access or edit branch info.
+   * would leave nobody able to grant admin access.
    */
   async clearOwner(ctx: RequestContext, kpmId: string): Promise<never> {
     this.require(ctx, 'kpm:assign_owner');
@@ -816,10 +816,13 @@ export class TenantService {
   /**
    * The office's own identity (P4-T5, `KPM_Owner.html:1807-1812`).
    *
-   * **The Owner's, not the Admin's.** `route-registry.md` puts Branch info alone among the
-   * Settings screens at KPM_OWNER only, and the permission matrix agrees — it is the row
-   * that says what this office *is*, and delegated administration does not extend to
-   * renaming the branch.
+   * **The Owner's and the Admin's, like every page under Settings** (ADR-0027), and under the
+   * same permission. It was the Owner's alone, behind `kpm:update_identity`, until the product
+   * owner gave the Admin the write: an Admin runs the office on the Owner's behalf, and only
+   * managing admins is held back.
+   *
+   * **The office is always the caller's own.** No platform grant reaches this permission, so
+   * the Super Admin exception this check used to carry could never run.
    *
    * **Company and KPM Owner are not here.** The prototype disables both fields and labels
    * the first *"tagged by Superadmin"*, which is where the platform-owned boundary was
@@ -843,8 +846,8 @@ export class TenantService {
       fiscalYearStartMonth?: number;
     },
   ): Promise<KpmView> {
-    this.require(ctx, 'kpm:update_identity');
-    if (!ctx.isSuperAdmin && ctx.kpmId !== kpmId) throw new NotFoundException('KPM');
+    this.require(ctx, 'tenant_config:write');
+    if (ctx.kpmId !== kpmId) throw new NotFoundException('KPM');
 
     const set: Record<string, unknown> = {};
     if (input.branchName !== undefined) set.branchName = input.branchName.trim();

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HierarchyRole, RequestContext } from '@/common/context/request-context';
-import { can, PERMISSIONS, Permission, Scope, scopeFor } from './permissions';
+import { can, isOwnerReserved, PERMISSIONS, Permission, Scope, scopeFor } from './permissions';
 
 function ctx(opts: {
   superAdmin?: boolean;
@@ -290,8 +290,26 @@ describe('permission matrix', () => {
     it('reserves owner-only actions from an admin', () => {
       expect(can(ctx({ owner: true }), 'kpm_admin:grant')).toBe(true);
       expect(can(ctx({ admin: true }), 'kpm_admin:grant')).toBe(false);
-      expect(can(ctx({ owner: true }), 'kpm:update_identity')).toBe(true);
-      expect(can(ctx({ admin: true }), 'kpm:update_identity')).toBe(false);
+    });
+
+    it('gives an Admin every settings page the Owner has, Branch info included (ADR-0027)', () => {
+      expect(can(ctx({ owner: true }), 'tenant_config:write')).toBe(true);
+      expect(can(ctx({ admin: true }), 'tenant_config:write')).toBe(true);
+      // Nobody else writes an office's settings: a leader would change what the office
+      // counts, and a Super Admin edits the company's template, not the office's copy.
+      expect(can(ctx({ role: 'ab' }), 'tenant_config:write')).toBe(false);
+      expect(can(ctx({ superAdmin: true, noMembership: true }), 'tenant_config:write')).toBe(false);
+    });
+
+    it('holds back from an Admin only managing admins, and an export nothing calls (ADR-0027)', () => {
+      /*
+       * The product owner's account of the role, made executable: an Admin runs the office on
+       * the Owner's behalf, and only deciding who else may do that is held back. A new entry
+       * here is a product decision about what an Admin may not do, so it fails the build until
+       * somebody has made it on purpose. `audit_log:export` has no route; OD-34 is open for it.
+       */
+      const reserved = (Object.keys(PERMISSIONS) as Permission[]).filter(isOwnerReserved).sort();
+      expect(reserved).toEqual(['audit_log:export', 'kpm_admin:grant', 'kpm_admin:revoke']);
     });
   });
 
