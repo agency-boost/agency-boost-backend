@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { configSchemaOptions } from '@/common/schema/base.schema';
+import { RATIO_DISPLAY_UNITS, type RatioDisplayUnit } from '@/domain/constants';
 
 export type RatioDefinitionDocument = HydratedDocument<RatioDefinition>;
 
@@ -52,6 +53,19 @@ export class RatioDefinition {
   comparison!: RatioComparison;
 
   /**
+   * How `benchmark` is written for a reader (P4-T25): `percent` (`0.15` → `15.0%`),
+   * `decimal` (`0.30` → `0.30`) or `points` (`30` → `±30 points`).
+   *
+   * Presentation, not arithmetic — the stored benchmark is compared exactly as before. It is
+   * a column rather than something a screen works out because it cannot be worked out: the
+   * value `0.30` is a percentage on one ratio and a plain number on another. Always
+   * resolved against `comparison` by `resolveDisplayUnit`, so a band ratio is points and an
+   * at-or-above ratio never is.
+   */
+  @Prop({ type: String, required: true, enum: RATIO_DISPLAY_UNITS, default: 'decimal' })
+  displayUnit!: RatioDisplayUnit;
+
+  /**
    * Whose formula this is (ADR-0021).
    *
    * `platform` is everything provisioning wrote — the platform defaults *and* a company's
@@ -66,6 +80,26 @@ export class RatioDefinition {
    */
   @Prop({ type: String, required: true, enum: RATIO_ORIGINS, default: 'office' })
   origin!: RatioOrigin;
+
+  /**
+   * The formula this row was **provisioned with** (ADR-0024), or `null` on a ratio the
+   * office created for itself.
+   *
+   * Recorded on the row rather than looked up, for three reasons. It is what the office was
+   * seeded from, which is the comparison ADR-0024 names — and a company republishing its
+   * `ratio_set` must not retroactively change what an existing office is said to diverge
+   * from (ADR-0018). It makes divergence a pure comparison of a row against itself, with no
+   * second collection to read on every settings load. And it lets the screen show an Owner
+   * *what* they diverged from, not only that they did.
+   *
+   * `divergesFromStandard` is **derived** from this, never stored: two fields that must
+   * agree are two fields that eventually will not.
+   */
+  @Prop({ type: [String], default: null })
+  standardNumerator!: string[] | null;
+
+  @Prop({ type: [String], default: null })
+  standardDenominator!: string[] | null;
 
   /**
    * The ladder rungs this ratio is a question about (ADR-0020).

@@ -232,8 +232,10 @@ async function main(): Promise<void> {
     await RatioDefinitions.insertMany(SEED_RATIO_DEFINITIONS.map((r) => ({
       kpmId, code: r.code, label: r.label,
       numerator: [...r.numerator], denominator: [...r.denominator],
-      benchmark: r.benchmark, comparison: r.comparison, displayOrder: r.displayOrder,
+      benchmark: r.benchmark, comparison: r.comparison, displayUnit: r.displayUnit,
+      displayOrder: r.displayOrder,
       origin: 'platform',
+      standardNumerator: [...r.numerator], standardDenominator: [...r.denominator],
       appliesToOrgLevelCodes: [...(r.appliesToOrgLevelCodes ?? [])],
       version: 1, status: 'active', archivedAt: null, deletedAt: null,
     })));
@@ -530,6 +532,8 @@ async function main(): Promise<void> {
       denominator: ['LEADS_CONTACTED'],
       benchmark: 0.35,
       comparison: 'gte',
+      // A conversion rate, so the Owner reads 35.0% — the unit they chose for their own.
+      displayUnit: 'percent',
       displayOrder: 6,
       origin: 'office',
       // Their referral push is the senior rungs' programme this quarter (ADR-0020).

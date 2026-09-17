@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { RATIO_DISPLAY_UNITS, type RatioDisplayUnit } from '@/domain/constants';
 import type { ActivityCategoryView, ActivityTypeView } from './activity.service';
 import type { LeadPipelineView, LeadStatusView } from './lead-status.service';
 import { LEAD_PIPELINES, type LeadPipeline } from './lead-status.schema';
@@ -181,8 +182,40 @@ export class RatioDefinitionDto implements RatioDefinitionView {
   })
   appliesToOrgLevelCodes!: string[];
 
+  @ApiProperty({
+    type: [String],
+    nullable: true,
+    description:
+      'The formula this office was provisioned with (ADR-0024), or `null` on a ratio it '
+      + 'created. What a divergence is measured against, and what the screen shows an Owner '
+      + 'they moved away from.',
+  })
+  standardNumerator!: string[] | null;
+
+  @ApiProperty({ type: [String], nullable: true })
+  standardDenominator!: string[] | null;
+
+  @ApiProperty({
+    type: Boolean,
+    description:
+      'The formula no longer matches what this office was seeded from (ADR-0024). A display '
+      + 'and support caveat: nothing is excluded from any comparison on account of it, '
+      + 'because a platform comparison computes the seeded formula rather than reading this '
+      + 'row.',
+  })
+  divergesFromStandard!: boolean;
+
   @ApiProperty({ enum: RATIO_COMPARISONS })
   comparison!: RatioComparison;
+
+  @ApiProperty({
+    enum: RATIO_DISPLAY_UNITS,
+    description:
+      'How to write `benchmark` for a reader. `percent`: × 100 to one decimal (15.0%). '
+      + '`decimal`: two decimals (0.30). `points`: ± percentage points (±30 points). Always '
+      + '`points` on a `band` ratio.',
+  })
+  displayUnit!: RatioDisplayUnit;
 
   @ApiProperty({ type: Number })
   displayOrder!: number;

@@ -106,18 +106,31 @@ describe('staged configuration changes (P4-T19)', () => {
       ])).rejects.toMatchObject({ code: 'CONFIG_RUNG_UNKNOWN' });
     });
 
-    it('refuses a formula change on a platform ratio before writing anything', async () => {
-      const ratio = (await wired.ratios.list(ctx(KPM_A))).find((r) => r.code === 'SELLING_SUCCESS_RATE')!;
-      await expect(wired.changes.apply(ctx(KPM_A), [
-        {
-          op: 'ratio.update', id: ratio.id, expectedVersion: ratio.version,
-          body: { benchmark: 0.9, numerator: ['SELL_PRESENTATION'] },
-        },
-      ])).rejects.toMatchObject({ code: 'CONFIG_RATIO_FORMULA_FIXED' });
+    it('refuses a display unit its rule cannot have before writing anything (P4-T25)', async () => {
+      const rows = await wired.ratios.list(ctx(KPM_A));
+      const leads = rows.find((r) => r.code === 'LEADS_PER_ACTIVITY')!;
+      const band = rows.find((r) => r.code === 'SELLING_VS_RECRUITMENT')!;
 
-      // Including the benchmark that shared the op.
-      expect((await wired.ratios.list(ctx(KPM_A))).find((r) => r.code === 'SELLING_SUCCESS_RATE')!.benchmark)
-        .toBe(ratio.benchmark);
+      await expect(wired.changes.apply(ctx(KPM_A), [
+        // Valid on its own, and must not land.
+        { op: 'ratio.update', id: leads.id, expectedVersion: leads.version, body: { benchmark: 0.9 } },
+        { op: 'ratio.update', id: band.id, expectedVersion: band.version, body: { displayUnit: 'percent' } },
+      ])).rejects.toMatchObject({ code: 'CONFIG_RATIO_UNIT_MISMATCH' });
+
+      expect((await wired.ratios.list(ctx(KPM_A))).find((r) => r.code === 'LEADS_PER_ACTIVITY')!.benchmark)
+        .toBe(leads.benchmark);
+    });
+
+    it('lets one op turn a ratio into a band and the next leave its unit alone', async () => {
+      // The projection carries the rule forward, so the second op is judged against the
+      // band the first one made — not against the row as it was read.
+      const leads = (await wired.ratios.list(ctx(KPM_A))).find((r) => r.code === 'LEADS_PER_ACTIVITY')!;
+      await wired.changes.apply(ctx(KPM_A), [
+        { op: 'ratio.update', id: leads.id, expectedVersion: leads.version, body: { comparison: 'band' } },
+        { op: 'ratio.update', id: leads.id, expectedVersion: leads.version + 1, body: { benchmark: 25 } },
+      ]);
+      const after = (await wired.ratios.list(ctx(KPM_A))).find((r) => r.code === 'LEADS_PER_ACTIVITY')!;
+      expect(after).toMatchObject({ comparison: 'band', displayUnit: 'points', benchmark: 25 });
     });
 
     it('names which change failed, not just what went wrong', async () => {
@@ -126,6 +139,24 @@ describe('staged configuration changes (P4-T19)', () => {
         { op: 'type.create', body: { code: 'X_ONE', categoryCode: 'NOWHERE', label: 'x' } },
       ])).rejects.toMatchObject({ message: expect.stringContaining('Change 2 (type.create)') });
     });
+  });
+
+  it('applies a formula change on a provisioned ratio, and flags it (ADR-0024)', async () => {
+    /*
+     * The batch refused this until ADR-0024, alongside the service. Both are open now, and
+     * the benchmark that used to be lost with the refusal lands in the same op.
+     */
+    const ratio = (await wired.ratios.list(ctx(KPM_A))).find((r) => r.code === 'SELLING_SUCCESS_RATE')!;
+
+    await wired.changes.apply(ctx(KPM_A), [{
+      op: 'ratio.update',
+      id: ratio.id,
+      expectedVersion: ratio.version,
+      body: { benchmark: 0.9, numerator: ['SELL_PRESENTATION'] },
+    }]);
+
+    expect((await wired.ratios.list(ctx(KPM_A))).find((r) => r.code === 'SELLING_SUCCESS_RATE'))
+      .toMatchObject({ benchmark: 0.9, numerator: ['SELL_PRESENTATION'], divergesFromStandard: true });
   });
 
   describe('two admins editing at once', () => {

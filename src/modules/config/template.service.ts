@@ -7,6 +7,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import {
   SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES, SEED_RATIO_DEFINITIONS,
+  resolveDisplayUnit,
 } from '@/domain/constants';
 import {
   CompanyTemplate, CompanyTemplateDocument, TemplateKind,
@@ -249,7 +250,12 @@ export class TemplateService {
 
     if (kind !== 'ratio_set') return;
 
-    const { ratios } = payload as { ratios?: { code: string; numerator: string[]; denominator: string[] }[] };
+    const { ratios } = payload as {
+      ratios?: {
+        code: string; numerator: string[]; denominator: string[];
+        comparison?: string; displayUnit?: string;
+      }[];
+    };
     if (!ratios?.length) {
       throw new BadRequestException('A ratio set with no ratios gives every new office nothing to measure.');
     }
@@ -278,6 +284,19 @@ export class TemplateService {
     }
 
     for (const ratio of ratios) {
+      /*
+       * A unit its rule cannot have (P4-T25) — refused here for the same reason as a
+       * missing code: provisioning would otherwise throw it at a Super Admin creating a real
+       * branch. An omitted unit is fine; provisioning resolves one.
+       */
+      if (ratio.displayUnit !== undefined) {
+        const resolved = resolveDisplayUnit(
+          ratio.comparison === 'band' ? 'band' : 'gte', ratio.displayUnit,
+        );
+        if (resolved.refusal !== undefined) {
+          throw new BadRequestException(`${ratio.code}: ${resolved.refusal}`);
+        }
+      }
       if (!ratio.denominator?.length) {
         throw new BadRequestException(
           `${ratio.code} has nothing in its denominator. That is a division by zero dressed `

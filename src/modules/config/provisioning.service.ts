@@ -6,6 +6,7 @@ import { Model } from 'mongoose';
 import {
   SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES, SEED_RATIO_DEFINITIONS,
   type SeedActivityCategory, type SeedActivityType, type SeedLeadStatus, type SeedRatioDefinition,
+  defaultDisplayUnitFor, resolveDisplayUnit,
 } from '@/domain/constants';
 import { ActivityCategory, ActivityCategoryDocument } from './activity-category.schema';
 import { ActivityType, ActivityTypeDocument } from './activity-type.schema';
@@ -232,8 +233,27 @@ export class ProvisioningService {
     const fromTemplate = (template?.payload as { ratios?: SeedRatioDefinition[] })?.ratios;
     const ratios = fromTemplate?.length ? fromTemplate : SEED_RATIO_DEFINITIONS;
 
+    /*
+     * The unit each ratio is written in (P4-T25). A template published before units existed
+     * has none on its ratios, and a published version is immutable, so it is not rewritten
+     * — the platform's unit for a seeded code stands in, and the rule's default otherwise.
+     * Publishing refuses a unit that does not fit its rule, so a refusal here means a
+     * template older than that check.
+     */
+    const unitOf = (r: SeedRatioDefinition) => {
+      const resolved = resolveDisplayUnit(
+        r.comparison,
+        (r as { displayUnit?: string }).displayUnit ?? defaultDisplayUnitFor(r.code, r.comparison),
+      );
+      if (resolved.refusal !== undefined) {
+        throw new Error(`The ratio ${r.code} for office ${kpmId}: ${resolved.refusal}`);
+      }
+      return resolved.unit;
+    };
+
     const known = new Set(availableCodes);
     for (const ratio of ratios) {
+      unitOf(ratio);
       const missing = [...ratio.numerator, ...ratio.denominator].filter((c) => !known.has(c));
       if (missing.length) {
         throw new Error(
@@ -251,6 +271,7 @@ export class ProvisioningService {
       denominator: [...r.denominator],
       benchmark: r.benchmark,
       comparison: r.comparison,
+      displayUnit: unitOf(r),
       displayOrder: r.displayOrder,
       /*
        * Everything provisioning writes is the platform's, including a company's own
@@ -260,6 +281,13 @@ export class ProvisioningService {
        * creating a ratio afterwards produces an `office` row.
        */
       origin: 'platform',
+      /*
+       * What this office was seeded from (ADR-0024). An Owner may change the formula now;
+       * this is what a divergence is measured against, and it stays as it was even if the
+       * company publishes a new `ratio_set` afterwards (ADR-0018).
+       */
+      standardNumerator: [...r.numerator],
+      standardDenominator: [...r.denominator],
       appliesToOrgLevelCodes: [...(r.appliesToOrgLevelCodes ?? [])],
       version: 1,
       status: 'active',

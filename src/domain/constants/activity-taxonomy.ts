@@ -1,4 +1,5 @@
 import { RATIO_BENCHMARKS } from './benchmarks';
+import type { RatioDisplayUnit } from './ratio-display';
 
 /**
  * The activity taxonomy a new office starts with (P4-T1).
@@ -198,6 +199,12 @@ export interface SeedRatioDefinition {
   readonly denominator: readonly string[];
   readonly benchmark: number;
   readonly comparison: 'gte' | 'band';
+  /**
+   * How the benchmark is written (P4-T25) — the unit `metrics-and-definitions.md` states for
+   * each of the five. The stored `benchmark` is a proportion either way; this is what turns
+   * `0.15` into `15.0%` on screen and leaves `0.30` as `0.30`.
+   */
+  readonly displayUnit: RatioDisplayUnit;
   readonly displayOrder: number;
   /**
    * Ladder rung codes this ratio is a question about (ADR-0020). Omitted means every rung.
@@ -217,6 +224,7 @@ export const SEED_RATIO_DEFINITIONS: readonly SeedRatioDefinition[] = [
     denominator: ['RECRUIT_PRESENTATION', 'RECRUIT_FOLLOWUP', 'RECRUIT_AGENT_CODE'],
     benchmark: RATIO_BENCHMARKS.BALANCE_BAND_PP,
     comparison: 'band',
+    displayUnit: 'points',
     displayOrder: 1,
     /*
      * The rungs that carry a recruiting mandate on v1's ladder (ADR-0020).
@@ -234,6 +242,7 @@ export const SEED_RATIO_DEFINITIONS: readonly SeedRatioDefinition[] = [
     denominator: ['SELL_PRESENTATION', 'SELL_FOLLOWUP'],
     benchmark: RATIO_BENCHMARKS.SELLING_SUCCESS_RATE,
     comparison: 'gte',
+    displayUnit: 'percent',
     displayOrder: 2,
   },
   {
@@ -243,6 +252,7 @@ export const SEED_RATIO_DEFINITIONS: readonly SeedRatioDefinition[] = [
     denominator: ['RECRUIT_PRESENTATION', 'RECRUIT_FOLLOWUP'],
     benchmark: RATIO_BENCHMARKS.RECRUITMENT_SUCCESS_RATE,
     comparison: 'gte',
+    displayUnit: 'percent',
     displayOrder: 3,
     // Same shape, same reason: a denominator that is structurally zero for this rung.
     appliesToOrgLevelCodes: ['AB', 'AAB'],
@@ -254,6 +264,7 @@ export const SEED_RATIO_DEFINITIONS: readonly SeedRatioDefinition[] = [
     denominator: ['LEADS_GEN_ACTIVITY'],
     benchmark: RATIO_BENCHMARKS.LEADS_PER_ACTIVITY,
     comparison: 'gte',
+    displayUnit: 'decimal',
     displayOrder: 4,
   },
   {
@@ -263,6 +274,7 @@ export const SEED_RATIO_DEFINITIONS: readonly SeedRatioDefinition[] = [
     denominator: ['LEADS_CONTACTED'],
     benchmark: RATIO_BENCHMARKS.MEETING_PER_APPROACH,
     comparison: 'gte',
+    displayUnit: 'decimal',
     displayOrder: 5,
   },
 ];

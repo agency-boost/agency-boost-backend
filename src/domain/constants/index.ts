@@ -11,6 +11,13 @@
  */
 
 export { RATIO_BENCHMARKS } from './benchmarks';
+export {
+  RATIO_DISPLAY_UNITS,
+  type RatioDisplayUnit,
+  type DisplayUnitResolution,
+  resolveDisplayUnit,
+  defaultDisplayUnitFor,
+} from './ratio-display';
 
 /** Goal calculator defaults. Overall.html:2872-2996, :5919-5940. All tenant-configurable. */
 export const GOAL_DEFAULTS = {

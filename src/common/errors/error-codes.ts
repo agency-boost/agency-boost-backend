@@ -84,12 +84,21 @@ export const ErrorCode = {
   PERM_LAST_OWNER: 'PERM_LAST_OWNER',
 
   // Configuration
-  /** A platform ratio's formula is not the tenant's to change (ADR-0021). */
+  /**
+   * **Retired by ADR-0024** — an office may change any ratio's formula, and a row that no
+   * longer matches what it was seeded from is flagged rather than refused.
+   *
+   * Kept and never reused. It shipped, so a client may still have a branch on it, and a code
+   * that once meant one thing must not come back meaning another — the same reasoning
+   * invariant §3 gives for configuration codes.
+   */
   CONFIG_RATIO_FORMULA_FIXED: 'CONFIG_RATIO_FORMULA_FIXED',
   /** A rung named in an applicability list is not active on the company's ladder. */
   CONFIG_RUNG_UNKNOWN: 'CONFIG_RUNG_UNKNOWN',
   /** A ratio counts activity nobody on one of its rungs can log (ADR-0020). */
   CONFIG_RATIO_UNREACHABLE_INPUT: 'CONFIG_RATIO_UNREACHABLE_INPUT',
+  /** A ratio's display unit does not fit its rule — `band` is points, `gte` never is. */
+  CONFIG_RATIO_UNIT_MISMATCH: 'CONFIG_RATIO_UNIT_MISMATCH',
 
   // Validation
   VALIDATION_FAILED: 'VALIDATION_FAILED',

@@ -5,6 +5,7 @@ import type { ErrorCodeValue } from '@/common/errors/error-codes';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { ActivityConfigService } from './activity.service';
+import { resolveDisplayUnit, type RatioDisplayUnit } from '@/domain/constants';
 import { RatioService } from './ratio.service';
 import { TenantConfigService, type TenantConfigView } from './tenant-config.service';
 import type { ChangeOp, ConfigChangeDto } from './changes.dto';
@@ -82,12 +83,12 @@ export class ConfigChangeService {
         types.set(t.id, { id: t.id, code: t.code, version: t.version, status: t.status });
       }
     }
+    /* The rule and unit each ratio holds, so a unit that no longer fits is refused here. */
+    const ratioShapes = new Map<string, { comparison: 'gte' | 'band'; displayUnit: RatioDisplayUnit }>();
     for (const r of await this.ratios.list(ctx, true)) {
       ratios.set(r.id, { id: r.id, code: r.code, version: r.version, status: r.status });
+      ratioShapes.set(r.id, { comparison: r.comparison, displayUnit: r.displayUnit });
     }
-    const platformRatios = new Set(
-      (await this.ratios.list(ctx, true)).filter((r) => r.origin === 'platform').map((r) => r.id),
-    );
 
     const ladder = await this.orgLevels.ladderForOffice(ctx);
     const activeRungs = new Set(ladder.filter((l) => l.status === 'active').map((l) => l.code));
@@ -134,13 +135,30 @@ export class ConfigChangeService {
         if (op.op.endsWith('.archive')) row!.status = 'archived';
         if (op.op.endsWith('.restore')) row!.status = 'active';
 
-        if (op.op === 'ratio.update' && platformRatios.has(op.id!)
-          && (op.body?.numerator !== undefined || op.body?.denominator !== undefined)) {
-          fail(
-            `${row!.code} is one of the five ratios every office measures the same way, so `
-              + 'its formula is fixed. Its benchmark, label and who it applies to are yours.',
-            ErrorCode.CONFIG_RATIO_FORMULA_FIXED,
+      }
+
+      /*
+       * The display unit against the rule it will sit under (P4-T25), in the projection like
+       * every other refusal — so a batch that sets `percent` on a band ratio is refused
+       * before its earlier ops are written, not halfway through applying them.
+       */
+      if (op.op === 'ratio.create' || op.op === 'ratio.update') {
+        const shape = op.id ? ratioShapes.get(op.id) : undefined;
+        const comparison = op.body?.comparison ?? shape?.comparison;
+        const requested = op.body?.displayUnit;
+        const touched = op.op === 'ratio.create'
+          || requested !== undefined || op.body?.comparison !== undefined;
+        if (touched && (comparison === 'gte' || comparison === 'band')) {
+          const resolved = resolveDisplayUnit(
+            comparison,
+            requested === undefined ? undefined : String(requested),
+            shape?.displayUnit,
           );
+          if (resolved.refusal !== undefined) {
+            fail(resolved.refusal, ErrorCode.CONFIG_RATIO_UNIT_MISMATCH);
+          } else if (shape) {
+            ratioShapes.set(op.id!, { comparison, displayUnit: resolved.unit });
+          }
         }
       }
 

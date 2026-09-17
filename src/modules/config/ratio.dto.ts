@@ -4,6 +4,7 @@ import {
   ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsNumber, IsOptional, IsString, Matches, Max,
   MaxLength, Min, MinLength,
 } from 'class-validator';
+import { RATIO_DISPLAY_UNITS, type RatioDisplayUnit } from '@/domain/constants';
 import { RATIO_COMPARISONS, type RatioComparison } from './ratio-definition.schema';
 
 const CODE_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,39}$/;
@@ -70,6 +71,17 @@ export class CreateRatioDto {
   comparison!: RatioComparison;
 
   @ApiPropertyOptional({
+    enum: RATIO_DISPLAY_UNITS,
+    description:
+      'How the benchmark is written: `percent` (0.15 as 15.0%), `decimal` (0.30 as 0.30) or '
+      + '`points` (30 as ±30 points). A `band` ratio is always `points` and a `gte` ratio '
+      + 'never is; omitted, a `gte` ratio keeps what it had, or starts as `decimal`.',
+  })
+  @IsOptional()
+  @IsIn(RATIO_DISPLAY_UNITS as unknown as string[])
+  displayUnit?: RatioDisplayUnit;
+
+  @ApiPropertyOptional({
     type: [String],
     example: ['AB', 'AAB'],
     description:
@@ -127,6 +139,17 @@ export class UpdateRatioDto {
   @IsOptional()
   @IsIn(RATIO_COMPARISONS as unknown as string[])
   comparison?: RatioComparison;
+
+  @ApiPropertyOptional({
+    enum: RATIO_DISPLAY_UNITS,
+    description:
+      'How the benchmark is written: `percent` (0.15 as 15.0%), `decimal` (0.30 as 0.30) or '
+      + '`points` (30 as ±30 points). A `band` ratio is always `points` and a `gte` ratio '
+      + 'never is; omitted, a `gte` ratio keeps what it had, or starts as `decimal`.',
+  })
+  @IsOptional()
+  @IsIn(RATIO_DISPLAY_UNITS as unknown as string[])
+  displayUnit?: RatioDisplayUnit;
 
   @ApiPropertyOptional({
     type: [String],

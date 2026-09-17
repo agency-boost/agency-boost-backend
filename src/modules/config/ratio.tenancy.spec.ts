@@ -278,6 +278,8 @@ describe('the office ratio definitions (P4-T2)', () => {
       });
       expect(updated.label).toBe('Prospek per aktivitas');
       expect(updated.comparison).toBe('band');
+      // A band is judged in points, so the unit follows without being asked (P4-T25).
+      expect(updated.displayUnit).toBe('points');
       expect(updated.numerator).toEqual(ratio.numerator);
     });
 
@@ -312,6 +314,108 @@ describe('the office ratio definitions (P4-T2)', () => {
    * Both add a field, and the two interact: applicability is editable on a platform ratio
    * while its formula is not, so the tests that matter are the ones that cross.
    */
+  describe('how a benchmark is written (P4-T25)', () => {
+    /*
+     * The screens printed the stored value, so an Owner read `0.15` where the registry and
+     * the prototype both say `15.0%`. The unit cannot be worked out from the number — `0.30`
+     * is a percentage on one ratio and a plain number on another — so it is stored, and it
+     * always agrees with the rule.
+     */
+    beforeEach(() => provision(KPM_A));
+
+    const create = (over: Record<string, unknown>) => ratios.create(ctx(KPM_A), {
+      code: 'REFERRAL_RATE', label: 'Referral rate',
+      numerator: ['SELL_SUBMISSION'], denominator: ['LEADS_CONTACTED'],
+      benchmark: 0.2, comparison: 'gte', ...over,
+    } as never);
+
+    it('provisions each of the five in the unit the registry states', async () => {
+      const byCode = Object.fromEntries(
+        (await ratios.list(ctx(KPM_A))).map((r) => [r.code, r.displayUnit]),
+      );
+      expect(byCode).toEqual({
+        SELLING_VS_RECRUITMENT: 'points',
+        SELLING_SUCCESS_RATE: 'percent',
+        RECRUITMENT_SUCCESS_RATE: 'percent',
+        LEADS_PER_ACTIVITY: 'decimal',
+        MEETING_PER_APPROACH: 'decimal',
+      });
+    });
+
+    it('starts an office’s own ratio as decimal, which writes the stored value unchanged', async () => {
+      expect((await create({})).displayUnit).toBe('decimal');
+    });
+
+    it('takes the unit an Owner chooses', async () => {
+      expect((await create({ displayUnit: 'percent' })).displayUnit).toBe('percent');
+    });
+
+    it('makes a band ratio points without being asked', async () => {
+      expect((await create({ comparison: 'band', benchmark: 20 })).displayUnit).toBe('points');
+    });
+
+    it('refuses points on an at-or-above ratio, naming it, and writes nothing', async () => {
+      await expect(create({ displayUnit: 'points' }))
+        .rejects.toMatchObject({ code: 'CONFIG_RATIO_UNIT_MISMATCH' });
+      expect((await ratios.list(ctx(KPM_A))).map((r) => r.code)).not.toContain('REFERRAL_RATE');
+    });
+
+    it('refuses a percentage on a band ratio rather than quietly saving points', async () => {
+      // Correcting it silently would save something other than what the Owner chose, and
+      // they would find out by reading the card.
+      await expect(create({ comparison: 'band', displayUnit: 'percent' }))
+        .rejects.toThrow(/REFERRAL_RATE: A balance ratio is judged in percentage points/);
+    });
+
+    it('lets an office change how a platform ratio is written — presentation, not formula', async () => {
+      const leads = (await ratios.list(ctx(KPM_A))).find((r) => r.code === 'LEADS_PER_ACTIVITY')!;
+      const updated = await ratios.update(ctx(KPM_A), leads.id, { displayUnit: 'percent' });
+      expect(updated.displayUnit).toBe('percent');
+      expect(updated.benchmark).toBe(leads.benchmark);
+    });
+
+    it('keeps a percentage when only the benchmark moves', async () => {
+      const selling = (await ratios.list(ctx(KPM_A))).find((r) => r.code === 'SELLING_SUCCESS_RATE')!;
+      expect((await ratios.update(ctx(KPM_A), selling.id, { benchmark: 0.2 })).displayUnit)
+        .toBe('percent');
+    });
+
+    it('drops points when a band stops being one', async () => {
+      const balance = (await ratios.list(ctx(KPM_A))).find((r) => r.code === 'SELLING_VS_RECRUITMENT')!;
+      expect((await ratios.update(ctx(KPM_A), balance.id, { comparison: 'gte' })).displayUnit)
+        .toBe('decimal');
+    });
+
+    it('provisions from a template published before units existed', async () => {
+      // A published version is immutable, so it was never rewritten. The platform's unit
+      // for a code it seeded stands in, and the rule's default for anything else.
+      await clearCollections();
+      await templates.create({
+        companyId: COMPANY, kind: 'ratio_set', version: 1, status: 'published', publishedAt: NOW,
+        payload: {
+          ratios: [
+            {
+              code: 'SELLING_SUCCESS_RATE', label: 'Selling success rate',
+              numerator: ['SELL_SUBMISSION'], denominator: ['SELL_PRESENTATION'],
+              benchmark: 0.15, comparison: 'gte', displayOrder: 1,
+            },
+            {
+              code: 'REFERRAL_RATE', label: 'Referral rate',
+              numerator: ['SELL_SUBMISSION'], denominator: ['LEADS_CONTACTED'],
+              benchmark: 0.3, comparison: 'gte', displayOrder: 2,
+            },
+          ],
+        },
+      } as never);
+      await provision(KPM_B);
+
+      const byCode = Object.fromEntries(
+        (await ratios.list(ctx(KPM_B))).map((r) => [r.code, r.displayUnit]),
+      );
+      expect(byCode).toEqual({ SELLING_SUCCESS_RATE: 'percent', REFERRAL_RATE: 'decimal' });
+    });
+  });
+
   describe('who a ratio is for, and who owns its formula (P4-T15)', () => {
     /** The company ladder an office's applicability is checked against (ADR-0012). */
     /** The harness returns its models untyped, so the cast is at the use site as elsewhere. */
@@ -350,22 +454,64 @@ describe('the office ratio definitions (P4-T2)', () => {
       });
     });
 
-    describe('AC-3: a platform ratio’s formula is fixed, and the rest of it is not', () => {
+    describe('AC-3: the formula is the office’s, and a divergence is flagged (ADR-0024)', () => {
       const platform = async () =>
         (await ratios.list(ctx(KPM_A))).find((r) => r.code === 'SELLING_SUCCESS_RATE')!;
 
-      it('refuses a numerator or denominator change, naming the ratio and the way out', async () => {
+      /*
+       * This was a refusal until ADR-0024, on the reasoning that a fixed formula is what
+       * makes two offices' figures comparable. The comparison that argument protects reads
+       * the *seeded* formula, which the row records — not the row's current one. What an
+       * Owner writes here is what their own people are measured by.
+       */
+      it('accepts a formula change on a provisioned ratio, and says it has diverged', async () => {
         const row = await platform();
-        for (const change of [
-          { numerator: ['SELL_PRESENTATION'] },
-          { denominator: ['SELL_SUBMISSION'] },
-        ]) {
-          await expect(ratios.update(ctx(KPM_A), row.id, change))
-            .rejects.toThrow(/SELLING_SUCCESS_RATE.*comparable/s);
-        }
-        // Refused, not partially applied.
-        expect(await platform()).toMatchObject({
-          numerator: ['SELL_SUBMISSION'], version: row.version,
+        expect(row.divergesFromStandard).toBe(false);
+
+        const updated = await ratios.update(ctx(KPM_A), row.id, {
+          denominator: ['SELL_PRESENTATION'],
+        });
+
+        expect(updated.denominator).toEqual(['SELL_PRESENTATION']);
+        expect(updated.divergesFromStandard).toBe(true);
+      });
+
+      it('keeps the seeded formula, so an Owner can see what they moved away from', async () => {
+        const row = await platform();
+        const updated = await ratios.update(ctx(KPM_A), row.id, { numerator: ['SELL_PRESENTATION'] });
+
+        expect(updated.standardNumerator).toEqual(['SELL_SUBMISSION']);
+        expect(updated.standardDenominator).toEqual(['SELL_PRESENTATION', 'SELL_FOLLOWUP']);
+      });
+
+      it('stops saying so when the formula is put back', async () => {
+        const row = await platform();
+        await ratios.update(ctx(KPM_A), row.id, { numerator: ['SELL_PRESENTATION'] });
+        const back = await ratios.update(ctx(KPM_A), row.id, { numerator: ['SELL_SUBMISSION'] });
+
+        expect(back.divergesFromStandard).toBe(false);
+      });
+
+      it('does not call a reordered formula a divergence — order is display, not meaning', async () => {
+        const row = await platform();
+        const updated = await ratios.update(ctx(KPM_A), row.id, {
+          denominator: ['SELL_FOLLOWUP', 'SELL_PRESENTATION'],
+        });
+
+        expect(updated.divergesFromStandard).toBe(false);
+      });
+
+      it('flags nothing on a ratio the office created — it never had a standard', async () => {
+        // Not the same as agreeing with one, and the card must not imply that it is.
+        const mine = await ratios.create(ctx(KPM_A), {
+          code: 'REFERRAL_RATE', label: 'Referral rate',
+          numerator: ['LEADS_NEW_PROSPECT'], denominator: ['LEADS_CONTACTED'],
+          benchmark: 0.2, comparison: 'gte',
+        });
+        const updated = await ratios.update(ctx(KPM_A), mine.id, { numerator: ['SELL_SUBMISSION'] });
+
+        expect(updated).toMatchObject({
+          divergesFromStandard: false, standardNumerator: null, standardDenominator: null,
         });
       });
 
@@ -393,8 +539,8 @@ describe('the office ratio definitions (P4-T2)', () => {
         expect(updated.numerator).toEqual(['SELL_SUBMISSION']);
       });
 
-      it('404s another office’s ratio before saying anything about its origin', async () => {
-        // The refusal must not become a way to learn that a ratio exists elsewhere.
+      it('404s another office’s ratio, whatever it is asked to change', async () => {
+        // A write must not become a way to learn that a ratio exists elsewhere.
         await kpms().create({
           _id: KPM_B, companyId: COMPANY, code: '0418', branchName: 'B', timezone: 'Asia/Jakarta',
         } as never);

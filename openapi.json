@@ -9124,6 +9124,15 @@
             ],
             "description": "`gte` is at or above the benchmark. `band` is the balance rule, `abs(sellingPct − 50) × 2 ≤ benchmark` — a different shape, which is why this is a named rule rather than an operator."
           },
+          "displayUnit": {
+            "type": "string",
+            "enum": [
+              "percent",
+              "decimal",
+              "points"
+            ],
+            "description": "How the benchmark is written: `percent` (0.15 as 15.0%), `decimal` (0.30 as 0.30) or `points` (30 as ±30 points). A `band` ratio is always `points` and a `gte` ratio never is; omitted, a `gte` ratio keeps what it had, or starts as `decimal`."
+          },
           "appliesToOrgLevelCodes": {
             "example": [
               "AB",
@@ -9177,6 +9186,15 @@
               "gte",
               "band"
             ]
+          },
+          "displayUnit": {
+            "type": "string",
+            "enum": [
+              "percent",
+              "decimal",
+              "points"
+            ],
+            "description": "How the benchmark is written: `percent` (0.15 as 15.0%), `decimal` (0.30 as 0.30) or `points` (30 as ±30 points). A `band` ratio is always `points` and a `gte` ratio never is; omitted, a `gte` ratio keeps what it had, or starts as `decimal`."
           },
           "appliesToOrgLevelCodes": {
             "example": [
@@ -10052,12 +10070,40 @@
               "type": "string"
             }
           },
+          "standardNumerator": {
+            "nullable": true,
+            "description": "The formula this office was provisioned with (ADR-0024), or `null` on a ratio it created. What a divergence is measured against, and what the screen shows an Owner they moved away from.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "standardDenominator": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "divergesFromStandard": {
+            "type": "boolean",
+            "description": "The formula no longer matches what this office was seeded from (ADR-0024). A display and support caveat: nothing is excluded from any comparison on account of it, because a platform comparison computes the seeded formula rather than reading this row."
+          },
           "comparison": {
             "type": "string",
             "enum": [
               "gte",
               "band"
             ]
+          },
+          "displayUnit": {
+            "type": "string",
+            "enum": [
+              "percent",
+              "decimal",
+              "points"
+            ],
+            "description": "How to write `benchmark` for a reader. `percent`: × 100 to one decimal (15.0%). `decimal`: two decimals (0.30). `points`: ± percentage points (±30 points). Always `points` on a `band` ratio."
           },
           "displayOrder": {
             "type": "number"
@@ -10082,7 +10128,11 @@
           "benchmark",
           "origin",
           "appliesToOrgLevelCodes",
+          "standardNumerator",
+          "standardDenominator",
+          "divergesFromStandard",
           "comparison",
+          "displayUnit",
           "displayOrder",
           "version",
           "status"

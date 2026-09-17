@@ -8,6 +8,8 @@ import { up as membershipOrgLevelCode } from './0004-membership-org-level-code';
 import { up as ratioOriginAndApplicability } from './0005-ratio-origin-and-applicability';
 import { up as companyTemplates } from './0006-company-templates';
 import { up as categoryAppliesTo } from './0007-category-applies-to';
+import { up as ratioDisplayUnit } from './0008-ratio-display-unit';
+import { up as ratioStandardFormula } from './0009-ratio-standard-formula';
 
 /**
  * Every migration, in order. Forward-only and idempotent, so running this twice is a
@@ -21,6 +23,8 @@ const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Date) => P
   ['0005-ratio-origin-and-applicability', ratioOriginAndApplicability],
   ['0006-company-templates', companyTemplates],
   ['0007-category-applies-to', categoryAppliesTo],
+  ['0008-ratio-display-unit', ratioDisplayUnit],
+  ['0009-ratio-standard-formula', ratioStandardFormula],
 ];
 
 async function main(): Promise<void> {

@@ -7,6 +7,9 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { ActivityConfigService } from './activity.service';
 import { RatioDefinitionRepository } from './activity.repository';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
+import {
+  defaultDisplayUnitFor, resolveDisplayUnit, type RatioDisplayUnit,
+} from '@/domain/constants';
 import { RatioComparison, RatioDefinitionDocument, RatioOrigin } from './ratio-definition.schema';
 
 export interface RatioDefinitionView {
@@ -17,16 +20,48 @@ export interface RatioDefinitionView {
   denominator: string[];
   benchmark: number;
   comparison: RatioComparison;
+  /** How the benchmark is written (P4-T25). Always `points` on a `band` ratio. */
+  displayUnit: RatioDisplayUnit;
   displayOrder: number;
   version: number;
   status: 'active' | 'archived';
-  /** Whose formula it is (ADR-0021). `platform` rows have a fixed numerator and denominator. */
+  /**
+   * Where the row came from (ADR-0021, revised by ADR-0024). `platform` rows were
+   * provisioned; their formula is the office's to change, like everything else on them.
+   */
   origin: RatioOrigin;
+  /** The formula this office was provisioned with, or `null` on a ratio it created. */
+  standardNumerator: string[] | null;
+  standardDenominator: string[] | null;
+  /**
+   * The formula no longer matches what the office was seeded from (ADR-0024).
+   *
+   * Derived, never stored. A display and support caveat — nothing is excluded from anything
+   * on account of it, because a platform comparison computes the seeded formula itself
+   * rather than reading this row.
+   */
+  divergesFromStandard: boolean;
   /** Ladder rung codes. Empty means every rung (ADR-0020). */
   appliesToOrgLevelCodes: string[];
 }
 
 const CODE_SHAPE = /^[A-Z][A-Z0-9_]{2,39}$/;
+
+/** Two formula sides are the same set of codes. Order is display, never meaning. */
+const sameCodes = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && [...a].sort().join() === [...b].sort().join();
+
+/**
+ * The row's formula against the one its office was provisioned with (ADR-0024).
+ *
+ * `false` for a ratio the office created: there is no standard it could have moved away
+ * from, which is not the same as agreeing with one.
+ */
+function diverges(doc: RatioDefinitionDocument): boolean {
+  if (!doc.standardNumerator || !doc.standardDenominator) return false;
+  return !sameCodes(doc.numerator, doc.standardNumerator)
+    || !sameCodes(doc.denominator, doc.standardDenominator);
+}
 
 /**
  * The office's ratio definitions (P4-T2).
@@ -61,10 +96,12 @@ export class RatioService {
     ctx: RequestContext,
     input: {
       code: string; label: string; numerator: string[]; denominator: string[];
-      benchmark: number; comparison: RatioComparison; appliesToOrgLevelCodes?: string[];
+      benchmark: number; comparison: RatioComparison; displayUnit?: string;
+      appliesToOrgLevelCodes?: string[];
     },
   ): Promise<RatioDefinitionView> {
     const code = this.normaliseCode(input.code);
+    const displayUnit = this.resolvedUnit(code, input.comparison, input.displayUnit);
     if (await this.ratios.exists(ctx, { code })) {
       throw new BadRequestException(`This office already has a ratio called ${code}.`);
     }
@@ -78,6 +115,7 @@ export class RatioService {
       denominator,
       benchmark: input.benchmark,
       comparison: input.comparison,
+      displayUnit,
       // An office's own, by construction. Nothing a tenant creates is platform-standard —
       // `platform` is written by provisioning and by nothing else (ADR-0021).
       origin: 'office',
@@ -108,30 +146,37 @@ export class RatioService {
     ctx: RequestContext,
     id: string,
     input: {
-      label?: string; benchmark?: number; comparison?: RatioComparison;
+      label?: string; benchmark?: number; comparison?: RatioComparison; displayUnit?: string;
       numerator?: string[]; denominator?: string[]; appliesToOrgLevelCodes?: string[];
     },
   ): Promise<RatioDefinitionView> {
     const existing = await this.ratios.findById(ctx, id);
     if (!existing) throw new NotFoundException('Ratio');
 
-    const formula = input.numerator !== undefined || input.denominator !== undefined;
-    if (formula && existing.origin === 'platform') {
-      throw new DomainException(
-        ErrorCode.CONFIG_RATIO_FORMULA_FIXED,
-        `${existing.code} is one of the five ratios every office measures the same way, so `
-          + 'its formula is fixed — that is what makes two offices\u2019 figures comparable. '
-          + 'Its benchmark, label and who it applies to are yours to change. To count '
-          + 'something else, add a ratio of your own.',
-        HttpStatus.BAD_REQUEST,
-        { code: existing.code },
-      );
-    }
-
+    /*
+     * A platform ratio's formula is the office's to change (ADR-0024). It was refused until
+     * then, to keep two offices' figures comparable — but the comparison that argument
+     * protected reads the *seeded* formula, which `standardNumerator` records, not this row.
+     * What the office writes here is what the office's own people are measured by.
+     */
     const set: Record<string, unknown> = {};
     if (input.label !== undefined) set.label = input.label.trim();
     if (input.benchmark !== undefined) set.benchmark = input.benchmark;
     if (input.comparison !== undefined) set.comparison = input.comparison;
+    /*
+     * The unit is re-resolved whenever the rule or the unit is touched, and on a platform
+     * ratio too — how a number is written is presentation, not formula, so ADR-0021 has
+     * nothing to say about it. Changing only the rule is the case that matters: a ratio
+     * turned into a band becomes `points` without being asked, because nothing else fits.
+     */
+    if (input.comparison !== undefined || input.displayUnit !== undefined) {
+      set.displayUnit = this.resolvedUnit(
+        existing.code,
+        input.comparison ?? existing.comparison,
+        input.displayUnit,
+        existing.displayUnit,
+      );
+    }
     if (input.appliesToOrgLevelCodes !== undefined) {
       set.appliesToOrgLevelCodes = await this.checkedRungs(ctx, input.appliesToOrgLevelCodes);
     }
@@ -221,6 +266,28 @@ export class RatioService {
     return normalised;
   }
 
+  /**
+   * The unit a write ends up with, or a refusal naming the ratio (P4-T25).
+   *
+   * Refused rather than corrected when the caller *asked* for a unit the rule does not
+   * allow: silently turning a requested `percent` into `points` would save something other
+   * than what the Owner chose, and they would find out by reading the card.
+   */
+  private resolvedUnit(
+    code: string, comparison: RatioComparison, requested?: string, current?: RatioDisplayUnit,
+  ): RatioDisplayUnit {
+    const resolved = resolveDisplayUnit(comparison, requested, current);
+    if (resolved.refusal !== undefined) {
+      throw new DomainException(
+        ErrorCode.CONFIG_RATIO_UNIT_MISMATCH,
+        `${code}: ${resolved.refusal}`,
+        HttpStatus.BAD_REQUEST,
+        { code },
+      );
+    }
+    return resolved.unit;
+  }
+
   private normaliseCode(raw: string): string {
     const code = raw.trim().toUpperCase();
     if (!CODE_SHAPE.test(code)) {
@@ -240,10 +307,15 @@ export class RatioService {
       denominator: doc.denominator,
       benchmark: doc.benchmark,
       comparison: doc.comparison,
+      // A row nothing has migrated yet still reads correctly; migration 0008 writes it.
+      displayUnit: doc.displayUnit ?? defaultDisplayUnitFor(doc.code, doc.comparison),
       displayOrder: doc.displayOrder,
       version: doc.version,
       status: doc.status,
       origin: doc.origin,
+      standardNumerator: doc.standardNumerator ?? null,
+      standardDenominator: doc.standardDenominator ?? null,
+      divergesFromStandard: diverges(doc),
       appliesToOrgLevelCodes: doc.appliesToOrgLevelCodes,
     };
   }

@@ -274,6 +274,34 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
         .rejects.toThrow(/BROKEN has nothing in its denominator/);
     });
 
+    it('refuses a ratio shown in a unit its rule cannot have (P4-T25)', async () => {
+      // Provisioning would otherwise throw it at a Super Admin creating a real branch.
+      await service.saveDraft(ctx(), companyId, 'ratio_set', {
+        ratios: [{
+          code: 'LEAN', label: 'Lean', numerator: ['SELL_SUBMISSION'], denominator: ['SELL_PRESENTATION'],
+          benchmark: 30, comparison: 'band', displayUnit: 'percent', displayOrder: 1,
+        }],
+      });
+      await expect(service.publish(ctx(), companyId, 'ratio_set'))
+        .rejects.toThrow(/LEAN: A balance ratio is judged in percentage points/);
+    });
+
+    it('accepts a ratio set that says nothing about units — provisioning resolves one', async () => {
+      await service.saveDraft(ctx(), companyId, 'ratio_set', ratioSet(['SELL_SUBMISSION', 'SELL_PRESENTATION']));
+      await expect(service.publish(ctx(), companyId, 'ratio_set')).resolves.toMatchObject({
+        status: 'published',
+      });
+    });
+
+    it('starts a new ratio set from the platform’s units', async () => {
+      const draft = await service.read(companyId, 'ratio_set');
+      const units = (draft.payload as { ratios: { code: string; displayUnit: string }[] }).ratios
+        .map((r) => [r.code, r.displayUnit]);
+      expect(Object.fromEntries(units)).toMatchObject({
+        SELLING_SUCCESS_RATE: 'percent', SELLING_VS_RECRUITMENT: 'points', LEADS_PER_ACTIVITY: 'decimal',
+      });
+    });
+
     it('refuses a ratio set with no ratios at all', async () => {
       await service.saveDraft(ctx(), companyId, 'ratio_set', { ratios: [] });
       await expect(service.publish(ctx(), companyId, 'ratio_set'))
