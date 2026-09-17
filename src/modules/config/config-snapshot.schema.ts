@@ -30,11 +30,13 @@ export class ConfigSnapshot {
   version!: number;
 
   /**
-   * The highest row `version` this was rendered from.
+   * The highest row `version` this was rendered from — kept for the audit record, and
+   * **no longer what the publish gate compares** (P5-T11).
    *
-   * How "you have unpublished changes" is answered without diffing: if any live row is
-   * above this, something has been edited since. It is deliberately not a timestamp —
-   * clocks and edit ordering are a worse comparison than a monotonic counter.
+   * It was: "if any live row is above this, something has been edited since". That misses a
+   * created row (version 1), an edit below the maximum, and an archive — the gate now
+   * compares which rows are present at which version, from `payload`, which every snapshot
+   * already carries.
    */
   @Prop({ type: Number, required: true })
   sourceVersion!: number;

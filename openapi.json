@@ -10413,10 +10413,11 @@
           },
           "workingVersion": {
             "type": "number",
-            "description": "The highest live row version."
+            "description": "The highest live row version. Informational — **not** a change detector: a created row starts at 1, and an edit below the maximum or an archive leaves it where it was. Read `hasUnpublishedChanges` for that."
           },
           "hasUnpublishedChanges": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether any row has been created, edited, archived or restored since the last publish, judged by which rows are present at which version. A reorder is not a change. True for an office with nothing published."
           },
           "publishedAt": {
             "type": "string",

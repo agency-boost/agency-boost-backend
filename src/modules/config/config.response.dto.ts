@@ -292,10 +292,22 @@ export class PublishStateDto implements PublishState {
   @ApiProperty({ type: Number, description: 'What agents are on. 0 when nothing is published.' })
   publishedVersion!: number;
 
-  @ApiProperty({ type: Number, description: 'The highest live row version.' })
+  @ApiProperty({
+    type: Number,
+    description:
+      'The highest live row version. Informational — **not** a change detector: a created row '
+      + 'starts at 1, and an edit below the maximum or an archive leaves it where it was. Read '
+      + '`hasUnpublishedChanges` for that.',
+  })
   workingVersion!: number;
 
-  @ApiProperty({ type: Boolean })
+  @ApiProperty({
+    type: Boolean,
+    description:
+      'Whether any row has been created, edited, archived or restored since the last publish, '
+      + 'judged by which rows are present at which version. A reorder is not a change. True for '
+      + 'an office with nothing published.',
+  })
   hasUnpublishedChanges!: boolean;
 
   @ApiProperty({ type: String, nullable: true })

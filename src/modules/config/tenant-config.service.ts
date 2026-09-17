@@ -13,7 +13,11 @@ import { RatioService, type RatioDefinitionView } from './ratio.service';
 export interface PublishState {
   /** The published version agents are on, or 0 when nothing has been published. */
   publishedVersion: number;
-  /** The highest live row version. Above `sourceVersion` means there is something to publish. */
+  /**
+   * The highest live row version. Informational only — **not** what decides
+   * `hasUnpublishedChanges`, because a new row, an edit below it and an archive all leave
+   * it where it was (P5-T11).
+   */
   workingVersion: number;
   hasUnpublishedChanges: boolean;
   publishedAt: string | null;
@@ -27,9 +31,11 @@ export interface TenantConfigView {
   /**
    * The highest `version` across everything above.
    *
-   * One number a client can compare, rather than making every screen reason about three
-   * collections. It moves when anything the office counts changes, and — deliberately —
-   * not when somebody only reorders, because a reorder rebinds nothing.
+   * **Not a change detector, and it was used as one.** It does not move when a row is
+   * created (a new row starts at version 1), when a row below the maximum is edited up to
+   * it, or when a row is archived (it leaves the active rows this is taken over). The
+   * publish gate compared it and missed all three until P5-T11. What does answer "has
+   * anything changed" is which rows are present at which version — see `changedSince`.
    */
   version: number;
 }
@@ -116,11 +122,59 @@ export class TenantConfigService {
     return {
       publishedVersion: snapshot?.version ?? 0,
       workingVersion: working.version,
-      // A row above the version the snapshot was rendered from is an edit since. Not a
-      // timestamp: clocks and edit ordering are a worse comparison than a counter.
-      hasUnpublishedChanges: !snapshot || working.version > snapshot.sourceVersion,
+      hasUnpublishedChanges: !snapshot
+        || this.changedSince(snapshot.payload as unknown as TenantConfigView, working),
       publishedAt: snapshot ? snapshot.publishedAt.toISOString() : null,
     };
+  }
+
+  /**
+   * Whether the working copy differs from what was published, by **which rows are present at
+   * which version** (P5-T11).
+   *
+   * **This replaced `working.version > snapshot.sourceVersion`, which was wrong in the
+   * ordinary case.** The highest active version does not move when a row is created (it
+   * starts at 1), when a row below the maximum is edited, or when a row is archived (it
+   * leaves the active rows). So once any row in an office had reached version 2 and been
+   * published, those three changes left the publish bar silent and agents on the old copy
+   * — and the one test asserted an edit from a fresh office, the single case the old
+   * comparison could see.
+   *
+   * Comparing the set of `(kind, id, version)` covers every write without asking any of
+   * them to remember a counter: a create brings a new id, an edit a new version, an archive
+   * or a restore changes which ids are there. **A reorder changes none of them**, because a
+   * reorder bumps no version — so the rule that a reorder is not an unpublished change holds
+   * by construction rather than by exception.
+   *
+   * No migration: every snapshot, including the ones provisioning and the demo seed wrote,
+   * already carries its rows with their ids and versions.
+   */
+  private changedSince(published: TenantConfigView, working: TenantConfigView): boolean {
+    const before = this.fingerprint(published);
+    const now = this.fingerprint(working);
+    if (before.size !== now.size) return true;
+    for (const key of now) if (!before.has(key)) return true;
+    return false;
+  }
+
+  /**
+   * Every active row as `kind:id:version`. Order is presentation and deliberately absent.
+   *
+   * Read as a full `TenantConfigView`, the way `readPublished` already reads it: every writer
+   * of a snapshot — `publish`, provisioning and the demo seed — renders all three lists, so a
+   * fallback for a missing one would defend a shape nothing produces.
+   */
+  private fingerprint(view: TenantConfigView): Set<string> {
+    const keys = new Set<string>();
+    for (const category of view.activity) {
+      keys.add(`category:${category.id}:${category.version}`);
+      for (const type of category.types) keys.add(`type:${type.id}:${type.version}`);
+    }
+    for (const ratio of view.ratios) keys.add(`ratio:${ratio.id}:${ratio.version}`);
+    for (const pipeline of view.leadPipelines) {
+      for (const status of pipeline.statuses) keys.add(`lead_status:${status.id}:${status.version}`);
+    }
+    return keys;
   }
 
   private async newestSnapshot(ctx: RequestContext): Promise<ConfigSnapshotDocument | null> {

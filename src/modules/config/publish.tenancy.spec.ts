@@ -123,6 +123,99 @@ describe('publishing an office’s configuration (P4-T6)', () => {
       expect(state.publishedVersion).toBe(2);
       expect(state.publishedAt).toBe(NOW.toISOString());
     });
+
+    describe('every change, not only one above the highest version (P5-T11)', () => {
+      /*
+       * The gate compared the **highest** active row version with the one the snapshot was
+       * rendered from. A new row starts at version 1 and an archived row leaves the active
+       * list, so once any row had reached version 2 and been published — which is the
+       * ordinary life of an office — a create, an edit below that maximum and an archive
+       * were all invisible. The Owner was told nothing needed publishing, and agents never
+       * saw the change.
+       *
+       * The test above passed throughout: its edit took a version-1 office to version 2,
+       * the one case the old comparison could see. Every test here starts from the state
+       * that hid the rest.
+       */
+      const typeNamed = async (code: string) =>
+        (await activity.list(ctx(KPM_A), true)).flatMap((c) => c.types).find((t) => t.code === code)!;
+
+      const unpublished = async () => (await config.state(ctx(KPM_A))).hasUnpublishedChanges;
+
+      beforeEach(async () => {
+        const [ratio] = await wired.ratios.list(ctx(KPM_A));
+        await wired.ratios.update(ctx(KPM_A), ratio.id, { benchmark: 0.2 });
+        await config.publish(ctx(KPM_A));
+        expect(await unpublished()).toBe(false);
+      });
+
+      it('AC-1: sees a new row, which starts below the highest version', async () => {
+        const [category] = await activity.list(ctx(KPM_A));
+        await activity.createType(ctx(KPM_A), {
+          code: 'SELL_REFERRAL', categoryCode: category.code, label: 'Referral masuk',
+        });
+
+        expect(await unpublished()).toBe(true);
+      });
+
+      it('AC-1: sees an edit that does not climb above the highest version', async () => {
+        const type = await typeNamed('SELL_SUBMISSION');
+        await activity.updateType(ctx(KPM_A), type.id, { label: 'Closing' });
+
+        expect(await unpublished()).toBe(true);
+      });
+
+      it('AC-1: sees an archive, which takes the row out of the working copy', async () => {
+        await activity.archiveType(ctx(KPM_A), (await typeNamed('SELL_SUBMISSION')).id);
+
+        expect(await unpublished()).toBe(true);
+      });
+
+      it('AC-1: sees changes to ratios and lead statuses the same way', async () => {
+        await wired.leads.create(ctx(KPM_A), {
+          pipeline: 'sales', code: 'AWAITING_UNDERWRITING', label: 'Awaiting underwriting',
+        });
+        expect(await unpublished()).toBe(true);
+
+        await config.publish(ctx(KPM_A));
+        const other = (await wired.ratios.list(ctx(KPM_A)))[1];
+        await wired.ratios.update(ctx(KPM_A), other.id, { label: 'Renamed' });
+        expect(await unpublished()).toBe(true);
+      });
+
+      it('AC-2: still does not call a reorder a change', async () => {
+        // The rule is unchanged; only the arithmetic under it was wrong.
+        const types = (await activity.list(ctx(KPM_A))).flatMap((c) => c.types);
+        await activity.reorderTypes(ctx(KPM_A), [...types].reverse().map((t) => t.id));
+
+        expect(await unpublished()).toBe(false);
+      });
+
+      it('AC-3: stops saying so once the change is published', async () => {
+        await activity.archiveType(ctx(KPM_A), (await typeNamed('SELL_SUBMISSION')).id);
+        expect(await unpublished()).toBe(true);
+
+        await config.publish(ctx(KPM_A));
+        expect(await unpublished()).toBe(false);
+      });
+
+      it('AC-4: sees a restore, which brings a row back into the working copy', async () => {
+        const type = await typeNamed('SELL_SUBMISSION');
+        await activity.archiveType(ctx(KPM_A), type.id);
+        await config.publish(ctx(KPM_A));
+
+        await activity.restoreType(ctx(KPM_A), type.id);
+        expect(await unpublished()).toBe(true);
+      });
+
+      it('AC-4: sees the archive of the very row that held the highest version', async () => {
+        // The case that most exposed the old arithmetic: the maximum itself leaves.
+        const [ratio] = await wired.ratios.list(ctx(KPM_A));
+        await wired.ratios.archive(ctx(KPM_A), ratio.id);
+
+        expect(await unpublished()).toBe(true);
+      });
+    });
   });
 
   describe('isolation', () => {
