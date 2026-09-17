@@ -1,5 +1,4 @@
 import type { SessionView } from './auth.service';
-import type { SessionLogEntry } from './impersonation.service';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -208,38 +207,4 @@ export class SessionDto implements SessionView {
     description: 'The session this request came from. Revoking it signs the caller out here.',
   })
   current!: boolean;
-}
-
-
-/** One support session, as an Owner reads it (P4-T10, §3.13). */
-export class ImpersonationLogEntryDto implements SessionLogEntry {
-  @ApiProperty({ type: String })
-  sessionId!: string;
-
-  @ApiProperty({ type: String, description: 'The platform operator who ran it.' })
-  operatorName!: string;
-
-  @ApiProperty({ type: String, description: 'Whose screens they saw.' })
-  subjectName!: string;
-
-  @ApiProperty({ type: String, description: 'Typed by the operator before it started.' })
-  reason!: string;
-
-  @ApiProperty({ type: Boolean, description: 'False only if a second Super Admin approved writing.' })
-  readOnly!: boolean;
-
-  @ApiProperty({ type: String, nullable: true })
-  elevatedByName!: string | null;
-
-  @ApiProperty({ type: String, nullable: true })
-  elevationReason!: string | null;
-
-  @ApiProperty({ type: String })
-  startedAt!: string;
-
-  @ApiProperty({ type: String, nullable: true, description: 'Null while it is still running.' })
-  endedAt!: string | null;
-
-  @ApiProperty({ type: String })
-  expiresAt!: string;
 }

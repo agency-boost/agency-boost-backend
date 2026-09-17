@@ -311,57 +311,6 @@ describe('ImpersonationService', () => {
       await expect(service.elevate(second, 'not-an-id', 'A good enough reason.'))
         .rejects.toThrow('Support session');
     });
-
-    it('refuses the session log to somebody without the grant', async () => {
-      const agent = new RequestContext('u-agent', 'none', {
-        membershipId: 'm', kpmId: 'k', orgLevelCode: 'AGENT', hierarchyRole: 'agent',
-        status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
-      });
-      await expect(service.sessionLog(agent, 'k')).rejects.toMatchObject({ code: 'PERM_DENIED' });
-    });
-
-    it('refuses an Owner another office’s log as a 404, never a 403', async () => {
-      // A 403 confirms the id is real, which is itself tenant information.
-      await expect(service.sessionLog(owner, 'another-office')).rejects.toThrow('KPM');
-    });
-
-    it('answers an empty log rather than nothing at all', async () => {
-      await expect(service.sessionLog(owner, 'k')).resolves.toEqual([]);
-    });
-
-    it('names the operator, the subject and both reasons in the log', async () => {
-      const target = await makeUser({ fullName: 'Rina Wijaya' });
-      const operator = await makeUser({ fullName: 'Root Operator', platformRole: 'super_admin' });
-      const approver = await makeUser({ fullName: 'Second Operator', platformRole: 'super_admin' });
-      const office = await mongoose.model(Kpm.name).create({
-        companyId: 'c1', code: '0420', branchName: 'B', timezone: 'Asia/Jakarta',
-        locale: 'id-ID', currency: 'IDR', status: 'active',
-      } as never);
-      const officeId = String((office as unknown as { _id: unknown })._id);
-      await mongoose.model(Membership.name).create({
-        kpmId: officeId, userId: String(target._id), role: 'agent', status: 'active',
-        agentCode: 'A9', agentSeq: 9, orgLevelId: 'lvl-agent', orgLevelCode: 'AGENT',
-        leaderCode: `LC${Math.floor(Math.random() * 100000)}`,
-      } as never);
-
-      const asOperator = new RequestContext(String(operator._id), 'super_admin', null);
-      const started = await service.start(asOperator, String(target._id), 'Their overview.');
-      await service.elevate(
-        new RequestContext(String(approver._id), 'super_admin', null),
-        started.sessionId,
-        'A duplicate code they cannot fix.',
-      );
-
-      const [row] = await service.sessionLog(superAdmin, officeId);
-      expect(row).toMatchObject({
-        operatorName: 'Root Operator',
-        subjectName: 'Rina Wijaya',
-        reason: 'Their overview.',
-        readOnly: false,
-        elevatedByName: 'Second Operator',
-        elevationReason: 'A duplicate code they cannot fix.',
-      });
-    });
   });
 
 });

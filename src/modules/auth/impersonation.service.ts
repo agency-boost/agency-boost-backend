@@ -27,20 +27,6 @@ export const IMPERSONATION_MAX_MINUTES = 60;
  * the real Super Admin and the person they acted as. That is why impersonating another
  * Super Admin is forbidden to everyone: it would erase exactly that distinction.
  */
-/** One support session, as an Owner reads it. */
-export interface SessionLogEntry {
-  sessionId: string;
-  operatorName: string;
-  subjectName: string;
-  reason: string;
-  readOnly: boolean;
-  elevatedByName: string | null;
-  elevationReason: string | null;
-  startedAt: string;
-  endedAt: string | null;
-  expiresAt: string;
-}
-
 @Injectable()
 export class ImpersonationService {
   constructor(
@@ -344,52 +330,6 @@ export class ImpersonationService {
       templateId: NotificationTemplate.IMPERSONATION_ELEVATED,
       payload: { reason: reason.trim() },
     });
-  }
-
-  /**
-   * The sessions run inside one office, newest first (§3.13).
-   *
-   * **An Owner reads their own tenant's.** Support that an office cannot see is support an
-   * office cannot question, and the people whose screens a session touched are the ones
-   * with a reason to look.
-   */
-  async sessionLog(ctx: RequestContext, kpmId: string): Promise<SessionLogEntry[]> {
-    if (!can(ctx, 'impersonation:read_session_log')) {
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        'You cannot read the support session log.',
-        HttpStatus.FORBIDDEN,
-        { permission: 'impersonation:read_session_log' },
-      );
-    }
-    // `own-kpm` for an Owner: another office's log is a 404, never a 403, like everywhere.
-    if (!ctx.isSuperAdmin && ctx.kpmId !== kpmId) throw new NotFoundException('KPM');
-
-    const rows = await this.sessions
-      .find({ kpmId, deletedAt: null })
-      .sort({ startedAt: -1 })
-      .limit(100)
-      .exec();
-    if (rows.length === 0) return [];
-
-    const userIds = [...new Set(rows.flatMap((r) => [
-      r.realActorUserId, r.effectiveUserId, r.elevatedByUserId,
-    ].filter((id): id is string => Boolean(id))))];
-    const people = await this.users.find({ _id: { $in: userIds } }).exec();
-    const named = new Map(people.map((u) => [String(u._id), u.fullName]));
-
-    return rows.map((r) => ({
-      sessionId: String(r._id),
-      operatorName: named.get(r.realActorUserId) ?? 'A platform operator',
-      subjectName: named.get(r.effectiveUserId) ?? 'Unknown',
-      reason: r.reason,
-      readOnly: r.readOnly,
-      elevatedByName: r.elevatedByUserId ? (named.get(r.elevatedByUserId) ?? 'Unknown') : null,
-      elevationReason: r.elevationReason,
-      startedAt: r.startedAt.toISOString(),
-      endedAt: r.endedAt ? r.endedAt.toISOString() : null,
-      expiresAt: r.expiresAt.toISOString(),
-    }));
   }
 
   /**

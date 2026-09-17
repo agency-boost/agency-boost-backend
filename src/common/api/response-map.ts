@@ -1,7 +1,7 @@
 import { Type } from '@nestjs/common';
 import {
   AccessTokenDto, ImpersonationSessionDto, MeDto, MyKpmRequestDto, ReadinessDto,
-  ImpersonationLogEntryDto, RedeemedInviteDto, SessionDto, StatusAckDto,
+  RedeemedInviteDto, SessionDto, StatusAckDto,
 } from '@/modules/auth/session.response.dto';
 import { InboxDto, InboxItemDto } from '@/modules/notifications/notification.response.dto';
 import {
@@ -101,7 +101,6 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_archiveLeadStatus: { type: LeadStatusDto },
   TenantConfigController_restoreLeadStatus: { type: LeadStatusDto },
   AdminController_elevateSession: { type: StatusAckDto },
-  AdminController_sessionLog: { type: ImpersonationLogEntryDto, isArray: true },
   AdminController_readTemplate: { type: CompanyTemplateDto },
   AdminController_templateHistory: { type: CompanyTemplateDto, isArray: true },
   AdminController_saveTemplateDraft: { type: CompanyTemplateDto },

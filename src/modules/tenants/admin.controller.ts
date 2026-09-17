@@ -341,18 +341,6 @@ export class AdminController {
     await this.impersonation.elevate(ctx, sessionId, dto.reason);
   }
 
-  @Get('tenants/:id/impersonation-sessions')
-  @RequirePermission('impersonation:read_session_log')
-  @ApiOperation({
-    summary: 'Support sessions run inside one office',
-    description:
-      'Newest first. An Owner reads their own office\'s — support an office cannot see is '
-      + 'support an office cannot question. Another office is a **404**, never a 403.',
-  })
-  async sessionLog(@Ctx() ctx: RequestContext, @Param('id') id: string) {
-    return this.impersonation.sessionLog(ctx, id);
-  }
-
   @Get('tenants/:id')
   @RequirePermission('kpm:read_profile')
   @ApiOperation({ summary: 'Read one KPM' })

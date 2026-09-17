@@ -785,59 +785,6 @@ describe('auth and admin over HTTP', () => {
         .send({ kpmId: '66f0000000000000000000a1' }).expect(404);
     });
 
-    it('P4-T10: an Owner reads the support sessions run in their office', async () => {
-      // Support an office cannot see is support an office cannot question.
-      const sa = await makeUser(`sa-log-${Math.random()}@agencyboost.test`, 'super_admin');
-      const saAuth = { Authorization: `Bearer ${sa.accessToken}` };
-      const companyId = await anInsurer();
-      const kpm = await api().post('/api/v1/admin/tenants').set(saAuth)
-        .send({
-          companyId,
-          code: `${Math.floor(Math.random() * 9000) + 1000}`,
-          branchName: 'Log Branch',
-        }).expect(201);
-      const owner = await makeUser(`owner-log-${Math.random()}@kpm.test`);
-      await api().patch(`/api/v1/admin/tenants/${String(kpm.body._id)}/owner`).set(saAuth)
-        .send({ email: owner.email }).expect(200);
-
-      await api().post(`/api/v1/admin/impersonate/${owner.id}`).set(saAuth)
-        .send({ reason: 'Their overview will not load.' }).expect(201);
-
-      const again = await api().post('/api/v1/auth/login')
-        .send({ email: owner.email, password: PASSWORD }).expect(200);
-      const asOwner = {
-        Authorization: `Bearer ${(again.body as { accessToken: string }).accessToken}`,
-      };
-
-      const log = await api()
-        .get(`/api/v1/admin/tenants/${String(kpm.body._id)}/impersonation-sessions`)
-        .set(asOwner).expect(200);
-
-      expect(log.body).toHaveLength(1);
-      expect(log.body[0]).toMatchObject({
-        readOnly: true,
-        reason: 'Their overview will not load.',
-        subjectName: expect.any(String),
-      });
-    });
-
-    it('P4-T10: refuses another office’s session log as a 404', async () => {
-      const sa = await makeUser(`sa-log2-${Math.random()}@agencyboost.test`, 'super_admin');
-      const saAuth = { Authorization: `Bearer ${sa.accessToken}` };
-      const companyId = await anInsurer();
-      const theirs = await api().post('/api/v1/admin/tenants').set(saAuth)
-        .send({
-          companyId,
-          code: `${Math.floor(Math.random() * 9000) + 1000}`,
-          branchName: 'Theirs',
-        }).expect(201);
-
-      const outsider = await makeUser(`outsider-${Math.random()}@kpm.test`);
-      await api().get(`/api/v1/admin/tenants/${String(theirs.body._id)}/impersonation-sessions`)
-        .set({ Authorization: `Bearer ${outsider.accessToken}` })
-        .expect(403);
-    });
-
     it('P3.5-T11 AC-5: an impersonation can actually be ended, and answers 200', async () => {
       // Two defects in one route, and the second only surfaced because the first was
       // being tested. The document said 201 while the server said 200 — nothing asserted

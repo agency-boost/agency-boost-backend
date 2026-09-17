@@ -199,10 +199,6 @@ export const PERMISSIONS = {
    * would erase the only attribution that makes the feature auditable at all.
    */
   'impersonation:target_super_admin': [],
-  'impersonation:read_session_log': [
-    { grantee: SUPER_ADMIN, scope: 'all' },
-    { grantee: KPM_OWNER, scope: 'own-kpm' },
-  ],
 
   // ---- Tenant administration. ----
   // The Super Admin grants were missing until 2026-09-06, against a matrix that has
