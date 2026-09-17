@@ -17,6 +17,10 @@ export const CHANGE_OPS = [
   'category.create', 'category.update', 'category.archive', 'category.restore',
   'type.create', 'type.update', 'type.archive', 'type.restore',
   'ratio.create', 'ratio.update', 'ratio.archive', 'ratio.restore',
+  // The training taxonomy (P5-T1): three levels, the same four intents each.
+  'trainingCategory.create', 'trainingCategory.update', 'trainingCategory.archive', 'trainingCategory.restore',
+  'trainingSkill.create', 'trainingSkill.update', 'trainingSkill.archive', 'trainingSkill.restore',
+  'trainingModule.create', 'trainingModule.update', 'trainingModule.archive', 'trainingModule.restore',
 ] as const;
 export type ChangeOp = (typeof CHANGE_OPS)[number];
 

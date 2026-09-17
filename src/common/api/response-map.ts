@@ -21,6 +21,7 @@ import {
   ActivityCategoryDto, ActivityTypeDto, LeadPipelineDto, LeadStatusDto, RatioDefinitionDto,
   CompanyTemplateDto, PublishStateDto, TenantConfigDto,
 } from '@/modules/config/config.response.dto';
+import { TrainingCategoryDto } from '@/modules/training/training.response.dto';
 
 /** What one operation answers with: a class, and whether it comes back as an array. */
 export interface ResponseShape {
@@ -116,6 +117,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_updateRatio: { type: RatioDefinitionDto },
   TenantConfigController_archiveRatio: { type: RatioDefinitionDto },
   TenantConfigController_restoreRatio: { type: RatioDefinitionDto },
+  TrainingController_list: { type: TrainingCategoryDto, isArray: true },
   OrgController_myTeam: { type: TeamMemberDto, isArray: true },
   OrgController_changeRole: { type: TeamMemberDto, isArray: true },
   OrgController_remove: { type: TeamMemberDto, isArray: true },

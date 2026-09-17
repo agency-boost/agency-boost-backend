@@ -8,6 +8,7 @@ import type { RatioDefinitionView } from './ratio.service';
 import type { PublishState, TenantConfigView } from './tenant-config.service';
 import type { TemplateView } from './template.service';
 import { TEMPLATE_KINDS, type TemplateKind } from './company-template.schema';
+import { TrainingCategoryDto } from '@/modules/training/training.response.dto';
 import { RATIO_COMPARISONS, type RatioComparison } from './ratio-definition.schema';
 
 /**
@@ -237,6 +238,14 @@ export class TenantConfigDto implements TenantConfigView {
 
   @ApiProperty({ type: [LeadPipelineDto] })
   leadPipelines!: LeadPipelineDto[];
+
+  @ApiProperty({
+    type: [TrainingCategoryDto],
+    description:
+      'The training taxonomy agents are offered: active categories and skills, and **published** '
+      + 'active modules only (P5-T1). A draft never reaches an agent.',
+  })
+  training!: TrainingCategoryDto[];
 
   @ApiProperty({
     type: Number,

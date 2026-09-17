@@ -9,6 +9,7 @@ import { ConfigSnapshotDocument } from './config-snapshot.schema';
 import { ActivityConfigService, type ActivityCategoryView } from './activity.service';
 import { LeadStatusService, type LeadPipelineView } from './lead-status.service';
 import { RatioService, type RatioDefinitionView } from './ratio.service';
+import { TrainingService, type TrainingCategoryView } from '@/modules/training/training.service';
 
 export interface PublishState {
   /** The published version agents are on, or 0 when nothing has been published. */
@@ -28,6 +29,13 @@ export interface TenantConfigView {
   activity: ActivityCategoryView[];
   ratios: RatioDefinitionView[];
   leadPipelines: LeadPipelineView[];
+  /**
+   * The training taxonomy agents are offered (P5-T1): active categories and skills, and
+   * **published** active modules only. A draft never reaches an agent.
+   *
+   * Absent from a snapshot published before P5-T1; read back as empty.
+   */
+  training: TrainingCategoryView[];
   /**
    * The highest `version` across everything above.
    *
@@ -63,6 +71,7 @@ export class TenantConfigService {
     private readonly audit: AuditService,
     private readonly clock: Clock,
     private readonly orgLevels: OrgLevelService,
+    private readonly training: TrainingService,
   ) {}
 
   /**
@@ -81,7 +90,10 @@ export class TenantConfigService {
   async readPublished(ctx: RequestContext): Promise<TenantConfigView> {
     const snapshot = await this.newestSnapshot(ctx);
     if (!snapshot) return this.read(ctx);
-    return snapshot.payload as unknown as TenantConfigView;
+    const published = snapshot.payload as unknown as TenantConfigView;
+    // A snapshot published before P5-T1 carries no training. Its agents are offered none —
+    // said as an empty list, so every reader sees one shape.
+    return { ...published, training: published.training ?? [] };
   }
 
   /**
@@ -161,8 +173,15 @@ export class TenantConfigService {
    * Every active row as `kind:id:version`. Order is presentation and deliberately absent.
    *
    * Read as a full `TenantConfigView`, the way `readPublished` already reads it: every writer
-   * of a snapshot — `publish`, provisioning and the demo seed — renders all three lists, so a
-   * fallback for a missing one would defend a shape nothing produces.
+   * of a snapshot — `publish`, provisioning and the demo seed — renders the three Phase 4 lists,
+   * so a fallback for a missing one would defend a shape nothing produces.
+   *
+   * **Training is the exception, and a real one.** Every snapshot published before P5-T1 lacks
+   * it, and those snapshots exist. Read as empty, an office whose training was seeded after its
+   * last publish shows unpublished changes — which is true: its agents are offered none yet.
+   *
+   * A draft module is not in the view, so editing one never makes the publish bar speak: agents
+   * cannot see it, so nothing they read has changed.
    */
   private fingerprint(view: TenantConfigView): Set<string> {
     const keys = new Set<string>();
@@ -173,6 +192,13 @@ export class TenantConfigService {
     for (const ratio of view.ratios) keys.add(`ratio:${ratio.id}:${ratio.version}`);
     for (const pipeline of view.leadPipelines) {
       for (const status of pipeline.statuses) keys.add(`lead_status:${status.id}:${status.version}`);
+    }
+    for (const category of view.training ?? []) {
+      keys.add(`training_category:${category.id}:${category.version}`);
+      for (const skill of category.skills) {
+        keys.add(`training_skill:${skill.id}:${skill.version}`);
+        for (const module of skill.modules) keys.add(`training_module:${module.id}:${module.version}`);
+      }
     }
     return keys;
   }
@@ -197,10 +223,11 @@ export class TenantConfigService {
   }
 
   async read(ctx: RequestContext): Promise<TenantConfigView> {
-    const [activity, ratios, leadPipelines] = await Promise.all([
+    const [activity, ratios, leadPipelines, training] = await Promise.all([
       this.activity.list(ctx),
       this.ratios.list(ctx),
       this.leadStatuses.list(ctx),
+      this.training.offered(ctx),
     ]);
 
     const versions = [
@@ -208,12 +235,16 @@ export class TenantConfigService {
       ...activity.flatMap((c) => c.types.map((t) => t.version)),
       ...ratios.map((r) => r.version),
       ...leadPipelines.flatMap((p) => p.statuses.map((s) => s.version)),
+      ...training.map((c) => c.version),
+      ...training.flatMap((c) => c.skills.map((s) => s.version)),
+      ...training.flatMap((c) => c.skills.flatMap((s) => s.modules.map((m) => m.version))),
     ];
 
     return {
       activity,
       ratios,
       leadPipelines,
+      training,
       version: versions.length ? Math.max(...versions) : 0,
     };
   }

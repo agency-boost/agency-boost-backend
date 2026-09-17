@@ -16,6 +16,15 @@ import { RatioDefinition, RatioDefinitionDocument } from './ratio-definition.sch
 import { ConfigSnapshot, ConfigSnapshotDocument } from './config-snapshot.schema';
 import { CompanyTemplate, CompanyTemplateDocument } from './company-template.schema';
 import { TenantConfigService } from './tenant-config.service';
+import {
+  TrainingCategory, TrainingCategoryDocument,
+} from '@/modules/training/training-category.schema';
+import { TrainingSkill, TrainingSkillDocument } from '@/modules/training/training-skill.schema';
+import { TrainingModule, TrainingModuleDocument } from '@/modules/training/training-module.schema';
+import {
+  defaultTrainingTaxonomy, trainingSeedDocuments, trainingTaxonomyProblems,
+  type TrainingTaxonomyPayload,
+} from '@/modules/training/training-payload';
 
 export interface ProvisionedTaxonomy {
   categories: number;
@@ -83,6 +92,10 @@ export class ProvisioningService {
     private readonly snapshots: Model<ConfigSnapshotDocument>,
     @InjectModel(CompanyTemplate.name)
     private readonly templates: Model<CompanyTemplateDocument>,
+    @InjectModel(TrainingCategory.name)
+    private readonly trainingCategories: Model<TrainingCategoryDocument>,
+    @InjectModel(TrainingSkill.name) private readonly trainingSkills: Model<TrainingSkillDocument>,
+    @InjectModel(TrainingModule.name) private readonly trainingModules: Model<TrainingModuleDocument>,
     private readonly clock: Clock,
     // Reads the rows this service has just written, and renders them the way agents will
     // read them — one renderer, so the snapshot and the live read cannot disagree.
@@ -229,6 +242,41 @@ export class ProvisioningService {
       categories: categories.length,
       types: usable.length,
       typeCodes: usable.map((t) => t.code),
+      seededFrom: recordOf(template),
+    };
+  }
+
+  /**
+   * The training taxonomy (P5-T1, ADR-0029): categories, skills and modules.
+   *
+   * **From the company's published template exactly as published**, or from the domain
+   * defaults when it has published none. Not "defaults when a list is empty", as the activity
+   * taxonomy reads it: a company may publish a category with nothing in it yet, and that is a
+   * choice to copy, not a gap to fill.
+   *
+   * A published template that would produce a broken tree is refused rather than copied. Publish
+   * already refuses one (`TemplateService`), so this can only be a template older than that
+   * check — and a skill under a category that does not exist would render on no screen.
+   */
+  async seedTrainingTaxonomy(kpmId: string, companyId: string): Promise<ProvisionedKind> {
+    const template = await this.publishedTemplate(companyId, 'training_taxonomy');
+    const problems = template ? trainingTaxonomyProblems(template.payload) : [];
+    if (problems.length) {
+      throw new Error(
+        `The published training taxonomy for company ${companyId} would produce a broken office: `
+          + problems.join(' '),
+      );
+    }
+    const payload = template
+      ? (template.payload as unknown as TrainingTaxonomyPayload)
+      : defaultTrainingTaxonomy();
+
+    const rows = trainingSeedDocuments(kpmId, payload);
+    await this.trainingCategories.insertMany(rows.categories);
+    await this.trainingSkills.insertMany(rows.skills);
+    await this.trainingModules.insertMany(rows.modules);
+    return {
+      rows: rows.categories.length + rows.skills.length + rows.modules.length,
       seededFrom: recordOf(template),
     };
   }

@@ -8162,6 +8162,87 @@
         ],
         "x-required-permission": "tenant_config:read"
       }
+    },
+    "/api/v1/kpm/settings/training": {
+      "get": {
+        "description": "Categories, each with its skills, each with its modules, in display order. **Drafts are included**: this is the office's configuration, not what agents are offered, which is `GET /kpm/config`. `includeArchived=true` is the settings screen's, so an Owner can bring a row back.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TrainingController_list_v1",
+        "parameters": [
+          {
+            "name": "includeArchived",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TrainingCategoryDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office's training taxonomy",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:read"
+      }
     }
   },
   "info": {
@@ -8765,7 +8846,19 @@
               "ratio.create",
               "ratio.update",
               "ratio.archive",
-              "ratio.restore"
+              "ratio.restore",
+              "trainingCategory.create",
+              "trainingCategory.update",
+              "trainingCategory.archive",
+              "trainingCategory.restore",
+              "trainingSkill.create",
+              "trainingSkill.update",
+              "trainingSkill.archive",
+              "trainingSkill.restore",
+              "trainingModule.create",
+              "trainingModule.update",
+              "trainingModule.archive",
+              "trainingModule.restore"
             ]
           },
           "id": {
@@ -10132,6 +10225,161 @@
           "statuses"
         ]
       },
+      "TrainingModuleDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "PROSPECT_LIST",
+            "description": "The identity. Never changes, never reused."
+          },
+          "skillCode": {
+            "type": "string",
+            "example": "PROSPECTING",
+            "description": "The skill it teaches. **Its category is that skill's**, never stored here."
+          },
+          "title": {
+            "type": "string",
+            "example": "Building Your Prospect List"
+          },
+          "publishState": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published"
+            ],
+            "description": "Whether agents are offered the module **at all**. Not when: that is the office's own publish. A draft never reaches an agent."
+          },
+          "displayOrder": {
+            "type": "number",
+            "description": "Within its skill. Presentation only."
+          },
+          "version": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "skillCode",
+          "title",
+          "publishState",
+          "displayOrder",
+          "version",
+          "status"
+        ]
+      },
+      "TrainingSkillDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "PROSPECTING"
+          },
+          "categoryCode": {
+            "type": "string",
+            "example": "SALES"
+          },
+          "label": {
+            "type": "string",
+            "example": "Prospecting"
+          },
+          "displayOrder": {
+            "type": "number",
+            "description": "Within its category."
+          },
+          "version": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "modules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrainingModuleDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "categoryCode",
+          "label",
+          "displayOrder",
+          "version",
+          "status",
+          "modules"
+        ]
+      },
+      "TrainingCategoryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "SALES"
+          },
+          "label": {
+            "type": "string",
+            "example": "Sales"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "example": "Structured modules — tracked here, and later in your Skill Tracker.",
+            "description": "The subtitle an agent's category page shows."
+          },
+          "displayOrder": {
+            "type": "number"
+          },
+          "version": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrainingSkillDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "label",
+          "description",
+          "displayOrder",
+          "version",
+          "status",
+          "skills"
+        ]
+      },
       "TenantConfigDto": {
         "type": "object",
         "properties": {
@@ -10153,6 +10401,13 @@
               "$ref": "#/components/schemas/LeadPipelineDto"
             }
           },
+          "training": {
+            "description": "The training taxonomy agents are offered: active categories and skills, and **published** active modules only (P5-T1). A draft never reaches an agent.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrainingCategoryDto"
+            }
+          },
           "version": {
             "type": "number",
             "description": "The highest version across everything above — one number to compare rather than three collections to reason about. It moves when what the office counts changes, and not on a reorder, because a reorder rebinds nothing."
@@ -10162,6 +10417,7 @@
           "activity",
           "ratios",
           "leadPipelines",
+          "training",
           "version"
         ]
       },

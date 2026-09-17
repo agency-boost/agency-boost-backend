@@ -47,6 +47,14 @@ import {
   RatioDefinition, RatioDefinitionSchema,
 } from '@/modules/config/ratio-definition.schema';
 import { ConfigSnapshot, ConfigSnapshotSchema } from '@/modules/config/config-snapshot.schema';
+import {
+  TrainingCategory, TrainingCategorySchema,
+} from '@/modules/training/training-category.schema';
+import { TrainingSkill, TrainingSkillSchema } from '@/modules/training/training-skill.schema';
+import { TrainingModule, TrainingModuleSchema } from '@/modules/training/training-module.schema';
+import {
+  defaultTrainingTaxonomy, trainingSeedDocuments,
+} from '@/modules/training/training-payload';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 
 loadEnv();
@@ -86,6 +94,9 @@ async function main(): Promise<void> {
   const LeadStatuses = mongoose.model(LeadStatus.name, LeadStatusSchema);
   const RatioDefinitions = mongoose.model(RatioDefinition.name, RatioDefinitionSchema);
   const ConfigSnapshots = mongoose.model(ConfigSnapshot.name, ConfigSnapshotSchema);
+  const TrainingCategories = mongoose.model(TrainingCategory.name, TrainingCategorySchema);
+  const TrainingSkills = mongoose.model(TrainingSkill.name, TrainingSkillSchema);
+  const TrainingModules = mongoose.model(TrainingModule.name, TrainingModuleSchema);
   const Memberships = mongoose.model(Membership.name, MembershipSchema);
   const History = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
   const Groups = mongoose.model(Group.name, GroupSchema);
@@ -239,6 +250,11 @@ async function main(): Promise<void> {
       appliesToOrgLevelCodes: [...(r.appliesToOrgLevelCodes ?? [])],
       version: 1, status: 'active', archivedAt: null, deletedAt: null,
     })));
+    // The training taxonomy (P5-T1), through the helper provisioning and migration 0011 use.
+    const training = trainingSeedDocuments(kpmId, defaultTrainingTaxonomy());
+    await TrainingCategories.insertMany(training.categories);
+    await TrainingSkills.insertMany(training.skills);
+    await TrainingModules.insertMany(training.modules);
   }
 
   /**
@@ -251,11 +267,16 @@ async function main(): Promise<void> {
    */
   async function publish(kpmId: string, at: Date) {
     if (await ConfigSnapshots.findOne({ kpmId }).exec()) return;
-    const [cats, types, ratios, statuses] = await Promise.all([
+    const [cats, types, ratios, statuses, trainingCats, trainingSkills, trainingModules] = await Promise.all([
       ActivityCategories.find({ kpmId, status: 'active' }).sort({ displayOrder: 1 }).lean().exec(),
       ActivityTypes.find({ kpmId, status: 'active' }).sort({ displayOrder: 1 }).lean().exec(),
       RatioDefinitions.find({ kpmId, status: 'active' }).sort({ displayOrder: 1 }).lean().exec(),
       LeadStatuses.find({ kpmId, status: 'active' }).sort({ rank: 1 }).lean().exec(),
+      TrainingCategories.find({ kpmId, status: 'active' }).sort({ displayOrder: 1 }).lean().exec(),
+      TrainingSkills.find({ kpmId, status: 'active' }).sort({ displayOrder: 1 }).lean().exec(),
+      // What agents are offered: published modules only, as `TrainingService.offered` renders it.
+      TrainingModules.find({ kpmId, status: 'active', publishState: 'published' })
+        .sort({ displayOrder: 1 }).lean().exec(),
     ]);
     const view = (rows: Record<string, unknown>[]): Record<string, unknown>[] =>
       rows.map((r) => ({ ...r, id: String(r._id) }));
@@ -268,6 +289,13 @@ async function main(): Promise<void> {
       leadPipelines: ['sales', 'recruitment'].map((pipeline) => ({
         pipeline,
         statuses: view(statuses as never).filter((l) => l.pipeline === pipeline),
+      })),
+      training: view(trainingCats as never).map((c) => ({
+        ...c,
+        skills: view(trainingSkills as never).filter((sk) => sk.categoryCode === c.code).map((sk) => ({
+          ...sk,
+          modules: view(trainingModules as never).filter((m) => m.skillCode === sk.code),
+        })),
       })),
       version: 1,
     };
@@ -285,7 +313,10 @@ async function main(): Promise<void> {
     const defaults = { templateId: null, version: null };
     await Kpms.updateOne({ _id: kpmId }, {
       $set: {
-        seededFrom: { activity_taxonomy: defaults, lead_pipeline: defaults, ratio_set: defaults },
+        seededFrom: {
+          activity_taxonomy: defaults, lead_pipeline: defaults, ratio_set: defaults,
+          training_taxonomy: defaults,
+        },
       },
     }).exec();
   }

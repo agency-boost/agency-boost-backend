@@ -52,6 +52,16 @@ import {
 } from '@/modules/config/config.controller';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
 import { TemplateService } from '@/modules/config/template.service';
+import {
+  TrainingCategory, TrainingCategorySchema,
+} from '@/modules/training/training-category.schema';
+import { TrainingSkill, TrainingSkillSchema } from '@/modules/training/training-skill.schema';
+import { TrainingModule, TrainingModuleSchema } from '@/modules/training/training-module.schema';
+import {
+  TrainingCategoryRepository, TrainingModuleRepository, TrainingSkillRepository,
+} from '@/modules/training/training.repository';
+import { TrainingService } from '@/modules/training/training.service';
+import { TrainingController } from '@/modules/training/training.controller';
 import { OfficeCounter } from '@/modules/config/office-counter.port';
 import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
@@ -144,6 +154,9 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: RatioDefinition.name, schema: RatioDefinitionSchema },
       { name: ConfigSnapshot.name, schema: ConfigSnapshotSchema },
       { name: CompanyTemplate.name, schema: CompanyTemplateSchema },
+      { name: TrainingCategory.name, schema: TrainingCategorySchema },
+      { name: TrainingSkill.name, schema: TrainingSkillSchema },
+      { name: TrainingModule.name, schema: TrainingModuleSchema },
     ]),
   ],
   controllers: [
@@ -156,6 +169,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     NotificationController,
     TenantConfigController,
     TenantConfigReadController,
+    TrainingController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -207,6 +221,10 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     RatioDefinitionRepository,
     RatioService,
     ConfigChangeService,
+    TrainingCategoryRepository,
+    TrainingSkillRepository,
+    TrainingModuleRepository,
+    TrainingService,
     ConfigSnapshotRepository,
     TenantConfigService,
     TemplateService,

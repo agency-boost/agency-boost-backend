@@ -27,6 +27,11 @@ import {
   ImpersonationSessionSchema,
 } from '@/modules/auth/impersonation-session.schema';
 import { CompanyTemplateSchema } from '@/modules/config/company-template.schema';
+import {
+  TrainingCategorySchema,
+} from '@/modules/training/training-category.schema';
+import { TrainingSkillSchema } from '@/modules/training/training-skill.schema';
+import { TrainingModuleSchema } from '@/modules/training/training-module.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -50,6 +55,9 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['leadStatuses', LeadStatusSchema],
   ['ratioDefinitions', RatioDefinitionSchema],
   ['configSnapshots', ConfigSnapshotSchema],
+  ['trainingCategories', TrainingCategorySchema],
+  ['trainingSkills', TrainingSkillSchema],
+  ['trainingModules', TrainingModuleSchema],
 ];
 
 /**
@@ -132,6 +140,9 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [LeadStatusSchema, 'LeadStatusSchema'],
   [RatioDefinitionSchema, 'RatioDefinitionSchema'],
   [ConfigSnapshotSchema, 'ConfigSnapshotSchema'],
+  [TrainingCategorySchema, 'TrainingCategorySchema'],
+  [TrainingSkillSchema, 'TrainingSkillSchema'],
+  [TrainingModuleSchema, 'TrainingModuleSchema'],
   [ImpersonationSessionSchema, 'ImpersonationSessionSchema'],
   [CompanyTemplateSchema, 'CompanyTemplateSchema'],
   [AssetSchema, 'AssetSchema'],

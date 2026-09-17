@@ -112,3 +112,14 @@ export {
   type SeedActivityType,
   type SeedLeadStatus,
 } from './activity-taxonomy';
+
+export {
+  TRAINING_PUBLISH_STATES,
+  type TrainingPublishState,
+  SEED_TRAINING_CATEGORIES,
+  SEED_TRAINING_SKILLS,
+  SEED_TRAINING_MODULES,
+  type SeedTrainingCategory,
+  type SeedTrainingSkill,
+  type SeedTrainingModule,
+} from './training-taxonomy';

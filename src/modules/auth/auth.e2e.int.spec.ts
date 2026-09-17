@@ -1,4 +1,13 @@
 import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
+import {
+  TrainingCategory, TrainingCategorySchema,
+} from '@/modules/training/training-category.schema';
+import { TrainingSkill, TrainingSkillSchema } from '@/modules/training/training-skill.schema';
+import { TrainingModule, TrainingModuleSchema } from '@/modules/training/training-module.schema';
+import {
+  TrainingCategoryRepository, TrainingModuleRepository, TrainingSkillRepository,
+} from '@/modules/training/training.repository';
+import { TrainingService } from '@/modules/training/training.service';
 import { Test } from '@nestjs/testing';
 import { MongooseModule, getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { ConfigService } from '@nestjs/config';
@@ -171,6 +180,9 @@ describe('auth and admin over HTTP', () => {
           { name: RatioDefinition.name, schema: RatioDefinitionSchema },
           { name: ConfigSnapshot.name, schema: ConfigSnapshotSchema },
           { name: CompanyTemplate.name, schema: CompanyTemplateSchema },
+          { name: TrainingCategory.name, schema: TrainingCategorySchema },
+          { name: TrainingSkill.name, schema: TrainingSkillSchema },
+          { name: TrainingModule.name, schema: TrainingModuleSchema },
         ]),
       ],
       controllers: [
@@ -197,6 +209,7 @@ describe('auth and admin over HTTP', () => {
         LeadStatusRepository, LeadStatusService, RatioDefinitionRepository, RatioService,
         ConfigSnapshotRepository,
         TenantConfigService, TemplateService, ConfigChangeService,
+        TrainingCategoryRepository, TrainingSkillRepository, TrainingModuleRepository, TrainingService,
         { provide: OfficeCounter, useClass: KpmOfficeCounter },
     TemplateService,
     { provide: OfficeCounter, useClass: KpmOfficeCounter },

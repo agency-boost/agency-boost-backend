@@ -23,6 +23,9 @@ const TENANT_SCOPED_MODELS = [
   'LeadStatus',
   'RatioDefinition',
   'ConfigSnapshot',
+  'TrainingCategory',
+  'TrainingSkill',
+  'TrainingModule',
 ];
 
 /**
@@ -38,6 +41,7 @@ const ALLOWED = new Map<string, string>([
   ['org/org.repositories.ts', 'the repositories for those models'],
 
   ['config/activity.repository.ts', 'the repositories for those models'],
+  ['training/training.repository.ts', 'the repositories for those models'],
   [
     'config/provisioning.service.ts',
     'writes into an office being created, before any context is scoped to it',

@@ -13,6 +13,9 @@ import {
   CompanyTemplate, CompanyTemplateDocument, TemplateKind,
 } from './company-template.schema';
 import { OfficeCounter, type OfficeStanding } from './office-counter.port';
+import {
+  defaultTrainingTaxonomy, trainingTaxonomyProblems,
+} from '@/modules/training/training-payload';
 
 /** No version to stand against — nothing published, or a history row that is not current. */
 const NO_STANDING: OfficeStanding = { behind: 0, unrecorded: 0 };
@@ -51,6 +54,7 @@ const STARTING_PAYLOAD: Record<string, () => Record<string, unknown>> = {
       ...r, numerator: [...r.numerator], denominator: [...r.denominator],
     })),
   }),
+  training_taxonomy: () => ({ ...defaultTrainingTaxonomy() }),
 };
 
 /**
@@ -263,6 +267,16 @@ export class TemplateService {
     companyId: string, kind: TemplateKind, payload: Record<string, unknown>,
   ): Promise<void> {
     this.refuseEmpty(kind, payload);
+
+    /*
+     * The training taxonomy (P5-T1): every row by the checker an office's own write meets
+     * (ADR-0030), then the references only a whole payload can break. An empty level is fine.
+     */
+    if (kind === 'training_taxonomy') {
+      const problems = trainingTaxonomyProblems(payload);
+      if (problems.length) throw new BadRequestException(problems.join(' '));
+      return;
+    }
 
     if (kind !== 'ratio_set') return;
 

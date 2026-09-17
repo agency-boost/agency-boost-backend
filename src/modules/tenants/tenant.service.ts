@@ -368,6 +368,8 @@ export class TenantService {
     const ratios = await this.provisioning.seedRatioDefinitions(
       String(kpm._id), input.companyId, seeded.typeCodes,
     );
+    // Training (P5-T1): before publishing, so the office's first snapshot offers it too.
+    const training = await this.provisioning.seedTrainingTaxonomy(String(kpm._id), input.companyId);
 
     /*
      * And publish what was just copied (P4-T6), so the office's agents have something to
@@ -384,6 +386,7 @@ export class TenantService {
       activity_taxonomy: seeded.seededFrom,
       lead_pipeline: leads.seededFrom,
       ratio_set: ratios.seededFrom,
+      training_taxonomy: training.seededFrom,
     };
     await kpm.save();
 

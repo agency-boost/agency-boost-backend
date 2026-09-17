@@ -26,6 +26,11 @@ import {
   ImpersonationSessionSchema,
 } from '@/modules/auth/impersonation-session.schema';
 import { CompanyTemplateSchema } from '@/modules/config/company-template.schema';
+import {
+  TrainingCategorySchema,
+} from '@/modules/training/training-category.schema';
+import { TrainingSkillSchema } from '@/modules/training/training-skill.schema';
+import { TrainingModuleSchema } from '@/modules/training/training-module.schema';
 
 /**
  * P2-T8: soft delete everywhere.
@@ -55,6 +60,9 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['configSnapshots', ConfigSnapshotSchema],
   ['impersonationSessions', ImpersonationSessionSchema],
   ['companyTemplates', CompanyTemplateSchema],
+  ['trainingCategories', TrainingCategorySchema],
+  ['trainingSkills', TrainingSkillSchema],
+  ['trainingModules', TrainingModuleSchema],
 ];
 
 /**
@@ -82,6 +90,9 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [ConfigSnapshotSchema, 'ConfigSnapshotSchema'],
   [ImpersonationSessionSchema, 'ImpersonationSessionSchema'],
   [CompanyTemplateSchema, 'CompanyTemplateSchema'],
+  [TrainingCategorySchema, 'TrainingCategorySchema'],
+  [TrainingSkillSchema, 'TrainingSkillSchema'],
+  [TrainingModuleSchema, 'TrainingModuleSchema'],
   [MembershipSchema, 'MembershipSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [JoinRequestSchema, 'JoinRequestSchema'],

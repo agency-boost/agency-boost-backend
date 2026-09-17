@@ -5,7 +5,7 @@ import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
-import { SEED_ACTIVITY_TYPES } from '@/domain/constants';
+import { SEED_ACTIVITY_TYPES, SEED_TRAINING_MODULES } from '@/domain/constants';
 import { CompanyTemplate, CompanyTemplateSchema } from './company-template.schema';
 import { TemplateService } from './template.service';
 import { KpmOfficeCounter } from './office-counter';
@@ -400,6 +400,27 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
       await service.saveDraft(ctx(), companyId, 'ratio_set', { ratios: [] });
       await expect(service.publish(ctx(), companyId, 'ratio_set'))
         .rejects.toThrow(/nothing to measure/);
+    });
+  });
+  describe('the training taxonomy (P5-T1)', () => {
+    it('starts from the domain defaults', async () => {
+      const view = await service.read(companyId, 'training_taxonomy');
+      expect((view.payload.modules as unknown[])).toHaveLength(SEED_TRAINING_MODULES.length);
+      expect((view.payload.categories as { code: string }[])[0].code).toBe('SALES');
+    });
+
+    it('publishes an empty taxonomy, and refuses one that would build a broken tree, naming what', async () => {
+      await service.saveDraft(ctx(), companyId, 'training_taxonomy', { categories: [], skills: [], modules: [] });
+      await expect(service.publish(ctx(), companyId, 'training_taxonomy'))
+        .resolves.toMatchObject({ status: 'published', version: 1 });
+
+      await service.saveDraft(ctx(), companyId, 'training_taxonomy', {
+        categories: [{ code: 'SALES', label: 'Sales' }],
+        skills: [{ code: 'CLOSING', categoryCode: 'SALES', label: 'Closing' }],
+        modules: [{ code: 'ORPHAN', skillCode: 'MISSING', title: 'Orphan' }],
+      });
+      await expect(service.publish(ctx(), companyId, 'training_taxonomy'))
+        .rejects.toThrow('The module ORPHAN names MISSING, which no skill in this taxonomy is.');
     });
   });
 });

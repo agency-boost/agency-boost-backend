@@ -1,4 +1,9 @@
 import mongoose from 'mongoose';
+import {
+  TrainingCategory, TrainingCategorySchema,
+} from '@/modules/training/training-category.schema';
+import { TrainingSkill, TrainingSkillSchema } from '@/modules/training/training-skill.schema';
+import { TrainingModule, TrainingModuleSchema } from '@/modules/training/training-module.schema';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -87,6 +92,9 @@ describe('TenantService', () => {
       mongoose.model(RatioDefinition.name, RatioDefinitionSchema) as never,
       mongoose.model(ConfigSnapshot.name, ConfigSnapshotSchema) as never,
       mongoose.model(CompanyTemplate.name, CompanyTemplateSchema) as never,
+      mongoose.model(TrainingCategory.name, TrainingCategorySchema) as never,
+      mongoose.model(TrainingSkill.name, TrainingSkillSchema) as never,
+      mongoose.model(TrainingModule.name, TrainingModuleSchema) as never,
       new FixedClock(NOW),
       configModule(NOW).config,
     );
@@ -261,6 +269,8 @@ describe('TenantService', () => {
         activity_taxonomy: { templateId: null, version: null },
         lead_pipeline: { templateId: null, version: null },
         ratio_set: { templateId: null, version: null },
+        // P5-T1: the training taxonomy is seeded, and recorded, like the rest.
+        training_taxonomy: { templateId: null, version: null },
       });
       expect(stored).not.toHaveProperty('seededFromVersion');
     });

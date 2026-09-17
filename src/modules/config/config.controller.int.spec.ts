@@ -11,6 +11,8 @@ import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { ActivityConfigService } from './activity.service';
 import { ConfigChangeService } from './changes.service';
 import { TenantConfigController, TenantConfigReadController } from './config.controller';
+import { TrainingController } from '@/modules/training/training.controller';
+import { TrainingService } from '@/modules/training/training.service';
 import { LeadStatusService } from './lead-status.service';
 import { RatioService } from './ratio.service';
 import { TenantConfigService } from './tenant-config.service';
@@ -66,13 +68,14 @@ describe('the configuration controllers', () => {
     wired = configModule(NOW);
 
     const moduleRef = await Test.createTestingModule({
-      controllers: [TenantConfigController, TenantConfigReadController],
+      controllers: [TenantConfigController, TenantConfigReadController, TrainingController],
       providers: [
         { provide: ActivityConfigService, useValue: wired.activity },
         { provide: LeadStatusService, useValue: wired.leads },
         { provide: RatioService, useValue: wired.ratios },
         { provide: TenantConfigService, useValue: wired.config },
         { provide: ConfigChangeService, useValue: wired.changes },
+        { provide: TrainingService, useValue: wired.training },
         // Only two of its methods are reachable from here, and neither is this file's
         // subject — `tenant.service`'s own specs own them.
         {
@@ -141,6 +144,7 @@ describe('the configuration controllers', () => {
     it.each([
       ['TenantConfigController', TenantConfigController],
       ['TenantConfigReadController', TenantConfigReadController],
+      ['TrainingController', TrainingController],
     ])('%s: every route names a permission', (_label, Controller) => {
       const found = routes(Object.create(Controller.prototype) as object);
       expect(found.length).toBeGreaterThan(0);
@@ -162,6 +166,7 @@ describe('the configuration controllers', () => {
       const found = [
         ...routes(Object.create(TenantConfigController.prototype) as object),
         ...routes(Object.create(TenantConfigReadController.prototype) as object),
+        ...routes(Object.create(TrainingController.prototype) as object),
       ];
       const writes = found.filter((r) => r.method !== RequestMethod.GET);
       expect(writes.length).toBeGreaterThan(0);
@@ -180,6 +185,7 @@ describe('the configuration controllers', () => {
       const found = [
         ...routes(Object.create(TenantConfigController.prototype) as object),
         ...routes(Object.create(TenantConfigReadController.prototype) as object),
+        ...routes(Object.create(TrainingController.prototype) as object),
       ];
       const writes = found.filter((r) => r.method !== RequestMethod.GET);
       expect(writes.length).toBeGreaterThan(0);
@@ -196,12 +202,48 @@ describe('the configuration controllers', () => {
       const found = [
         ...routes(Object.create(TenantConfigController.prototype) as object),
         ...routes(Object.create(TenantConfigReadController.prototype) as object),
+        ...routes(Object.create(TrainingController.prototype) as object),
       ];
       const reads = found.filter((r) => r.method === RequestMethod.GET);
       expect(reads.length).toBeGreaterThan(0);
       expect(reads
         .filter((r) => !readLike.test(r.permission?.split(':')[1] ?? ''))
         .map((r) => r.name)).toEqual([]);
+    });
+  });
+
+  describe('GET /kpm/settings/training (P5-T1)', () => {
+    it('reads the office\'s taxonomy nested, drafts included, archived rows on request', async () => {
+      await wired.provisioning.seedTrainingTaxonomy(KPM_A, COMPANY);
+      await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [
+          { op: 'trainingModule.create', body: { code: 'WIP', skillCode: 'CLOSING', title: 'In progress' } },
+        ] })
+        .expect(201);
+      const sales = (await wired.training.list(OWNER, true)).find((c) => c.code === 'SALES')!;
+      await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [{ op: 'trainingCategory.archive', id: sales.id, expectedVersion: sales.version }] })
+        .expect(201);
+
+      const live = await request(app.getHttpServer()).get('/kpm/settings/training').expect(200);
+      expect(live.body.map((c: { code: string }) => c.code)).not.toContain('SALES');
+
+      const all = await request(app.getHttpServer())
+        .get('/kpm/settings/training?includeArchived=true').expect(200);
+      const closing = all.body[0].skills.find((s: { code: string }) => s.code === 'CLOSING');
+      expect(closing.modules.map((m: { code: string; publishState: string }) => [m.code, m.publishState]))
+        .toContainEqual(['WIP', 'draft']);
+    });
+
+    it('is readable by every member, and the batch refuses them its writes', async () => {
+      current = AGENT;
+      await request(app.getHttpServer()).get('/kpm/settings/training').expect(200);
+      await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [{ op: 'trainingCategory.create', body: { code: 'MINE_NOW', label: 'Mine' } }] })
+        .expect(403);
     });
   });
 

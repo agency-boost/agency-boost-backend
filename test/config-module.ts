@@ -26,6 +26,15 @@ import { RatioService } from '@/modules/config/ratio.service';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
 import { ConfigChangeService } from '@/modules/config/changes.service';
 import { ProvisioningService } from '@/modules/config/provisioning.service';
+import {
+  TrainingCategory, TrainingCategorySchema,
+} from '@/modules/training/training-category.schema';
+import { TrainingSkill, TrainingSkillSchema } from '@/modules/training/training-skill.schema';
+import { TrainingModule, TrainingModuleSchema } from '@/modules/training/training-module.schema';
+import {
+  TrainingCategoryRepository, TrainingModuleRepository, TrainingSkillRepository,
+} from '@/modules/training/training.repository';
+import { TrainingService } from '@/modules/training/training.service';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
@@ -53,6 +62,9 @@ export function configModule(now: Date) {
   const ratioDefinitions = model('RatioDefinitionModel', RatioDefinitionSchema);
   const snapshots = model('ConfigSnapshotModel', ConfigSnapshotSchema);
   const templates = model('CompanyTemplateModel', CompanyTemplateSchema);
+  const trainingCategories = model('TrainingCategoryModel', TrainingCategorySchema);
+  const trainingSkills = model('TrainingSkillModel', TrainingSkillSchema);
+  const trainingModules = model('TrainingModuleModel', TrainingModuleSchema);
 
   const clock: Clock = new FixedClock(now);
   const audit = new AuditService(model('AuditLogModel', AuditLogSchema) as never);
@@ -85,11 +97,20 @@ export function configModule(now: Date) {
   const ratios = new RatioService(
     new RatioDefinitionRepository(ratioDefinitions as never), activity, orgLevels, audit, clock,
   );
+  // P5-T1. Before `config`, which renders what agents are offered from it.
+  const training = new TrainingService(
+    new TrainingCategoryRepository(trainingCategories as never),
+    new TrainingSkillRepository(trainingSkills as never),
+    new TrainingModuleRepository(trainingModules as never),
+    audit,
+    clock,
+  );
   const config = new TenantConfigService(
     activity, ratios, leads,
     new ConfigSnapshotRepository(snapshots as never),
     audit, clock,
     orgLevels,
+    training,
   );
   const provisioning = new ProvisioningService(
     categories as never,
@@ -98,17 +119,20 @@ export function configModule(now: Date) {
     ratioDefinitions as never,
     snapshots as never,
     templates as never,
+    trainingCategories as never,
+    trainingSkills as never,
+    trainingModules as never,
     clock,
     config,
   );
 
   // `orgLevels` and `kpms` are exposed since P4-T15: a ratio's applicability validates
   // against the company's ladder, so a spec exercising it has to be able to publish one.
-  const changes = new ConfigChangeService(activity, ratios, config, orgLevels);
+  const changes = new ConfigChangeService(activity, ratios, config, orgLevels, training);
 
   return {
     activity, ratios, leads, config, provisioning, templates, audit, clock, changes,
-    orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema),
+    orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training,
   };
 }
 
@@ -121,6 +145,7 @@ export async function provisionOffice(
   const seeded = await module.provisioning.seedActivityTaxonomy(kpmId, companyId);
   await module.provisioning.seedLeadPipelines(kpmId, companyId);
   await module.provisioning.seedRatioDefinitions(kpmId, companyId, seeded.typeCodes);
+  await module.provisioning.seedTrainingTaxonomy(kpmId, companyId);
   return seeded;
 }
 
@@ -129,4 +154,6 @@ export {
   ConfigSnapshot, ConfigSnapshotSchema, LeadStatus, LeadStatusSchema,
   CompanyTemplate, CompanyTemplateSchema, RatioDefinition, RatioDefinitionSchema,
   AuditLog, AuditLogSchema,
+  TrainingCategory, TrainingCategorySchema, TrainingSkill, TrainingSkillSchema,
+  TrainingModule, TrainingModuleSchema,
 };

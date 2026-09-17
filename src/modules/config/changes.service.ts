@@ -13,6 +13,11 @@ import {
   checkCategoryCreate, checkCategoryUpdate, checkNoFields, checkRatioCreate, checkRatioUpdate,
   checkTypeCreate, checkTypeUpdate,
 } from './config-input';
+import { TrainingService } from '@/modules/training/training.service';
+import {
+  checkTrainingCategoryCreate, checkTrainingCategoryUpdate, checkTrainingModuleCreate,
+  checkTrainingModuleUpdate, checkTrainingSkillCreate, checkTrainingSkillUpdate,
+} from '@/modules/training/training-input';
 
 /**
  * Each op's own field rules — the checker its service runs (ADR-0030).
@@ -33,7 +38,26 @@ const CHECKERS: Record<ChangeOp, (body: unknown) => object | void> = {
   'ratio.update': checkRatioUpdate,
   'ratio.archive': checkNoFields,
   'ratio.restore': checkNoFields,
+  'trainingCategory.create': checkTrainingCategoryCreate,
+  'trainingCategory.update': checkTrainingCategoryUpdate,
+  'trainingCategory.archive': checkNoFields,
+  'trainingCategory.restore': checkNoFields,
+  'trainingSkill.create': checkTrainingSkillCreate,
+  'trainingSkill.update': checkTrainingSkillUpdate,
+  'trainingSkill.archive': checkNoFields,
+  'trainingSkill.restore': checkNoFields,
+  'trainingModule.create': checkTrainingModuleCreate,
+  'trainingModule.update': checkTrainingModuleUpdate,
+  'trainingModule.archive': checkNoFields,
+  'trainingModule.restore': checkNoFields,
 };
+
+/** What a checked body may say about where a row sits. */
+interface Checked {
+  code?: string;
+  categoryCode?: string;
+  skillCode?: string;
+}
 
 /** One live row, reduced to what the validate pass needs to reason about. */
 interface Known {
@@ -41,6 +65,8 @@ interface Known {
   code: string;
   version: number;
   status: 'active' | 'archived';
+  /** A training skill's category code, or a training module's skill code. */
+  parent?: string;
 }
 
 /**
@@ -82,6 +108,7 @@ export class ConfigChangeService {
     private readonly ratios: RatioService,
     private readonly config: TenantConfigService,
     private readonly orgLevels: OrgLevelService,
+    private readonly training: TrainingService,
   ) {}
 
   async apply(ctx: RequestContext, ops: ConfigChangeDto[]): Promise<TenantConfigView> {
@@ -117,11 +144,39 @@ export class ConfigChangeService {
       ratioShapes.set(r.id, { comparison: r.comparison, displayUnit: r.displayUnit });
     }
 
+    /* The training tree (P5-T1), with each row's parent, so the tree's own rules hold here too. */
+    const trainingCategories = new Map<string, Known>();
+    const trainingSkills = new Map<string, Known>();
+    const trainingModules = new Map<string, Known>();
+    for (const c of await this.training.list(ctx, true)) {
+      trainingCategories.set(c.id, { id: c.id, code: c.code, version: c.version, status: c.status });
+      for (const s of c.skills) {
+        trainingSkills.set(s.id, {
+          id: s.id, code: s.code, version: s.version, status: s.status, parent: s.categoryCode,
+        });
+        for (const m of s.modules) {
+          trainingModules.set(m.id, {
+            id: m.id, code: m.code, version: m.version, status: m.status, parent: m.skillCode,
+          });
+        }
+      }
+    }
+    const tree = { categories: trainingCategories, skills: trainingSkills, modules: trainingModules };
+
     const ladder = await this.orgLevels.ladderForOffice(ctx);
     const activeRungs = new Set(ladder.filter((l) => l.status === 'active').map((l) => l.code));
 
+    const rowsByKind: Record<string, Map<string, Known>> = {
+      category: categories,
+      type: types,
+      ratio: ratios,
+      trainingCategory: trainingCategories,
+      trainingSkill: trainingSkills,
+      trainingModule: trainingModules,
+    };
+
     for (const [index, op] of ops.entries()) {
-      const rows = this.rowsFor(op.op, categories, types, ratios);
+      const rows = rowsByKind[op.op.split('.')[0]];
       const fail = (message: string, code: ErrorCodeValue = ErrorCode.VALIDATION_FAILED) => {
         throw this.atOp(index, op.op, new DomainException(code, message, HttpStatus.BAD_REQUEST));
       };
@@ -131,7 +186,7 @@ export class ConfigChangeService {
       if (!checker) fail(`Unknown change ${String(op.op)}.`);
 
       // The body by its own rules before anything about it is believed — its code included.
-      let checked: { code?: string; categoryCode?: string } = {};
+      let checked: Checked = {};
       try {
         checked = (checker!(op.body) ?? {}) as typeof checked;
       } catch (err) {
@@ -187,6 +242,8 @@ export class ConfigChangeService {
 
       }
 
+      if (op.op.startsWith('training')) this.projectTraining(op, index, checked, tree, fail);
+
       /*
        * The display unit against the rule it will sit under (P4-T25), in the projection like
        * every other refusal — so a batch that sets `percent` on a band ratio is refused
@@ -227,15 +284,99 @@ export class ConfigChangeService {
     }
   }
 
-  private rowsFor(
-    op: ChangeOp,
-    categories: Map<string, Known>,
-    types: Map<string, Known>,
-    ratios: Map<string, Known>,
-  ): Map<string, Known> {
-    if (op.startsWith('category.')) return categories;
-    if (op.startsWith('type.')) return types;
-    return ratios;
+  /**
+   * The training tree's own rules, in the projection (P5-T1) — so a batch that breaks one is
+   * refused before its earlier ops are written, like every other refusal here.
+   *
+   * - A skill needs an active category, and a module an active skill — **counting ops earlier
+   *   in the batch**, so a module may name a skill created three ops before it.
+   * - Nothing is restored under an archived parent.
+   * - An archive reaches down, so a later op cannot create or restore under what it retired.
+   *
+   * The row itself — its code, its version, its own status — the loop above has already moved.
+   */
+  private projectTraining(
+    op: ConfigChangeDto,
+    index: number,
+    checked: Checked,
+    tree: { categories: Map<string, Known>; skills: Map<string, Known>; modules: Map<string, Known> },
+    fail: (message: string) => never,
+  ): void {
+    const active = (rows: Map<string, Known>, code: string) =>
+      [...rows.values()].some((r) => r.code === code && r.status === 'active');
+    // An existing row always has an id here: the loop above answered 404 for one without.
+    const row = op.op.endsWith('.create') ? undefined : this.rowIn(op.op, op.id!, tree);
+    const pending = (rows: Map<string, Known>) => rows.get(`pending:${index}`)!;
+
+    switch (op.op) {
+      case 'trainingSkill.create':
+        if (!active(tree.categories, checked.categoryCode!)) {
+          fail(`No active training category called ${checked.categoryCode}. Add it first, or check the code.`);
+        }
+        pending(tree.skills).parent = checked.categoryCode;
+        return;
+      case 'trainingModule.create':
+        if (!active(tree.skills, checked.skillCode!)) {
+          fail(`No active training skill called ${checked.skillCode}. Add it first, or check the code.`);
+        }
+        pending(tree.modules).parent = checked.skillCode;
+        return;
+      case 'trainingSkill.update':
+        if (checked.categoryCode !== undefined && checked.categoryCode !== row!.parent) {
+          if (!active(tree.categories, checked.categoryCode)) {
+            fail(`No active training category called ${checked.categoryCode} to move ${row!.code} into.`);
+          }
+          row!.parent = checked.categoryCode;
+        }
+        return;
+      case 'trainingModule.update':
+        if (checked.skillCode !== undefined && checked.skillCode !== row!.parent) {
+          if (!active(tree.skills, checked.skillCode)) {
+            fail(`No active training skill called ${checked.skillCode} to move ${row!.code} under.`);
+          }
+          row!.parent = checked.skillCode;
+        }
+        return;
+      case 'trainingSkill.restore':
+        if (!active(tree.categories, row!.parent!)) {
+          fail(`${row!.code} is in ${row!.parent}, which is archived. Restore the category first.`);
+        }
+        return;
+      case 'trainingModule.restore':
+        if (!active(tree.skills, row!.parent!)) {
+          fail(`${row!.code} teaches ${row!.parent}, which is archived. Restore the skill first.`);
+        }
+        return;
+      case 'trainingCategory.archive': {
+        const skills = [...tree.skills.values()].filter((s) => s.parent === row!.code);
+        for (const skill of skills) skill.status = 'archived';
+        const codes = new Set(skills.map((s) => s.code));
+        for (const module of tree.modules.values()) {
+          if (codes.has(module.parent!)) module.status = 'archived';
+        }
+        return;
+      }
+      case 'trainingSkill.archive':
+        for (const module of tree.modules.values()) {
+          if (module.parent === row!.code) module.status = 'archived';
+        }
+        return;
+      default:
+        // Category creates, updates and restores, and module archives: nothing about the tree's
+        // shape changes beyond the row itself.
+        return;
+    }
+  }
+
+  /** An existing training row, by the level its op names. */
+  private rowIn(
+    op: string,
+    id: string,
+    tree: { categories: Map<string, Known>; skills: Map<string, Known>; modules: Map<string, Known> },
+  ): Known | undefined {
+    if (op.startsWith('trainingSkill.')) return tree.skills.get(id);
+    if (op.startsWith('trainingModule.')) return tree.modules.get(id);
+    return tree.categories.get(id);
   }
 
   // --------------------------------------------------------------------- apply
@@ -263,6 +404,18 @@ export class ConfigChangeService {
       'ratio.update': () => this.ratios.update(ctx, id, body),
       'ratio.archive': () => this.ratios.archive(ctx, id),
       'ratio.restore': () => this.ratios.restore(ctx, id),
+      'trainingCategory.create': () => this.training.createCategory(ctx, body),
+      'trainingCategory.update': () => this.training.updateCategory(ctx, id, body),
+      'trainingCategory.archive': () => this.training.archiveCategory(ctx, id),
+      'trainingCategory.restore': () => this.training.restoreCategory(ctx, id),
+      'trainingSkill.create': () => this.training.createSkill(ctx, body),
+      'trainingSkill.update': () => this.training.updateSkill(ctx, id, body),
+      'trainingSkill.archive': () => this.training.archiveSkill(ctx, id),
+      'trainingSkill.restore': () => this.training.restoreSkill(ctx, id),
+      'trainingModule.create': () => this.training.createModule(ctx, body),
+      'trainingModule.update': () => this.training.updateModule(ctx, id, body),
+      'trainingModule.archive': () => this.training.archiveModule(ctx, id),
+      'trainingModule.restore': () => this.training.restoreModule(ctx, id),
     };
     await handlers[op.op]();
   }
