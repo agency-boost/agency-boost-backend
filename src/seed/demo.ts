@@ -336,9 +336,23 @@ async function main(): Promise<void> {
     return String((kpm as { companyId?: string } | null)?.companyId ?? '');
   }
 
+  /**
+   * Everything one office starts with.
+   *
+   * **Guarded per collection, not once for the whole function.** It used to return early when the
+   * office already had activity types, so every collection a later phase added — event types,
+   * events, campaigns, product decisions — was skipped on any database that had been seeded
+   * before. The seed reported success and wrote nothing, and the screens for those features were
+   * empty with no way to tell that from broken.
+   *
+   * "Has activity types" was never the same question as "has event types". Each block now asks
+   * its own.
+   */
   async function configure(kpmId: string) {
-    if (await ActivityTypes.findOne({ kpmId }).exec()) return;
+    const missing = async (model: { exists: (f: object) => Promise<unknown> }) =>
+      !(await model.exists({ kpmId }));
 
+    if (await missing(ActivityTypes as never)) {
     await ActivityCategories.insertMany(SEED_ACTIVITY_CATEGORIES.map((c) => ({
       kpmId, code: c.code, label: c.label, displayOrder: c.displayOrder,
       version: 1, status: 'active', archivedAt: null, deletedAt: null,
@@ -362,20 +376,26 @@ async function main(): Promise<void> {
       appliesToOrgLevelCodes: [...(r.appliesToOrgLevelCodes ?? [])],
       version: 1, status: 'active', archivedAt: null, deletedAt: null,
     })));
+    }
+
     // The training taxonomy (P5-T1), through the helper provisioning and migration 0011 use.
-    const training = trainingSeedDocuments(kpmId, defaultTrainingTaxonomy());
-    await TrainingCategories.insertMany(training.categories);
-    await TrainingSkills.insertMany(training.skills);
-    await TrainingModules.insertMany(training.modules);
+    if (await missing(TrainingModules as never)) {
+      const training = trainingSeedDocuments(kpmId, defaultTrainingTaxonomy());
+      await TrainingCategories.insertMany(training.categories);
+      await TrainingSkills.insertMany(training.skills);
+      await TrainingModules.insertMany(training.modules);
+    }
 
     // The event types a new office is provisioned with (P5-T6). Without them the Events
     // screen opens empty and says an office has nothing to file an event under.
-    await EventTypes.insertMany(SEED_EVENT_TYPES.map((type, index) => ({
+    if (await missing(EventTypes as never)) {
+      await EventTypes.insertMany(SEED_EVENT_TYPES.map((type, index) => ({
       kpmId, code: type.code, label: type.label, description: null,
       emoji: type.emoji, color: type.color, displayOrder: index + 1,
       version: 1, status: 'active', archivedAt: null, deletedAt: null,
-      createdBy: null, updatedBy: null,
-    })));
+        createdBy: null, updatedBy: null,
+      })));
+    }
 
     /*
      * Three events, one in each phase (P5-T6).
@@ -387,6 +407,7 @@ async function main(): Promise<void> {
     const day = 86_400_000;
     const at = (offsetDays: number, hours: number) =>
       new Date(clock.now().getTime() + offsetDays * day + hours * 3_600_000);
+    if (await missing(Events as never)) {
     await Events.insertMany([
       {
         kpmId, code: 'KICKOFF', typeCode: 'TRAINING', title: 'Kickoff 2026',
@@ -414,6 +435,7 @@ async function main(): Promise<void> {
       ...event, version: 1, status: 'active', archivedAt: null, deletedAt: null,
       createdBy: null, updatedBy: null,
     })));
+    }
 
     /*
      * Three product decisions (P5-T5), so the Products screen shows every state it has.
@@ -424,7 +446,7 @@ async function main(): Promise<void> {
      */
     const shelf = await Products.find({ companyId: await companyOf(kpmId) })
       .sort({ sortOrder: 1 }).limit(3).lean().exec();
-    if (shelf.length === 3) {
+    if (shelf.length === 3 && await missing(KpmProductConfigs as never)) {
       await KpmProductConfigs.insertMany([
         {
           kpmId, productId: String(shelf[0]._id),
@@ -465,6 +487,7 @@ async function main(): Promise<void> {
      * editable — the row that has to look different from *Star Club*, the insurer's tier, on the
      * same screen. Dated relative to the seeded clock so one is always running.
      */
+    if (await missing(Campaigns as never)) {
     await Campaigns.insertMany([
       {
         kpmId, code: 'YEAR_END_DRIVE', title: 'Year-End Star Club Drive',
@@ -489,9 +512,11 @@ async function main(): Promise<void> {
       ...campaign, version: 1, status: 'active', archivedAt: null, deletedAt: null,
       createdBy: null, updatedBy: null,
     })));
+    }
 
     // The activation checklist (P5-T3), as the office's version 1, published — the state
     // provisioning leaves a new office in, so the settings screen opens on something real.
+    if (await missing(ActivationTemplates as never)) {
     await ActivationTemplates.create({
       kpmId,
       version: 1,
@@ -502,6 +527,7 @@ async function main(): Promise<void> {
       createdBy: null,
       updatedBy: null,
     });
+    }
   }
 
   /**
