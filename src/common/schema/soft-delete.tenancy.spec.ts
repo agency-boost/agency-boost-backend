@@ -40,6 +40,12 @@ import {
 import {
   AttackPlanSchema, CommissionYearSchema, ProductSchema,
 } from '@/modules/products/product.schema';
+import {
+  KpmProductConfigSchema, ProductDocumentRefSchema,
+} from '@/modules/products/kpm-product-config.schema';
+import {
+  EventAudienceSchema, EventSchema, EventTypeSchema,
+} from '@/modules/events/event.schema';
 
 /**
  * P2-T8: soft delete everywhere.
@@ -74,6 +80,9 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['trainingModules', TrainingModuleSchema],
   ['activationTemplates', ActivationTemplateSchema],
   ['products', ProductSchema],
+  ['kpmProductConfigs', KpmProductConfigSchema],
+  ['eventTypes', EventTypeSchema],
+  ['events', EventSchema],
 ];
 
 /**
@@ -106,6 +115,16 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     'trainingContentLink (subdocument)',
     TrainingContentLinkSchema,
     'a subdocument of a module\'s content, for the same reason',
+  ],
+  [
+    'eventAudience (subdocument)',
+    EventAudienceSchema,
+    'a subdocument of events: it is deleted with the event that holds it',
+  ],
+  [
+    'productDocumentRef (subdocument)',
+    ProductDocumentRefSchema,
+    'a subdocument of products and kpmProductConfigs: it is deleted with the row that holds it',
   ],
   [
     'attackPlan (subdocument)',
@@ -146,6 +165,11 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [ActivationAspectSchema, 'ActivationAspectSchema'],
   [ActivationItemSchema, 'ActivationItemSchema'],
   [ProductSchema, 'ProductSchema'],
+  [KpmProductConfigSchema, 'KpmProductConfigSchema'],
+  [EventTypeSchema, 'EventTypeSchema'],
+  [EventSchema, 'EventSchema'],
+  [EventAudienceSchema, 'EventAudienceSchema'],
+  [ProductDocumentRefSchema, 'ProductDocumentRefSchema'],
   [AttackPlanSchema, 'AttackPlanSchema'],
   [CommissionYearSchema, 'CommissionYearSchema'],
   [MembershipSchema, 'MembershipSchema'],

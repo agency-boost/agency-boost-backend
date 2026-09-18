@@ -26,6 +26,10 @@ import {
 } from '@/modules/training/training.response.dto';
 import { ActivationChecklistDto } from '@/modules/activation/activation.response.dto';
 import { ProductResponseDto } from '@/modules/products/product.response.dto';
+import {
+  KpmProductDto, SignedUrlDto as ProductSignedUrlDto,
+} from '@/modules/products/kpm-product.response.dto';
+import { EventDto, EventTypeDto } from '@/modules/events/event.response.dto';
 
 /** What one operation answers with: a class, and whether it comes back as an array. */
 export interface ResponseShape {
@@ -142,6 +146,27 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   ProductController_closeToNewBusiness: { type: ProductResponseDto },
   ProductController_withdraw: { type: ProductResponseDto },
   ProductController_reopen: { type: ProductResponseDto },
+
+  // What an office decides about its company's products (P5-T5).
+  KpmProductController_list: { type: KpmProductDto, isArray: true },
+  KpmProductController_setActive: { type: KpmProductDto },
+  KpmProductController_saveOverrides: { type: KpmProductDto },
+  KpmProductController_resetOverride: { type: KpmProductDto },
+  KpmProductController_setDocument: { type: KpmProductDto },
+  KpmProductController_resetDocument: { type: KpmProductDto },
+  KpmProductController_documentUrl: { type: ProductSignedUrlDto },
+
+  // The events an office runs (P5-T6).
+  EventController_listTypes: { type: EventTypeDto, isArray: true },
+  EventController_createType: { type: EventTypeDto },
+  EventController_updateType: { type: EventTypeDto },
+  EventController_archiveType: { type: EventTypeDto },
+  EventController_restoreType: { type: EventTypeDto },
+  EventController_list: { type: EventDto, isArray: true },
+  EventController_create: { type: EventDto },
+  EventController_update: { type: EventDto },
+  EventController_archive: { type: EventDto },
+  EventController_restore: { type: EventDto },
   OrgController_myTeam: { type: TeamMemberDto, isArray: true },
   OrgController_changeRole: { type: TeamMemberDto, isArray: true },
   OrgController_remove: { type: TeamMemberDto, isArray: true },

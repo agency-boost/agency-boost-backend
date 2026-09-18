@@ -41,6 +41,14 @@ import {
 import { ActivationTemplateRepository } from '@/modules/activation/activation.repository';
 import { ActivationService } from '@/modules/activation/activation.service';
 import { ProductSchema } from '@/modules/products/product.schema';
+import { KpmProductConfigSchema } from '@/modules/products/kpm-product-config.schema';
+import { KpmProductConfigRepository } from '@/modules/products/kpm-product.repository';
+import { KpmProductService } from '@/modules/products/kpm-product.service';
+import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events/event.schema';
+import { EventRepository, EventTypeRepository } from '@/modules/events/event.repository';
+import { EventService } from '@/modules/events/event.service';
+import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
+import { MembershipRepository } from '@/modules/org/membership.repository';
 import { AssetSchema } from '@/modules/assets/asset.schema';
 import { AssetRepository } from '@/modules/assets/asset.repository';
 import { AssetService } from '@/modules/assets/asset.service';
@@ -148,6 +156,24 @@ export function configModule(now: Date) {
     audit,
     clock,
   );
+  // P5-T5: what an office decides about its company's products.
+  const kpmProducts = new KpmProductService(
+    new KpmProductConfigRepository(
+      model('KpmProductConfigModel', KpmProductConfigSchema) as never,
+    ),
+    productRows as never,
+    kpms as never,
+    assets,
+    audit,
+  );
+  // P5-T6: the events an office runs. Nothing per-person lives here.
+  const events = new EventService(
+    new EventTypeRepository(model(EventType.name, EventTypeSchema) as never),
+    new EventRepository(model(Event.name, EventSchema) as never),
+    new MembershipRepository(model(Membership.name, MembershipSchema) as never),
+    audit,
+    clock,
+  );
   const provisioning = new ProvisioningService(
     categories as never,
     types as never,
@@ -170,7 +196,7 @@ export function configModule(now: Date) {
   return {
     activity, ratios, leads, config, provisioning, templates, audit, clock, changes,
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
-    products, assets, storage,
+    products, assets, storage, kpmProducts, events,
   };
 }
 

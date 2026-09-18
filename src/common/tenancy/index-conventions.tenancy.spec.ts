@@ -41,6 +41,12 @@ import {
 import {
   AttackPlanSchema, CommissionYearSchema, ProductSchema,
 } from '@/modules/products/product.schema';
+import {
+  KpmProductConfigSchema, ProductDocumentRefSchema,
+} from '@/modules/products/kpm-product-config.schema';
+import {
+  EventAudienceSchema, EventSchema, EventTypeSchema,
+} from '@/modules/events/event.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -68,6 +74,9 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['trainingSkills', TrainingSkillSchema],
   ['trainingModules', TrainingModuleSchema],
   ['activationTemplates', ActivationTemplateSchema],
+  ['kpmProductConfigs', KpmProductConfigSchema],
+  ['eventTypes', EventTypeSchema],
+  ['events', EventSchema],
 ];
 
 /**
@@ -147,6 +156,16 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'a subdocument of a module\'s content, for the same reason',
   ],
   [
+    'eventAudience (subdocument)',
+    EventAudienceSchema,
+    'a subdocument of events: no collection and no _id of its own',
+  ],
+  [
+    'productDocumentRef (subdocument)',
+    ProductDocumentRefSchema,
+    'a subdocument of products and kpmProductConfigs: no collection and no _id of its own',
+  ],
+  [
     'attackPlan (subdocument)',
     AttackPlanSchema,
     'a subdocument of products: no collection and no _id of its own',
@@ -208,6 +227,11 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [ActivationAspectSchema, 'ActivationAspectSchema'],
   [ActivationItemSchema, 'ActivationItemSchema'],
   [ProductSchema, 'ProductSchema'],
+  [KpmProductConfigSchema, 'KpmProductConfigSchema'],
+  [EventTypeSchema, 'EventTypeSchema'],
+  [EventSchema, 'EventSchema'],
+  [EventAudienceSchema, 'EventAudienceSchema'],
+  [ProductDocumentRefSchema, 'ProductDocumentRefSchema'],
   [AttackPlanSchema, 'AttackPlanSchema'],
   [CommissionYearSchema, 'CommissionYearSchema'],
   [ImpersonationSessionSchema, 'ImpersonationSessionSchema'],

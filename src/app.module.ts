@@ -71,6 +71,16 @@ import { ActivationController } from '@/modules/activation/activation.controller
 import { Product, ProductSchema } from '@/modules/products/product.schema';
 import { ProductService } from '@/modules/products/product.service';
 import { ProductController } from '@/modules/products/product.controller';
+import {
+  KpmProductConfig, KpmProductConfigSchema,
+} from '@/modules/products/kpm-product-config.schema';
+import { KpmProductConfigRepository } from '@/modules/products/kpm-product.repository';
+import { KpmProductService } from '@/modules/products/kpm-product.service';
+import { KpmProductController } from '@/modules/products/kpm-product.controller';
+import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events/event.schema';
+import { EventRepository, EventTypeRepository } from '@/modules/events/event.repository';
+import { EventService } from '@/modules/events/event.service';
+import { EventController } from '@/modules/events/event.controller';
 import { OfficeCounter } from '@/modules/config/office-counter.port';
 import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
@@ -172,6 +182,9 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: TrainingModule.name, schema: TrainingModuleSchema },
       { name: ActivationTemplate.name, schema: ActivationTemplateSchema },
       { name: Product.name, schema: ProductSchema },
+      { name: KpmProductConfig.name, schema: KpmProductConfigSchema },
+      { name: EventType.name, schema: EventTypeSchema },
+      { name: Event.name, schema: EventSchema },
     ]),
   ],
   controllers: [
@@ -187,6 +200,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     TrainingController,
     ActivationController,
     ProductController,
+    KpmProductController,
+    EventController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -245,6 +260,11 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ActivationTemplateRepository,
     ActivationService,
     ProductService,
+    KpmProductConfigRepository,
+    KpmProductService,
+    EventTypeRepository,
+    EventRepository,
+    EventService,
     /*
      * The upload registry (P4-T11 AC-1, finished 2026-09-18).
      *

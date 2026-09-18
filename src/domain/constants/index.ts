@@ -156,4 +156,23 @@ export {
   SEED_PRODUCTS,
   type SeedProduct,
   type SeedAttackPlan,
+  // P5-T5: what an office decides about a product it sells.
+  PRODUCT_DOCUMENT_SLOTS,
+  type ProductDocumentSlot,
+  SCRIPT_REVIEW_STATES,
+  type ScriptReviewState,
+  OVERRIDABLE_PRODUCT_FIELDS,
+  type OverridableProductField,
+  SCRIPT_OVERRIDE_FIELDS,
 } from './product-catalog';
+
+export {
+  EVENT_ISSUERS,
+  type EventIssuer,
+  EVENT_AUDIENCE_SCOPES,
+  type EventAudienceScope,
+  SELECT_AUDIENCE_SCOPES,
+  EVENT_PHASES,
+  type EventPhase,
+  SEED_EVENT_TYPES,
+} from './events';

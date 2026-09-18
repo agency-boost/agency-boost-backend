@@ -40,6 +40,48 @@ export const PRODUCT_NEEDS = [
 ] as const;
 export type ProductNeed = (typeof PRODUCT_NEEDS)[number];
 
+/**
+ * The three document slots a product carries, in the prototype's own order and wording
+ * (`KPM_Owner.html:2389-2391`).
+ *
+ * Named slots rather than a list: an agent looking for the illustration is looking for **the**
+ * illustration, and a list would make "which one is the brochure" a question about ordering.
+ */
+export const PRODUCT_DOCUMENT_SLOTS = [
+  { key: 'brochure', label: 'Brochure' },
+  { key: 'illustration', label: 'Illustration / Simulation' },
+  { key: 'productDoc', label: 'Product Document' },
+] as const;
+export type ProductDocumentSlot = (typeof PRODUCT_DOCUMENT_SLOTS)[number]['key'];
+
+/**
+ * Whether an office's own wording may reach its agents yet (ADR-0037).
+ *
+ * `none` is a row with no script override at all — most rows, most of the time. The approval is
+ * the **office's own**, not an independent review, which is the thing the manual has to say
+ * plainly so nobody reads a tick as a compliance sign-off somebody else gave.
+ */
+export const SCRIPT_REVIEW_STATES = ['none', 'pending', 'approved', 'rejected'] as const;
+export type ScriptReviewState = (typeof SCRIPT_REVIEW_STATES)[number];
+
+/**
+ * What an office may replace on a product it sells (P5-T5 AC-6).
+ *
+ * The display name and the seven attack-plan fields — exactly what the prototype's override modal
+ * offers (`KPM_Owner.html:1783-1793`). Everything else is the company's: a code, a channel, a
+ * category, the bands and the commission are facts about the product rather than words about it,
+ * and an office rewriting one would be describing a different product under the same code.
+ */
+export const OVERRIDABLE_PRODUCT_FIELDS = [
+  'displayName',
+  'goodFit', 'opening', 'benefits', 'fullScript',
+  'objectionTheySay', 'objectionYouSay', 'nextAction',
+] as const;
+export type OverridableProductField = (typeof OVERRIDABLE_PRODUCT_FIELDS)[number];
+
+/** The seven that make up the script, so approving one approves a coherent whole. */
+export const SCRIPT_OVERRIDE_FIELDS = OVERRIDABLE_PRODUCT_FIELDS.filter((f) => f !== 'displayName');
+
 /** `legacy: true` in the prototype, which could not say what replaced a product (P5-T4 AC-4). */
 export const PRODUCT_LIFECYCLES = ['active', 'closed_to_new_business', 'withdrawn'] as const;
 export type ProductLifecycle = (typeof PRODUCT_LIFECYCLES)[number];

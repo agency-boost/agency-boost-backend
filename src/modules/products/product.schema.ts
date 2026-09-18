@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { configSchemaOptions } from '@/common/schema/base.schema';
+import { ProductDocumentRefSchema } from './kpm-product-config.schema';
 import {
   PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRODUCT_LIFECYCLES, PRODUCT_NEEDS,
   type ProductCategory, type ProductChannel, type ProductLifecycle, type ProductNeed,
@@ -110,6 +111,16 @@ export class Product {
 
   @Prop({ type: AttackPlanSchema, default: () => ({}) })
   defaultAttackPlan!: AttackPlan;
+
+  /**
+   * The company's own documents for this product, by slot (P5-T5).
+   *
+   * Company-owned assets (`companyId`, no `kpmId`), shared by reference with every office of the
+   * company exactly as training material is (ADR-0032). An office that uploads its own into a slot
+   * overrides this one **for itself**; removing its upload falls back here.
+   */
+  @Prop({ type: Map, of: ProductDocumentRefSchema, default: () => ({}) })
+  defaultDocuments!: Map<string, unknown>;
 
   /** Empty until the company states one. The screen says so rather than inventing 40% / 20%. */
   @Prop({ type: [CommissionYearSchema], default: [] })
