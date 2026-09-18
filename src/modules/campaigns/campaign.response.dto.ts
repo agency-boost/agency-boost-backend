@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { QUALIFICATION_RULE_KINDS } from '@/domain/constants';
+import { METRIC_UNITS, QUALIFICATION_RULE_KINDS } from '@/domain/constants';
 
 export class RequirementViewDto {
   @ApiProperty({ type: String })
@@ -99,4 +99,30 @@ export class QualificationRuleDto {
       + 'the screen says so rather than showing it as an ordinary rule.',
   })
   waitingOnMetrics!: string[];
+}
+
+/** One entry of the metric registry, as `GET /metrics` serves it (P5-T9). */
+export class MetricDefinitionDto {
+  @ApiProperty({ type: String, description: 'The stable key a rule or requirement names.' })
+  key!: string;
+
+  @ApiProperty({ type: String, description: 'What a screen calls it. No screen holds a second copy.' })
+  name!: string;
+
+  @ApiProperty({
+    enum: METRIC_UNITS,
+    description: '`idr_minor` is integer sen, never a float and never a display string.',
+  })
+  unit!: string;
+
+  @ApiProperty({ type: Number, description: 'The phase that computes it.' })
+  phase!: number;
+
+  @ApiProperty({
+    type: Boolean,
+    description:
+      'Whether anything computes it by the phase campaigns are evaluated in. A rule naming one '
+      + 'that nothing computes is recorded as waiting on it rather than never passing in silence.',
+  })
+  computed!: boolean;
 }

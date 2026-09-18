@@ -5,7 +5,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
-  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_EVENT_TYPES, SEED_LEAD_STATUSES,
+  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES,
   SEED_RATIO_DEFINITIONS,
   type SeedActivityCategory, type SeedActivityType, type SeedLeadStatus, type SeedRatioDefinition,
   defaultDisplayUnitFor, resolveDisplayUnit,
@@ -27,6 +27,15 @@ import {
   capabilityLadderProblems, capabilitySeedDocument, defaultCapabilityLadder,
   type CapabilityLadderPayload,
 } from '@/modules/capability/capability-payload';
+import {
+  defaultEventTypes, eventTypeSeedDocuments, eventTypesProblems, type EventTypesPayload,
+} from '@/modules/events/event-types-payload';
+import {
+  qualificationRuleSeedDocuments, type CampaignKindsPayload,
+} from '@/modules/campaigns/campaign-kinds-payload';
+import {
+  QualificationRule, QualificationRuleDocument,
+} from '@/modules/campaigns/campaign.schema';
 import {
   activationChecklistProblems, activationSeedAspects, activationTrainingLinks,
   defaultActivationChecklist, type ActivationChecklistPayload,
@@ -123,6 +132,8 @@ export class ProvisioningService {
     @InjectModel(EventType.name) private readonly eventTypes: Model<EventTypeDocument>,
     @InjectModel(CapabilityCatalog.name)
     private readonly capabilityCatalogs: Model<CapabilityCatalogDocument>,
+    @InjectModel(QualificationRule.name)
+    private readonly rules: Model<QualificationRuleDocument>,
     private readonly clock: Clock,
     // Reads the rows this service has just written, and renders them the way agents will
     // read them — one renderer, so the snapshot and the live read cannot disagree.
@@ -314,33 +325,66 @@ export class ProvisioningService {
   }
 
   /**
-   * The event types a new office starts with (P5-T6).
+   * The event types a new office starts with (P5-T6, P5-T9 AC-4).
    *
-   * The defaults for now. ADR-0034 puts **event types** on the Company template's Events tab, and
-   * P5-T9 is the task that gives every Phase 5 kind a starting payload, publish validation and a
-   * provisioning step — until then a company cannot publish its own, so there is nothing to read.
+   * From the company's published `event_types` where there is one, else the platform defaults —
+   * ADR-0034 puts them on the Company template's Events tab, because an insurer that runs
+   * *Product launch* and not *Community* should not hand every office a type it never uses.
    *
    * Seeded rather than left empty, because an office with no event type has nothing to file an
    * event under, and its Events screen would say so on day one for a reason nobody chose.
    */
-  async seedEventTypes(kpmId: string): Promise<number> {
-    const rows = SEED_EVENT_TYPES.map((type, index) => ({
-      kpmId,
-      code: type.code,
-      label: type.label,
-      description: null,
-      emoji: type.emoji,
-      color: type.color,
-      displayOrder: index + 1,
-      version: 1,
-      status: 'active' as const,
-      archivedAt: null,
-      deletedAt: null,
-      createdBy: null,
-      updatedBy: null,
-    }));
+  async seedEventTypes(kpmId: string, companyId: string): Promise<ProvisionedKind> {
+    const template = await this.publishedTemplate(companyId, 'event_types');
+    const problems = template ? eventTypesProblems(template.payload) : [];
+    if (problems.length) {
+      throw new Error(
+        `The published event types for company ${companyId} would produce a broken office: `
+          + problems.join(' '),
+      );
+    }
+    const payload = template
+      ? (template.payload as unknown as EventTypesPayload)
+      : defaultEventTypes();
+
+    const rows = eventTypeSeedDocuments(kpmId, payload);
     await this.eventTypes.insertMany(rows);
-    return rows.length;
+    return { rows: rows.length, seededFrom: recordOf(template) };
+  }
+
+  /**
+   * Apply a published `campaign_kinds` template to the company's rules (P5-T9 AC-4).
+   *
+   * **Applied at publish, not at provisioning, and that is not an inconsistency.** Every other kind
+   * is copied into a new office because the rows live in the office. Carrier rules do not: they are
+   * company-partitioned and read live by every office (ADR-0026), so there is nothing to copy and
+   * nowhere to copy it to. Seeding them at company creation would also be too early to be useful —
+   * a template belongs to a company, so no company can have one published before it exists.
+   *
+   * **A rule the payload no longer names is soft-deleted, never removed** (invariant 6): a standing
+   * that qualified under it is still a standing, and the row has to stay readable to render it.
+   */
+  async applyCampaignKinds(
+    companyId: string, payload: CampaignKindsPayload,
+  ): Promise<{ written: number; retired: number }> {
+    const wanted = qualificationRuleSeedDocuments(companyId, payload);
+    const keep = new Set(wanted.map((r) => `${r.kind}:${r.code}`));
+
+    await Promise.all(wanted.map((rule) => this.rules.updateOne(
+      { companyId, kind: rule.kind, code: rule.code },
+      // `deletedAt: null` is in the `$set` on purpose: publishing a rule that had been retired
+      // brings it back, which is what a Super Admin putting it in the payload means.
+      { $set: { ...rule, deletedAt: null } },
+      { upsert: true },
+    ).exec()));
+
+    const live = await this.rules.find({ companyId, deletedAt: null }).exec();
+    const retired = live.filter((row) => !keep.has(`${row.kind}:${row.code}`));
+    await Promise.all(retired.map((row) => this.rules.updateOne(
+      { _id: row._id }, { $set: { deletedAt: this.clock.now() } },
+    ).exec()));
+
+    return { written: wanted.length, retired: retired.length };
   }
 
   async seedTrainingTaxonomy(kpmId: string, companyId: string): Promise<ProvisionedTraining> {

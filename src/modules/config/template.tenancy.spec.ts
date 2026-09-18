@@ -22,6 +22,22 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
   let companies: mongoose.Model<never>;
   let kpms: mongoose.Model<never>;
   let companyId: string;
+  /**
+   * What publishing `campaign_kinds` handed on (P5-T9 AC-4).
+   *
+   * A fake rather than a real `ProvisioningService`: the port exists so this spec can assert the
+   * *hand-off* — that publishing applies it, and only for this kind — while the writing itself is
+   * tested against a real database in the provisioning spec, where the rows are.
+   */
+  const applied: { companyId: string; codes: string[] }[] = [];
+  const applier = {
+    applyCampaignKinds: async (
+      company: string, payload: { rules: { code: string }[] },
+    ) => {
+      applied.push({ companyId: company, codes: payload.rules.map((r) => r.code) });
+      return { written: payload.rules.length, retired: 0 };
+    },
+  };
 
   beforeAll(async () => {
     await startMongo();
@@ -33,6 +49,7 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
       new AuditService(mongoose.model(AuditLog.name, AuditLogSchema) as never),
       new FixedClock(NOW),
       new KpmOfficeCounter(kpms as never),
+      applier,
     );
   });
 

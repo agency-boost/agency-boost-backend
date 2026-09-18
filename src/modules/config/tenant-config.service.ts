@@ -10,6 +10,30 @@ import { ActivityConfigService, type ActivityCategoryView } from './activity.ser
 import { LeadStatusService, type LeadPipelineView } from './lead-status.service';
 import { RatioService, type RatioDefinitionView } from './ratio.service';
 import { TrainingService, type TrainingCategoryView } from '@/modules/training/training.service';
+import {
+  ActivationService, type ActivationVersionView,
+} from '@/modules/activation/activation.service';
+import { EventService } from '@/modules/events/event.service';
+import {
+  CapabilityService, type CapabilityCatalogView,
+} from '@/modules/capability/capability.service';
+
+/**
+ * An event type as the snapshot carries it (P5-T9 AC-1).
+ *
+ * `EventTypeView` minus its live `events` count and its `status`: a count belongs to the rows it
+ * counts, and only active types are here at all.
+ */
+export interface SnapshotEventTypeView {
+  id: string;
+  code: string;
+  label: string;
+  description: string | null;
+  emoji: string | null;
+  color: string | null;
+  displayOrder: number;
+  version: number;
+}
 
 export interface PublishState {
   /** The published version agents are on, or 0 when nothing has been published. */
@@ -36,6 +60,29 @@ export interface TenantConfigView {
    * Absent from a snapshot published before P5-T1; read back as empty.
    */
   training: TrainingCategoryView[];
+  /**
+   * The 90-day checklist a new hire is given (P5-T3) — the **published** version only.
+   *
+   * A draft never reaches an agent, the same rule the training modules follow. `null` before an
+   * office has published one, which is a real state: the checklist is seeded at provisioning but
+   * an office that has edited and not published has nothing to give a hire yet.
+   */
+  activationChecklist: ActivationVersionView | null;
+  /**
+   * What an event may be filed under (P5-T6), active rows only.
+   *
+   * **Without the live event count `EventTypeView` carries.** A count belongs to the rows it
+   * counts; freezing one into a snapshot means it is wrong the moment anybody files an event,
+   * and an agent-facing screen has no use for it.
+   */
+  eventTypes: SnapshotEventTypeView[];
+  /**
+   * The capability catalog a leader assesses against (P5-T8), active rows only.
+   *
+   * Office-owned and identical for every member, so it is snapshot material by ADR-0039's own
+   * test. `null` only for an office provisioned before P5-T8.
+   */
+  capability: CapabilityCatalogView | null;
   /**
    * The highest `version` across everything above.
    *
@@ -72,6 +119,9 @@ export class TenantConfigService {
     private readonly clock: Clock,
     private readonly orgLevels: OrgLevelService,
     private readonly training: TrainingService,
+    private readonly activation: ActivationService,
+    private readonly events: EventService,
+    private readonly capability: CapabilityService,
   ) {}
 
   /**
@@ -91,9 +141,18 @@ export class TenantConfigService {
     const snapshot = await this.newestSnapshot(ctx);
     if (!snapshot) return this.read(ctx);
     const published = snapshot.payload as unknown as TenantConfigView;
-    // A snapshot published before P5-T1 carries no training. Its agents are offered none —
-    // said as an empty list, so every reader sees one shape.
-    return { ...published, training: published.training ?? [] };
+    /*
+     * A snapshot published before the phase that added a field carries none of it. Its agents are
+     * offered nothing there — said as an empty list or a `null`, so every reader sees one shape
+     * and no screen has to know which phase its office was provisioned in.
+     */
+    return {
+      ...published,
+      training: published.training ?? [],
+      activationChecklist: published.activationChecklist ?? null,
+      eventTypes: published.eventTypes ?? [],
+      capability: published.capability ?? null,
+    };
   }
 
   /**
@@ -200,6 +259,20 @@ export class TenantConfigService {
         for (const module of skill.modules) keys.add(`training_module:${module.id}:${module.version}`);
       }
     }
+    /*
+     * The three catalogs P5-T9 added to the snapshot.
+     *
+     * Without them the publish bar would stay silent while an Owner archived an event type or
+     * republished the checklist — agents would go on reading the old snapshot and nothing on the
+     * screen would say why. Each is keyed the same way as every row above: which is present, at
+     * which version.
+     */
+    if (view.activationChecklist) {
+      const checklist = view.activationChecklist;
+      keys.add(`activation:${checklist.id}:${checklist.version}`);
+    }
+    for (const type of view.eventTypes ?? []) keys.add(`event_type:${type.id}:${type.version}`);
+    if (view.capability) keys.add(`capability:${view.capability.version}`);
     return keys;
   }
 
@@ -223,13 +296,34 @@ export class TenantConfigService {
   }
 
   async read(ctx: RequestContext): Promise<TenantConfigView> {
-    const [activity, ratios, leadPipelines, training] = await Promise.all([
-      this.activity.list(ctx),
-      this.ratios.list(ctx),
-      this.leadStatuses.list(ctx),
-      this.training.offered(ctx),
-    ]);
+    const [activity, ratios, leadPipelines, training, activation, eventTypes, capability]
+      = await Promise.all([
+        this.activity.list(ctx),
+        this.ratios.list(ctx),
+        this.leadStatuses.list(ctx),
+        this.training.offered(ctx),
+        this.activation.read(ctx),
+        this.events.listTypes(ctx),
+        this.capability.own(ctx),
+      ]);
 
+    /*
+     * Which Phase 5 catalogs are here, and which are deliberately not (P5-T9 AC-1, ADR-0039).
+     *
+     * **In:** the office's own configuration — what an agent may log, measure, work a lead
+     * through, be trained on, be activated against, file an event under, and be assessed on.
+     * Every member of the office receives the same bytes, which is ADR-0039's whole test.
+     *
+     * **Out, and each for a stated reason:**
+     * - **Products** are read live from the company (ADR-0033). A withdrawal has to reach every
+     *   office with no Owner republishing anything, and a frozen copy cannot do that.
+     * - **Carrier rules** — production clubs, MOC — are company-partitioned and read live for
+     *   exactly the same reason (ADR-0026). A carrier changing MOC should not wait on fifty
+     *   Owners pressing Publish.
+     * - **Events and campaigns themselves** are live records with dates that pass on their own.
+     *   An event's audience also differs per member, so it fails ADR-0039's test outright.
+     */
+    const activationChecklist = activation.published;
     const versions = [
       ...activity.map((c) => c.version),
       ...activity.flatMap((c) => c.types.map((t) => t.version)),
@@ -238,6 +332,9 @@ export class TenantConfigService {
       ...training.map((c) => c.version),
       ...training.flatMap((c) => c.skills.map((s) => s.version)),
       ...training.flatMap((c) => c.skills.flatMap((s) => s.modules.map((m) => m.version))),
+      ...(activationChecklist ? [activationChecklist.version] : []),
+      ...eventTypes.map((t) => t.version),
+      ...(capability ? [capability.version] : []),
     ];
 
     return {
@@ -245,6 +342,20 @@ export class TenantConfigService {
       ratios,
       leadPipelines,
       training,
+      activationChecklist,
+      eventTypes: eventTypes
+        .filter((type) => type.status === 'active')
+        .map((type) => ({
+          id: type.id,
+          code: type.code,
+          label: type.label,
+          description: type.description,
+          emoji: type.emoji,
+          color: type.color,
+          displayOrder: type.displayOrder,
+          version: type.version,
+        })),
+      capability,
       version: versions.length ? Math.max(...versions) : 0,
     };
   }

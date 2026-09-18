@@ -5,10 +5,14 @@ import type { LeadPipelineView, LeadStatusView } from './lead-status.service';
 import { LEAD_PIPELINES, type LeadPipeline } from './lead-status.schema';
 import { RATIO_ORIGINS, type RatioOrigin } from './ratio-definition.schema';
 import type { RatioDefinitionView } from './ratio.service';
-import type { PublishState, TenantConfigView } from './tenant-config.service';
+import type {
+  PublishState, SnapshotEventTypeView, TenantConfigView,
+} from './tenant-config.service';
 import type { TemplateView } from './template.service';
 import { TEMPLATE_KINDS, type TemplateKind } from './company-template.schema';
 import { TrainingCategoryDto } from '@/modules/training/training.response.dto';
+import { ActivationVersionDto } from '@/modules/activation/activation.response.dto';
+import { CapabilityCatalogDto } from '@/modules/capability/capability.response.dto';
 import { RATIO_COMPARISONS, type RatioComparison } from './ratio-definition.schema';
 
 /**
@@ -228,6 +232,33 @@ export class RatioDefinitionDto implements RatioDefinitionView {
   status!: 'active' | 'archived';
 }
 
+/** An event type as the snapshot carries it (P5-T9): no live count, and active rows only. */
+export class SnapshotEventTypeDto implements SnapshotEventTypeView {
+  @ApiProperty({ type: String })
+  id!: string;
+
+  @ApiProperty({ type: String })
+  code!: string;
+
+  @ApiProperty({ type: String })
+  label!: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  description!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  emoji!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  color!: string | null;
+
+  @ApiProperty({ type: Number })
+  displayOrder!: number;
+
+  @ApiProperty({ type: Number })
+  version!: number;
+}
+
 /** Everything an agent surface needs, in one round trip (P4-T7). */
 export class TenantConfigDto implements TenantConfigView {
   @ApiProperty({ type: [ActivityCategoryDto] })
@@ -246,6 +277,33 @@ export class TenantConfigDto implements TenantConfigView {
       + 'active modules only (P5-T1). A draft never reaches an agent.',
   })
   training!: TrainingCategoryDto[];
+
+  @ApiProperty({
+    type: ActivationVersionDto,
+    nullable: true,
+    description:
+      'The 90-day checklist a new hire is given (P5-T3) — the **published** version only, and '
+      + '`null` before an office has published one. A draft never reaches an agent.',
+  })
+  activationChecklist!: ActivationVersionDto | null;
+
+  @ApiProperty({
+    type: [SnapshotEventTypeDto],
+    description:
+      'What an event may be filed under (P5-T6), active rows only — without the live event '
+      + 'count the settings screen carries, because a count frozen into a snapshot is wrong the '
+      + 'moment anybody files an event.',
+  })
+  eventTypes!: SnapshotEventTypeDto[];
+
+  @ApiProperty({
+    type: CapabilityCatalogDto,
+    nullable: true,
+    description:
+      'The capability catalog a leader assesses against (P5-T8), active rows only. `null` only '
+      + 'for an office provisioned before it existed.',
+  })
+  capability!: CapabilityCatalogDto | null;
 
   @ApiProperty({
     type: Number,

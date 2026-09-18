@@ -78,6 +78,9 @@ import {
   activationSeedAspects, defaultActivationChecklist,
 } from '@/modules/activation/activation-payload';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
+import {
+  CompanyTemplate, CompanyTemplateSchema,
+} from '@/modules/config/company-template.schema';
 
 loadEnv();
 
@@ -126,6 +129,7 @@ async function main(): Promise<void> {
   const Events = mongoose.model(Event.name, EventSchema);
   const Campaigns = mongoose.model(Campaign.name, CampaignSchema);
   const QualificationRules = mongoose.model(QualificationRule.name, QualificationRuleSchema);
+  const CompanyTemplates = mongoose.model(CompanyTemplate.name, CompanyTemplateSchema);
   const CapabilityCatalogs = mongoose.model(CapabilityCatalog.name, CapabilityCatalogSchema);
   const Memberships = mongoose.model(Membership.name, MembershipSchema);
   const History = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
@@ -227,6 +231,24 @@ async function main(): Promise<void> {
     await seedProducts(String(row._id));
     await seedCarrierRules(String(row._id));
     return row;
+  }
+
+  /**
+   * A published Company template of one kind (P5-T9).
+   *
+   * Published rather than drafted, so the tab reads *"New offices start from version 1"* rather
+   * than *"Nothing is published yet"* — and so the two companies below differ in a way somebody
+   * can see on screen without creating an office first.
+   */
+  async function publishTemplate(
+    companyId: string, kind: string, payload: Record<string, unknown>,
+  ) {
+    if (await CompanyTemplates.exists({ companyId, kind })) return;
+    await CompanyTemplates.create({
+      companyId, kind, version: 1, status: 'published', payload,
+      publishedAt: new Date(clock.now().getTime() - 7 * 24 * 60 * 60 * 1000),
+      deletedAt: null, createdBy: null, updatedBy: null,
+    });
   }
 
   /**
@@ -592,8 +614,22 @@ async function main(): Promise<void> {
    * for that reason.
    */
   async function publish(kpmId: string, at: Date) {
-    if (await ConfigSnapshots.findOne({ kpmId }).exec()) return;
-    const [cats, types, ratios, statuses, trainingCats, trainingSkills, trainingModules] = await Promise.all([
+    /*
+     * Skipped only when the newest snapshot already carries what this seed would write.
+     *
+     * *"Has a snapshot"* was never the same question as *"has a snapshot with the Phase 5
+     * catalogs in it"* — the same shape as the bug that left the Events screen empty after a
+     * reseed. An office seeded before P5-T9 gets the **next version** rather than a rewrite,
+     * because a published snapshot is immutable and that is exactly what an Owner pressing
+     * Publish again would produce.
+     */
+    const newest = await ConfigSnapshots.findOne({ kpmId }).sort({ version: -1 }).lean().exec();
+    const current = (newest as { payload?: { eventTypes?: unknown[] } } | null)?.payload;
+    if (newest && Array.isArray(current?.eventTypes)) return;
+    const [
+      cats, types, ratios, statuses, trainingCats, trainingSkills, trainingModules,
+      eventTypeRows, capabilityRow, checklistRow,
+    ] = await Promise.all([
       ActivityCategories.find({ kpmId, status: 'active' }).sort({ displayOrder: 1 }).lean().exec(),
       ActivityTypes.find({ kpmId, status: 'active' }).sort({ displayOrder: 1 }).lean().exec(),
       RatioDefinitions.find({ kpmId, status: 'active' }).sort({ displayOrder: 1 }).lean().exec(),
@@ -603,6 +639,18 @@ async function main(): Promise<void> {
       // What agents are offered: published modules only, as `TrainingService.offered` renders it.
       TrainingModules.find({ kpmId, status: 'active', publishState: 'published' })
         .sort({ displayOrder: 1 }).lean().exec(),
+      /*
+       * The three Phase 5 catalogs the snapshot carries (P5-T9 AC-1).
+       *
+       * Without them `/kpm/config` answers a demo office with an empty `eventTypes` and a null
+       * `capability` — the backward-compatible read for an office provisioned before these
+       * fields existed, which is exactly what a freshly seeded office would have looked like.
+       * A feature nobody can see in the demo is one nobody can check.
+       */
+      EventTypes.find({ kpmId, status: 'active' }).sort({ displayOrder: 1 }).lean().exec(),
+      CapabilityCatalogs.findOne({ kpmId }).lean().exec(),
+      ActivationTemplates.findOne({ kpmId, status: 'published' })
+        .sort({ version: -1 }).lean().exec(),
     ]);
     const view = (rows: Record<string, unknown>[]): Record<string, unknown>[] =>
       rows.map((r) => ({ ...r, id: String(r._id) }));
@@ -623,10 +671,38 @@ async function main(): Promise<void> {
           modules: view(trainingModules as never).filter((m) => m.skillCode === sk.code),
         })),
       })),
+      activationChecklist: checklistRow
+        ? {
+          id: String((checklistRow as { _id: unknown })._id),
+          version: (checklistRow as { version: number }).version,
+          status: 'published',
+          publishedAt: null,
+          aspects: (checklistRow as { aspects?: unknown[] }).aspects ?? [],
+        }
+        : null,
+      eventTypes: view(eventTypeRows as never).map((t) => ({
+        id: t.id,
+        code: t.code,
+        label: t.label,
+        description: t.description ?? null,
+        emoji: t.emoji ?? null,
+        color: t.color ?? null,
+        displayOrder: t.displayOrder,
+        version: t.version,
+      })),
+      capability: capabilityRow
+        ? {
+          stages: (capabilityRow as { stages?: unknown[] }).stages ?? [],
+          milestones: (capabilityRow as { milestones?: unknown[] }).milestones ?? [],
+          grids: (capabilityRow as { grids?: unknown[] }).grids ?? [],
+          version: (capabilityRow as { version: number }).version,
+        }
+        : null,
       version: 1,
     };
+    const version = ((newest as { version?: number } | null)?.version ?? 0) + 1;
     await ConfigSnapshots.create({
-      kpmId, version: 1, sourceVersion: 1, payload,
+      kpmId, version, sourceVersion: 1, payload,
       publishedAt: at, publishedBy: null, deletedAt: null,
     });
 
@@ -636,6 +712,8 @@ async function main(): Promise<void> {
      * as *unrecorded* on every tab of the Company template — true of offices configured before
      * this line existed, which is why the early return above leaves those alone.
      */
+    if (version > 1) return;
+
     const defaults = { templateId: null, version: null };
     await Kpms.updateOne({ _id: kpmId }, {
       $set: {
@@ -814,6 +892,33 @@ async function main(): Promise<void> {
   // operators below happen to skip that branch, so ordering it the other way round
   // survived only by short-circuit evaluation — which is not a thing to rely on.
   const prudential = await company('Prudential', 'prudential');
+
+  /*
+   * Two companies, publishing different presets (P5-T9 AC-5).
+   *
+   * Allianz Life has **no offices**, which is a real state — a company exists before its first
+   * branch — and it is the cheapest way to make the isolation visible: open each company's
+   * template and the Events tab lists a different set. Without a second company the Company
+   * template screen can only ever show one answer, so "neither company sees the other's" is a
+   * claim nobody can check in a browser.
+   */
+  const allianz = await company('Allianz Life', 'allianz-life');
+
+  await publishTemplate(String(prudential._id), 'event_types', {
+    types: [
+      { code: 'TRAINING', label: 'Pelatihan', description: null, emoji: '📚', color: '#2D9CDB', displayOrder: 1 },
+      { code: 'PRODUCT_LAUNCH', label: 'Peluncuran produk', description: null, emoji: '🚀', color: '#F2994A', displayOrder: 2 },
+      { code: 'RECOGNITION', label: 'Penghargaan', description: null, emoji: '🏆', color: '#27AE60', displayOrder: 3 },
+      { code: 'RECRUITMENT', label: 'Rekrutmen', description: null, emoji: '🤝', color: '#9B51E0', displayOrder: 4 },
+      { code: 'COMMUNITY', label: 'Komunitas', description: null, emoji: '🎉', color: '#EB5757', displayOrder: 5 },
+    ],
+  });
+  await publishTemplate(String(allianz._id), 'event_types', {
+    types: [
+      { code: 'ROADSHOW', label: 'Roadshow', description: null, emoji: '🚐', color: '#EB5757', displayOrder: 1 },
+      { code: 'PRODUCT_CLINIC', label: 'Klinik produk', description: null, emoji: '🩺', color: '#27AE60', displayOrder: 2 },
+    ],
+  });
 
   const superAdmin = await user('superadmin@agencyboost.test', 'Platform Operator', {
     password: 'demo super admin', platformRole: 'super_admin',

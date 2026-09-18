@@ -12,6 +12,11 @@ export const TEMPLATE_KINDS = [
   'activation_checklist',
   'training_taxonomy',
   'capability_ladder',
+  // ADR-0034: the tabs carry **types, not occurrences**. There is no kind for an event or a
+  // campaign itself, and there will not be one — a company's own are live records at company
+  // level, and an office's are the office's.
+  'event_types',
+  'campaign_kinds',
 ] as const;
 export type TemplateKind = (typeof TEMPLATE_KINDS)[number];
 

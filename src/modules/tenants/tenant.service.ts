@@ -393,7 +393,7 @@ export class TenantService {
     );
     // Event types (P5-T6). An office with none has nothing to file an event under, and its
     // Events screen would say so on day one for a reason nobody chose.
-    await this.provisioning.seedEventTypes(String(kpm._id));
+    await this.provisioning.seedEventTypes(String(kpm._id), input.companyId);
     // The capability catalog (P5-T8): the instrument leaders assess against, one per office.
     await this.provisioning.seedCapabilityCatalog(String(kpm._id), input.companyId);
 

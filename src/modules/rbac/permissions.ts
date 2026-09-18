@@ -222,6 +222,26 @@ export const PERMISSIONS = {
     { grantee: AGENT, scope: 'own-kpm' },
   ],
   'org_level:crud': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+
+  /*
+   * The metric registry — the platform's own vocabulary (P5-T9, invariant 8).
+   *
+   * **Read by everybody, because every role's screens name metrics**, and written by nobody: it
+   * is a constant in `domain/constants`, not a row. A Super Admin authoring a company's carrier
+   * rules needs it, and so does an Owner writing a campaign requirement — and the campaigns
+   * screen had been carrying its own hard-coded copy of five of them, which is the second
+   * definition of a metric invariant 7 exists to prevent.
+   *
+   * It carries no tenant data at all: the same list, for everybody, whatever office they are in.
+   */
+  'metric_registry:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-kpm' },
+    { grantee: AAB, scope: 'own-kpm' },
+    { grantee: AGENT, scope: 'own-kpm' },
+  ],
   'super_admin:grant': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'super_admin:revoke': [{ grantee: SUPER_ADMIN, scope: 'all' }],
 

@@ -21,6 +21,14 @@ export interface EventTypeView {
   color: string | null;
   displayOrder: number;
   status: 'active' | 'archived';
+  /**
+   * Bumped on every edit, so the publish gate notices one (P5-T9).
+   *
+   * The gate keys on which rows are present at which version, and a type with no version on its
+   * view is a row it cannot see change — an Owner renaming a type would have got no publish
+   * prompt and their agents would have kept the old label.
+   */
+  version: number;
   /** How many events name it — so *Archive* can say what it affects. */
   events: number;
 }
@@ -252,6 +260,7 @@ export class EventService {
       color: row.color,
       displayOrder: row.displayOrder,
       status: row.status,
+      version: row.version,
       events,
     };
   }

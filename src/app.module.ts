@@ -87,6 +87,7 @@ import {
 import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
 import { CampaignService } from '@/modules/campaigns/campaign.service';
 import { CampaignController } from '@/modules/campaigns/campaign.controller';
+import { MetricRegistryController } from '@/modules/campaigns/metric-registry.controller';
 import {
   CapabilityCatalog, CapabilityCatalogSchema,
 } from '@/modules/capability/capability.schema';
@@ -94,6 +95,7 @@ import { CapabilityCatalogRepository } from '@/modules/capability/capability.rep
 import { CapabilityService } from '@/modules/capability/capability.service';
 import { CapabilityController } from '@/modules/capability/capability.controller';
 import { OfficeCounter } from '@/modules/config/office-counter.port';
+import { CampaignKindsApplier } from '@/modules/config/campaign-kinds.port';
 import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
 import { AssetRepository } from '@/modules/assets/asset.repository';
@@ -218,6 +220,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     KpmProductController,
     EventController,
     CampaignController,
+    MetricRegistryController,
     CapabilityController,
   ],
   providers: [
@@ -301,6 +304,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     TemplateService,
     { provide: OfficeCounter, useClass: KpmOfficeCounter },
     ProvisioningService,
+    { provide: CampaignKindsApplier, useExisting: ProvisioningService },
     AuditService,
     NotificationService,
     PasswordService,

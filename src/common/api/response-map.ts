@@ -30,7 +30,7 @@ import {
   EffectiveScriptDto, KpmProductDto, SignedUrlDto as ProductSignedUrlDto,
 } from '@/modules/products/kpm-product.response.dto';
 import { EventDto, EventTypeDto } from '@/modules/events/event.response.dto';
-import { CampaignDto, QualificationRuleDto } from '@/modules/campaigns/campaign.response.dto';
+import { CampaignDto, MetricDefinitionDto, QualificationRuleDto } from '@/modules/campaigns/campaign.response.dto';
 import { CapabilityCatalogDto } from '@/modules/capability/capability.response.dto';
 
 /** What one operation answers with: a class, and whether it comes back as an array. */
@@ -176,6 +176,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   EventController_restore: { type: EventDto },
 
   // Campaigns, and the carrier rules an office is measured against (P5-T7).
+  MetricRegistryController_list: { type: MetricDefinitionDto, isArray: true },
   CampaignController_listRules: { type: QualificationRuleDto, isArray: true },
   CampaignController_list: { type: CampaignDto, isArray: true },
   CampaignController_create: { type: CampaignDto },

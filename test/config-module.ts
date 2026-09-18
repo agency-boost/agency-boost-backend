@@ -26,6 +26,8 @@ import { RatioService } from '@/modules/config/ratio.service';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
 import { ConfigChangeService } from '@/modules/config/changes.service';
 import { ProvisioningService } from '@/modules/config/provisioning.service';
+import { TemplateService } from '@/modules/config/template.service';
+import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import {
   TrainingCategory, TrainingCategorySchema,
 } from '@/modules/training/training-category.schema';
@@ -144,13 +146,6 @@ export function configModule(now: Date) {
     assets,
     kpms as never,
   );
-  const config = new TenantConfigService(
-    activity, ratios, leads,
-    new ConfigSnapshotRepository(snapshots as never),
-    audit, clock,
-    orgLevels,
-    training,
-  );
   // P5-T3. After `training`, whose modules its links are checked against.
   const activation = new ActivationService(
     new ActivationTemplateRepository(activationTemplates as never),
@@ -200,6 +195,23 @@ export function configModule(now: Date) {
     ),
     audit,
   );
+  /*
+   * After the three Phase 5 services it reads (P5-T9 AC-1).
+   *
+   * `/kpm/config` carries the office's own configuration, and the checklist, the event types and
+   * the capability catalog are part of it — so this is constructed once they exist rather than
+   * before them.
+   */
+  const config = new TenantConfigService(
+    activity, ratios, leads,
+    new ConfigSnapshotRepository(snapshots as never),
+    audit, clock,
+    orgLevels,
+    training,
+    activation,
+    events,
+    capability,
+  );
   const provisioning = new ProvisioningService(
     categories as never,
     types as never,
@@ -213,6 +225,7 @@ export function configModule(now: Date) {
     activationTemplates as never,
     model(EventType.name, EventTypeSchema) as never,
     model(CapabilityCatalog.name, CapabilityCatalogSchema) as never,
+    model(QualificationRule.name, QualificationRuleSchema) as never,
     clock,
     config,
   );
@@ -221,8 +234,23 @@ export function configModule(now: Date) {
   // against the company's ladder, so a spec exercising it has to be able to publish one.
   const changes = new ConfigChangeService(activity, ratios, config, orgLevels, training);
 
+  /*
+   * The Company template service, with the real applier (P5-T9).
+   *
+   * Publishing `campaign_kinds` writes the company's carrier rules, so a spec that publishes one
+   * and then reads the rules is exercising the whole path rather than a fake in the middle.
+   */
+  const templateService = new TemplateService(
+    templates as never,
+    model('CompanyModelForConfig', CompanySchema) as never,
+    audit,
+    clock,
+    new KpmOfficeCounter(kpms as never),
+    provisioning,
+  );
+
   return {
-    activity, ratios, leads, config, provisioning, templates, audit, clock, changes,
+    activity, ratios, leads, config, provisioning, templates, templateService, audit, clock, changes,
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
     products, assets, storage, kpmProducts, events, campaigns, capability,
   };
@@ -239,7 +267,7 @@ export async function provisionOffice(
   await module.provisioning.seedRatioDefinitions(kpmId, companyId, seeded.typeCodes);
   const training = await module.provisioning.seedTrainingTaxonomy(kpmId, companyId);
   await module.provisioning.seedActivationChecklist(kpmId, companyId, training.publishedModuleCodes);
-  await module.provisioning.seedEventTypes(kpmId);
+  await module.provisioning.seedEventTypes(kpmId, companyId);
   await module.provisioning.seedCapabilityCatalog(kpmId, companyId);
   return seeded;
 }

@@ -13,12 +13,18 @@ import {
   CompanyTemplate, CompanyTemplateDocument, TemplateKind,
 } from './company-template.schema';
 import { OfficeCounter, type OfficeStanding } from './office-counter.port';
+import { CampaignKindsApplier } from './campaign-kinds.port';
 import {
   defaultTrainingTaxonomy, trainingTaxonomyProblems,
 } from '@/modules/training/training-payload';
 import {
   activationChecklistProblems, defaultActivationChecklist,
 } from '@/modules/activation/activation-payload';
+import { capabilityLadderProblems, defaultCapabilityLadder } from '@/modules/capability/capability-payload';
+import { defaultEventTypes, eventTypesProblems } from '@/modules/events/event-types-payload';
+import {
+  campaignKindsProblems, defaultCampaignKinds, type CampaignKindsPayload,
+} from '@/modules/campaigns/campaign-kinds-payload';
 
 /** No version to stand against — nothing published, or a history row that is not current. */
 const NO_STANDING: OfficeStanding = { behind: 0, unrecorded: 0 };
@@ -59,6 +65,12 @@ const STARTING_PAYLOAD: Record<string, () => Record<string, unknown>> = {
   }),
   training_taxonomy: () => ({ ...defaultTrainingTaxonomy() }),
   activation_checklist: () => ({ ...defaultActivationChecklist() }),
+  // P5-T9 AC-4: every Phase 5 kind starts from something. `capability_ladder` had validation and
+  // a provisioning reader since P5-T8 and no starting payload, so a Super Admin opening the tab
+  // would have been handed `{}` and asked to retype four stages from a PDF.
+  capability_ladder: () => ({ ...defaultCapabilityLadder() }),
+  event_types: () => ({ ...defaultEventTypes() }),
+  campaign_kinds: () => ({ ...defaultCampaignKinds() }),
 };
 
 /**
@@ -90,6 +102,8 @@ export class TemplateService {
     private readonly audit: AuditService,
     private readonly clock: Clock,
     private readonly officesOf: OfficeCounter,
+    /** Publishing `campaign_kinds` applies it; every other kind is read at provisioning. */
+    private readonly campaignKinds: CampaignKindsApplier,
   ) {}
 
   /**
@@ -201,6 +215,20 @@ export class TemplateService {
     draft.updatedBy = ctx.userId;
     await draft.save();
 
+    /*
+     * `campaign_kinds` is applied here rather than at provisioning (P5-T9 AC-4).
+     *
+     * Every other kind is copied into a new office because the rows live in the office. Carrier
+     * rules do not — they are company-partitioned and read live by every office (ADR-0026), so
+     * there is nothing to copy and nowhere to copy it to. Publishing **is** the act, which also
+     * makes it reach the company's existing offices rather than only its future ones.
+     */
+    if (kind === 'campaign_kinds') {
+      await this.campaignKinds.applyCampaignKinds(
+        companyId, draft.payload as unknown as CampaignKindsPayload,
+      );
+    }
+
     await this.audit.record(ctx, {
       action: 'company_template.published',
       targetCollection: 'companyTemplates',
@@ -289,6 +317,24 @@ export class TemplateService {
 
     if (kind === 'training_taxonomy') {
       const problems = trainingTaxonomyProblems(payload);
+      if (problems.length) throw new BadRequestException(problems.join(' '));
+      return;
+    }
+
+    /*
+     * The three kinds P5-T9 finished (AC-4), each by the same checker its provisioning step runs.
+     *
+     * One checker, two callers, on purpose: publishing and provisioning disagreeing about what is
+     * valid is how a template passes here and throws at a Super Admin creating a real branch.
+     */
+    const checker: Partial<Record<TemplateKind, (p: unknown) => string[]>> = {
+      capability_ladder: capabilityLadderProblems,
+      event_types: eventTypesProblems,
+      campaign_kinds: campaignKindsProblems,
+    };
+    const check = checker[kind];
+    if (check) {
+      const problems = check(payload);
       if (problems.length) throw new BadRequestException(problems.join(' '));
       return;
     }

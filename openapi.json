@@ -11878,6 +11878,68 @@
         "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
       }
     },
+    "/api/v1/metrics": {
+      "get": {
+        "description": "The key, the name a screen shows, the unit its number is in, and the phase that computes it. A rule or a campaign requirement naming a metric whose phase has not shipped is recorded as waiting on it rather than silently never qualifying anybody (ADR-0035) — campaigns are evaluated in phase 12.\n\n**Requires `metric_registry:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "MetricRegistryController_list_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MetricDefinitionDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `metric_registry:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every metric this product defines",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "metric_registry:read"
+      }
+    },
     "/api/v1/kpm/settings/capability-catalog": {
       "get": {
         "description": "Four stages, their milestones and the four skill grids, each item carrying a **code**. An office provisioned before this existed reads the defaults, unsaved, until its first edit.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -14694,6 +14756,49 @@
           }
         }
       },
+      "MetricDefinitionDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The stable key a rule or requirement names."
+          },
+          "name": {
+            "type": "string",
+            "description": "What a screen calls it. No screen holds a second copy."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "boolean",
+              "count",
+              "percentage",
+              "percentage_points",
+              "ratio",
+              "days",
+              "idr_minor",
+              "enum",
+              "score"
+            ],
+            "description": "`idr_minor` is integer sen, never a float and never a display string."
+          },
+          "phase": {
+            "type": "number",
+            "description": "The phase that computes it."
+          },
+          "computed": {
+            "type": "boolean",
+            "description": "Whether anything computes it by the phase campaigns are evaluated in. A rule naming one that nothing computes is recorded as waiting on it rather than never passing in silence."
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "unit",
+          "phase",
+          "computed"
+        ]
+      },
       "CapabilityStageDto": {
         "type": "object",
         "properties": {
@@ -16079,6 +16184,188 @@
           "skills"
         ]
       },
+      "ActivationLinkDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "example": "feature:goals"
+          },
+          "label": {
+            "type": "string",
+            "example": "Goal Settings",
+            "description": "Phase 11's \"Go to {label} →\"."
+          },
+          "route": {
+            "type": "string",
+            "example": "/goals"
+          },
+          "completesWhen": {
+            "type": "string",
+            "example": "the hire has saved any goal since joining this office"
+          },
+          "live": {
+            "type": "boolean",
+            "description": "Whether an evaluator exists yet. While it does not, a leader ticks the item by hand and the tick is recorded as manual; once it is live, no role may tick it."
+          },
+          "livePhase": {
+            "type": "number",
+            "example": 11
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "route",
+          "completesWhen",
+          "live",
+          "livePhase"
+        ]
+      },
+      "ActivationItemDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "GOAL_SETTING"
+          },
+          "label": {
+            "type": "string"
+          },
+          "displayOrder": {
+            "type": "number",
+            "description": "Within its aspect. Presentation only."
+          },
+          "autoLink": {
+            "type": "string",
+            "nullable": true,
+            "example": "feature:goals"
+          },
+          "link": {
+            "nullable": true,
+            "description": "The link, resolved.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationLinkDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "displayOrder",
+          "autoLink",
+          "link"
+        ]
+      },
+      "ActivationAspectDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "INITIAL_SETUP"
+          },
+          "label": {
+            "type": "string",
+            "example": "2. Initial Setup"
+          },
+          "displayOrder": {
+            "type": "number"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivationItemDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "displayOrder",
+          "items"
+        ]
+      },
+      "ActivationVersionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "number",
+            "description": "What a hire's activation records at creation."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published"
+            ]
+          },
+          "publishedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "aspects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivationAspectDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "status",
+          "publishedAt",
+          "aspects"
+        ]
+      },
+      "SnapshotEventTypeDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "emoji": {
+            "type": "string",
+            "nullable": true
+          },
+          "color": {
+            "type": "string",
+            "nullable": true
+          },
+          "displayOrder": {
+            "type": "number"
+          },
+          "version": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "label",
+          "description",
+          "emoji",
+          "color",
+          "displayOrder",
+          "version"
+        ]
+      },
       "TenantConfigDto": {
         "type": "object",
         "properties": {
@@ -16107,6 +16394,31 @@
               "$ref": "#/components/schemas/TrainingCategoryDto"
             }
           },
+          "activationChecklist": {
+            "nullable": true,
+            "description": "The 90-day checklist a new hire is given (P5-T3) — the **published** version only, and `null` before an office has published one. A draft never reaches an agent.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationVersionDto"
+              }
+            ]
+          },
+          "eventTypes": {
+            "description": "What an event may be filed under (P5-T6), active rows only — without the live event count the settings screen carries, because a count frozen into a snapshot is wrong the moment anybody files an event.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SnapshotEventTypeDto"
+            }
+          },
+          "capability": {
+            "nullable": true,
+            "description": "The capability catalog a leader assesses against (P5-T8), active rows only. `null` only for an office provisioned before it existed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CapabilityCatalogDto"
+              }
+            ]
+          },
           "version": {
             "type": "number",
             "description": "The highest version across everything above — one number to compare rather than three collections to reason about. It moves when what the office counts changes, and not on a reorder, because a reorder rebinds nothing."
@@ -16117,6 +16429,9 @@
           "ratios",
           "leadPipelines",
           "training",
+          "activationChecklist",
+          "eventTypes",
+          "capability",
           "version"
         ]
       },
@@ -16138,7 +16453,9 @@
               "ratio_set",
               "activation_checklist",
               "training_taxonomy",
-              "capability_ladder"
+              "capability_ladder",
+              "event_types",
+              "campaign_kinds"
             ]
           },
           "version": {
@@ -16351,146 +16668,6 @@
           "suspendedAt",
           "suspendedReason",
           "createdAt"
-        ]
-      },
-      "ActivationLinkDto": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "example": "feature:goals"
-          },
-          "label": {
-            "type": "string",
-            "example": "Goal Settings",
-            "description": "Phase 11's \"Go to {label} →\"."
-          },
-          "route": {
-            "type": "string",
-            "example": "/goals"
-          },
-          "completesWhen": {
-            "type": "string",
-            "example": "the hire has saved any goal since joining this office"
-          },
-          "live": {
-            "type": "boolean",
-            "description": "Whether an evaluator exists yet. While it does not, a leader ticks the item by hand and the tick is recorded as manual; once it is live, no role may tick it."
-          },
-          "livePhase": {
-            "type": "number",
-            "example": 11
-          }
-        },
-        "required": [
-          "kind",
-          "label",
-          "route",
-          "completesWhen",
-          "live",
-          "livePhase"
-        ]
-      },
-      "ActivationItemDto": {
-        "type": "object",
-        "properties": {
-          "code": {
-            "type": "string",
-            "example": "GOAL_SETTING"
-          },
-          "label": {
-            "type": "string"
-          },
-          "displayOrder": {
-            "type": "number",
-            "description": "Within its aspect. Presentation only."
-          },
-          "autoLink": {
-            "type": "string",
-            "nullable": true,
-            "example": "feature:goals"
-          },
-          "link": {
-            "nullable": true,
-            "description": "The link, resolved.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ActivationLinkDto"
-              }
-            ]
-          }
-        },
-        "required": [
-          "code",
-          "label",
-          "displayOrder",
-          "autoLink",
-          "link"
-        ]
-      },
-      "ActivationAspectDto": {
-        "type": "object",
-        "properties": {
-          "code": {
-            "type": "string",
-            "example": "INITIAL_SETUP"
-          },
-          "label": {
-            "type": "string",
-            "example": "2. Initial Setup"
-          },
-          "displayOrder": {
-            "type": "number"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ActivationItemDto"
-            }
-          }
-        },
-        "required": [
-          "code",
-          "label",
-          "displayOrder",
-          "items"
-        ]
-      },
-      "ActivationVersionDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "version": {
-            "type": "number",
-            "description": "What a hire's activation records at creation."
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "draft",
-              "published"
-            ]
-          },
-          "publishedAt": {
-            "type": "string",
-            "nullable": true,
-            "format": "date-time"
-          },
-          "aspects": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ActivationAspectDto"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "version",
-          "status",
-          "publishedAt",
-          "aspects"
         ]
       },
       "ActivationChecklistDto": {

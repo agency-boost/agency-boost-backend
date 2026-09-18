@@ -94,6 +94,7 @@ describe('KpmRequestService (P3.5-T2)', () => {
       mongoose.model(ActivationTemplate.name, ActivationTemplateSchema) as never,
       mongoose.model(EventType.name, EventTypeSchema) as never,
       mongoose.model(CapabilityCatalog.name, CapabilityCatalogSchema) as never,
+      mongoose.model(QualificationRule.name, QualificationRuleSchema) as never,
       new FixedClock(NOW),
       configModule(NOW).config,
     );

@@ -11,7 +11,7 @@ export class CapabilityEntryDto {
   displayOrder!: number;
 
   @ApiProperty({ enum: ['active', 'archived'] })
-  status!: string;
+  status!: 'active' | 'archived';
 }
 
 export class CapabilityStageDto extends CapabilityEntryDto {

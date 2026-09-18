@@ -60,9 +60,22 @@ export class CapabilityService {
    * read's.
    */
   async read(ctx: RequestContext): Promise<CapabilityCatalogView> {
+    return (await this.own(ctx))
+      ?? this.view(capabilitySeedDocument('', defaultCapabilityLadder()) as never);
+  }
+
+  /**
+   * This office's own catalog, or `null` where it has none (P5-T9 AC-1).
+   *
+   * **Not {@link read}'s fallback.** Showing the platform defaults on the settings screen is right
+   * — a Super Admin should see what they are about to edit — but telling `/kpm/config` that an
+   * office has a catalog it has never been given is not: it would put version 1 on an office with
+   * nothing configured at all, and a leader would open an assessment against rows that exist on
+   * no screen.
+   */
+  async own(ctx: RequestContext): Promise<CapabilityCatalogView | null> {
     const row = await this.catalogs.findOne(ctx, {});
-    if (!row) return this.view(capabilitySeedDocument('', defaultCapabilityLadder()) as never);
-    return this.view(row);
+    return row ? this.view(row) : null;
   }
 
   /** Rename anything. **The code never moves**, whatever the body carries (AC-4). */

@@ -110,6 +110,12 @@ import { Product, ProductSchema } from '@/modules/products/product.schema';
 import { ProductService } from '@/modules/products/product.service';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
 import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events/event.schema';
+import { EventRepository, EventTypeRepository } from '@/modules/events/event.repository';
+import { EventService } from '@/modules/events/event.service';
+import { ActivationTemplateRepository } from '@/modules/activation/activation.repository';
+import { ActivationService } from '@/modules/activation/activation.service';
+import { CapabilityCatalogRepository } from '@/modules/capability/capability.repository';
+import { CapabilityService } from '@/modules/capability/capability.service';
 import {
   Campaign, CampaignSchema, QualificationRule, QualificationRuleSchema,
 } from '@/modules/campaigns/campaign.schema';
@@ -128,6 +134,7 @@ import {
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
 import { TemplateService } from '@/modules/config/template.service';
 import { OfficeCounter } from '@/modules/config/office-counter.port';
+import { CampaignKindsApplier } from '@/modules/config/campaign-kinds.port';
 import { KpmOfficeCounter } from '@/modules/config/office-counter';
 
 /**
@@ -237,10 +244,14 @@ describe('auth and admin over HTTP', () => {
         ConfigSnapshotRepository,
         TenantConfigService, TemplateService, ConfigChangeService,
         TrainingCategoryRepository, TrainingSkillRepository, TrainingModuleRepository, TrainingService,
+        // P5-T9: `/kpm/config` carries the office's own Phase 5 catalogs too, so the three
+        // services that read them are part of the graph now.
+        ActivationTemplateRepository, ActivationService,
+        EventTypeRepository, EventRepository, EventService,
+        CapabilityCatalogRepository, CapabilityService,
         { provide: OfficeCounter, useClass: KpmOfficeCounter },
-    TemplateService,
-    { provide: OfficeCounter, useClass: KpmOfficeCounter },
         ProvisioningService,
+        { provide: CampaignKindsApplier, useExisting: ProvisioningService },
         ProductService,
         // P5-T2: a training module's content is files (ADR-0032). The vendor is stubbed —
         // this file's subject is the HTTP contract, not Cloudinary.
