@@ -113,6 +113,9 @@ import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events
 import {
   Campaign, CampaignSchema, QualificationRule, QualificationRuleSchema,
 } from '@/modules/campaigns/campaign.schema';
+import {
+  CapabilityCatalog, CapabilityCatalogSchema,
+} from '@/modules/capability/capability.schema';
 import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
 import { CampaignService } from '@/modules/campaigns/campaign.service';
 import { AssetRepository } from '@/modules/assets/asset.repository';
@@ -206,6 +209,7 @@ describe('auth and admin over HTTP', () => {
         { name: Event.name, schema: EventSchema },
         { name: Campaign.name, schema: CampaignSchema },
         { name: QualificationRule.name, schema: QualificationRuleSchema },
+        { name: CapabilityCatalog.name, schema: CapabilityCatalogSchema },
         ]),
       ],
       controllers: [

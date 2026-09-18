@@ -87,6 +87,12 @@ import {
 import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
 import { CampaignService } from '@/modules/campaigns/campaign.service';
 import { CampaignController } from '@/modules/campaigns/campaign.controller';
+import {
+  CapabilityCatalog, CapabilityCatalogSchema,
+} from '@/modules/capability/capability.schema';
+import { CapabilityCatalogRepository } from '@/modules/capability/capability.repository';
+import { CapabilityService } from '@/modules/capability/capability.service';
+import { CapabilityController } from '@/modules/capability/capability.controller';
 import { OfficeCounter } from '@/modules/config/office-counter.port';
 import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
@@ -193,6 +199,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: Event.name, schema: EventSchema },
       { name: Campaign.name, schema: CampaignSchema },
       { name: QualificationRule.name, schema: QualificationRuleSchema },
+      { name: CapabilityCatalog.name, schema: CapabilityCatalogSchema },
     ]),
   ],
   controllers: [
@@ -211,6 +218,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     KpmProductController,
     EventController,
     CampaignController,
+    CapabilityController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -276,6 +284,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     EventService,
     CampaignRepository,
     CampaignService,
+    CapabilityCatalogRepository,
+    CapabilityService,
     /*
      * The upload registry (P4-T11 AC-1, finished 2026-09-18).
      *

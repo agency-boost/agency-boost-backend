@@ -52,6 +52,11 @@ import {
 } from '@/modules/campaigns/campaign.schema';
 import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
 import { CampaignService } from '@/modules/campaigns/campaign.service';
+import {
+  CapabilityCatalog, CapabilityCatalogSchema,
+} from '@/modules/capability/capability.schema';
+import { CapabilityCatalogRepository } from '@/modules/capability/capability.repository';
+import { CapabilityService } from '@/modules/capability/capability.service';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { AssetSchema } from '@/modules/assets/asset.schema';
@@ -187,6 +192,13 @@ export function configModule(now: Date) {
     audit,
     clock,
   );
+  // P5-T8: the office's capability catalog.
+  const capability = new CapabilityService(
+    new CapabilityCatalogRepository(
+      model(CapabilityCatalog.name, CapabilityCatalogSchema) as never,
+    ),
+    audit,
+  );
   const provisioning = new ProvisioningService(
     categories as never,
     types as never,
@@ -199,6 +211,7 @@ export function configModule(now: Date) {
     trainingModules as never,
     activationTemplates as never,
     model(EventType.name, EventTypeSchema) as never,
+    model(CapabilityCatalog.name, CapabilityCatalogSchema) as never,
     clock,
     config,
   );
@@ -210,7 +223,7 @@ export function configModule(now: Date) {
   return {
     activity, ratios, leads, config, provisioning, templates, audit, clock, changes,
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
-    products, assets, storage, kpmProducts, events, campaigns,
+    products, assets, storage, kpmProducts, events, campaigns, capability,
   };
 }
 
@@ -226,6 +239,7 @@ export async function provisionOffice(
   const training = await module.provisioning.seedTrainingTaxonomy(kpmId, companyId);
   await module.provisioning.seedActivationChecklist(kpmId, companyId, training.publishedModuleCodes);
   await module.provisioning.seedEventTypes(kpmId);
+  await module.provisioning.seedCapabilityCatalog(kpmId, companyId);
   return seeded;
 }
 

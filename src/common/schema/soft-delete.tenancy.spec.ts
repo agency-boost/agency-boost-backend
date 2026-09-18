@@ -49,6 +49,10 @@ import {
 import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
 } from '@/modules/campaigns/campaign.schema';
+import {
+  CapabilityCatalogSchema, CapabilityEntrySchema, CapabilityGridRowSchema,
+  CapabilityStageRowSchema,
+} from '@/modules/capability/capability.schema';
 
 /**
  * P2-T8: soft delete everywhere.
@@ -87,6 +91,7 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['eventTypes', EventTypeSchema],
   ['events', EventSchema],
   ['campaigns', CampaignSchema],
+  ['capabilityCatalogs', CapabilityCatalogSchema],
   // Company-partitioned carrier rules (ADR-0035), soft-deleted like every other row.
   ['qualificationRules', QualificationRuleSchema],
 ];
@@ -121,6 +126,21 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     'trainingContentLink (subdocument)',
     TrainingContentLinkSchema,
     'a subdocument of a module\'s content, for the same reason',
+  ],
+  [
+    'capabilityEntry (subdocument)',
+    CapabilityEntrySchema,
+    'a subdocument of capabilityCatalogs: it is deleted with the catalog that holds it',
+  ],
+  [
+    'capabilityStageRow (subdocument)',
+    CapabilityStageRowSchema,
+    'a subdocument of capabilityCatalogs, for the same reason',
+  ],
+  [
+    'capabilityGridRow (subdocument)',
+    CapabilityGridRowSchema,
+    'a subdocument of capabilityCatalogs, for the same reason',
   ],
   [
     'requirement (subdocument)',
@@ -189,6 +209,10 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [QualificationRuleSchema, 'QualificationRuleSchema'],
   [RequirementSchema, 'RequirementSchema'],
   [CriteriaGroupSchema, 'CriteriaGroupSchema'],
+  [CapabilityCatalogSchema, 'CapabilityCatalogSchema'],
+  [CapabilityEntrySchema, 'CapabilityEntrySchema'],
+  [CapabilityStageRowSchema, 'CapabilityStageRowSchema'],
+  [CapabilityGridRowSchema, 'CapabilityGridRowSchema'],
   [ProductDocumentRefSchema, 'ProductDocumentRefSchema'],
   [AttackPlanSchema, 'AttackPlanSchema'],
   [CommissionYearSchema, 'CommissionYearSchema'],

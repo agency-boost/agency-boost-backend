@@ -50,6 +50,10 @@ import {
 import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
 } from '@/modules/campaigns/campaign.schema';
+import {
+  CapabilityCatalogSchema, CapabilityEntrySchema, CapabilityGridRowSchema,
+  CapabilityStageRowSchema,
+} from '@/modules/capability/capability.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -81,6 +85,7 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['eventTypes', EventTypeSchema],
   ['events', EventSchema],
   ['campaigns', CampaignSchema],
+  ['capabilityCatalogs', CapabilityCatalogSchema],
 ];
 
 /**
@@ -158,6 +163,21 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'trainingContentLink (subdocument)',
     TrainingContentLinkSchema,
     'a subdocument of a module\'s content, for the same reason',
+  ],
+  [
+    'capabilityEntry (subdocument)',
+    CapabilityEntrySchema,
+    'a subdocument of capabilityCatalogs: no collection and no _id of its own',
+  ],
+  [
+    'capabilityStageRow (subdocument)',
+    CapabilityStageRowSchema,
+    'a subdocument of capabilityCatalogs, for the same reason',
+  ],
+  [
+    'capabilityGridRow (subdocument)',
+    CapabilityGridRowSchema,
+    'a subdocument of capabilityCatalogs, for the same reason',
   ],
   [
     'requirement (subdocument)',
@@ -256,6 +276,10 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [QualificationRuleSchema, 'QualificationRuleSchema'],
   [RequirementSchema, 'RequirementSchema'],
   [CriteriaGroupSchema, 'CriteriaGroupSchema'],
+  [CapabilityCatalogSchema, 'CapabilityCatalogSchema'],
+  [CapabilityEntrySchema, 'CapabilityEntrySchema'],
+  [CapabilityStageRowSchema, 'CapabilityStageRowSchema'],
+  [CapabilityGridRowSchema, 'CapabilityGridRowSchema'],
   [ProductDocumentRefSchema, 'ProductDocumentRefSchema'],
   [AttackPlanSchema, 'AttackPlanSchema'],
   [CommissionYearSchema, 'CommissionYearSchema'],

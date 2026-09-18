@@ -35,6 +35,7 @@ const TENANT_SCOPED_MODELS = [
   'EventType',
   'Event',
   'Campaign',
+  'CapabilityCatalog',
 ];
 
 /**
@@ -56,6 +57,7 @@ const ALLOWED = new Map<string, string>([
   ['products/kpm-product.repository.ts', 'the repository for that model'],
   ['events/event.repository.ts', 'the repositories for those models'],
   ['campaigns/campaign.repository.ts', 'the repository for that model'],
+  ['capability/capability.repository.ts', 'the repository for that model'],
   [
     'config/provisioning.service.ts',
     'writes into an office being created, before any context is scoped to it',

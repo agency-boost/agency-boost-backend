@@ -31,6 +31,7 @@ import {
 } from '@/modules/products/kpm-product.response.dto';
 import { EventDto, EventTypeDto } from '@/modules/events/event.response.dto';
 import { CampaignDto, QualificationRuleDto } from '@/modules/campaigns/campaign.response.dto';
+import { CapabilityCatalogDto } from '@/modules/capability/capability.response.dto';
 
 /** What one operation answers with: a class, and whether it comes back as an array. */
 export interface ResponseShape {
@@ -176,6 +177,13 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   CampaignController_update: { type: CampaignDto },
   CampaignController_archive: { type: CampaignDto },
   CampaignController_restore: { type: CampaignDto },
+
+  // The office's capability catalog (P5-T8). No delete route, by design.
+  CapabilityController_read: { type: CapabilityCatalogDto },
+  CapabilityController_rename: { type: CapabilityCatalogDto },
+  CapabilityController_setStatus: { type: CapabilityCatalogDto },
+  CapabilityController_add: { type: CapabilityCatalogDto },
+  CapabilityController_reorder: { type: CapabilityCatalogDto },
   OrgController_myTeam: { type: TeamMemberDto, isArray: true },
   OrgController_changeRole: { type: TeamMemberDto, isArray: true },
   OrgController_remove: { type: TeamMemberDto, isArray: true },

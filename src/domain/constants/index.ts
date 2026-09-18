@@ -195,3 +195,14 @@ export {
   SEED_PRODUCTION_CLUB_TIERS,
   SEED_MOC_RULES,
 } from './metrics';
+
+export {
+  type CapabilityMilestone,
+  type CapabilityStage,
+  type CapabilityGridItem,
+  type CapabilityGrid,
+  SEED_CAPABILITY_MILESTONES,
+  SEED_CAPABILITY_STAGES,
+  SEED_CAPABILITY_GRIDS,
+  capabilityStageFor,
+} from './capability';

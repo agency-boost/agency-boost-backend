@@ -38,6 +38,9 @@ import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
 import { EventType, EventTypeSchema } from '@/modules/events/event.schema';
 import {
+  CapabilityCatalog, CapabilityCatalogSchema,
+} from '@/modules/capability/capability.schema';
+import {
   Campaign, CampaignSchema, QualificationRule, QualificationRuleSchema,
 } from '@/modules/campaigns/campaign.schema';
 import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
@@ -108,6 +111,7 @@ describe('TenantService', () => {
       mongoose.model(TrainingModule.name, TrainingModuleSchema) as never,
       mongoose.model(ActivationTemplate.name, ActivationTemplateSchema) as never,
       mongoose.model(EventType.name, EventTypeSchema) as never,
+      mongoose.model(CapabilityCatalog.name, CapabilityCatalogSchema) as never,
       new FixedClock(NOW),
       configModule(NOW).config,
     );

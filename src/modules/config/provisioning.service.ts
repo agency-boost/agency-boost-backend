@@ -21,6 +21,13 @@ import {
 } from '@/modules/activation/activation-template.schema';
 import { EventType, EventTypeDocument } from '@/modules/events/event.schema';
 import {
+  CapabilityCatalog, CapabilityCatalogDocument,
+} from '@/modules/capability/capability.schema';
+import {
+  capabilityLadderProblems, capabilitySeedDocument, defaultCapabilityLadder,
+  type CapabilityLadderPayload,
+} from '@/modules/capability/capability-payload';
+import {
   activationChecklistProblems, activationSeedAspects, activationTrainingLinks,
   defaultActivationChecklist, type ActivationChecklistPayload,
 } from '@/modules/activation/activation-payload';
@@ -114,6 +121,8 @@ export class ProvisioningService {
     @InjectModel(ActivationTemplate.name)
     private readonly activationTemplates: Model<ActivationTemplateDocument>,
     @InjectModel(EventType.name) private readonly eventTypes: Model<EventTypeDocument>,
+    @InjectModel(CapabilityCatalog.name)
+    private readonly capabilityCatalogs: Model<CapabilityCatalogDocument>,
     private readonly clock: Clock,
     // Reads the rows this service has just written, and renders them the way agents will
     // read them — one renderer, so the snapshot and the live read cannot disagree.
@@ -276,6 +285,34 @@ export class ProvisioningService {
    * already refuses one (`TemplateService`), so this can only be a template older than that
    * check — and a skill under a category that does not exist would render on no screen.
    */
+  /**
+   * The capability catalog a new office starts with (P5-T8, ADR-0025).
+   *
+   * From the company's published `capability_ladder` where there is one, else the defaults — and
+   * **refused when that payload would produce a broken office** (AC-5). A catalog with no stages,
+   * or two items sharing a code, reaches every office created afterwards and nothing says so until
+   * a leader opens an assessment and finds it cannot be scored.
+   *
+   * Two offices seeded from the same version hold **identical item codes** (AC-3), because the
+   * codes come from the payload rather than being minted per office.
+   */
+  async seedCapabilityCatalog(kpmId: string, companyId: string): Promise<SeedRecord> {
+    const template = await this.publishedTemplate(companyId, 'capability_ladder');
+    const problems = template ? capabilityLadderProblems(template.payload) : [];
+    if (problems.length) {
+      throw new Error(
+        `The published capability catalog for company ${companyId} would produce a broken office: `
+          + problems.join(' '),
+      );
+    }
+    const payload = template
+      ? (template.payload as unknown as CapabilityLadderPayload)
+      : defaultCapabilityLadder();
+
+    await this.capabilityCatalogs.create(capabilitySeedDocument(kpmId, payload));
+    return recordOf(template);
+  }
+
   /**
    * The event types a new office starts with (P5-T6).
    *

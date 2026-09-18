@@ -28,6 +28,12 @@ import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events
 import {
   Campaign, CampaignSchema, QualificationRule, QualificationRuleSchema,
 } from '@/modules/campaigns/campaign.schema';
+import {
+  CapabilityCatalog, CapabilityCatalogSchema,
+} from '@/modules/capability/capability.schema';
+import {
+  capabilitySeedDocument, defaultCapabilityLadder,
+} from '@/modules/capability/capability-payload';
 import { DEFAULT_ORG_LADDER } from '@/domain/constants';
 import {
   CompanyOrgLevel, CompanyOrgLevelSchema,
@@ -120,6 +126,7 @@ async function main(): Promise<void> {
   const Events = mongoose.model(Event.name, EventSchema);
   const Campaigns = mongoose.model(Campaign.name, CampaignSchema);
   const QualificationRules = mongoose.model(QualificationRule.name, QualificationRuleSchema);
+  const CapabilityCatalogs = mongoose.model(CapabilityCatalog.name, CapabilityCatalogSchema);
   const Memberships = mongoose.model(Membership.name, MembershipSchema);
   const History = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
   const Groups = mongoose.model(Group.name, GroupSchema);
@@ -148,7 +155,7 @@ async function main(): Promise<void> {
       // exists renders as an empty Products tab on a company that should have 31.
       'trainingCategories', 'trainingSkills', 'trainingModules', 'activationTemplates',
       'companyTemplates', 'products', 'kpmProductConfigs', 'eventTypes', 'events',
-      'campaigns', 'qualificationRules',
+      'campaigns', 'qualificationRules', 'capabilityCatalogs',
     ];
     for (const name of owned) {
       const { deletedCount } = await mongoose.connection.collection(name).deleteMany({});
@@ -512,6 +519,14 @@ async function main(): Promise<void> {
       ...campaign, version: 1, status: 'active', archivedAt: null, deletedAt: null,
       createdBy: null, updatedBy: null,
     })));
+    }
+
+    // The capability catalog (P5-T8), the instrument leaders assess against. One per office, and
+    // every item carrying a code — the two grids the prototype keys by label included.
+    if (await missing(CapabilityCatalogs as never)) {
+      await CapabilityCatalogs.create(
+        capabilitySeedDocument(kpmId, defaultCapabilityLadder()),
+      );
     }
 
     // The activation checklist (P5-T3), as the office's version 1, published — the state
