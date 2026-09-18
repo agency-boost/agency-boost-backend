@@ -34,6 +34,8 @@ import { RatioDefinition, RatioDefinitionSchema } from '@/modules/config/ratio-d
 import { ConfigSnapshot, ConfigSnapshotSchema } from '@/modules/config/config-snapshot.schema';
 import { configModule } from '../../../test/config-module';
 import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
+import { Product, ProductSchema } from '@/modules/products/product.schema';
+import { ProductService } from '@/modules/products/product.service';
 import {
   CompanyTemplate, CompanyTemplateSchema,
 } from '@/modules/config/company-template.schema';
@@ -91,6 +93,12 @@ describe('KpmRequestService (P3.5-T2)', () => {
       ), repo,
       orgLevels,
       provisioning,
+      new ProductService(
+        mongoose.model(Product.name, ProductSchema) as never,
+        companies as never,
+        audit,
+        clock,
+      ),
     );
     service = new KpmRequestService(
       requests as never, companies as never, users as never, tenants, audit, clock,

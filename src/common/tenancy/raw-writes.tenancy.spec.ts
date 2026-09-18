@@ -43,6 +43,10 @@ const EXEMPT: Record<string, string> = {
   Kpm: 'the tenant record itself.',
   Company: 'platform-global. Owned by Super Admin, read-only to a tenant.',
   CompanyOrgLevel: 'platform-global. A company defines its ladder, not an office (ADR-0012).',
+  Product:
+    'company-partitioned (ADR-0033). A product belongs to the insurer and is read live by every '
+    + 'office of it, so `kpmId` would say the opposite of what it is. `companyId` is the filter '
+    + 'that matters, and `ProductService.of` is the one place it is applied.',
   KpmRequest: 'an office that does not exist yet, so there is no tenant to scope to.',
   AuthToken: 'platform-global. A session belongs to a user, not to an office.',
   ImpersonationSession:

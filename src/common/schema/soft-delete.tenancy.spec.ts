@@ -34,6 +34,9 @@ import { TrainingModuleSchema } from '@/modules/training/training-module.schema'
 import {
   ActivationAspectSchema, ActivationItemSchema, ActivationTemplateSchema,
 } from '@/modules/activation/activation-template.schema';
+import {
+  AttackPlanSchema, CommissionYearSchema, ProductSchema,
+} from '@/modules/products/product.schema';
 
 /**
  * P2-T8: soft delete everywhere.
@@ -67,6 +70,7 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['trainingSkills', TrainingSkillSchema],
   ['trainingModules', TrainingModuleSchema],
   ['activationTemplates', ActivationTemplateSchema],
+  ['products', ProductSchema],
 ];
 
 /**
@@ -84,6 +88,16 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     'activationItem (subdocument)',
     ActivationItemSchema,
     'a subdocument of an activation aspect, for the same reason',
+  ],
+  [
+    'attackPlan (subdocument)',
+    AttackPlanSchema,
+    'a subdocument of products: it is deleted with the product that holds it',
+  ],
+  [
+    'commissionYear (subdocument)',
+    CommissionYearSchema,
+    'a subdocument of products, for the same reason',
   ],
   ['authTokens', AuthTokenSchema, 'self-expiring: revokedAt and expiresAt already model the lifecycle'],
 ];
@@ -110,6 +124,9 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [ActivationTemplateSchema, 'ActivationTemplateSchema'],
   [ActivationAspectSchema, 'ActivationAspectSchema'],
   [ActivationItemSchema, 'ActivationItemSchema'],
+  [ProductSchema, 'ProductSchema'],
+  [AttackPlanSchema, 'AttackPlanSchema'],
+  [CommissionYearSchema, 'CommissionYearSchema'],
   [MembershipSchema, 'MembershipSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [JoinRequestSchema, 'JoinRequestSchema'],

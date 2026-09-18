@@ -106,6 +106,8 @@ import { RatioService } from '@/modules/config/ratio.service';
 import { ConfigChangeService } from '@/modules/config/changes.service';
 import { ActivityConfigService } from '@/modules/config/activity.service';
 import { ProvisioningService } from '@/modules/config/provisioning.service';
+import { Product, ProductSchema } from '@/modules/products/product.schema';
+import { ProductService } from '@/modules/products/product.service';
 import {
   TenantConfigController, TenantConfigReadController,
 } from '@/modules/config/config.controller';
@@ -187,6 +189,7 @@ describe('auth and admin over HTTP', () => {
           { name: TrainingSkill.name, schema: TrainingSkillSchema },
           { name: TrainingModule.name, schema: TrainingModuleSchema },
         { name: ActivationTemplate.name, schema: ActivationTemplateSchema },
+        { name: Product.name, schema: ProductSchema },
         ]),
       ],
       controllers: [
@@ -218,6 +221,7 @@ describe('auth and admin over HTTP', () => {
     TemplateService,
     { provide: OfficeCounter, useClass: KpmOfficeCounter },
         ProvisioningService,
+        ProductService,
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService, OrgLevelService,
         RosterImportService,

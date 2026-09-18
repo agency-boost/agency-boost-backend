@@ -15,6 +15,7 @@ import { Company, CompanyDocument } from './company.schema';
 import { KpmRequest, KpmRequestDocument } from './kpm-request.schema';
 import { OrgLevelService } from './org-level.service';
 import { ProvisioningService } from '@/modules/config/provisioning.service';
+import { ProductService } from '@/modules/products/product.service';
 import { DEFAULT_KPM_SETTINGS, Kpm, KpmDocument } from './kpm.schema';
 
 export interface CreateKpmInput {
@@ -139,6 +140,8 @@ export class TenantService {
     // Same shape: it copies a company template into a brand-new office and knows nothing
     // about tenancy beyond the id it is handed.
     private readonly provisioning: ProvisioningService,
+    // Same again: the company's starting catalog (P5-T4). It takes a companyId and nothing else.
+    private readonly products: ProductService,
   ) {}
 
   private require(ctx: RequestContext, permission: Parameters<typeof can>[1]): void {
@@ -282,6 +285,11 @@ export class TenantService {
     // and nothing would say so until somebody tried. ADR-0012 §3 settles that v1 ships
     // one seeded ladder; Super Admin edits it at /admin/org-levels afterwards.
     await this.orgLevels.seedDefaultLadder(String(company._id));
+
+    // **And a catalog**, for the same reason in a different register: a company with no products
+    // is one whose offices have nothing to sell and no way to say so. It is the company's from
+    // this moment — Super Admin edits it at the Company template's Products tab (ADR-0033).
+    await this.products.seedForCompany(String(company._id));
 
     await this.audit.record(ctx, {
       action: 'company.created',

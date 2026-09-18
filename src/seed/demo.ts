@@ -20,6 +20,7 @@ import { SystemClock } from '@/common/clock/clock.port';
 import { PasswordService } from '@/modules/auth/password.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
+import { Product, ProductSchema } from '@/modules/products/product.schema';
 import { DEFAULT_ORG_LADDER } from '@/domain/constants';
 import {
   CompanyOrgLevel, CompanyOrgLevelSchema,
@@ -36,7 +37,8 @@ import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.sche
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { Notification, NotificationSchema } from '@/modules/notifications/notification.schema';
 import {
-  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES, SEED_RATIO_DEFINITIONS,
+  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES, SEED_PRODUCTS,
+  SEED_RATIO_DEFINITIONS,
 } from '@/domain/constants';
 import {
   ActivityCategory, ActivityCategorySchema,
@@ -104,6 +106,7 @@ async function main(): Promise<void> {
   const TrainingSkills = mongoose.model(TrainingSkill.name, TrainingSkillSchema);
   const TrainingModules = mongoose.model(TrainingModule.name, TrainingModuleSchema);
   const ActivationTemplates = mongoose.model(ActivationTemplate.name, ActivationTemplateSchema);
+  const Products = mongoose.model(Product.name, ProductSchema);
   const Memberships = mongoose.model(Membership.name, MembershipSchema);
   const History = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
   const Groups = mongoose.model(Group.name, GroupSchema);
@@ -127,6 +130,11 @@ async function main(): Promise<void> {
       // across two different offices.
       'activityCategories', 'activityTypes', 'leadStatuses', 'ratioDefinitions',
       'configSnapshots',
+      // Phase 5. `products` is the company's rather than the office's, and it is cleared for
+      // the same reason: a previous run's shelf orphaned against a company id that no longer
+      // exists renders as an empty Products tab on a company that should have 31.
+      'trainingCategories', 'trainingSkills', 'trainingModules', 'activationTemplates',
+      'companyTemplates', 'products',
     ];
     for (const name of owned) {
       const { deletedCount } = await mongoose.connection.collection(name).deleteMany({});
@@ -188,13 +196,42 @@ async function main(): Promise<void> {
   }
 
   async function company(name: string, slug: string) {
-    return (
+    const row = (
       (await Companies.findOne({ slug }).exec()) ??
       (await Companies.create({
         name, slug,
         defaultCurrency: 'IDR', defaultLocale: 'id-ID', defaultTimezone: 'Asia/Jakarta',
       }))
     );
+    await seedProducts(String(row._id));
+    return row;
+  }
+
+  /**
+   * The company's product catalog (P5-T4), as `TenantService.createCompany` gives a real one.
+   *
+   * Mirrored here rather than called, for the reason the office presets below are: this file
+   * writes documents and owns no Nest container. The **values** come from `@/domain/constants`,
+   * so there is one catalog and this is a second copy of the call, not of the shelf.
+   *
+   * Without it the Company template's Products tab renders an empty catalog on the one company
+   * the demo has — which is what the P5-T4 browser walk found.
+   */
+  async function seedProducts(companyId: string) {
+    if (await Products.exists({ companyId })) return;
+    await Products.insertMany(SEED_PRODUCTS.map((product) => ({
+      ...product,
+      companyId,
+      // Never seeded: a company states its own rates (parity F-15).
+      commissionSchedule: [],
+      replacedByProductId: null,
+      lifecycleChangedAt: null,
+      lifecycleChangedBy: null,
+      version: 1,
+      deletedAt: null,
+      createdBy: null,
+      updatedBy: null,
+    })));
   }
 
   async function office(

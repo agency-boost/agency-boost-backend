@@ -139,3 +139,21 @@ export {
   activationLinkKind,
   mayTickByHand,
 } from './activation-checklist';
+
+export {
+  PRODUCT_CHANNELS,
+  type ProductChannel,
+  PRODUCT_CATEGORIES,
+  type ProductCategory,
+  PRODUCT_NEEDS,
+  type ProductNeed,
+  PRODUCT_LIFECYCLES,
+  type ProductLifecycle,
+  PRODUCT_AGE_BANDS,
+  PRODUCT_BUDGET_BANDS,
+  PRODUCT_AGE_BAND_LABELS,
+  PRODUCT_BUDGET_BAND_LABELS,
+  SEED_PRODUCTS,
+  type SeedProduct,
+  type SeedAttackPlan,
+} from './product-catalog';

@@ -35,6 +35,9 @@ import { TrainingModuleSchema } from '@/modules/training/training-module.schema'
 import {
   ActivationAspectSchema, ActivationItemSchema, ActivationTemplateSchema,
 } from '@/modules/activation/activation-template.schema';
+import {
+  AttackPlanSchema, CommissionYearSchema, ProductSchema,
+} from '@/modules/products/product.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -118,6 +121,24 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
       'a rung, so scoping the ladder to one would say the opposite of what it is',
   ],
   [
+    'products',
+    ProductSchema,
+    'company-partitioned, not tenant-scoped (ADR-0033): a product belongs to the insurer, is '
+      + 'written only by Super Admin, and is read **live** by every office of that company — which '
+      + 'is what makes a withdrawal reach all of them at once. Scoping it to one office would be '
+      + 'the opposite of what it is',
+  ],
+  [
+    'attackPlan (subdocument)',
+    AttackPlanSchema,
+    'a subdocument of products: no collection and no _id of its own',
+  ],
+  [
+    'commissionYear (subdocument)',
+    CommissionYearSchema,
+    'a subdocument of products, for the same reason',
+  ],
+  [
     'authTokens',
     AuthTokenSchema,
     'issued against a global identity before any office is chosen: refresh, email ' +
@@ -160,6 +181,9 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [ActivationTemplateSchema, 'ActivationTemplateSchema'],
   [ActivationAspectSchema, 'ActivationAspectSchema'],
   [ActivationItemSchema, 'ActivationItemSchema'],
+  [ProductSchema, 'ProductSchema'],
+  [AttackPlanSchema, 'AttackPlanSchema'],
+  [CommissionYearSchema, 'CommissionYearSchema'],
   [ImpersonationSessionSchema, 'ImpersonationSessionSchema'],
   [CompanyTemplateSchema, 'CompanyTemplateSchema'],
   [AssetSchema, 'AssetSchema'],

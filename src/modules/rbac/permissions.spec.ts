@@ -121,6 +121,14 @@ describe('permission matrix', () => {
       'notification:receive/KPM_ADMIN': 'as KPM_OWNER',
       'notification:receive/AB': 'as KPM_OWNER — own-unit delivery is the routing phase',
       'notification:receive/AAB': 'as KPM_OWNER',
+      'commission_rates:read/KPM_OWNER': 'P5-T4 builds the company\'s catalog, whose only reader '
+        + 'is Super Admin. An office reads a product from P5-T5 and an agent from Phase 12; the '
+        + 'grant lands with the route that exercises it.',
+      'commission_rates:read/KPM_ADMIN': 'as KPM_OWNER',
+      'commission_rates:read/AB': 'as KPM_OWNER — and a leader reads the rates of the people they '
+        + 'lead (ADR-0038), which needs the member-scoped read Phase 12 builds',
+      'commission_rates:read/AAB': 'as AB',
+      'commission_rates:read/AGENT': 'as KPM_OWNER',
     };
 
     /** The widest scope the matrix gives this permission in this column, or null. */

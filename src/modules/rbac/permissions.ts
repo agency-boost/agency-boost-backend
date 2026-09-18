@@ -160,6 +160,30 @@ export const PERMISSIONS = {
   'company_template:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'company_template:write': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   /*
+   * The company's product catalog (ADR-0033, P5-T4).
+   *
+   * Super Admin's alone, and separate from `company_template:write` although both edit the
+   * company's side: a template is copied into an office once, at creation, and a product is
+   * **read live** — withdrawing one stops every office of the company selling it on their next
+   * read. The two have different blast radii, so they are different permissions.
+   *
+   * `product_catalog:read` — the office-side read, held by every member — arrives with P5-T5,
+   * which is where an office's decisions about products live. Granting it here would be a grant
+   * no route exercises.
+   */
+  'product_catalog:crud': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
+   * What somebody earns on a product (ADR-0038, closing OD-43).
+   *
+   * A figure an agent reads as their pay: the catalog read leaves `commissionSchedule` out
+   * entirely for anybody without this, rather than sending it and hiding it on screen.
+   *
+   * The matrix also gives it to the Owner, the Admin and — for the people they lead — a leader.
+   * Those wait for P5-T5 and Phase 12, where an office and an agent can read a product at all;
+   * `permissions.spec.ts` records each with the phase that settles it.
+   */
+  'commission_rates:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
    * The company's role ladder, readable by the offices that stand on it (P4-T9).
    *
    * Super Admin only until now, with the reason written down: *"nothing tenant-side

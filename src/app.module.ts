@@ -68,6 +68,9 @@ import {
 import { ActivationTemplateRepository } from '@/modules/activation/activation.repository';
 import { ActivationService } from '@/modules/activation/activation.service';
 import { ActivationController } from '@/modules/activation/activation.controller';
+import { Product, ProductSchema } from '@/modules/products/product.schema';
+import { ProductService } from '@/modules/products/product.service';
+import { ProductController } from '@/modules/products/product.controller';
 import { OfficeCounter } from '@/modules/config/office-counter.port';
 import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
@@ -164,6 +167,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: TrainingSkill.name, schema: TrainingSkillSchema },
       { name: TrainingModule.name, schema: TrainingModuleSchema },
       { name: ActivationTemplate.name, schema: ActivationTemplateSchema },
+      { name: Product.name, schema: ProductSchema },
     ]),
   ],
   controllers: [
@@ -178,6 +182,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     TenantConfigReadController,
     TrainingController,
     ActivationController,
+    ProductController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -235,6 +240,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     TrainingService,
     ActivationTemplateRepository,
     ActivationService,
+    ProductService,
     ConfigSnapshotRepository,
     TenantConfigService,
     TemplateService,

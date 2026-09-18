@@ -23,6 +23,7 @@ import {
 } from '@/modules/config/config.response.dto';
 import { TrainingCategoryDto } from '@/modules/training/training.response.dto';
 import { ActivationChecklistDto } from '@/modules/activation/activation.response.dto';
+import { ProductResponseDto } from '@/modules/products/product.response.dto';
 
 /** What one operation answers with: a class, and whether it comes back as an array. */
 export interface ResponseShape {
@@ -122,6 +123,16 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   ActivationController_read: { type: ActivationChecklistDto },
   ActivationController_saveDraft: { type: ActivationChecklistDto },
   ActivationController_publish: { type: ActivationChecklistDto },
+
+  // The company's product catalog (P5-T4). Every route answers with the product, or the
+  // whole shelf where the act was about the shelf.
+  ProductController_list: { type: ProductResponseDto, isArray: true },
+  ProductController_create: { type: ProductResponseDto },
+  ProductController_reorder: { type: ProductResponseDto, isArray: true },
+  ProductController_update: { type: ProductResponseDto },
+  ProductController_closeToNewBusiness: { type: ProductResponseDto },
+  ProductController_withdraw: { type: ProductResponseDto },
+  ProductController_reopen: { type: ProductResponseDto },
   OrgController_myTeam: { type: TeamMemberDto, isArray: true },
   OrgController_changeRole: { type: TeamMemberDto, isArray: true },
   OrgController_remove: { type: TeamMemberDto, isArray: true },

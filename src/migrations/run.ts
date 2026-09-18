@@ -13,6 +13,7 @@ import { up as ratioStandardFormula } from './0009-ratio-standard-formula';
 import { up as kpmSeedRecordPerKind } from './0010-kpm-seed-record-per-kind';
 import { up as seedTrainingTaxonomy } from './0011-seed-training-taxonomy';
 import { up as seedActivationChecklist } from './0012-seed-activation-checklist';
+import { up as seedProductCatalog } from './0013-seed-product-catalog';
 
 /**
  * Every migration, in order. Forward-only and idempotent, so running this twice is a
@@ -31,6 +32,7 @@ const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Date) => P
   ['0010-kpm-seed-record-per-kind', kpmSeedRecordPerKind],
   ['0011-seed-training-taxonomy', seedTrainingTaxonomy],
   ['0012-seed-activation-checklist', seedActivationChecklist],
+  ['0013-seed-product-catalog', seedProductCatalog],
 ];
 
 async function main(): Promise<void> {

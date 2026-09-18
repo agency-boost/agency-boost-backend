@@ -40,6 +40,8 @@ import {
 } from '@/modules/activation/activation-template.schema';
 import { ActivationTemplateRepository } from '@/modules/activation/activation.repository';
 import { ActivationService } from '@/modules/activation/activation.service';
+import { ProductSchema } from '@/modules/products/product.schema';
+import { ProductService } from '@/modules/products/product.service';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
@@ -71,6 +73,7 @@ export function configModule(now: Date) {
   const trainingSkills = model('TrainingSkillModel', TrainingSkillSchema);
   const trainingModules = model('TrainingModuleModel', TrainingModuleSchema);
   const activationTemplates = model('ActivationTemplateModel', ActivationTemplateSchema);
+  const productRows = model('ProductModel', ProductSchema);
 
   const clock: Clock = new FixedClock(now);
   const audit = new AuditService(model('AuditLogModel', AuditLogSchema) as never);
@@ -126,6 +129,13 @@ export function configModule(now: Date) {
     audit,
     clock,
   );
+  // P5-T4. Company-partitioned: it takes a companyId, and never a kpmId.
+  const products = new ProductService(
+    productRows as never,
+    model('CompanyModelForConfig', CompanySchema) as never,
+    audit,
+    clock,
+  );
   const provisioning = new ProvisioningService(
     categories as never,
     types as never,
@@ -148,6 +158,7 @@ export function configModule(now: Date) {
   return {
     activity, ratios, leads, config, provisioning, templates, audit, clock, changes,
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
+    products,
   };
 }
 

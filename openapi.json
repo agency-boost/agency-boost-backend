@@ -8438,6 +8438,688 @@
         ],
         "x-required-permission": "tenant_config:write"
       }
+    },
+    "/api/v1/admin/companies/{companyId}/products": {
+      "get": {
+        "description": "In `sortOrder`, withdrawn rows included — a withdrawn product still has to render in every record that names it. `commissionSchedule` is absent for a reader without `commission_rates:read`.\n\n**Requires `product_catalog:crud`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductController_list_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProductResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `product_catalog:crud`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The company's whole catalog",
+        "tags": [
+          "products (Super Admin)"
+        ],
+        "x-required-permission": "product_catalog:crud"
+      },
+      "post": {
+        "description": "The code is typed once and never changes. A code this company has used — withdrawn rows counted — is refused: reusing one would change the meaning of every policy still pointing at it.\n\n**Requires `product_catalog:crud`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductController_create_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProductDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `product_catalog:crud`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add a product",
+        "tags": [
+          "products (Super Admin)"
+        ],
+        "x-required-permission": "product_catalog:crud"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/products/reorder": {
+      "patch": {
+        "description": "The whole shelf, once each. Bumps no version: a catalog's order is presentation, and two people dragging rows should not each produce a new version of every product.\n\n**Requires `product_catalog:crud`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductController_reorder_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderProductsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProductResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `product_catalog:crud`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set the order of the shelf",
+        "tags": [
+          "products (Super Admin)"
+        ],
+        "x-required-permission": "product_catalog:crud"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/products/{productId}": {
+      "patch": {
+        "description": "Everything but the identity and the lifecycle. There is no `code` here — it never changes — and no `lifecycle`, which moves through the three routes below.\n\n**Requires `product_catalog:crud`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductController_update_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "productId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProductDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `product_catalog:crud`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change a product",
+        "tags": [
+          "products (Super Admin)"
+        ],
+        "x-required-permission": "product_catalog:crud"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/products/{productId}/close-to-new-business": {
+      "post": {
+        "description": "It stays sold against existing policies and stays readable everywhere it is named. Name the successor where there is one.\n\n**Requires `product_catalog:crud`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductController_closeToNewBusiness_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "productId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseToNewBusinessDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `product_catalog:crud`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Close a product to new business",
+        "tags": [
+          "products (Super Admin)"
+        ],
+        "x-required-permission": "product_catalog:crud"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/products/{productId}/withdraw": {
+      "post": {
+        "description": "Every office of this company stops selling it on their next read, with no Owner pressing publish — which is what a product pulled for regulatory reasons needs.\n\n**Requires `product_catalog:crud`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductController_withdraw_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "productId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseToNewBusinessDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `product_catalog:crud`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Withdraw a product",
+        "tags": [
+          "products (Super Admin)"
+        ],
+        "x-required-permission": "product_catalog:crud"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/products/{productId}/reopen": {
+      "post": {
+        "description": "Active again, and its successor forgotten. Offices keep whatever they had decided.\n\n**Requires `product_catalog:crud`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductController_reopen_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "productId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `product_catalog:crud`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Put a product back on sale",
+        "tags": [
+          "products (Super Admin)"
+        ],
+        "x-required-permission": "product_catalog:crud"
+      }
     }
   },
   "info": {
@@ -9505,6 +10187,412 @@
         "required": [
           "aspects"
         ]
+      },
+      "AttackPlanDto": {
+        "type": "object",
+        "properties": {
+          "goodFit": {
+            "type": "string",
+            "description": "0 · Good fit for",
+            "example": "Young families with a first mortgage"
+          },
+          "opening": {
+            "type": "string",
+            "description": "1 · Opening line"
+          },
+          "benefits": {
+            "description": "2 · Lead with these benefits",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "fullScript": {
+            "type": "string",
+            "description": "3 · Full script"
+          },
+          "objectionTheySay": {
+            "type": "string",
+            "description": "4a · If they push back — they say"
+          },
+          "objectionYouSay": {
+            "type": "string",
+            "description": "4b · If they push back — you say"
+          },
+          "nextAction": {
+            "type": "string",
+            "description": "5 · Next action"
+          }
+        },
+        "required": [
+          "goodFit",
+          "opening",
+          "benefits",
+          "fullScript",
+          "objectionTheySay",
+          "objectionYouSay",
+          "nextAction"
+        ]
+      },
+      "CommissionYearDto": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "number",
+            "example": 1,
+            "description": "Policy year, from 1."
+          },
+          "rate": {
+            "type": "number",
+            "example": 0.4,
+            "description": "A proportion, not a percentage: `0.4` is 40%. The company states it; nothing here invents one (parity F-15)."
+          }
+        },
+        "required": [
+          "year",
+          "rate"
+        ]
+      },
+      "ProductResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "companyId": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "PRUMAPAN",
+            "description": "The identity. Immutable, and unique within the company counting withdrawn rows."
+          },
+          "name": {
+            "type": "string",
+            "example": "PRUMapan"
+          },
+          "tagline": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "conventional",
+              "syariah"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "life",
+              "health",
+              "ci",
+              "education",
+              "investment"
+            ]
+          },
+          "primaryNeeds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "life-protection",
+                "health",
+                "ci",
+                "accident",
+                "education",
+                "investment",
+                "retirement",
+                "legacy"
+              ]
+            }
+          },
+          "eligibleAgeBands": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "eligibleBudgetBands": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "benefits": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "differentiator": {
+            "type": "string"
+          },
+          "bestFor": {
+            "type": "string"
+          },
+          "defaultAttackPlan": {
+            "$ref": "#/components/schemas/AttackPlanDto"
+          },
+          "commissionSchedule": {
+            "description": "Left out entirely for a reader without `commission_rates:read` (ADR-0038) — not sent and hidden. Empty where the company has stated no schedule; nothing is ever defaulted (F-15).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommissionYearDto"
+            }
+          },
+          "lifecycle": {
+            "type": "string",
+            "enum": [
+              "active",
+              "closed_to_new_business",
+              "withdrawn"
+            ]
+          },
+          "replacedByProductId": {
+            "type": "string",
+            "nullable": true,
+            "description": "The successor, where a run-off product has one."
+          },
+          "activeByDefault": {
+            "type": "boolean",
+            "description": "What an office sells before its Owner has an opinion (ADR-0033)."
+          },
+          "sortOrder": {
+            "type": "number",
+            "description": "Presentation. Reordering bumps no version."
+          },
+          "version": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "companyId",
+          "code",
+          "name",
+          "tagline",
+          "channel",
+          "category",
+          "primaryNeeds",
+          "eligibleAgeBands",
+          "eligibleBudgetBands",
+          "benefits",
+          "differentiator",
+          "bestFor",
+          "defaultAttackPlan",
+          "lifecycle",
+          "replacedByProductId",
+          "activeByDefault",
+          "sortOrder",
+          "version"
+        ]
+      },
+      "CreateProductDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "PRUMapan"
+          },
+          "tagline": {
+            "type": "string",
+            "example": "Proteksi jiwa dengan premi tetap"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "conventional",
+              "syariah"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "life",
+              "health",
+              "ci",
+              "education",
+              "investment"
+            ]
+          },
+          "primaryNeeds": {
+            "type": "array",
+            "description": "`accident` is a need, not a category — accident products sit under `health`.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "life-protection",
+                "health",
+                "ci",
+                "accident",
+                "education",
+                "investment",
+                "retirement",
+                "legacy"
+              ]
+            }
+          },
+          "eligibleAgeBands": {
+            "description": "Band numbers, 1–5.",
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "eligibleBudgetBands": {
+            "description": "Band numbers, 1–7. The seven-band scale of the prototype's `Overall.html` copy, which the ERD records; `Sales_Attack_Plan.html` scores the same products on five.",
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "benefits": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "differentiator": {
+            "type": "string"
+          },
+          "bestFor": {
+            "type": "string"
+          },
+          "defaultAttackPlan": {
+            "$ref": "#/components/schemas/AttackPlanDto"
+          },
+          "commissionSchedule": {
+            "description": "Empty until the company states one. An empty list is shown as \"not set\", never as a default.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommissionYearDto"
+            }
+          },
+          "activeByDefault": {
+            "type": "boolean",
+            "description": "What an office sells before its Owner has an opinion about the product (ADR-0033)."
+          },
+          "code": {
+            "type": "string",
+            "example": "PRUMAPAN",
+            "description": "Upper case, letters, digits and `_`. Immutable once created."
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "ReorderProductsDto": {
+        "type": "object",
+        "properties": {
+          "productIds": {
+            "description": "Every product of the company, once each, in the order wanted.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "productIds"
+        ]
+      },
+      "UpdateProductDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "PRUMapan"
+          },
+          "tagline": {
+            "type": "string",
+            "example": "Proteksi jiwa dengan premi tetap"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "conventional",
+              "syariah"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "life",
+              "health",
+              "ci",
+              "education",
+              "investment"
+            ]
+          },
+          "primaryNeeds": {
+            "type": "array",
+            "description": "`accident` is a need, not a category — accident products sit under `health`.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "life-protection",
+                "health",
+                "ci",
+                "accident",
+                "education",
+                "investment",
+                "retirement",
+                "legacy"
+              ]
+            }
+          },
+          "eligibleAgeBands": {
+            "description": "Band numbers, 1–5.",
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "eligibleBudgetBands": {
+            "description": "Band numbers, 1–7. The seven-band scale of the prototype's `Overall.html` copy, which the ERD records; `Sales_Attack_Plan.html` scores the same products on five.",
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "benefits": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "differentiator": {
+            "type": "string"
+          },
+          "bestFor": {
+            "type": "string"
+          },
+          "defaultAttackPlan": {
+            "$ref": "#/components/schemas/AttackPlanDto"
+          },
+          "commissionSchedule": {
+            "description": "Empty until the company states one. An empty list is shown as \"not set\", never as a default.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommissionYearDto"
+            }
+          },
+          "activeByDefault": {
+            "type": "boolean",
+            "description": "What an office sells before its Owner has an opinion about the product (ADR-0033)."
+          }
+        }
+      },
+      "CloseToNewBusinessDto": {
+        "type": "object",
+        "properties": {
+          "replacedByProductId": {
+            "type": "string",
+            "description": "The successor, where there is one — a product of the same company. The prototype’s `legacy` boolean could not say."
+          }
+        }
       },
       "ApiErrorBody": {
         "type": "object",

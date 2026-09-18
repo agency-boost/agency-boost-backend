@@ -35,6 +35,8 @@ import { RatioDefinition, RatioDefinitionSchema } from '@/modules/config/ratio-d
 import { ConfigSnapshot, ConfigSnapshotSchema } from '@/modules/config/config-snapshot.schema';
 import { configModule } from '../../../test/config-module';
 import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
+import { Product, ProductSchema } from '@/modules/products/product.schema';
+import { ProductService } from '@/modules/products/product.service';
 import {
   CompanyTemplate, CompanyTemplateSchema,
 } from '@/modules/config/company-template.schema';
@@ -115,6 +117,12 @@ describe('TenantService', () => {
       repo,
       orgLevels,
       provisioning,
+      new ProductService(
+        mongoose.model(Product.name, ProductSchema) as never,
+        companies as never,
+        new AuditService(auditModel as never),
+        clock,
+      ),
     );
   });
   afterAll(stopMongo);
