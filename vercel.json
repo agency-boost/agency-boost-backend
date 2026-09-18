@@ -4,6 +4,8 @@
 
   "buildCommand": "pnpm build",
 
+  "outputDirectory": "public",
+
   "functions": {
     "api/index.js": {
       "includeFiles": "dist/**"
