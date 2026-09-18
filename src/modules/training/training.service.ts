@@ -1,11 +1,14 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import type { FilterQuery } from 'mongoose';
+import { InjectModel } from '@nestjs/mongoose';
+import type { FilterQuery, Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 // The domain's, not Nest's: it answers `NOT_FOUND`, the code every tenant-scoped refusal uses.
 import { NotFoundException } from '@/common/errors/domain.exception';
 import type { TrainingPublishState } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
+import { AssetService } from '@/modules/assets/asset.service';
+import { Kpm } from '@/modules/tenants/kpm.schema';
 import { TrainingCategoryDocument } from './training-category.schema';
 import { TrainingModuleDocument } from './training-module.schema';
 import { TrainingSkillDocument } from './training-skill.schema';
@@ -16,8 +19,23 @@ import {
 import {
   TrainingCategoryRepository, TrainingModuleRepository, TrainingSkillRepository,
 } from './training.repository';
+import {
+  checkTrainingContent, emptyContent, storageKeysOf, type CheckedContent,
+} from './training-content';
 
 type Status = 'active' | 'archived';
+
+/** A module's content as a screen reads it, with where each half came from. */
+export interface TrainingContentView {
+  moduleCode: string;
+  title: string;
+  /** What agents in this office are shown: the office's replacement, or the company's. */
+  content: CheckedContent;
+  /** The company's material, always — so the screen can say what "use theirs again" restores. */
+  companyContent: CheckedContent;
+  /** False while this office is using the company's material unchanged. */
+  overridden: boolean;
+}
 
 export interface TrainingModuleView {
   id: string;
@@ -91,6 +109,9 @@ export class TrainingService {
     private readonly modules: TrainingModuleRepository,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    // P5-T2. Content is files, and files are the asset registry's (ADR-0032).
+    private readonly assets: AssetService,
+    @InjectModel(Kpm.name) private readonly kpms: Model<Kpm>,
   ) {}
 
   /**
@@ -322,6 +343,166 @@ export class TrainingService {
 
   // -------------------------------------------------------------------- internals
 
+  // ------------------------------------------------------ a module's content (P5-T2, ADR-0032)
+
+  /**
+   * A signed upload for training material, in this office's folder.
+   *
+   * The folder is **fixed by the server**, not taken from the caller: a client that chose its own
+   * would decide where somebody else's erasure sweep looks.
+   */
+  async requestContentUpload(
+    ctx: RequestContext,
+    params: { filename: string; mimeType: string; bytes: number },
+  ) {
+    return this.assets.requestUpload(ctx, { folder: 'training', ...params });
+  }
+
+  /** Ask storage what actually landed, and record that (ADR-0040). */
+  async confirmContentUpload(ctx: RequestContext, storageKey: string) {
+    const asset = await this.assets.confirmUpload(ctx, storageKey);
+    return {
+      storageKey: asset.storageKey, mimeType: asset.mimeType, bytes: asset.bytes,
+    };
+  }
+
+  /**
+   * What this office shows for a module, and what the company gave it.
+   *
+   * Both halves, always: a screen offering *"use the company's material again"* has to be able to
+   * say what that would restore, and an Owner deciding whether to replace something needs to see
+   * what they are replacing.
+   */
+  async readContent(ctx: RequestContext, code: string): Promise<TrainingContentView> {
+    const module = await this.requireModule(ctx, code);
+    const companyContent = asContent(module.companyContent);
+    return {
+      moduleCode: module.code,
+      title: module.title,
+      content: module.officeContent ? asContent(module.officeContent) : companyContent,
+      companyContent,
+      overridden: module.officeContent !== null,
+    };
+  }
+
+  /**
+   * Replace this office's content for one module (AC-6, AC-9).
+   *
+   * **The whole document, and it lands on `officeContent`.** The company's row is never touched —
+   * that is what makes the replacement this office's alone, and what lets `resetContent` put the
+   * company's material back.
+   *
+   * Reference counts are moved by **diffing** old against new rather than by the caller telling us
+   * what changed: a screen that sends the whole document cannot be trusted to also narrate its own
+   * edits, and a count that drifts makes a live file look like an orphan.
+   */
+  async saveContent(
+    ctx: RequestContext, code: string, body: unknown,
+  ): Promise<TrainingContentView> {
+    const module = await this.requireModule(ctx, code);
+    const next = checkTrainingContent(body);
+    await this.requireOfficeAssets(ctx, next);
+
+    const before = module.officeContent ? storageKeysOf(asContent(module.officeContent)) : [];
+    const after = storageKeysOf(next);
+    await this.moveReferences(ctx, before, after);
+
+    await this.modules.updateById(ctx, String(module._id), {
+      $set: { officeContent: next },
+      $inc: { version: 1 },
+    });
+    await this.record(ctx, 'training_module.content_saved', 'trainingModules', module, {
+      code: module.code,
+      files: next.files.length,
+      videos: next.videos.length,
+      links: next.links.length,
+    });
+    return this.readContent(ctx, code);
+  }
+
+  /**
+   * Give the module back its company material (AC-9).
+   *
+   * Removing the replacement is writing `null`, which is the whole of the fallback rule. The
+   * office's own uploads are released rather than deleted — somebody may put them back, and
+   * deleting a file because it stopped being referenced is a decision nobody made.
+   */
+  async resetContent(ctx: RequestContext, code: string): Promise<TrainingContentView> {
+    const module = await this.requireModule(ctx, code);
+    if (module.officeContent === null) return this.readContent(ctx, code);
+
+    await this.moveReferences(ctx, storageKeysOf(asContent(module.officeContent)), []);
+    await this.modules.updateById(ctx, String(module._id), {
+      $set: { officeContent: null },
+      $inc: { version: 1 },
+    });
+    await this.record(ctx, 'training_module.content_reset', 'trainingModules', module, {
+      code: module.code,
+    });
+    return this.readContent(ctx, code);
+  }
+
+  /**
+   * A short-lived signed URL for one item of a module's content.
+   *
+   * **Which registry answers depends on which half the item is in**, not on what the caller says:
+   * a file the office uploaded is read as the office's, and the company's shared material is read
+   * through the named unscoped method filtered by this office's own company (ADR-0032). A key that
+   * is in neither half of this module is a 404, so knowing a storage key buys nothing.
+   */
+  async contentUrl(ctx: RequestContext, code: string, storageKey: string): Promise<string> {
+    const module = await this.requireModule(ctx, code);
+    const office = module.officeContent ? asContent(module.officeContent) : null;
+
+    if (office && storageKeysOf(office).includes(storageKey)) {
+      return this.assets.urlFor(ctx, storageKey);
+    }
+    if (storageKeysOf(asContent(module.companyContent)).includes(storageKey)) {
+      return this.assets.companyUrlFor(await this.companyOf(ctx), storageKey);
+    }
+    throw new NotFoundException('Asset');
+  }
+
+  /** The company this office belongs to — never a value the caller sent. */
+  private async companyOf(ctx: RequestContext): Promise<string> {
+    const kpm = await this.kpms.findById(ctx.kpmId).select('companyId').lean().exec();
+    const companyId = (kpm as { companyId?: string } | null)?.companyId;
+    if (!companyId) throw new NotFoundException('Kpm');
+    return companyId;
+  }
+
+  /**
+   * Every file named in a save is one this office actually uploaded and confirmed.
+   *
+   * Without it a body could name the company's key, or another office's, and attach it to this
+   * office's module — and the delivery URL would then be issued against the wrong registry.
+   */
+  private async requireOfficeAssets(ctx: RequestContext, content: CheckedContent): Promise<void> {
+    for (const storageKey of storageKeysOf(content)) {
+      // `urlFor` is the same check delivery makes: it exists, it is this office's, and its bytes
+      // arrived. Reusing it means the two can never disagree about what is attachable.
+      await this.assets.urlFor(ctx, storageKey);
+    }
+  }
+
+  /** Retain what is newly referenced, release what no longer is. */
+  private async moveReferences(
+    ctx: RequestContext, before: string[], after: string[],
+  ): Promise<void> {
+    const had = new Set(before);
+    const has = new Set(after);
+    for (const key of has) if (!had.has(key)) await this.assets.retain(ctx, key);
+    for (const key of had) if (!has.has(key)) await this.assets.release(ctx, key);
+  }
+
+  private async requireModule(
+    ctx: RequestContext, code: string,
+  ): Promise<TrainingModuleDocument> {
+    const module = await this.modules.findOne(ctx, { code: code.toUpperCase() });
+    if (!module) throw new NotFoundException('TrainingModule');
+    return module;
+  }
+
   private async tree(
     ctx: RequestContext,
     categoryFilter: FilterQuery<TrainingCategoryDocument>,
@@ -420,4 +601,25 @@ export class TrainingService {
   ): Promise<void> {
     await this.audit.record(ctx, { action, targetCollection, targetId: String(target._id), after });
   }
+}
+
+/**
+ * A stored subdocument as the plain shape the checker and the screens speak.
+ *
+ * `toObject()` rather than a spread: spreading a Mongoose subdocument copies its internals and
+ * none of its fields, so `storageKey` came back `undefined` and a file the office had just
+ * attached read as one the module did not hold.
+ */
+function asContent(raw: unknown): CheckedContent {
+  const plain = <T>(value: unknown): T => {
+    const doc = value as { toObject?: () => unknown };
+    return (typeof doc?.toObject === 'function' ? doc.toObject() : { ...(value as object) }) as T;
+  };
+  const row = plain<Partial<CheckedContent>>(raw ?? {});
+  return {
+    ...emptyContent(),
+    files: (row.files ?? []).map((f) => plain<CheckedContent['files'][number]>(f)),
+    videos: (row.videos ?? []).map((f) => plain<CheckedContent['files'][number]>(f)),
+    links: (row.links ?? []).map((l) => plain<CheckedContent['links'][number]>(l)),
+  };
 }

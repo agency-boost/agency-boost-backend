@@ -15,10 +15,21 @@ export interface StoredObject {
   readonly bytes: number;
 }
 
+/**
+ * Who a file belongs to, which decides the folder it lands in (ADR-0032).
+ *
+ * An office's upload is `<env>/<kpmId>/…` and the company's shared material is
+ * `<env>/company/<companyId>/…`, so per-office erasure and per-company accounting both stay
+ * folder operations rather than queries.
+ */
+export type AssetOwner =
+  | { kind: 'kpm'; kpmId: string }
+  | { kind: 'company'; companyId: string };
+
 export abstract class StoragePort {
   /** A short-lived signed upload, so file bytes never transit the API. */
   abstract createSignedUpload(params: {
-    kpmId: string;
+    owner: AssetOwner;
     folder: string;
     filename: string;
     mimeType: string;

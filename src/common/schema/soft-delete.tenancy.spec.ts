@@ -30,7 +30,10 @@ import {
   TrainingCategorySchema,
 } from '@/modules/training/training-category.schema';
 import { TrainingSkillSchema } from '@/modules/training/training-skill.schema';
-import { TrainingModuleSchema } from '@/modules/training/training-module.schema';
+import {
+  TrainingContentFileSchema, TrainingContentLinkSchema, TrainingContentSchema,
+  TrainingModuleSchema,
+} from '@/modules/training/training-module.schema';
 import {
   ActivationAspectSchema, ActivationItemSchema, ActivationTemplateSchema,
 } from '@/modules/activation/activation-template.schema';
@@ -90,6 +93,21 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     'a subdocument of an activation aspect, for the same reason',
   ],
   [
+    'trainingContent (subdocument)',
+    TrainingContentSchema,
+    'a subdocument of trainingModules: it is deleted with the module that holds it',
+  ],
+  [
+    'trainingContentFile (subdocument)',
+    TrainingContentFileSchema,
+    'a subdocument of a module\'s content, for the same reason',
+  ],
+  [
+    'trainingContentLink (subdocument)',
+    TrainingContentLinkSchema,
+    'a subdocument of a module\'s content, for the same reason',
+  ],
+  [
     'attackPlan (subdocument)',
     AttackPlanSchema,
     'a subdocument of products: it is deleted with the product that holds it',
@@ -121,6 +139,9 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [TrainingCategorySchema, 'TrainingCategorySchema'],
   [TrainingSkillSchema, 'TrainingSkillSchema'],
   [TrainingModuleSchema, 'TrainingModuleSchema'],
+  [TrainingContentSchema, 'TrainingContentSchema'],
+  [TrainingContentFileSchema, 'TrainingContentFileSchema'],
+  [TrainingContentLinkSchema, 'TrainingContentLinkSchema'],
   [ActivationTemplateSchema, 'ActivationTemplateSchema'],
   [ActivationAspectSchema, 'ActivationAspectSchema'],
   [ActivationItemSchema, 'ActivationItemSchema'],

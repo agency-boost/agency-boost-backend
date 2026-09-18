@@ -108,6 +108,11 @@ import { ActivityConfigService } from '@/modules/config/activity.service';
 import { ProvisioningService } from '@/modules/config/provisioning.service';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
 import { ProductService } from '@/modules/products/product.service';
+import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
+import { AssetRepository } from '@/modules/assets/asset.repository';
+import { AssetService } from '@/modules/assets/asset.service';
+import { StoragePort } from '@/modules/assets/storage.port';
+import { StubStorage } from '../../../test/stub-storage';
 import {
   TenantConfigController, TenantConfigReadController,
 } from '@/modules/config/config.controller';
@@ -190,6 +195,7 @@ describe('auth and admin over HTTP', () => {
           { name: TrainingModule.name, schema: TrainingModuleSchema },
         { name: ActivationTemplate.name, schema: ActivationTemplateSchema },
         { name: Product.name, schema: ProductSchema },
+        { name: Asset.name, schema: AssetSchema },
         ]),
       ],
       controllers: [
@@ -222,6 +228,11 @@ describe('auth and admin over HTTP', () => {
     { provide: OfficeCounter, useClass: KpmOfficeCounter },
         ProvisioningService,
         ProductService,
+        // P5-T2: a training module's content is files (ADR-0032). The vendor is stubbed —
+        // this file's subject is the HTTP contract, not Cloudinary.
+        AssetRepository,
+        AssetService,
+        { provide: StoragePort, useClass: StubStorage },
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService, OrgLevelService,
         RosterImportService,

@@ -21,7 +21,9 @@ import {
   ActivityCategoryDto, ActivityTypeDto, LeadPipelineDto, LeadStatusDto, RatioDefinitionDto,
   CompanyTemplateDto, PublishStateDto, TenantConfigDto,
 } from '@/modules/config/config.response.dto';
-import { TrainingCategoryDto } from '@/modules/training/training.response.dto';
+import {
+  ModuleContentDto, SignedUploadDto, SignedUrlDto, TrainingCategoryDto,
+} from '@/modules/training/training.response.dto';
 import { ActivationChecklistDto } from '@/modules/activation/activation.response.dto';
 import { ProductResponseDto } from '@/modules/products/product.response.dto';
 
@@ -120,6 +122,13 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_archiveRatio: { type: RatioDefinitionDto },
   TenantConfigController_restoreRatio: { type: RatioDefinitionDto },
   TrainingController_list: { type: TrainingCategoryDto, isArray: true },
+  // A module's content (P5-T2). Not part of the office snapshot: it is files, not rows.
+  TrainingController_requestUpload: { type: SignedUploadDto },
+  TrainingController_confirmUpload: { type: ModuleContentDto },
+  TrainingController_readContent: { type: ModuleContentDto },
+  TrainingController_saveContent: { type: ModuleContentDto },
+  TrainingController_resetContent: { type: ModuleContentDto },
+  TrainingController_contentUrl: { type: SignedUrlDto },
   ActivationController_read: { type: ActivationChecklistDto },
   ActivationController_saveDraft: { type: ActivationChecklistDto },
   ActivationController_publish: { type: ActivationChecklistDto },

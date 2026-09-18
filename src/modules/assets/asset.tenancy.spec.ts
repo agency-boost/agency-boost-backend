@@ -6,7 +6,10 @@ import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { AssetRepository } from './asset.repository';
 import { AssetSchema } from './asset.schema';
 import { AssetService } from './asset.service';
-import { SignedUpload, StoragePort, StoredObject } from './storage.port';
+import { AssetOwner, SignedUpload, StoragePort, StoredObject } from './storage.port';
+
+/** The folder the adapter would use, mirrored so a stub key still reads like a real one. */
+const ownerFolder = (o: AssetOwner) => (o.kind === 'kpm' ? o.kpmId : `company/${o.companyId}`);
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 const KPM_A = '66f0000000000000000000a1';
@@ -14,11 +17,11 @@ const KPM_B = '66f0000000000000000000b1';
 
 class StubStorage extends StoragePort {
   removed: string[] = [];
-  async createSignedUpload(p: { kpmId: string; folder: string }): Promise<SignedUpload> {
+  async createSignedUpload(p: { owner: AssetOwner; folder: string }): Promise<SignedUpload> {
     return {
       uploadUrl: 'https://upload.test',
       // Unique per call, because `storageKey` is unique across the collection.
-      storageKey: `dev/${p.kpmId}/${p.folder}/${Math.random().toString(36).slice(2)}`,
+      storageKey: `dev/${ownerFolder(p.owner)}/${p.folder}/${Math.random().toString(36).slice(2)}`,
       signature: 'sig',
       expiresAt: NOW,
     };

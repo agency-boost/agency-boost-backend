@@ -96,3 +96,88 @@ export class TrainingCategoryDto implements TrainingCategoryView {
   @ApiProperty({ type: [TrainingSkillDto] })
   skills!: TrainingSkillDto[];
 }
+
+// ------------------------------------------------------------ a module's content (P5-T2)
+
+export class ContentFileDto {
+  @ApiProperty({ type: String, description: 'Stable for the life of the item.' })
+  id!: string;
+
+  @ApiProperty({ type: String })
+  label!: string;
+
+  @ApiProperty({
+    type: String,
+    description:
+      'The key, never a URL. A URL is minted per request, signed, and expires in 300 seconds; a '
+      + 'stored one would be a permanent public link to a private file.',
+  })
+  storageKey!: string;
+
+  @ApiProperty({ type: String })
+  mimeType!: string;
+
+  @ApiProperty({ type: Number })
+  bytes!: number;
+}
+
+export class ContentLinkDto {
+  @ApiProperty({ type: String })
+  id!: string;
+
+  @ApiProperty({ type: String })
+  label!: string;
+
+  @ApiProperty({ type: String, description: '`https` only.' })
+  url!: string;
+}
+
+export class ContentDto {
+  @ApiProperty({ type: [ContentFileDto] })
+  files!: ContentFileDto[];
+
+  @ApiProperty({ type: [ContentFileDto] })
+  videos!: ContentFileDto[];
+
+  @ApiProperty({ type: [ContentLinkDto] })
+  links!: ContentLinkDto[];
+}
+
+export class ModuleContentDto {
+  @ApiProperty({ type: String })
+  moduleCode!: string;
+
+  @ApiProperty({ type: String })
+  title!: string;
+
+  @ApiProperty({ type: ContentDto, description: 'What agents in this office are shown.' })
+  content!: ContentDto;
+
+  @ApiProperty({
+    type: ContentDto,
+    description: 'The company\'s material, always — so a screen can say what "use theirs again" restores.',
+  })
+  companyContent!: ContentDto;
+
+  @ApiProperty({ type: Boolean, description: 'False while this office uses the company\'s material unchanged.' })
+  overridden!: boolean;
+}
+
+export class SignedUploadDto {
+  @ApiProperty({ type: String, description: 'Where the browser PUTs the bytes. They never transit this API.' })
+  uploadUrl!: string;
+
+  @ApiProperty({ type: String })
+  storageKey!: string;
+
+  @ApiProperty({ type: String })
+  signature!: string;
+
+  @ApiProperty({ type: String, format: 'date-time' })
+  expiresAt!: string;
+}
+
+export class SignedUrlDto {
+  @ApiProperty({ type: String, description: 'Valid for 300 seconds.' })
+  url!: string;
+}

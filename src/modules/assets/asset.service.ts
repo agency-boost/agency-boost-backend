@@ -6,7 +6,7 @@ import { HttpStatus } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { AssetDocument } from './asset.schema';
 import { AssetRepository } from './asset.repository';
-import { ASSET_LIMITS, SignedUpload, StoragePort } from './storage.port';
+import { ASSET_LIMITS, SignedUpload, StoragePort, StoredObject } from './storage.port';
 
 @Injectable()
 export class AssetService {
@@ -34,7 +34,9 @@ export class AssetService {
     }
     this.refuseBeyondLimits(params.mimeType, params.bytes);
 
-    const signed = await this.storage.createSignedUpload({ kpmId, ...params });
+    const signed = await this.storage.createSignedUpload({
+      owner: { kind: 'kpm', kpmId }, ...params,
+    });
     await this.assets.create(ctx, {
       storageKey: signed.storageKey,
       mimeType: params.mimeType,
@@ -66,17 +68,7 @@ export class AssetService {
       throw new DomainException(ErrorCode.NOT_FOUND, 'Asset not found.', HttpStatus.NOT_FOUND);
     }
 
-    const stored = await this.storage.describe(storageKey);
-    if (!stored) {
-      throw new DomainException(
-        ErrorCode.ASSET_NOT_UPLOADED,
-        'That file never finished uploading. Try again.',
-        HttpStatus.CONFLICT,
-        { storageKey },
-      );
-    }
-
-    this.refuseBeyondLimits(stored.mimeType, stored.bytes);
+    const stored = await this.requireStored(storageKey);
     const confirmed = await this.assets.updateById(ctx, String(asset._id), {
       $set: { mimeType: stored.mimeType, bytes: stored.bytes, uploadState: 'confirmed' },
     });
@@ -100,13 +92,7 @@ export class AssetService {
     if (!asset) {
       throw new DomainException(ErrorCode.NOT_FOUND, 'Asset not found.', HttpStatus.NOT_FOUND);
     }
-    if (asset.uploadState !== 'confirmed') {
-      throw new DomainException(
-        ErrorCode.ASSET_NOT_CONFIRMED,
-        'This file has not finished uploading yet. Try again shortly.',
-        HttpStatus.CONFLICT,
-      );
-    }
+    this.requireConfirmed(asset);
     return this.storage.createSignedUrl(storageKey, ASSET_LIMITS.SIGNED_URL_TTL_SECONDS);
   }
 
@@ -131,6 +117,91 @@ export class AssetService {
   async findOrphans(ctx: RequestContext, olderThanDays = 30): Promise<AssetDocument[]> {
     const cutoff = new Date(this.clock.now().getTime() - olderThanDays * 86_400_000);
     return this.assets.findAcrossAllTenants(ctx, { refCount: 0, createdAt: { $lt: cutoff } });
+  }
+
+  // ------------------------------------------------ the company's shared material (ADR-0032)
+
+  /**
+   * An upload that belongs to the **company**, not to any office.
+   *
+   * Super Admin's alone, and the caller has already been through `company_template:write`. It
+   * lands under `company/<companyId>`, every office of that company reads it by reference, and
+   * no office's erasure touches it.
+   */
+  async requestCompanyUpload(
+    companyId: string,
+    params: { folder: string; filename: string; mimeType: string; bytes: number },
+  ): Promise<SignedUpload> {
+    this.refuseBeyondLimits(params.mimeType, params.bytes);
+
+    const signed = await this.storage.createSignedUpload({
+      owner: { kind: 'company', companyId }, ...params,
+    });
+    await this.assets.createCompanyAsset({
+      companyId,
+      storageKey: signed.storageKey,
+      mimeType: params.mimeType,
+      bytes: params.bytes,
+      originalFilename: params.filename,
+      // No membership: a Super Admin is in no office, and inventing one would attribute the
+      // upload to a member who does not exist.
+      uploadedByMembershipId: null,
+      refCount: 0,
+      uploadState: 'pending',
+    } as Partial<AssetDocument>);
+    return signed;
+  }
+
+  async confirmCompanyUpload(companyId: string, storageKey: string): Promise<AssetDocument> {
+    const asset = await this.assets.findCompanyAsset(companyId, storageKey);
+    if (!asset) {
+      throw new DomainException(ErrorCode.NOT_FOUND, 'Asset not found.', HttpStatus.NOT_FOUND);
+    }
+    const stored = await this.requireStored(storageKey);
+    return (await this.assets.updateCompanyAsset(companyId, storageKey, {
+      mimeType: stored.mimeType, bytes: stored.bytes, uploadState: 'confirmed',
+    }))!;
+  }
+
+  /**
+   * A delivery URL for the company's material.
+   *
+   * **Authorised by who may read the module, not by who owns the file** (ADR-0032): a member of
+   * any office of that company may read it, which is what sharing by reference means. The caller
+   * passes the company its reader belongs to — never one from the request body — so an office of
+   * another insurer asking for this key gets a 404 like any other stranger.
+   */
+  async companyUrlFor(companyId: string, storageKey: string): Promise<string> {
+    const asset = await this.assets.findCompanyAsset(companyId, storageKey);
+    if (!asset) {
+      throw new DomainException(ErrorCode.NOT_FOUND, 'Asset not found.', HttpStatus.NOT_FOUND);
+    }
+    this.requireConfirmed(asset);
+    return this.storage.createSignedUrl(storageKey, ASSET_LIMITS.SIGNED_URL_TTL_SECONDS);
+  }
+
+  private async requireStored(storageKey: string): Promise<StoredObject> {
+    const stored = await this.storage.describe(storageKey);
+    if (!stored) {
+      throw new DomainException(
+        ErrorCode.ASSET_NOT_UPLOADED,
+        'That file never finished uploading. Try again.',
+        HttpStatus.CONFLICT,
+        { storageKey },
+      );
+    }
+    this.refuseBeyondLimits(stored.mimeType, stored.bytes);
+    return stored;
+  }
+
+  private requireConfirmed(asset: AssetDocument): void {
+    if (asset.uploadState !== 'confirmed') {
+      throw new DomainException(
+        ErrorCode.ASSET_NOT_CONFIRMED,
+        'This file has not finished uploading yet. Try again shortly.',
+        HttpStatus.CONFLICT,
+      );
+    }
   }
 
   /**

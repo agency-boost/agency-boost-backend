@@ -1,14 +1,19 @@
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { AssetService } from './asset.service';
-import { ASSET_LIMITS, SignedUpload, StoragePort, StoredObject } from './storage.port';
+import {
+  ASSET_LIMITS, AssetOwner, SignedUpload, StoragePort, StoredObject,
+} from './storage.port';
+
+/** The folder the adapter would use, mirrored so a stub key still reads like a real one. */
+const ownerFolder = (o: AssetOwner) => (o.kind === 'kpm' ? o.kpmId : `company/${o.companyId}`);
 
 class StubStorage extends StoragePort {
   removed: string[] = [];
-  async createSignedUpload(p: { kpmId: string; folder: string }): Promise<SignedUpload> {
+  async createSignedUpload(p: { owner: AssetOwner; folder: string }): Promise<SignedUpload> {
     return {
       uploadUrl: 'https://upload.test',
-      storageKey: `dev/${p.kpmId}/${p.folder}/01ABC`,
+      storageKey: `dev/${ownerFolder(p.owner)}/${p.folder}/01ABC`,
       signature: 'sig',
       expiresAt: new Date('2026-09-04T00:10:00Z'),
     };

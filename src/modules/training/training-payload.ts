@@ -10,8 +10,36 @@ import {
 export interface TrainingTaxonomyPayload {
   categories: { code: string; label: string; description?: string | null }[];
   skills: { code: string; categoryCode: string; label: string }[];
-  modules: { code: string; skillCode: string; title: string; publishState?: TrainingPublishState }[];
+  modules: {
+    code: string;
+    skillCode: string;
+    title: string;
+    publishState?: TrainingPublishState;
+    /**
+     * The company's material for this module (P5-T2, ADR-0032).
+     *
+     * Its files are **company-owned assets** — `companyId`, no `kpmId` — and provisioning copies
+     * this document by **reference**: a new office points at the same objects and stores no bytes
+     * of its own. A published company asset never changes, so new material is a new template
+     * version, which reaches offices created afterwards and never reaches back (ADR-0018).
+     */
+    content?: TrainingContentPayload;
+  }[];
 }
+
+/** A module's content in a template. The same three sections a module holds. */
+export interface TrainingContentPayload {
+  files?: { id: string; label: string; storageKey: string; mimeType: string; bytes: number }[];
+  videos?: { id: string; label: string; storageKey: string; mimeType: string; bytes: number }[];
+  links?: { id: string; label: string; url: string }[];
+}
+
+/** A template's content as a module stores it, with the three sections always present. */
+export const contentFromPayload = (raw: TrainingContentPayload | undefined) => ({
+  files: (raw?.files ?? []).map((f) => ({ ...f })),
+  videos: (raw?.videos ?? []).map((f) => ({ ...f })),
+  links: (raw?.links ?? []).map((l) => ({ ...l })),
+});
 
 /** The domain defaults as a payload: a template's starting point, and a company's seed until it publishes one. */
 export function defaultTrainingTaxonomy(): TrainingTaxonomyPayload {
@@ -118,6 +146,11 @@ export function trainingSeedDocuments(kpmId: string, payload: TrainingTaxonomyPa
       ...base, code: code(m.code), skillCode: code(m.skillCode), title: m.title.trim(),
       publishState: m.publishState ?? 'draft',
       displayOrder: nextIn(`skill:${code(m.skillCode)}`),
+      // **By reference.** The office points at the company's objects and stores no bytes of its
+      // own, which is what makes a new office cost nothing in storage (ADR-0032).
+      companyContent: contentFromPayload(m.content),
+      // No replacement until the office makes one; `null` is what the fallback rule reads.
+      officeContent: null,
     })),
   };
 }

@@ -31,7 +31,10 @@ import {
   TrainingCategorySchema,
 } from '@/modules/training/training-category.schema';
 import { TrainingSkillSchema } from '@/modules/training/training-skill.schema';
-import { TrainingModuleSchema } from '@/modules/training/training-module.schema';
+import {
+  TrainingContentFileSchema, TrainingContentLinkSchema, TrainingContentSchema,
+  TrainingModuleSchema,
+} from '@/modules/training/training-module.schema';
 import {
   ActivationAspectSchema, ActivationItemSchema, ActivationTemplateSchema,
 } from '@/modules/activation/activation-template.schema';
@@ -129,6 +132,21 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
       + 'the opposite of what it is',
   ],
   [
+    'trainingContent (subdocument)',
+    TrainingContentSchema,
+    'a subdocument of trainingModules: no collection and no _id of its own',
+  ],
+  [
+    'trainingContentFile (subdocument)',
+    TrainingContentFileSchema,
+    'a subdocument of a module\'s content, for the same reason',
+  ],
+  [
+    'trainingContentLink (subdocument)',
+    TrainingContentLinkSchema,
+    'a subdocument of a module\'s content, for the same reason',
+  ],
+  [
     'attackPlan (subdocument)',
     AttackPlanSchema,
     'a subdocument of products: no collection and no _id of its own',
@@ -154,6 +172,11 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
  * a decision somebody made rather than an oversight.
  */
 const CROSS_TENANT_INDEXES: Record<string, string> = {
+  'assets:companyId,createdAt':
+    "the company's shared training material (ADR-0032). A company asset carries no `kpmId` at " +
+    'all — it belongs to the insurer and every office of that company reads the same row by ' +
+    'reference — so an index leading with one would never match it. The read is the named ' +
+    'unscoped `findCompanyAsset`, filtered by company, never the scoped repository.',
   'memberships:leaderCode':
     'the leader code a joiner types before they belong anywhere. There is no tenant to ' +
     'scope the lookup to — it is the code that names the office — so it is unique ' +
@@ -178,6 +201,9 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [TrainingCategorySchema, 'TrainingCategorySchema'],
   [TrainingSkillSchema, 'TrainingSkillSchema'],
   [TrainingModuleSchema, 'TrainingModuleSchema'],
+  [TrainingContentSchema, 'TrainingContentSchema'],
+  [TrainingContentFileSchema, 'TrainingContentFileSchema'],
+  [TrainingContentLinkSchema, 'TrainingContentLinkSchema'],
   [ActivationTemplateSchema, 'ActivationTemplateSchema'],
   [ActivationAspectSchema, 'ActivationAspectSchema'],
   [ActivationItemSchema, 'ActivationItemSchema'],

@@ -4,7 +4,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import { ulid } from 'ulid';
 import { Clock } from '@/common/clock/clock.port';
 import {
-  ASSET_LIMITS, FORMAT_TO_MIME_TYPE, SignedUpload, StoragePort, StoredObject,
+  ASSET_LIMITS, AssetOwner, FORMAT_TO_MIME_TYPE, SignedUpload, StoragePort, StoredObject,
 } from './storage.port';
 
 /**
@@ -33,13 +33,26 @@ export class CloudinaryAdapter extends StoragePort {
     return this.config.getOrThrow<string>('CLOUDINARY_FOLDER_PREFIX');
   }
 
+  /**
+   * `<kpmId>` or `company/<companyId>` (ADR-0032, P5-T2 AC-2).
+   *
+   * The literal `company` segment keeps the two apart under one prefix: an office id and a
+   * company id are both opaque strings, so without it a company folder would be
+   * indistinguishable from an office's and per-office erasure could take the company's
+   * material with it.
+   */
+  private ownerFolder(owner: AssetOwner): string {
+    return owner.kind === 'kpm' ? owner.kpmId : `company/${owner.companyId}`;
+  }
+
   async createSignedUpload(params: {
-    kpmId: string;
+    owner: AssetOwner;
     folder: string;
     filename: string;
     mimeType: string;
   }): Promise<SignedUpload> {
-    const storageKey = `${this.prefix()}/${params.kpmId}/${params.folder}/${ulid()}`;
+    const storageKey = `${this.prefix()}/${this.ownerFolder(params.owner)}`
+      + `/${params.folder}/${ulid()}`;
     const timestamp = Math.floor(this.clock.now().getTime() / 1000);
     const signature = cloudinary.utils.api_sign_request(
       { public_id: storageKey, timestamp },

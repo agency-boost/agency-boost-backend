@@ -18,4 +18,31 @@ export class AssetRepository extends TenantScopedRepository<AssetDocument> {
   constructor(@InjectModel(Asset.name) model: Model<AssetDocument>) {
     super(model, 'assets');
   }
+
+  /**
+   * The **company's** shared training material (ADR-0032).
+   *
+   * Deliberately verbose, and deliberately not reachable through `scope()`: a company asset
+   * carries no `kpmId`, so the scoped filter would never match one — and if it were made to,
+   * the row would stop being the company's. Every office of the company reads the same row,
+   * which is the whole point of sharing by reference.
+   *
+   * The caller enforces **who** may reach it: Super Admin to write, and a member of that
+   * company to read.
+   */
+  async findCompanyAsset(companyId: string, storageKey: string): Promise<AssetDocument | null> {
+    return this.model.findOne({ companyId, storageKey, deletedAt: null }).exec();
+  }
+
+  async createCompanyAsset(doc: Partial<AssetDocument>): Promise<AssetDocument> {
+    return this.model.create({ ...doc, kpmId: null, deletedAt: null });
+  }
+
+  async updateCompanyAsset(
+    companyId: string, storageKey: string, set: Record<string, unknown>,
+  ): Promise<AssetDocument | null> {
+    return this.model
+      .findOneAndUpdate({ companyId, storageKey, deletedAt: null }, { $set: set }, { new: true })
+      .exec();
+  }
 }

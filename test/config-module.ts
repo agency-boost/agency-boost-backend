@@ -41,6 +41,10 @@ import {
 import { ActivationTemplateRepository } from '@/modules/activation/activation.repository';
 import { ActivationService } from '@/modules/activation/activation.service';
 import { ProductSchema } from '@/modules/products/product.schema';
+import { AssetSchema } from '@/modules/assets/asset.schema';
+import { AssetRepository } from '@/modules/assets/asset.repository';
+import { AssetService } from '@/modules/assets/asset.service';
+import { StubStorage } from './stub-storage';
 import { ProductService } from '@/modules/products/product.service';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
@@ -76,6 +80,7 @@ export function configModule(now: Date) {
   const productRows = model('ProductModel', ProductSchema);
 
   const clock: Clock = new FixedClock(now);
+  const storage = new StubStorage();
   const audit = new AuditService(model('AuditLogModel', AuditLogSchema) as never);
 
   const leads = new LeadStatusService(
@@ -107,12 +112,19 @@ export function configModule(now: Date) {
     new RatioDefinitionRepository(ratioDefinitions as never), activity, orgLevels, audit, clock,
   );
   // P5-T1. Before `config`, which renders what agents are offered from it.
+  // P5-T2: a module's content is files, and files are the asset registry's (ADR-0032).
+  const assetRows = model('AssetModelForConfig', AssetSchema);
+  const assets = new AssetService(
+    new AssetRepository(assetRows as never), storage, clock,
+  );
   const training = new TrainingService(
     new TrainingCategoryRepository(trainingCategories as never),
     new TrainingSkillRepository(trainingSkills as never),
     new TrainingModuleRepository(trainingModules as never),
     audit,
     clock,
+    assets,
+    kpms as never,
   );
   const config = new TenantConfigService(
     activity, ratios, leads,
@@ -158,7 +170,7 @@ export function configModule(now: Date) {
   return {
     activity, ratios, leads, config, provisioning, templates, audit, clock, changes,
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
-    products,
+    products, assets, storage,
   };
 }
 

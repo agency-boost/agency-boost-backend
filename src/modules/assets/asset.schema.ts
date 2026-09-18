@@ -13,8 +13,24 @@ export type AssetDocument = HydratedDocument<Asset>;
  */
 @Schema({ ...baseSchemaOptions, collection: 'assets' })
 export class Asset {
-  @Prop({ type: String, required: true, index: true })
-  kpmId!: string;
+  /**
+   * **A row has exactly one owner** (ADR-0032).
+   *
+   * `kpmId` set and `companyId` null — an office's own upload, read through the scoped
+   * repository like every other tenant document.
+   *
+   * `companyId` set and `kpmId` null — the **company's** training material, written only by
+   * Super Admin and shared by reference with every office of that company. It is not any
+   * office's data, so it is read through an explicitly named unscoped method filtered by
+   * company, never by the scoped repository. That is also what keeps the shared reference
+   * compatible with erasure (ADR-0007): an office's erasure takes its own uploads and leaves
+   * the company's material, which was never its to delete.
+   */
+  @Prop({ type: String, default: null, index: true })
+  kpmId!: string | null;
+
+  @Prop({ type: String, default: null, index: true })
+  companyId!: string | null;
 
   /** Cloudinary public_id, including the tenant folder prefix. */
   @Prop({ type: String, required: true, unique: true })
@@ -29,8 +45,9 @@ export class Asset {
   @Prop({ type: String, default: null })
   originalFilename!: string | null;
 
-  @Prop({ type: String, required: true })
-  uploadedByMembershipId!: string;
+  /** Null for the company's material: a Super Admin is a member of no office (ADR-0032). */
+  @Prop({ type: String, default: null })
+  uploadedByMembershipId!: string | null;
 
   /** How many documents reference this asset. Zero for 30 days means it is an orphan. */
   @Prop({ type: Number, default: 0 })
@@ -58,3 +75,25 @@ export class Asset {
 export const AssetSchema = SchemaFactory.createForClass(Asset);
 AssetSchema.index({ kpmId: 1, createdAt: -1 });
 AssetSchema.index({ kpmId: 1, refCount: 1, createdAt: 1 });
+/** The company's shared material, read by every office of that company (ADR-0032). */
+AssetSchema.index({ companyId: 1, createdAt: -1 });
+
+/**
+ * Exactly one owner, enforced by the database rather than by every caller remembering.
+ *
+ * A row with both would be an office's file and a company's at once — deliverable to offices
+ * that must not see it, and undeletable by the erasure that should take it. A row with
+ * neither belongs to nobody and no scoped read would ever find it again.
+ */
+AssetSchema.pre('validate', function enforceOneOwner(next) {
+  const doc = this as unknown as { kpmId: string | null; companyId: string | null };
+  const owners = [doc.kpmId, doc.companyId].filter((v) => v !== null && v !== undefined);
+  if (owners.length !== 1) {
+    next(new Error(
+      'An asset belongs to exactly one owner: a kpmId for an office\'s upload, or a companyId '
+      + 'for the company\'s shared material (ADR-0032).',
+    ));
+    return;
+  }
+  next();
+});
