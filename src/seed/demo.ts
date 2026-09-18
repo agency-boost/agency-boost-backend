@@ -21,6 +21,13 @@ import { PasswordService } from '@/modules/auth/password.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
+import {
+  KpmProductConfig, KpmProductConfigSchema,
+} from '@/modules/products/kpm-product-config.schema';
+import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events/event.schema';
+import {
+  Campaign, CampaignSchema, QualificationRule, QualificationRuleSchema,
+} from '@/modules/campaigns/campaign.schema';
 import { DEFAULT_ORG_LADDER } from '@/domain/constants';
 import {
   CompanyOrgLevel, CompanyOrgLevelSchema,
@@ -37,8 +44,9 @@ import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.sche
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { Notification, NotificationSchema } from '@/modules/notifications/notification.schema';
 import {
-  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES, SEED_PRODUCTS,
-  SEED_RATIO_DEFINITIONS,
+  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_EVENT_TYPES, SEED_LEAD_STATUSES,
+  SEED_MOC_RULES, SEED_PRODUCTION_CLUB_TIERS, SEED_PRODUCTS, SEED_RATIO_DEFINITIONS,
+  metricByKey,
 } from '@/domain/constants';
 import {
   ActivityCategory, ActivityCategorySchema,
@@ -107,6 +115,11 @@ async function main(): Promise<void> {
   const TrainingModules = mongoose.model(TrainingModule.name, TrainingModuleSchema);
   const ActivationTemplates = mongoose.model(ActivationTemplate.name, ActivationTemplateSchema);
   const Products = mongoose.model(Product.name, ProductSchema);
+  const KpmProductConfigs = mongoose.model(KpmProductConfig.name, KpmProductConfigSchema);
+  const EventTypes = mongoose.model(EventType.name, EventTypeSchema);
+  const Events = mongoose.model(Event.name, EventSchema);
+  const Campaigns = mongoose.model(Campaign.name, CampaignSchema);
+  const QualificationRules = mongoose.model(QualificationRule.name, QualificationRuleSchema);
   const Memberships = mongoose.model(Membership.name, MembershipSchema);
   const History = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
   const Groups = mongoose.model(Group.name, GroupSchema);
@@ -134,7 +147,8 @@ async function main(): Promise<void> {
       // the same reason: a previous run's shelf orphaned against a company id that no longer
       // exists renders as an empty Products tab on a company that should have 31.
       'trainingCategories', 'trainingSkills', 'trainingModules', 'activationTemplates',
-      'companyTemplates', 'products',
+      'companyTemplates', 'products', 'kpmProductConfigs', 'eventTypes', 'events',
+      'campaigns', 'qualificationRules',
     ];
     for (const name of owned) {
       const { deletedCount } = await mongoose.connection.collection(name).deleteMany({});
@@ -204,6 +218,7 @@ async function main(): Promise<void> {
       }))
     );
     await seedProducts(String(row._id));
+    await seedCarrierRules(String(row._id));
     return row;
   }
 
@@ -217,6 +232,53 @@ async function main(): Promise<void> {
    * Without it the Company template's Products tab renders an empty catalog on the one company
    * the demo has — which is what the P5-T4 browser walk found.
    */
+  /**
+   * MOC and the production club tiers (P5-T7, ADR-0026), as `TenantService.createCompany` gives a
+   * real company. Mirrored rather than called for the same reason the office presets are: this file
+   * writes documents and owns no Nest container, and the **values** come from `@/domain/constants`.
+   */
+  async function seedCarrierRules(companyId: string) {
+    if (await QualificationRules.exists({ companyId })) return;
+
+    await QualificationRules.insertMany([
+      ...SEED_PRODUCTION_CLUB_TIERS.map((tier) => ({
+        companyId, scope: 'company', kind: 'production_club',
+        code: tier.code, name: tier.name, appliesToOrgLevelCodes: [],
+        criteriaGroups: [{
+          mode: 'all',
+          criteria: [{
+            metricKey: 'APE_ACHIEVED', comparator: 'gte',
+            value: tier.minAnnualApe, unit: 'idr_minor',
+          }],
+        }],
+        groupMode: 'all', reward: tier.reward, rank: tier.rank,
+        waitingOnMetrics: [], effectiveFrom: null, effectiveTo: null, deletedAt: null,
+      })),
+      ...SEED_MOC_RULES.map((rule, index) => {
+        const criteriaGroups = rule.criteriaGroups.map((group) => ({
+          mode: group.mode,
+          criteria: group.criteria.map((c) => ({
+            metricKey: c.metricKey, comparator: c.comparator, value: c.value,
+            unit: metricByKey(c.metricKey)?.unit ?? (c.value > 1_000_000 ? 'idr_minor' : 'count'),
+          })),
+        }));
+        return {
+          companyId, scope: 'company', kind: 'moc',
+          code: rule.code, name: rule.name,
+          appliesToOrgLevelCodes: [...rule.appliesToOrgLevelCodes],
+          criteriaGroups, groupMode: rule.groupMode, reward: '', rank: index + 1,
+          // The inputs the registry does not define yet, so the screen can say what it is waiting
+          // on rather than showing a rule nobody can ever pass.
+          waitingOnMetrics: [...new Set(
+            criteriaGroups.flatMap((g) => g.criteria).map((c) => c.metricKey)
+              .filter((key) => metricByKey(key) === undefined),
+          )],
+          effectiveFrom: null, effectiveTo: null, deletedAt: null,
+        };
+      }),
+    ]);
+  }
+
   async function seedProducts(companyId: string) {
     if (await Products.exists({ companyId })) return;
     await Products.insertMany(SEED_PRODUCTS.map((product) => ({
@@ -268,6 +330,12 @@ async function main(): Promise<void> {
    * other by `provisioning.tenancy.spec.ts`; what is duplicated here is the *call*, not
    * the values, which come from `@/domain/constants` exactly as provisioning's do.
    */
+  /** Which insurer an office belongs to — the decisions below are about that company's shelf. */
+  async function companyOf(kpmId: string): Promise<string> {
+    const kpm = await Kpms.findById(kpmId).select('companyId').lean().exec();
+    return String((kpm as { companyId?: string } | null)?.companyId ?? '');
+  }
+
   async function configure(kpmId: string) {
     if (await ActivityTypes.findOne({ kpmId }).exec()) return;
 
@@ -299,6 +367,128 @@ async function main(): Promise<void> {
     await TrainingCategories.insertMany(training.categories);
     await TrainingSkills.insertMany(training.skills);
     await TrainingModules.insertMany(training.modules);
+
+    // The event types a new office is provisioned with (P5-T6). Without them the Events
+    // screen opens empty and says an office has nothing to file an event under.
+    await EventTypes.insertMany(SEED_EVENT_TYPES.map((type, index) => ({
+      kpmId, code: type.code, label: type.label, description: null,
+      emoji: type.emoji, color: type.color, displayOrder: index + 1,
+      version: 1, status: 'active', archivedAt: null, deletedAt: null,
+      createdBy: null, updatedBy: null,
+    })));
+
+    /*
+     * Three events, one in each phase (P5-T6).
+     *
+     * Dated **relative to the seeded clock**, so the demo always has something upcoming, something
+     * running and something past. A fixed date would drift into all-past within a month and the
+     * phase badge — the thing this task exists to get right — would stop being demonstrable.
+     */
+    const day = 86_400_000;
+    const at = (offsetDays: number, hours: number) =>
+      new Date(clock.now().getTime() + offsetDays * day + hours * 3_600_000);
+    await Events.insertMany([
+      {
+        kpmId, code: 'KICKOFF', typeCode: 'TRAINING', title: 'Kickoff 2026',
+        blurb: 'What the year looks like, and what we are measured on.',
+        description: '', startsAt: at(14, 2), endsAt: at(14, 6), location: 'Kantor KPM',
+        locationUrl: null,
+        audience: { issuer: 'kpm', scope: 'all_agents', inviteeMembershipIds: [] },
+      },
+      {
+        kpmId, code: 'LEADERS_HUDDLE', typeCode: 'RECOGNITION',
+        title: 'Leaders’ huddle', blurb: 'Unit numbers, and who needs help this month.',
+        description: '', startsAt: at(0, -1), endsAt: at(0, 2), location: 'Ruang rapat',
+        locationUrl: null,
+        // Leaders by the graph, never by job title — which is what makes this row worth seeding.
+        audience: { issuer: 'kpm', scope: 'leaders', inviteeMembershipIds: [] },
+      },
+      {
+        kpmId, code: 'PRULINK_BRIEFING', typeCode: 'PRODUCT_LAUNCH',
+        title: 'PRULink briefing', blurb: 'The new rider, and how to position it.',
+        description: '', startsAt: at(-21, 2), endsAt: at(-21, 5), location: 'Online',
+        locationUrl: 'https://meet.example.test/prulink',
+        audience: { issuer: 'company', scope: 'all_agents', inviteeMembershipIds: [] },
+      },
+    ].map((event) => ({
+      ...event, version: 1, status: 'active', archivedAt: null, deletedAt: null,
+      createdBy: null, updatedBy: null,
+    })));
+
+    /*
+     * Three product decisions (P5-T5), so the Products screen shows every state it has.
+     *
+     * An office with no rows at all reads as *"everything inherited"*, which is true but shows
+     * none of what the screen is for: one product it turned off, one it renamed, and one whose
+     * script it has rewritten and not yet approved.
+     */
+    const shelf = await Products.find({ companyId: await companyOf(kpmId) })
+      .sort({ sortOrder: 1 }).limit(3).lean().exec();
+    if (shelf.length === 3) {
+      await KpmProductConfigs.insertMany([
+        {
+          kpmId, productId: String(shelf[0]._id),
+          active: null,
+          overrides: { displayName: `${String(shelf[0].name)} (nama kami)` },
+          reviewState: 'none',
+        },
+        {
+          kpmId, productId: String(shelf[1]._id),
+          // Turned off here, and still on the company's shelf — the distinction the screen exists
+          // to make visible.
+          active: false,
+          overrides: {},
+          reviewState: 'none',
+        },
+        {
+          kpmId, productId: String(shelf[2]._id),
+          active: true,
+          overrides: {
+            opening: 'Halo Pak/Bu, boleh saya cerita sebentar soal proteksi keluarga?',
+            nextAction: 'Boleh saya siapkan ilustrasinya untuk Bapak/Ibu?',
+          },
+          // Written, not yet approved: agents keep reading the company's words until it is.
+          reviewState: 'pending',
+        },
+      ].map((row) => ({
+        ...row,
+        reviewedByMembershipId: null, reviewedAt: null, rejectionReason: null,
+        approvedOverrideVersion: 0, approvedOverrides: {}, documents: {},
+        version: 1, deletedAt: null, createdBy: null, updatedBy: null,
+      })));
+    }
+
+    /*
+     * Two campaigns, one running and one ended (P5-T7).
+     *
+     * Named after the prototype's own *Year-End Star Club Drive*, which is the office's and fully
+     * editable — the row that has to look different from *Star Club*, the insurer's tier, on the
+     * same screen. Dated relative to the seeded clock so one is always running.
+     */
+    await Campaigns.insertMany([
+      {
+        kpmId, code: 'YEAR_END_DRIVE', title: 'Year-End Star Club Drive',
+        description: 'Push to Star Club before the year closes.',
+        startsAt: at(-30, 0), endsAt: at(60, 0),
+        requirements: [{
+          metricKey: 'APE_ACHIEVED', comparator: 'gte',
+          value: 500_000_000 * 100, unit: 'idr_minor',
+        }],
+        reward: 'Extra unit budget and a dinner',
+      },
+      {
+        kpmId, code: 'RECRUIT_SPRINT', title: 'Recruitment sprint',
+        description: 'Four weeks of recruiting, counted on activity.',
+        startsAt: at(-120, 0), endsAt: at(-90, 0),
+        requirements: [{
+          metricKey: 'RECRUITMENT_SUCCESS_RATE', comparator: 'gte', value: 0.3, unit: 'ratio',
+        }],
+        reward: 'Recognition at the monthly huddle',
+      },
+    ].map((campaign) => ({
+      ...campaign, version: 1, status: 'active', archivedAt: null, deletedAt: null,
+      createdBy: null, updatedBy: null,
+    })));
 
     // The activation checklist (P5-T3), as the office's version 1, published — the state
     // provisioning leaves a new office in, so the settings screen opens on something real.

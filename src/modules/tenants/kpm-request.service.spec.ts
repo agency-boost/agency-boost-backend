@@ -35,6 +35,12 @@ import { ConfigSnapshot, ConfigSnapshotSchema } from '@/modules/config/config-sn
 import { configModule } from '../../../test/config-module';
 import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
+import { EventType, EventTypeSchema } from '@/modules/events/event.schema';
+import {
+  Campaign, CampaignSchema, QualificationRule, QualificationRuleSchema,
+} from '@/modules/campaigns/campaign.schema';
+import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
+import { CampaignService } from '@/modules/campaigns/campaign.service';
 import { ProductService } from '@/modules/products/product.service';
 import {
   CompanyTemplate, CompanyTemplateSchema,
@@ -83,6 +89,7 @@ describe('KpmRequestService (P3.5-T2)', () => {
       mongoose.model(TrainingSkill.name, TrainingSkillSchema) as never,
       mongoose.model(TrainingModule.name, TrainingModuleSchema) as never,
       mongoose.model(ActivationTemplate.name, ActivationTemplateSchema) as never,
+      mongoose.model(EventType.name, EventTypeSchema) as never,
       new FixedClock(NOW),
       configModule(NOW).config,
     );
@@ -96,6 +103,13 @@ describe('KpmRequestService (P3.5-T2)', () => {
       new ProductService(
         mongoose.model(Product.name, ProductSchema) as never,
         companies as never,
+        audit,
+        clock,
+      ),
+      new CampaignService(
+        new CampaignRepository(mongoose.model(Campaign.name, CampaignSchema) as never),
+        mongoose.model(QualificationRule.name, QualificationRuleSchema) as never,
+        kpms as never,
         audit,
         clock,
       ),

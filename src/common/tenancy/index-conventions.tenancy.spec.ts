@@ -47,6 +47,9 @@ import {
 import {
   EventAudienceSchema, EventSchema, EventTypeSchema,
 } from '@/modules/events/event.schema';
+import {
+  CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
+} from '@/modules/campaigns/campaign.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -77,6 +80,7 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['kpmProductConfigs', KpmProductConfigSchema],
   ['eventTypes', EventTypeSchema],
   ['events', EventSchema],
+  ['campaigns', CampaignSchema],
 ];
 
 /**
@@ -156,6 +160,23 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'a subdocument of a module\'s content, for the same reason',
   ],
   [
+    'requirement (subdocument)',
+    RequirementSchema,
+    'a subdocument of campaigns and qualificationRules: no collection and no _id of its own',
+  ],
+  [
+    'criteriaGroup (subdocument)',
+    CriteriaGroupSchema,
+    'a subdocument of qualificationRules, for the same reason',
+  ],
+  [
+    'qualificationRules',
+    QualificationRuleSchema,
+    'company-partitioned, not tenant-scoped (ADR-0035): MOC and the production club tiers are the '
+      + 'insurer\'s carrier rules, seeded per company and editable by no office role at all — '
+      + 'scoping them to one office would say the opposite of what they are',
+  ],
+  [
     'eventAudience (subdocument)',
     EventAudienceSchema,
     'a subdocument of events: no collection and no _id of its own',
@@ -231,6 +252,10 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [EventTypeSchema, 'EventTypeSchema'],
   [EventSchema, 'EventSchema'],
   [EventAudienceSchema, 'EventAudienceSchema'],
+  [CampaignSchema, 'CampaignSchema'],
+  [QualificationRuleSchema, 'QualificationRuleSchema'],
+  [RequirementSchema, 'RequirementSchema'],
+  [CriteriaGroupSchema, 'CriteriaGroupSchema'],
   [ProductDocumentRefSchema, 'ProductDocumentRefSchema'],
   [AttackPlanSchema, 'AttackPlanSchema'],
   [CommissionYearSchema, 'CommissionYearSchema'],

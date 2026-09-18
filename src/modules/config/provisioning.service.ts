@@ -5,7 +5,8 @@ import { RequestContext } from '@/common/context/request-context';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
-  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES, SEED_RATIO_DEFINITIONS,
+  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_EVENT_TYPES, SEED_LEAD_STATUSES,
+  SEED_RATIO_DEFINITIONS,
   type SeedActivityCategory, type SeedActivityType, type SeedLeadStatus, type SeedRatioDefinition,
   defaultDisplayUnitFor, resolveDisplayUnit,
 } from '@/domain/constants';
@@ -18,6 +19,7 @@ import { CompanyTemplate, CompanyTemplateDocument } from './company-template.sch
 import {
   ActivationTemplate, ActivationTemplateDocument,
 } from '@/modules/activation/activation-template.schema';
+import { EventType, EventTypeDocument } from '@/modules/events/event.schema';
 import {
   activationChecklistProblems, activationSeedAspects, activationTrainingLinks,
   defaultActivationChecklist, type ActivationChecklistPayload,
@@ -111,6 +113,7 @@ export class ProvisioningService {
     @InjectModel(TrainingModule.name) private readonly trainingModules: Model<TrainingModuleDocument>,
     @InjectModel(ActivationTemplate.name)
     private readonly activationTemplates: Model<ActivationTemplateDocument>,
+    @InjectModel(EventType.name) private readonly eventTypes: Model<EventTypeDocument>,
     private readonly clock: Clock,
     // Reads the rows this service has just written, and renders them the way agents will
     // read them — one renderer, so the snapshot and the live read cannot disagree.
@@ -273,6 +276,36 @@ export class ProvisioningService {
    * already refuses one (`TemplateService`), so this can only be a template older than that
    * check — and a skill under a category that does not exist would render on no screen.
    */
+  /**
+   * The event types a new office starts with (P5-T6).
+   *
+   * The defaults for now. ADR-0034 puts **event types** on the Company template's Events tab, and
+   * P5-T9 is the task that gives every Phase 5 kind a starting payload, publish validation and a
+   * provisioning step — until then a company cannot publish its own, so there is nothing to read.
+   *
+   * Seeded rather than left empty, because an office with no event type has nothing to file an
+   * event under, and its Events screen would say so on day one for a reason nobody chose.
+   */
+  async seedEventTypes(kpmId: string): Promise<number> {
+    const rows = SEED_EVENT_TYPES.map((type, index) => ({
+      kpmId,
+      code: type.code,
+      label: type.label,
+      description: null,
+      emoji: type.emoji,
+      color: type.color,
+      displayOrder: index + 1,
+      version: 1,
+      status: 'active' as const,
+      archivedAt: null,
+      deletedAt: null,
+      createdBy: null,
+      updatedBy: null,
+    }));
+    await this.eventTypes.insertMany(rows);
+    return rows.length;
+  }
+
   async seedTrainingTaxonomy(kpmId: string, companyId: string): Promise<ProvisionedTraining> {
     const template = await this.publishedTemplate(companyId, 'training_taxonomy');
     const problems = template ? trainingTaxonomyProblems(template.payload) : [];

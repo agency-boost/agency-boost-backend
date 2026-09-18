@@ -46,6 +46,9 @@ import {
 import {
   EventAudienceSchema, EventSchema, EventTypeSchema,
 } from '@/modules/events/event.schema';
+import {
+  CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
+} from '@/modules/campaigns/campaign.schema';
 
 /**
  * P2-T8: soft delete everywhere.
@@ -83,6 +86,9 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['kpmProductConfigs', KpmProductConfigSchema],
   ['eventTypes', EventTypeSchema],
   ['events', EventSchema],
+  ['campaigns', CampaignSchema],
+  // Company-partitioned carrier rules (ADR-0035), soft-deleted like every other row.
+  ['qualificationRules', QualificationRuleSchema],
 ];
 
 /**
@@ -115,6 +121,16 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     'trainingContentLink (subdocument)',
     TrainingContentLinkSchema,
     'a subdocument of a module\'s content, for the same reason',
+  ],
+  [
+    'requirement (subdocument)',
+    RequirementSchema,
+    'a subdocument of campaigns and qualificationRules: it is deleted with the row that holds it',
+  ],
+  [
+    'criteriaGroup (subdocument)',
+    CriteriaGroupSchema,
+    'a subdocument of qualificationRules, for the same reason',
   ],
   [
     'eventAudience (subdocument)',
@@ -169,6 +185,10 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [EventTypeSchema, 'EventTypeSchema'],
   [EventSchema, 'EventSchema'],
   [EventAudienceSchema, 'EventAudienceSchema'],
+  [CampaignSchema, 'CampaignSchema'],
+  [QualificationRuleSchema, 'QualificationRuleSchema'],
+  [RequirementSchema, 'RequirementSchema'],
+  [CriteriaGroupSchema, 'CriteriaGroupSchema'],
   [ProductDocumentRefSchema, 'ProductDocumentRefSchema'],
   [AttackPlanSchema, 'AttackPlanSchema'],
   [CommissionYearSchema, 'CommissionYearSchema'],

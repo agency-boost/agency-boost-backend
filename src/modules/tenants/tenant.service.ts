@@ -16,6 +16,7 @@ import { KpmRequest, KpmRequestDocument } from './kpm-request.schema';
 import { OrgLevelService } from './org-level.service';
 import { ProvisioningService } from '@/modules/config/provisioning.service';
 import { ProductService } from '@/modules/products/product.service';
+import { CampaignService } from '@/modules/campaigns/campaign.service';
 import { DEFAULT_KPM_SETTINGS, Kpm, KpmDocument } from './kpm.schema';
 
 export interface CreateKpmInput {
@@ -142,6 +143,8 @@ export class TenantService {
     private readonly provisioning: ProvisioningService,
     // Same again: the company's starting catalog (P5-T4). It takes a companyId and nothing else.
     private readonly products: ProductService,
+    // And its carrier rules (P5-T7).
+    private readonly campaigns: CampaignService,
   ) {}
 
   private require(ctx: RequestContext, permission: Parameters<typeof can>[1]): void {
@@ -291,6 +294,11 @@ export class TenantService {
     // this moment — Super Admin edits it at the Company template's Products tab (ADR-0033).
     await this.products.seedForCompany(String(company._id));
 
+    // **And the carrier rules** (P5-T7, ADR-0026): MOC and the production club tiers. They are the
+    // insurer's, editable by no office role, and an office measured against nothing would read as
+    // an office that qualifies for nothing.
+    await this.campaigns.seedForCompany(String(company._id));
+
     await this.audit.record(ctx, {
       action: 'company.created',
       targetCollection: 'companies',
@@ -383,6 +391,9 @@ export class TenantService {
     const activation = await this.provisioning.seedActivationChecklist(
       String(kpm._id), input.companyId, training.publishedModuleCodes,
     );
+    // Event types (P5-T6). An office with none has nothing to file an event under, and its
+    // Events screen would say so on day one for a reason nobody chose.
+    await this.provisioning.seedEventTypes(String(kpm._id));
 
     /*
      * And publish what was just copied (P4-T6), so the office's agents have something to

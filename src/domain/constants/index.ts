@@ -176,3 +176,22 @@ export {
   type EventPhase,
   SEED_EVENT_TYPES,
 } from './events';
+
+export {
+  METRIC_UNITS,
+  type MetricUnit,
+  type MetricDefinition,
+  METRIC_REGISTRY,
+  metricByKey,
+  CAMPAIGN_EVALUATION_PHASE,
+  REQUIREMENT_COMPARATORS,
+  type RequirementComparator,
+  QUALIFICATION_RULE_KINDS,
+  type QualificationRuleKind,
+  QUALIFICATION_RULE_SCOPES,
+  type QualificationRuleScope,
+  CRITERIA_MODES,
+  type CriteriaMode,
+  SEED_PRODUCTION_CLUB_TIERS,
+  SEED_MOC_RULES,
+} from './metrics';

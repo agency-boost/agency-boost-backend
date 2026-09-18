@@ -11068,6 +11068,499 @@
         "x-required-permission": "tenant_config:write",
         "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
       }
+    },
+    "/api/v1/kpm/settings/campaigns/rules": {
+      "get": {
+        "description": "MOC and the production club tiers, the insurer’s. **Read only for every office role** — there is no write route here at all. A rule waiting on a metric this product does not compute yet says so, rather than being shown as an ordinary rule nobody can ever pass.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CampaignController_listRules_v1",
+        "parameters": [
+          {
+            "name": "kind",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/QualificationRuleDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The carrier rules this office is measured against",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:read"
+      }
+    },
+    "/api/v1/kpm/settings/campaigns": {
+      "get": {
+        "description": "Newest first, each with its phase **derived now** — upcoming, running or ended. The prototype labels one campaign *Running* in the list while its own data says `past`.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CampaignController_list_v1",
+        "parameters": [
+          {
+            "name": "includeArchived",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CampaignDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office’s own campaigns",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:read"
+      },
+      "post": {
+        "description": "A requirement is a **metric, a comparator and a number**. A metric this product does not measure is refused by name; one that arrives in a later phase is refused saying which phase brings it, because a campaign asking for it could never qualify anybody.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CampaignController_create_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveCampaignDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add a campaign",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/kpm/settings/campaigns/{id}": {
+      "patch": {
+        "description": "Never the code.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CampaignController_update_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveCampaignDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change a campaign",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/kpm/settings/campaigns/{id}/archive": {
+      "post": {
+        "operationId": "CampaignController_archive_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Archive a campaign",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write",
+        "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
+      }
+    },
+    "/api/v1/kpm/settings/campaigns/{id}/restore": {
+      "post": {
+        "operationId": "CampaignController_restore_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Bring a campaign back",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write",
+        "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
+      }
     }
   },
   "info": {
@@ -13191,6 +13684,289 @@
           },
           "audience": {
             "$ref": "#/components/schemas/EventAudienceDto"
+          }
+        }
+      },
+      "RequirementViewDto": {
+        "type": "object",
+        "properties": {
+          "metricKey": {
+            "type": "string"
+          },
+          "metricName": {
+            "type": "string",
+            "description": "The registry’s own name, so no screen holds a second copy."
+          },
+          "comparator": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string",
+            "description": "`idr_minor` means integer sen."
+          }
+        },
+        "required": [
+          "metricKey",
+          "metricName",
+          "comparator",
+          "value",
+          "unit"
+        ]
+      },
+      "CriteriaGroupDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "any"
+            ]
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequirementViewDto"
+            }
+          }
+        },
+        "required": [
+          "mode",
+          "criteria"
+        ]
+      },
+      "QualificationRuleDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "moc",
+              "production_club",
+              "promotion_path"
+            ]
+          },
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "appliesToOrgLevelCodes": {
+            "description": "Rungs by code. Empty means everybody.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "criteriaGroups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CriteriaGroupDto"
+            }
+          },
+          "groupMode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "any"
+            ]
+          },
+          "reward": {
+            "type": "string"
+          },
+          "rank": {
+            "type": "number"
+          },
+          "waitingOnMetrics": {
+            "description": "Metric keys the registry does not define yet. A rule with any of these can never pass, and the screen says so rather than showing it as an ordinary rule.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "code",
+          "name",
+          "appliesToOrgLevelCodes",
+          "criteriaGroups",
+          "groupMode",
+          "reward",
+          "rank",
+          "waitingOnMetrics"
+        ]
+      },
+      "CampaignDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "upcoming",
+              "running",
+              "ended"
+            ],
+            "description": "Derived on every read, never stored."
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequirementViewDto"
+            }
+          },
+          "reward": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "version": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "title",
+          "description",
+          "startsAt",
+          "endsAt",
+          "phase",
+          "requirements",
+          "reward",
+          "status",
+          "version"
+        ]
+      },
+      "RequirementDto": {
+        "type": "object",
+        "properties": {
+          "metricKey": {
+            "type": "string",
+            "enum": [
+              "MONTHLY_ACTIVE_AGENT",
+              "MAA_COUNT_IN_UNIT",
+              "PACING_TO_MAA",
+              "ACTIVITY_COMPLIANCE_7D",
+              "ACTIVITY_COMPLIANCE_MONTH",
+              "ACTIVITY_COMPLIANCE_RATE",
+              "COACHED_7D",
+              "COACHED_30D",
+              "DAYS_SINCE_LAST_COACHING",
+              "COACHING_COVERAGE",
+              "LEADER_COACHING_FREQUENCY",
+              "APE_ACHIEVED",
+              "APE_TARGET",
+              "APE_ATTAINMENT_PCT",
+              "APE_GAP_TO_TARGET",
+              "POLICIES_NEEDED",
+              "GOAL_PACE_STATUS",
+              "SELLING_RECRUITMENT_BALANCE",
+              "SELLING_SUCCESS_RATE",
+              "RECRUITMENT_SUCCESS_RATE",
+              "LEADS_PER_ACTIVITY",
+              "MEETING_PER_APPROACH",
+              "ACTIVATION_COMPLETION_PCT",
+              "ACTIVATION_DAY_INDEX",
+              "TRAINING_COMPLETION_PCT",
+              "EVENT_ATTENDANCE_STATUS",
+              "EVENT_ATTENDANCE_RATE",
+              "EVENT_NPS",
+              "CAMPAIGN_QUALIFICATION_STATUS",
+              "MOC_STATUS",
+              "PRODUCTION_CLUB_TIER",
+              "RECRUITMENT_PIPELINE_NOW",
+              "RECRUITMENT_EXPECTED_TO_CLOSE",
+              "NEW_ACTIVE_AGENTS",
+              "ROLLING_PERSISTENCY"
+            ],
+            "description": "A key from the metric registry. Anything else is refused at write time, by name."
+          },
+          "comparator": {
+            "type": "string",
+            "enum": [
+              "gte",
+              "gt",
+              "lte",
+              "lt",
+              "eq"
+            ]
+          },
+          "value": {
+            "type": "number",
+            "description": "**Integer IDR minor units** where the metric is money — never a float, and never a display string like \"Rp 600 juta\"."
+          }
+        },
+        "required": [
+          "metricKey",
+          "comparator",
+          "value"
+        ]
+      },
+      "SaveCampaignDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "YEAR_END_DRIVE"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "After `startsAt`."
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequirementDto"
+            }
+          },
+          "reward": {
+            "type": "string",
+            "description": "What qualifying wins. Text: a reward is a promise."
           }
         }
       },

@@ -47,6 +47,11 @@ import { KpmProductService } from '@/modules/products/kpm-product.service';
 import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events/event.schema';
 import { EventRepository, EventTypeRepository } from '@/modules/events/event.repository';
 import { EventService } from '@/modules/events/event.service';
+import {
+  Campaign, CampaignSchema, QualificationRule, QualificationRuleSchema,
+} from '@/modules/campaigns/campaign.schema';
+import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
+import { CampaignService } from '@/modules/campaigns/campaign.service';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { AssetSchema } from '@/modules/assets/asset.schema';
@@ -174,6 +179,14 @@ export function configModule(now: Date) {
     audit,
     clock,
   );
+  // P5-T7: the office's campaigns, and the carrier rules it is measured against.
+  const campaigns = new CampaignService(
+    new CampaignRepository(model(Campaign.name, CampaignSchema) as never),
+    model(QualificationRule.name, QualificationRuleSchema) as never,
+    kpms as never,
+    audit,
+    clock,
+  );
   const provisioning = new ProvisioningService(
     categories as never,
     types as never,
@@ -185,6 +198,7 @@ export function configModule(now: Date) {
     trainingSkills as never,
     trainingModules as never,
     activationTemplates as never,
+    model(EventType.name, EventTypeSchema) as never,
     clock,
     config,
   );
@@ -196,7 +210,7 @@ export function configModule(now: Date) {
   return {
     activity, ratios, leads, config, provisioning, templates, audit, clock, changes,
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
-    products, assets, storage, kpmProducts, events,
+    products, assets, storage, kpmProducts, events, campaigns,
   };
 }
 
@@ -211,6 +225,7 @@ export async function provisionOffice(
   await module.provisioning.seedRatioDefinitions(kpmId, companyId, seeded.typeCodes);
   const training = await module.provisioning.seedTrainingTaxonomy(kpmId, companyId);
   await module.provisioning.seedActivationChecklist(kpmId, companyId, training.publishedModuleCodes);
+  await module.provisioning.seedEventTypes(kpmId);
   return seeded;
 }
 

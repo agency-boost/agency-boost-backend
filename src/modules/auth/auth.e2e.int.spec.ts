@@ -109,6 +109,12 @@ import { ProvisioningService } from '@/modules/config/provisioning.service';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
 import { ProductService } from '@/modules/products/product.service';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
+import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events/event.schema';
+import {
+  Campaign, CampaignSchema, QualificationRule, QualificationRuleSchema,
+} from '@/modules/campaigns/campaign.schema';
+import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
+import { CampaignService } from '@/modules/campaigns/campaign.service';
 import { AssetRepository } from '@/modules/assets/asset.repository';
 import { AssetService } from '@/modules/assets/asset.service';
 import { StoragePort } from '@/modules/assets/storage.port';
@@ -196,6 +202,10 @@ describe('auth and admin over HTTP', () => {
         { name: ActivationTemplate.name, schema: ActivationTemplateSchema },
         { name: Product.name, schema: ProductSchema },
         { name: Asset.name, schema: AssetSchema },
+        { name: EventType.name, schema: EventTypeSchema },
+        { name: Event.name, schema: EventSchema },
+        { name: Campaign.name, schema: CampaignSchema },
+        { name: QualificationRule.name, schema: QualificationRuleSchema },
         ]),
       ],
       controllers: [
@@ -232,6 +242,9 @@ describe('auth and admin over HTTP', () => {
         // this file's subject is the HTTP contract, not Cloudinary.
         AssetRepository,
         AssetService,
+        // P5-T7: TenantService seeds a company's carrier rules at creation.
+        CampaignRepository,
+        CampaignService,
         { provide: StoragePort, useClass: StubStorage },
         AuditService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService, OrgLevelService,

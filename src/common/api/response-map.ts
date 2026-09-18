@@ -30,6 +30,7 @@ import {
   KpmProductDto, SignedUrlDto as ProductSignedUrlDto,
 } from '@/modules/products/kpm-product.response.dto';
 import { EventDto, EventTypeDto } from '@/modules/events/event.response.dto';
+import { CampaignDto, QualificationRuleDto } from '@/modules/campaigns/campaign.response.dto';
 
 /** What one operation answers with: a class, and whether it comes back as an array. */
 export interface ResponseShape {
@@ -167,6 +168,14 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   EventController_update: { type: EventDto },
   EventController_archive: { type: EventDto },
   EventController_restore: { type: EventDto },
+
+  // Campaigns, and the carrier rules an office is measured against (P5-T7).
+  CampaignController_listRules: { type: QualificationRuleDto, isArray: true },
+  CampaignController_list: { type: CampaignDto, isArray: true },
+  CampaignController_create: { type: CampaignDto },
+  CampaignController_update: { type: CampaignDto },
+  CampaignController_archive: { type: CampaignDto },
+  CampaignController_restore: { type: CampaignDto },
   OrgController_myTeam: { type: TeamMemberDto, isArray: true },
   OrgController_changeRole: { type: TeamMemberDto, isArray: true },
   OrgController_remove: { type: TeamMemberDto, isArray: true },

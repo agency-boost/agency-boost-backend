@@ -81,6 +81,12 @@ import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events
 import { EventRepository, EventTypeRepository } from '@/modules/events/event.repository';
 import { EventService } from '@/modules/events/event.service';
 import { EventController } from '@/modules/events/event.controller';
+import {
+  Campaign, CampaignSchema, QualificationRule, QualificationRuleSchema,
+} from '@/modules/campaigns/campaign.schema';
+import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
+import { CampaignService } from '@/modules/campaigns/campaign.service';
+import { CampaignController } from '@/modules/campaigns/campaign.controller';
 import { OfficeCounter } from '@/modules/config/office-counter.port';
 import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
@@ -185,6 +191,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: KpmProductConfig.name, schema: KpmProductConfigSchema },
       { name: EventType.name, schema: EventTypeSchema },
       { name: Event.name, schema: EventSchema },
+      { name: Campaign.name, schema: CampaignSchema },
+      { name: QualificationRule.name, schema: QualificationRuleSchema },
     ]),
   ],
   controllers: [
@@ -202,6 +210,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ProductController,
     KpmProductController,
     EventController,
+    CampaignController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -265,6 +274,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     EventTypeRepository,
     EventRepository,
     EventService,
+    CampaignRepository,
+    CampaignService,
     /*
      * The upload registry (P4-T11 AC-1, finished 2026-09-18).
      *
