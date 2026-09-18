@@ -1,13 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Patch, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import {
-  AttachProductDocumentDto, SetProductActiveDto, SaveProductOverridesDto,
+  AttachProductDocumentDto, RejectScriptDto, SetProductActiveDto, SaveProductOverridesDto,
 } from './kpm-product.dto';
 import { KpmProductView } from './kpm-product.service';
 import { KpmProductService } from './kpm-product.service';
-import { KpmProductDto, SignedUrlDto } from './kpm-product.response.dto';
+import {
+  EffectiveScriptDto, KpmProductDto, SignedUrlDto,
+} from './kpm-product.response.dto';
 
 /**
  * What this office sells, and the words it sells it with (P5-T5, ADR-0033).
@@ -140,5 +142,71 @@ export class KpmProductController {
     @Param('slot') slot: string,
   ) {
     return { url: await this.products.documentUrl(ctx, productId, slot) };
+  }
+
+  // ------------------------------------------- the script approval gate (P5-T10, ADR-0037)
+
+  @Get('script-reviews')
+  @RequirePermission('tenant_config:read')
+  @ApiOperation({
+    summary: 'The script overrides waiting on somebody here',
+    description:
+      'A queue rather than a hunt through the whole shelf: the point of a gate is that whoever '
+      + 'holds it can see what is behind it. **Reading it is `tenant_config:read`, not '
+      + '`sales_script:approve`** — every row is already in `GET /kpm/settings/products`, so a '
+      + 'stricter grant on the same data would be theatre, and somebody who wrote a script has '
+      + 'every reason to see it waiting. Deciding is the separate grant.',
+  })
+  @ApiResponse({ status: 200, type: KpmProductDto, isArray: true })
+  async pendingReviews(@Ctx() ctx: RequestContext) {
+    return this.products.pendingReviews(ctx);
+  }
+
+  @Post(':productId/script/approve')
+  @RequirePermission('sales_script:approve')
+  @ApiOperation({
+    summary: 'Approve this office’s script override',
+    description:
+      'The approved words are **frozen at this moment**, so a later edit cannot change what agents '
+      + 'are already reading — and that edit returns the row to pending. **This is a gate, not an '
+      + 'independent review** (ADR-0037): the office writes and approves, and what it guarantees is '
+      + 'that no half-finished script reaches an agent and that every one carries a name and a time.',
+  })
+  @ApiResponse({ status: 201, type: KpmProductDto })
+  async approveScript(@Ctx() ctx: RequestContext, @Param('productId') productId: string) {
+    return this.products.approveScript(ctx, productId);
+  }
+
+  @Post(':productId/script/reject')
+  @RequirePermission('sales_script:approve')
+  @ApiOperation({
+    summary: 'Send the script back, with a reason',
+    description:
+      'The reason is required: "no" on its own is not something the person who wrote it can act on, '
+      + 'and a rejection nobody can act on is a script that stays unapproved for ever.',
+  })
+  @ApiResponse({ status: 201, type: KpmProductDto })
+  async rejectScript(
+    @Ctx() ctx: RequestContext,
+    @Param('productId') productId: string,
+    @Body() dto: RejectScriptDto,
+  ) {
+    return this.products.rejectScript(ctx, productId, dto.reason);
+  }
+
+  @Get(':productId/script/effective')
+  @RequirePermission('tenant_config:read')
+  @ApiOperation({
+    summary: 'The script an agent is actually served',
+    description:
+      'The office’s own words **only when approved**; otherwise the company’s, which the company '
+      + 'published and is therefore already the company’s word. Phase 12 reads this and nothing '
+      + 'else, which is what stops it rendering an override nobody approved.',
+  })
+  @ApiResponse({ status: 200, type: EffectiveScriptDto })
+  async effectiveScript(
+    @Ctx() ctx: RequestContext, @Param('productId') productId: string,
+  ) {
+    return this.products.effectiveScript(ctx, productId);
   }
 }

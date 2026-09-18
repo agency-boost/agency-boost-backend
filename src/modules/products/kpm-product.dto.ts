@@ -62,3 +62,12 @@ export class AttachProductDocumentDto {
   @IsString() @MaxLength(200)
   label!: string;
 }
+
+export class RejectScriptDto {
+  @ApiProperty({
+    description:
+      'Required. "No" on its own is not something the person who wrote the script can act on.',
+  })
+  @IsString() @MaxLength(1000)
+  reason!: string;
+}

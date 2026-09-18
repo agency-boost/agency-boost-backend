@@ -184,6 +184,24 @@ export const PERMISSIONS = {
    */
   'commission_rates:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   /*
+   * Approving an office's own sales-script override before agents read it (ADR-0037, P5-T10).
+   *
+   * **The one deliberate exception to ADR-0027**, which otherwise makes every page under Settings
+   * a single `tenant_config:write`. The answer to *"who may change this office's configuration"* is
+   * one answer; *"who may approve a script"* is a question that decision expects to revisit, and a
+   * separate permission is what makes moving it to Super Admin, or to a company compliance role, a
+   * grant change rather than a redesign.
+   *
+   * **A gate, not an independent review.** The office both writes and approves. What it guarantees
+   * is that no half-finished script reaches an agent and that every script an agent read carries a
+   * name and a time — and the manual says exactly that, so nobody reads a tick as somebody else's
+   * compliance sign-off.
+   */
+  'sales_script:approve': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  /*
    * The company's role ladder, readable by the offices that stand on it (P4-T9).
    *
    * Super Admin only until now, with the reason written down: *"nothing tenant-side

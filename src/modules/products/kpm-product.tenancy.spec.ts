@@ -187,6 +187,154 @@ describe('an office’s product decisions (P5-T5)', () => {
     });
   });
 
+  describe('the office approves its own script before agents read it (P5-T10)', () => {
+    const write = (ctx: RequestContext) => wired.kpmProducts.saveOverrides(ctx, mapanId, {
+      opening: 'Halo Pak, boleh saya cerita sebentar?',
+    });
+
+    it('serves the company’s words until the office approves its own (AC-5)', async () => {
+      const ctx = member(KPM_A);
+      await write(ctx);
+
+      // Written, not approved. Phase 12 reads this and nothing else, which is what stops it
+      // rendering an override nobody approved.
+      const pending = await wired.kpmProducts.effectiveScript(ctx, mapanId);
+      expect(pending.source).toBe('company');
+      expect(pending.script.opening).not.toBe('Halo Pak, boleh saya cerita sebentar?');
+
+      await wired.kpmProducts.approveScript(ctx, mapanId);
+
+      const approved = await wired.kpmProducts.effectiveScript(ctx, mapanId);
+      expect(approved.source).toBe('kpm');
+      expect(approved.script.opening).toBe('Halo Pak, boleh saya cerita sebentar?');
+      // Field by field: the office rewrote one line and the rest stay the company's.
+      expect(approved.script.fullScript).toBe(pending.script.fullScript);
+    });
+
+    it('records who approved it and when', async () => {
+      const ctx = member(KPM_A);
+      await write(ctx);
+
+      const row = await wired.kpmProducts.approveScript(ctx, mapanId);
+
+      expect(row.reviewState).toBe('approved');
+      const stored = await mongoose.connection.db!.collection('kpmProductConfigs')
+        .findOne({ kpmId: KPM_A, productId: mapanId });
+      expect(stored).toMatchObject({ reviewedByMembershipId: `mem-${KPM_A}` });
+      expect(stored!.reviewedAt).toBeInstanceOf(Date);
+    });
+
+    it('freezes the approved words, so a later edit cannot change what agents read (AC-2)', async () => {
+      const ctx = member(KPM_A);
+      await write(ctx);
+      await wired.kpmProducts.approveScript(ctx, mapanId);
+
+      // Editing an approved override returns the row to pending, and the approved copy stays.
+      const edited = await wired.kpmProducts.saveOverrides(ctx, mapanId, {
+        opening: 'A wilder claim nobody has looked at',
+      });
+      expect(edited.reviewState).toBe('pending');
+
+      /*
+       * And agents go on reading the **approved** words while the new draft waits.
+       *
+       * This assertion read `'company'` until a browser walk showed what that means in a working
+       * week: an office approves a script, starts editing it seven days later, and every agent's
+       * screen silently drops back to the company's wording — because the edit moved the row to
+       * pending. Nobody unapproved anything. The read answers from `approvedOverrides`, which is
+       * written at approval and at no other time.
+       */
+      const served = await wired.kpmProducts.effectiveScript(ctx, mapanId);
+      expect(served.source).toBe('kpm');
+      expect(served.script.opening).toBe('Halo Pak, boleh saya cerita sebentar?');
+      expect(served.script.opening).not.toBe('A wilder claim nobody has looked at');
+
+      // A send-back is not an un-approval either: it rejects the draft, not what is in service.
+      await wired.kpmProducts.rejectScript(ctx, mapanId, 'Too strong a claim about returns.');
+      expect((await wired.kpmProducts.effectiveScript(ctx, mapanId)).script.opening)
+        .toBe('Halo Pak, boleh saya cerita sebentar?');
+
+      const stored = await mongoose.connection.db!.collection('kpmProductConfigs')
+        .findOne({ kpmId: KPM_A, productId: mapanId });
+      expect(stored!.approvedOverrides).toMatchObject({
+        opening: 'Halo Pak, boleh saya cerita sebentar?',
+      });
+    });
+
+    it('stops serving a field the office gives back to the company', async () => {
+      const ctx = member(KPM_A);
+      await write(ctx);
+      await wired.kpmProducts.approveScript(ctx, mapanId);
+
+      // Since the effective read answers from the approved copy, the reset has to clear it too —
+      // otherwise agents keep reading words the office has just said it no longer wants.
+      await wired.kpmProducts.resetOverride(ctx, mapanId, 'opening');
+
+      const served = await wired.kpmProducts.effectiveScript(ctx, mapanId);
+      expect(served.source).toBe('company');
+      expect(served.script.opening).not.toBe('Halo Pak, boleh saya cerita sebentar?');
+    });
+
+    it('requires a reason to send one back (AC-4)', async () => {
+      const ctx = member(KPM_A);
+      await write(ctx);
+
+      await expect(wired.kpmProducts.rejectScript(ctx, mapanId, '   '))
+        .rejects.toThrow(/Say why you are sending it back/);
+
+      const sent = await wired.kpmProducts.rejectScript(
+        ctx, mapanId, 'The return claim is stronger than the illustration supports.',
+      );
+      expect(sent.reviewState).toBe('rejected');
+      expect(sent.rejectionReason).toMatch(/return claim/);
+    });
+
+    it('refuses a decision on something nobody has written', async () => {
+      await expect(wired.kpmProducts.approveScript(member(KPM_A), mapanId))
+        .rejects.toThrow(/nothing waiting on you/);
+    });
+
+    it('lists what is waiting and what was sent back, and only for this office', async () => {
+      const ctx = member(KPM_A);
+      await write(ctx);
+
+      expect((await wired.kpmProducts.pendingReviews(ctx)).map((p) => p.code))
+        .toEqual(['PRUMAPAN']);
+      expect(await wired.kpmProducts.pendingReviews(member(KPM_B))).toEqual([]);
+
+      // A sent-back row stays on the list. It is the one somebody has to act on, and a rejection
+      // nobody can find is a script that stays unapproved for ever — which is the whole reason a
+      // reason is required. Walking the screen found this: the queue returned `pending` only, so
+      // the *Sent back* half of it could never fill.
+      await wired.kpmProducts.rejectScript(ctx, mapanId, 'Too strong a claim about returns.');
+      const queue = await wired.kpmProducts.pendingReviews(ctx);
+      expect(queue.map((p) => [p.code, p.reviewState]))
+        .toEqual([['PRUMAPAN', 'rejected']]);
+
+      // Approved is settled, and settled is not a queue.
+      await wired.kpmProducts.saveOverrides(ctx, mapanId, { opening: 'Halo lagi.' });
+      await wired.kpmProducts.approveScript(ctx, mapanId);
+      expect(await wired.kpmProducts.pendingReviews(ctx)).toEqual([]);
+    });
+
+    it('leaves no markup in anything it serves (AC-6)', async () => {
+      const ctx = member(KPM_A);
+      await wired.kpmProducts.saveOverrides(ctx, mapanId, {
+        opening: '<b>Halo</b> Pak, <script>alert(1)</script>boleh?',
+      });
+      await wired.kpmProducts.approveScript(ctx, mapanId);
+
+      const served = await wired.kpmProducts.effectiveScript(ctx, mapanId);
+      for (const value of Object.values(served.script)) {
+        expect(String(value)).not.toMatch(/<[a-z/]/i);
+      }
+      // A `<script>` loses its body as well as its tags: stripping the tags alone is safe, and
+      // still leaves `alert(1)` sitting in the middle of a sales script.
+      expect(String(served.script.opening)).not.toMatch(/alert/);
+      expect(served.script.opening).toBe('Halo Pak, boleh?');
+    });
+  });
+
   describe('the three document slots (AC-7)', () => {
     const upload = async (ctx: RequestContext) => {
       const signed = await wired.assets.requestUpload(ctx, {

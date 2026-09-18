@@ -27,7 +27,7 @@ import {
 import { ActivationChecklistDto } from '@/modules/activation/activation.response.dto';
 import { ProductResponseDto } from '@/modules/products/product.response.dto';
 import {
-  KpmProductDto, SignedUrlDto as ProductSignedUrlDto,
+  EffectiveScriptDto, KpmProductDto, SignedUrlDto as ProductSignedUrlDto,
 } from '@/modules/products/kpm-product.response.dto';
 import { EventDto, EventTypeDto } from '@/modules/events/event.response.dto';
 import { CampaignDto, QualificationRuleDto } from '@/modules/campaigns/campaign.response.dto';
@@ -157,6 +157,11 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   KpmProductController_setDocument: { type: KpmProductDto },
   KpmProductController_resetDocument: { type: KpmProductDto },
   KpmProductController_documentUrl: { type: ProductSignedUrlDto },
+  // The script approval gate (P5-T10, ADR-0037).
+  KpmProductController_pendingReviews: { type: KpmProductDto, isArray: true },
+  KpmProductController_approveScript: { type: KpmProductDto },
+  KpmProductController_rejectScript: { type: KpmProductDto },
+  KpmProductController_effectiveScript: { type: EffectiveScriptDto },
 
   // The events an office runs (P5-T6).
   EventController_listTypes: { type: EventTypeDto, isArray: true },

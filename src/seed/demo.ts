@@ -445,16 +445,29 @@ async function main(): Promise<void> {
     }
 
     /*
-     * Three product decisions (P5-T5), so the Products screen shows every state it has.
+     * Five product decisions (P5-T5, P5-T10), so both tabs show every state they have.
      *
      * An office with no rows at all reads as *"everything inherited"*, which is true but shows
-     * none of what the screen is for: one product it turned off, one it renamed, and one whose
-     * script it has rewritten and not yet approved.
+     * none of what the screens are for. So: one product it turned off, one it renamed, and the
+     * three review states the approval queue exists to tell apart — **pending**, **approved**
+     * (its words frozen, which is what agents actually read) and **sent back** with a reason.
      */
     const shelf = await Products.find({ companyId: await companyOf(kpmId) })
-      .sort({ sortOrder: 1 }).limit(3).lean().exec();
-    if (shelf.length === 3 && await missing(KpmProductConfigs as never)) {
-      await KpmProductConfigs.insertMany([
+      .sort({ sortOrder: 1 }).limit(5).lean().exec();
+    if (shelf.length === 5) {
+      /*
+       * Per row, not per collection.
+       *
+       * The collection-wide guard this file uses everywhere else is right where a block's rows
+       * arrive together. These do not: P5-T5 seeded three and P5-T10 added two, and an office
+       * seeded before today would keep answering *"it already has some"* for ever — the exact
+       * shape of the bug that left the Events screen empty after a reseed. `$setOnInsert` fills
+       * in what is missing and leaves anything already there alone, including a row somebody
+       * changed while walking the screen.
+       */
+      const already = new Set((await KpmProductConfigs.find({ kpmId }).lean().exec())
+        .map((row) => String(row.productId)));
+      const decisions = [
         {
           kpmId, productId: String(shelf[0]._id),
           active: null,
@@ -479,12 +492,37 @@ async function main(): Promise<void> {
           // Written, not yet approved: agents keep reading the company's words until it is.
           reviewState: 'pending',
         },
-      ].map((row) => ({
-        ...row,
+        {
+          kpmId, productId: String(shelf[3]._id),
+          active: true,
+          // Approved, and then edited again — so `overrides` and `approvedOverrides` differ, which
+          // is the whole point of freezing them: agents read the approved words while the new
+          // draft waits. The screen says so on the queued card.
+          overrides: {
+            opening: 'Halo Pak/Bu, ada waktu lima menit? Saya ingin cerita soal dana pendidikan.',
+          },
+          reviewState: 'pending',
+          approvedOverrideVersion: 1,
+          approvedOverrides: {
+            opening: 'Halo Pak/Bu, boleh saya cerita sebentar soal dana pendidikan?',
+          },
+        },
+        {
+          kpmId, productId: String(shelf[4]._id),
+          active: true,
+          overrides: { fullScript: 'Produk ini pasti untung besar, dijamin.' },
+          // Sent back, with something its author can act on — which is why the reason is required.
+          reviewState: 'rejected',
+          rejectionReason:
+            'Klaim "pasti untung" melebihi ilustrasi resmi. Tolong pakai angka dari ilustrasi.',
+        },
+      ].filter((row) => !already.has(row.productId)).map((row) => ({
         reviewedByMembershipId: null, reviewedAt: null, rejectionReason: null,
         approvedOverrideVersion: 0, approvedOverrides: {}, documents: {},
         version: 1, deletedAt: null, createdBy: null, updatedBy: null,
-      })));
+        ...row,
+      }));
+      if (decisions.length > 0) await KpmProductConfigs.insertMany(decisions);
     }
 
     /*

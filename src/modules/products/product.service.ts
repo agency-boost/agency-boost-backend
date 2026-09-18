@@ -6,6 +6,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { SEED_PRODUCTS, type ProductLifecycle } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
+import { plainText } from '@/common/validation/plain-text';
 import { Product, ProductDocument } from './product.schema';
 
 export interface CommissionYearView {
@@ -47,11 +48,8 @@ export interface ProductView {
   version: number;
 }
 
-/** Plain text: nothing authored reaches a screen as markup (P5-T4 AC-7). */
-const plain = (value: unknown): string => String(value ?? '')
-  .replace(/<\/?[a-z][^>]*>/gi, '')
-  .replace(/\s+/g, ' ')
-  .trim();
+/** Both halves strip it: a rule enforced on one side only is a rule with a way around it. */
+const plain = plainText;
 
 /**
  * A company's product catalog (P5-T4, ADR-0033).

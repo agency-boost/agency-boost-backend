@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Clock } from '@/common/clock/clock.port';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
@@ -6,6 +7,7 @@ import {
   OVERRIDABLE_PRODUCT_FIELDS, PRODUCT_DOCUMENT_SLOTS, SCRIPT_OVERRIDE_FIELDS,
   type ProductDocumentSlot, type ScriptReviewState,
 } from '@/domain/constants';
+import { plainText } from '@/common/validation/plain-text';
 import { AssetService } from '@/modules/assets/asset.service';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Kpm } from '@/modules/tenants/kpm.schema';
@@ -71,6 +73,7 @@ export class KpmProductService {
     @InjectModel(Kpm.name) private readonly kpms: Model<Kpm>,
     private readonly assets: AssetService,
     private readonly audit: AuditService,
+    private readonly clock: Clock,
   ) {}
 
   /** This office's whole shelf: its company's products, with its own decisions laid over them. */
@@ -133,10 +136,19 @@ export class KpmProductService {
     if (Object.keys(input).length === 0) throw new BadRequestException('Nothing to change.');
 
     const set: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(input)) set[`overrides.${key}`] = value;
+    for (const [key, value] of Object.entries(input)) {
+      // **Sanitised on write, the same as the company's half** (AC-6). Anybody who can write a
+      // script could otherwise write a tag, and the prototype renders scripts with `innerHTML`.
+      set[`overrides.${key}`] = Array.isArray(value)
+        ? value.map(plainText).filter((line) => line !== '')
+        : plainText(value);
+    }
 
     const touchesScript = Object.keys(input).some((k) => SCRIPT_OVERRIDE_FIELDS.includes(k as never));
     if (touchesScript) {
+      // **Editing an approved override returns it to pending** (ADR-0037, AC-2). The approved
+      // copy stays readable, so agents keep reading words somebody approved while the next draft
+      // is being looked at.
       set.reviewState = 'pending';
       // A new draft clears the last decision rather than inheriting it: an approval belongs to
       // the words it was given, and a rejection nobody has re-read is not a rejection of these.
@@ -167,8 +179,15 @@ export class KpmProductService {
       throw new BadRequestException(`${field} is not a field your office can change.`);
     }
 
+    /*
+     * The approved copy goes with it.
+     *
+     * Giving a field back to the company means agents follow the company on it — and since the
+     * effective read answers from `approvedOverrides`, leaving the approved copy behind would go
+     * on serving words the office has just said it no longer wants.
+     */
     const row = await this.configs.upsert(ctx, productId, {
-      $unset: { [`overrides.${field}`]: '' },
+      $unset: { [`overrides.${field}`]: '', [`approvedOverrides.${field}`]: '' },
       $inc: { version: 1 },
     });
     await this.record(ctx, 'kpm_product.override_reset', row, { code: product.code, field });
@@ -249,6 +268,165 @@ export class KpmProductService {
       return this.assets.companyUrlFor(await this.companyOf(ctx), theirs.storageKey);
     }
     throw new NotFoundException('Document');
+  }
+
+  // ------------------------------------------------- the script approval gate (P5-T10, ADR-0037)
+
+  /**
+   * The overrides this office still has to do something about.
+   *
+   * A queue rather than a hunt through 31 products: the whole point of a gate is that the person
+   * holding it can see what is behind it.
+   *
+   * **Sent-back rows belong here too.** They are the ones somebody has to act on — a rejection
+   * nobody can find is a script that stays unapproved for ever, which is the thing requiring a
+   * reason was meant to prevent. `approved` and `none` are settled and are not on anybody's list.
+   */
+  async pendingReviews(ctx: RequestContext): Promise<KpmProductView[]> {
+    const open: ScriptReviewState[] = ['pending', 'rejected'];
+    return (await this.list(ctx)).filter((p) => open.includes(p.reviewState));
+  }
+
+  /**
+   * Approve this office's own script override (AC-3, AC-4).
+   *
+   * **The approved words are frozen here, not read live.** `approvedOverrides` is a copy taken at
+   * the moment of approval, so editing afterwards cannot change what agents are already reading —
+   * which is the whole of *"every script an agent read carries a name and a time"*.
+   *
+   * **This is a gate, not an independent review** (ADR-0037). The office both writes and approves;
+   * what it guarantees is that no half-finished script reaches an agent. The manual says so.
+   */
+  async approveScript(ctx: RequestContext, productId: string): Promise<KpmProductView> {
+    const product = await this.requireProduct(ctx, productId);
+    const row = await this.requirePending(ctx, productId);
+
+    const approved = await this.configs.upsert(ctx, productId, {
+      $set: {
+        reviewState: 'approved',
+        reviewedByMembershipId: ctx.membershipId,
+        reviewedAt: this.clock.now(),
+        rejectionReason: null,
+        // Frozen: a later edit returns the row to pending and leaves this readable (AC-2).
+        approvedOverrides: this.scriptOf(row),
+        approvedOverrideVersion: row.version,
+      },
+    });
+
+    await this.record(ctx, 'sales_script.approved', approved, {
+      code: product.code, version: row.version,
+    });
+    return this.view(product, approved);
+  }
+
+  /**
+   * Send it back, with a reason (AC-4).
+   *
+   * **A reason is required.** "No" on its own is not something the person who wrote the script can
+   * act on, and a rejection nobody can act on is a script that stays unapproved for ever.
+   */
+  async rejectScript(
+    ctx: RequestContext, productId: string, reason: string,
+  ): Promise<KpmProductView> {
+    const product = await this.requireProduct(ctx, productId);
+    await this.requirePending(ctx, productId);
+
+    const trimmed = reason.trim();
+    if (!trimmed) {
+      throw new BadRequestException(
+        'Say why you are sending it back. Somebody has to act on it, and "no" on its own is not '
+        + 'something anybody can act on.',
+      );
+    }
+
+    const rejected = await this.configs.upsert(ctx, productId, {
+      $set: {
+        reviewState: 'rejected',
+        reviewedByMembershipId: ctx.membershipId,
+        reviewedAt: this.clock.now(),
+        rejectionReason: trimmed,
+      },
+    });
+
+    await this.record(ctx, 'sales_script.rejected', rejected, {
+      code: product.code, reason: trimmed,
+    });
+    return this.view(product, rejected);
+  }
+
+  /**
+   * The script an agent is actually served (AC-5).
+   *
+   * **Phase 12 reads this and nothing else**, which is what stops it bypassing the gate: an
+   * override that is `pending` or `rejected` is not in the answer at all, so a caller cannot
+   * accidentally render one by reading the wrong field.
+   *
+   * | Office state | What an agent reads |
+   * |---|---|
+   * | `approved` | The office's own words, frozen at approval |
+   * | `pending`, `rejected`, `none` | The company's — which the company published, and is therefore already the company's word |
+   */
+  async effectiveScript(
+    ctx: RequestContext, productId: string,
+  ): Promise<{ source: 'kpm' | 'company'; script: Record<string, string | string[]> }> {
+    const product = await this.requireProduct(ctx, productId);
+    const row = await this.configs.findOne(ctx, { productId });
+    const company = SCRIPT_OVERRIDE_FIELDS.reduce<Record<string, string | string[]>>(
+      (acc, field) => ({
+        ...acc,
+        [field]: (product.defaultAttackPlan as unknown as Record<string, string | string[]>)[field],
+      }),
+      {},
+    );
+
+    /*
+     * What was approved, **not** what the row's state is today.
+     *
+     * Reading the state instead was wrong and only a browser walk showed it: an office approves a
+     * script, starts editing it the next week, and every agent's screen falls back to the
+     * company's words mid-week — because the edit had moved the row to `pending`. Nobody
+     * unapproved anything. `approvedOverrides` is written at approval and at no other time, so it
+     * is the honest answer to *"what did this office approve?"*, whatever is being drafted over it.
+     */
+    const approved = (row?.approvedOverrides ?? {}) as Record<string, string | string[]>;
+    if (Object.keys(approved).length === 0) return { source: 'company', script: company };
+
+    // Field by field: an office may have approved a rewrite of two fields and left the rest.
+    return {
+      source: 'kpm',
+      script: SCRIPT_OVERRIDE_FIELDS.reduce<Record<string, string | string[]>>(
+        (acc, field) => ({
+          ...acc,
+          [field]: Object.prototype.hasOwnProperty.call(approved, field)
+            ? approved[field]
+            : company[field],
+        }),
+        {},
+      ),
+    };
+  }
+
+  private async requirePending(
+    ctx: RequestContext, productId: string,
+  ): Promise<KpmProductConfigDocument> {
+    const row = await this.configs.findOne(ctx, { productId });
+    if (!row || row.reviewState !== 'pending') {
+      throw new BadRequestException(
+        'There is nothing waiting on you for this product. A decision is made on a script that has '
+        + 'been written and not yet approved.',
+      );
+    }
+    return row;
+  }
+
+  /** Only the seven script fields — a display-name override is not a script. */
+  private scriptOf(row: KpmProductConfigDocument): Record<string, unknown> {
+    const overrides = (row.overrides ?? {}) as Record<string, unknown>;
+    return Object.fromEntries(
+      SCRIPT_OVERRIDE_FIELDS
+        .filter((field) => Object.prototype.hasOwnProperty.call(overrides, field))
+        .map((field) => [field, overrides[field]]),
+    );
   }
 
   // -------------------------------------------------------------------- internals

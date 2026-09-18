@@ -77,3 +77,19 @@ export class SignedUrlDto {
   @ApiProperty({ type: String, description: 'Valid for 300 seconds.' })
   url!: string;
 }
+
+export class EffectiveScriptDto {
+  @ApiProperty({
+    enum: ['kpm', 'company'],
+    description:
+      'Whose words these are. `kpm` only when the office approved its own override; otherwise the '
+      + 'company’s, which the company published.',
+  })
+  source!: string;
+
+  @ApiProperty({
+    type: Object,
+    description: 'The seven script fields, each the effective value. No markup, ever.',
+  })
+  script!: Record<string, unknown>;
+}

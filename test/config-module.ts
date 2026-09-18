@@ -175,6 +175,7 @@ export function configModule(now: Date) {
     kpms as never,
     assets,
     audit,
+    clock,
   );
   // P5-T6: the events an office runs. Nothing per-person lives here.
   const events = new EventService(
