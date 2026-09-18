@@ -123,3 +123,19 @@ export {
   type SeedTrainingSkill,
   type SeedTrainingModule,
 } from './training-taxonomy';
+
+export {
+  ACTIVATION_FEATURE_LINKS,
+  type ActivationFeatureLink,
+  ACTIVATION_TRAINING_LINK_PREFIX,
+  ACTIVATION_LINK_KINDS,
+  ACTIVATION_TRAINING_LINK,
+  ACTIVATION_ACTIVITY_WEEKS,
+  type ActivationLinkKind,
+  SEED_ACTIVATION_ASPECTS,
+  SEED_ACTIVATION_ITEMS,
+  type SeedActivationAspect,
+  type SeedActivationItem,
+  activationLinkKind,
+  mayTickByHand,
+} from './activation-checklist';

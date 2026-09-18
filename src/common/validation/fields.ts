@@ -166,6 +166,22 @@ export class Fields {
   }
 }
 
+/**
+ * Refuse with violations gathered outside a single `Fields` — a document checked object by object,
+ * such as the activation checklist's aspects and items (P5-T3).
+ *
+ * The same shape `Fields.done` throws, so a client still cannot tell which layer refused, and a form
+ * with three mistakes still hears about three.
+ */
+export function refuseWith(violations: readonly string[]): never {
+  throw new DomainException(
+    ErrorCode.VALIDATION_FAILED,
+    violations.join('; '),
+    HttpStatus.BAD_REQUEST,
+    { violations: [...violations] },
+  );
+}
+
 // ---------------------------------------------------------- archive and restore
 
 /** An archive or a restore names a row and carries nothing else. */

@@ -16,6 +16,9 @@ import { OfficeCounter, type OfficeStanding } from './office-counter.port';
 import {
   defaultTrainingTaxonomy, trainingTaxonomyProblems,
 } from '@/modules/training/training-payload';
+import {
+  activationChecklistProblems, defaultActivationChecklist,
+} from '@/modules/activation/activation-payload';
 
 /** No version to stand against — nothing published, or a history row that is not current. */
 const NO_STANDING: OfficeStanding = { behind: 0, unrecorded: 0 };
@@ -55,6 +58,7 @@ const STARTING_PAYLOAD: Record<string, () => Record<string, unknown>> = {
     })),
   }),
   training_taxonomy: () => ({ ...defaultTrainingTaxonomy() }),
+  activation_checklist: () => ({ ...defaultActivationChecklist() }),
 };
 
 /**
@@ -272,6 +276,17 @@ export class TemplateService {
      * The training taxonomy (P5-T1): every row by the checker an office's own write meets
      * (ADR-0030), then the references only a whole payload can break. An empty level is fine.
      */
+    /*
+      * The activation checklist (P5-T3): the same checker an office's own save meets (ADR-0030).
+      * A training link is **not** checked here — a template has no office whose modules it could
+      * name, so provisioning checks it against the modules it has just copied.
+      */
+    if (kind === 'activation_checklist') {
+      const problems = activationChecklistProblems(payload);
+      if (problems.length) throw new BadRequestException(problems.join(' '));
+      return;
+    }
+
     if (kind === 'training_taxonomy') {
       const problems = trainingTaxonomyProblems(payload);
       if (problems.length) throw new BadRequestException(problems.join(' '));

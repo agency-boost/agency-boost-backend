@@ -55,6 +55,12 @@ import { TrainingModule, TrainingModuleSchema } from '@/modules/training/trainin
 import {
   defaultTrainingTaxonomy, trainingSeedDocuments,
 } from '@/modules/training/training-payload';
+import {
+  ActivationTemplate, ActivationTemplateSchema,
+} from '@/modules/activation/activation-template.schema';
+import {
+  activationSeedAspects, defaultActivationChecklist,
+} from '@/modules/activation/activation-payload';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 
 loadEnv();
@@ -97,6 +103,7 @@ async function main(): Promise<void> {
   const TrainingCategories = mongoose.model(TrainingCategory.name, TrainingCategorySchema);
   const TrainingSkills = mongoose.model(TrainingSkill.name, TrainingSkillSchema);
   const TrainingModules = mongoose.model(TrainingModule.name, TrainingModuleSchema);
+  const ActivationTemplates = mongoose.model(ActivationTemplate.name, ActivationTemplateSchema);
   const Memberships = mongoose.model(Membership.name, MembershipSchema);
   const History = mongoose.model(MembershipHistory.name, MembershipHistorySchema);
   const Groups = mongoose.model(Group.name, GroupSchema);
@@ -255,6 +262,19 @@ async function main(): Promise<void> {
     await TrainingCategories.insertMany(training.categories);
     await TrainingSkills.insertMany(training.skills);
     await TrainingModules.insertMany(training.modules);
+
+    // The activation checklist (P5-T3), as the office's version 1, published — the state
+    // provisioning leaves a new office in, so the settings screen opens on something real.
+    await ActivationTemplates.create({
+      kpmId,
+      version: 1,
+      status: 'published',
+      publishedAt: clock.now(),
+      aspects: activationSeedAspects(defaultActivationChecklist()),
+      deletedAt: null,
+      createdBy: null,
+      updatedBy: null,
+    });
   }
 
   /**
@@ -315,7 +335,7 @@ async function main(): Promise<void> {
       $set: {
         seededFrom: {
           activity_taxonomy: defaults, lead_pipeline: defaults, ratio_set: defaults,
-          training_taxonomy: defaults,
+          training_taxonomy: defaults, activation_checklist: defaults,
         },
       },
     }).exec();

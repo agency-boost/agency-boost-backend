@@ -370,6 +370,11 @@ export class TenantService {
     );
     // Training (P5-T1): before publishing, so the office's first snapshot offers it too.
     const training = await this.provisioning.seedTrainingTaxonomy(String(kpm._id), input.companyId);
+    // The checklist after it (P5-T3), and checked against the modules just copied: an item linked
+    // to a module this office is not given could never complete.
+    const activation = await this.provisioning.seedActivationChecklist(
+      String(kpm._id), input.companyId, training.publishedModuleCodes,
+    );
 
     /*
      * And publish what was just copied (P4-T6), so the office's agents have something to
@@ -387,6 +392,7 @@ export class TenantService {
       lead_pipeline: leads.seededFrom,
       ratio_set: ratios.seededFrom,
       training_taxonomy: training.seededFrom,
+      activation_checklist: activation.seededFrom,
     };
     await kpm.save();
 

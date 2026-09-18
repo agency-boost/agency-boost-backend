@@ -423,4 +423,51 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
         .rejects.toThrow('The module ORPHAN names MISSING, which no skill in this taxonomy is.');
     });
   });
+
+  describe('the activation checklist (P5-T3)', () => {
+    it('starts from the seed: sixteen items in five aspects', async () => {
+      const view = await service.read(companyId, 'activation_checklist');
+      const aspects = view.payload.aspects as { code: string; items: unknown[] }[];
+
+      expect(aspects).toHaveLength(5);
+      expect(aspects.flatMap((a) => a.items)).toHaveLength(16);
+      expect(aspects[0].code).toBe('INTRODUCTION');
+    });
+
+    it('refuses a checklist an office could not have saved, through the same checker', async () => {
+      await service.saveDraft(ctx(), companyId, 'activation_checklist', { aspects: [] });
+      await expect(service.publish(ctx(), companyId, 'activation_checklist'))
+        .rejects.toThrow(/1–20 aspects/);
+
+      await service.saveDraft(ctx(), companyId, 'activation_checklist', {
+        aspects: [{
+          code: 'INTRODUCTION',
+          label: '1. Introduction',
+          items: [
+            { code: 'SAME_CODE', label: 'One' },
+            { code: 'SAME_CODE', label: 'Two', autoLink: 'feature:nothing' },
+          ],
+        }],
+      });
+      await expect(service.publish(ctx(), companyId, 'activation_checklist'))
+        .rejects.toThrow(/The item code SAME_CODE is used twice/);
+    });
+
+    /*
+     * A template has no office whose modules it could name, so the code's shape is all that can be
+     * checked here. Whether the office is given that module is provisioning's question (AC-5).
+     */
+    it('publishes a training link, leaving it for provisioning to resolve', async () => {
+      await service.saveDraft(ctx(), companyId, 'activation_checklist', {
+        aspects: [{
+          code: 'TRAINING_AND_CERTIFICATION',
+          label: '3. Training & Certification',
+          items: [{ code: 'MANDATORY_TRAINING', label: 'Mandatory training', autoLink: 'training:PROSPECT_LIST' }],
+        }],
+      });
+
+      await expect(service.publish(ctx(), companyId, 'activation_checklist'))
+        .resolves.toMatchObject({ status: 'published', version: 1 });
+    });
+  });
 });

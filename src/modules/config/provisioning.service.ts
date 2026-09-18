@@ -15,6 +15,13 @@ import { LeadStatus, LeadStatusDocument } from './lead-status.schema';
 import { RatioDefinition, RatioDefinitionDocument } from './ratio-definition.schema';
 import { ConfigSnapshot, ConfigSnapshotDocument } from './config-snapshot.schema';
 import { CompanyTemplate, CompanyTemplateDocument } from './company-template.schema';
+import {
+  ActivationTemplate, ActivationTemplateDocument,
+} from '@/modules/activation/activation-template.schema';
+import {
+  activationChecklistProblems, activationSeedAspects, activationTrainingLinks,
+  defaultActivationChecklist, type ActivationChecklistPayload,
+} from '@/modules/activation/activation-payload';
 import { TenantConfigService } from './tenant-config.service';
 import {
   TrainingCategory, TrainingCategoryDocument,
@@ -39,6 +46,12 @@ export interface ProvisionedTaxonomy {
 export interface ProvisionedKind {
   rows: number;
   seededFrom: SeedRecord;
+}
+
+/** The training seed also hands back what it copied, so the checklist's links are checkable. */
+export interface ProvisionedTraining extends ProvisionedKind {
+  /** The codes of the modules agents are offered — published and active. */
+  publishedModuleCodes: string[];
 }
 
 /**
@@ -96,6 +109,8 @@ export class ProvisioningService {
     private readonly trainingCategories: Model<TrainingCategoryDocument>,
     @InjectModel(TrainingSkill.name) private readonly trainingSkills: Model<TrainingSkillDocument>,
     @InjectModel(TrainingModule.name) private readonly trainingModules: Model<TrainingModuleDocument>,
+    @InjectModel(ActivationTemplate.name)
+    private readonly activationTemplates: Model<ActivationTemplateDocument>,
     private readonly clock: Clock,
     // Reads the rows this service has just written, and renders them the way agents will
     // read them — one renderer, so the snapshot and the live read cannot disagree.
@@ -258,7 +273,7 @@ export class ProvisioningService {
    * already refuses one (`TemplateService`), so this can only be a template older than that
    * check — and a skill under a category that does not exist would render on no screen.
    */
-  async seedTrainingTaxonomy(kpmId: string, companyId: string): Promise<ProvisionedKind> {
+  async seedTrainingTaxonomy(kpmId: string, companyId: string): Promise<ProvisionedTraining> {
     const template = await this.publishedTemplate(companyId, 'training_taxonomy');
     const problems = template ? trainingTaxonomyProblems(template.payload) : [];
     if (problems.length) {
@@ -277,6 +292,65 @@ export class ProvisioningService {
     await this.trainingModules.insertMany(rows.modules);
     return {
       rows: rows.categories.length + rows.skills.length + rows.modules.length,
+      seededFrom: recordOf(template),
+      publishedModuleCodes: rows.modules
+        .filter((m) => m.publishState === 'published')
+        .map((m) => m.code),
+    };
+  }
+
+  /**
+   * The 90-day activation checklist (P5-T3), as the office's **version 1, published**.
+   *
+   * Seeded **after** the training taxonomy and checked against it, for the reason the ratios are
+   * seeded after the activity types: an item linked to a module this office does not offer can never
+   * complete, and the hire it stalls has no way to know why. Refusing here puts the failure where
+   * the bad template is still the obvious suspect.
+   */
+  async seedActivationChecklist(
+    kpmId: string,
+    companyId: string,
+    publishedModuleCodes: readonly string[],
+  ): Promise<ProvisionedKind> {
+    const template = await this.publishedTemplate(companyId, 'activation_checklist');
+    const payload = template
+      ? (template.payload as unknown as ActivationChecklistPayload)
+      : defaultActivationChecklist();
+
+    const problems = template ? activationChecklistProblems(template.payload) : [];
+    if (problems.length) {
+      throw new Error(
+        `The published activation checklist for company ${companyId} would produce a broken office: `
+          + problems.join(' '),
+      );
+    }
+
+    const aspects = activationSeedAspects(payload);
+    const offered = new Set(publishedModuleCodes);
+    const missing = activationTrainingLinks(aspects).filter((code) => !offered.has(code));
+    if (missing.length) {
+      throw new Error(
+        `The published activation checklist for company ${companyId} links to training modules this `
+          + `office is not given: ${missing.join(', ')}.`,
+      );
+    }
+
+    const now = this.clock.now();
+    await this.activationTemplates.create({
+      kpmId,
+      version: 1,
+      status: 'published',
+      publishedAt: now,
+      aspects,
+      deletedAt: null,
+      createdBy: null,
+      updatedBy: null,
+      createdAt: now,
+      updatedAt: now,
+    } as never);
+
+    return {
+      rows: aspects.reduce((total, aspect) => total + aspect.items.length, 0),
       seededFrom: recordOf(template),
     };
   }

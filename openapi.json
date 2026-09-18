@@ -8243,6 +8243,201 @@
         ],
         "x-required-permission": "tenant_config:read"
       }
+    },
+    "/api/v1/kpm/settings/activation-checklist": {
+      "get": {
+        "description": "The published version hires starting now are given, the working draft if there is one, and the office's activation window. Each item carries its link, resolved: what it waits for, where that sends a reader, and whether an evaluator exists yet.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivationController_read_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivationChecklistDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office's activation checklist",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:read"
+      },
+      "put": {
+        "description": "The whole checklist, not a patch: order is the order of the lists sent. Refuses a duplicate code, a link this product does not have, and a training link to a module the office does not offer — naming every problem at once. Nothing reaches a hire until it is published.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivationController_saveDraft_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveActivationChecklistDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivationChecklistDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save the working draft",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/kpm/settings/activation-checklist/publish": {
+      "post": {
+        "description": "Turns the draft into the next version, which is then immutable and given to hires who start after it. Hires already under way keep the version they started on. Refuses when there is no draft, and re-checks the training links, which can be archived between saving and publishing.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivationController_publish_v1",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivationChecklistDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Publish the draft as the next version",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
     }
   },
   "info": {
@@ -9248,6 +9443,68 @@
             "description": "The month the financial year starts. Read by Phase 14, stored now."
           }
         }
+      },
+      "ActivationItemDraftDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "GOAL_SETTING",
+            "description": "Permanent. A hire's progress names it."
+          },
+          "label": {
+            "type": "string",
+            "example": "Goal setting: APE & activity targets"
+          },
+          "autoLink": {
+            "type": "string",
+            "nullable": true,
+            "example": "feature:goals",
+            "description": "What completes it on its own: `feature:goals`, `feature:leads`, `feature:activity`, `training:<module code>`, or `null` for an item a leader ticks."
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
+      "ActivationAspectDraftDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "INITIAL_SETUP"
+          },
+          "label": {
+            "type": "string",
+            "example": "2. Initial Setup"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivationItemDraftDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "items"
+        ]
+      },
+      "SaveActivationChecklistDto": {
+        "type": "object",
+        "properties": {
+          "aspects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivationAspectDraftDto"
+            }
+          }
+        },
+        "required": [
+          "aspects"
+        ]
       },
       "ApiErrorBody": {
         "type": "object",
@@ -10652,6 +10909,179 @@
           "suspendedAt",
           "suspendedReason",
           "createdAt"
+        ]
+      },
+      "ActivationLinkDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "example": "feature:goals"
+          },
+          "label": {
+            "type": "string",
+            "example": "Goal Settings",
+            "description": "Phase 11's \"Go to {label} →\"."
+          },
+          "route": {
+            "type": "string",
+            "example": "/goals"
+          },
+          "completesWhen": {
+            "type": "string",
+            "example": "the hire has saved any goal since joining this office"
+          },
+          "live": {
+            "type": "boolean",
+            "description": "Whether an evaluator exists yet. While it does not, a leader ticks the item by hand and the tick is recorded as manual; once it is live, no role may tick it."
+          },
+          "livePhase": {
+            "type": "number",
+            "example": 11
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "route",
+          "completesWhen",
+          "live",
+          "livePhase"
+        ]
+      },
+      "ActivationItemDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "GOAL_SETTING"
+          },
+          "label": {
+            "type": "string"
+          },
+          "displayOrder": {
+            "type": "number",
+            "description": "Within its aspect. Presentation only."
+          },
+          "autoLink": {
+            "type": "string",
+            "nullable": true,
+            "example": "feature:goals"
+          },
+          "link": {
+            "nullable": true,
+            "description": "The link, resolved.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationLinkDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "displayOrder",
+          "autoLink",
+          "link"
+        ]
+      },
+      "ActivationAspectDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "INITIAL_SETUP"
+          },
+          "label": {
+            "type": "string",
+            "example": "2. Initial Setup"
+          },
+          "displayOrder": {
+            "type": "number"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivationItemDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "displayOrder",
+          "items"
+        ]
+      },
+      "ActivationVersionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "number",
+            "description": "What a hire's activation records at creation."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published"
+            ]
+          },
+          "publishedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "aspects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivationAspectDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "status",
+          "publishedAt",
+          "aspects"
+        ]
+      },
+      "ActivationChecklistDto": {
+        "type": "object",
+        "properties": {
+          "published": {
+            "nullable": true,
+            "description": "The version hires starting now are given. `null` before the first publish.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationVersionDto"
+              }
+            ]
+          },
+          "draft": {
+            "nullable": true,
+            "description": "The office's working copy. `null` when nothing has changed since publishing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationVersionDto"
+              }
+            ]
+          },
+          "windowDays": {
+            "type": "number",
+            "example": 90,
+            "description": "The office's activation window. Shown beside the checklist; changed in Branch info."
+          }
+        },
+        "required": [
+          "published",
+          "draft",
+          "windowDays"
         ]
       },
       "TeamMemberDto": {

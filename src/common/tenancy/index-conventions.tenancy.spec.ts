@@ -32,6 +32,9 @@ import {
 } from '@/modules/training/training-category.schema';
 import { TrainingSkillSchema } from '@/modules/training/training-skill.schema';
 import { TrainingModuleSchema } from '@/modules/training/training-module.schema';
+import {
+  ActivationAspectSchema, ActivationItemSchema, ActivationTemplateSchema,
+} from '@/modules/activation/activation-template.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -58,6 +61,7 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['trainingCategories', TrainingCategorySchema],
   ['trainingSkills', TrainingSkillSchema],
   ['trainingModules', TrainingModuleSchema],
+  ['activationTemplates', ActivationTemplateSchema],
 ];
 
 /**
@@ -65,6 +69,16 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
  * listed here and not above is a schema nobody classified — which is itself a finding.
  */
 const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
+  [
+    'activationAspect (subdocument)',
+    ActivationAspectSchema,
+    'a subdocument of activationTemplates: no collection, no _id of its own, and its kpmId is the document it sits in',
+  ],
+  [
+    'activationItem (subdocument)',
+    ActivationItemSchema,
+    'a subdocument of an activation aspect, for the same reason',
+  ],
   ['auditLog', AuditLogSchema, 'kpmId is nullable: platform actions belong to no tenant'],
   [
     'notificationPreferences',
@@ -143,6 +157,9 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [TrainingCategorySchema, 'TrainingCategorySchema'],
   [TrainingSkillSchema, 'TrainingSkillSchema'],
   [TrainingModuleSchema, 'TrainingModuleSchema'],
+  [ActivationTemplateSchema, 'ActivationTemplateSchema'],
+  [ActivationAspectSchema, 'ActivationAspectSchema'],
+  [ActivationItemSchema, 'ActivationItemSchema'],
   [ImpersonationSessionSchema, 'ImpersonationSessionSchema'],
   [CompanyTemplateSchema, 'CompanyTemplateSchema'],
   [AssetSchema, 'AssetSchema'],

@@ -12,6 +12,8 @@ import { ActivityConfigService } from './activity.service';
 import { ConfigChangeService } from './changes.service';
 import { TenantConfigController, TenantConfigReadController } from './config.controller';
 import { TrainingController } from '@/modules/training/training.controller';
+import { ActivationController } from '@/modules/activation/activation.controller';
+import { ActivationService } from '@/modules/activation/activation.service';
 import { TrainingService } from '@/modules/training/training.service';
 import { LeadStatusService } from './lead-status.service';
 import { RatioService } from './ratio.service';
@@ -68,7 +70,9 @@ describe('the configuration controllers', () => {
     wired = configModule(NOW);
 
     const moduleRef = await Test.createTestingModule({
-      controllers: [TenantConfigController, TenantConfigReadController, TrainingController],
+      controllers: [
+        TenantConfigController, TenantConfigReadController, TrainingController, ActivationController,
+      ],
       providers: [
         { provide: ActivityConfigService, useValue: wired.activity },
         { provide: LeadStatusService, useValue: wired.leads },
@@ -76,6 +80,7 @@ describe('the configuration controllers', () => {
         { provide: TenantConfigService, useValue: wired.config },
         { provide: ConfigChangeService, useValue: wired.changes },
         { provide: TrainingService, useValue: wired.training },
+        { provide: ActivationService, useValue: wired.activation },
         // Only two of its methods are reachable from here, and neither is this file's
         // subject — `tenant.service`'s own specs own them.
         {
@@ -145,6 +150,7 @@ describe('the configuration controllers', () => {
       ['TenantConfigController', TenantConfigController],
       ['TenantConfigReadController', TenantConfigReadController],
       ['TrainingController', TrainingController],
+      ['ActivationController', ActivationController],
     ])('%s: every route names a permission', (_label, Controller) => {
       const found = routes(Object.create(Controller.prototype) as object);
       expect(found.length).toBeGreaterThan(0);
@@ -167,6 +173,7 @@ describe('the configuration controllers', () => {
         ...routes(Object.create(TenantConfigController.prototype) as object),
         ...routes(Object.create(TenantConfigReadController.prototype) as object),
         ...routes(Object.create(TrainingController.prototype) as object),
+        ...routes(Object.create(ActivationController.prototype) as object),
       ];
       const writes = found.filter((r) => r.method !== RequestMethod.GET);
       expect(writes.length).toBeGreaterThan(0);
@@ -186,6 +193,7 @@ describe('the configuration controllers', () => {
         ...routes(Object.create(TenantConfigController.prototype) as object),
         ...routes(Object.create(TenantConfigReadController.prototype) as object),
         ...routes(Object.create(TrainingController.prototype) as object),
+        ...routes(Object.create(ActivationController.prototype) as object),
       ];
       const writes = found.filter((r) => r.method !== RequestMethod.GET);
       expect(writes.length).toBeGreaterThan(0);
@@ -203,6 +211,7 @@ describe('the configuration controllers', () => {
         ...routes(Object.create(TenantConfigController.prototype) as object),
         ...routes(Object.create(TenantConfigReadController.prototype) as object),
         ...routes(Object.create(TrainingController.prototype) as object),
+        ...routes(Object.create(ActivationController.prototype) as object),
       ];
       const reads = found.filter((r) => r.method === RequestMethod.GET);
       expect(reads.length).toBeGreaterThan(0);
@@ -244,6 +253,72 @@ describe('the configuration controllers', () => {
         .post('/kpm/settings/changes')
         .send({ ops: [{ op: 'trainingCategory.create', body: { code: 'MINE_NOW', label: 'Mine' } }] })
         .expect(403);
+    });
+  });
+
+  describe('/kpm/settings/activation-checklist (P5-T3)', () => {
+    const draftOf = (body: { published: { aspects: unknown[] } }) => ({
+      aspects: (body.published.aspects as {
+        code: string; label: string; items: { code: string; label: string; autoLink: string | null }[];
+      }[]).map((aspect) => ({
+        code: aspect.code,
+        label: aspect.label,
+        items: aspect.items.map((i) => ({ code: i.code, label: i.label, autoLink: i.autoLink })),
+      })),
+    });
+
+    beforeEach(async () => {
+      const training = await wired.provisioning.seedTrainingTaxonomy(KPM_A, COMPANY);
+      await wired.provisioning.seedActivationChecklist(KPM_A, COMPANY, training.publishedModuleCodes);
+    });
+
+    it('reads the published version, its window, and every link resolved', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/kpm/settings/activation-checklist').expect(200);
+
+      expect(res.body.published).toMatchObject({ version: 1, status: 'published' });
+      expect(res.body.draft).toBeNull();
+      const items = res.body.published.aspects.flatMap((a: { items: unknown[] }) => a.items);
+      expect(items).toHaveLength(16);
+      expect(items.find((i: { code: string }) => i.code === 'GOAL_SETTING').link)
+        .toMatchObject({ label: 'Goal Settings', route: '/goals', live: false });
+    });
+
+    it('saves a draft and publishes it as the next version', async () => {
+      const read = await request(app.getHttpServer()).get('/kpm/settings/activation-checklist');
+      const next = draftOf(read.body);
+      next.aspects[0].label = '1. Induction';
+
+      const saved = await request(app.getHttpServer())
+        .put('/kpm/settings/activation-checklist').send(next).expect(200);
+      expect(saved.body.draft).toMatchObject({ version: 2, status: 'draft' });
+      expect(saved.body.published.aspects[0].label).toBe('1. Introduction');
+
+      const published = await request(app.getHttpServer())
+        .post('/kpm/settings/activation-checklist/publish').expect(201);
+      expect(published.body.draft).toBeNull();
+      expect(published.body.published).toMatchObject({ version: 2 });
+      expect(published.body.published.aspects[0].label).toBe('1. Induction');
+    });
+
+    it('refuses a draft the checker will not have, naming every problem', async () => {
+      const res = await request(app.getHttpServer())
+        .put('/kpm/settings/activation-checklist')
+        .send({ aspects: [{ code: 'A_CODE', label: 'A', items: [{ code: 'X', label: '' }] }] })
+        .expect(400);
+
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('is readable by every member, and refuses them both writes', async () => {
+      current = AGENT;
+      await request(app.getHttpServer()).get('/kpm/settings/activation-checklist').expect(200);
+      await request(app.getHttpServer())
+        .put('/kpm/settings/activation-checklist')
+        .send({ aspects: [{ code: 'MINE', label: 'Mine', items: [{ code: 'M_ITEM', label: 'Item' }] }] })
+        .expect(403);
+      await request(app.getHttpServer())
+        .post('/kpm/settings/activation-checklist/publish').expect(403);
     });
   });
 

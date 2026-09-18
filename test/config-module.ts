@@ -35,6 +35,11 @@ import {
   TrainingCategoryRepository, TrainingModuleRepository, TrainingSkillRepository,
 } from '@/modules/training/training.repository';
 import { TrainingService } from '@/modules/training/training.service';
+import {
+  ActivationTemplate, ActivationTemplateSchema,
+} from '@/modules/activation/activation-template.schema';
+import { ActivationTemplateRepository } from '@/modules/activation/activation.repository';
+import { ActivationService } from '@/modules/activation/activation.service';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
@@ -65,6 +70,7 @@ export function configModule(now: Date) {
   const trainingCategories = model('TrainingCategoryModel', TrainingCategorySchema);
   const trainingSkills = model('TrainingSkillModel', TrainingSkillSchema);
   const trainingModules = model('TrainingModuleModel', TrainingModuleSchema);
+  const activationTemplates = model('ActivationTemplateModel', ActivationTemplateSchema);
 
   const clock: Clock = new FixedClock(now);
   const audit = new AuditService(model('AuditLogModel', AuditLogSchema) as never);
@@ -112,6 +118,14 @@ export function configModule(now: Date) {
     orgLevels,
     training,
   );
+  // P5-T3. After `training`, whose modules its links are checked against.
+  const activation = new ActivationService(
+    new ActivationTemplateRepository(activationTemplates as never),
+    training,
+    kpms as never,
+    audit,
+    clock,
+  );
   const provisioning = new ProvisioningService(
     categories as never,
     types as never,
@@ -122,6 +136,7 @@ export function configModule(now: Date) {
     trainingCategories as never,
     trainingSkills as never,
     trainingModules as never,
+    activationTemplates as never,
     clock,
     config,
   );
@@ -132,7 +147,7 @@ export function configModule(now: Date) {
 
   return {
     activity, ratios, leads, config, provisioning, templates, audit, clock, changes,
-    orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training,
+    orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
   };
 }
 
@@ -145,7 +160,8 @@ export async function provisionOffice(
   const seeded = await module.provisioning.seedActivityTaxonomy(kpmId, companyId);
   await module.provisioning.seedLeadPipelines(kpmId, companyId);
   await module.provisioning.seedRatioDefinitions(kpmId, companyId, seeded.typeCodes);
-  await module.provisioning.seedTrainingTaxonomy(kpmId, companyId);
+  const training = await module.provisioning.seedTrainingTaxonomy(kpmId, companyId);
+  await module.provisioning.seedActivationChecklist(kpmId, companyId, training.publishedModuleCodes);
   return seeded;
 }
 
@@ -156,4 +172,5 @@ export {
   AuditLog, AuditLogSchema,
   TrainingCategory, TrainingCategorySchema, TrainingSkill, TrainingSkillSchema,
   TrainingModule, TrainingModuleSchema,
+  ActivationTemplate, ActivationTemplateSchema,
 };

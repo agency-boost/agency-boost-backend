@@ -5,6 +5,9 @@ import {
 import { TrainingSkill, TrainingSkillSchema } from '@/modules/training/training-skill.schema';
 import { TrainingModule, TrainingModuleSchema } from '@/modules/training/training-module.schema';
 import {
+  ActivationTemplate, ActivationTemplateSchema,
+} from '@/modules/activation/activation-template.schema';
+import {
   TrainingCategoryRepository, TrainingModuleRepository, TrainingSkillRepository,
 } from '@/modules/training/training.repository';
 import { TrainingService } from '@/modules/training/training.service';
@@ -183,6 +186,7 @@ describe('auth and admin over HTTP', () => {
           { name: TrainingCategory.name, schema: TrainingCategorySchema },
           { name: TrainingSkill.name, schema: TrainingSkillSchema },
           { name: TrainingModule.name, schema: TrainingModuleSchema },
+        { name: ActivationTemplate.name, schema: ActivationTemplateSchema },
         ]),
       ],
       controllers: [
