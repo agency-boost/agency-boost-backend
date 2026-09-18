@@ -144,6 +144,56 @@ describe('SMTP, end to end (P4-T14 AC-7)', () => {
     expect(rows[0].payload).toEqual({});
   });
 
+  describe('start-up must not wait on an unreachable relay (ADR-0041)', () => {
+    /**
+     * An unroutable address: the connection neither completes nor is refused, which is
+     * what a blocked outbound port looks like. Against the real relay on such a network
+     * `verify()` sat for 75 seconds before ETIMEDOUT — and `onModuleInit` blocks
+     * `app.init()`, which on a serverless platform blocks the first request behind it.
+     */
+    function unreachable(nodeEnv: string) {
+      const values: Record<string, unknown> = {
+        SMTP_HOST: '192.0.2.1', SMTP_PORT: 587, SMTP_USER: '', SMTP_PASSWORD: '',
+        MAIL_FROM: 'x@test', MAIL_TRANSPORT: 'smtp',
+      };
+      const config = {
+        get: (k: string) => values[k], getOrThrow: (k: string) => values[k],
+      } as unknown as ConfigService;
+      const previous = process.env.NODE_ENV;
+      process.env.NODE_ENV = nodeEnv;
+      const smtp = new SmtpChannelAdapter(config, { addressOf: async () => 'a@b.test' });
+      return { smtp, restore: () => { process.env.NODE_ENV = previous; } };
+    }
+
+    it('returns immediately outside production, where the failure is only a warning', async () => {
+      const { smtp, restore } = unreachable('staging');
+      try {
+        const started = Date.now();
+        await smtp.onModuleInit();
+        // Well under the 10s connection timeout, so this cannot have waited for the dial.
+        expect(Date.now() - started).toBeLessThan(1_000);
+      } finally {
+        restore();
+      }
+    });
+
+    it('bounds the dial rather than taking the two-minute nodemailer default', async () => {
+      const { smtp, restore } = unreachable('staging');
+      try {
+        // The floating verify still has to settle, and it must do so on our schedule.
+        const started = Date.now();
+        await smtp.onModuleInit();
+        await expect(smtp.send(
+          { userId: 'u1', templateId: NotificationTemplate.PASSWORD_RESET, payload: {} },
+          { subject: 'S', body: 'B' },
+        )).rejects.toThrow();
+        expect(Date.now() - started).toBeLessThan(25_000);
+      } finally {
+        restore();
+      }
+    }, 40_000);
+  });
+
   it('reports a refused connection rather than appearing to send', async () => {
     // A closed port, which is what a wrong SMTP_HOST looks like from here.
     const values: Record<string, unknown> = {

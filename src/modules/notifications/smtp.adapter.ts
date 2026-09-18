@@ -29,6 +29,19 @@ export abstract class RecipientAddressBook {
  * carries on by design — an unreachable mail server must not fail the approval, the removal
  * or the registration that triggered the message.
  */
+/**
+ * Transport timeouts, stated because nodemailer's defaults are two minutes.
+ *
+ * A start-up liveness check that can sit for two minutes is wrong on every platform: it
+ * stalls `pnpm dev` behind an unreachable relay, and on Vercel it spends the whole
+ * invocation budget before the first request is looked at. Measured on a network that
+ * blocks outbound 587, `verify()` took 75s to reach ETIMEDOUT.
+ */
+const SMTP_CONNECTION_TIMEOUT_MS = 10_000;
+const SMTP_GREETING_TIMEOUT_MS = 10_000;
+/** Inactivity during an exchange, which covers sending as well as verifying. */
+const SMTP_SOCKET_TIMEOUT_MS = 30_000;
+
 @Injectable()
 export class SmtpChannelAdapter extends NotificationChannelAdapter implements OnModuleInit {
   readonly channel: NotificationChannel = 'email';
@@ -53,6 +66,14 @@ export class SmtpChannelAdapter extends NotificationChannelAdapter implements On
       // is the single most common way an SMTP client hangs rather than failing.
       secure: port === 465,
       auth: user ? { user, pass: config.get<string>('SMTP_PASSWORD') ?? '' } : undefined,
+      // Stated, because nodemailer's default connection timeout is two minutes and a
+      // start-up check has no business taking that long anywhere. Measured against a
+      // network that blocks outbound 587: verify() sat for 75s before ETIMEDOUT, which on
+      // a serverless platform is the whole invocation budget spent before the first
+      // request is looked at.
+      connectionTimeout: SMTP_CONNECTION_TIMEOUT_MS,
+      greetingTimeout: SMTP_GREETING_TIMEOUT_MS,
+      socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
     });
   }
 
@@ -61,6 +82,27 @@ export class SmtpChannelAdapter extends NotificationChannelAdapter implements On
     // has anything to verify. Dialling a fake `SMTP_HOST` on every local boot would cost a
     // connection timeout and teach developers to ignore a warning.
     if (this.config.get<string>('MAIL_TRANSPORT') !== 'smtp') return;
+
+    const verified = this.verifyTransport();
+
+    // **Production waits; nothing else does.**
+    //
+    // A failure here is fatal in production (ADR-0019 AC-3), so the process must not get
+    // past this line until the answer is known. Everywhere else the same failure is only a
+    // warning — and a warning must not cost start-up time, because `onModuleInit` blocks
+    // `app.init()`, which on Vercel blocks the first request behind it (ADR-0041). The
+    // warning still arrives; it just arrives on its own schedule.
+    if (process.env.NODE_ENV === 'production') {
+      await verified;
+      return;
+    }
+
+    // Cannot reject outside production — `verifyTransport` only throws on the production
+    // branch — so this floats safely rather than becoming an unhandled rejection.
+    void verified;
+  }
+
+  private async verifyTransport(): Promise<void> {
     try {
       await this.transport.verify();
       this.logger.log('SMTP transport verified');
