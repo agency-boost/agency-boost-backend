@@ -14,6 +14,10 @@ const MODULES = join(__dirname, '..');
  * repository is a defect even when it happens to be correct today."*
  */
 const TENANT_SCOPED_MODELS = [
+  // Added 2026-09-18, finishing P4-T11 AC-1, which named `assets` and stopped short of it.
+  // Its absence is why this spec — written to catch a service holding a raw model — never
+  // asked about the one service that was.
+  'Asset',
   'Group',
   'JoinRequest',
   'MembershipHistory',
@@ -44,6 +48,7 @@ const ALLOWED = new Map<string, string>([
   ['config/activity.repository.ts', 'the repositories for those models'],
   ['training/training.repository.ts', 'the repositories for those models'],
   ['activation/activation.repository.ts', 'the repository for that model'],
+  ['assets/asset.repository.ts', 'the repository for that model'],
   [
     'config/provisioning.service.ts',
     'writes into an office being created, before any context is scoped to it',

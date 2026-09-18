@@ -9,7 +9,7 @@ export type AssetDocument = HydratedDocument<Asset>;
  *
  * Without it, Cloudinary references scatter across training modules, product documents,
  * event posters, coaching exports and upload batches — and there is no way to find an
- * orphan, account for storage per tenant, or prove a file was scanned.
+ * orphan, account for storage per tenant, or say who uploaded what.
  */
 @Schema({ ...baseSchemaOptions, collection: 'assets' })
 export class Asset {
@@ -36,8 +36,20 @@ export class Asset {
   @Prop({ type: Number, default: 0 })
   refCount!: number;
 
-  @Prop({ type: String, enum: ['pending', 'clean', 'infected'], default: 'pending' })
-  scanStatus!: 'pending' | 'clean' | 'infected';
+  /**
+   * Whether the bytes are known to have arrived (ADR-0040).
+   *
+   * `pending` — a signature was issued and the browser may or may not have finished.
+   * `confirmed` — storage was asked, the object is there, and `mimeType` and `bytes` above hold
+   * what storage reported rather than what the client claimed.
+   *
+   * **This is not a malware check and never was one.** It replaced a `scanStatus` of
+   * `pending | clean | infected` that nothing ever moved out of `pending`, so every upload was
+   * permanently undeliverable while the schema told every reader the file had been inspected.
+   * v1 does not scan; ADR-0040 records what stands in place of one, and what that accepts.
+   */
+  @Prop({ type: String, enum: ['pending', 'confirmed'], default: 'pending' })
+  uploadState!: 'pending' | 'confirmed';
 
   @Prop({ type: Date, default: null })
   deletedAt!: Date | null;

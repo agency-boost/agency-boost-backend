@@ -74,6 +74,10 @@ import { ProductController } from '@/modules/products/product.controller';
 import { OfficeCounter } from '@/modules/config/office-counter.port';
 import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
+import { AssetRepository } from '@/modules/assets/asset.repository';
+import { AssetService } from '@/modules/assets/asset.service';
+import { StoragePort } from '@/modules/assets/storage.port';
+import { CloudinaryAdapter } from '@/modules/assets/cloudinary.adapter';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { AuthToken, AuthTokenSchema } from '@/modules/auth/auth-token.schema';
 import {
@@ -241,6 +245,16 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ActivationTemplateRepository,
     ActivationService,
     ProductService,
+    /*
+     * The upload registry (P4-T11 AC-1, finished 2026-09-18).
+     *
+     * It was written in Phase 2 and never registered, so nothing could inject it and no
+     * route could exist — a module complete enough to pass its own unit tests and absent
+     * from the running application. P5-T2 builds the endpoints on top of it.
+     */
+    AssetRepository,
+    AssetService,
+    { provide: StoragePort, useClass: CloudinaryAdapter },
     ConfigSnapshotRepository,
     TenantConfigService,
     TemplateService,

@@ -8,6 +8,7 @@ jest.mock('cloudinary', () => ({
     utils: { api_sign_request: jest.fn(() => 'signed-abc') },
     url: jest.fn((key: string, opts: Record<string, unknown>) => `https://cdn.test/${key}?e=${opts.expires_at}`),
     uploader: { destroy: jest.fn(async () => ({ result: 'ok' })) },
+    api: { resource: jest.fn() },
   },
 }));
 
@@ -81,5 +82,60 @@ describe('CloudinaryAdapter', () => {
   it('invalidates the CDN when removing, so a deleted file stops being served', async () => {
     await makeAdapter().remove('dev/k/f/1');
     expect(cloudinary.uploader.destroy).toHaveBeenCalledWith('dev/k/f/1', { invalidate: true });
+  });
+
+  describe('confirming what storage actually holds (ADR-0040)', () => {
+    /** Cloudinary answers a 404 by throwing an object carrying `http_code`. */
+    const notFound = () => Object.assign(new Error('Resource not found'), { http_code: 404 });
+
+    it('turns the vendor’s format back into the media type this product speaks', async () => {
+      (cloudinary.api.resource as jest.Mock).mockResolvedValueOnce({ format: 'PDF', bytes: 2048 });
+
+      await expect(makeAdapter().describe('dev/kpm-1/training/01ABC')).resolves.toEqual({
+        storageKey: 'dev/kpm-1/training/01ABC',
+        mimeType: 'application/pdf',
+        bytes: 2048,
+      });
+    });
+
+    it('asks each resource type in turn, because an upload goes to auto/upload', async () => {
+      // Cloudinary decides for itself: a spreadsheet lands under `raw`, and `api.resource`
+      // defaults to `image` and 404s for the rest. Asking once would only ever find pictures.
+      (cloudinary.api.resource as jest.Mock)
+        .mockRejectedValueOnce(notFound())
+        .mockRejectedValueOnce(notFound())
+        .mockResolvedValueOnce({ format: 'xlsx', bytes: 64 });
+
+      const found = await makeAdapter().describe('dev/kpm-1/uploads/01ABC');
+
+      expect(found?.mimeType)
+        .toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      expect((cloudinary.api.resource as jest.Mock).mock.calls.map((c) => c[1].resource_type))
+        .toEqual(['image', 'video', 'raw']);
+    });
+
+    it('answers null when the bytes never arrived', async () => {
+      (cloudinary.api.resource as jest.Mock).mockRejectedValue(notFound());
+
+      await expect(makeAdapter().describe('dev/kpm-1/training/nothing')).resolves.toBeNull();
+    });
+
+    it('passes an unmapped format through, so the allow-list refuses it by name', async () => {
+      // Never invent a media type for a file we do not recognise: `refuseBeyondLimits` then
+      // rejects `exe` rather than being handed something that looks acceptable.
+      (cloudinary.api.resource as jest.Mock).mockResolvedValueOnce({ format: 'exe', bytes: 10 });
+
+      await expect(makeAdapter().describe('dev/kpm-1/x/1'))
+        .resolves.toMatchObject({ mimeType: 'exe' });
+    });
+
+    it('never reads a real failure as "the file is not there"', async () => {
+      // A revoked credential is a 401. Swallowing it would report every upload as never
+      // having arrived, and the screen would tell people to try again for ever.
+      (cloudinary.api.resource as jest.Mock)
+        .mockRejectedValue(Object.assign(new Error('Unauthorized'), { http_code: 401 }));
+
+      await expect(makeAdapter().describe('dev/kpm-1/x/1')).rejects.toThrow('Unauthorized');
+    });
   });
 });

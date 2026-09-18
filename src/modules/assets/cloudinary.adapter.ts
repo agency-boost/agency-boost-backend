@@ -3,7 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary } from 'cloudinary';
 import { ulid } from 'ulid';
 import { Clock } from '@/common/clock/clock.port';
-import { ASSET_LIMITS, SignedUpload, StoragePort } from './storage.port';
+import {
+  ASSET_LIMITS, FORMAT_TO_MIME_TYPE, SignedUpload, StoragePort, StoredObject,
+} from './storage.port';
 
 /**
  * Cloudinary, foldered per environment and per tenant.
@@ -62,6 +64,49 @@ export class CloudinaryAdapter extends StoragePort {
       type: 'authenticated',
       expires_at: Math.floor(this.clock.now().getTime() / 1000) + ttlSeconds,
     });
+  }
+
+  /**
+   * What Cloudinary actually holds under this key (ADR-0040).
+   *
+   * **Three lookups, not one.** An upload goes to `auto/upload`, and Cloudinary decides for itself
+   * which of its three resource types the file belongs to — a PDF lands under `image`, a
+   * spreadsheet under `raw`, an mp4 under `video` — while `api.resource` defaults to `image` and
+   * answers 404 for the others. Asking each in turn is what makes "did this arrive?" answerable
+   * for every type on the allow-list rather than for pictures only.
+   *
+   * `null` means storage has nothing there: a signature was issued and the bytes never came.
+   */
+  async describe(storageKey: string): Promise<StoredObject | null> {
+    for (const resourceType of ['image', 'video', 'raw'] as const) {
+      const found = await this.resource(storageKey, resourceType);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  private async resource(
+    storageKey: string,
+    resourceType: 'image' | 'video' | 'raw',
+  ): Promise<StoredObject | null> {
+    try {
+      const r = await cloudinary.api.resource(storageKey, { resource_type: resourceType }) as {
+        format?: string; bytes?: number;
+      };
+      const format = String(r.format ?? '').toLowerCase();
+      return {
+        storageKey,
+        // Unmapped formats pass through as themselves, so the allow-list refuses them by name
+        // instead of this method inventing a media type for a file it does not recognise.
+        mimeType: FORMAT_TO_MIME_TYPE[format] ?? format,
+        bytes: Number(r.bytes ?? 0),
+      };
+    } catch (err) {
+      // 404 is the expected answer for two of the three probes above. Anything else is a real
+      // failure — a bad key, a revoked credential — and must not read as "the file is not there".
+      if ((err as { http_code?: number })?.http_code === 404) return null;
+      throw err;
+    }
   }
 
   async remove(storageKey: string): Promise<void> {
