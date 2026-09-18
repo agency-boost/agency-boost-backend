@@ -69,6 +69,7 @@
   "engines": {
     "node": ">=20"
   },
+  "packageManager": "pnpm@10.33.0",
   "pnpm": {
     "overrides": {
       "@angular-devkit/core>picomatch": ">=4.0.4",
@@ -78,6 +79,13 @@
       "@nestjs/swagger>js-yaml": ">=4.3.1",
       "@nestjs/swagger>lodash": ">=4.18.0",
       "external-editor>tmp": ">=0.2.6"
-    }
+    },
+    "onlyBuiltDependencies": [],
+    "ignoredBuiltDependencies": [
+      "@nestjs/core",
+      "@scarf/scarf",
+      "argon2",
+      "mongodb-memory-server"
+    ]
   }
 }

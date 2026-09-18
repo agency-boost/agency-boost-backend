@@ -10,9 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      # No version pinned here on purpose: the action reads package.json#packageManager,
+      # which is the same pnpm the lockfile was generated with and the same one Vercel
+      # uses. Pinning it in four places is how CI came to run a pnpm that read the
+      # overrides from somewhere the lockfile did not.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 9
       - uses: actions/setup-node@v5
         with:
           node-version: 20
@@ -74,9 +76,11 @@ jobs:
         tz: [UTC, Asia/Jakarta, America/New_York]
     steps:
       - uses: actions/checkout@v5
+      # No version pinned here on purpose: the action reads package.json#packageManager,
+      # which is the same pnpm the lockfile was generated with and the same one Vercel
+      # uses. Pinning it in four places is how CI came to run a pnpm that read the
+      # overrides from somewhere the lockfile did not.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 9
       - uses: actions/setup-node@v5
         with:
           node-version: 20
@@ -99,9 +103,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      # No version pinned here on purpose: the action reads package.json#packageManager,
+      # which is the same pnpm the lockfile was generated with and the same one Vercel
+      # uses. Pinning it in four places is how CI came to run a pnpm that read the
+      # overrides from somewhere the lockfile did not.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 9
       - uses: actions/setup-node@v5
         with:
           node-version: 20
@@ -121,9 +127,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      # No version pinned here on purpose: the action reads package.json#packageManager,
+      # which is the same pnpm the lockfile was generated with and the same one Vercel
+      # uses. Pinning it in four places is how CI came to run a pnpm that read the
+      # overrides from somewhere the lockfile did not.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 9
       - uses: actions/setup-node@v5
         with:
           node-version: 20

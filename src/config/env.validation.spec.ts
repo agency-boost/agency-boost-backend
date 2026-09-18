@@ -40,6 +40,39 @@ describe('environment validation', () => {
     });
   });
 
+  describe('cross-site cookies (ADR-0041)', () => {
+    it('defaults to same-site, the safer of the two', () => {
+      expect(validateEnv(valid).COOKIE_CROSS_SITE).toBe(false);
+    });
+
+    it('reads "false" as false — the string a reader would expect to disable it', () => {
+      // z.coerce.boolean() would make this true, silently turning the control on for
+      // whoever wrote the obvious value.
+      expect(validateEnv({ ...valid, COOKIE_CROSS_SITE: 'false' }).COOKIE_CROSS_SITE).toBe(false);
+    });
+
+    it('enables it over HTTPS, which is the Vercel staging shape', () => {
+      const env = validateEnv({
+        ...valid,
+        COOKIE_CROSS_SITE: 'true',
+        APP_ORIGIN: 'https://app.example',
+      });
+      expect(env.COOKIE_CROSS_SITE).toBe(true);
+    });
+
+    it('refuses it over plain http, where a Secure cookie is discarded', () => {
+      expect(() =>
+        validateEnv({ ...valid, COOKIE_CROSS_SITE: 'true', APP_ORIGIN: 'http://app.example' }),
+      ).toThrow(/COOKIE_CROSS_SITE/);
+    });
+
+    it('rejects a value that is neither true nor false', () => {
+      expect(() => validateEnv({ ...valid, COOKIE_CROSS_SITE: 'yes' })).toThrow(
+        /COOKIE_CROSS_SITE/,
+      );
+    });
+  });
+
   it('accepts a complete configuration and applies defaults', () => {
     const env = validateEnv(valid);
     expect(env.PORT).toBe(3001);

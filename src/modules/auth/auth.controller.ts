@@ -7,7 +7,7 @@ import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nes
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import type { Request, Response } from 'express';
+import type { CookieOptions, Request, Response } from 'express';
 import {
   AllowTemporaryPassword, AllowWhileReadOnly, Ctx, Public,
 } from '@/common/auth/auth.decorators';
@@ -15,6 +15,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { initialsOf, User, UserDocument } from '@/modules/users/user.schema';
+import { refreshCookieOptions } from '@/modules/auth/refresh-cookie';
 import { can, PERMISSIONS, Permission } from '@/modules/rbac/permissions';
 import { AuthService } from './auth.service';
 import { RateLimiter } from './rate-limiter';
@@ -74,18 +75,25 @@ export class AuthController {
     return this.config.get<number>('RATE_LIMIT_LOGIN_PER_15M') ?? 5;
   }
 
+  private refreshCookieOptions(): CookieOptions {
+    return refreshCookieOptions({
+      // Compared to `true` rather than tested for truthiness: validateEnv hands back a
+      // real boolean, and anything else reaching here is a misconfiguration that must not
+      // be read as "loosen the cookie".
+      crossSite: this.config.get<boolean>('COOKIE_CROSS_SITE') === true,
+      nodeEnv: this.config.get<string>('NODE_ENV') ?? 'development',
+    });
+  }
+
   private setRefreshCookie(res: Response, token: string): void {
     res.cookie(REFRESH_COOKIE, token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/api/v1/auth',
+      ...this.refreshCookieOptions(),
       maxAge: REFRESH_COOKIE_MAX_AGE_MS,
     });
   }
 
   private clearRefreshCookie(res: Response): void {
-    res.clearCookie(REFRESH_COOKIE, { path: '/api/v1/auth' });
+    res.clearCookie(REFRESH_COOKIE, this.refreshCookieOptions());
   }
 
   /** Cookie first; an explicit body value is accepted for non-browser clients. */

@@ -42,6 +42,26 @@ export const envSchema = z.object({
   APP_BASE_URL: z.string().url(),
   CORS_ORIGINS: z.string().default(''),
   /**
+   * Whether the browser treats a call to this API as cross-site.
+   *
+   * True when the app and the API sit on different registrable domains — which is exactly
+   * the Vercel staging shape, where the frontend is one `*.vercel.app` host and the API is
+   * another (ADR-0041). There, a `SameSite=Lax` refresh cookie is simply never sent, so
+   * login appears to work and every refresh afterwards fails.
+   *
+   * It is a stated fact about the deployment rather than something inferred, because the
+   * API cannot see its own public hostname reliably behind a proxy — and guessing wrong
+   * in the permissive direction would weaken CSRF protection everywhere else.
+   *
+   * Spelled as an enum, not `z.coerce.boolean()`: coercion reads the string "false" as
+   * true, and a security control that silently inverts when someone writes the obvious
+   * value is not a control.
+   */
+  COOKIE_CROSS_SITE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /**
    * Where a shared invite link points — the app's origin, not this API's. A joiner opens
    * a page, not an endpoint, and the two differ in every environment.
    */
@@ -55,6 +75,17 @@ export const envSchema = z.object({
    */
   DEFAULT_TENANT_TIMEZONE: z.string().default(DEFAULT_TENANT_TIMEZONE),
 }).superRefine((env, ctx) => {
+  if (env.COOKIE_CROSS_SITE && env.APP_ORIGIN.startsWith('http://')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['COOKIE_CROSS_SITE'],
+      message:
+        'requires HTTPS. A cross-site cookie is sent as "SameSite=None; Secure", and a '
+        + 'browser discards a Secure cookie on a plain-http origin — the session would be '
+        + 'dropped on every request with nothing in the logs to say why.',
+    });
+  }
+
   if (env.NODE_ENV === 'production' && env.MAIL_TRANSPORT === 'log') {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

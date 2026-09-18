@@ -1,0 +1,22 @@
+{
+  // `nest build` picks this file up automatically; `tsc --noEmit`, jest and eslint keep
+  // using tsconfig.json.
+  //
+  // It exists because the root tsconfig includes `test/` and `tools/` — which typecheck
+  // and lint genuinely need. That widens tsc's inferred rootDir to the repository root,
+  // so `nest build` emitted `dist/src/main.js` while package.json's start script said
+  // `node dist/main`. The start script had been pointing at a file that did not exist.
+  //
+  // Narrowing the build to `src/` (and dropping specs and the seed script) puts main.js
+  // back at `dist/main.js` and keeps compiled tests out of the deployed bundle.
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "tools",
+    "**/*.spec.ts",
+    "src/seed/**"
+  ]
+}
