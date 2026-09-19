@@ -1,5 +1,5 @@
 import {
-  CanActivate, ExecutionContext, INestApplication, RequestMethod, ValidationPipe,
+  CanActivate, ExecutionContext, INestApplication, RequestMethod,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
@@ -8,6 +8,7 @@ import { REQUIRED_PERMISSION } from '@/common/auth/auth.decorators';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
+import { productionPipe } from '../../../test/http-permissions';
 import { ActivityConfigService } from './activity.service';
 import { ConfigChangeService } from './changes.service';
 import { TenantConfigController, TenantConfigReadController } from './config.controller';
@@ -94,7 +95,7 @@ describe('the configuration controllers', () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(productionPipe());
     app.useGlobalFilters(new DomainExceptionFilter());
     app.useGlobalGuards(new StubAuth(), new PermissionsGuard(app.get(Reflector)));
     await app.init();

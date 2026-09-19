@@ -87,6 +87,22 @@ const config: Config = {
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],
   globalSetup: '<rootDir>/test/global-setup.ts',
   globalTeardown: '<rootDir>/test/global-teardown.ts',
+  /*
+   * **The one shared `mongod` has a concurrency ceiling, and Jest's default walks past it.**
+   *
+   * `test/global-setup.ts` starts a single in-memory server for the whole run — itself a fix for
+   * a dozen `mongod` processes racing to start and blowing the library's 10s budget. What it
+   * trades away is headroom: every worker connects to the same server, and past a certain number
+   * of them `mongoose.connect()` simply stops answering. The three heaviest suites then die on a
+   * 30s hook timeout, taking ~325 tests with them, while passing perfectly when run alone.
+   *
+   * Measured on a 12-core machine when the Phase 5 controller specs took the suite from 95 files
+   * to 99: 11 workers (the default here) fails, 8 fails, 6 passes twice, 4 passes and is the
+   * *fastest* run of the four. A fixed 4 rather than a percentage, because the limit belongs to
+   * the database server, not to the number of cores — a 32-core runner would scale a percentage
+   * straight back over the edge.
+   */
+  maxWorkers: 4,
 };
 
 export default config;

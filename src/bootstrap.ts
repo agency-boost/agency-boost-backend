@@ -9,6 +9,31 @@ import cookieParser from 'cookie-parser';
 import { buildOpenApiDocument } from './openapi';
 
 /**
+ * How every request body is validated, exported so a test can boot the **same** pipe.
+ *
+ * A controller int-spec that configures its own weaker pipe tests a server nobody runs. That is
+ * not hypothetical: `whitelist` silently stripped three Swagger-only DTOs, so creating an event
+ * or a campaign over HTTP answered *"property code should not exist"* for every field it was
+ * sent — and no spec saw it, because the specs that existed called services directly and the one
+ * that used HTTP left `forbidNonWhitelisted` off.
+ */
+export const VALIDATION_PIPE_OPTIONS = {
+  whitelist: true,
+  // An unknown field is a 400, never a silent drop — a typo'd field name that is
+  // quietly ignored is the hardest kind of bug to find.
+  forbidNonWhitelisted: true,
+  transform: true,
+  // Implicit conversion is OFF. With it on, class-transformer coerces 42 to "42"
+  // before validation runs, so @IsString() passes for a number and @IsInt() passes
+  // for a numeric string — body type validation becomes decorative.
+  //
+  // Query and param DTOs, which genuinely arrive as strings, opt in per field with
+  // @Type(() => Number). That is more typing and it is the right trade: this
+  // product's premise is that a silently wrong number is worse than a crash.
+  transformOptions: { enableImplicitConversion: false },
+} as const;
+
+/**
  * Everything the API is, apart from how it starts listening.
  *
  * Two entrypoints call this: `main.ts`, which listens on a port (local development and
@@ -37,23 +62,7 @@ export function configureApp(app: INestApplication): void {
     defaultVersion: '1', // A controller declares @Version('2') when its contract breaks.
   });
 
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      // An unknown field is a 400, never a silent drop — a typo'd field name that is
-      // quietly ignored is the hardest kind of bug to find.
-      forbidNonWhitelisted: true,
-      transform: true,
-      // Implicit conversion is OFF. With it on, class-transformer coerces 42 to "42"
-      // before validation runs, so @IsString() passes for a number and @IsInt() passes
-      // for a numeric string — body type validation becomes decorative.
-      //
-      // Query and param DTOs, which genuinely arrive as strings, opt in per field with
-      // @Type(() => Number). That is more typing and it is the right trade: this
-      // product's premise is that a silently wrong number is worse than a crash.
-      transformOptions: { enableImplicitConversion: false },
-    }),
-  );
+  app.useGlobalPipes(new ValidationPipe(VALIDATION_PIPE_OPTIONS));
 
   const origins = config.get<string>('CORS_ORIGINS', '');
   app.enableCors({

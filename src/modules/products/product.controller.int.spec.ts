@@ -1,6 +1,4 @@
-import {
-  CanActivate, ExecutionContext, INestApplication, ValidationPipe,
-} from '@nestjs/common';
+import { CanActivate, ExecutionContext, INestApplication } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -10,6 +8,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
+import { productionPipe } from '../../../test/http-permissions';
 import { ProductController } from './product.controller';
 import { ProductService } from './product.service';
 
@@ -62,7 +61,7 @@ describe('the product catalog controller (P5-T4)', () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(productionPipe());
     app.useGlobalFilters(new DomainExceptionFilter());
     app.useGlobalGuards(new StubAuth(), new PermissionsGuard(app.get(Reflector)));
     await app.init();
@@ -157,12 +156,29 @@ describe('the product catalog controller (P5-T4)', () => {
         .send({ ...body, eligibleAgeBands: [6] }).expect(400);
     });
 
-    it('takes no code and no lifecycle on a PATCH, whatever the body carries', async () => {
+    it('refuses a PATCH carrying a code or a lifecycle, by name', async () => {
+      /*
+       * `forbidNonWhitelisted` is on in production, so a field the DTO does not declare is a
+       * **400 naming it**, not a silent drop — the reason `bootstrap.ts` gives is that a typo'd
+       * field quietly ignored is the hardest kind of bug to find. This spec asserted the silent
+       * drop until it booted the real pipe, which is the same mistake one layer up.
+       */
       const mapan = (await shelf())[0];
 
       const res = await request(app.getHttpServer()).patch(`${url}/${mapan.id}`)
         .send({ name: 'PRUMapan Plus', code: 'ELSE', lifecycle: 'withdrawn' })
-        .expect(200);
+        .expect(400);
+
+      expect(res.body.error.details.violations).toEqual(expect.arrayContaining([
+        expect.stringContaining('code'), expect.stringContaining('lifecycle'),
+      ]));
+    });
+
+    it('renames a product without touching its code or where it is in its life', async () => {
+      const mapan = (await shelf())[0];
+
+      const res = await request(app.getHttpServer()).patch(`${url}/${mapan.id}`)
+        .send({ name: 'PRUMapan Plus' }).expect(200);
 
       expect(res.body).toMatchObject({
         code: 'PRUMAPAN', name: 'PRUMapan Plus', lifecycle: 'active',
