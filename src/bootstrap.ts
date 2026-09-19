@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { ConfigService } from '@nestjs/config';
 import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import { SwaggerModule } from '@nestjs/swagger';
@@ -59,6 +62,35 @@ export function configureApp(app: INestApplication): void {
   });
 
   if (config.get('NODE_ENV') !== 'production') {
-    SwaggerModule.setup('api/docs', app, buildOpenApiDocument(app));
+    SwaggerModule.setup('api/docs', app, buildOpenApiDocument(app), {
+      customSwaggerUiPath: bundledSwaggerUiPath(),
+    });
   }
+}
+
+/**
+ * Where Swagger UI's stylesheet and bundles are, or `undefined` to let the package say.
+ *
+ * `SwaggerModule.setup` serves `/api/docs` and `swagger-ui-init.js` as Express routes, but
+ * `swagger-ui.css` and the two bundles through `express.static` pointed at
+ * `swagger-ui-dist` inside `node_modules`. Vercel builds a function by tracing `require`,
+ * and nothing requires those files — they are read from disk per request — so they were
+ * absent from the deployed bundle and staging served an HTML page whose every asset 404'd.
+ *
+ * `tools/copy-swagger-ui.ts` copies them into `dist/swagger-ui` during `pnpm build`, which
+ * `vercel.json` already ships via `includeFiles: "dist/**"`. This points Swagger there.
+ *
+ * `__dirname` rather than a path relative to the working directory: `resolvePath` inside
+ * `@nestjs/swagger` is `path.resolve`, which is cwd-relative, and a function platform's
+ * cwd is not ours to assume. In a built app this file is `dist/bootstrap.js`, so the
+ * sibling `dist/swagger-ui` is one `join` away.
+ *
+ * `undefined` when the directory is absent, which is the normal local case: neither
+ * `nest start --watch` nor ts-jest runs the copy step, and `serveStatic` falls back to the
+ * package's own directory — reachable there, because `node_modules` is a real tree rather
+ * than a traced bundle.
+ */
+function bundledSwaggerUiPath(): string | undefined {
+  const bundled = join(__dirname, 'swagger-ui');
+  return existsSync(bundled) ? bundled : undefined;
 }

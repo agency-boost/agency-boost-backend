@@ -63,6 +63,33 @@ describe('the serverless handler', () => {
       .expect(200, { status: 'ok', checks: { database: 'up' } });
   });
 
+  /*
+   * Swagger is the API's only human-readable surface on staging, and it broke there in a
+   * way no test saw: `SwaggerModule.setup` serves the page as an Express route but the
+   * stylesheet and bundles through `express.static`, so a deploy that carried the routes
+   * and not the files rendered a page whose every asset 404'd.
+   *
+   * These two assertions cover the wiring — the page and a statically served asset, through
+   * the same handler the platform calls. They cannot prove the files are inside a Vercel
+   * function bundle; that is what the copy step in `pnpm build` and `includeFiles` do, and
+   * `tools/copy-swagger-ui.spec.ts` covers the copy.
+   */
+  it('serves the Swagger page, since NODE_ENV here is not production', async () => {
+    await request(handler).get('/api/docs').expect(200).expect('Content-Type', /html/);
+  });
+
+  it('serves the Swagger UI assets that the page loads', async () => {
+    await request(handler)
+      .get('/api/docs/swagger-ui.css')
+      .expect(200)
+      .expect('Content-Type', /css/);
+
+    await request(handler)
+      .get('/api/docs/swagger-ui-bundle.js')
+      .expect(200)
+      .expect('Content-Type', /javascript/);
+  });
+
   it('builds the application once and reuses it across invocations', async () => {
     // What makes the function affordable: a warm container must not rebuild the Nest
     // graph — and with it a fresh Atlas connection pool — for every request.

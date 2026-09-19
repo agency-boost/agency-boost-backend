@@ -74,6 +74,9 @@ importers:
       rxjs:
         specifier: ^7.8.1
         version: 7.8.2
+      swagger-ui-dist:
+        specifier: ^5.18.2
+        version: 5.18.2
       ulid:
         specifier: ^2.3.0
         version: 2.4.0

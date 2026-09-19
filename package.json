@@ -4,7 +4,7 @@
   "private": true,
   "description": "AgencyBoost API — multi-tenant SaaS for insurance agency offices (KPM)",
   "scripts": {
-    "build": "nest build",
+    "build": "nest build && ts-node tools/copy-swagger-ui.ts",
     "dev": "nest start --watch",
     "start": "node dist/main",
     "lint": "ESLINT_USE_FLAT_CONFIG=true eslint \"src/**/*.ts\" \"test/**/*.ts\" \"tools/**/*.ts\" --max-warnings 0",
@@ -38,6 +38,7 @@
     "pino-http": "^10.3.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "swagger-ui-dist": "^5.18.2",
     "ulid": "^2.3.0",
     "zod": "^3.24.1"
   },

@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { BadRequestException, INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IsString } from 'class-validator';
@@ -7,6 +10,10 @@ import { configureApp } from './bootstrap';
 
 jest.mock('@nestjs/swagger', () => ({
   SwaggerModule: { setup: jest.fn() },
+}));
+jest.mock('node:fs', () => ({
+  ...jest.requireActual<typeof import('node:fs')>('node:fs'),
+  existsSync: jest.fn(),
 }));
 jest.mock('./openapi', () => ({
   buildOpenApiDocument: jest.fn(() => ({ openapi: '3.0.0' })),
@@ -134,6 +141,8 @@ describe('configureApp', () => {
   });
 
   describe('Swagger', () => {
+    const exists = existsSync as jest.MockedFunction<typeof existsSync>;
+
     it('is not served in production', () => {
       const r = recordingApp({ NODE_ENV: 'production' });
       configureApp(r.app);
@@ -143,7 +152,45 @@ describe('configureApp', () => {
     it('is served in staging, where a reader needs the contract', () => {
       const r = recordingApp({ NODE_ENV: 'staging' });
       configureApp(r.app);
-      expect(SwaggerModule.setup).toHaveBeenCalledWith('api/docs', r.app, expect.anything());
+      expect(SwaggerModule.setup).toHaveBeenCalledWith(
+        'api/docs',
+        r.app,
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    /*
+     * The UI's stylesheet and bundles are served by `express.static`, not by a route, so
+     * Vercel's require-tracing never pulled them into the function bundle: staging
+     * rendered the page and 404'd every asset. `pnpm build` now copies them beside the
+     * compiled app, and this is the pair of assertions that keeps both paths honest.
+     */
+    it('points at the assets copied beside the build when they are there', () => {
+      exists.mockReturnValue(true);
+
+      const r = recordingApp({ NODE_ENV: 'staging' });
+      configureApp(r.app);
+
+      expect(SwaggerModule.setup).toHaveBeenCalledWith(
+        'api/docs',
+        r.app,
+        expect.anything(),
+        { customSwaggerUiPath: join(__dirname, 'swagger-ui') },
+      );
+    });
+
+    it('lets the package resolve its own assets when the build copy is absent', () => {
+      // Local development: neither `nest start --watch` nor jest runs the copy step, and
+      // `node_modules` is a real tree there rather than a traced bundle.
+      exists.mockReturnValue(false);
+
+      const r = recordingApp({ NODE_ENV: 'development' });
+      configureApp(r.app);
+
+      expect(SwaggerModule.setup).toHaveBeenCalledWith('api/docs', r.app, expect.anything(), {
+        customSwaggerUiPath: undefined,
+      });
     });
   });
 });
