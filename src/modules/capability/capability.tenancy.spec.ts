@@ -204,6 +204,51 @@ describe('the capability catalog (P5-T8)', () => {
       expect(capabilityLadderProblems(payload))
         .toEqual(expect.arrayContaining([expect.stringMatching(/share stageOrder 1/)]));
     });
+
+    /*
+     * The four rules below were written with the rest and then never exercised — the branch that
+     * raises each one was the whole of this module's coverage gap, and a validation rule nothing
+     * calls is indistinguishable from one that was deleted. Each stops a payload that publishes
+     * silently and breaks an office only when a leader opens an assessment.
+     */
+    it('refuses a part that is not a list at all, rather than reading it as empty', () => {
+      // `{ stages: {} }` is what a hand-edited template or a half-migrated row looks like, and
+      // treating it as an empty list would report "no stages" — true, but not what is wrong.
+      expect(capabilityLadderProblems({ stages: {}, milestones: null, grids: 'none' }))
+        .toEqual(expect.arrayContaining([
+          expect.stringMatching(/stages must be a list/),
+          expect.stringMatching(/milestones must be a list/),
+          expect.stringMatching(/grids must be a list/),
+        ]));
+    });
+
+    it('refuses a stage whose seniority is not a whole number of 1 or more', () => {
+      // `stageOrder` is how senior a stage is, and the comparison that finds "the highest
+      // reached" is numeric — a 0, a 1.5 or a "second" makes it meaningless rather than wrong.
+      for (const bad of [0, -1, 1.5, 'second', null]) {
+        const payload = defaultCapabilityLadder();
+        (payload.stages[0] as { stageOrder: unknown }).stageOrder = bad;
+
+        expect(capabilityLadderProblems(payload))
+          .toEqual(expect.arrayContaining([expect.stringMatching(/stageOrder of 1 or more/)]));
+      }
+    });
+
+    it('refuses a stage that requires nothing, because everybody is already on it', () => {
+      const payload = defaultCapabilityLadder();
+      payload.stages[0].requiredMilestoneCodes = [];
+
+      expect(capabilityLadderProblems(payload))
+        .toEqual(expect.arrayContaining([expect.stringMatching(/requires no milestone/)]));
+    });
+
+    it('refuses a grid with nothing in it to assess', () => {
+      const payload = defaultCapabilityLadder();
+      payload.grids[0].items = [];
+
+      expect(capabilityLadderProblems(payload))
+        .toEqual(expect.arrayContaining([expect.stringMatching(/has no items/)]));
+    });
   });
 
   describe('the stage comes from the milestones, not from a position (AC-6)', () => {

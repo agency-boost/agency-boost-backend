@@ -194,16 +194,6 @@ export class CapabilityService {
     return this.save(ctx, row, 'capability.reordered', { part, count: codes.length });
   }
 
-  /** The office's catalog at provisioning, from its company's preset or the defaults. */
-  async seedForOffice(ctx: RequestContext): Promise<boolean> {
-    if (await this.catalogs.exists(ctx, {})) return false;
-    const seed = capabilitySeedDocument(ctx.kpmId ?? '', defaultCapabilityLadder());
-    await this.catalogs.create(ctx, {
-      stages: seed.stages, milestones: seed.milestones, grids: seed.grids, version: 1,
-    } as never);
-    return true;
-  }
-
   /**
    * Which stage somebody is at, from what a leader has ticked (AC-6).
    *

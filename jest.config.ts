@@ -82,6 +82,44 @@ const config: Config = {
     './src/modules/tenants/': { lines: 95, branches: 89, functions: 92, statements: 95 },
     './src/modules/auth/': { lines: 95, branches: 86, functions: 94, statements: 95 },
     './src/modules/config/': { lines: 95, branches: 87, functions: 83, statements: 95 },
+    //
+    // **The six modules Phase 5 shipped, absent from this list until the phase exit review.**
+    //
+    // They rode the global 80% — which Jest checks as one whole-project aggregate, not per
+    // module — so each was diluted into a much larger, well-tested codebase and none was ever
+    // asked a question about itself. Three did not clear 80% on their own. `capability` sat at
+    // 66% branch while the ratchet reported green, which is the same failure the `./src/domain/`
+    // note above records: the gate passed because it was not configured to ask.
+    //
+    // **What the numbers were made of mattered more than the numbers.** Before pinning anything,
+    // every gap was read. Most of `capability`, `campaigns` and `events` turned out to be
+    // *untested rules* rather than untested fallbacks — a payload part that is not a list, a
+    // stage nobody can be on, a campaign window that ends before it starts, two events sharing a
+    // code. Each stops a record that otherwise publishes silently and breaks an office later, and
+    // each is now covered. `CapabilityService.seedForOffice` went the other way: no caller
+    // anywhere, so it was deleted rather than tested.
+    //
+    // What is left is the shape `modules/org` describes above — `?? {}`, `?? 0`, and
+    // `x !== undefined ? { x } : {}` spreads, which branch coverage counts one apiece. Closing
+    // those means a fixture per fallback asserting a default is the default, and that is the
+    // coverage theatre this project's conventions argue against.
+    //
+    // So: 95 where a module meets it, and the achieved figure where it does not — the same rule
+    // the four entries above follow, and the same bargain. The threshold is the debt made
+    // visible, not the debt hidden.
+    './src/modules/activation/': { lines: 95, branches: 90, functions: 95, statements: 95 },
+    './src/modules/campaigns/': { lines: 95, branches: 89, functions: 95, statements: 95 },
+    './src/modules/events/': { lines: 95, branches: 83, functions: 95, statements: 95 },
+    './src/modules/products/': { lines: 95, branches: 84, functions: 95, statements: 95 },
+    // Statements sit just under 95 on `training-content.ts`, which is the one file here whose
+    // gap is neither a rule nor a fallback: it is the Cloudinary-backed upload paths, and an
+    // adapter that is stubbed in every test reports its error handling as unreached.
+    './src/modules/training/': { lines: 95, branches: 83, functions: 91, statements: 94 },
+    // The lowest floor in this file, and named rather than rounded up to look better: what
+    // remains in `capability` is `capability-payload.ts`'s and `capability.service.ts`'s
+    // defensive reads — a null payload, a row with no `code` key, a catalog belonging to an
+    // office provisioned before the feature existed. Every rule the module enforces is covered.
+    './src/modules/capability/': { lines: 95, branches: 73, functions: 95, statements: 95 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],

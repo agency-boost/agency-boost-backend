@@ -80,6 +80,22 @@ describe('an office’s events (P5-T6)', () => {
       await wired.events.create(member(KPM_A), anEvent());
       await expect(wired.events.create(member(KPM_B), anEvent())).resolves.toBeTruthy();
     });
+
+    it('refuses the same code twice within one office, for an event and for a type', async () => {
+      /*
+       * The other half of the rule above, and the half that had no test: a code is unique
+       * *within* an office because a tick, a filter and a report all name one — two rows sharing
+       * one would make every reference ambiguous. Both checks run before anything is written.
+       */
+      await wired.events.create(member(KPM_A), anEvent());
+      await expect(wired.events.create(member(KPM_A), anEvent()))
+        .rejects.toThrow(/already has an event with the code KICKOFF/);
+
+      const existing = (await wired.events.listTypes(member(KPM_A)))[0];
+      await expect(wired.events.createType(member(KPM_A), {
+        code: existing.code, label: 'Another name for it',
+      })).rejects.toThrow(/already has an event type with the code/);
+    });
   });
 
   describe('an event type is archived, never deleted (AC-2)', () => {
