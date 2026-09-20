@@ -6,7 +6,8 @@ import { HttpStatus } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { AssetDocument } from './asset.schema';
 import { AssetRepository } from './asset.repository';
-import { ASSET_LIMITS, SignedUpload, StoragePort, StoredObject } from './storage.port';
+import { ASSET_LIMITS } from '@/domain/constants';
+import { SignedUpload, StoragePort, StoredObject } from './storage.port';
 
 @Injectable()
 export class AssetService {

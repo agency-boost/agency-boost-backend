@@ -166,6 +166,8 @@ export {
   SCRIPT_OVERRIDE_FIELDS,
 } from './product-catalog';
 
+export { ASSET_LIMITS } from './assets';
+
 export {
   EVENT_ISSUERS,
   type EventIssuer,

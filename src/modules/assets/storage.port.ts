@@ -50,17 +50,6 @@ export abstract class StoragePort {
   abstract remove(storageKey: string): Promise<void>;
 }
 
-/** Limits enforced before a signature is issued, not after the bytes arrive. */
-export const ASSET_LIMITS = {
-  MAX_BYTES: 25 * 1024 * 1024,
-  ALLOWED_MIME_TYPES: [
-    'image/jpeg', 'image/png', 'image/webp',
-    'application/pdf',
-    'video/mp4',
-    'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  ] as const,
-  SIGNED_URL_TTL_SECONDS: 300,
-} as const;
 
 /**
  * A vendor's file extension back to the media type this product speaks (ADR-0040).

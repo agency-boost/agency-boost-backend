@@ -230,7 +230,14 @@ export class ProductService {
 
   // -------------------------------------------------------------------- internals
 
-  /** The one place `companyId` is applied, so no query can forget it. */
+  /**
+   * The company filter for every **read**.
+   *
+   * It said "the one place `companyId` is applied, so no query can forget it", and that was not
+   * true: `update`, `setLifecycle` and `reorder` each apply it inline. Every mutating query does
+   * still filter on it — this is not a leak — but a reader who believed the old sentence would
+   * check one function and conclude the boundary was held there.
+   */
   private of(companyId: string) {
     return this.products.find({ companyId, deletedAt: null });
   }

@@ -3,8 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary } from 'cloudinary';
 import { ulid } from 'ulid';
 import { Clock } from '@/common/clock/clock.port';
+import { ASSET_LIMITS } from '@/domain/constants';
 import {
-  ASSET_LIMITS, AssetOwner, FORMAT_TO_MIME_TYPE, SignedUpload, StoragePort, StoredObject,
+  AssetOwner, FORMAT_TO_MIME_TYPE, SignedUpload, StoragePort, StoredObject,
 } from './storage.port';
 
 /**

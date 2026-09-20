@@ -1,8 +1,9 @@
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { AssetService } from './asset.service';
+import { ASSET_LIMITS } from '@/domain/constants';
 import {
-  ASSET_LIMITS, AssetOwner, SignedUpload, StoragePort, StoredObject,
+  AssetOwner, SignedUpload, StoragePort, StoredObject,
 } from './storage.port';
 
 /** The folder the adapter would use, mirrored so a stub key still reads like a real one. */

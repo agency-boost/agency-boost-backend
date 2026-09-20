@@ -1,5 +1,6 @@
 import {
   ACTIVATION,
+  ASSET_LIMITS,
   ACTIVITY,
   GOAL_DEFAULTS,
   PERFORMANCE,
@@ -109,5 +110,30 @@ describe('domain constants', () => {
     // 0–999 activity-count clamp even though both read 999 — `metrics:1450` says so.
     expect(PERFORMANCE.ATTAINMENT_PCT_CAP).toBe(999);
     expect(DEFAULT_CURRENCY).toBe('IDR');
+  });
+
+  describe('upload limits (ADR-0032, ADR-0040)', () => {
+    /*
+     * These lived in `modules/assets/storage.port.ts` and were in no registry at all until the
+     * Phase 5 exit review — a threshold outside `domain/constants/` is one that can be
+     * re-declared without anybody noticing, which is the whole of invariant §7.
+     */
+    it('pins the ceiling at 25 MB, above which material is a link rather than an upload', () => {
+      expect(ASSET_LIMITS.MAX_BYTES).toBe(25 * 1024 * 1024);
+      expect(ASSET_LIMITS.MAX_BYTES).toBe(26_214_400);
+    });
+
+    it('pins the signed-URL life at 300 seconds', () => {
+      expect(ASSET_LIMITS.SIGNED_URL_TTL_SECONDS).toBe(300);
+    });
+
+    it('pins the accepted types, so widening the list is a deliberate change', () => {
+      expect([...ASSET_LIMITS.ALLOWED_MIME_TYPES]).toEqual([
+        'image/jpeg', 'image/png', 'image/webp',
+        'application/pdf',
+        'video/mp4',
+        'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ]);
+    });
   });
 });

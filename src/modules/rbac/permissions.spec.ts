@@ -121,9 +121,10 @@ describe('permission matrix', () => {
       'notification:receive/KPM_ADMIN': 'as KPM_OWNER',
       'notification:receive/AB': 'as KPM_OWNER — own-unit delivery is the routing phase',
       'notification:receive/AAB': 'as KPM_OWNER',
-      'commission_rates:read/KPM_OWNER': 'P5-T4 builds the company\'s catalog, whose only reader '
-        + 'is Super Admin. An office reads a product from P5-T5 and an agent from Phase 12; the '
-        + 'grant lands with the route that exercises it.',
+      'commission_rates:read/KPM_OWNER': 'P5-T5 shipped the office\'s product read and did **not** '
+        + 'carry the commission schedule: `KpmProductView` has no such field, so the grant still '
+        + 'has no route exercising it. That fails closed — an Owner cannot see rates anywhere — '
+        + 'and the reader is Phase 12\'s member-scoped read (ADR-0038), not a catalog task.',
       'commission_rates:read/KPM_ADMIN': 'as KPM_OWNER',
       'commission_rates:read/AB': 'as KPM_OWNER — and a leader reads the rates of the people they '
         + 'lead (ADR-0038), which needs the member-scoped read Phase 12 builds',

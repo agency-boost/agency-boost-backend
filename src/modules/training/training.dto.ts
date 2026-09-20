@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
-import { ASSET_LIMITS } from '@/modules/assets/storage.port';
+import { ASSET_LIMITS } from '@/domain/constants';
 
 /** The folders a training upload may land in. Anything else is another module's business. */
 export const TRAINING_UPLOAD_FOLDERS = ['training'] as const;
