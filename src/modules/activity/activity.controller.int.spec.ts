@@ -132,9 +132,22 @@ describe('logging a day over HTTP (P6)', () => {
       expect(JSON.stringify(res.body)).toMatch(/YYYY-MM-DD/);
     });
 
-    it('refuses a day that has not happened', async () => {
-      await request(app.getHttpServer()).put(`${url}/log`)
-        .send({ date: '2026-03-12', counts: {} }).expect(400);
+    it('refuses a day that has not happened, with a code a client can branch on', async () => {
+      // 422 and ACTIVITY_FUTURE_DATE, not a bare 400. The error catalog carried these codes from
+      // an earlier phase and the module shipped producing none of them — found at the Phase 6
+      // exit review, and a client written against the catalog would have branched on nothing.
+      const res = await request(app.getHttpServer()).put(`${url}/log`)
+        .send({ date: '2026-03-12', counts: {} }).expect(422);
+
+      expect(res.body.error.code).toBe('ACTIVITY_FUTURE_DATE');
+    });
+
+    it('refuses a day past its window with the code that offers the next step', async () => {
+      const res = await request(app.getHttpServer()).put(`${url}/log`)
+        .send({ date: '2026-01-20', counts: {} }).expect(422);
+
+      // The one refusal with somewhere to go: the screen switches to the correction form.
+      expect(res.body.error.code).toBe('ACTIVITY_DATE_OUT_OF_WINDOW');
     });
 
     it('refuses a code this office does not have, by name', async () => {

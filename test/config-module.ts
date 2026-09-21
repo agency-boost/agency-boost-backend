@@ -187,6 +187,7 @@ export function configModule(now: Date) {
   const activityLogs = new ActivityService(
     new ActivityLogRepository(model(ActivityLog.name, ActivityLogSchema) as never),
     new ActivityTypeRepository(types as never),
+    new ActivityCategoryRepository(categories as never),
     new MembershipRepository(model(Membership.name, MembershipSchema) as never),
     kpms as never,
     clock,

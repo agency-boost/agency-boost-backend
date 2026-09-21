@@ -129,12 +129,16 @@ const config: Config = {
     // office provisioned before the feature existed. Every rule the module enforces is covered.
     './src/modules/capability/': { lines: 95, branches: 73, functions: 95, statements: 95 },
     /*
-     * P6. The branch figure is the defensive reads on the office's settings — `?? ACTIVITY.…`
-     * for an office provisioned before a knob existed — plus the view's `?? 0` fallbacks for a
-     * day with no row. Every rule the module enforces is covered: the window, the freeze, the
-     * clamp, the scope, and the day boundary (which lives in `common/time`, pinned at 100).
+     * P6, raised 78 → 80 at the phase exit review.
+     *
+     * What is left is two guards that are **unreachable today** — a context carrying an office
+     * without a membership — plus the defensive reads on the office's settings (`?? ACTIVITY.…`
+     * for an office provisioned before a knob existed) and the view's `?? 0` for a day with no
+     * row. Every rule is covered: the window, the freeze, the clamp, the scope, rung
+     * applicability, every named period, and the day boundary (which lives in `common/time`,
+     * pinned at 100).
      */
-    './src/modules/activity/': { lines: 95, branches: 78, functions: 95, statements: 95 },
+    './src/modules/activity/': { lines: 95, branches: 80, functions: 95, statements: 95 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],

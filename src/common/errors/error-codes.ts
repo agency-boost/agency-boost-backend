@@ -15,6 +15,25 @@ export const ErrorCode = {
   AUTH_ACCOUNT_DEACTIVATED: 'AUTH_ACCOUNT_DEACTIVATED',
   AUTH_RATE_LIMITED: 'AUTH_RATE_LIMITED',
 
+  /*
+   * Activity logging (P6). The catalog carried these four rows from an earlier phase and the
+   * module shipped producing none of them — found at the Phase 6 exit review. Three are real and
+   * are raised here; `ACTIVITY_COUNT_OUT_OF_RANGE` was removed from the catalog instead, because
+   * a count out of range is **clamped**, not refused (`activity-management.md` §4, invariant §7).
+   */
+  /** A day that has not happened in the office's timezone. */
+  ACTIVITY_FUTURE_DATE: 'ACTIVITY_FUTURE_DATE',
+  /** Past the office's backdating window: correctable, with a reason, but not editable (ADR-0042). */
+  ACTIVITY_DATE_OUT_OF_WINDOW: 'ACTIVITY_DATE_OUT_OF_WINDOW',
+  /**
+   * A count filed against a section this member's rung is not shown (ADR-0020, P4-T18).
+   *
+   * Its own code because the client can act on it: the row should not have been on screen, so the
+   * honest response is to reload the configuration rather than to show the agent a validation
+   * message about a field they were offered.
+   */
+  ACTIVITY_TYPE_NOT_APPLICABLE: 'ACTIVITY_TYPE_NOT_APPLICABLE',
+
   // Tenant. Note there is deliberately NO cross-tenant code — see NOT_FOUND.
   TENANT_SUSPENDED: 'TENANT_SUSPENDED',
   TENANT_ARCHIVED: 'TENANT_ARCHIVED',

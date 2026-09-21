@@ -42,6 +42,9 @@ describe('an agent’s activity log (P6)', () => {
       { _id: KPM_A, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta' },
       { _id: KPM_B, companyId: COMPANY, code: '0555', branchName: 'B', timezone: 'Asia/Jakarta' },
     ]);
+    // The company's ladder, because a section's applicability names rungs and the service
+    // refuses a rung the company does not have (ADR-0012, CONFIG_RUNG_UNKNOWN).
+    await wired.orgLevels.seedDefaultLadder(COMPANY);
     await provisionOffice(wired, KPM_A, COMPANY);
     await provisionOffice(wired, KPM_B, COMPANY);
   });
@@ -70,11 +73,34 @@ describe('an agent’s activity log (P6)', () => {
     });
 
     it('refuses another office’s member as not found, never as forbidden', async () => {
-      // A 403 would confirm the membership exists. The office boundary answers 404.
+      /*
+       * **A real membership in KPM_A, not a made-up id.** This test asked for
+       * `mem-66f0…a1`, which is not a valid ObjectId at all, so the repository short-circuited it
+       * before the scoped query ever ran — it proved that garbage 404s, not that a real row in
+       * another office is invisible. That is the exact bug this test was written to pin, and it
+       * was not pinning it. Found at the Phase 6 exit review.
+       */
+      const theirs = await mongoose.model('Membership').create({
+        kpmId: KPM_A,
+        userId: new mongoose.Types.ObjectId().toString(),
+        role: 'agent',
+        orgLevelCode: 'AGENT',
+        orgLevelId: new mongoose.Types.ObjectId().toString(),
+        status: 'active',
+        agentCode: `A${Math.random().toString(36).slice(2, 8)}`,
+        agentSeq: Math.floor(Math.random() * 100000),
+        leaderCode: Math.random().toString(36).slice(2, 10).toUpperCase(),
+        deletedAt: null,
+      });
       const owner = member(KPM_B, { isKpmOwner: true });
 
-      await expect(wired.activityLogs.readDay(owner, { membershipId: `mem-${KPM_A}` }))
-        .rejects.toMatchObject({ status: 404 });
+      const refusal = await wired.activityLogs
+        .readDay(owner, { membershipId: String(theirs._id) })
+        .catch((err: unknown) => err as { status: number; code: string });
+
+      // 404, and `NOT_FOUND` rather than `INTERNAL_ERROR`: the status was always right, the code
+      // was not, because the service threw Nest's exception instead of this project's.
+      expect(refusal).toMatchObject({ status: 404, code: 'NOT_FOUND' });
     });
 
     it('lets two offices hold the same day for the same date', async () => {
@@ -172,6 +198,99 @@ describe('an agent’s activity log (P6)', () => {
     });
   });
 
+  describe('a section an office does not show this rung (ADR-0020, P4-T18)', () => {
+    /*
+     * **Found at the Phase 6 exit review, and it was a real defect.** The module offered every
+     * active type to everybody and accepted counts against all of them, so a plain agent was
+     * shown the recruitment section their office had restricted to leaders — and every count they
+     * put in it fed `SELLING_VS_RECRUITMENT`, which is precisely the judgement ADR-0020 exists to
+     * stop them being measured by. The error catalog had carried
+     * `ACTIVITY_TYPE_NOT_APPLICABLE` since before the module was written.
+     */
+    /*
+     * **Team Development, because that is the section an office would actually narrow.**
+     * `activity-management.md` §5 names it: items 11 and 12 *"encode a leader/subordinate
+     * asymmetry, but both are shown to everyone"*.
+     *
+     * The first draft of this test narrowed Recruitment and the product refused it —
+     * `CONFIG_RATIO_UNREACHABLE_INPUT`: three ratios read that section and still applied to the
+     * rungs it would stop being shown to, *"so those agents would be measured on something they
+     * cannot log"*. The configuration side already guards the case this module was getting wrong,
+     * which narrows this defect rather than removing it: an office that narrows a section
+     * legitimately — as here — was still shown every row on its agents' screens.
+     */
+    const restrictTeamDevelopmentToLeaders = async () => {
+      const owner = member(KPM_A, { isKpmOwner: true });
+      const development = (await wired.activity.list(owner))
+        .find((c) => c.code === 'TEAM_DEVELOPMENT')!;
+      await wired.activity.updateCategory(owner, development.id, {
+        appliesToOrgLevelCodes: ['AB'],
+      });
+    };
+
+    it('leaves it off an agent’s day, and keeps it on a leader’s', async () => {
+      await restrictTeamDevelopmentToLeaders();
+
+      const agent = await wired.activityLogs.readDay(member(KPM_A), {});
+      const leader = await wired.activityLogs.readDay(
+        member(KPM_A, { orgLevelCode: 'AB', hierarchyRole: 'ab' }), {},
+      );
+
+      expect(agent.entries.map((e) => e.activityTypeCode)).not.toContain('DEV_TEAM_ACTIVITY');
+      expect(leader.entries.map((e) => e.activityTypeCode)).toContain('DEV_TEAM_ACTIVITY');
+    });
+
+    it('refuses a count against it, with its own code rather than a validation message', async () => {
+      await restrictTeamDevelopmentToLeaders();
+
+      await expect(save(member(KPM_A), { DEV_TEAM_ACTIVITY: 2 }))
+        .rejects.toMatchObject({ code: 'ACTIVITY_TYPE_NOT_APPLICABLE', status: 422 });
+    });
+
+    it('still refuses a code the office does not have at all, and says which is which', async () => {
+      // Two different failures: a code that does not exist, and a code that exists and is not
+      // this rung's. Collapsing them would tell an agent their office has no such type when it
+      // does — and tell a developer nothing about why the row was on screen.
+      await restrictTeamDevelopmentToLeaders();
+
+      await expect(save(member(KPM_A), { NOT_A_CODE: 1 }))
+        .rejects.toThrow(/no activity type with the code NOT_A_CODE/);
+    });
+
+    it('reads a downline’s day through **their** rung, not the reader’s', async () => {
+      /*
+       * The subtlety worth pinning: a leader opening an agent's day should see the agent's
+       * screen. Resolving applicability from the reader would show the leader rows the agent
+       * never had, and the day a leader reads would be a different shape from the day the agent
+       * filled in.
+       */
+      await restrictTeamDevelopmentToLeaders();
+      const leader = member(KPM_A, {
+        membershipId: `mem-${KPM_A}`, orgLevelCode: 'AB', hierarchyRole: 'ab', directCount: 1,
+      });
+      const theirs = await mongoose.model('Membership').create({
+        kpmId: KPM_A,
+        userId: new mongoose.Types.ObjectId().toString(),
+        role: 'agent',
+        orgLevelCode: 'AGENT',
+        orgLevelId: new mongoose.Types.ObjectId().toString(),
+        status: 'active',
+        agentCode: `A${Math.random().toString(36).slice(2, 8)}`,
+        agentSeq: Math.floor(Math.random() * 100000),
+        leaderCode: Math.random().toString(36).slice(2, 10).toUpperCase(),
+        leaderId: `mem-${KPM_A}`,
+        ancestorIds: [`mem-${KPM_A}`],
+        deletedAt: null,
+      });
+
+      const view = await wired.activityLogs.readDay(leader, {
+        membershipId: String(theirs._id),
+      });
+
+      expect(view.entries.map((e) => e.activityTypeCode)).not.toContain('DEV_TEAM_ACTIVITY');
+    });
+  });
+
   describe('the correction window (P6-T3, ADR-0042)', () => {
     it('refuses a day that has not happened', async () => {
       await expect(save(member(KPM_A), { SELL_SUBMISSION: 1 }, '2026-03-12'))
@@ -261,7 +380,7 @@ describe('an agent’s activity log (P6)', () => {
       const other = await downline(null);
 
       await expect(wired.activityLogs.readDay(member(KPM_A), { membershipId: other }))
-        .rejects.toThrow(/only read your own/);
+        .rejects.toMatchObject({ status: 403, code: 'PERM_OUT_OF_SCOPE' });
     });
 
     it('lets a leader read somebody in their downline, and not somebody outside it', async () => {
@@ -273,6 +392,24 @@ describe('an agent’s activity log (P6)', () => {
         .resolves.toMatchObject({ membershipId: mine });
       await expect(wired.activityLogs.readDay(leader, { membershipId: stranger }))
         .rejects.toMatchObject({ status: 404 });
+    });
+
+    it('lets an AAB read a direct report, and nobody else’s', async () => {
+      /*
+       * **The arm with zero executions.** Istanbul's branch map showed `member.leaderId === me` —
+       * the AAB's whole scope — never taken: every scoped-read test used an AB, so only the
+       * `ancestorIds` arm ran. Correct by inspection is exactly what the `own-kpm` bug looked
+       * like before the tenancy spec caught it, so it is a test now.
+       */
+      const aab = member(KPM_A, { orgLevelCode: 'AAB', hierarchyRole: 'aab', directCount: 1 });
+      const mine = await downline(`mem-${KPM_A}`);
+      // A peer's agent: two levels under, so in the *downline* but not in the unit.
+      const grandchild = await downline(mine);
+
+      await expect(wired.activityLogs.readDay(aab, { membershipId: mine }))
+        .resolves.toMatchObject({ membershipId: mine });
+      await expect(wired.activityLogs.readDay(aab, { membershipId: grandchild }))
+        .rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
     });
 
     it('lets the Owner read anybody in the office', async () => {
@@ -328,6 +465,57 @@ describe('an agent’s activity log (P6)', () => {
       await expect(wired.activityLogs.summary(member(KPM_A), {
         from: '2026-03-10', to: '2026-03-01',
       })).rejects.toThrow(/starts after it ends/);
+    });
+  });
+
+  describe('the refusals the service owns, not the pipe', () => {
+    /*
+     * Each of these is also refused a layer earlier — by the guard, or by a DTO decorator. They
+     * are tested here too because the service is callable from Phase 8's goal cascade and Phase
+     * 10's dashboard without a controller in front of it, and a rule that only the pipe enforces
+     * is a rule those callers do not have.
+     */
+    it('refuses a platform caller before it ever looks for a membership', async () => {
+      /*
+       * A Super Admin has no `kpmId`, so the office lookup answers 404 first and the
+       * membership guards below it are never reached. Worth pinning as the *order* rather than
+       * the message: the two guards further in are unreachable today and are kept as insurance
+       * against a context shape that carries an office without a membership.
+       */
+      await expect(save(RequestContext.platform('root'), { SELL_SUBMISSION: 1 }))
+        .rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
+    });
+
+    it('refuses a date that is not a date, by shape', async () => {
+      await expect(save(member(KPM_A), {}, '11-03-2026'))
+        .rejects.toThrow(/Days are written YYYY-MM-DD/);
+      await expect(save(member(KPM_A), {}, '2026-02-31'))
+        .rejects.toThrow(/is not a date/);
+    });
+  });
+
+  describe('the periods a summary is taken over (ADR-0022)', () => {
+    it('takes the office’s own ratio window for ROLLING_30D', async () => {
+      // 30 days ending today, from `kpms.settings.ratioWindowDays` — not a constant here, so an
+      // office that narrows its ratio window narrows this with it.
+      const window = await wired.activityLogs.summary(member(KPM_A), { period: 'ROLLING_30D' });
+
+      expect(window).toMatchObject({ from: '2026-02-10', to: TODAY });
+    });
+
+    it('takes a custom range as given', async () => {
+      await save(member(KPM_A), { SELL_SUBMISSION: 2 }, '2026-03-02');
+
+      const custom = await wired.activityLogs.summary(member(KPM_A), {
+        from: '2026-03-01', to: '2026-03-05',
+      });
+
+      expect(custom).toMatchObject({ from: '2026-03-01', to: '2026-03-05', daysLogged: 1 });
+    });
+
+    it('refuses a period the registry does not name', async () => {
+      await expect(wired.activityLogs.summary(member(KPM_A), { period: 'LAST_FORTNIGHT' }))
+        .rejects.toThrow(/is not a period/);
     });
   });
 
