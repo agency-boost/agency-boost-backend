@@ -81,6 +81,10 @@ import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events
 import { EventRepository, EventTypeRepository } from '@/modules/events/event.repository';
 import { EventService } from '@/modules/events/event.service';
 import { EventController } from '@/modules/events/event.controller';
+import { ActivityLog, ActivityLogSchema } from '@/modules/activity/activity-log.schema';
+import { ActivityLogRepository } from '@/modules/activity/activity-log.repository';
+import { ActivityService } from '@/modules/activity/activity.service';
+import { ActivityController } from '@/modules/activity/activity.controller';
 import {
   Campaign, CampaignSchema, QualificationRule, QualificationRuleSchema,
 } from '@/modules/campaigns/campaign.schema';
@@ -199,6 +203,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: KpmProductConfig.name, schema: KpmProductConfigSchema },
       { name: EventType.name, schema: EventTypeSchema },
       { name: Event.name, schema: EventSchema },
+      { name: ActivityLog.name, schema: ActivityLogSchema },
       { name: Campaign.name, schema: CampaignSchema },
       { name: QualificationRule.name, schema: QualificationRuleSchema },
       { name: CapabilityCatalog.name, schema: CapabilityCatalogSchema },
@@ -219,6 +224,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ProductController,
     KpmProductController,
     EventController,
+    ActivityController,
     CampaignController,
     MetricRegistryController,
     CapabilityController,
@@ -285,6 +291,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     EventTypeRepository,
     EventRepository,
     EventService,
+    ActivityLogRepository,
+    ActivityService,
     CampaignRepository,
     CampaignService,
     CapabilityCatalogRepository,

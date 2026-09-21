@@ -1,0 +1,200 @@
+import { INestApplication } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
+import { PermissionsGuard } from '@/common/auth/permissions.guard';
+import { DomainExceptionFilter } from '@/common/errors/error.filter';
+import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
+import { configModule, provisionOffice } from '../../../test/config-module';
+import {
+  declaredPermissions, EVERY_MEMBER, FIXTURE_KPM, OWNER, productionPipe, session, StubAuth,
+  SUPER_ADMIN,
+} from '../../../test/http-permissions';
+import { ActivityController } from './activity.controller';
+import { ActivityService } from './activity.service';
+
+const NOW = new Date('2026-03-11T02:00:00Z');
+const COMPANY = '66f0000000000000000000c1';
+const TODAY = '2026-03-11';
+
+/** Every route, and the permission it must declare. */
+const ROUTES: Record<string, string> = {
+  readDay: 'activity_log:read_raw',
+  saveDay: 'activity_log:create',
+  correctDay: 'activity_log:update',
+  summary: 'activity_ratios:read',
+  compliance: 'activity_log:read_raw',
+};
+
+/**
+ * Logging a day, over HTTP (P6).
+ *
+ * `activity.tenancy.spec.ts` proves the day boundary, the correction window and the scoped reads
+ * by calling the service. What only a request can answer lives here: the decorators, the pipe, and
+ * the shape of the write route.
+ *
+ * **The write route has no `membershipId` and that is the point.** No role may log on another
+ * person's behalf (`roles-and-permissions.md` §3.5). A check can be forgotten; a parameter that
+ * does not exist cannot be passed.
+ */
+describe('logging a day over HTTP (P6)', () => {
+  let app: INestApplication;
+  let wired: ReturnType<typeof configModule>;
+  const url = '/activity';
+
+  beforeAll(async () => {
+    await startMongo();
+    wired = configModule(NOW);
+
+    const moduleRef = await Test.createTestingModule({
+      controllers: [ActivityController],
+      providers: [{ provide: ActivityService, useValue: wired.activityLogs }],
+    }).compile();
+
+    app = moduleRef.createNestApplication();
+    app.useGlobalPipes(productionPipe());
+    app.useGlobalFilters(new DomainExceptionFilter());
+    app.useGlobalGuards(new StubAuth(), new PermissionsGuard(app.get(Reflector)));
+    await app.init();
+    await app.listen(0);
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await stopMongo();
+  });
+
+  beforeEach(async () => {
+    session.current = OWNER;
+    await clearCollections();
+    await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create({
+      _id: FIXTURE_KPM, companyId: COMPANY, code: '0417', branchName: 'A',
+      timezone: 'Asia/Jakarta',
+    });
+    await provisionOffice(wired, FIXTURE_KPM, COMPANY);
+  });
+
+  it('declares a permission on every route, and the right one', () => {
+    expect(declaredPermissions(ActivityController)).toEqual(ROUTES);
+  });
+
+  describe('who may log', () => {
+    /*
+     * **Every member of the office may log their own day, the Owner and the Admin included.**
+     *
+     * §3.5's table shows `—` in the Owner and Admin columns, and that is easy to misread. The
+     * grant is on the **rung**, and admin rights are orthogonal to hierarchy role — an Owner is
+     * also an AB or an AAB, stands on the ladder like anybody else, and has a day of their own to
+     * report. What the `—` means is that being the Owner grants nothing extra here: it buys no
+     * right to write *somebody else's* day, which is what `proxy_create` would have been.
+     */
+    it.each(EVERY_MEMBER)('lets %s save their own day', async (_name, who) => {
+      session.current = who;
+
+      const res = await request(app.getHttpServer()).put(`${url}/log`)
+        .send({ counts: { SELL_SUBMISSION: 2 } }).expect(200);
+
+      expect(res.body).toMatchObject({ localDate: TODAY, totalCount: 2, version: 1 });
+      expect(res.body.membershipId).toBe(who.membershipId);
+    });
+
+    it('refuses a Super Admin, who stands on no rung and has no day here', async () => {
+      session.current = SUPER_ADMIN;
+
+      await request(app.getHttpServer()).put(`${url}/log`)
+        .send({ counts: { SELL_SUBMISSION: 1 } }).expect(403);
+    });
+
+    it('has no way to name whose day is being written', async () => {
+      // `forbidNonWhitelisted` refuses the field outright, so the attempt cannot even be
+      // mistaken for a silent drop.
+      const res = await request(app.getHttpServer()).put(`${url}/log`)
+        .send({ counts: {}, membershipId: 'somebody-else' }).expect(400);
+
+      expect(res.body.error.details.violations)
+        .toEqual(expect.arrayContaining([expect.stringContaining('membershipId')]));
+    });
+  });
+
+  describe('the day', () => {
+    it('defaults to today in the office, and comes back with every active type', async () => {
+      const res = await request(app.getHttpServer()).get(`${url}/log`).expect(200);
+
+      expect(res.body.localDate).toBe(TODAY);
+      expect(res.body.entries).toHaveLength(12);
+      expect(res.body.editable).toBe(true);
+    });
+
+    it('refuses a date that is not a date, naming the shape', async () => {
+      const res = await request(app.getHttpServer()).get(`${url}/log`)
+        .query({ date: '11-03-2026' }).expect(400);
+
+      expect(JSON.stringify(res.body)).toMatch(/YYYY-MM-DD/);
+    });
+
+    it('refuses a day that has not happened', async () => {
+      await request(app.getHttpServer()).put(`${url}/log`)
+        .send({ date: '2026-03-12', counts: {} }).expect(400);
+    });
+
+    it('refuses a code this office does not have, by name', async () => {
+      const res = await request(app.getHttpServer()).put(`${url}/log`)
+        .send({ counts: { NOT_A_CODE: 1 } }).expect(400);
+
+      expect(res.body.error.message).toMatch(/NOT_A_CODE/);
+    });
+  });
+
+  describe('correcting a frozen day', () => {
+    it('needs a reason, through the pipe as well as the service', async () => {
+      await request(app.getHttpServer()).post(`${url}/log/correction`)
+        .send({ date: '2026-02-20', counts: {} }).expect(400);
+    });
+
+    it('refuses a day that is still open, pointing at the ordinary save', async () => {
+      await request(app.getHttpServer()).put(`${url}/log`).send({ counts: {} }).expect(200);
+
+      const res = await request(app.getHttpServer()).post(`${url}/log/correction`)
+        .send({ date: TODAY, counts: {}, reason: 'Because.' }).expect(400);
+
+      expect(res.body.error.message).toMatch(/still open/);
+    });
+  });
+
+  describe('the reads', () => {
+    it('answers the summary over a named period, with every code present', async () => {
+      await request(app.getHttpServer()).put(`${url}/log`)
+        .send({ counts: { SELL_SUBMISSION: 3 } }).expect(200);
+
+      const res = await request(app.getHttpServer()).get(`${url}/summary`)
+        .query({ period: 'ROLLING_7D' }).expect(200);
+
+      expect(res.body).toMatchObject({ from: '2026-03-05', to: TODAY, daysLogged: 1 });
+      expect(res.body.totals).toHaveLength(12);
+    });
+
+    it('refuses a period the registry does not name', async () => {
+      await request(app.getHttpServer()).get(`${url}/summary`)
+        .query({ period: 'LAST_FORTNIGHT' }).expect(400);
+    });
+
+    it('answers compliance as Logged or Missed, with no partial state', async () => {
+      const before = await request(app.getHttpServer()).get(`${url}/compliance`).expect(200);
+      expect(before).toMatchObject({ body: { compliant7d: false, lastLoggedOn: null } });
+
+      // An all-zero day counts: the metric asks whether they reported (ADR-0042, OD-30).
+      await request(app.getHttpServer()).put(`${url}/log`).send({ counts: {} }).expect(200);
+
+      const after = await request(app.getHttpServer()).get(`${url}/compliance`).expect(200);
+      expect(after.body).toMatchObject({
+        compliant7d: true, compliantMonth: true, lastLoggedOn: TODAY, windowDays: 7,
+      });
+    });
+
+    it.each(EVERY_MEMBER)('lets %s read their own compliance', async (_name, who) => {
+      session.current = who;
+
+      await request(app.getHttpServer()).get(`${url}/compliance`).expect(200);
+    });
+  });
+});

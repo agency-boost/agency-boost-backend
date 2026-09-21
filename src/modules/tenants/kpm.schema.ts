@@ -19,6 +19,8 @@ export class KpmSettings {
   coachingOverdueDays!: number;
   onTrackPaceThreshold!: number;
   activityDailyMaxCount!: number;
+  /** How many days past month end an activity day stays freely editable (ADR-0042). */
+  activityBackdateGraceDays!: number;
   weeksPerMonth!: number;
   avgDaysPerMonth!: number;
 }
@@ -30,6 +32,7 @@ export const DEFAULT_KPM_SETTINGS: KpmSettings = {
   coachingOverdueDays: PERFORMANCE.COACHING_OVERDUE_DAYS,
   onTrackPaceThreshold: PERFORMANCE.ON_TRACK_PACE_THRESHOLD,
   activityDailyMaxCount: ACTIVITY.COUNT_MAX,
+  activityBackdateGraceDays: ACTIVITY.BACKDATE_GRACE_DAYS,
   weeksPerMonth: TIME.WEEKS_PER_MONTH,
   avgDaysPerMonth: TIME.AVG_DAYS_PER_MONTH,
 };

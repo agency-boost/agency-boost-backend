@@ -51,7 +51,17 @@ export interface ResponseShape {
  * The classes themselves live beside the services that produce them and `implements`
  * their interfaces, so the *shape* cannot drift either. This table only says which one.
  */
+import {
+  ActivityComplianceDto, ActivityDayDto, ActivitySummaryDto,
+} from '@/modules/activity/activity.response.dto';
+
 export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
+  // P6: what an agent did, day by day.
+  ActivityController_readDay: { type: ActivityDayDto },
+  ActivityController_saveDay: { type: ActivityDayDto },
+  ActivityController_correctDay: { type: ActivityDayDto },
+  ActivityController_summary: { type: ActivitySummaryDto },
+  ActivityController_compliance: { type: ActivityComplianceDto },
   AuthController_resendVerification: { type: StatusAckDto },
   AuthController_sessions: { type: SessionDto, isArray: true },
   HealthController_live: { type: StatusAckDto },

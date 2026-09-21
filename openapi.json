@@ -11385,6 +11385,441 @@
         "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
       }
     },
+    "/api/v1/activity/log": {
+      "get": {
+        "description": "Defaults to **today in the office’s timezone** and to your own membership. Every active activity type comes back, zeros included — the screen is the office’s taxonomy, so a type with no count still has a row to type into. `editable` says whether the Save button is live for this caller on this day.\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivityController_readDay_v1",
+        "parameters": [
+          {
+            "name": "date",
+            "required": false,
+            "in": "query",
+            "description": "Defaults to today in the office.",
+            "schema": {
+              "example": "2026-03-11",
+              "type": "string"
+            }
+          },
+          {
+            "name": "membershipId",
+            "required": false,
+            "in": "query",
+            "description": "Whose day. Defaults to your own; needs the scope to read.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityDayDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activity_log:read_raw`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One day",
+        "tags": [
+          "activity"
+        ],
+        "x-required-permission": "activity_log:read_raw"
+      },
+      "put": {
+        "description": "An upsert: the whole day is sent, and a code left out counts as zero. Free within the current calendar month plus the office’s grace window; **a future day is refused**, and a day past its window is refused with a pointer at the correction route (ADR-0042).\n\n**There is no `membershipId` parameter.** No role may log on another person’s behalf, and a route with no subject to pass is a stronger guarantee than a check somebody has to remember.\n\n**Requires `activity_log:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivityController_saveDay_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveActivityDayDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityDayDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activity_log:create`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save your own day",
+        "tags": [
+          "activity"
+        ],
+        "x-required-permission": "activity_log:create"
+      }
+    },
+    "/api/v1/activity/log/correction": {
+      "post": {
+        "description": "For a day whose window has closed. The **whole prior state** moves into the record’s correction list — not a diff — so a leader who coached against Tuesday’s numbers can still read Tuesday’s numbers. A reason is required.\n\n**Requires `activity_log:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivityController_correctDay_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectActivityDayDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityDayDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activity_log:update`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Correct a frozen day",
+        "tags": [
+          "activity"
+        ],
+        "x-required-permission": "activity_log:update"
+      }
+    },
+    "/api/v1/activity/summary": {
+      "get": {
+        "description": "The read Phase 10’s dashboard and ratio cards will use. Periods are the **named** ones (ADR-0022), resolved in the office’s timezone: a rolling window is never labelled *this month*. `from`/`to` override `period` for a custom range.\n\n**Requires `activity_ratios:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivityController_summary_v1",
+        "parameters": [
+          {
+            "name": "period",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "ROLLING_7D",
+                "ROLLING_30D",
+                "CALENDAR_MONTH"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "With `to`, overrides `period`.",
+            "schema": {
+              "example": "2026-03-01",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "example": "2026-03-31",
+              "type": "string"
+            }
+          },
+          {
+            "name": "membershipId",
+            "required": false,
+            "in": "query",
+            "description": "Whose totals. Defaults to your own.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivitySummaryDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activity_ratios:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Totals per activity code over a period",
+        "tags": [
+          "activity"
+        ],
+        "x-required-permission": "activity_ratios:read"
+      }
+    },
+    "/api/v1/activity/compliance": {
+      "get": {
+        "description": "`ACTIVITY_COMPLIANCE_7D` and `ACTIVITY_COMPLIANCE_MONTH`. **Existence, not a total**: an all-zero entry is a statement that nothing happened and counts as reporting, where no entry is silence and does not (ADR-0042). There is no partial state — Logged or Missed.\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivityController_compliance_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": false,
+            "in": "query",
+            "description": "Whose compliance. Defaults to your own.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityComplianceDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activity_log:read_raw`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Whether this member is reporting",
+        "tags": [
+          "activity"
+        ],
+        "x-required-permission": "activity_log:read_raw"
+      }
+    },
     "/api/v1/kpm/settings/campaigns/rules": {
       "get": {
         "description": "MOC and the production club tiers, the insurer’s. **Read only for every office role** — there is no write route here at all. A rule waiting on a metric this product does not compute yet says so, rather than being shown as an ordinary rule nobody can ever pass.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -14472,6 +14907,220 @@
             "$ref": "#/components/schemas/EventAudienceDto"
           }
         }
+      },
+      "ActivityCountDto": {
+        "type": "object",
+        "properties": {
+          "activityTypeId": {
+            "type": "string"
+          },
+          "activityTypeCode": {
+            "type": "string",
+            "example": "SELL_SUBMISSION",
+            "description": "What a formula binds to, never a position."
+          },
+          "label": {
+            "type": "string",
+            "example": "Submission polis",
+            "description": "The office’s own wording."
+          },
+          "count": {
+            "type": "number",
+            "example": 3
+          }
+        },
+        "required": [
+          "activityTypeId",
+          "activityTypeCode",
+          "label",
+          "count"
+        ]
+      },
+      "ActivityDayDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "localDate": {
+            "type": "string",
+            "example": "2026-03-11",
+            "description": "A calendar day in the office’s timezone."
+          },
+          "entries": {
+            "description": "Every active type, zeros included.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityCountDto"
+            }
+          },
+          "totalCount": {
+            "type": "number",
+            "example": 7
+          },
+          "version": {
+            "type": "number",
+            "example": 2,
+            "description": "Bumped on every save. 0 when the day has no entry."
+          },
+          "frozenAt": {
+            "type": "object",
+            "nullable": true,
+            "description": "Null while the day is still freely editable; set when its window closed."
+          },
+          "editable": {
+            "type": "boolean",
+            "description": "Whether **this** caller may write this day. The Save button."
+          },
+          "correctionCount": {
+            "type": "number",
+            "example": 0,
+            "description": "How many times this day was corrected after freezing."
+          }
+        },
+        "required": [
+          "membershipId",
+          "localDate",
+          "entries",
+          "totalCount",
+          "version",
+          "editable",
+          "correctionCount"
+        ]
+      },
+      "SaveActivityDayDto": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "example": "2026-03-11",
+            "description": "Defaults to today in the office."
+          },
+          "counts": {
+            "type": "object",
+            "example": {
+              "LEADS_GEN_ACTIVITY": 3,
+              "SELL_SUBMISSION": 1
+            }
+          }
+        },
+        "required": [
+          "counts"
+        ]
+      },
+      "CorrectActivityDayDto": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "example": "2026-02-11",
+            "description": "The frozen day being corrected."
+          },
+          "counts": {
+            "type": "object",
+            "example": {
+              "SELL_SUBMISSION": 2
+            }
+          },
+          "reason": {
+            "type": "string",
+            "example": "Two submissions were logged against the wrong day.",
+            "description": "Required. A correction nobody can explain is a number that changed for no reason anybody can find."
+          }
+        },
+        "required": [
+          "date",
+          "counts",
+          "reason"
+        ]
+      },
+      "ActivitySummaryTotalDto": {
+        "type": "object",
+        "properties": {
+          "activityTypeCode": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "activityTypeCode",
+          "label",
+          "count"
+        ]
+      },
+      "ActivitySummaryDto": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "example": "2026-03-05"
+          },
+          "to": {
+            "type": "string",
+            "example": "2026-03-11"
+          },
+          "totals": {
+            "description": "Every active code, zeros included.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivitySummaryTotalDto"
+            }
+          },
+          "daysLogged": {
+            "type": "number",
+            "example": 5,
+            "description": "Days with an entry — the compliance denominator."
+          },
+          "totalCount": {
+            "type": "number",
+            "example": 31
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "totals",
+          "daysLogged",
+          "totalCount"
+        ]
+      },
+      "ActivityComplianceDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "compliant7d": {
+            "type": "boolean",
+            "description": "`ACTIVITY_COMPLIANCE_7D`. Logged or Missed, with no partial state."
+          },
+          "compliantMonth": {
+            "type": "boolean",
+            "description": "`ACTIVITY_COMPLIANCE_MONTH`, over the calendar month."
+          },
+          "lastLoggedOn": {
+            "type": "object",
+            "nullable": true,
+            "example": "2026-03-09",
+            "description": "Null when they have never logged — *Never logged*, not *0 days ago*."
+          },
+          "windowDays": {
+            "type": "number",
+            "example": 7,
+            "description": "The office’s own compliance window."
+          }
+        },
+        "required": [
+          "membershipId",
+          "compliant7d",
+          "compliantMonth",
+          "windowDays"
+        ]
       },
       "RequirementViewDto": {
         "type": "object",

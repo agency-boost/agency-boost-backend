@@ -159,7 +159,7 @@ async function main(): Promise<void> {
       // exists renders as an empty Products tab on a company that should have 31.
       'trainingCategories', 'trainingSkills', 'trainingModules', 'activationTemplates',
       'companyTemplates', 'products', 'kpmProductConfigs', 'eventTypes', 'events',
-      'campaigns', 'qualificationRules', 'capabilityCatalogs',
+      'campaigns', 'qualificationRules', 'capabilityCatalogs', 'activityLogs',
     ];
     for (const name of owned) {
       const { deletedCount } = await mongoose.connection.collection(name).deleteMany({});
@@ -1440,6 +1440,99 @@ async function main(): Promise<void> {
     effectiveUserId: String(rinaUser._id),
     targetId: String(rinaUser._id),
     createdAt: daysAgo(6),
+  });
+
+  // ------------------------------------------------------------ activity logs (P6)
+
+  /*
+   * **Without these the Log Activity screen has nothing to show and the compliance tree is
+   * empty**, which reads as a broken screen rather than as an office nobody has logged in yet.
+   * Four states are seeded because each is a different answer the product gives:
+   *
+   * - **Rina** logs most days — the compliant case, and the one the ratios have data for.
+   * - **Budi** last logged nine days ago — outside the seven-day window, so the Owner's
+   *   compliance list has somebody on it and *"Last logged 9 days ago"* has a source.
+   * - **Dewi** saved a day of zeroes — the OD-30 case. She counts as reporting, and the whole
+   *   argument for that is only visible when the row exists.
+   * - **Sari** has a **corrected** day from last month, which is the only way to see ADR-0042's
+   *   correction list on a screen at all.
+   */
+  const jakartaDay = (days: number) => new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(daysAgo(days));
+
+  const logDay = async (
+    membershipId: string,
+    daysBack: number,
+    counts: Record<string, number>,
+    extra: Record<string, unknown> = {},
+  ) => {
+    const types = await ActivityTypes.find({ kpmId: id0417, status: 'active' }).lean().exec();
+    const entries = types.map((type) => ({
+      activityTypeId: String((type as { _id: unknown })._id),
+      activityTypeCode: (type as { code: string }).code,
+      count: counts[(type as { code: string }).code] ?? 0,
+    }));
+    await mongoose.connection.collection('activityLogs').insertOne({
+      kpmId: id0417,
+      membershipId,
+      localDate: jakartaDay(daysBack),
+      entries,
+      totalCount: entries.reduce((sum, e) => sum + e.count, 0),
+      source: 'self',
+      enteredByMembershipId: membershipId,
+      version: 1,
+      frozenAt: null,
+      corrections: [],
+      deletedAt: null,
+      createdAt: daysAgo(daysBack),
+      updatedAt: daysAgo(daysBack),
+      createdBy: null,
+      updatedBy: null,
+      ...extra,
+    });
+  };
+
+  // Rina: a working week, with the shape a real one has — busier midweek, quiet on the edges.
+  for (const [back, counts] of [
+    [0, { LEADS_GEN_ACTIVITY: 2, LEADS_CONTACTED: 5, SELL_PRESENTATION: 2, SELL_SUBMISSION: 1 }],
+    [1, { LEADS_CONTACTED: 4, SELL_PRESENTATION: 3, SELL_FOLLOWUP: 2 }],
+    [2, { LEADS_GEN_ACTIVITY: 1, LEADS_CONTACTED: 6, SELL_PRESENTATION: 1 }],
+    [4, { LEADS_CONTACTED: 3, SELL_FOLLOWUP: 1, DEV_TRAINING_ATTEND: 1 }],
+    [5, { LEADS_GEN_ACTIVITY: 3, LEADS_NEW_PROSPECT: 2 }],
+  ] as [number, Record<string, number>][]) {
+    await logDay(rina.id, back, counts);
+  }
+
+  // Budi: nine days ago, so he is outside the window and the Owner has somebody to chase.
+  await logDay(budi.id, 9, { LEADS_CONTACTED: 2, SELL_PRESENTATION: 1 });
+
+  // Dewi: a day of zeroes. She reported, and she did nothing — two different facts (OD-30).
+  await logDay(dewi.id, 1, {});
+
+  /*
+   * Sari: a day from last month, corrected after its window closed.
+   *
+   * The prior state is kept **whole** rather than as a diff, because the point of the list is
+   * that a leader who coached against the old numbers can still read them (ADR-0042).
+   */
+  const sariTypes = await ActivityTypes.find({ kpmId: id0417, status: 'active' }).lean().exec();
+  const priorEntries = sariTypes.map((type) => ({
+    activityTypeId: String((type as { _id: unknown })._id),
+    activityTypeCode: (type as { code: string }).code,
+    count: (type as { code: string }).code === 'SELL_SUBMISSION' ? 1 : 0,
+  }));
+  await logDay(sari.id, 40, { SELL_SUBMISSION: 3, SELL_PRESENTATION: 2 }, {
+    version: 2,
+    frozenAt: daysAgo(6),
+    corrections: [{
+      version: 1,
+      entries: priorEntries,
+      totalCount: 1,
+      at: daysAgo(5),
+      byMembershipId: sari.id,
+      reason: 'Two submissions were logged against the wrong day.',
+    }],
   });
 
   // ---------------------------------------------------------- in no office at all

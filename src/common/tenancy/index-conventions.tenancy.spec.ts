@@ -48,6 +48,9 @@ import {
   EventAudienceSchema, EventSchema, EventTypeSchema,
 } from '@/modules/events/event.schema';
 import {
+  ActivityLogCorrectionSchema, ActivityLogEntrySchema, ActivityLogSchema,
+} from '@/modules/activity/activity-log.schema';
+import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
 } from '@/modules/campaigns/campaign.schema';
 import {
@@ -84,6 +87,7 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['kpmProductConfigs', KpmProductConfigSchema],
   ['eventTypes', EventTypeSchema],
   ['events', EventSchema],
+  ['activityLogs', ActivityLogSchema],
   ['campaigns', CampaignSchema],
   ['capabilityCatalogs', CapabilityCatalogSchema],
 ];
@@ -202,6 +206,16 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'a subdocument of events: no collection and no _id of its own',
   ],
   [
+    'activityLogEntry (subdocument)',
+    ActivityLogEntrySchema,
+    'one code\'s count inside an activity log: no collection and no _id of its own',
+  ],
+  [
+    'activityLogCorrection (subdocument)',
+    ActivityLogCorrectionSchema,
+    'a prior state of an activity log, held inside the day it belongs to',
+  ],
+  [
     'productDocumentRef (subdocument)',
     ProductDocumentRefSchema,
     'a subdocument of products and kpmProductConfigs: no collection and no _id of its own',
@@ -272,6 +286,9 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [EventTypeSchema, 'EventTypeSchema'],
   [EventSchema, 'EventSchema'],
   [EventAudienceSchema, 'EventAudienceSchema'],
+  [ActivityLogSchema, 'ActivityLogSchema'],
+  [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
+  [ActivityLogCorrectionSchema, 'ActivityLogCorrectionSchema'],
   [CampaignSchema, 'CampaignSchema'],
   [QualificationRuleSchema, 'QualificationRuleSchema'],
   [RequirementSchema, 'RequirementSchema'],

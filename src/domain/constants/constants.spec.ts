@@ -72,6 +72,8 @@ describe('domain constants', () => {
     it('pins the per-item daily count range at 0..999', () => {
       expect(ACTIVITY.COUNT_MIN).toBe(0);
       expect(ACTIVITY.COUNT_MAX).toBe(999);
+      // ADR-0042: the current calendar month, plus this many days into the next.
+      expect(ACTIVITY.BACKDATE_GRACE_DAYS).toBe(7);
     });
     it('pins the activation window at 90 days, counted from day 1', () => {
       expect(ACTIVATION.WINDOW_DAYS).toBe(90);

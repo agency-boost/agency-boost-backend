@@ -300,6 +300,61 @@ export const PERMISSIONS = {
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
 
+  // ---- Activity logging (P6, `roles-and-permissions.md` §3.5). ----
+  /*
+   * **Writing is `own` and nothing else, on purpose.**
+   *
+   * Not the leader, not the Owner, not a Super Admin, not an elevated impersonation session. §3.5
+   * gives the reason: the daily log is the evidentiary base for compliance, MAA status, coaching
+   * coverage and campaign qualification, and a proxy write destroys its meaning. The service
+   * enforces it structurally as well — the write path takes no subject at all — because a grant
+   * list is a statement and a missing parameter is a guarantee.
+   */
+  'activity_log:create': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /** Correcting a frozen day (ADR-0042). Still `own`: a correction is a write. */
+  'activity_log:update': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /*
+   * **Reading is wide, and §3.5 explains why it was widened rather than clawed back.** The Owner
+   * and Admin were once limited to the binary compliance projection, and three other grants in
+   * the same matrix — personal summary, KPM analytics, the unit dashboard's per-person breakdown —
+   * routed around it. An access control three endpoints defeat is not a control; it is a false
+   * statement in a document.
+   */
+  'activity_log:read_raw': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-unit' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  'activity_ratios:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-unit' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /*
+   * **`activity_log:proxy_create` is deliberately absent from this registry.**
+   *
+   * §3.5 documents the row and grants it to nobody: *"No role may log activity on behalf of
+   * another person… If proxy logging is ever added it must be a distinct action with visible
+   * attribution on the agent's own screen."* Declaring it here with an empty grant list would
+   * trip the rule that a permission nobody holds is probably a mistake — and it would be worth
+   * tripping, because a key here is something a route can declare, and no route should. The
+   * guarantee is structural instead: `ActivityService`'s write path takes no subject at all.
+   */
+
   // ---- Membership. ----
   'member:read_profile': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },

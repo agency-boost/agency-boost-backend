@@ -47,6 +47,9 @@ import {
   EventAudienceSchema, EventSchema, EventTypeSchema,
 } from '@/modules/events/event.schema';
 import {
+  ActivityLogCorrectionSchema, ActivityLogEntrySchema, ActivityLogSchema,
+} from '@/modules/activity/activity-log.schema';
+import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
 } from '@/modules/campaigns/campaign.schema';
 import {
@@ -90,6 +93,7 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['kpmProductConfigs', KpmProductConfigSchema],
   ['eventTypes', EventTypeSchema],
   ['events', EventSchema],
+  ['activityLogs', ActivityLogSchema],
   ['campaigns', CampaignSchema],
   ['capabilityCatalogs', CapabilityCatalogSchema],
   // Company-partitioned carrier rules (ADR-0035), soft-deleted like every other row.
@@ -158,6 +162,17 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     'a subdocument of events: it is deleted with the event that holds it',
   ],
   [
+    'activityLogEntry (subdocument)',
+    ActivityLogEntrySchema,
+    'one code\'s count inside an activity log: it goes with the day that holds it',
+  ],
+  [
+    'activityLogCorrection (subdocument)',
+    ActivityLogCorrectionSchema,
+    'a prior state of an activity log. **Append-only and never removed** — the whole point is '
+      + 'that a leader who coached against the old numbers can still read them (ADR-0042)',
+  ],
+  [
     'productDocumentRef (subdocument)',
     ProductDocumentRefSchema,
     'a subdocument of products and kpmProductConfigs: it is deleted with the row that holds it',
@@ -205,6 +220,9 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [EventTypeSchema, 'EventTypeSchema'],
   [EventSchema, 'EventSchema'],
   [EventAudienceSchema, 'EventAudienceSchema'],
+  [ActivityLogSchema, 'ActivityLogSchema'],
+  [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
+  [ActivityLogCorrectionSchema, 'ActivityLogCorrectionSchema'],
   [CampaignSchema, 'CampaignSchema'],
   [QualificationRuleSchema, 'QualificationRuleSchema'],
   [RequirementSchema, 'RequirementSchema'],

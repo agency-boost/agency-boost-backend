@@ -48,6 +48,15 @@ export const ACTIVITY = {
   COUNT_MIN: 0,
   /** Per item, per day. Tenant-configurable via kpms.settings.activityDailyMaxCount. */
   COUNT_MAX: 999,
+  /**
+   * How many days into the next month a day stays freely editable (ADR-0042, resolving OD-17).
+   *
+   * An agent logs freely within the **current calendar month** plus this many days into the next,
+   * and a future date is never valid. After the window the day is frozen: a correction is still
+   * possible and writes a new version carrying a reason, so this bounds *silent* editing rather
+   * than editing. Tenant-configurable, because month-end differs by office.
+   */
+  BACKDATE_GRACE_DAYS: 7,
 } as const;
 
 /** 90-day activation programme. Overall.html:3270-3352. Tenant-configurable window. */

@@ -49,6 +49,9 @@ import { KpmProductService } from '@/modules/products/kpm-product.service';
 import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events/event.schema';
 import { EventRepository, EventTypeRepository } from '@/modules/events/event.repository';
 import { EventService } from '@/modules/events/event.service';
+import { ActivityLog, ActivityLogSchema } from '@/modules/activity/activity-log.schema';
+import { ActivityLogRepository } from '@/modules/activity/activity-log.repository';
+import { ActivityService } from '@/modules/activity/activity.service';
 import {
   Campaign, CampaignSchema, QualificationRule, QualificationRuleSchema,
 } from '@/modules/campaigns/campaign.schema';
@@ -180,6 +183,15 @@ export function configModule(now: Date) {
     audit,
     clock,
   );
+  // P6: what an agent did, day by day. The first module holding what people *did*.
+  const activityLogs = new ActivityService(
+    new ActivityLogRepository(model(ActivityLog.name, ActivityLogSchema) as never),
+    new ActivityTypeRepository(types as never),
+    new MembershipRepository(model(Membership.name, MembershipSchema) as never),
+    kpms as never,
+    clock,
+    audit,
+  );
   // P5-T7: the office's campaigns, and the carrier rules it is measured against.
   const campaigns = new CampaignService(
     new CampaignRepository(model(Campaign.name, CampaignSchema) as never),
@@ -252,7 +264,7 @@ export function configModule(now: Date) {
   return {
     activity, ratios, leads, config, provisioning, templates, templateService, audit, clock, changes,
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
-    products, assets, storage, kpmProducts, events, campaigns, capability,
+    products, assets, storage, kpmProducts, events, campaigns, capability, activityLogs,
   };
 }
 

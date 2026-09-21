@@ -44,6 +44,14 @@ const config: Config = {
     './src/modules/rbac/': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/common/auth/': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/common/context/': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    /*
+     * **`common/time` is invariant §9 made executable**, so it is pinned with the isolation code
+     * rather than with the modules. A day boundary computed in the server's clock is a bug; the
+     * prototype computes every one of them that way, and this is the file that does not. It is at
+     * 100 today and a branch that stops being covered here is a day somebody files against the
+     * wrong date.
+     */
+    './src/common/time/': { lines: 100, branches: 100, functions: 100, statements: 100 },
     // Business rules and constants: a silently wrong number is worse than a crash.
     //
     // `./src/domain/` alone used to stand for "business-rule modules", and it is sixteen
@@ -120,6 +128,13 @@ const config: Config = {
     // defensive reads — a null payload, a row with no `code` key, a catalog belonging to an
     // office provisioned before the feature existed. Every rule the module enforces is covered.
     './src/modules/capability/': { lines: 95, branches: 73, functions: 95, statements: 95 },
+    /*
+     * P6. The branch figure is the defensive reads on the office's settings — `?? ACTIVITY.…`
+     * for an office provisioned before a knob existed — plus the view's `?? 0` fallbacks for a
+     * day with no row. Every rule the module enforces is covered: the window, the freeze, the
+     * clamp, the scope, and the day boundary (which lives in `common/time`, pinned at 100).
+     */
+    './src/modules/activity/': { lines: 95, branches: 78, functions: 95, statements: 95 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],
