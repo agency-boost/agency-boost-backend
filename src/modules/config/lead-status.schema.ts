@@ -41,6 +41,24 @@ export class LeadStatus {
   @Prop({ type: Boolean, required: true, default: false })
   isTerminal!: boolean;
 
+  /**
+   * A stage late enough that the lead is expected to convert this period (ADR-0043).
+   *
+   * **The source for `RECRUITMENT_EXPECTED_TO_CLOSE`**, the KPM Overview tile that could
+   * not be computed until this field existed. Unlike `isTerminal` it is not exclusive:
+   * an office may flag as many stages as its ladder warrants, and a ladder whose last
+   * open stage is the only late one is a valid answer.
+   *
+   * **Never true on the terminal stage.** A lead that has closed is not expected to
+   * close; counting it would double it against last period's figure.
+   *
+   * This is the whole of OD-12's second half. The ERD proposed a six-value `stageClass`
+   * enum; four of its classes already existed under other names (`won` is `isTerminal`,
+   * `lost` is a lead outcome and never a status) and nothing read the other two.
+   */
+  @Prop({ type: Boolean, required: true, default: false })
+  isLateStage!: boolean;
+
   @Prop({ type: Number, required: true, default: 1 })
   version!: number;
 

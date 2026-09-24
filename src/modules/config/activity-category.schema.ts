@@ -22,7 +22,6 @@ export class ActivityCategory {
   @Prop({ type: String, required: true, trim: true })
   label!: string;
 
-  /** Presentation only, and reorderable — which is why nothing references it. */
   /** Optional, and shown under the heading. Mirrors `activityTypes.description`. */
   @Prop({ type: String, default: null, trim: true })
   description!: string | null;
@@ -43,6 +42,7 @@ export class ActivityCategory {
   @Prop({ type: [String], required: true, default: [] })
   appliesToOrgLevelCodes!: string[];
 
+  /** Presentation only, and reorderable — which is why nothing references it. */
   @Prop({ type: Number, required: true })
   displayOrder!: number;
 

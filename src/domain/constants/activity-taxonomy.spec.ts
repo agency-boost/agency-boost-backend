@@ -87,15 +87,18 @@ describe('the seeded lead pipelines against the prototype', () => {
     expect(sales.map((l) => l.label)).toEqual(labelsIn('leadstatuses-sales'));
   });
 
-  it('has two recruitment stages the Owner prototype does not, and that is OD-12', () => {
+  it('has two recruitment stages the Owner prototype does not — ratified by ADR-0043', () => {
     /*
      * The prototypes disagree with each other, not with us. `Overall.html:5367` — the
      * agent app, where leads are actually worked — lists seven stages including
      * *Agent code created*; this file's settings screen lists six and calls stage three
-     * *Pitched*. `glossary.md:337` records the conflict and OD-12 owns the resolution.
+     * *Pitched*. `glossary.md:337` records the conflict.
      *
-     * Pinned rather than corrected, so that closing OD-12 is a deliberate edit here and
-     * not something somebody discovers by diffing two HTML files again.
+     * **ADR-0043 ratified the seven.** It was pinned here rather than corrected so that
+     * closing OD-12 would be a deliberate edit in this file, and it was: the ADR found
+     * that Phase 4 had already shipped the agent app's ladder and the register had not
+     * noticed. Leads are worked in the agent app, and an office may add or archive its
+     * own stages from P4-T3's settings screen regardless.
      */
     const ours = SEED_LEAD_STATUSES.filter((l) => l.pipeline === 'recruitment');
     const theirs = labelsIn('leadstatuses-recruitment');
@@ -106,6 +109,29 @@ describe('the seeded lead pipelines against the prototype', () => {
     // The terminal stage is the one both agree on, and the one everything downstream reads.
     expect(ours.at(-1)!.label).toBe(theirs.at(-1));
     expect(ours.filter((l) => l.isTerminal).map((l) => l.label)).toEqual(['New active agent']);
+  });
+
+  it('flags the stages after which the work is the counterparty’s (ADR-0043)', () => {
+    /*
+     * OD-12's second half. `RECRUITMENT_EXPECTED_TO_CLOSE` counts these, and it is the
+     * KPM Overview tile that could not be computed before this field existed.
+     *
+     * Pinned by code rather than by count, because which stages these are is the decision
+     * — an office may change its own copy, but changing what a new office starts with is
+     * a change to the ADR.
+     */
+    const late = SEED_LEAD_STATUSES.filter((l) => l.isLateStage).map((l) => l.code);
+
+    expect(late).toEqual([
+      'POLICY_SUBMITTED', 'APPROVED_NOT_PAID',
+      'AGENT_CODE_CREATED', 'AAJI_LICENSED', 'JOINT_FIELD_WORK_PLANNED',
+    ]);
+  });
+
+  it('never flags a terminal stage, in either pipeline', () => {
+    // A lead that has closed is not expected to close. Both flags on one stage would
+    // double it against the previous period's figure.
+    expect(SEED_LEAD_STATUSES.filter((l) => l.isTerminal && l.isLateStage)).toEqual([]);
   });
 });
 

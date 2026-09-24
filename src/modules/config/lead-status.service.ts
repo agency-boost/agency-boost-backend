@@ -13,6 +13,7 @@ export interface LeadStatusView {
   label: string;
   rank: number;
   isTerminal: boolean;
+  isLateStage: boolean;
   version: number;
   status: 'active' | 'archived';
 }
@@ -69,6 +70,9 @@ export class LeadStatusService {
       rank: inPipeline + 1,
       // Never terminal on creation: a pipeline has exactly one, and it already has it.
       isTerminal: false,
+      // Nor late: the Owner says which stages are expected to close, and a stage appended
+      // to the end of a ladder is as likely to be a new terminal as a new late one.
+      isLateStage: false,
       version: 1,
       status: 'active',
     } as Partial<LeadStatusDocument>);
@@ -112,11 +116,49 @@ export class LeadStatusService {
         $set: { isTerminal: false }, $inc: { version: 1 },
       })));
 
-    await this.statuses.updateById(ctx, id, { $set: { isTerminal: true }, $inc: { version: 1 } });
+    // A closed lead is not expected to close, so the two flags cannot both stand. Cleared
+    // here rather than refused, because the Owner's intent is unambiguous: they are naming
+    // the stage that ends the pipeline (ADR-0043).
+    await this.statuses.updateById(ctx, id, {
+      $set: { isTerminal: true, isLateStage: false }, $inc: { version: 1 },
+    });
     await this.record(ctx, 'lead_status.terminal_changed', id, {
       pipeline: target.pipeline, code: target.code,
     });
     return (await this.list(ctx)).find((p) => p.pipeline === target.pipeline)!;
+  }
+
+  /**
+   * Flag a stage as one the lead is expected to convert from this period (ADR-0043).
+   *
+   * **Not exclusive, unlike the terminal flag.** An office may name as many stages as its
+   * ladder warrants — the seeded sales ladder names two and the recruitment ladder three
+   * — so this is a set, and setting one says nothing about the others.
+   *
+   * It is what `RECRUITMENT_EXPECTED_TO_CLOSE` counts, and the reason the KPM Overview's
+   * *Expected to close* tile could not be computed before Phase 7.
+   */
+  async setLateStage(ctx: RequestContext, id: string, isLateStage: boolean): Promise<LeadStatusView> {
+    const target = await this.statuses.findById(ctx, id);
+    if (!target) throw new NotFoundException('Lead status');
+    if (isLateStage && target.isTerminal) {
+      throw new BadRequestException(
+        'This is the stage that closes the pipeline, so a lead sitting on it has already '
+        + 'closed. Flag a stage before it instead.',
+      );
+    }
+    if (isLateStage && target.status === 'archived') {
+      throw new BadRequestException('An archived stage holds no leads, so it counts nothing.');
+    }
+    if (target.isLateStage === isLateStage) return this.view(target);
+
+    const updated = await this.statuses.updateById(ctx, id, {
+      $set: { isLateStage }, $inc: { version: 1 },
+    });
+    await this.record(ctx, 'lead_status.late_stage_changed', id, {
+      code: target.code, pipeline: target.pipeline, isLateStage,
+    });
+    return this.view(updated!);
   }
 
   /** Reorder one pipeline, by naming all of it. */
@@ -170,6 +212,7 @@ export class LeadStatusService {
       label: doc.label,
       rank: doc.rank,
       isTerminal: doc.isTerminal,
+      isLateStage: doc.isLateStage,
       version: doc.version,
       status: doc.status,
     };

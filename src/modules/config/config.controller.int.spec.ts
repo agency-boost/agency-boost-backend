@@ -456,6 +456,50 @@ describe('the configuration controllers', () => {
       expect((await sales()).find((st) => st.id === id)!.status).toBe('active');
     });
 
+    it('ticks and unticks the expected-to-close flag over HTTP (ADR-0043)', async () => {
+      const submitted = (await sales()).find((st) => st.code === 'POLICY_SUBMITTED')!;
+      expect(submitted.isLateStage).toBe(true);
+
+      const off = await request(app.getHttpServer())
+        .patch(`/kpm/settings/lead-statuses/${submitted.id}/late-stage`)
+        .send({ isLateStage: false })
+        .expect(200);
+      expect(off.body).toMatchObject({ code: 'POLICY_SUBMITTED', isLateStage: false });
+
+      const on = await request(app.getHttpServer())
+        .patch(`/kpm/settings/lead-statuses/${submitted.id}/late-stage`)
+        .send({ isLateStage: true })
+        .expect(200);
+      expect(on.body.isLateStage).toBe(true);
+    });
+
+    it('needs a real boolean, through the pipe rather than the service', async () => {
+      // `enableImplicitConversion: false`, so the string "true" is not a boolean and the
+      // Owner's browser cannot half-tick a checkbox.
+      const submitted = (await sales()).find((st) => st.code === 'POLICY_SUBMITTED')!;
+
+      await request(app.getHttpServer())
+        .patch(`/kpm/settings/lead-statuses/${submitted.id}/late-stage`)
+        .send({ isLateStage: 'true' })
+        .expect(400);
+
+      await request(app.getHttpServer())
+        .patch(`/kpm/settings/lead-statuses/${submitted.id}/late-stage`)
+        .send({})
+        .expect(400);
+    });
+
+    it('refuses the flag on the stage that closes the pipeline', async () => {
+      const closed = (await sales()).find((st) => st.isTerminal)!;
+
+      const res = await request(app.getHttpServer())
+        .patch(`/kpm/settings/lead-statuses/${closed.id}/late-stage`)
+        .send({ isLateStage: true })
+        .expect(400);
+
+      expect(res.body.error.message).toMatch(/already closed/);
+    });
+
     it('adds, archives and restores a ratio', async () => {
       const created = await request(app.getHttpServer())
         .post('/kpm/settings/ratio-benchmarks')

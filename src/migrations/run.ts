@@ -16,6 +16,7 @@ import { up as seedActivationChecklist } from './0012-seed-activation-checklist'
 import { up as seedProductCatalog } from './0013-seed-product-catalog';
 import { up as assetUploadState } from './0014-asset-upload-state';
 import { up as activityBackdateGrace } from './0015-kpm-activity-backdate-grace';
+import { up as leadStatusLateStage } from './0016-lead-status-late-stage';
 
 /**
  * Every migration, in order. Forward-only and idempotent, so running this twice is a
@@ -37,6 +38,7 @@ const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Date) => P
   ['0013-seed-product-catalog', seedProductCatalog],
   ['0014-asset-upload-state', assetUploadState],
   ['0015-kpm-activity-backdate-grace', activityBackdateGrace],
+  ['0016-lead-status-late-stage', leadStatusLateStage],
 ];
 
 async function main(): Promise<void> {

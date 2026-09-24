@@ -7300,6 +7300,104 @@
         "x-required-permission": "tenant_config:write"
       }
     },
+    "/api/v1/kpm/settings/lead-statuses/{id}/late-stage": {
+      "patch": {
+        "description": "What the KPM Overview counts as **Expected to close** (ADR-0043). Not exclusive: flag as many stages as the ladder warrants. Refused on the stage that closes the pipeline — a lead sitting there has already closed.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TenantConfigController_setLateStage_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetLateStageDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadStatusDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Flag a stage as one a lead is expected to convert from",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
     "/api/v1/kpm/settings/lead-statuses/{id}/restore": {
       "post": {
         "operationId": "TenantConfigController_restoreLeadStatus_v1",
@@ -13595,6 +13693,18 @@
           "label"
         ]
       },
+      "SetLateStageDto": {
+        "type": "object",
+        "properties": {
+          "isLateStage": {
+            "type": "boolean",
+            "description": "True to count leads on this stage as expected to convert this period."
+          }
+        },
+        "required": [
+          "isLateStage"
+        ]
+      },
       "CreateRatioDto": {
         "type": "object",
         "properties": {
@@ -16634,6 +16744,10 @@
             "type": "boolean",
             "description": "The stage that closes this pipeline, and what gates marking a lead successful. Exactly one per pipeline — a property, not \"the last one in the list\"."
           },
+          "isLateStage": {
+            "type": "boolean",
+            "description": "A stage the lead is expected to convert from this period, and what the KPM Overview counts as *Expected to close*. Unlike the terminal flag it is not exclusive, and it is never true on the stage that closes the pipeline."
+          },
           "version": {
             "type": "number"
           },
@@ -16652,6 +16766,7 @@
           "label",
           "rank",
           "isTerminal",
+          "isLateStage",
           "version",
           "status"
         ]

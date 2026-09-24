@@ -119,6 +119,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_reorderLeadStatuses: { type: LeadPipelineDto },
   TenantConfigController_renameLeadStatus: { type: LeadStatusDto },
   TenantConfigController_setTerminal: { type: LeadPipelineDto },
+  TenantConfigController_setLateStage: { type: LeadStatusDto },
   TenantConfigController_archiveLeadStatus: { type: LeadStatusDto },
   TenantConfigController_restoreLeadStatus: { type: LeadStatusDto },
   AdminController_elevateSession: { type: StatusAckDto },

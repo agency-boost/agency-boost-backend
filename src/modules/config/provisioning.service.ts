@@ -191,6 +191,17 @@ export class ProvisioningService {
     const fromTemplate = (template?.payload as { statuses?: SeedLeadStatus[] })?.statuses;
     const statuses = fromTemplate?.length ? fromTemplate : SEED_LEAD_STATUSES;
 
+    // A closed lead is not expected to close. A template saying both would make the
+    // Overview's *Expected to close* double-count against *Last month* (ADR-0043).
+    const contradictory = statuses.filter((s) => s.isTerminal && s.isLateStage);
+    if (contradictory.length) {
+      throw new Error(
+        `The published lead pipeline template for company ${companyId} flags `
+          + `${contradictory.map((s) => s.code).join(', ')} as both the stage that closes `
+          + 'its pipeline and a stage still expected to close. A lead can only be one.',
+      );
+    }
+
     for (const pipeline of ['sales', 'recruitment'] as const) {
       const terminals = statuses.filter((s) => s.pipeline === pipeline && s.isTerminal);
       if (terminals.length !== 1) {
@@ -210,6 +221,7 @@ export class ProvisioningService {
       label: s.label,
       rank: s.rank,
       isTerminal: s.isTerminal,
+      isLateStage: s.isLateStage ?? false,
       version: 1,
       status: 'active',
       archivedAt: null,

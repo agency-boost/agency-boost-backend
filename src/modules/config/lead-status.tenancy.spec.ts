@@ -69,6 +69,112 @@ describe('the office lead pipelines (P4-T3)', () => {
     });
   });
 
+  describe('the stages a lead is expected to close from (ADR-0043, AC-4)', () => {
+    beforeEach(() => provisioning.seedLeadPipelines(KPM_A, COMPANY));
+
+    it('seeds the stages after which the work is the counterparty’s', async () => {
+      /*
+       * This is the whole of OD-12's second half. `RECRUITMENT_EXPECTED_TO_CLOSE` had no
+       * source until this field existed, and the prototype's stub named *Offer* and
+       * *Onboarding* — stages that appear in neither ladder.
+       */
+      const [sales, recruitment] = await service.list(ctx(KPM_A));
+
+      expect(sales.statuses.filter((s) => s.isLateStage).map((s) => s.code))
+        .toEqual(['POLICY_SUBMITTED', 'APPROVED_NOT_PAID']);
+      expect(recruitment.statuses.filter((s) => s.isLateStage).map((s) => s.code))
+        .toEqual(['AGENT_CODE_CREATED', 'AAJI_LICENSED', 'JOINT_FIELD_WORK_PLANNED']);
+    });
+
+    it('never flags the stage that closes a pipeline', async () => {
+      // A lead that has closed is not expected to close; counting it would double it
+      // against last period's figure.
+      for (const pipeline of await service.list(ctx(KPM_A))) {
+        expect(pipeline.statuses.find((s) => s.isTerminal)!.isLateStage).toBe(false);
+      }
+    });
+
+    it('is a set, not an exclusive flag — unlike the terminal one', async () => {
+      const [, recruitment] = await service.list(ctx(KPM_A));
+      const target = recruitment.statuses.find((s) => s.code === 'MEETING_SCHEDULED')!;
+
+      await service.setLateStage(ctx(KPM_A), target.id, true);
+
+      const [, after] = await service.list(ctx(KPM_A));
+      expect(after.statuses.filter((s) => s.isLateStage)).toHaveLength(4);
+    });
+
+    it('unticks, because an untick is as much a decision as a tick', async () => {
+      const [sales] = await service.list(ctx(KPM_A));
+      const submitted = sales.statuses.find((s) => s.code === 'POLICY_SUBMITTED')!;
+
+      const updated = await service.setLateStage(ctx(KPM_A), submitted.id, false);
+
+      expect(updated.isLateStage).toBe(false);
+      expect(updated.version).toBe(submitted.version + 1);
+    });
+
+    it('refuses the terminal stage, and says where to put the flag instead', async () => {
+      const [sales] = await service.list(ctx(KPM_A));
+      const closed = sales.statuses.find((s) => s.isTerminal)!;
+
+      await expect(service.setLateStage(ctx(KPM_A), closed.id, true))
+        .rejects.toThrow(/already closed/);
+    });
+
+    it('refuses an archived stage, which holds no leads', async () => {
+      const [sales] = await service.list(ctx(KPM_A));
+      const followUp = sales.statuses.find((s) => s.code === 'FOLLOW_UP')!;
+      await service.archive(ctx(KPM_A), followUp.id);
+
+      await expect(service.setLateStage(ctx(KPM_A), followUp.id, true))
+        .rejects.toThrow(/holds no leads/);
+    });
+
+    it('clears the flag when a late stage is made terminal', async () => {
+      // Both cannot stand. The Owner's intent is unambiguous — they are naming the stage
+      // that ends the pipeline — so it is cleared rather than refused.
+      const [sales] = await service.list(ctx(KPM_A));
+      const submitted = sales.statuses.find((s) => s.code === 'POLICY_SUBMITTED')!;
+      expect(submitted.isLateStage).toBe(true);
+
+      await service.setTerminal(ctx(KPM_A), submitted.id);
+
+      const [after] = await service.list(ctx(KPM_A));
+      const now = after.statuses.find((s) => s.code === 'POLICY_SUBMITTED')!;
+      expect(now.isTerminal).toBe(true);
+      expect(now.isLateStage).toBe(false);
+    });
+
+    it('writes nothing when the flag is already what was asked for', async () => {
+      const [sales] = await service.list(ctx(KPM_A));
+      const submitted = sales.statuses.find((s) => s.code === 'POLICY_SUBMITTED')!;
+
+      const same = await service.setLateStage(ctx(KPM_A), submitted.id, true);
+
+      expect(same.version).toBe(submitted.version);
+    });
+
+    it('cannot flag another office’s stage — 404, never 403', async () => {
+      await provisioning.seedLeadPipelines(KPM_B, COMPANY);
+      const [salesB] = await service.list(ctx(KPM_B));
+      const theirs = salesB.statuses.find((s) => s.code === 'FOLLOW_UP')!;
+
+      await expect(service.setLateStage(ctx(KPM_A), theirs.id, true))
+        .rejects.toThrow(/Lead status/);
+    });
+
+    it('gives an office’s own new stage `false`, never a guess from its rank', async () => {
+      // Deriving it from position is exactly what ADR-0043 refused. We know nothing about
+      // a stage an office invented, so it counts nothing until somebody ticks the box.
+      const created = await service.create(ctx(KPM_A), {
+        pipeline: 'recruitment', code: 'CONTRACT_SENT', label: 'Contract sent',
+      });
+
+      expect(created.isLateStage).toBe(false);
+    });
+  });
+
   describe('changing a ladder', () => {
     beforeEach(() => provisioning.seedLeadPipelines(KPM_A, COMPANY));
 
@@ -163,6 +269,24 @@ describe('the office lead pipelines (P4-T3)', () => {
 
       await expect(provisioning.seedLeadPipelines(KPM_A, COMPANY))
         .rejects.toThrow(/sales pipeline 0 terminal stages/);
+    });
+
+    it('refuses a template whose stage both closes and is expected to close', async () => {
+      // Copying it would make *Expected to close* double-count against *Last month*, and
+      // the bad number would surface on the Owner's Overview weeks later (ADR-0043).
+      await templates.create({
+        companyId: COMPANY, kind: 'lead_pipeline', version: 1, status: 'published',
+        publishedAt: NOW,
+        payload: {
+          statuses: [
+            { pipeline: 'sales', code: 'ONE', label: 'One', rank: 1, isTerminal: true, isLateStage: true },
+            { pipeline: 'recruitment', code: 'TWO', label: 'Two', rank: 1, isTerminal: true, isLateStage: false },
+          ],
+        },
+      } as never);
+
+      await expect(provisioning.seedLeadPipelines(KPM_A, COMPANY))
+        .rejects.toThrow(/ONE.*both/s);
     });
 
     it('keeps two offices’ ladders apart', async () => {

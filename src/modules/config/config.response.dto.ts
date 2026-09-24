@@ -133,6 +133,15 @@ export class LeadStatusDto implements LeadStatusView {
   })
   isTerminal!: boolean;
 
+  @ApiProperty({
+    type: Boolean,
+    description:
+      'A stage the lead is expected to convert from this period, and what the KPM '
+      + 'Overview counts as *Expected to close*. Unlike the terminal flag it is not '
+      + 'exclusive, and it is never true on the stage that closes the pipeline.',
+  })
+  isLateStage!: boolean;
+
   @ApiProperty({ type: Number })
   version!: number;
 

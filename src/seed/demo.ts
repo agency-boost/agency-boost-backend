@@ -393,7 +393,8 @@ async function main(): Promise<void> {
     })));
     await LeadStatuses.insertMany(SEED_LEAD_STATUSES.map((l) => ({
       kpmId, pipeline: l.pipeline, code: l.code, label: l.label, rank: l.rank,
-      isTerminal: l.isTerminal, version: 1, status: 'active', archivedAt: null, deletedAt: null,
+      isTerminal: l.isTerminal, isLateStage: l.isLateStage,
+      version: 1, status: 'active', archivedAt: null, deletedAt: null,
     })));
     await RatioDefinitions.insertMany(SEED_RATIO_DEFINITIONS.map((r) => ({
       kpmId, code: r.code, label: r.label,

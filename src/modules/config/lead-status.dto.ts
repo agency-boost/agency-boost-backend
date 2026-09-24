@@ -1,7 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
-  ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsMongoId, IsString, Matches, MaxLength, MinLength,
+  ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsMongoId, IsString, Matches, MaxLength,
+  MinLength,
 } from 'class-validator';
 import { LEAD_PIPELINES, type LeadPipeline } from './lead-status.schema';
 
@@ -41,6 +42,21 @@ export class RenameLeadStatusDto {
   @MaxLength(leadStatusLabel.max)
   @trim
   label!: string;
+}
+
+/**
+ * Whether this stage counts toward *Expected to close* (ADR-0043).
+ *
+ * A body rather than two routes, because the Owner is toggling a checkbox and an untick
+ * is as much a decision as a tick.
+ */
+export class SetLateStageDto {
+  @ApiProperty({
+    type: Boolean,
+    description: 'True to count leads on this stage as expected to convert this period.',
+  })
+  @IsBoolean()
+  isLateStage!: boolean;
 }
 
 export class ReorderLeadStatusesDto {

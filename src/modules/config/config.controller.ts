@@ -14,7 +14,7 @@ import { TenantConfigService } from './tenant-config.service';
 import { UpdateBranchInfoDto } from '@/modules/tenants/tenant.dto';
 import { CreateRatioDto, UpdateRatioDto } from './ratio.dto';
 import {
-  CreateLeadStatusDto, RenameLeadStatusDto, ReorderLeadStatusesDto,
+  CreateLeadStatusDto, RenameLeadStatusDto, ReorderLeadStatusesDto, SetLateStageDto,
 } from './lead-status.dto';
 import {
   CreateActivityCategoryDto,
@@ -258,6 +258,23 @@ export class TenantConfigController {
   })
   async setTerminal(@Ctx() ctx: RequestContext, @Param('id') id: string) {
     return this.leadStatuses.setTerminal(ctx, id);
+  }
+
+  @Patch('lead-statuses/:id/late-stage')
+  @RequirePermission('tenant_config:write')
+  @ApiOperation({
+    summary: 'Flag a stage as one a lead is expected to convert from',
+    description:
+      'What the KPM Overview counts as **Expected to close** (ADR-0043). Not exclusive: '
+      + 'flag as many stages as the ladder warrants. Refused on the stage that closes the '
+      + 'pipeline — a lead sitting there has already closed.',
+  })
+  async setLateStage(
+    @Ctx() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() dto: SetLateStageDto,
+  ) {
+    return this.leadStatuses.setLateStage(ctx, id, dto.isLateStage);
   }
 
   @Delete('lead-statuses/:id')

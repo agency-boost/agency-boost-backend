@@ -156,23 +156,38 @@ export interface SeedLeadStatus {
   readonly label: string;
   readonly rank: number;
   readonly isTerminal: boolean;
+  /**
+   * Far enough along to be expected to convert this period (ADR-0043). Feeds
+   * `RECRUITMENT_EXPECTED_TO_CLOSE`. Never true where `isTerminal` is.
+   */
+  readonly isLateStage: boolean;
 }
 
-/** `Overall.html:5366-5367`, five and seven. */
+/**
+ * `Overall.html:5366-5367`, five and seven.
+ *
+ * **`isLateStage` marks the stages after which the work is the counterparty's** (ADR-0043):
+ * underwriting has the sales case, and a recruit with an agent code is waiting on AAJI and
+ * on a field-work date. That is what *"expected to convert this month"* means, and it is
+ * what the prototype's *Offer / Onboarding* stub was reaching for with stage names that
+ * exist in neither ladder (`metrics-and-definitions.md:302`).
+ *
+ * The office owns these flags from provisioning onward, like every other field here.
+ */
 export const SEED_LEAD_STATUSES: readonly SeedLeadStatus[] = [
-  { pipeline: 'sales', code: 'NOT_YET_APPROACHED', label: 'Not yet approached', rank: 1, isTerminal: false },
-  { pipeline: 'sales', code: 'FOLLOW_UP', label: 'Follow-up', rank: 2, isTerminal: false },
-  { pipeline: 'sales', code: 'POLICY_SUBMITTED', label: 'Policy submitted', rank: 3, isTerminal: false },
-  { pipeline: 'sales', code: 'APPROVED_NOT_PAID', label: 'Approved, not paid', rank: 4, isTerminal: false },
-  { pipeline: 'sales', code: 'PAID_AND_ISSUED', label: 'Paid and issued', rank: 5, isTerminal: true },
+  { pipeline: 'sales', code: 'NOT_YET_APPROACHED', label: 'Not yet approached', rank: 1, isTerminal: false, isLateStage: false },
+  { pipeline: 'sales', code: 'FOLLOW_UP', label: 'Follow-up', rank: 2, isTerminal: false, isLateStage: false },
+  { pipeline: 'sales', code: 'POLICY_SUBMITTED', label: 'Policy submitted', rank: 3, isTerminal: false, isLateStage: true },
+  { pipeline: 'sales', code: 'APPROVED_NOT_PAID', label: 'Approved, not paid', rank: 4, isTerminal: false, isLateStage: true },
+  { pipeline: 'sales', code: 'PAID_AND_ISSUED', label: 'Paid and issued', rank: 5, isTerminal: true, isLateStage: false },
 
-  { pipeline: 'recruitment', code: 'NOT_APPROACHED', label: 'Not approached', rank: 1, isTerminal: false },
-  { pipeline: 'recruitment', code: 'MEETING_SCHEDULED', label: 'Meeting scheduled', rank: 2, isTerminal: false },
-  { pipeline: 'recruitment', code: 'RECRUITMENT_PRESENTATION', label: 'Recruitment presentation', rank: 3, isTerminal: false },
-  { pipeline: 'recruitment', code: 'AGENT_CODE_CREATED', label: 'Agent code created', rank: 4, isTerminal: false },
-  { pipeline: 'recruitment', code: 'AAJI_LICENSED', label: 'AAJI licensed', rank: 5, isTerminal: false },
-  { pipeline: 'recruitment', code: 'JOINT_FIELD_WORK_PLANNED', label: 'Joint field work planned', rank: 6, isTerminal: false },
-  { pipeline: 'recruitment', code: 'NEW_ACTIVE_AGENT', label: 'New active agent', rank: 7, isTerminal: true },
+  { pipeline: 'recruitment', code: 'NOT_APPROACHED', label: 'Not approached', rank: 1, isTerminal: false, isLateStage: false },
+  { pipeline: 'recruitment', code: 'MEETING_SCHEDULED', label: 'Meeting scheduled', rank: 2, isTerminal: false, isLateStage: false },
+  { pipeline: 'recruitment', code: 'RECRUITMENT_PRESENTATION', label: 'Recruitment presentation', rank: 3, isTerminal: false, isLateStage: false },
+  { pipeline: 'recruitment', code: 'AGENT_CODE_CREATED', label: 'Agent code created', rank: 4, isTerminal: false, isLateStage: true },
+  { pipeline: 'recruitment', code: 'AAJI_LICENSED', label: 'AAJI licensed', rank: 5, isTerminal: false, isLateStage: true },
+  { pipeline: 'recruitment', code: 'JOINT_FIELD_WORK_PLANNED', label: 'Joint field work planned', rank: 6, isTerminal: false, isLateStage: true },
+  { pipeline: 'recruitment', code: 'NEW_ACTIVE_AGENT', label: 'New active agent', rank: 7, isTerminal: true, isLateStage: false },
 ];
 
 /**
