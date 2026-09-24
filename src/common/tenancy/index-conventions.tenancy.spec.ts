@@ -50,6 +50,7 @@ import {
 import {
   ActivityLogCorrectionSchema, ActivityLogEntrySchema, ActivityLogSchema,
 } from '@/modules/activity/activity-log.schema';
+import { LeadContactSchema, LeadSchema, LeadTransitionSchema } from '@/modules/leads/lead.schema';
 import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
 } from '@/modules/campaigns/campaign.schema';
@@ -88,6 +89,7 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['eventTypes', EventTypeSchema],
   ['events', EventSchema],
   ['activityLogs', ActivityLogSchema],
+  ['leads', LeadSchema],
   ['campaigns', CampaignSchema],
   ['capabilityCatalogs', CapabilityCatalogSchema],
 ];
@@ -211,6 +213,16 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'one code\'s count inside an activity log: no collection and no _id of its own',
   ],
   [
+    'leadContact (subdocument)',
+    LeadContactSchema,
+    'a phone and an email inside a lead: no collection and no _id of its own',
+  ],
+  [
+    'leadTransition (subdocument)',
+    LeadTransitionSchema,
+    'one move along a ladder inside a lead: no collection and no _id of its own',
+  ],
+  [
     'activityLogCorrection (subdocument)',
     ActivityLogCorrectionSchema,
     'a prior state of an activity log, held inside the day it belongs to',
@@ -287,6 +299,9 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [EventSchema, 'EventSchema'],
   [EventAudienceSchema, 'EventAudienceSchema'],
   [ActivityLogSchema, 'ActivityLogSchema'],
+  [LeadSchema, 'LeadSchema'],
+  [LeadContactSchema, 'LeadContactSchema'],
+  [LeadTransitionSchema, 'LeadTransitionSchema'],
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
   [ActivityLogCorrectionSchema, 'ActivityLogCorrectionSchema'],
   [CampaignSchema, 'CampaignSchema'],

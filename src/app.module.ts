@@ -13,6 +13,9 @@ import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { HealthController } from '@/modules/health/health.controller';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditReadService } from '@/modules/audit/audit-read.service';
+import { LeadRepository } from '@/modules/leads/lead.repository';
+import { LeadService } from '@/modules/leads/lead.service';
+import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
 import { AuditService } from '@/modules/audit/audit.service';
 import {
   Notification, NotificationPreferences, NotificationPreferencesSchema, NotificationSchema,
@@ -187,6 +190,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: KpmRequest.name, schema: KpmRequestSchema },
       { name: CompanyOrgLevel.name, schema: CompanyOrgLevelSchema },
       { name: Membership.name, schema: MembershipSchema },
+      { name: Lead.name, schema: LeadSchema },
       { name: MembershipHistory.name, schema: MembershipHistorySchema },
       { name: JoinRequest.name, schema: JoinRequestSchema },
       { name: Group.name, schema: GroupSchema },
@@ -316,6 +320,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     { provide: CampaignKindsApplier, useExisting: ProvisioningService },
     AuditService,
     AuditReadService,
+    LeadRepository,
+    LeadService,
     NotificationService,
     PasswordService,
     RateLimiter,

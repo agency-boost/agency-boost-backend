@@ -334,6 +334,64 @@ describe('organisation', () => {
     });
   });
 
+  describe('the two reads that deliberately cross tenants (invariant §1)', () => {
+    /*
+     * Invariant §1 asks that a Super Admin's cross-tenant read be an **explicitly named method**
+     * rather than an absent filter. Both of these are that, and both were reachable only through
+     * their callers until now — so the methods themselves went untested and the repository sat at
+     * zero branch coverage, which `modules/org`'s own floor eventually said out loud.
+     */
+    it('finds a person\u2019s live membership in whichever office holds it', async () => {
+      const userId = await person();
+      await hierarchy.create(ctx(KPM_B), { userId, role: 'agent', status: 'active' });
+
+      const found = await members.liveForUserAnywhere(userId);
+
+      expect(found).not.toBeNull();
+      expect(String(found!.kpmId)).toBe(KPM_B);
+    });
+
+    it('returns null for somebody in no office at all', async () => {
+      expect(await members.liveForUserAnywhere(await person())).toBeNull();
+    });
+
+    describe('naming a membership for the audit console', () => {
+      it('answers across offices, with the agent code when there is one', async () => {
+        const one = await hierarchy.create(ctx(KPM_A), {
+          userId: await person(), role: 'agent', status: 'active',
+        });
+        const two = await hierarchy.create(ctx(KPM_B), {
+          userId: await person(), role: 'agent', status: 'active',
+        });
+
+        const rows = await members.byIdsAnywhereForAudit([String(one.id), String(two.id)]);
+
+        expect(rows).toHaveLength(2);
+        expect(rows.map((r) => r._id).sort())
+          .toEqual([String(one.id), String(two.id)].sort());
+        for (const row of rows) expect(typeof row.userId).toBe('string');
+      });
+
+      it('reads no membership as no query, not as a query for everything', async () => {
+        // `$in: []` matches nothing, so the answer would be right either way — but a read that
+        // costs nothing should cost nothing.
+        expect(await members.byIdsAnywhereForAudit([])).toEqual([]);
+      });
+
+      it('includes a removed membership, which is exactly when somebody reads the log', async () => {
+        const removed = await hierarchy.create(ctx(KPM_A), {
+          userId: await person(), role: 'agent', status: 'active',
+        });
+        await mongoose.model(Membership.name).updateOne(
+          { _id: removed.id },
+          { $set: { status: 'removed', deletedAt: new Date() } },
+        ).exec();
+
+        expect(await members.byIdsAnywhereForAudit([String(removed.id)])).toHaveLength(1);
+      });
+    });
+  });
+
   describe('the directory (P3-T1 AC-3)', () => {
     it('never returns another office\'s members', async () => {
       await join(KPM_A, 'ab');

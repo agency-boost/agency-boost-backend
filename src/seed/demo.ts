@@ -21,6 +21,7 @@ import { PasswordService } from '@/modules/auth/password.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
+import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
 import {
   KpmProductConfig, KpmProductConfigSchema,
 } from '@/modules/products/kpm-product-config.schema';
@@ -124,6 +125,7 @@ async function main(): Promise<void> {
   const TrainingModules = mongoose.model(TrainingModule.name, TrainingModuleSchema);
   const ActivationTemplates = mongoose.model(ActivationTemplate.name, ActivationTemplateSchema);
   const Products = mongoose.model(Product.name, ProductSchema);
+  const Leads = mongoose.model(Lead.name, LeadSchema);
   const KpmProductConfigs = mongoose.model(KpmProductConfig.name, KpmProductConfigSchema);
   const EventTypes = mongoose.model(EventType.name, EventTypeSchema);
   const Events = mongoose.model(Event.name, EventSchema);
@@ -1134,6 +1136,88 @@ async function main(): Promise<void> {
    */
   for (const [membershipId, code] of [[sari.id, 'SARI01'], [ab.id, 'AGUS01']] as const) {
     await Memberships.updateOne({ _id: membershipId }, { $set: { leaderCode: code } });
+  }
+
+  /*
+   * ------------------------------------------------------------------ Leads (P7-T1)
+   *
+   * **No status on any of them, and that is the record rather than an omission.** Setting a lead's
+   * first status is a *move*, and every move is P7-T3's (ADR-0045) — so a seeded status here would
+   * be a row the product cannot yet have written. They gain one when that task lands.
+   *
+   * The spread is the **lawful basis**, because that is the rule P7-T1 exists for: one with a name
+   * and nothing else, one on each of the three grounds, and one reachable only by email.
+   */
+  const leadSeeds: ReadonlyArray<{
+    owner: string;
+    name: string;
+    type: 'sales' | 'recruitment' | null;
+    phone?: string;
+    email?: string;
+    lawfulBasis?: 'consent' | 'contract' | 'legitimate_interest';
+    remarks?: string;
+    nextActionDate?: string;
+    nextActionNote?: string;
+    thisMonth?: boolean;
+    source?: string;
+  }> = [
+    // A name from a Thursday BOP and nothing more — legal to hold, and the reason the gate sits on
+    // the contact fields rather than on the record.
+    { owner: rina.id, name: 'Pak Bambang', type: null, remarks: 'Met at the Thursday BOP.' },
+    {
+      owner: rina.id, name: 'Ibu Dewi Lestari', type: 'sales',
+      phone: '0812-1100-2200', lawfulBasis: 'consent',
+      remarks: 'Hot button: the eldest starts university in two years.',
+      nextActionDate: '2026-10-02', nextActionNote: 'Coffee at Grand Indonesia, 10:00.',
+      thisMonth: true, source: 'Referral — Ibu Sari',
+    },
+    {
+      owner: rina.id, name: 'Pak Hendro Gunawan', type: 'sales',
+      email: 'hendro.g@example.com', lawfulBasis: 'contract',
+      remarks: 'Application already in with another insurer; comparing.',
+      nextActionDate: '2026-09-18', nextActionNote: 'Chase the illustration.',
+      source: 'Canvassing — Senayan',
+    },
+    {
+      owner: budi.id, name: 'Sdri. Maya Puspita', type: 'recruitment',
+      phone: '0813-4455-6677', lawfulBasis: 'legitimate_interest',
+      remarks: 'Referred by her cousin, who is already an agent. Not yet approached.',
+      source: 'Referral — agent network',
+    },
+    {
+      owner: budi.id, name: 'Pak Andi Kurniawan', type: 'recruitment',
+      phone: '0857-7788-9900', lawfulBasis: 'consent',
+      remarks: 'Sat through the NBO. Asked about the licence timeline.',
+      nextActionDate: '2026-10-06', nextActionNote: 'Send the AAJI schedule.',
+      thisMonth: true, source: 'BOP — 12 September',
+    },
+  ];
+  for (const seed of leadSeeds) {
+    if (await Leads.findOne({ kpmId: id0417, name: seed.name }).exec()) continue;
+    await Leads.create({
+      kpmId: id0417,
+      ownerMembershipId: seed.owner,
+      name: seed.name,
+      type: seed.type,
+      contact: { phone: seed.phone ?? null, email: seed.email ?? null },
+      lawfulBasis: seed.lawfulBasis ?? null,
+      consentAt: seed.lawfulBasis ? daysAgo(20) : null,
+      statusCode: null,
+      statusId: null,
+      thisMonth: seed.thisMonth ?? false,
+      remarks: seed.remarks ?? null,
+      nextActionDate: seed.nextActionDate ?? null,
+      nextActionNote: seed.nextActionNote ?? null,
+      outcome: null,
+      outcomeAt: null,
+      dateRegistered: daysAgo(20),
+      source: seed.source ?? null,
+      version: 1,
+      transitions: [],
+      deletedAt: null,
+      createdBy: seed.owner,
+      updatedBy: seed.owner,
+    });
   }
 
   // ------------------------------------------------- KPM 0555, for cross-tenant checks

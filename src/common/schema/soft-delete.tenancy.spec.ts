@@ -49,6 +49,7 @@ import {
 import {
   ActivityLogCorrectionSchema, ActivityLogEntrySchema, ActivityLogSchema,
 } from '@/modules/activity/activity-log.schema';
+import { LeadContactSchema, LeadSchema, LeadTransitionSchema } from '@/modules/leads/lead.schema';
 import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
 } from '@/modules/campaigns/campaign.schema';
@@ -94,6 +95,7 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['eventTypes', EventTypeSchema],
   ['events', EventSchema],
   ['activityLogs', ActivityLogSchema],
+  ['leads', LeadSchema],
   ['campaigns', CampaignSchema],
   ['capabilityCatalogs', CapabilityCatalogSchema],
   // Company-partitioned carrier rules (ADR-0035), soft-deleted like every other row.
@@ -167,6 +169,18 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     'one code\'s count inside an activity log: it goes with the day that holds it',
   ],
   [
+    'leadContact (subdocument)',
+    LeadContactSchema,
+    'a phone and an email inside a lead: they go with the lead that holds them, and clearing '
+      + 'them is a write rather than a delete',
+  ],
+  [
+    'leadTransition (subdocument)',
+    LeadTransitionSchema,
+    'one move along a ladder. **Append-only and never removed** — it is what makes a jump '
+      + 'legible and a leader\'s edit attributable (ADR-0044, ADR-0045)',
+  ],
+  [
     'activityLogCorrection (subdocument)',
     ActivityLogCorrectionSchema,
     'a prior state of an activity log. **Append-only and never removed** — the whole point is '
@@ -221,6 +235,9 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [EventSchema, 'EventSchema'],
   [EventAudienceSchema, 'EventAudienceSchema'],
   [ActivityLogSchema, 'ActivityLogSchema'],
+  [LeadSchema, 'LeadSchema'],
+  [LeadContactSchema, 'LeadContactSchema'],
+  [LeadTransitionSchema, 'LeadTransitionSchema'],
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
   [ActivityLogCorrectionSchema, 'ActivityLogCorrectionSchema'],
   [CampaignSchema, 'CampaignSchema'],

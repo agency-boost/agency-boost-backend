@@ -34,6 +34,23 @@ export const ErrorCode = {
    */
   ACTIVITY_TYPE_NOT_APPLICABLE: 'ACTIVITY_TYPE_NOT_APPLICABLE',
 
+  /*
+   * Leads (P7). The catalog has carried four `LEAD_*` codes since Phase 0, written ahead of the
+   * module. They land here **one at a time, with the path that raises them** — the convention the
+   * ORG_* note below states, and the one the ACTIVITY_* family above learned the hard way.
+   *
+   * `LEAD_STATUS_NOT_FINAL`, `LEAD_STATUS_WRONG_PIPELINE` and `LEAD_ALREADY_CLOSED` belong to
+   * P7-T3, which is the task that can throw them.
+   */
+  /**
+   * Contact details were to be stored with no recorded ground for holding them (UU 27/2022).
+   *
+   * **On the contact fields, not on the lead.** A name jotted down from a Thursday BOP is not
+   * personal data the regulation governs; a phone number is. A gate on creation would make the
+   * first thing an agent meets a compliance form, and the predictable outcome is a notebook.
+   */
+  LEAD_CONSENT_REQUIRED: 'LEAD_CONSENT_REQUIRED',
+
   // Tenant. Note there is deliberately NO cross-tenant code — see NOT_FOUND.
   TENANT_SUSPENDED: 'TENANT_SUSPENDED',
   TENANT_ARCHIVED: 'TENANT_ARCHIVED',

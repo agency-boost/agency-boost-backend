@@ -51,6 +51,9 @@ import { EventRepository, EventTypeRepository } from '@/modules/events/event.rep
 import { EventService } from '@/modules/events/event.service';
 import { ActivityLog, ActivityLogSchema } from '@/modules/activity/activity-log.schema';
 import { ActivityLogRepository } from '@/modules/activity/activity-log.repository';
+import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
+import { LeadRepository } from '@/modules/leads/lead.repository';
+import { LeadService } from '@/modules/leads/lead.service';
 import { ActivityService } from '@/modules/activity/activity.service';
 import {
   Campaign, CampaignSchema, QualificationRule, QualificationRuleSchema,
@@ -193,6 +196,12 @@ export function configModule(now: Date) {
     clock,
     audit,
   );
+  // P7-T1: one person an agent is working. The first record about somebody who is not a user.
+  const leadRecords = new LeadService(
+    new LeadRepository(model(Lead.name, LeadSchema) as never),
+    audit,
+    clock,
+  );
   // P5-T7: the office's campaigns, and the carrier rules it is measured against.
   const campaigns = new CampaignService(
     new CampaignRepository(model(Campaign.name, CampaignSchema) as never),
@@ -266,6 +275,7 @@ export function configModule(now: Date) {
     activity, ratios, leads, config, provisioning, templates, templateService, audit, clock, changes,
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
     products, assets, storage, kpmProducts, events, campaigns, capability, activityLogs,
+    leadRecords,
   };
 }
 

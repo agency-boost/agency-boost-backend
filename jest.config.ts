@@ -139,6 +139,16 @@ const config: Config = {
      * pinned at 100).
      */
     './src/modules/activity/': { lines: 95, branches: 80, functions: 95, statements: 95 },
+    /*
+     * P7-T1. The record about somebody who is not a user of this product, so the rule that has to
+     * be covered is the one about holding their details at all: the ground before the phone
+     * number, in both directions — adding details with no ground, and withdrawing the ground from
+     * a lead that still holds them.
+     *
+     * What is left uncovered is the `partial` branch of a required field, which the create path
+     * always takes one way and the patch path always the other. Raised as the module grows.
+     */
+    './src/modules/leads/': { lines: 95, branches: 88, functions: 95, statements: 95 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],
