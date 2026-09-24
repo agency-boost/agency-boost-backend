@@ -17,7 +17,7 @@ import { CapabilityService, type CapabilityPart } from './capability.service';
  */
 @ApiTags('tenant configuration')
 @ApiBearerAuth()
-@Controller('kpm/settings/skills-and-stages')
+@Controller('kpm/settings/capability-mapping')
 export class CapabilityController {
   constructor(private readonly capability: CapabilityService) {}
 

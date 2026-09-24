@@ -12669,7 +12669,7 @@
         "x-required-permission": "metric_registry:read"
       }
     },
-    "/api/v1/kpm/settings/skills-and-stages": {
+    "/api/v1/kpm/settings/capability-mapping": {
       "get": {
         "description": "Four stages, their milestones and the four skill grids, each item carrying a **code**. An office provisioned before this existed reads the defaults, unsaved, until its first edit.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "CapabilityController_read_v1",
@@ -12728,7 +12728,7 @@
         "x-required-permission": "tenant_config:read"
       }
     },
-    "/api/v1/kpm/settings/skills-and-stages/label": {
+    "/api/v1/kpm/settings/capability-mapping/label": {
       "patch": {
         "description": "The **code never moves**, so no tick is re-pointed by a correction to the wording.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "CapabilityController_rename_v1",
@@ -12807,7 +12807,7 @@
         "x-required-permission": "tenant_config:write"
       }
     },
-    "/api/v1/kpm/settings/skills-and-stages/status": {
+    "/api/v1/kpm/settings/capability-mapping/status": {
       "patch": {
         "description": "There is no delete. An archived item stays readable on assessments that already reference it and takes no new ones. Archiving a milestone a stage requires is refused, because that stage would become unreachable.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "CapabilityController_setStatus_v1",
@@ -12886,7 +12886,7 @@
         "x-required-permission": "tenant_config:write"
       }
     },
-    "/api/v1/kpm/settings/skills-and-stages/items": {
+    "/api/v1/kpm/settings/capability-mapping/items": {
       "post": {
         "description": "The code is chosen once and refused when it is already used **anywhere in the catalog, archived rows included** — a tick names a code, so a reused one would re-point every assessment that held it.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "CapabilityController_add_v1",
@@ -12965,7 +12965,7 @@
         "x-required-permission": "tenant_config:write"
       }
     },
-    "/api/v1/kpm/settings/skills-and-stages/order": {
+    "/api/v1/kpm/settings/capability-mapping/order": {
       "patch": {
         "description": "Position on screen only. It **never touches `stageOrder`**, so tidying the ladder cannot move anybody’s stage — which is exactly what the prototype’s array index does.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "CapabilityController_reorder_v1",

@@ -39,7 +39,7 @@ const ROUTES: Record<string, string> = {
 describe('skills and stages over HTTP (P5-T8)', () => {
   let app: INestApplication;
   let wired: ReturnType<typeof configModule>;
-  const url = '/kpm/settings/skills-and-stages';
+  const url = '/kpm/settings/capability-mapping';
 
   beforeAll(async () => {
     await startMongo();
