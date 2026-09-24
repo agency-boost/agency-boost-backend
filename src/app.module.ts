@@ -12,6 +12,7 @@ import { PermissionsGuard } from '@/common/auth/permissions.guard';
 
 import { HealthController } from '@/modules/health/health.controller';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
+import { AuditReadService } from '@/modules/audit/audit-read.service';
 import { AuditService } from '@/modules/audit/audit.service';
 import {
   Notification, NotificationPreferences, NotificationPreferencesSchema, NotificationSchema,
@@ -314,6 +315,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ProvisioningService,
     { provide: CampaignKindsApplier, useExisting: ProvisioningService },
     AuditService,
+    AuditReadService,
     NotificationService,
     PasswordService,
     RateLimiter,

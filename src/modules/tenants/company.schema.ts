@@ -26,6 +26,22 @@ export class Company {
   @Prop({ type: String, enum: ['active', 'suspended'], default: 'active' })
   status!: 'active' | 'suspended';
 
+  /**
+   * Whether this company started from the platform's own presets, or from nothing.
+   *
+   * **It is recorded rather than inferred, and it is read long after creation.** The eight
+   * Company template kinds are not written at creation — `template.service.read()` hands back
+   * `STARTING_PAYLOAD` for a kind nobody has authored yet, so a blank company would otherwise
+   * show twelve activity types the moment a Super Admin opened the tab and have no way to say
+   * it did not want them.
+   *
+   * False also means provisioning skipped the product catalog and the carrier's qualification
+   * rules. It never skips the **role ladder**: `memberships.orgLevelId` resolves against it on
+   * every join, so a company without one is an office nobody can join (ADR-0012 §3).
+   */
+  @Prop({ type: Boolean, required: true, default: true })
+  usesPlatformDefaults!: boolean;
+
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;
 }

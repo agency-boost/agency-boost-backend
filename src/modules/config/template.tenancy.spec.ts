@@ -91,6 +91,45 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
       expect(view.status).toBe('draft');
       expect(view.payload).toEqual({ categories: [], types: [] });
     });
+
+    it('hands a blank company nothing, on every kind (client feedback, 2026-09-24)', async () => {
+      /*
+       * The starting point above is right almost every time and wrong for the one case a
+       * Super Admin authoring an insurer's presets from scratch is in: the eight kinds are
+       * computed here rather than written at creation, so declining the defaults has to
+       * reach *this* method or the twelve activity types turn up anyway.
+       */
+      const blank = await companies.create({
+        name: 'Blank Co', slug: 'blank-co', defaultCurrency: 'IDR',
+        defaultLocale: 'id-ID', defaultTimezone: 'Asia/Jakarta', status: 'active',
+        usesPlatformDefaults: false,
+      } as never);
+      const blankId = String((blank as unknown as { _id: unknown })._id);
+
+      for (const kind of [
+        'activity_taxonomy', 'ratio_set', 'lead_pipeline', 'training_taxonomy',
+        'activation_checklist', 'capability_ladder', 'event_types', 'campaign_kinds',
+      ] as const) {
+        expect(await service.read(blankId, kind)).toMatchObject({ version: 0, payload: {} });
+      }
+    });
+
+    it('still hands a draft to a blank company once it has authored one', async () => {
+      // Blank is where it starts, not a permanent state.
+      const blank = await companies.create({
+        name: 'Blank Two', slug: 'blank-two', defaultCurrency: 'IDR',
+        defaultLocale: 'id-ID', defaultTimezone: 'Asia/Jakarta', status: 'active',
+        usesPlatformDefaults: false,
+      } as never);
+      const blankId = String((blank as unknown as { _id: unknown })._id);
+
+      await service.saveDraft(ctx(), blankId, 'activity_taxonomy', {
+        categories: [{ code: 'OWN', label: 'Our own', displayOrder: 1 }], types: [],
+      });
+
+      const view = await service.read(blankId, 'activity_taxonomy');
+      expect((view.payload.categories as { code: string }[])[0].code).toBe('OWN');
+    });
   });
 
   describe('publishing', () => {

@@ -1336,6 +1336,202 @@
         "x-required-permission": "company:crud"
       }
     },
+    "/api/v1/admin/companies/{companyId}": {
+      "patch": {
+        "description": "Both are labels: every office points at its company by id and nothing stores the slug, so changing one moves no reference. A slug already in use is refused with COMPANY_SLUG_TAKEN, naming the company that holds it. Audited.\n\n**Requires `company:crud`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AdminController_updateCompany_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCompanyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `company:crud`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rename a company, or change its slug",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "company:crud"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/status": {
+      "patch": {
+        "description": "A suspended company disappears from the list somebody registering chooses from, so no new person and no new office attaches to it. It does **not** sign anybody out or suspend its offices — that is each office's own lifecycle. Nothing is deleted.\n\n**Requires `company:crud`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AdminController_setCompanyStatus_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCompanyStatusDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `company:crud`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Suspend a company, or bring it back",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "company:crud"
+      }
+    },
     "/api/v1/admin/org-levels": {
       "get": {
         "description": "Every rung of every company’s ladder, junior first — archived ones included, because a screen that hid them would show a ladder that does not explain the people standing on it. Narrow with ?companyId.\n\n**Requires `org_level:crud`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -13044,11 +13240,49 @@
             "maxLength": 64,
             "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
             "description": "Derived from the name by the console and editable there. Unique among companies that have not been deleted; a clash is refused with COMPANY_SLUG_TAKEN."
+          },
+          "usesPlatformDefaults": {
+            "type": "boolean",
+            "default": true,
+            "description": "True gives the company the platform's activity taxonomy, ratios, lead ladders, training tree, activation checklist, capability ladder, event types, carrier rules and product catalog to edit. False leaves every one of them empty, for a company whose presets are being authored from scratch. The role ladder is seeded either way: an office whose company has none is one nobody can join."
           }
         },
         "required": [
           "name",
           "slug"
+        ]
+      },
+      "UpdateCompanyDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Prudential Indonesia",
+            "minLength": 2,
+            "maxLength": 120
+          },
+          "slug": {
+            "type": "string",
+            "example": "prudential-id",
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Changeable: nothing stores it. Every office points at the company by id, and the slug is a label. A clash is refused with COMPANY_SLUG_TAKEN."
+          }
+        }
+      },
+      "SetCompanyStatusDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "suspended"
+            ]
+          }
+        },
+        "required": [
+          "status"
         ]
       },
       "CreateOrgLevelDto": {
@@ -18232,6 +18466,10 @@
               "active",
               "suspended"
             ]
+          },
+          "usesPlatformDefaults": {
+            "type": "boolean",
+            "description": "False means this company was created blank: no product catalog, no carrier rules, and every Company template tab starts empty rather than from the platform's presets."
           }
         },
         "required": [
@@ -18241,7 +18479,8 @@
           "defaultCurrency",
           "defaultLocale",
           "defaultTimezone",
-          "status"
+          "status",
+          "usesPlatformDefaults"
         ]
       },
       "RosterTemplateDto": {
@@ -18384,11 +18623,6 @@
           "_id": {
             "type": "string"
           },
-          "kpmId": {
-            "type": "string",
-            "nullable": true,
-            "description": "Null for a platform-level action, which belongs to no office."
-          },
           "action": {
             "type": "string",
             "example": "kpm.provisioned"
@@ -18401,17 +18635,30 @@
             "type": "string",
             "nullable": true
           },
+          "targetLabel": {
+            "type": "string",
+            "nullable": true,
+            "example": "0417 · Surabaya Branch",
+            "description": "What the target is called — a person's name, an office's code and branch, a company's name. **Null when the id resolves to nothing, or to a collection nothing names yet**, and the reader is shown the id instead: a blank cell would read as nothing happened."
+          },
           "actorUserId": {
             "type": "string",
+            "nullable": true,
             "description": "The real actor. Under impersonation this stays the Super Admin."
+          },
+          "actorName": {
+            "type": "string",
+            "nullable": true,
+            "description": "The real actor's name, or null if the account is gone."
           },
           "effectiveUserId": {
             "type": "string",
             "nullable": true,
             "description": "Who they were acting as, when this was a support session."
           },
-          "onBehalfOf": {
-            "type": "boolean"
+          "effectiveName": {
+            "type": "string",
+            "nullable": true
           },
           "before": {
             "type": "object",
@@ -18430,13 +18677,14 @@
         },
         "required": [
           "_id",
-          "kpmId",
           "action",
           "targetCollection",
           "targetId",
+          "targetLabel",
           "actorUserId",
+          "actorName",
           "effectiveUserId",
-          "onBehalfOf",
+          "effectiveName",
           "createdAt"
         ]
       },

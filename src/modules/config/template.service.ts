@@ -115,7 +115,7 @@ export class TemplateService {
    * thing a Super Admin does is retype twelve activity types from a PDF.
    */
   async read(companyId: string, kind: TemplateKind): Promise<TemplateView> {
-    await this.requireCompany(companyId);
+    const company = await this.requireCompany(companyId);
 
     const draft = await this.templates
       .findOne({ companyId, kind, status: 'draft', deletedAt: null }).exec();
@@ -132,7 +132,15 @@ export class TemplateService {
       kind,
       version: 0,
       status: 'draft',
-      payload: STARTING_PAYLOAD[kind]?.() ?? {},
+      /*
+       * **What a company that declined the defaults gets is nothing** (`usesPlatformDefaults`).
+       *
+       * The eight kinds are not written at creation — an unauthored one is computed here — so
+       * without this a Super Admin who asked for a blank company would open Activity types and
+       * find the platform's twelve, with no way to say they had not wanted them. Declining has
+       * to reach the screen that shows the default, not only the seeds that write one.
+       */
+      payload: company.usesPlatformDefaults ? (STARTING_PAYLOAD[kind]?.() ?? {}) : {},
       publishedAt: null,
       publishedVersion: null,
       officesBehind: standing.behind,
@@ -259,13 +267,14 @@ export class TemplateService {
       .exec();
   }
 
-  private async requireCompany(companyId: string): Promise<void> {
+  private async requireCompany(companyId: string): Promise<CompanyDocument> {
     const company = await this.companies
       .findOne({ _id: companyId, deletedAt: null }).exec()
       // A malformed id arrives from a URL; an uncaught CastError is a 500 and a log line
       // about an unhandled error, which is the wrong story about a typo.
       .catch(() => null);
     if (!company) throw new NotFoundException('Company');
+    return company;
   }
 
   /** Where this company's offices stand against the published version of one kind. */

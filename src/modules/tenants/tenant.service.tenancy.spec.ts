@@ -239,6 +239,136 @@ describe('TenantService', () => {
         service.createCompany(actor, { name: 'Nope', slug: 'nope' }),
       ).rejects.toMatchObject({ code: 'PERM_DENIED' });
     });
+
+    describe('starting from nothing (client feedback, 2026-09-24)', () => {
+      /*
+       * A Super Admin authoring an insurer's presets from scratch could not: the catalog and
+       * the carrier rules were written at creation, and the eight template kinds are computed
+       * on read, so the platform's twelve activity types turned up on the first tab with no
+       * way to decline them.
+       */
+      it('gives a blank company no catalog and no carrier rules', async () => {
+        const blank = await service.createCompany(ctx({ superAdmin: true }), {
+          name: 'Blank Co', slug: 'blank-co', usesPlatformDefaults: false,
+        });
+
+        expect(blank.usesPlatformDefaults).toBe(false);
+        const companyId = String(blank._id);
+        expect(await mongoose.model('Product').countDocuments({ companyId })).toBe(0);
+        expect(await mongoose.model('QualificationRule').countDocuments({ companyId })).toBe(0);
+      });
+
+      it('gives it a role ladder all the same', async () => {
+        // Not declinable: `memberships.orgLevelId` resolves against it on every join, so a
+        // company without one is an office nobody can join (ADR-0012 §3).
+        const blank = await service.createCompany(ctx({ superAdmin: true }), {
+          name: 'Blank Two', slug: 'blank-two', usesPlatformDefaults: false,
+        });
+
+        expect(await mongoose.model('CompanyOrgLevel')
+          .countDocuments({ companyId: String(blank._id) })).toBeGreaterThan(0);
+      });
+
+      it('takes the defaults when nothing is said, as every earlier caller did', async () => {
+        const normal = await service.createCompany(ctx({ superAdmin: true }), {
+          name: 'Ordinary', slug: 'ordinary',
+        });
+
+        expect(normal.usesPlatformDefaults).toBe(true);
+        expect(await mongoose.model('Product')
+          .countDocuments({ companyId: String(normal._id) })).toBeGreaterThan(0);
+      });
+
+      it('records the choice, because it decides what nine screens show', async () => {
+        const blank = await service.createCompany(ctx({ superAdmin: true }), {
+          name: 'Blank Three', slug: 'blank-three', usesPlatformDefaults: false,
+        });
+
+        const entry = await mongoose.model(AuditLog.name)
+          .findOne({ action: 'company.created', targetId: String(blank._id) }).exec();
+        expect(entry?.get('after')).toMatchObject({ usesPlatformDefaults: false });
+      });
+    });
+  });
+
+  describe('changing a company that already exists (client feedback, 2026-09-24)', () => {
+    let companyId: string;
+
+    beforeEach(async () => {
+      const made = await service.createCompany(ctx({ superAdmin: true }), {
+        name: 'Manulife', slug: 'manulife',
+      });
+      companyId = String(made._id);
+    });
+
+    it('renames it, and changes the slug, because both are labels', async () => {
+      // Unlike a config `code`, nothing points at either: every office holds the company id.
+      const updated = await service.updateCompany(ctx({ superAdmin: true }), companyId, {
+        name: 'Manulife Indonesia', slug: 'manulife-id',
+      });
+
+      expect(updated).toMatchObject({ name: 'Manulife Indonesia', slug: 'manulife-id' });
+      const entry = await mongoose.model(AuditLog.name)
+        .findOne({ action: 'company.updated', targetId: companyId }).exec();
+      expect(entry?.get('before')).toMatchObject({ name: 'Manulife', slug: 'manulife' });
+    });
+
+    it('refuses a slug another company holds, naming the incumbent', async () => {
+      await service.createCompany(ctx({ superAdmin: true }), { name: 'AXA', slug: 'axa' });
+
+      await expect(service.updateCompany(ctx({ superAdmin: true }), companyId, { slug: 'axa' }))
+        .rejects.toMatchObject({ code: 'COMPANY_SLUG_TAKEN' });
+    });
+
+    it('lets a company keep its own slug on a rename', async () => {
+      // The pre-check has to skip the row it is about to write, or renaming the name alone
+      // would collide with itself.
+      const updated = await service.updateCompany(ctx({ superAdmin: true }), companyId, {
+        name: 'Manulife Two', slug: 'manulife',
+      });
+
+      expect(updated.slug).toBe('manulife');
+    });
+
+    it('suspends it, and takes it off the list somebody registering chooses from', async () => {
+      expect((await service.listCompaniesForRegistration()).map((c) => c.name))
+        .toContain('Manulife');
+
+      await service.setCompanyStatus(ctx({ superAdmin: true }), companyId, 'suspended');
+
+      expect((await service.listCompaniesForRegistration()).map((c) => c.name))
+        .not.toContain('Manulife');
+      // Still there for the console: suspending is not deleting (invariant §6).
+      expect((await service.listCompanies(ctx({ superAdmin: true }))).map((c) => c.name))
+        .toContain('Manulife');
+    });
+
+    it('brings it back', async () => {
+      await service.setCompanyStatus(ctx({ superAdmin: true }), companyId, 'suspended');
+      const back = await service.setCompanyStatus(ctx({ superAdmin: true }), companyId, 'active');
+
+      expect(back.status).toBe('active');
+      expect((await service.listCompaniesForRegistration()).map((c) => c.name))
+        .toContain('Manulife');
+    });
+
+    it('is 404 for an id that is not a company, and for one that is malformed', async () => {
+      await expect(service.updateCompany(ctx({ superAdmin: true }), 'not-an-id', { name: 'X' }))
+        .rejects.toThrow(/Company/);
+      await expect(service.setCompanyStatus(ctx({ superAdmin: true }), '66f0000000000000000000ff', 'suspended'))
+        .rejects.toThrow(/Company/);
+    });
+
+    it.each([
+      ['a KPM Owner', 'owner'],
+      ['a user with no membership', 'none'],
+    ])('refuses %s with PERM_DENIED', async (_label, who) => {
+      const actor = who === 'owner' ? ctx({ owner: true }) : ctx();
+      await expect(service.updateCompany(actor, companyId, { name: 'Nope' }))
+        .rejects.toMatchObject({ code: 'PERM_DENIED' });
+      await expect(service.setCompanyStatus(actor, companyId, 'suspended'))
+        .rejects.toMatchObject({ code: 'PERM_DENIED' });
+    });
   });
 
   describe('only a Super Admin creates a KPM', () => {

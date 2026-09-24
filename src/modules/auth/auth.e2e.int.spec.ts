@@ -23,6 +23,7 @@ import { AuthGuard } from '@/common/auth/auth.guard';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
+import { AuditReadService } from '@/modules/audit/audit-read.service';
 import { AuditService } from '@/modules/audit/audit.service';
 import {
   Notification, NotificationDocument, NotificationPreferences,
@@ -261,7 +262,7 @@ describe('auth and admin over HTTP', () => {
         CampaignRepository,
         CampaignService,
         { provide: StoragePort, useClass: StubStorage },
-        AuditService, NotificationService, PasswordService, RateLimiter,
+        AuditService, AuditReadService, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService, OrgLevelService,
         RosterImportService,
         MembershipRepository, GroupRepository, JoinRequestRepository,

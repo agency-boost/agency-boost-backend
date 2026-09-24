@@ -19,7 +19,8 @@ describe('AdminController', () => {
   });
 
   function make() {
-    const audit = { findForTenant: jest.fn(async () => []), record: jest.fn(async () => undefined) };
+    // The console reads through `AuditReadService`, which names the people and the things.
+    const audit = { findForTenant: jest.fn(async () => []) };
     const controller = new AdminController(
       {} as never,
       {} as never,

@@ -232,7 +232,9 @@ export class TenantService {
    */
   async listCompaniesForRegistration(): Promise<{ _id: string; name: string }[]> {
     const rows = await this.companies
-      .find({ deletedAt: null }, { name: 1 })
+      // **Suspended companies are not on offer.** That is what suspending one means here: no
+      // new person and no new office attaches to it. Everybody already inside is untouched.
+      .find({ deletedAt: null, status: 'active' }, { name: 1 })
       .sort({ name: 1 })
       .lean()
       .exec();
@@ -260,7 +262,7 @@ export class TenantService {
    */
   async createCompany(
     ctx: RequestContext,
-    input: { name: string; slug: string },
+    input: { name: string; slug: string; usesPlatformDefaults?: boolean },
   ): Promise<CompanyDocument> {
     this.require(ctx, 'company:crud');
 
@@ -272,9 +274,12 @@ export class TenantService {
     const clash = await this.companies.findOne({ slug, deletedAt: null }).exec();
     if (clash) throw this.slugTaken(slug, clash.name);
 
+    // Absent means true: every caller that does not care gets what they always got.
+    const usesPlatformDefaults = input.usesPlatformDefaults !== false;
+
     let company: CompanyDocument;
     try {
-      company = await this.companies.create({ name, slug });
+      company = await this.companies.create({ name, slug, usesPlatformDefaults });
     } catch (err) {
       if ((err as { code?: number }).code === 11000) {
         const winner = await this.companies.findOne({ slug, deletedAt: null }).exec();
@@ -289,15 +294,23 @@ export class TenantService {
     // one seeded ladder; Super Admin edits it at /admin/org-levels afterwards.
     await this.orgLevels.seedDefaultLadder(String(company._id));
 
-    // **And a catalog**, for the same reason in a different register: a company with no products
-    // is one whose offices have nothing to sell and no way to say so. It is the company's from
-    // this moment — Super Admin edits it at the Company template's Products tab (ADR-0033).
-    await this.products.seedForCompany(String(company._id));
-
-    // **And the carrier rules** (P5-T7, ADR-0026): MOC and the production club tiers. They are the
-    // insurer's, editable by no office role, and an office measured against nothing would read as
-    // an office that qualifies for nothing.
-    await this.campaigns.seedForCompany(String(company._id));
+    /*
+     * **The rest is the platform's offer, and it can be declined.**
+     *
+     * A catalog, because a company with no products is one whose offices have nothing to sell
+     * (ADR-0033); the carrier rules, because an office measured against nothing reads as an
+     * office that qualifies for nothing (P5-T7, ADR-0026). Both are good defaults and neither
+     * is a structural requirement, which is exactly what makes them declinable — the ladder
+     * above is not, and stays.
+     *
+     * A company authoring its own presets from scratch gets nothing here and nothing from
+     * `STARTING_PAYLOAD` on the template tabs either, so *blank* means blank on every screen
+     * rather than blank on some of them.
+     */
+    if (usesPlatformDefaults) {
+      await this.products.seedForCompany(String(company._id));
+      await this.campaigns.seedForCompany(String(company._id));
+    }
 
     await this.audit.record(ctx, {
       action: 'company.created',
@@ -312,7 +325,105 @@ export class TenantService {
         defaultCurrency: company.defaultCurrency,
         defaultLocale: company.defaultLocale,
         defaultTimezone: company.defaultTimezone,
+        // Recorded because it decides what nine screens show for the life of the company,
+        // and because "it came up empty" is otherwise unanswerable a month later.
+        usesPlatformDefaults,
       },
+    });
+
+    return company;
+  }
+
+  /**
+   * Rename a company, or change its slug.
+   *
+   * **Both are labels.** Every office points at its company by id and nothing stores the slug,
+   * so changing it moves no reference — unlike a config `code`, which invariant §4 makes
+   * permanent precisely because things do point at it.
+   *
+   * The slug clash is checked the same way creation checks it, for the same reason: the partial
+   * index is the only thing that actually stops a race, and its refusal has to arrive as the
+   * same 409 a first reader would have seen.
+   */
+  async updateCompany(
+    ctx: RequestContext,
+    companyId: string,
+    input: { name?: string; slug?: string },
+  ): Promise<CompanyDocument> {
+    this.require(ctx, 'company:crud');
+
+    const company = await this.companies
+      .findOne({ _id: companyId, deletedAt: null }).exec()
+      // A malformed id from a URL is "not here", not a 500.
+      .catch(() => null);
+    if (!company) throw new NotFoundException('Company');
+
+    const before = { name: company.name, slug: company.slug };
+
+    if (input.slug !== undefined) {
+      const slug = input.slug.trim().toLowerCase();
+      if (slug !== company.slug) {
+        const clash = await this.companies.findOne({ slug, deletedAt: null }).exec();
+        if (clash) throw this.slugTaken(slug, clash.name);
+        company.slug = slug;
+      }
+    }
+    if (input.name !== undefined) company.name = input.name.trim();
+
+    try {
+      await company.save();
+    } catch (err) {
+      if ((err as { code?: number }).code === 11000) {
+        const winner = await this.companies.findOne({ slug: company.slug, deletedAt: null }).exec();
+        throw this.slugTaken(company.slug, winner?.name ?? 'another company');
+      }
+      throw err;
+    }
+
+    await this.audit.record(ctx, {
+      action: 'company.updated',
+      targetCollection: 'companies',
+      targetId: companyId,
+      before,
+      after: { name: company.name, slug: company.slug },
+    });
+
+    return company;
+  }
+
+  /**
+   * Suspend a company, or bring it back.
+   *
+   * **What it does is narrow and stated rather than implied.** A suspended company disappears
+   * from the list somebody registering chooses from, so no new person and no new office can
+   * attach to it. It does **not** sign anybody out, suspend its offices, or hide their data:
+   * those are the office's own lifecycle (`PATCH /admin/tenants/:id/status`) and collapsing the
+   * two would mean one click silently locking out several thousand people.
+   *
+   * Soft, like everything else here (invariant §6). Nothing is deleted.
+   */
+  async setCompanyStatus(
+    ctx: RequestContext,
+    companyId: string,
+    status: 'active' | 'suspended',
+  ): Promise<CompanyDocument> {
+    this.require(ctx, 'company:crud');
+
+    const company = await this.companies
+      .findOne({ _id: companyId, deletedAt: null }).exec()
+      .catch(() => null);
+    if (!company) throw new NotFoundException('Company');
+
+    const before = company.status;
+    company.status = status;
+    await company.save();
+
+    await this.audit.record(ctx, {
+      action: `company.${status === 'suspended' ? 'suspended' : 'reactivated'}`,
+      targetCollection: 'companies',
+      targetId: companyId,
+      before: { status: before },
+      after: { status },
     });
 
     return company;

@@ -5,7 +5,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AllowWhileReadOnly, Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
-import { AuditService } from '@/modules/audit/audit.service';
+import { AuditReadService } from '@/modules/audit/audit-read.service';
 import { ElevateImpersonationDto, ImpersonateDto } from '@/modules/auth/auth.dto';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
 import {
@@ -13,6 +13,8 @@ import {
   AssignOwnerDto,
   AuditQueryDto,
   CreateCompanyDto,
+  SetCompanyStatusDto,
+  UpdateCompanyDto,
   CreateKpmDto,
   CreateOrgLevelDto,
   DeclineKpmRequestDto,
@@ -51,7 +53,7 @@ export class AdminController {
     private readonly kpmRequestService: KpmRequestService,
     private readonly orgLevels: OrgLevelService,
     private readonly impersonation: ImpersonationService,
-    private readonly audit: AuditService,
+    private readonly auditRead: AuditReadService,
     private readonly roster: RosterImportService,
     private readonly templates: TemplateService,
   ) {}
@@ -145,6 +147,40 @@ export class AdminController {
   })
   async createCompany(@Ctx() ctx: RequestContext, @Body() dto: CreateCompanyDto) {
     return this.tenants.createCompany(ctx, dto);
+  }
+
+  @Patch('companies/:companyId')
+  @RequirePermission('company:crud')
+  @ApiOperation({
+    summary: 'Rename a company, or change its slug',
+    description:
+      'Both are labels: every office points at its company by id and nothing stores the '
+      + 'slug, so changing one moves no reference. A slug already in use is refused with '
+      + 'COMPANY_SLUG_TAKEN, naming the company that holds it. Audited.',
+  })
+  async updateCompany(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Body() dto: UpdateCompanyDto,
+  ) {
+    return this.tenants.updateCompany(ctx, companyId, dto);
+  }
+
+  @Patch('companies/:companyId/status')
+  @RequirePermission('company:crud')
+  @ApiOperation({
+    summary: 'Suspend a company, or bring it back',
+    description:
+      'A suspended company disappears from the list somebody registering chooses from, so '
+      + 'no new person and no new office attaches to it. It does **not** sign anybody out '
+      + 'or suspend its offices — that is each office\'s own lifecycle. Nothing is deleted.',
+  })
+  async setCompanyStatus(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Body() dto: SetCompanyStatusDto,
+  ) {
+    return this.tenants.setCompanyStatus(ctx, companyId, dto.status);
   }
 
   @Get('org-levels')
@@ -430,7 +466,7 @@ export class AdminController {
   })
   async readAudit(@Ctx() ctx: RequestContext, @Query() query: AuditQueryDto) {
     const scope = ctx.isSuperAdmin ? (query.kpmId ?? null) : ctx.kpmId;
-    return this.audit.findForTenant(scope, 100);
+    return this.auditRead.findForTenant(scope, 100);
   }
 
   /**

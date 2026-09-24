@@ -233,6 +233,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // code has no business knowing how each one is configured (ADR-0017).
   CompanyController_list: { type: PublicCompanyDto, isArray: true },
   AdminController_createCompany: { type: CompanyResponseDto },
+  AdminController_updateCompany: { type: CompanyResponseDto },
+  AdminController_setCompanyStatus: { type: CompanyResponseDto },
   AdminController_listOrgLevels: { type: OrgLevelRowDto, isArray: true },
   AdminController_createOrgLevel: { type: OrgLevelRowDto, isArray: true },
   AdminController_updateOrgLevel: { type: OrgLevelRowDto, isArray: true },

@@ -1,8 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
-  IsEmail, IsEnum, IsIn, IsInt, IsMongoId, IsOptional, IsString, Matches, Max, MaxLength,
-  Min, MinLength,
+  IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsMongoId, IsOptional, IsString, Matches, Max,
+  MaxLength, Min, MinLength,
 } from 'class-validator';
 import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
 
@@ -34,6 +34,58 @@ export class CreateCompanyDto {
     message: 'slug must be lower-case letters and digits, separated by single hyphens',
   })
   slug!: string;
+
+  /**
+   * Start this company from the platform's presets, or from nothing.
+   *
+   * **Default true, and absent means true** — a company created before this field existed,
+   * and every caller that does not care, gets what they always got.
+   */
+  @ApiPropertyOptional({
+    default: true,
+    description:
+      'True gives the company the platform\'s activity taxonomy, ratios, lead ladders, '
+      + 'training tree, activation checklist, capability ladder, event types, carrier rules '
+      + 'and product catalog to edit. False leaves every one of them empty, for a company '
+      + 'whose presets are being authored from scratch. The role ladder is seeded either '
+      + 'way: an office whose company has none is one nobody can join.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  usesPlatformDefaults?: boolean;
+}
+
+/** Renaming a company. The slug is separate from the name and both are optional. */
+export class UpdateCompanyDto {
+  @ApiPropertyOptional({ example: 'Prudential Indonesia', minLength: 2, maxLength: 120 })
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  name?: string;
+
+  @ApiPropertyOptional({
+    example: 'prudential-id',
+    maxLength: 64,
+    pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
+    description:
+      'Changeable: nothing stores it. Every office points at the company by id, and the '
+      + 'slug is a label. A clash is refused with COMPANY_SLUG_TAKEN.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'slug must be lower-case letters and digits, separated by single hyphens',
+  })
+  slug?: string;
+}
+
+/** Suspending a company, or bringing it back. */
+export class SetCompanyStatusDto {
+  @ApiProperty({ enum: ['active', 'suspended'] })
+  @IsIn(['active', 'suspended'])
+  status!: 'active' | 'suspended';
 }
 
 /**

@@ -47,6 +47,33 @@ export class MembershipRepository extends TenantScopedRepository<MembershipDocum
       .exec();
   }
 
+  /**
+   * Who these memberships belong to, in whichever office holds each one.
+   *
+   * **Deliberately unscoped, and named so.** The Super Admin's audit console shows platform
+   * rows from every office at once, and resolving `memberships/68f3…` to a person is the whole
+   * reason that screen is readable. The reader is in no tenant, so there is no tenant to ask
+   * within — invariant §1 asks that such a read be an explicitly named method rather than an
+   * absent filter, and this is one.
+   *
+   * Soft-deleted rows are **included**: an audit row about a membership that has since been
+   * removed still has to say whose it was, which is exactly when somebody is reading the log.
+   */
+  async byIdsAnywhereForAudit(
+    ids: string[],
+  ): Promise<{ _id: string; userId: string; agentCode: string | null }[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.model
+      .find({ _id: { $in: ids } }, { userId: 1, agentCode: 1 })
+      .lean()
+      .exec();
+    return rows.map((r) => ({
+      _id: String(r._id),
+      userId: String(r.userId),
+      agentCode: (r as { agentCode?: string | null }).agentCode ?? null,
+    }));
+  }
+
   async existsWithLeaderCode(code: string): Promise<boolean> {
     return (await this.model.exists({ leaderCode: code, deletedAt: null })) !== null;
   }

@@ -29,15 +29,20 @@ export class CompanyResponseDto {
 
   @ApiProperty({ type: String, enum: ['active', 'suspended'] })
   status!: string;
+
+  @ApiProperty({
+    type: Boolean,
+    description:
+      'False means this company was created blank: no product catalog, no carrier rules, '
+      + 'and every Company template tab starts empty rather than from the platform\'s presets.',
+  })
+  usesPlatformDefaults!: boolean;
 }
 
 /** One row of the append-only platform log. Read-only by construction — there is no edit. */
 export class AuditEntryResponseDto {
   @ApiProperty({ type: String })
   _id!: string;
-
-  @ApiProperty({ type: String, nullable: true, description: 'Null for a platform-level action, which belongs to no office.' })
-  kpmId!: string | null;
 
   @ApiProperty({ type: String, example: 'kpm.provisioned' })
   action!: string;
@@ -48,14 +53,28 @@ export class AuditEntryResponseDto {
   @ApiProperty({ type: String, nullable: true })
   targetId!: string | null;
 
-  @ApiProperty({ type: String, description: 'The real actor. Under impersonation this stays the Super Admin.' })
-  actorUserId!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: '0417 · Surabaya Branch',
+    description:
+      'What the target is called — a person\'s name, an office\'s code and branch, a company\'s '
+      + 'name. **Null when the id resolves to nothing, or to a collection nothing names yet**, '
+      + 'and the reader is shown the id instead: a blank cell would read as nothing happened.',
+  })
+  targetLabel!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, description: 'The real actor. Under impersonation this stays the Super Admin.' })
+  actorUserId!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, description: 'The real actor\'s name, or null if the account is gone.' })
+  actorName!: string | null;
 
   @ApiProperty({ type: String, nullable: true, description: 'Who they were acting as, when this was a support session.' })
   effectiveUserId!: string | null;
 
-  @ApiProperty({ type: Boolean })
-  onBehalfOf!: boolean;
+  @ApiProperty({ type: String, nullable: true })
+  effectiveName!: string | null;
 
   @ApiPropertyOptional({ type: 'object', additionalProperties: true, nullable: true })
   before?: Record<string, unknown> | null;
