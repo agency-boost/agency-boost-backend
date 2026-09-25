@@ -1214,7 +1214,15 @@ async function main(): Promise<void> {
         consentAt: seed.lawfulBasis ? daysAgo(20) : null,
         statusCode: here,
         statusId: status ? String((status as { _id: unknown })._id) : null,
-        thisMonth: seed.thisMonth ?? false,
+        /*
+         * A promise carries the month it was made for (P7-T5), so nothing has to clear it. Seeded
+         * as **this** month in the office's zone — a demo lead promised for a month that has
+         * already ended would read as not promised, which is the mechanism working and a fixture
+         * that shows nothing.
+         */
+        commitments: seed.thisMonth
+          ? [{ month: leadDay(0).slice(0, 7), at: daysAgo(3), byMembershipId: seed.owner }]
+          : [],
         remarks: seed.remarks ?? null,
         nextActionDate: seed.nextActionIn === undefined ? null : leadDay(seed.nextActionIn),
         nextActionNote: seed.nextActionNote ?? null,

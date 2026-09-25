@@ -50,7 +50,9 @@ import {
 import {
   ActivityLogCorrectionSchema, ActivityLogEntrySchema, ActivityLogSchema,
 } from '@/modules/activity/activity-log.schema';
-import { LeadContactSchema, LeadSchema, LeadTransitionSchema } from '@/modules/leads/lead.schema';
+import {
+  LeadCommitmentSchema, LeadContactSchema, LeadSchema, LeadTransitionSchema,
+} from '@/modules/leads/lead.schema';
 import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
 } from '@/modules/campaigns/campaign.schema';
@@ -223,6 +225,11 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'one move along a ladder inside a lead: no collection and no _id of its own',
   ],
   [
+    'leadCommitment (subdocument)',
+    LeadCommitmentSchema,
+    'one month a lead was promised for, inside the lead: no collection and no _id of its own',
+  ],
+  [
     'activityLogCorrection (subdocument)',
     ActivityLogCorrectionSchema,
     'a prior state of an activity log, held inside the day it belongs to',
@@ -302,6 +309,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [LeadSchema, 'LeadSchema'],
   [LeadContactSchema, 'LeadContactSchema'],
   [LeadTransitionSchema, 'LeadTransitionSchema'],
+  [LeadCommitmentSchema, 'LeadCommitmentSchema'],
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
   [ActivityLogCorrectionSchema, 'ActivityLogCorrectionSchema'],
   [CampaignSchema, 'CampaignSchema'],

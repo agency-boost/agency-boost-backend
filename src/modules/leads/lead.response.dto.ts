@@ -35,8 +35,23 @@ export class LeadResponseDto implements LeadView {
   @ApiProperty({ type: String, nullable: true, description: 'The code, never the label.' })
   statusCode!: string | null;
 
-  @ApiProperty({ type: Boolean })
+  @ApiProperty({
+    type: Boolean,
+    description:
+      '**Derived** (P7-T5): is there a commitment for the office’s current month? Nothing clears '
+      + 'it, so it cannot be left true for an agent who has not opened the app since March.',
+  })
   thisMonth!: boolean;
+
+  @ApiProperty({
+    type: [String],
+    example: ['2026-09', '2026-10'],
+    description:
+      'Every month this lead was promised for, oldest first, in the office’s timezone. The '
+      + 'archive behind *did they do what they said* — written when the promise is made rather '
+      + 'than swept somewhere when the month ends.',
+  })
+  committedMonths!: string[];
 
   @ApiProperty({ type: String, nullable: true })
   remarks!: string | null;

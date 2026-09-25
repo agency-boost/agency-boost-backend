@@ -28,6 +28,8 @@ import { Kpm } from './kpm.schema';
 /** What day it is where the work happens, and the zone that decided it. */
 export interface OfficeDay {
   readonly today: LocalDate;
+  /** `YYYY-MM` — the office's calendar month, which is the first seven characters of its day. */
+  readonly month: string;
   readonly timezone: string;
 }
 
@@ -63,6 +65,9 @@ export class TenantDay {
    */
   async for(ctx: RequestContext): Promise<OfficeDay> {
     const timezone = await this.timezoneOf(ctx);
-    return { today: localDayOf(this.clock.now(), timezone), timezone };
+    const today = localDayOf(this.clock.now(), timezone);
+    // The month is the day's first seven characters rather than a second computation: two ways to
+    // answer *which month is it in Jakarta* is one way too many, and they drift at the boundary.
+    return { today, month: today.slice(0, 7), timezone };
   }
 }

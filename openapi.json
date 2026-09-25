@@ -13816,7 +13816,19 @@
             "description": "The code, never the label."
           },
           "thisMonth": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "**Derived** (P7-T5): is there a commitment for the office’s current month? Nothing clears it, so it cannot be left true for an agent who has not opened the app since March."
+          },
+          "committedMonths": {
+            "example": [
+              "2026-09",
+              "2026-10"
+            ],
+            "description": "Every month this lead was promised for, oldest first, in the office’s timezone. The archive behind *did they do what they said* — written when the promise is made rather than swept somewhere when the month ends.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "remarks": {
             "type": "string",
@@ -13881,6 +13893,7 @@
           "consentAt",
           "statusCode",
           "thisMonth",
+          "committedMonths",
           "remarks",
           "nextActionDate",
           "nextActionNote",

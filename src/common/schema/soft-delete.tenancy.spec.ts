@@ -49,7 +49,9 @@ import {
 import {
   ActivityLogCorrectionSchema, ActivityLogEntrySchema, ActivityLogSchema,
 } from '@/modules/activity/activity-log.schema';
-import { LeadContactSchema, LeadSchema, LeadTransitionSchema } from '@/modules/leads/lead.schema';
+import {
+  LeadCommitmentSchema, LeadContactSchema, LeadSchema, LeadTransitionSchema,
+} from '@/modules/leads/lead.schema';
 import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
 } from '@/modules/campaigns/campaign.schema';
@@ -181,6 +183,14 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
       + 'legible and a leader\'s edit attributable (ADR-0044, ADR-0045)',
   ],
   [
+    'leadCommitment (subdocument)',
+    LeadCommitmentSchema,
+    'one month an agent promised a lead for (P7-T5). A past month is unreachable by '
+      + 'construction — only the current month\'s entry can be written — and un-ticking the box '
+      + 'inside the month removes that entry, which is correcting today\'s promise rather than '
+      + 'deleting a record of one',
+  ],
+  [
     'activityLogCorrection (subdocument)',
     ActivityLogCorrectionSchema,
     'a prior state of an activity log. **Append-only and never removed** — the whole point is '
@@ -238,6 +248,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [LeadSchema, 'LeadSchema'],
   [LeadContactSchema, 'LeadContactSchema'],
   [LeadTransitionSchema, 'LeadTransitionSchema'],
+  [LeadCommitmentSchema, 'LeadCommitmentSchema'],
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
   [ActivityLogCorrectionSchema, 'ActivityLogCorrectionSchema'],
   [CampaignSchema, 'CampaignSchema'],

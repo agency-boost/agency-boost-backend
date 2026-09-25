@@ -576,4 +576,115 @@ describe('the lead record (P7-T1)', () => {
     });
   });
 
+
+  /**
+   * The monthly rollover (P7-T5).
+   *
+   * **There is nothing to run, and that is the design.** `thisMonth` is derived from the month the
+   * promise names, so it is right on the first of the month for an agent who has not opened the app
+   * since March — with no job, no scheduler, and nothing to have missed them.
+   */
+  describe('P7-T5 — the commitment, and the month it was made for', () => {
+    beforeEach(() => provisionOffice(wired, KPM_A, COMPANY));
+    afterEach(() => (wired.clock as FixedClock).set(NOW));
+
+    const at = (instant: string) => (wired.clock as FixedClock).set(new Date(instant));
+    const commit = (id: string, thisMonth: boolean) =>
+      wired.leadRecords.update(A(), id, { thisMonth });
+
+    it('AC-1: rolls over for an agent who never opens the app', async () => {
+      // The prototype clears the flag from `localStorage` when the agent loads the screen, so
+      // somebody who does not open it in October is still promising September's lead in December.
+      const lead = await create(A(), { thisMonth: true });
+      expect(lead.thisMonth).toBe(true);
+
+      at('2026-10-01T02:00:00Z');
+
+      // Nothing has run. Nothing needed to.
+      expect((await wired.leadRecords.read(A(), lead.id)).thisMonth).toBe(false);
+    });
+
+    it('AC-3: and what was promised is still there afterwards', async () => {
+      const lead = await create(A(), { thisMonth: true });
+
+      at('2026-10-01T02:00:00Z');
+
+      // *Did they do what they said in September* is answerable in October, which a cleared
+      // boolean could not do. The promise was written down when it was made.
+      expect((await wired.leadRecords.read(A(), lead.id)).committedMonths).toEqual(['2026-09']);
+    });
+
+    it('AC-2: the month boundary is the office’s, not the server’s', async () => {
+      /*
+       * 2026-09-30T18:00Z is already October in Jakarta and still September in New York. One
+       * instant, two offices, two answers — and the commitment was made in September either way.
+       */
+      const lead = await create(A(), { thisMonth: true });
+      await mongoose.connection.db!.collection('kpms').updateOne(
+        { _id: new mongoose.Types.ObjectId(KPM_A) }, { $set: { timezone: 'Asia/Jakarta' } },
+      );
+      at('2026-09-30T18:00:00Z');
+
+      expect((await wired.leadRecords.read(A(), lead.id)).thisMonth).toBe(false);
+
+      await mongoose.connection.db!.collection('kpms').updateOne(
+        { _id: new mongoose.Types.ObjectId(KPM_A) }, { $set: { timezone: 'America/New_York' } },
+      );
+      expect((await wired.leadRecords.read(A(), lead.id)).thisMonth).toBe(true);
+    });
+
+    it('AC-4: promising a lead twice in one month writes nothing the second time', async () => {
+      const lead = await create(A());
+      const once = await commit(lead.id, true);
+      const again = await commit(lead.id, true);
+
+      expect(once.committedMonths).toEqual(['2026-09']);
+      expect(again.committedMonths).toEqual(['2026-09']);
+    });
+
+    it('records the month again when the agent promises it a second month', async () => {
+      const lead = await create(A(), { thisMonth: true });
+      at('2026-10-05T02:00:00Z');
+
+      const carried = await commit(lead.id, true);
+
+      expect(carried.committedMonths).toEqual(['2026-09', '2026-10']);
+      expect(carried.thisMonth).toBe(true);
+    });
+
+    it('un-ticking inside the month corrects today’s promise rather than erasing a past one', async () => {
+      const lead = await create(A(), { thisMonth: true });
+      at('2026-10-05T02:00:00Z');
+      await commit(lead.id, true);
+
+      const retracted = await commit(lead.id, false);
+
+      expect(retracted.thisMonth).toBe(false);
+      // September is untouched: it is a thing that was said, not a thing being decided.
+      expect(retracted.committedMonths).toEqual(['2026-09']);
+    });
+
+    it('stores no boolean at all — the flag is read, never written', async () => {
+      const lead = await create(A(), { thisMonth: true });
+
+      const stored = await mongoose.connection.db!.collection('leads')
+        .findOne({ _id: new mongoose.Types.ObjectId(lead.id) });
+      expect(stored).not.toHaveProperty('thisMonth');
+      expect(stored!.commitments).toHaveLength(1);
+    });
+
+    it('drops only this month’s promise when the ladder changes', async () => {
+      // *Close this month* and *recruit this month* are different promises (I-105). The months
+      // before this one are not the patch's to touch.
+      const lead = await create(A(), { thisMonth: true });
+      at('2026-10-05T02:00:00Z');
+      await commit(lead.id, true);
+
+      const moved = await wired.leadRecords.update(A(), lead.id, { type: 'recruitment' });
+
+      expect(moved.thisMonth).toBe(false);
+      expect(moved.committedMonths).toEqual(['2026-09']);
+    });
+  });
+
 });

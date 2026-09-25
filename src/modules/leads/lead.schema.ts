@@ -44,6 +44,29 @@ export class LeadTransition {
 }
 export const LeadTransitionSchema = SchemaFactory.createForClass(LeadTransition);
 
+/**
+ * *I will close this one this month.* The agent's own promise, and the month they made it for.
+ *
+ * **One entry per month, and only the current month's is ever touched.** A promise about September
+ * stops being editable when September ends, because by then it is a thing that was said rather than
+ * a thing being decided — which is what makes it answerable afterwards. Un-ticking the box inside
+ * the month removes that month's entry: correcting today's promise is not rewriting history.
+ */
+@Schema({ _id: false })
+export class LeadCommitment {
+  /** `YYYY-MM` in the **office's** timezone, never the server's or the browser's (invariant §9). */
+  @Prop({ type: String, required: true })
+  month!: string;
+
+  @Prop({ type: Date, required: true })
+  at!: Date;
+
+  /** Who promised. A leader may commit a downline's lead (ADR-0044), and this is how that shows. */
+  @Prop({ type: String, required: true })
+  byMembershipId!: string;
+}
+export const LeadCommitmentSchema = SchemaFactory.createForClass(LeadCommitment);
+
 /** Whatever contact detail the agent has. Both optional; neither free of a lawful basis. */
 @Schema({ _id: false })
 export class LeadContact {
@@ -116,9 +139,26 @@ export class Lead {
   @Prop({ type: String, default: null })
   statusId!: string | null;
 
-  /** The agent's own commitment for the month. Cleared by the rollover, not by remembering (P7-T5). */
-  @Prop({ type: Boolean, required: true, default: false })
-  thisMonth!: boolean;
+  /**
+   * Every month this lead was promised for, oldest first (P7-T5).
+   *
+   * **There is no stored `thisMonth`, and that is the rollover.** It was a boolean, and a boolean
+   * has to be *cleared* by something — which the prototype does in `localStorage`, per agent, so a
+   * commitment silently persists for anybody who does not open the app (`leads-management.md` §4).
+   * A job on the server would fix that and introduce its own failure: a sweep that does not run
+   * leaves every office wrong, and nothing on any screen says so.
+   *
+   * Holding the **month** instead makes the flag derived — *is there an entry for the office's
+   * current month?* — so it is right on the first of the month for an agent who has not opened the
+   * app since March, with nothing having run. The same reasoning as the attention flags: a stored
+   * flag is one that is wrong at midnight.
+   *
+   * And it is the archive. *Did they do what they said in September* is a question about a promise
+   * that was made, so the promise is written down when it is made rather than swept into a second
+   * collection later.
+   */
+  @Prop({ type: [LeadCommitmentSchema], default: [] })
+  commitments!: LeadCommitment[];
 
   @Prop({ type: String, default: null, trim: true })
   remarks!: string | null;

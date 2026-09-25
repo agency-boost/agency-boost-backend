@@ -49,7 +49,14 @@ export interface LeadView {
   lawfulBasis: string | null;
   consentAt: string | null;
   statusCode: string | null;
+  /**
+   * **Derived, not stored** (P7-T5): is there a commitment for the office's current month?
+   *
+   * The field an API caller reads is unchanged — what changed is that nothing has to clear it.
+   */
   thisMonth: boolean;
+  /** Every month this lead was promised for, oldest first. The archive, and it is the record. */
+  committedMonths: string[];
   remarks: string | null;
   nextActionDate: string | null;
   nextActionNote: string | null;
@@ -102,6 +109,7 @@ export class LeadService {
 
   async create(ctx: RequestContext, body: unknown): Promise<LeadView> {
     const membershipId = this.me(ctx);
+    const day = await this.days.for(ctx);
     const input = checkLead(body);
     const contact = input.contact ?? { phone: null, email: null };
 
@@ -122,7 +130,10 @@ export class LeadService {
       nextActionDate: input.nextActionDate ?? null,
       nextActionNote: input.nextActionNote ?? null,
       source: input.source ?? null,
-      thisMonth: input.thisMonth ?? false,
+      // A promise is a row with the month on it, so nothing has to clear it later (P7-T5).
+      commitments: input.thisMonth
+        ? [{ month: day.month, at: now, byMembershipId: membershipId }]
+        : [],
       // A move, and moves are P7-T3. A lead starts on no rung.
       statusCode: null,
       statusId: null,
@@ -140,7 +151,7 @@ export class LeadService {
       hasContact: Boolean(contact.phone || contact.email),
       lawfulBasis: created.lawfulBasis,
     });
-    return this.view(created, await this.days.for(ctx));
+    return this.view(created, day);
   }
 
   async update(ctx: RequestContext, id: string, body: unknown): Promise<LeadView> {
@@ -153,6 +164,7 @@ export class LeadService {
     requireLawfulBasis(next);
 
     const now = this.clock.now();
+    const day = await this.days.for(ctx);
     const $set: Record<string, unknown> = {
       ...this.writable(input),
       contact: next.contact,
@@ -172,19 +184,40 @@ export class LeadService {
      * `setStatus` would refuse to move it there, and `setOutcome('won')` would look up its
      * `isTerminal` on the wrong pipeline's stage and let it close from nowhere.
      *
-     * The prototype does the same (`leads-management.md` §4), including `thisMonth`: *close this
-     * month* and *recruit this month* are different promises, and one does not survive becoming
-     * the other. **No transition is appended** — the lead has not moved to a stage, it has left
-     * one, and a history row that named a destination would invent one. The `lead.updated` audit
-     * row carries the field change.
+     * The prototype does the same (`leads-management.md` §4), including the commitment: *close
+     * this month* and *recruit this month* are different promises, and one does not survive
+     * becoming the other. **No transition is appended** — the lead has not moved to a stage, it
+     * has left one, and a history row that named a destination would invent one. The
+     * `lead.updated` audit row carries the field change.
      */
-    if (input.type !== undefined && input.type !== lead.type) {
+    const dropCommitment = input.type !== undefined && input.type !== lead.type;
+    if (dropCommitment) {
       $set.statusCode = null;
       $set.statusId = null;
-      $set.thisMonth = false;
     }
 
-    const updated = await this.leads.updateById(ctx, id, { $set, $inc: { version: 1 } });
+    /*
+     * **The promise for *this* month, and no other.**
+     *
+     * A patch can only add or drop the current month's entry: a promise about September stops
+     * being editable when September ends, because by then it is something that was said rather
+     * than something being decided. Which is what makes the archive worth keeping — and it is why
+     * the only write here is scoped to `day.month`.
+     *
+     * Dropping is a `$pull` rather than a tombstone: un-ticking the box inside the month is
+     * correcting today's promise, not erasing a past one. Nothing before this month can be
+     * reached from here at all.
+     */
+    const commit = dropCommitment ? false : input.thisMonth;
+    const alreadyCommitted = (lead.commitments ?? []).some((c) => c.month === day.month);
+    const write: Record<string, unknown> = { $set, $inc: { version: 1 } };
+    if (commit === true && !alreadyCommitted) {
+      write.$push = { commitments: { month: day.month, at: now, byMembershipId: membershipId } };
+    } else if (commit === false && alreadyCommitted) {
+      write.$pull = { commitments: { month: day.month } };
+    }
+
+    const updated = await this.leads.updateById(ctx, id, write);
     if (!updated) throw new NotFoundException('Lead');
 
     await this.record(ctx, 'lead.updated', id, {
@@ -192,7 +225,7 @@ export class LeadService {
       hasContact: Boolean(next.contact.phone || next.contact.email),
       lawfulBasis: next.lawfulBasis,
     });
-    return this.view(updated, await this.days.for(ctx));
+    return this.view(updated, day);
   }
 
   /**
@@ -450,10 +483,16 @@ export class LeadService {
     };
   }
 
-  /** The fields a patch may set. `contact` and `lawfulBasis` are handled together, above. */
+  /**
+   * The fields a patch may set directly.
+   *
+   * `contact` and `lawfulBasis` are handled together above, and **`thisMonth` is not here at all**:
+   * it is derived from `commitments`, so a patch carrying it adds or removes this month's promise
+   * rather than writing a column.
+   */
   private writable(input: CheckedLead): Record<string, unknown> {
     const out: Record<string, unknown> = {};
-    for (const key of ['name', 'type', 'remarks', 'nextActionDate', 'nextActionNote', 'source', 'thisMonth'] as const) {
+    for (const key of ['name', 'type', 'remarks', 'nextActionDate', 'nextActionNote', 'source'] as const) {
       if (input[key] !== undefined) out[key] = input[key];
     }
     return out;
@@ -470,7 +509,8 @@ export class LeadService {
       lawfulBasis: doc.lawfulBasis,
       consentAt: doc.consentAt ? doc.consentAt.toISOString() : null,
       statusCode: doc.statusCode,
-      thisMonth: doc.thisMonth,
+      thisMonth: (doc.commitments ?? []).some((c) => c.month === day.month),
+      committedMonths: (doc.commitments ?? []).map((c) => c.month),
       remarks: doc.remarks,
       nextActionDate: doc.nextActionDate,
       nextActionNote: doc.nextActionNote,

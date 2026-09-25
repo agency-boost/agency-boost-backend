@@ -48,7 +48,7 @@ describe('the office’s day (P7-T4)', () => {
 
     const day = await days.for(member(kpmId));
 
-    expect(day).toEqual({ today: '2026-09-26', timezone: 'Asia/Jakarta' });
+    expect(day).toEqual({ today: '2026-09-26', month: '2026-09', timezone: 'Asia/Jakarta' });
     // What the prototype would have answered, and what this exists to stop.
     expect(EVENING.toISOString().slice(0, 10)).toBe('2026-09-25');
   });
@@ -58,7 +58,7 @@ describe('the office’s day (P7-T4)', () => {
 
     const day = await days.for(member(kpmId));
 
-    expect(day).toEqual({ today: '2026-09-25', timezone: 'America/New_York' });
+    expect(day).toEqual({ today: '2026-09-25', month: '2026-09', timezone: 'America/New_York' });
   });
 
   it('falls back to the platform zone when the row names none', async () => {
