@@ -32,6 +32,24 @@ export const GOAL_DEFAULTS = {
 } as const;
 
 /**
+ * The three activity codes the goal cascade's columns count against (P8-T1).
+ *
+ * **Codes, and the whole point is that they are not numbers.** The prototype's tip reads *"Maps to
+ * activities #3, #4, #6 in Activity Management"* (`Overall.html:3010`) — and those are **display
+ * order**, which the Owner's settings screen lets an office drag. An office that reordered its list
+ * would silently rebind every goal in it to three different activities, which is invariant §4 in one
+ * sentence.
+ *
+ * Here rather than in the goals module because two things will read them: the cascade, and whatever
+ * measures an agent against it (Phase 10). One source, per invariant §7.
+ */
+export const CASCADE_ACTIVITY_CODES = {
+  leadsCode: 'LEADS_CONTACTED',
+  appointmentsCode: 'SELL_PRESENTATION',
+  closingsCode: 'SELL_SUBMISSION',
+} as const;
+
+/**
  * Time conversion. These are *projection* constants for the goal cascade — they never
  * define a period boundary. A calendar month is a calendar month in the tenant timezone.
  * Overall.html:5751, :5818, :7023.

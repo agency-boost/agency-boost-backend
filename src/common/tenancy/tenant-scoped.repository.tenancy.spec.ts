@@ -382,4 +382,99 @@ describe('TenantScopedRepository — cross-tenant isolation', () => {
     });
   });
 
+
+  /**
+   * Create-or-update, in one round trip (P8-T1).
+   *
+   * The shape a read-then-write gets wrong. Two saves race in this product for real — an agent on a
+   * phone and their leader on a laptop in the same 1-on-1 — and read-then-write hands whoever is
+   * second a duplicate-key error rather than the row they meant to write.
+   */
+  describe('upsertOne', () => {
+    it('creates the row when there is none, scoped to the caller', async () => {
+      const created = await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, {
+        $set: { name: 'plan' },
+      });
+
+      expect((created as unknown as { kpmId: string }).kpmId).toBe(KPM_A);
+      expect((created as unknown as { deletedAt: Date | null }).deletedAt).toBeNull();
+      expect((created as unknown as { createdBy: string }).createdBy).toBe('mem-' + KPM_A);
+    });
+
+    it('updates the row when there is one, without creating a second', async () => {
+      await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, { $set: { name: 'plan' } });
+
+      await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, { $set: { name: 'plan' } });
+
+      expect(await repo.count(ctxFor(KPM_A), {})).toBe(1);
+    });
+
+    it('stamps who created it once, and a later writer does not become it', async () => {
+      /*
+       * `createdBy` is the repository's to stamp, not the caller's — the context's membership wins
+       * over anything passed in `$setOnInsert`, which is why it is spread **before** the stamps.
+       * And an update leaves it alone: the second writer moves `updatedBy` and nothing else.
+       */
+      const mine = ctxFor(KPM_A);
+      const theirs = ctxFor(KPM_A, { membershipId: 'mem-second' });
+
+      const first = await repo.upsertOne(mine, { name: 'plan' }, { $set: { name: 'plan' } });
+      const second = await repo.upsertOne(theirs, { name: 'plan' }, { $set: { name: 'plan' } });
+
+      expect((first as unknown as { createdBy: string }).createdBy).toBe('mem-' + KPM_A);
+      expect((second as unknown as { createdBy: string }).createdBy).toBe('mem-' + KPM_A);
+      expect((second as unknown as { updatedBy: string }).updatedBy).toBe('mem-second');
+    });
+
+    it('carries a caller’s $setOnInsert onto a new row, and ignores it on an existing one', async () => {
+      // The clause exists for the fields only a **new** row gets — the ones an update must not
+      // reset. A goal's cascade mapping is the case this was written for (P8-T1).
+      const born = await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, {
+        $setOnInsert: { name: 'plan' },
+      });
+      const again = await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, {
+        $setOnInsert: { name: 'never-applied' },
+      });
+
+      expect((born as unknown as { name: string }).name).toBe('plan');
+      expect((again as unknown as { name: string }).name).toBe('plan');
+      expect(await repo.count(ctxFor(KPM_A), {})).toBe(1);
+    });
+
+    it('takes an update with no $set of its own, and still stamps the writer', async () => {
+      const row = await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, {
+        $setOnInsert: { name: 'plan' },
+      });
+
+      expect((row as unknown as { updatedBy: string }).updatedBy).toBe('mem-' + KPM_A);
+    });
+
+    it('cannot reach another tenant’s row, and makes its own instead', async () => {
+      await repo.upsertOne(ctxFor(KPM_B), { name: 'plan' }, { $set: { name: 'plan' } });
+
+      await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, { $set: { name: 'plan' } });
+
+      expect(await repo.count(ctxFor(KPM_A), {})).toBe(1);
+      expect(await repo.count(ctxFor(KPM_B), {})).toBe(1);
+    });
+
+    it('does not adopt a soft-deleted row', async () => {
+      const gone = await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, { $set: { name: 'plan' } });
+      await repo.softDeleteById(ctxFor(KPM_A), String((gone as unknown as { _id: unknown })._id), new Date());
+
+      const fresh = await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, { $set: { name: 'plan' } });
+
+      expect(String((fresh as unknown as { _id: unknown })._id))
+        .not.toBe(String((gone as unknown as { _id: unknown })._id));
+      expect(await repo.count(ctxFor(KPM_A), {})).toBe(1);
+    });
+
+    it('fails closed with no tenant context, like every other write', async () => {
+      const noTenant = new RequestContext('u1', 'none', null);
+
+      await expect(repo.upsertOne(noTenant, { name: 'plan' }, { $set: { name: 'plan' } }))
+        .rejects.toBeInstanceOf(MissingTenantContextError);
+    });
+  });
+
 });

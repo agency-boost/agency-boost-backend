@@ -18,6 +18,9 @@ import { LeadRepository } from '@/modules/leads/lead.repository';
 import { LeadService } from '@/modules/leads/lead.service';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
+import { Goal, GoalSchema } from '@/modules/goals/goal.schema';
+import { GoalRepository } from '@/modules/goals/goal.repository';
+import { GoalService } from '@/modules/goals/goal.service';
 import { AuditService } from '@/modules/audit/audit.service';
 import {
   Notification, NotificationPreferences, NotificationPreferencesSchema, NotificationSchema,
@@ -194,6 +197,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: CompanyOrgLevel.name, schema: CompanyOrgLevelSchema },
       { name: Membership.name, schema: MembershipSchema },
       { name: Lead.name, schema: LeadSchema },
+      { name: Goal.name, schema: GoalSchema },
       { name: MembershipHistory.name, schema: MembershipHistorySchema },
       { name: JoinRequest.name, schema: JoinRequestSchema },
       { name: Group.name, schema: GroupSchema },
@@ -326,6 +330,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     AuditReadService,
     LeadRepository,
     LeadService,
+    GoalRepository,
+    GoalService,
     TenantDay,
     NotificationService,
     PasswordService,

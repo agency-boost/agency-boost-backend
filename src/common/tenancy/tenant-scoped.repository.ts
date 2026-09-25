@@ -147,6 +147,44 @@ export abstract class TenantScopedRepository<T extends Document> {
       .exec();
   }
 
+  /**
+   * Create the row matching `filter`, or update it if it is there — **one round trip**.
+   *
+   * The shape a read-then-write gets wrong. Two saves genuinely race in this product: an agent on a
+   * phone and their leader on a laptop in the same 1-on-1, both reading *nothing there yet* and both
+   * inserting. Read-then-write turns that into a duplicate-key error for whoever is second; an
+   * upsert turns it into what they both meant.
+   *
+   * `$setOnInsert` carries what only a **new** row gets — the fields an update must not reset. The
+   * tenant is injected into both the filter and the insert, so a row created this way is scoped the
+   * moment it exists.
+   */
+  async upsertOne(
+    ctx: RequestContext,
+    filter: FilterQuery<T>,
+    update: UpdateQuery<T>,
+  ): Promise<T> {
+    const kpmId = this.requireKpmId(ctx, 'upsertOne');
+    const scoped = this.scope(ctx, 'upsertOne', filter);
+    const created = await this.model
+      .findOneAndUpdate(
+        scoped,
+        {
+          ...update,
+          $set: { ...(update.$set ?? {}), updatedBy: ctx.membershipId },
+          $setOnInsert: {
+            ...(update.$setOnInsert ?? {}),
+            kpmId,
+            deletedAt: null,
+            createdBy: ctx.membershipId,
+          },
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true },
+      )
+      .exec();
+    return created as T;
+  }
+
   async exists(ctx: RequestContext, filter: FilterQuery<T> = {}): Promise<boolean> {
     return (await this.model.exists(this.scope(ctx, 'exists', filter))) !== null;
   }

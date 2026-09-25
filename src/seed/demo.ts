@@ -22,6 +22,7 @@ import { User, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
 import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
+import { Goal, GoalSchema } from '@/modules/goals/goal.schema';
 import {
   KpmProductConfig, KpmProductConfigSchema,
 } from '@/modules/products/kpm-product-config.schema';
@@ -35,7 +36,7 @@ import {
 import {
   capabilitySeedDocument, defaultCapabilityLadder,
 } from '@/modules/capability/capability-payload';
-import { DEFAULT_ORG_LADDER } from '@/domain/constants';
+import { CASCADE_ACTIVITY_CODES, DEFAULT_ORG_LADDER } from '@/domain/constants';
 import {
   CompanyOrgLevel, CompanyOrgLevelSchema,
 } from '@/modules/tenants/company-org-level.schema';
@@ -126,6 +127,7 @@ async function main(): Promise<void> {
   const ActivationTemplates = mongoose.model(ActivationTemplate.name, ActivationTemplateSchema);
   const Products = mongoose.model(Product.name, ProductSchema);
   const Leads = mongoose.model(Lead.name, LeadSchema);
+  const Goals = mongoose.model(Goal.name, GoalSchema);
   const KpmProductConfigs = mongoose.model(KpmProductConfig.name, KpmProductConfigSchema);
   const EventTypes = mongoose.model(EventType.name, EventTypeSchema);
   const Events = mongoose.model(Event.name, EventSchema);
@@ -162,6 +164,9 @@ async function main(): Promise<void> {
       'trainingCategories', 'trainingSkills', 'trainingModules', 'activationTemplates',
       'companyTemplates', 'products', 'kpmProductConfigs', 'eventTypes', 'events',
       'campaigns', 'qualificationRules', 'capabilityCatalogs', 'activityLogs',
+      // Phase 8. Added with the collection rather than a phase later, which is the
+      // lesson `leads` taught on the line below.
+      'goals',
       // Phase 7, and missed when the collection was added in P7-T1. Without it a `--reset`
       // leaves the previous run's leads owned by membership ids that no longer exist: the
       // Leads screen then reads none of them — it lists the caller's own — while the rows sit
@@ -1330,6 +1335,93 @@ async function main(): Promise<void> {
       source: 'Referral — Pak Agus',
     },
   ]);
+
+  /*
+   * ------------------------------------------------------------------ Goals (P8-T1)
+   *
+   * **A goal is the only place an agent says what they intend to produce**, and four surfaces read
+   * it. Without these the Goal Settings screen opens on defaults for everybody, and the two states
+   * that are actually interesting — a plan somebody has re-planned, and a plan their leader set —
+   * cannot be looked at.
+   *
+   * The snapshots are left at zero deliberately: **what the inputs produce is P8-T2's**, and a
+   * seeded figure here would be a number this codebase cannot yet derive, sitting in the field
+   * whose whole point is that it records something that *was* derived.
+   */
+  const goalSeeds: ReadonlyArray<{
+    owner: string;
+    period: string;
+    mode: 'direct' | 'from_savings';
+    annual: number;
+    savings?: number;
+    commissionPct?: number;
+    monthsLeft: number;
+    achieved: number;
+    caseSize: number;
+    leadsToAppt: number;
+    closing: number;
+    version: number;
+    /** Somebody other than the owner saved it — a leader, in a 1-on-1 (ADR-0046). */
+    savedBy?: string;
+  }> = [
+    {
+      // Rina: the ordinary case, a plan she set herself and has since updated as she produced.
+      owner: rina.id, period: '2026', mode: 'direct',
+      annual: 500_000_000_00, monthsLeft: 3.2, achieved: 120_000_000_00,
+      caseSize: 18_000_000_00, leadsToAppt: 30, closing: 30, version: 3,
+    },
+    {
+      // Budi: the second entry mode. He thinks in take-home pay, not in APE.
+      owner: budi.id, period: '2026', mode: 'from_savings',
+      annual: 300_000_000_00, savings: 30_000_000_00, commissionPct: 10,
+      monthsLeft: 3.2, achieved: 45_000_000_00,
+      caseSize: 15_000_000_00, leadsToAppt: 25, closing: 20, version: 1,
+    },
+    {
+      // Dewi: **set by her leader**, so the agent's screen has an attribution to show (ADR-0046).
+      owner: dewi.id, period: '2026', mode: 'direct',
+      annual: 750_000_000_00, monthsLeft: 3.2, achieved: 210_000_000_00,
+      caseSize: 22_000_000_00, leadsToAppt: 35, closing: 30, version: 2,
+      savedBy: ab.id,
+    },
+    {
+      // Rina, last year: what a history screen reads, and the reason `period` is a key (ADR-0049).
+      owner: rina.id, period: '2025', mode: 'direct',
+      annual: 400_000_000_00, monthsLeft: 0.1, achieved: 415_000_000_00,
+      caseSize: 16_000_000_00, leadsToAppt: 30, closing: 30, version: 5,
+    },
+  ];
+
+  for (const seed of goalSeeds) {
+    if (await Goals.findOne({ kpmId: id0417, membershipId: seed.owner, period: seed.period }).exec()) {
+      continue;
+    }
+    await Goals.create({
+      kpmId: id0417,
+      membershipId: seed.owner,
+      period: seed.period,
+      mode: seed.mode,
+      annualApeTargetMinor: seed.annual,
+      savingsTargetMinor: seed.savings ?? 0,
+      commissionRatePct: seed.commissionPct ?? 0,
+      monthsLeft: seed.monthsLeft,
+      apeAchievedMinor: seed.achieved,
+      caseSizeMinor: seed.caseSize,
+      leadsToApptPct: seed.leadsToAppt,
+      closingRatePct: seed.closing,
+      // P8-T2 fills these. A seeded figure would be a derivation this codebase cannot yet make.
+      snapshot: {
+        monthlyApeTargetMinor: 0, policiesPerMonth: 0, appointmentsPerMonth: 0, leadsPerMonth: 0,
+      },
+      cascadeMapping: { ...CASCADE_ACTIVITY_CODES },
+      savedAt: daysAgo(seed.period === '2025' ? 300 : 12),
+      savedByMembershipId: seed.savedBy ?? seed.owner,
+      version: seed.version,
+      deletedAt: null,
+      createdBy: seed.savedBy ?? seed.owner,
+      updatedBy: seed.savedBy ?? seed.owner,
+    });
+  }
 
   // ------------------------------------------------- KPM 0555, for cross-tenant checks
 

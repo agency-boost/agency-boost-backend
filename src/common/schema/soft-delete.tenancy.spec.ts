@@ -53,6 +53,9 @@ import {
   LeadCommitmentSchema, LeadContactSchema, LeadSchema, LeadTransitionSchema,
 } from '@/modules/leads/lead.schema';
 import {
+  GoalCascadeMappingSchema, GoalSchema, GoalSnapshotSchema,
+} from '@/modules/goals/goal.schema';
+import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
 } from '@/modules/campaigns/campaign.schema';
 import {
@@ -98,6 +101,7 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['events', EventSchema],
   ['activityLogs', ActivityLogSchema],
   ['leads', LeadSchema],
+  ['goals', GoalSchema],
   ['campaigns', CampaignSchema],
   ['capabilityCatalogs', CapabilityCatalogSchema],
   // Company-partitioned carrier rules (ADR-0035), soft-deleted like every other row.
@@ -183,6 +187,19 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
       + 'legible and a leader\'s edit attributable (ADR-0044, ADR-0045)',
   ],
   [
+    'goalSnapshot (subdocument)',
+    GoalSnapshotSchema,
+    'the figures a goal was agreed on. **Replaced whole on every save, never removed** — a goal '
+      + 'that has been re-planned keeps the version that held the old ones (ADR-0042)',
+  ],
+  [
+    'goalCascadeMapping (subdocument)',
+    GoalCascadeMappingSchema,
+    'the three activity codes a goal is measured against. Set once and rewritten only if the '
+      + 'product changes which activities the cascade counts — deleting one would leave a column '
+      + 'measuring nothing',
+  ],
+  [
     'leadCommitment (subdocument)',
     LeadCommitmentSchema,
     'one month an agent promised a lead for (P7-T5). A past month is unreachable by '
@@ -249,6 +266,9 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [LeadContactSchema, 'LeadContactSchema'],
   [LeadTransitionSchema, 'LeadTransitionSchema'],
   [LeadCommitmentSchema, 'LeadCommitmentSchema'],
+  [GoalSchema, 'GoalSchema'],
+  [GoalSnapshotSchema, 'GoalSnapshotSchema'],
+  [GoalCascadeMappingSchema, 'GoalCascadeMappingSchema'],
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
   [ActivityLogCorrectionSchema, 'ActivityLogCorrectionSchema'],
   [CampaignSchema, 'CampaignSchema'],

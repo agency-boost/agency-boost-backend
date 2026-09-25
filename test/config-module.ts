@@ -74,6 +74,9 @@ import { StubStorage } from './stub-storage';
 import { ProductService } from '@/modules/products/product.service';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
+import { Goal, GoalSchema } from '@/modules/goals/goal.schema';
+import { GoalRepository } from '@/modules/goals/goal.repository';
+import { GoalService } from '@/modules/goals/goal.service';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { UserSchema } from '@/modules/users/user.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
@@ -213,6 +216,12 @@ export function configModule(now: Date) {
     memberships,
     new MemberNames(memberships, users as never),
   );
+  // P8-T1: one agent's agreed plan for one period.
+  const goals = new GoalService(
+    new GoalRepository(model(Goal.name, GoalSchema) as never),
+    audit,
+    clock,
+  );
   // P5-T7: the office's campaigns, and the carrier rules it is measured against.
   const campaigns = new CampaignService(
     new CampaignRepository(model(Campaign.name, CampaignSchema) as never),
@@ -287,6 +296,7 @@ export function configModule(now: Date) {
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
     products, assets, storage, kpmProducts, events, campaigns, capability, activityLogs,
     leadRecords,
+    goals,
   };
 }
 

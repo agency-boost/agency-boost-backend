@@ -54,6 +54,9 @@ import {
   LeadCommitmentSchema, LeadContactSchema, LeadSchema, LeadTransitionSchema,
 } from '@/modules/leads/lead.schema';
 import {
+  GoalCascadeMappingSchema, GoalSchema, GoalSnapshotSchema,
+} from '@/modules/goals/goal.schema';
+import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
 } from '@/modules/campaigns/campaign.schema';
 import {
@@ -92,6 +95,7 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['events', EventSchema],
   ['activityLogs', ActivityLogSchema],
   ['leads', LeadSchema],
+  ['goals', GoalSchema],
   ['campaigns', CampaignSchema],
   ['capabilityCatalogs', CapabilityCatalogSchema],
 ];
@@ -230,6 +234,18 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'one month a lead was promised for, inside the lead: no collection and no _id of its own',
   ],
   [
+    'goalSnapshot (subdocument)',
+    GoalSnapshotSchema,
+    'what a goal\'s inputs produced when they were agreed, inside the goal: no collection and no '
+      + '_id of its own',
+  ],
+  [
+    'goalCascadeMapping (subdocument)',
+    GoalCascadeMappingSchema,
+    'the three activity codes a goal is measured against, inside the goal: no collection and no '
+      + '_id of its own',
+  ],
+  [
     'activityLogCorrection (subdocument)',
     ActivityLogCorrectionSchema,
     'a prior state of an activity log, held inside the day it belongs to',
@@ -310,6 +326,9 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [LeadContactSchema, 'LeadContactSchema'],
   [LeadTransitionSchema, 'LeadTransitionSchema'],
   [LeadCommitmentSchema, 'LeadCommitmentSchema'],
+  [GoalSchema, 'GoalSchema'],
+  [GoalSnapshotSchema, 'GoalSnapshotSchema'],
+  [GoalCascadeMappingSchema, 'GoalCascadeMappingSchema'],
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
   [ActivityLogCorrectionSchema, 'ActivityLogCorrectionSchema'],
   [CampaignSchema, 'CampaignSchema'],

@@ -149,6 +149,10 @@ const config: Config = {
      * always takes one way and the patch path always the other. Raised as the module grows.
      */
     './src/modules/leads/': { lines: 95, branches: 88, functions: 95, statements: 95 },
+    // P8: the goal record and the cascade that reads it. A ratchet, not a target — the
+    // module is at 100/94 on the day it lands, and these are the numbers it may not fall
+    // below.
+    './src/modules/goals/': { lines: 95, branches: 90, functions: 95, statements: 95 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],
