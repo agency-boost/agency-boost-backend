@@ -162,6 +162,11 @@ async function main(): Promise<void> {
       'trainingCategories', 'trainingSkills', 'trainingModules', 'activationTemplates',
       'companyTemplates', 'products', 'kpmProductConfigs', 'eventTypes', 'events',
       'campaigns', 'qualificationRules', 'capabilityCatalogs', 'activityLogs',
+      // Phase 7, and missed when the collection was added in P7-T1. Without it a `--reset`
+      // leaves the previous run's leads owned by membership ids that no longer exist: the
+      // Leads screen then reads none of them — it lists the caller's own — while the rows sit
+      // in the database forever, which is the same orphaning the two comments above describe.
+      'leads',
     ];
     for (const name of owned) {
       const { deletedCount } = await mongoose.connection.collection(name).deleteMany({});
@@ -1664,6 +1669,24 @@ async function main(): Promise<void> {
     counts: Record<string, number>,
     extra: Record<string, unknown> = {},
   ) => {
+    /*
+     * **Leaves what exists**, like every other writer in this file.
+     *
+     * This one had no guard and was the only seeder that could *fail* a re-run rather than
+     * no-op it: `activityLogs` carries a unique `(kpmId, membershipId, localDate)` index, and
+     * the days below are relative to **today**. Seed on Tuesday and Rina's `daysBack: 0` writes
+     * Tuesday; seed again on Wednesday and her `daysBack: 1` writes Tuesday a second time —
+     * E11000, on a script the docs call idempotent, part-way through so that everything after
+     * it never ran. Which is how it surfaced: a re-seed for Phase 7 stopped before the leads
+     * block it was run for.
+     *
+     * Skipping rather than overwriting is the same contract as `notify` and `audited` above: a
+     * day that is already there keeps the counts it has.
+     */
+    const localDate = jakartaDay(daysBack);
+    if (await mongoose.connection.collection('activityLogs')
+      .findOne({ kpmId: id0417, membershipId, localDate })) return;
+
     const types = await ActivityTypes.find({ kpmId: id0417, status: 'active' }).lean().exec();
     const entries = types.map((type) => ({
       activityTypeId: String((type as { _id: unknown })._id),
@@ -1673,7 +1696,7 @@ async function main(): Promise<void> {
     await mongoose.connection.collection('activityLogs').insertOne({
       kpmId: id0417,
       membershipId,
-      localDate: jakartaDay(daysBack),
+      localDate,
       entries,
       totalCount: entries.reduce((sum, e) => sum + e.count, 0),
       source: 'self',
