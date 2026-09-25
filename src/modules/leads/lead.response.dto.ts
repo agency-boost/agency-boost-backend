@@ -68,6 +68,17 @@ export class LeadResponseDto implements LeadView {
       + 'prototype, which shows only the green chip on a lead that is also two weeks overdue.',
   })
   flags!: LeadFlag[];
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 14,
+    description:
+      'How late, in the office’s own calendar days — `null` unless `flags` carries `overdue`. '
+      + 'Beside `flags` rather than inside it: `flags` is what the list filters on, and a filter '
+      + 'key carrying a number is one nobody can match against.',
+  })
+  overdueDays!: number | null;
 }
 
 export class LeadPageDto implements LeadPage {

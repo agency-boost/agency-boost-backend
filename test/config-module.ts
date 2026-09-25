@@ -73,6 +73,7 @@ import { AssetService } from '@/modules/assets/asset.service';
 import { StubStorage } from './stub-storage';
 import { ProductService } from '@/modules/products/product.service';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
+import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
@@ -202,6 +203,7 @@ export function configModule(now: Date) {
     new LeadStatusRepository(leadStatuses as never),
     audit,
     clock,
+    new TenantDay(kpms as never, clock),
   );
   // P5-T7: the office's campaigns, and the carrier rules it is measured against.
   const campaigns = new CampaignService(

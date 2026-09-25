@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
@@ -33,7 +34,16 @@ describe('the lead record (P7-T1)', () => {
     wired = configModule(NOW);
   });
   afterAll(stopMongo);
-  beforeEach(clearCollections);
+  beforeEach(async () => {
+    await clearCollections();
+    // A real office row per tenant, because `TenantDay` reads `kpms.timezone` rather than a
+    // constant (invariant §9). Without these it falls back to the platform default and the
+    // zone tests below would be asserting the fallback.
+    await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create([
+      { _id: KPM_A, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta' },
+      { _id: KPM_B, companyId: COMPANY, code: '0555', branchName: 'B', timezone: 'Asia/Jakarta' },
+    ]);
+  });
 
   const create = (ctx: RequestContext, over: Record<string, unknown> = {}) =>
     wired.leadRecords.create(ctx, { name: 'Pak Budi', ...over });
@@ -470,4 +480,100 @@ describe('the lead record (P7-T1)', () => {
       expect(page.rows.map((l) => l.name)).toEqual(['Sdri. Maya']);
     });
   });
+
+  /**
+   * Triage (P7-T4).
+   *
+   * **The flags are derived on every read and stored nowhere.** A stored flag is one that is
+   * wrong at midnight — and *which* midnight is the rest of this block.
+   */
+  describe('P7-T4 — what is asking to be picked up', () => {
+    beforeEach(() => provisionOffice(wired, KPM_A, COMPANY));
+    afterEach(() => (wired.clock as FixedClock).set(NOW));
+
+    const at = (instant: string) => (wired.clock as FixedClock).set(new Date(instant));
+    const zone = (kpmId: string, timezone: string) =>
+      mongoose.connection.db!.collection('kpms')
+        .updateOne({ _id: new mongoose.Types.ObjectId(kpmId) }, { $set: { timezone } });
+
+    it('AC-1: derives the three flags and stores none of them', async () => {
+      const lead = await create(A(), { nextActionDate: '2026-09-01' });
+
+      const stored = await mongoose.connection.db!.collection('leads')
+        .findOne({ _id: new mongoose.Types.ObjectId(lead.id) });
+      expect(stored).not.toHaveProperty('flags');
+      expect((await wired.leadRecords.read(A(), lead.id)).flags)
+        .toEqual(['overdue', 'no-remarks']);
+    });
+
+    it('AC-4: forgetting a date and missing one are different flags', async () => {
+      const forgotten = await create(A(), { name: 'No date', remarks: 'Talked on Friday.' });
+      const missed = await create(A(), { name: 'Late', remarks: 'Talked on Friday.', nextActionDate: '2026-09-01' });
+
+      expect((await wired.leadRecords.read(A(), forgotten.id)).flags).toEqual(['no-next-action']);
+      expect((await wired.leadRecords.read(A(), missed.id)).flags).toEqual(['overdue']);
+    });
+
+    it('AC-3: overdue is the office’s day, not the server’s', async () => {
+      /*
+       * 2026-09-25T17:30Z is already the 26th in Jakarta and still the 25th in UTC. A lead due
+       * on the 25th is late for an office in Jakarta and not late for one reading the server's
+       * clock — which is the whole of invariant §9 in one row.
+       */
+      await zone(KPM_A, 'Asia/Jakarta');
+      const lead = await create(A(), { remarks: 'Talked on Friday.', nextActionDate: '2026-09-25' });
+      at('2026-09-25T17:30:00Z');
+
+      expect((await wired.leadRecords.read(A(), lead.id)).flags).toEqual(['overdue']);
+      expect(new Date('2026-09-25T17:30:00Z').toISOString().slice(0, 10)).toBe('2026-09-25');
+    });
+
+    it('AC-3: and the same instant is not overdue for an office further west', async () => {
+      // v1 runs every office on Asia/Jakarta (ADR-0016). The column is real all the same, and
+      // this is the test that fails the moment somebody replaces it with the constant.
+      await zone(KPM_A, 'America/New_York');
+      const lead = await create(A(), { remarks: 'Talked on Friday.', nextActionDate: '2026-09-25' });
+      at('2026-09-25T17:30:00Z');
+
+      expect((await wired.leadRecords.read(A(), lead.id)).flags).toEqual([]);
+    });
+
+    it('counts how late in whole office days, not in epoch arithmetic', async () => {
+      await zone(KPM_A, 'Asia/Jakarta');
+      const lead = await create(A(), { remarks: 'Talked on Friday.', nextActionDate: '2026-09-11' });
+
+      // NOW is 2026-09-25T02:00Z — 09:00 on the 25th in Jakarta. Fourteen days.
+      const read = await wired.leadRecords.read(A(), lead.id);
+      expect(read.overdueDays).toBe(14);
+    });
+
+    it('carries no day count on a lead that is not overdue', async () => {
+      const onTime = await create(A(), { remarks: 'Talked on Friday.', nextActionDate: '2026-10-02' });
+      const undated = await create(A(), { name: 'No date', remarks: 'Talked on Friday.' });
+
+      expect((await wired.leadRecords.read(A(), onTime.id)).overdueDays).toBeNull();
+      expect((await wired.leadRecords.read(A(), undated.id)).overdueDays).toBeNull();
+    });
+
+    it('AC-2: a commitment for the month hides nothing', async () => {
+      // The prototype shows only the green chip on a lead that is also two weeks overdue,
+      // which hides exactly the leads most needing attention. Registered as I-103.
+      const lead = await create(A(), { thisMonth: true, nextActionDate: '2026-09-11' });
+
+      const read = await wired.leadRecords.read(A(), lead.id);
+      expect(read.thisMonth).toBe(true);
+      expect(read.flags).toEqual(['overdue', 'no-remarks']);
+      expect(read.overdueDays).toBe(14);
+    });
+
+    it('a closed lead is asking for nothing', async () => {
+      const lead = await create(A(), { nextActionDate: '2026-09-01' });
+      await wired.leadRecords.setOutcome(A(), lead.id, 'lost');
+
+      const read = await wired.leadRecords.read(A(), lead.id);
+      expect(read.flags).toEqual([]);
+      expect(read.overdueDays).toBeNull();
+    });
+  });
+
 });

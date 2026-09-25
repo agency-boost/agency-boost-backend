@@ -7,6 +7,7 @@ import {
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
 import { LeadStatusRepository } from '@/modules/config/activity.repository';
+import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
 import { checkLead, requireLawfulBasis, type CheckedLead } from './lead-input';
 import { LeadRepository } from './lead.repository';
 import type { LeadDocument, LeadType } from './lead.schema';
@@ -58,6 +59,15 @@ export interface LeadView {
   version: number;
   /** Computed on read, so the screen and the service cannot disagree about what is overdue. */
   flags: LeadFlag[];
+  /**
+   * How late, in the office's own days. `null` unless `flags` carries `overdue`.
+   *
+   * *Overdue 14 days* and *Overdue 1 day* are different conversations, and the prototype says
+   * which (`leads-management.md` §4). Kept **beside** `flags` rather than folded into it: `flags`
+   * is what the screen filters on, and a filter key carrying a number is a filter key nobody can
+   * match against.
+   */
+  overdueDays: number | null;
 }
 
 /**
@@ -80,6 +90,7 @@ export class LeadService {
     private readonly statuses: LeadStatusRepository,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    private readonly days: TenantDay,
   ) {}
 
   /** The caller's own membership, or a refusal that says what to do about it. */
@@ -129,7 +140,7 @@ export class LeadService {
       hasContact: Boolean(contact.phone || contact.email),
       lawfulBasis: created.lawfulBasis,
     });
-    return this.view(created);
+    return this.view(created, await this.days.for(ctx));
   }
 
   async update(ctx: RequestContext, id: string, body: unknown): Promise<LeadView> {
@@ -181,7 +192,7 @@ export class LeadService {
       hasContact: Boolean(next.contact.phone || next.contact.email),
       lawfulBasis: next.lawfulBasis,
     });
-    return this.view(updated);
+    return this.view(updated, await this.days.for(ctx));
   }
 
   /**
@@ -217,7 +228,7 @@ export class LeadService {
     }
 
     const wanted = statusCode.trim().toUpperCase();
-    if (wanted === lead.statusCode) return this.view(lead);
+    if (wanted === lead.statusCode) return this.view(lead, await this.days.for(ctx));
 
     const status = await this.statuses.findOne(ctx, { code: wanted });
     if (!status) throw new NotFoundException('Lead status', { code: wanted });
@@ -256,7 +267,7 @@ export class LeadService {
     await this.record(ctx, 'lead.status_changed', id, {
       from: lead.statusCode ?? null, to: wanted, byMembershipId: membershipId,
     });
-    return this.view(updated);
+    return this.view(updated, await this.days.for(ctx));
   }
 
   /**
@@ -312,7 +323,7 @@ export class LeadService {
     await this.record(ctx, outcome ? 'lead.closed' : 'lead.reopened', id, {
       outcome, from: lead.outcome ?? null, statusCode: lead.statusCode ?? null,
     });
-    return this.view(updated);
+    return this.view(updated, await this.days.for(ctx));
   }
 
   /**
@@ -337,7 +348,7 @@ export class LeadService {
     this.me(ctx);
     const lead = await this.leads.findById(ctx, id);
     if (!lead) throw new NotFoundException('Lead');
-    return this.view(lead);
+    return this.view(lead, await this.days.for(ctx));
   }
 
   /**
@@ -378,8 +389,11 @@ export class LeadService {
       sort: { [query.sort ?? 'dateRegistered']: query.dir === 'asc' ? 1 : -1 },
     });
 
+    // Once for the page. `flagsFor` runs for every row here and again for every row rendered,
+    // and the office's day does not change between two rows of one response.
+    const day = await this.days.for(ctx);
     const attended = query.attention
-      ? rows.filter((row) => this.flagsFor(row).includes(query.attention!))
+      ? rows.filter((row) => this.flagsFor(row, day).includes(query.attention!))
       : rows;
 
     /*
@@ -393,7 +407,7 @@ export class LeadService {
     const start = (page - 1) * size;
 
     return {
-      rows: attended.slice(start, start + size).map((row) => this.view(row)),
+      rows: attended.slice(start, start + size).map((row) => this.view(row, day)),
       total: attended.length,
       page,
       pageSize: size,
@@ -408,20 +422,21 @@ export class LeadService {
    * it shows only the green *Closes this month* chip on a lead that is also two weeks overdue,
    * hiding exactly the leads most needing attention (P7-T4 AC-2).
    */
-  private flagsFor(lead: LeadDocument): LeadFlag[] {
+  private flagsFor(lead: LeadDocument, day: OfficeDay): LeadFlag[] {
     if (lead.outcome) return [];
     const flags: LeadFlag[] = [];
+    /*
+     * **Two flags, not one** (AC-4). Forgetting to set a date and missing one are different
+     * failures with different answers: the first wants a decision, the second wants a call. The
+     * `else` is precedence rather than suppression — a lead with no date cannot also be late for
+     * one — and it is the prototype's own order (`leads-management.md` §4).
+     */
     if (!lead.nextActionDate) flags.push('no-next-action');
-    // Against the tenant's day, which P7-T4 makes exact; today's comparison is on the same
-    // `YYYY-MM-DD` string the field stores, so it is timezone-free until then.
-    else if (lead.nextActionDate < this.today()) flags.push('overdue');
+    // `YYYY-MM-DD` sorts lexicographically in calendar order, which is the reason the field is
+    // stored in this shape. `today` is the **office's** day (invariant §9, AC-3).
+    else if (lead.nextActionDate < day.today) flags.push('overdue');
     if (!lead.remarks) flags.push('no-remarks');
     return flags;
-  }
-
-  /** `YYYY-MM-DD` as the clock sees it. P7-T4 moves this onto the tenant's timezone. */
-  private today(): string {
-    return this.clock.now().toISOString().slice(0, 10);
   }
 
   /** The stored row with the patch applied, for a rule that has to see both. */
@@ -444,7 +459,8 @@ export class LeadService {
     return out;
   }
 
-  private view(doc: LeadDocument): LeadView {
+  private view(doc: LeadDocument, day: OfficeDay): LeadView {
+    const flags = this.flagsFor(doc, day);
     return {
       id: String(doc._id),
       ownerMembershipId: doc.ownerMembershipId,
@@ -462,7 +478,15 @@ export class LeadService {
       source: doc.source,
       dateRegistered: doc.dateRegistered ? doc.dateRegistered.toISOString() : null,
       version: doc.version,
-      flags: this.flagsFor(doc),
+      flags: flags,
+      /*
+       * Whole calendar days, in the office's zone — `Clock.daysBetween` rather than a subtraction
+       * of epoch milliseconds, which is what the prototype does and is off by one across a DST
+       * boundary. Jakarta has none; the next company's offices are not promised to.
+       */
+      overdueDays: flags.includes('overdue') && doc.nextActionDate
+        ? this.clock.daysBetween(day.timezone, doc.nextActionDate, day.today)
+        : null,
     };
   }
 

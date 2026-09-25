@@ -13863,6 +13863,12 @@
                 "no-remarks"
               ]
             }
+          },
+          "overdueDays": {
+            "type": "number",
+            "nullable": true,
+            "example": 14,
+            "description": "How late, in the office’s own calendar days — `null` unless `flags` carries `overdue`. Beside `flags` rather than inside it: `flags` is what the list filters on, and a filter key carrying a number is one nobody can match against."
           }
         },
         "required": [
@@ -13882,7 +13888,8 @@
           "source",
           "dateRegistered",
           "version",
-          "flags"
+          "flags",
+          "overdueDays"
         ]
       },
       "LeadPageDto": {
