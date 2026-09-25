@@ -73,8 +73,14 @@ describe('a goal’s fields', () => {
       expect(checkGoal({ ...ok, [field]: 12.5 })[field as 'commissionRatePct']).toBe(12.5);
     });
 
-    it.each([-1, 101])('refuses %p, which is not a percentage', (value) => {
-      expect(() => checkGoal({ ...ok, closingRatePct: value })).toThrow(/from 0 to 100/);
+    it('refuses a negative one, because no percentage is', () => {
+      expect(() => checkGoal({ ...ok, closingRatePct: -1 })).toThrow(/must be a percentage/);
+    });
+
+    it('lets 101 through, because the ceiling belongs to the cascade', () => {
+      // Shape here, semantics there: `goal-cascade.ts` refuses it with GOAL_INVALID_ASSUMPTION so
+      // the screen can point at the field. One rule, in the module that needs it (AC-7).
+      expect(checkGoal({ ...ok, closingRatePct: 101 }).closingRatePct).toBe(101);
     });
   });
 
@@ -105,7 +111,8 @@ describe('a goal’s fields', () => {
     });
 
     it('still refuses a bad value', () => {
-      expect(() => checkGoal({ closingRatePct: 400 }, { partial: true })).toThrow(/from 0 to 100/);
+      expect(() => checkGoal({ closingRatePct: 'thirty' }, { partial: true }))
+        .toThrow(/must be a percentage/);
     });
   });
 
@@ -116,7 +123,7 @@ describe('a goal’s fields', () => {
 
   it('gathers every violation, so a form with three mistakes hears about three', () => {
     try {
-      checkGoal({ ...ok, period: 'x', closingRatePct: 400, monthsLeft: 0 });
+      checkGoal({ ...ok, period: 'x', closingRatePct: 'thirty', monthsLeft: 0 });
       throw new Error('should have refused');
     } catch (err) {
       expect((err as { details: { violations: string[] } }).details.violations).toHaveLength(3);

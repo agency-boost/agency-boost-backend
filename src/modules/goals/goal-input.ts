@@ -30,8 +30,7 @@ const PERIOD = /^\d{4}$/;
  */
 export const GOAL_BOUNDS = {
   money: { min: 0, max: 10_000_000_000_000_00 },
-  /** A percentage, not a fraction. `30` is thirty per cent, and `12.5` is twelve and a half. */
-  percent: { min: 0, max: 100 },
+
   /** The cascade's divisor. Floored well above zero so it cannot divide by ~0. */
   monthsLeft: { min: 0.1, max: 120 },
 } as const;
@@ -98,14 +97,26 @@ export function checkGoal(body: unknown, opts: { partial?: boolean } = {}): Chec
   }
 
   /*
-   * **Decimals are accepted here, deliberately** (I-108). The prototype's `parseNum` strips every
+   * **Shape only: is this a percentage-shaped number.** Whether it is a *usable* one — above zero
+   * and at most a hundred — is `goal-cascade.ts`'s, which refuses it with
+   * `GOAL_INVALID_ASSUMPTION` so a screen can point at the field rather than at the form. One
+   * semantic rule, in the module that needs it (invariant §8).
+   *
+   * **Decimals survive here, deliberately** (I-108). The prototype's `parseNum` strips every
    * non-digit, so `12.5` becomes `125`: a commission rate of twelve and a half per cent read as a
-   * hundred and twenty-five, and a plan built on a tenfold error. That is a defect rather than a
-   * simplification, and this is the line that does not reproduce it.
+   * hundred and twenty-five, and a plan built on a tenfold error.
    */
   for (const field of PERCENT) {
-    const value = f.number(field, GOAL_BOUNDS.percent, required);
-    if (value !== undefined) out[field] = value;
+    const value = raw(body, field);
+    if (value === undefined) {
+      if (required) f.violations.push(`${field} is required.`);
+      continue;
+    }
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      f.violations.push(`${field} must be a percentage, written as a number like 30 or 12.5.`);
+      continue;
+    }
+    out[field] = value;
   }
 
   const months = f.number('monthsLeft', GOAL_BOUNDS.monthsLeft, required);

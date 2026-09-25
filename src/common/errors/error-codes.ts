@@ -63,6 +63,19 @@ export const ErrorCode = {
   /** Already won or lost. Reopening is an explicit act, not a side effect of the next write. */
   LEAD_ALREADY_CLOSED: 'LEAD_ALREADY_CLOSED',
   /**
+   * An assumption the goal cascade cannot make a plan from (P8-T2).
+   *
+   * **Catalogued since Phase 0 and raised by nothing until now**, the third of these this year —
+   * the drift `ACTIVITY_COUNT_OUT_OF_RANGE` was removed for and `CONFIG_ARCHIVED` was finally
+   * given a caller for in P7-T3.
+   *
+   * A non-positive case size or a conversion rate outside 0–100. The prototype coerces instead:
+   * `parseNum(caseSize) || 1` turns a blank into **one rupiah**, which produces a target of a
+   * hundred million policies and no hint that anything is wrong. Refusing by name lets the screen
+   * point at the field.
+   */
+  GOAL_INVALID_ASSUMPTION: 'GOAL_INVALID_ASSUMPTION',
+  /**
    * New data written against archived configuration (invariant §3).
    *
    * **Catalogued since Phase 4 and raised by nothing until now.** It is one of six `CONFIG_*`

@@ -180,12 +180,13 @@ describe('the goal record (P8-T1)', () => {
       expect(read.monthsLeft).toBe(3.2);
     });
 
-    it('starts a new goal with no agreed figures, which is a real state', async () => {
+    it('snapshots what was agreed, at the one moment it equals what the inputs mean', async () => {
+      // P8-T2 made this true: the snapshot is written from the cascade at save time and never
+      // again, which is the only moment the agreement and the projection are the same thing.
       const goal = await save(A());
 
-      expect(goal.snapshot).toEqual({
-        monthlyApeTargetMinor: 0, policiesPerMonth: 0, appointmentsPerMonth: 0, leadsPerMonth: 0,
-      });
+      expect(goal.snapshot.policiesPerMonth).toBe(goal.projected!.policiesPerMonth);
+      expect(goal.snapshot.monthlyApeTargetMinor).toBe(goal.projected!.monthlyApeTargetMinor);
     });
   });
 
@@ -278,9 +279,59 @@ describe('the goal record (P8-T1)', () => {
     });
   });
 
+  describe('AC-1b — every read recomputes, and the snapshot does not move', () => {
+    it('reads what the inputs mean today, not what was agreed in January', async () => {
+      /*
+       * The whole reason both are stored. `monthsLeft` shrinks every day, so a plan saved with
+       * five months left and read with two is a different monthly target — and the screen has to
+       * show the second one or it is describing a year that no longer exists (client PRD §17).
+       */
+      const goal = await save(A(), { monthsLeft: 5 });
+      expect(goal.snapshot.monthlyApeTargetMinor).toBe(100_000_000_00);
+
+      // The agent revises the runway, and only the inputs move.
+      await mongoose.connection.db!.collection('goals').updateOne(
+        { _id: new mongoose.Types.ObjectId(goal.id) }, { $set: { monthsLeft: 2 } },
+      );
+      const read = await wired.goals.read(A(), '2026');
+
+      expect(read.projected!.monthlyApeTargetMinor).toBe(250_000_000_00);
+      // The agreement is untouched: it is a record of what was said, not of what is true now.
+      expect(read.snapshot.monthlyApeTargetMinor).toBe(100_000_000_00);
+    });
+
+    it('recomputes for a list as well as a read', async () => {
+      await save(A(), { period: '2026', monthsLeft: 5 });
+      await save(A(), { period: '2027', monthsLeft: 10 });
+
+      const [newest, older] = await wired.goals.list(A());
+
+      expect(newest.projected!.monthlyApeTargetMinor).toBe(50_000_000_00);
+      expect(older.projected!.monthlyApeTargetMinor).toBe(100_000_000_00);
+    });
+
+    it('AC-7: refuses to save a plan its assumptions cannot produce', async () => {
+      await expect(save(A(), { caseSizeMinor: 0 }))
+        .rejects.toMatchObject({ code: 'GOAL_INVALID_ASSUMPTION', status: 422 });
+      await expect(save(A(), { closingRatePct: 101 }))
+        .rejects.toMatchObject({ code: 'GOAL_INVALID_ASSUMPTION' });
+    });
+
+    it('AC-7: writes nothing when it refuses', async () => {
+      await expect(save(A(), { caseSizeMinor: 0 })).rejects.toMatchObject({ code: 'GOAL_INVALID_ASSUMPTION' });
+
+      expect(await mongoose.connection.db!.collection('goals').countDocuments()).toBe(0);
+    });
+  });
+
   describe('what an office starts somebody on', () => {
     it('offers the registry’s defaults without writing anything', async () => {
-      const offered = wired.goals.defaults('2026');
+      const offered = await wired.goals.defaults(A(), '2026');
+
+      // AC-5: months left is derived for the office rather than left at a floor, and the cascade
+      // still runs — or the screen would open on five empty cards.
+      expect(offered.monthsLeft).toBeGreaterThan(GOAL_DEFAULTS.MONTHS_LEFT_MIN);
+      expect(offered.projected!.leadsPerMonth).toBeGreaterThan(0);
 
       expect(offered.annualApeTargetMinor).toBe(GOAL_DEFAULTS.ANNUAL_APE_TARGET_MINOR);
       expect(offered.caseSizeMinor).toBe(GOAL_DEFAULTS.CASE_SIZE_MINOR);
@@ -317,16 +368,21 @@ describe('the goal record (P8-T1)', () => {
       expect(read.savedAt).toBeNull();
     });
 
-    it('fills both in when the schema writes them, so the fallback is never the ordinary path', async () => {
-      // Written through the model with neither supplied: Mongoose's own defaults run.
+    it('reads a goal whose stored assumptions cannot make a plan, rather than locking its agent out', async () => {
+      /*
+       * Written through the model with nothing but its key: every assumption defaults to zero, so
+       * the cascade cannot run. A **write** refuses that by name (AC-7); a **read** must not, or
+       * the one screen that could fix it is the one screen that will not open.
+       */
       await mongoose.model(Goal.name).create({
         kpmId: KPM_A, membershipId: 'mem-a1', period: '2023', mode: 'direct',
       } as never);
 
       const read = await wired.goals.read(A(), '2023');
 
+      expect(read.projected).toBeNull();
       expect(read.cascadeMapping.leadsCode).toBe('LEADS_CONTACTED');
-      expect(read.snapshot.policiesPerMonth).toBe(0);
+      expect(read.caseSizeMinor).toBe(0);
     });
   });
 

@@ -221,6 +221,7 @@ export function configModule(now: Date) {
     new GoalRepository(model(Goal.name, GoalSchema) as never),
     audit,
     clock,
+    new TenantDay(kpms as never, clock),
   );
   // P5-T7: the office's campaigns, and the carrier rules it is measured against.
   const campaigns = new CampaignService(

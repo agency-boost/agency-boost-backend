@@ -3,7 +3,9 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { AuditService } from '@/modules/audit/audit.service';
+import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { CASCADE_ACTIVITY_CODES, GOAL_DEFAULTS } from '@/domain/constants';
+import { computeCascade, defaultMonthsLeft, type CascadeResult } from './goal-cascade';
 import { checkGoal } from './goal-input';
 import { GoalRepository } from './goal.repository';
 import type { GoalDocument, GoalMode } from './goal.schema';
@@ -14,6 +16,20 @@ export interface GoalSnapshotView {
   policiesPerMonth: number;
   appointmentsPerMonth: number;
   leadsPerMonth: number;
+}
+
+/**
+ * The cascade over a stored goal, or `null` when its inputs cannot make one.
+ *
+ * Outside the class because it is a pure question about a document, and because the alternative —
+ * a try/catch inline in `view` — reads as though throwing were expected there.
+ */
+function projectionOf(doc: GoalDocument): CascadeResult | null {
+  try {
+    return computeCascade(doc as never);
+  } catch {
+    return null;
+  }
 }
 
 /** A plan nobody has agreed figures for yet. Also what a row written before the field reads as. */
@@ -42,6 +58,19 @@ export interface GoalView {
    * the formula; this task stores the agreement and proves the two are independent.
    */
   snapshot: GoalSnapshotView;
+  /**
+   * **What the inputs mean today** — recomputed on every read, never served from storage (P8-T2).
+   *
+   * `monthsLeft` shrinks every day, so a plan saved in January and shown in June would otherwise
+   * claim a year that no longer has eleven months left in it (client PRD §17). This is what every
+   * screen renders; `snapshot` is what was agreed.
+   *
+   * **`null` when the stored inputs cannot produce a plan.** A *write* refuses an unusable
+   * assumption by name (AC-7); a *read* must not, or a goal saved before the rule existed — or
+   * seeded wrong — would lock its agent out of the one screen that could fix it. The inputs still
+   * come back, and the screen says which of them it cannot work from.
+   */
+  projected: CascadeResult | null;
   /** The three activity **codes** the cascade counts against — never the prototype's #3, #4, #6. */
   cascadeMapping: { leadsCode: string; appointmentsCode: string; closingsCode: string };
   savedAt: string | null;
@@ -68,6 +97,7 @@ export class GoalService {
     private readonly goals: GoalRepository,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    private readonly days: TenantDay,
   ) {}
 
   /** The caller's own membership, or a refusal that says what to do about it. */
@@ -96,6 +126,8 @@ export class GoalService {
     const membershipId = this.me(ctx);
     const input = checkGoal(body);
     const now = this.clock.now();
+    // Refuses an unusable assumption before anything is written (AC-7).
+    const agreed = computeCascade(input as never);
 
     const saved = await this.goals.upsertOne(
       ctx,
@@ -113,13 +145,21 @@ export class GoalService {
           closingRatePct: input.closingRatePct!,
           savedAt: now,
           savedByMembershipId: membershipId,
+          /*
+           * **The snapshot is written at save time and never again.** It is what was agreed, which
+           * is a different question from what the inputs mean today — and the only moment the two
+           * are the same is this one.
+           */
+          snapshot: {
+            monthlyApeTargetMinor: agreed.monthlyApeTargetMinor,
+            policiesPerMonth: agreed.policiesPerMonth,
+            appointmentsPerMonth: agreed.appointmentsPerMonth,
+            leadsPerMonth: agreed.leadsPerMonth,
+          },
         },
         $setOnInsert: {
           membershipId,
           period: input.period!,
-          // What the cascade makes of these is P8-T2's. A goal with no agreed figures yet is a
-          // real state, and zero is what it looks like.
-          snapshot: { ...EMPTY_SNAPSHOT },
           cascadeMapping: { ...CASCADE_ACTIVITY_CODES },
         },
         /*
@@ -163,19 +203,29 @@ export class GoalService {
    * `GOAL_DEFAULTS`, so the constants have exactly one home (invariant §7) and the screen does not
    * carry a second copy of them.
    */
-  defaults(period: string): Omit<GoalView, 'id' | 'membershipId' | 'version'> {
-    return {
-      period,
-      mode: 'direct',
+  async defaults(ctx: RequestContext, period: string): Promise<Omit<GoalView, 'id' | 'membershipId' | 'version'>> {
+    const day = await this.days.for(ctx);
+    const inputs = {
+      mode: 'direct' as const,
       annualApeTargetMinor: GOAL_DEFAULTS.ANNUAL_APE_TARGET_MINOR,
       savingsTargetMinor: GOAL_DEFAULTS.ANNUAL_SAVINGS_TARGET_MINOR,
       commissionRatePct: GOAL_DEFAULTS.COMMISSION_RATE_PCT,
-      monthsLeft: GOAL_DEFAULTS.MONTHS_LEFT_MIN,
+      // Derived in the **office's** timezone (AC-5, invariant §9), and overridable the moment the
+      // agent types over it: somebody starting in November knows something the calendar does not.
+      monthsLeft: defaultMonthsLeft(period, this.clock.now(), day.timezone),
       apeAchievedMinor: 0,
       caseSizeMinor: GOAL_DEFAULTS.CASE_SIZE_MINOR,
       leadsToApptPct: GOAL_DEFAULTS.LEADS_TO_APPOINTMENT_PCT,
       closingRatePct: GOAL_DEFAULTS.CLOSING_RATE_PCT,
+    };
+
+    return {
+      period,
+      ...inputs,
+      // Nothing has been agreed, so there is nothing to snapshot — but the cascade still runs, or
+      // the screen would open on five empty cards.
       snapshot: { ...EMPTY_SNAPSHOT },
+      projected: computeCascade(inputs),
       cascadeMapping: { ...CASCADE_ACTIVITY_CODES },
       savedAt: null,
       savedByMembershipId: null,
@@ -183,6 +233,16 @@ export class GoalService {
   }
 
   private view(doc: GoalDocument): GoalView {
+    /*
+     * **Every read recomputes** (AC-1b). The stored snapshot is the agreement; this is what it
+     * means today, and it is what every screen renders.
+     *
+     * **A read never throws on a stored assumption.** The write refuses one by name, so the only
+     * way a bad one reaches here is a row older than the rule — and a read that threw would lock
+     * its agent out of the screen they would fix it on. `null`, and the inputs come back regardless.
+     */
+    const projected = projectionOf(doc);
+
     return {
       id: String(doc._id),
       membershipId: doc.membershipId,
@@ -211,6 +271,7 @@ export class GoalService {
         appointmentsPerMonth: doc.snapshot.appointmentsPerMonth,
         leadsPerMonth: doc.snapshot.leadsPerMonth,
       },
+      projected,
       cascadeMapping: {
         leadsCode: doc.cascadeMapping.leadsCode,
         appointmentsCode: doc.cascadeMapping.appointmentsCode,

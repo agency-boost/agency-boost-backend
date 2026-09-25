@@ -37,6 +37,7 @@ import {
   capabilitySeedDocument, defaultCapabilityLadder,
 } from '@/modules/capability/capability-payload';
 import { CASCADE_ACTIVITY_CODES, DEFAULT_ORG_LADDER } from '@/domain/constants';
+import { computeCascade } from '@/modules/goals/goal-cascade';
 import {
   CompanyOrgLevel, CompanyOrgLevelSchema,
 } from '@/modules/tenants/company-org-level.schema';
@@ -1409,10 +1410,30 @@ async function main(): Promise<void> {
       caseSizeMinor: seed.caseSize,
       leadsToApptPct: seed.leadsToAppt,
       closingRatePct: seed.closing,
-      // P8-T2 fills these. A seeded figure would be a derivation this codebase cannot yet make.
-      snapshot: {
-        monthlyApeTargetMinor: 0, policiesPerMonth: 0, appointmentsPerMonth: 0, leadsPerMonth: 0,
-      },
+      /*
+       * **Derived, not typed** (P8-T2). Seeding a hand-written figure here would be the prototype's
+       * own defect — its markup says 80 leads and its calculator says 67 — planted in the fixture
+       * this product is reviewed from.
+       */
+      snapshot: (() => {
+        const agreed = computeCascade({
+          mode: seed.mode,
+          annualApeTargetMinor: seed.annual,
+          savingsTargetMinor: seed.savings ?? 0,
+          commissionRatePct: seed.commissionPct ?? 0,
+          monthsLeft: seed.monthsLeft,
+          apeAchievedMinor: seed.achieved,
+          caseSizeMinor: seed.caseSize,
+          leadsToApptPct: seed.leadsToAppt,
+          closingRatePct: seed.closing,
+        });
+        return {
+          monthlyApeTargetMinor: agreed.monthlyApeTargetMinor,
+          policiesPerMonth: agreed.policiesPerMonth,
+          appointmentsPerMonth: agreed.appointmentsPerMonth,
+          leadsPerMonth: agreed.leadsPerMonth,
+        };
+      })(),
       cascadeMapping: { ...CASCADE_ACTIVITY_CODES },
       savedAt: daysAgo(seed.period === '2025' ? 300 : 12),
       savedByMembershipId: seed.savedBy ?? seed.owner,
