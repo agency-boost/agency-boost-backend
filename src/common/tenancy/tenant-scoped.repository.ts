@@ -1,4 +1,6 @@
-import { Document, FilterQuery, Model, QueryOptions, UpdateQuery, isValidObjectId } from 'mongoose';
+import {
+  Document, FilterQuery, Model, PipelineStage, QueryOptions, UpdateQuery, isValidObjectId,
+} from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { MissingTenantContextError } from './tenant-scope.error';
 
@@ -111,6 +113,38 @@ export abstract class TenantScopedRepository<T extends Document> {
 
   async count(ctx: RequestContext, filter: FilterQuery<T> = {}): Promise<number> {
     return this.model.countDocuments(this.scope(ctx, 'count', filter)).exec();
+  }
+
+  /**
+   * A rollup, with the tenant injected into the pipeline's **first** stage.
+   *
+   * **The first stage is replaced, not prepended to.** A caller passes `[{ $match: … }, …]` and
+   * that match is merged with `kpmId` and `deletedAt`, so a pipeline cannot begin by reading the
+   * whole collection and narrowing afterwards — which would be a cross-tenant read that happens to
+   * return the right answer, and the reason invariant §1 says queries go through here at all. A
+   * pipeline whose first stage is anything else is refused rather than quietly scoped, because
+   * *where* the scope lands changes the plan as well as the result.
+   *
+   * `raw-writes.tenancy.spec.ts` is what stops the model being reached around instead.
+   */
+  async aggregate(
+    ctx: RequestContext,
+    pipeline: Record<string, unknown>[],
+    includeDeleted = false,
+  ): Promise<Record<string, unknown>[]> {
+    const [first, ...rest] = pipeline;
+    if (!first || !('$match' in first)) {
+      throw new Error(
+        `${this.collectionName}: an aggregation must begin with $match, so the tenant scope is `
+        + 'the first thing the plan applies.',
+      );
+    }
+    const scoped = this.scope(
+      ctx, 'aggregate', first.$match as FilterQuery<T>, includeDeleted,
+    );
+    return this.model
+      .aggregate([{ $match: scoped }, ...rest] as unknown as PipelineStage[])
+      .exec();
   }
 
   async exists(ctx: RequestContext, filter: FilterQuery<T> = {}): Promise<boolean> {

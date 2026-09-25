@@ -19,6 +19,7 @@ const COMPANY = '66f0000000000000000000c1';
 /** Every route, and the permission it must declare. */
 const ROUTES: Record<string, string> = {
   list: 'lead:read',
+  summary: 'lead:read_aggregate_counts',
   read: 'lead:read',
   create: 'lead:create',
   update: 'lead:update',

@@ -404,6 +404,22 @@ export const PERMISSIONS = {
    * their own prospects like anybody else, and they could not delete one. Found writing AC-5's
    * six-role tests, which is what those are for.
    */
+  /**
+   * Counts, and never rows (§3.7, P7-T6).
+   *
+   * **The one lead permission the Owner and the Admin hold.** A lead carries third-party personal
+   * data an agent typed about somebody who never interacted with the platform, and minimisation
+   * applies inside the tenant too — so an office's administrators are told *how many*, which is
+   * what running an office needs, and never *who*.
+   */
+  'lead:read_aggregate_counts': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-unit' },
+    { grantee: AGENT, scope: 'own' },
+  ],
   'lead:delete': [
     { grantee: AB, scope: 'own' },
     { grantee: AAB, scope: 'own' },

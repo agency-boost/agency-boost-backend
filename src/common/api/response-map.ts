@@ -5,7 +5,7 @@ import {
 } from '@/modules/auth/session.response.dto';
 import { InboxDto, InboxItemDto } from '@/modules/notifications/notification.response.dto';
 import {
-  DeletedLeadDto, LeadPageDto, LeadResponseDto,
+  DeletedLeadDto, LeadPageDto, LeadResponseDto, LeadSummaryDto,
 } from '@/modules/leads/lead.response.dto';
 import {
   DelegatedAdminDto, DirectoryMemberDto, DirectoryPageDto, GroupSummaryDto, InvitePreviewDto,
@@ -124,6 +124,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_setTerminal: { type: LeadPipelineDto },
   TenantConfigController_setLateStage: { type: LeadStatusDto },
   LeadController_list: { type: LeadPageDto },
+  LeadController_summary: { type: LeadSummaryDto },
   LeadController_read: { type: LeadResponseDto },
   LeadController_create: { type: LeadResponseDto },
   LeadController_update: { type: LeadResponseDto },

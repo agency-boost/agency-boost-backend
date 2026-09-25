@@ -314,4 +314,72 @@ describe('TenantScopedRepository — cross-tenant isolation', () => {
       expect(await new Peeking().peek(ctx)).toHaveLength(1);
     });
   });
+
+  /**
+   * Rollups (P7-T6).
+   *
+   * An aggregation is the one read shape that can look correct and still be wrong: a pipeline
+   * that counts the whole collection and filters afterwards returns this tenant's number while
+   * having read everybody's. So the scope goes into the **first** stage, and a pipeline that does
+   * not begin with one is refused rather than quietly repaired.
+   */
+  describe('aggregation is scoped in its first stage', () => {
+    beforeEach(async () => {
+      await repo.create(ctxFor(KPM_A), { name: 'a-one' } as never);
+      await repo.create(ctxFor(KPM_A), { name: 'a-two' } as never);
+      await repo.create(ctxFor(KPM_B), { name: 'b-one' } as never);
+    });
+
+    it('counts only this tenant’s rows', async () => {
+      const [out] = await repo.aggregate(ctxFor(KPM_A), [
+        { $match: {} }, { $count: 'n' },
+      ]);
+
+      expect(out).toEqual({ n: 2 });
+    });
+
+    it('merges the tenant into a filter the caller supplied', async () => {
+      const [out] = await repo.aggregate(ctxFor(KPM_A), [
+        { $match: { name: 'a-one' } }, { $count: 'n' },
+      ]);
+
+      expect(out).toEqual({ n: 1 });
+    });
+
+    it('cannot be aimed at another tenant by naming one', async () => {
+      // The caller's `kpmId` is overwritten, not merged with: `{...filter, kpmId}` puts the
+      // context last on purpose, so a pipeline asking for KPM B gets KPM A's answer.
+      const [out] = await repo.aggregate(ctxFor(KPM_A), [
+        { $match: { kpmId: KPM_B } }, { $count: 'n' },
+      ]);
+
+      expect(out).toEqual({ n: 2 });
+    });
+
+    it('hides soft-deleted rows unless they are asked for', async () => {
+      const gone = await repo.findOne(ctxFor(KPM_A), { name: 'a-two' });
+      await repo.softDeleteById(ctxFor(KPM_A), String(gone!._id), new Date());
+
+      const [live] = await repo.aggregate(ctxFor(KPM_A), [{ $match: {} }, { $count: 'n' }]);
+      const [all] = await repo.aggregate(ctxFor(KPM_A), [{ $match: {} }, { $count: 'n' }], true);
+
+      expect(live).toEqual({ n: 1 });
+      expect(all).toEqual({ n: 2 });
+    });
+
+    it('refuses a pipeline that does not begin with $match', async () => {
+      await expect(repo.aggregate(ctxFor(KPM_A), [{ $count: 'n' }]))
+        .rejects.toThrow(/must begin with \$match/);
+      await expect(repo.aggregate(ctxFor(KPM_A), []))
+        .rejects.toThrow(/must begin with \$match/);
+    });
+
+    it('fails closed with no tenant context, like every other read', async () => {
+      const noTenant = new RequestContext('u1', 'none', null);
+
+      await expect(repo.aggregate(noTenant, [{ $match: {} }, { $count: 'n' }]))
+        .rejects.toBeInstanceOf(MissingTenantContextError);
+    });
+  });
+
 });

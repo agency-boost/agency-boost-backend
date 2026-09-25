@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
@@ -72,6 +73,9 @@ describe('who may touch whose lead (P7-T7)', () => {
     return {
       _id: new mongoose.Types.ObjectId(id),
       kpmId: KPM,
+      // Unique across live rows (`{leaderCode: 1}`, partial on `deletedAt: null`), so these are
+      // written rather than left null — five nulls collide the moment the index is built.
+      leaderCode: `LC-${id.slice(-3)}`,
       userId: '66f00000000000000000020' + id.slice(-1),
       orgLevelCode: rung,
       hierarchyRole: rung.toLowerCase(),
@@ -279,4 +283,126 @@ describe('who may touch whose lead (P7-T7)', () => {
         .rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
   });
+
+  /**
+   * The rollups that read leads (P7-T6).
+   *
+   * **Every number is something already defined elsewhere.** Two are the metric registry's
+   * (invariant §8); the rest are this module's own rules — T5's commitment and T4's attention
+   * flags — so nothing here is a figure invented for a screen.
+   */
+  describe('the counts (P7-T6)', () => {
+    const summary = (who: RequestContext) => wired.leadRecords.summary(who);
+
+    const recruitmentAt = async (who: RequestContext, name: string, code: string | null) => {
+      const lead = await wired.leadRecords.create(who, { name, type: 'recruitment' });
+      if (code) await wired.leadRecords.setStatus(who, lead.id, code);
+      return lead;
+    };
+
+    it('AC-1: RECRUITMENT_PIPELINE_NOW counts the open candidates off the closing stage', async () => {
+      await recruitmentAt(agent(), 'Not started', null);
+      await recruitmentAt(agent(), 'Halfway', 'MEETING_SCHEDULED');
+      const done = await recruitmentAt(agent(), 'Arrived', 'NEW_ACTIVE_AGENT');
+      const lost = await recruitmentAt(agent(), 'Gone', 'MEETING_SCHEDULED');
+      await wired.leadRecords.setOutcome(agent(), lost.id, 'lost');
+      await wired.leadRecords.create(agent(), { name: 'A sale', type: 'sales' });
+
+      // Two: the one with no stage and the one halfway. Not the terminal stage, not the lost one,
+      // and not the sales lead — `isTerminal` is the office's own flag, never a rank (invariant §4).
+      expect((await summary(agent())).recruitmentPipelineNow).toBe(2);
+      expect(done.id).toBeDefined();
+    });
+
+    it('AC-1: RECRUITMENT_EXPECTED_TO_CLOSE counts the late stages, and only those', async () => {
+      await recruitmentAt(agent(), 'Early', 'MEETING_SCHEDULED');
+      await recruitmentAt(agent(), 'Late', 'AGENT_CODE_CREATED');
+      await recruitmentAt(agent(), 'Later', 'AAJI_LICENSED');
+      // On the stage that closes the pipeline: excluded by construction, because `isLateStage` is
+      // never true where `isTerminal` is.
+      await recruitmentAt(agent(), 'Arrived', 'NEW_ACTIVE_AGENT');
+
+      expect((await summary(agent())).recruitmentExpectedToClose).toBe(2);
+    });
+
+    it('AC-1: reads the office’s own flags rather than a rank', async () => {
+      // Flip a stage the platform seeds as early, and the number follows the office.
+      const [, recruitment] = await wired.leads.list(agent());
+      const early = recruitment.statuses.find((s) => s.code === 'MEETING_SCHEDULED')!;
+      await recruitmentAt(agent(), 'Early', 'MEETING_SCHEDULED');
+      expect((await summary(agent())).recruitmentExpectedToClose).toBe(0);
+
+      await wired.leads.setLateStage(agent(), early.id, true);
+
+      expect((await summary(agent())).recruitmentExpectedToClose).toBe(1);
+    });
+
+    it('counts the commitment T5 defines, for the office’s current month only', async () => {
+      const promised = await wired.leadRecords.create(agent(), { name: 'Promised', thisMonth: true });
+      await wired.leadRecords.create(agent(), { name: 'Not promised' });
+
+      expect((await summary(agent())).committedThisMonth).toBe(1);
+
+      (wired.clock as FixedClock).set(new Date('2026-10-01T02:00:00Z'));
+      // Nothing ran, and the promise is September's.
+      expect((await summary(agent())).committedThisMonth).toBe(0);
+      (wired.clock as FixedClock).set(NOW);
+      expect(promised.thisMonth).toBe(true);
+    });
+
+    it('agrees with flagsFor, which is the only definition of an attention flag', async () => {
+      // Invariant §8: the counts are evaluated in the database and defined in the service. This
+      // is what stops the two from drifting — it fails the moment either changes alone.
+      await wired.leadRecords.create(agent(), { name: 'Nothing typed' });
+      await wired.leadRecords.create(agent(), { name: 'Late', remarks: 'Talked.', nextActionDate: '2026-09-01' });
+      await wired.leadRecords.create(agent(), { name: 'Fine', remarks: 'Talked.', nextActionDate: '2026-12-01' });
+      const closed = await wired.leadRecords.create(agent(), { name: 'Closed' });
+      await wired.leadRecords.setOutcome(agent(), closed.id, 'lost');
+
+      const rows = (await wired.leadRecords.list(agent(), { pageSize: 200 })).rows;
+      const byFlags = {
+        overdue: rows.filter((r) => r.flags.includes('overdue')).length,
+        'no-next-action': rows.filter((r) => r.flags.includes('no-next-action')).length,
+        'no-remarks': rows.filter((r) => r.flags.includes('no-remarks')).length,
+      };
+
+      expect((await summary(agent())).attention).toEqual(byFlags);
+      expect(byFlags).toEqual({ overdue: 1, 'no-next-action': 1, 'no-remarks': 1 });
+    });
+
+    it('AC-4: a leader’s counts cover their downline and nothing else', async () => {
+      await wired.leadRecords.create(ab(), { name: 'Agus’ own' });
+      await wired.leadRecords.create(aab(), { name: 'Sari’s own' });
+      await wired.leadRecords.create(agent(), { name: 'Rina’s' });
+      await wired.leadRecords.create(sibling(), { name: 'Budi’s' });
+      await wired.leadRecords.create(outsider(), { name: 'Lina’s' });
+
+      expect((await summary(ab())).open).toBe(4);
+      expect((await summary(aab())).open).toBe(3);
+      expect((await summary(agent())).open).toBe(1);
+      // The office has five; nobody but an administrator is told so.
+      expect((await summary(outsider())).open).toBe(1);
+    });
+
+    it('AC-2: an Owner is told how many and never who', async () => {
+      await wired.leadRecords.create(agent(), { name: 'Rina’s' });
+      await wired.leadRecords.create(outsider(), { name: 'Lina’s' });
+      const owner = ctxFor(AB, 'AB', { isKpmOwner: true, membershipId: '66f000000000000000000199' });
+
+      // Counts: the whole office, because an office's administrator runs the office.
+      expect((await summary(owner)).open).toBe(2);
+      // Rows: none, at any scope — `lead:read` grants them nothing (§3.7).
+      const rows = await wired.leadRecords.list(owner);
+      expect(rows.rows).toEqual([]);
+    });
+
+    it('counts nothing for somebody the grant does not reach', async () => {
+      await wired.leadRecords.create(agent(), { name: 'Rina’s' });
+      // An office member holding no lead grant at all: fail-closed, not their own.
+      const nobody = ctxFor('66f000000000000000000198', 'UNKNOWN_RUNG');
+
+      expect((await summary(nobody)).open).toBe(0);
+    });
+  });
+
 });

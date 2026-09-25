@@ -5,7 +5,9 @@ import { RequestContext } from '@/common/context/request-context';
 import {
   CreateLeadDto, ListLeadsQueryDto, SetLeadOutcomeDto, SetLeadStatusDto, UpdateLeadDto,
 } from './lead.dto';
-import { DeletedLeadDto, LeadPageDto, LeadResponseDto } from './lead.response.dto';
+import {
+  DeletedLeadDto, LeadPageDto, LeadResponseDto, LeadSummaryDto,
+} from './lead.response.dto';
 import { LeadService } from './lead.service';
 
 /**
@@ -33,11 +35,32 @@ export class LeadController {
     description:
       'Search over the name and the remarks, filter by ladder, stage, outcome and attention '
       + 'state, sort on one key, and page. The prototype has none of these on the screen with the '
-      + 'most rows. **Your own leads**: a leader reading a downline’s is P7-T7.',
+      + 'most rows. **Scoped to what your grant reaches**: your own, plus your unit or your '
+      + 'downline. A lead outside it is a 404, never a 403.',
   })
   @ApiResponse({ status: 200, type: LeadPageDto })
   async list(@Ctx() ctx: RequestContext, @Query() query: ListLeadsQueryDto) {
     return this.leads.list(ctx, query);
+  }
+
+  /**
+   * **Declared before `:id`, and that is load-bearing.** Nest matches in declaration order, so
+   * below it `/leads/summary` would be read as a lead whose id is the word *summary* — a 404 that
+   * looks like a missing record rather than a shadowed route.
+   */
+  @Get('summary')
+  @RequirePermission('lead:read_aggregate_counts')
+  @ApiOperation({
+    summary: 'The counts, scoped like the list',
+    description:
+      'Counts and never rows (§3.7). **The one lead route an Owner and an Admin may call**: a '
+      + 'lead carries third-party personal data an agent typed about somebody who never '
+      + 'interacted with the platform, so administrators are told how many and never who. '
+      + 'Everybody else gets the counts behind the list they can see.',
+  })
+  @ApiResponse({ status: 200, type: LeadSummaryDto })
+  async summary(@Ctx() ctx: RequestContext) {
+    return this.leads.summary(ctx);
   }
 
   @Get(':id')

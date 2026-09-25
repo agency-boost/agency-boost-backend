@@ -34,6 +34,26 @@ export interface LeadQuery {
   pageSize?: number;
 }
 
+/**
+ * The rollups that read leads, computed once (P7-T6).
+ *
+ * **Every number here is something already defined somewhere else.** Two are the metric registry's
+ * (invariant §8); the other four are this module's own rules — the commitment T5 defines and the
+ * attention flags T4 does — and nothing in this shape is a figure invented for a screen.
+ */
+export interface LeadSummary {
+  /** Open leads in scope: `outcome` null, not deleted. */
+  open: number;
+  /** Open leads promised for the office's **current** month — the glossary's *Commitment*. */
+  committedThisMonth: number;
+  /** `RECRUITMENT_PIPELINE_NOW`: open recruitment candidates not on the stage that closes it. */
+  recruitmentPipelineNow: number;
+  /** `RECRUITMENT_EXPECTED_TO_CLOSE`: open recruitment candidates on a late stage (ADR-0043). */
+  recruitmentExpectedToClose: number;
+  /** How many open leads carry each attention flag. A lead may carry two, so these overlap. */
+  attention: Record<LeadFlag, number>;
+}
+
 /** One page of them, and how many there are to page through. */
 export interface LeadPage {
   rows: LeadView[];
@@ -94,9 +114,9 @@ export interface LeadView {
  *
  * **Writes take no subject.** A lead is created for the person creating it, exactly as an activity
  * day is logged for the person logging it (§3.5's shape, applied to a different record). A leader
- * may later write a **downline's** lead — ADR-0044 — but that is P7-T7, and it arrives as a route
- * that names whose lead it is rather than as a parameter smuggled into this one. A check can be
- * forgotten; a parameter that does not exist cannot be passed.
+ * may write a **downline's** lead — ADR-0044, built in P7-T7 — but only by naming the lead, never
+ * by naming a subject on a *create*. A check can be forgotten; a parameter that does not exist
+ * cannot be passed.
  *
  * **No status is written here, and that is the line between this task and P7-T3.** Setting a lead's
  * first status is a *move* — `{ fromStatusCode: null, toStatusCode, at, byMembershipId }` — and
@@ -488,8 +508,9 @@ export class LeadService {
    * Recruitment"* and its code does no such thing; the code wins and the footnote is not
    * reproduced.
    *
-   * `own` for now: resolving a downline is P7-T7's, and until then a leader sees their own leads
-   * rather than a wider set the service cannot yet scope correctly.
+   * **Scoped to what the caller's grant reaches** (P7-T7): their own, plus their unit or their
+   * downline. `ownersInScope` is the one place that decides, and `summary` asks it the same
+   * question — a count above a table has to count the table.
    */
   async list(ctx: RequestContext, query: LeadQuery = {}): Promise<LeadPage> {
     const owners = await this.ownersInScope(ctx, 'lead:read');
@@ -539,6 +560,89 @@ export class LeadService {
       total: attended.length,
       page,
       pageSize: size,
+    };
+  }
+
+  /**
+   * The rollups, in one indexed pass (P7-T6).
+   *
+   * **Scoped exactly as the list is**, from `lead:read_aggregate_counts` rather than from
+   * `lead:read` — an Owner and an Admin hold this one and hold no row-reading grant at all, which
+   * is §3.7 in the permission matrix rather than in a check somebody has to remember. A count
+   * above a table has to count the table, and for everybody who has both, it does.
+   *
+   * **One aggregation with `$facet`, not six round trips.** The `$match` is the same
+   * `{kpmId, ownerMembershipId, deletedAt}` prefix the list uses, so it is served by the index
+   * that already exists; `performance-and-scale.md` asks for no `COLLSCAN` on a tenant-scoped
+   * collection and `lead.performance.spec.ts` asserts it.
+   *
+   * **The attention counts are evaluated in the database and defined in `flagsFor`.** Two
+   * evaluations of one rule is exactly what invariant §8 forbids, so they are pinned together by a
+   * test that counts a seeded office both ways and fails if they ever disagree.
+   */
+  async summary(ctx: RequestContext): Promise<LeadSummary> {
+    const owners = await this.ownersInScope(ctx, 'lead:read_aggregate_counts');
+    const day = await this.days.for(ctx);
+
+    // The office's own recruitment ladder decides which stages mean *still running* and *nearly
+    // there*. Reading the codes rather than hardcoding them is invariant §4.
+    const stages = await this.statuses.find(ctx, { pipeline: 'recruitment' });
+    const terminal = stages.filter((s) => s.isTerminal).map((s) => s.code);
+    const late = stages.filter((s) => s.isLateStage).map((s) => s.code);
+
+    // `kpmId` and `deletedAt` are the repository's to add — see `aggregate`.
+    const match: Record<string, unknown> = {};
+    if (owners !== null) match.ownerMembershipId = { $in: owners };
+
+    const openOnly = { $eq: ['$outcome', null] };
+    const countWhen = (when: unknown) => [
+      { $match: { $expr: { $and: [openOnly, when] } } },
+      { $count: 'n' },
+    ];
+
+    const [facets] = await this.leads.aggregate(ctx, [
+      { $match: match },
+      {
+        $facet: {
+          open: [{ $match: { outcome: null } }, { $count: 'n' }],
+          committedThisMonth: countWhen({ $in: [day.month, { $ifNull: ['$commitments.month', []] }] }),
+          recruitmentPipelineNow: countWhen({
+            $and: [
+              { $eq: ['$type', 'recruitment'] },
+              { $not: [{ $in: [{ $ifNull: ['$statusCode', ''] }, terminal] }] },
+            ],
+          }),
+          recruitmentExpectedToClose: countWhen({
+            $and: [
+              { $eq: ['$type', 'recruitment'] },
+              { $in: [{ $ifNull: ['$statusCode', ''] }, late] },
+            ],
+          }),
+          // The three rules `flagsFor` applies, in the order it applies them: a lead with no date
+          // is *no next action* and cannot also be *overdue*.
+          overdue: countWhen({
+            $and: [
+              { $ne: [{ $ifNull: ['$nextActionDate', null] }, null] },
+              { $lt: ['$nextActionDate', day.today] },
+            ],
+          }),
+          noNextAction: countWhen({ $eq: [{ $ifNull: ['$nextActionDate', null] }, null] }),
+          noRemarks: countWhen({ $eq: [{ $ifNull: ['$remarks', null] }, null] }),
+        },
+      },
+    ]);
+
+    const n = (key: string) => (facets?.[key] as { n?: number }[] | undefined)?.[0]?.n ?? 0;
+    return {
+      open: n('open'),
+      committedThisMonth: n('committedThisMonth'),
+      recruitmentPipelineNow: n('recruitmentPipelineNow'),
+      recruitmentExpectedToClose: n('recruitmentExpectedToClose'),
+      attention: {
+        overdue: n('overdue'),
+        'no-next-action': n('noNextAction'),
+        'no-remarks': n('noRemarks'),
+      },
     };
   }
 
