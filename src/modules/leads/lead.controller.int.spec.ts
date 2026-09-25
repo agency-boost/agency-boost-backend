@@ -7,7 +7,7 @@ import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
 import {
-  AGENT, declaredPermissions, EVERY_MEMBER, FIXTURE_KPM, OWNER, productionPipe, session, StubAuth,
+  AGENT, declaredPermissions, EVERY_MEMBER, FIXTURE_KPM, productionPipe, session, StubAuth,
   SUPER_ADMIN,
 } from '../../../test/http-permissions';
 import { LeadController } from './lead.controller';
@@ -228,11 +228,34 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
       await http().get(url).expect(200);
     });
 
-    it('refuses an Owner the delete, which is the agent’s alone', async () => {
-      // §3.7: not the coach, not the admin. Soft, with a retention window.
+    it('lets every rung that carries leads delete one of their own (P7-T7)', async () => {
+      /*
+       * This asserted a **403 for the Owner**, and passed for the wrong reason: `lead:delete` was
+       * granted to `AGENT` and to nobody else, so an AB and an AAB could not delete their own
+       * leads either. §3.7's *"soft, and the agent's alone"* meant the **owner's** alone, and what
+       * refuses a coach is the `own` scope rather than a missing grant.
+       *
+       * **Whose lead is whose cannot be asked here.** Every fixture in `http-permissions.ts` is
+       * `mem-a` wearing a different rung — one person, six hats — which is right for asking what a
+       * *decorator* refuses and useless for asking what an *owner* does. That is
+       * `lead-access.tenancy.spec.ts`, where five real memberships stand in a real hierarchy.
+       */
+      for (const [, who] of EVERY_MEMBER) {
+        session.current = who;
+        const { body } = await add().expect(201);
+        await http().delete(`${url}/${body.id}`).expect(200);
+      }
+    });
+
+    it('pins a version, and refuses a write the record has moved past', async () => {
       const { body } = await add().expect(201);
-      session.current = OWNER;
-      await http().delete(`${url}/${body.id}`).expect(403);
+      await http().patch(`${url}/${body.id}`).send({ remarks: 'First.' }).expect(200);
+
+      const stale = await http().patch(`${url}/${body.id}`)
+        .send({ remarks: 'Second.', version: body.version }).expect(409);
+
+      expect(stale.body.error.code).toBe('VERSION_CONFLICT');
+      expect((await http().get(`${url}/${body.id}`).expect(200)).body.remarks).toBe('First.');
     });
 
     it('refuses a Super Admin by name rather than by a 500', async () => {

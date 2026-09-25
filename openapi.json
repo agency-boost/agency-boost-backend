@@ -13876,6 +13876,21 @@
               ]
             }
           },
+          "lastEditedBy": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": false,
+            "properties": {
+              "membershipId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "description": "Who last changed this lead, when that was not the agent whose lead it is (ADR-0044) — `null` otherwise. A proxy edit is recognisable by `updatedBy` differing from `ownerMembershipId`: two columns, so no flag is needed."
+          },
           "overdueDays": {
             "type": "number",
             "nullable": true,
@@ -13902,6 +13917,7 @@
           "dateRegistered",
           "version",
           "flags",
+          "lastEditedBy",
           "overdueDays"
         ]
       },
@@ -14062,12 +14078,22 @@
           "thisMonth": {
             "type": "boolean",
             "description": "The agent’s own commitment for the month."
+          },
+          "version": {
+            "type": "number",
+            "example": 3,
+            "description": "The `version` this patch was written against. Refused with `409 VERSION_CONFLICT` if the lead has moved on — two people in one 1-on-1 on two devices is the realistic case."
           }
         }
       },
       "SetLeadStatusDto": {
         "type": "object",
         "properties": {
+          "version": {
+            "type": "number",
+            "example": 3,
+            "description": "The version this write was read at."
+          },
           "statusCode": {
             "type": "string",
             "example": "FOLLOW_UP",
@@ -14081,6 +14107,11 @@
       "SetLeadOutcomeDto": {
         "type": "object",
         "properties": {
+          "version": {
+            "type": "number",
+            "example": 3,
+            "description": "The version this write was read at."
+          },
           "outcome": {
             "type": "string",
             "enum": [

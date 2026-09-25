@@ -24,6 +24,13 @@ export interface CheckedLead {
   nextActionNote?: string | null;
   source?: string | null;
   thisMonth?: boolean;
+  /**
+   * The version the writer read, pinned so a stale write is refused rather than applied (P7-T7).
+   *
+   * Not a field of the lead — it is a claim *about* the lead the patch was written against, which
+   * is why it is read here and never reaches `writable`.
+   */
+  version?: number;
 }
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -41,7 +48,7 @@ export function checkLead(body: unknown, opts: { partial?: boolean } = {}): Chec
   const required = !opts.partial;
   const f = new Fields(body, [
     'name', 'type', 'contact', 'lawfulBasis', 'remarks',
-    'nextActionDate', 'nextActionNote', 'source', 'thisMonth',
+    'nextActionDate', 'nextActionNote', 'source', 'thisMonth', 'version',
   ]);
 
   const out: CheckedLead = {};
@@ -78,6 +85,13 @@ export function checkLead(body: unknown, opts: { partial?: boolean } = {}): Chec
   if (committed !== undefined) {
     if (typeof committed !== 'boolean') f.violations.push('thisMonth must be true or false.');
     else out.thisMonth = committed;
+  }
+
+  const pinned = raw(body, 'version');
+  if (pinned !== undefined) {
+    if (typeof pinned !== 'number' || !Number.isInteger(pinned) || pinned < 1) {
+      f.violations.push('version must be the whole number the record was read at.');
+    } else out.version = pinned;
   }
 
   const contact = raw(body, 'contact');

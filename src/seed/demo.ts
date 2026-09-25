@@ -1179,6 +1179,14 @@ async function main(): Promise<void> {
     nextActionNote?: string;
     thisMonth?: boolean;
     source?: string;
+    /**
+     * Somebody other than the owner made the last change (ADR-0044).
+     *
+     * Seeded because P7-T7's acceptance criterion is a claim about what an **agent sees on their
+     * own screen** — so the fixture has to contain a lead a leader touched, or the criterion
+     * cannot be checked the way it is written.
+     */
+    lastEditedBy?: string;
   }
 
   /** `YYYY-MM-DD` in the office's timezone — the same day boundary the server resolves. */
@@ -1236,7 +1244,7 @@ async function main(): Promise<void> {
         transitions,
         deletedAt: null,
         createdBy: seed.owner,
-        updatedBy: seed.owner,
+        updatedBy: seed.lastEditedBy ?? seed.owner,
       });
     }
   };
@@ -1256,6 +1264,9 @@ async function main(): Promise<void> {
     {
       // Overdue, and committed for the month — the pair the prototype hides behind its green
       // chip and this product does not (P7-T4 AC-2).
+      // Sari coached Rina on this one and left a note, so the agent's screen shows *Edited by
+      // Ibu Sari* — which is the phase's exit criterion, seeded rather than asserted.
+      lastEditedBy: sari.id,
       owner: rina.id, name: 'Pak Hendro Gunawan', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED'],
       email: 'hendro.g@example.com', lawfulBasis: 'contract',

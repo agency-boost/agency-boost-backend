@@ -2,10 +2,13 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import {
-  DomainException, NoMembershipException, NotFoundException,
+  DomainException, NoMembershipException, NotFoundException, VersionConflictException,
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
+import { MemberNames } from '@/modules/org/member-names.service';
+import { MembershipRepository } from '@/modules/org/membership.repository';
+import { scopeFor, type Permission } from '@/modules/rbac/permissions';
 import { LeadStatusRepository } from '@/modules/config/activity.repository';
 import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
 import { checkLead, requireLawfulBasis, type CheckedLead } from './lead-input';
@@ -57,6 +60,15 @@ export interface LeadView {
   thisMonth: boolean;
   /** Every month this lead was promised for, oldest first. The archive, and it is the record. */
   committedMonths: string[];
+  /**
+   * Who last changed it, when that was not the agent whose lead it is (ADR-0044).
+   *
+   * `null` when the owner made the last change themselves — which is the ordinary case, and the
+   * reason this is a name rather than a flag: *two columns, so no flag is needed*. An id that
+   * resolves to nobody leaves `name` null and keeps the membership, because a blank reads as
+   * *nothing happened* rather than as *this is all we know*.
+   */
+  lastEditedBy: { membershipId: string; name: string | null } | null;
   remarks: string | null;
   nextActionDate: string | null;
   nextActionNote: string | null;
@@ -98,7 +110,87 @@ export class LeadService {
     private readonly audit: AuditService,
     private readonly clock: Clock,
     private readonly days: TenantDay,
+    private readonly memberships: MembershipRepository,
+    private readonly names: MemberNames,
   ) {}
+
+  /**
+   * Whose leads this caller may touch, for the permission the **route** declares (P7-T7).
+   *
+   * **Their own, always — plus whoever the grant reaches.** A lead belongs to a membership, so a
+   * leader reaches a lead exactly when they reach its owner. The grant is read from the matrix
+   * rather than from the caller's rung, because those two have already drifted once: `summary` was
+   * gated on one permission and resolved another, and the narrower of the pair would have gone on
+   * enforcing the wider one's scope (found at the Phase 6 exit review).
+   *
+   * `null` means *the whole office* and is reachable only by `lead:read_aggregate_counts`. No
+   * row-reading permission grants `own-kpm` to anybody: the Owner and the Admin get counts, never
+   * rows, because these are third-party personal data typed by an agent about somebody who never
+   * interacted with the platform, and minimisation applies inside the tenant too (§3.7).
+   */
+  private async ownersInScope(
+    ctx: RequestContext, permission: Permission,
+  ): Promise<string[] | null> {
+    const me = this.me(ctx);
+    const scope = scopeFor(ctx, permission);
+    if (scope === 'own-kpm' || scope === 'all') return null;
+    /*
+     * **No grant reaches nobody's leads**, rather than falling through to the caller's own.
+     *
+     * The guard has already refused anybody holding none of these, so this is the second lock on
+     * the same door — but the first version returned `[me]` here, which quietly *granted* on the
+     * strength of an absent permission. Fail-closed costs one line and cannot be wrong.
+     */
+    if (scope === null) return [];
+    if (scope !== 'own-unit' && scope !== 'own-downline') return [me];
+
+    // Indexed both ways: `{kpmId, leaderId, status}` and `{kpmId, ancestorIds, status}`.
+    const reports = await this.memberships.find(
+      ctx,
+      scope === 'own-unit' ? { leaderId: me } : { ancestorIds: me },
+      { select: '_id' },
+    );
+    return [me, ...reports.map((r) => String(r._id))];
+  }
+
+  /**
+   * The lead this caller may act on, or a 404.
+   *
+   * **404 and never 403**, exactly as a cross-tenant read is: a leader asking after somebody
+   * outside their downline should not learn from the shape of the refusal that the lead exists.
+   * The same sentence has been true of `kpmId` since Phase 2; ownership inside one office is the
+   * same question one level down, and it was **not enforced at all** until this task — any agent
+   * could read, edit or delete a colleague's lead, which no test asked about because the tenancy
+   * spec only ever crossed offices.
+   */
+  private async reachable(
+    ctx: RequestContext, id: string, permission: Permission, pinned?: number,
+  ): Promise<LeadDocument> {
+    const lead = await this.leads.findById(ctx, id);
+    if (!lead) throw new NotFoundException('Lead');
+    const owners = await this.ownersInScope(ctx, permission);
+    if (owners !== null && !owners.includes(lead.ownerMembershipId)) {
+      throw new NotFoundException('Lead');
+    }
+    /*
+     * **The version the writer read, checked before anything is written** (P7-T7 AC-3).
+     *
+     * Two people in one 1-on-1 on two devices is the realistic case rather than the edge one: the
+     * leader opens the lead, the agent edits a remark, the leader saves, and last-write-wins
+     * silently discards what the agent typed in front of them.
+     *
+     * **After the scope check, deliberately.** A stale version on a lead the caller may not reach
+     * would otherwise answer 409 where the answer is 404 — and 409 confirms the lead exists.
+     *
+     * Optional, and honoured whenever it is sent. The screen always sends it; a second writer
+     * that forgets is unprotected, which is an argument for making it required once there is a
+     * second writer — the coaching session, in Phase 13.
+     */
+    if (pinned !== undefined && pinned !== lead.version) {
+      throw new VersionConflictException(pinned, lead.version);
+    }
+    return lead;
+  }
 
   /** The caller's own membership, or a refusal that says what to do about it. */
   private me(ctx: RequestContext): string {
@@ -151,15 +243,13 @@ export class LeadService {
       hasContact: Boolean(contact.phone || contact.email),
       lawfulBasis: created.lawfulBasis,
     });
-    return this.view(created, day);
+    return this.view(created, day, new Map());
   }
 
   async update(ctx: RequestContext, id: string, body: unknown): Promise<LeadView> {
     const membershipId = this.me(ctx);
-    const lead = await this.leads.findById(ctx, id);
-    if (!lead) throw new NotFoundException('Lead');
-
     const input = checkLead(body, { partial: true });
+    const lead = await this.reachable(ctx, id, 'lead:update', input.version);
     const next = this.merge(lead, input);
     requireLawfulBasis(next);
 
@@ -225,7 +315,7 @@ export class LeadService {
       hasContact: Boolean(next.contact.phone || next.contact.email),
       lawfulBasis: next.lawfulBasis,
     });
-    return this.view(updated, day);
+    return this.view(updated, day, await this.attribution(ctx, [updated]));
   }
 
   /**
@@ -236,10 +326,11 @@ export class LeadService {
    * forward-only rule would let a drag on the Owner's settings screen change which moves their
    * agents may make.
    */
-  async setStatus(ctx: RequestContext, id: string, statusCode: string): Promise<LeadView> {
+  async setStatus(
+    ctx: RequestContext, id: string, statusCode: string, pinned?: number,
+  ): Promise<LeadView> {
     const membershipId = this.me(ctx);
-    const lead = await this.leads.findById(ctx, id);
-    if (!lead) throw new NotFoundException('Lead');
+    const lead = await this.reachable(ctx, id, 'lead:update', pinned);
 
     if (lead.outcome) {
       throw new DomainException(
@@ -261,7 +352,9 @@ export class LeadService {
     }
 
     const wanted = statusCode.trim().toUpperCase();
-    if (wanted === lead.statusCode) return this.view(lead, await this.days.for(ctx));
+    if (wanted === lead.statusCode) {
+      return this.view(lead, await this.days.for(ctx), await this.attribution(ctx, [lead]));
+    }
 
     const status = await this.statuses.findOne(ctx, { code: wanted });
     if (!status) throw new NotFoundException('Lead status', { code: wanted });
@@ -300,7 +393,7 @@ export class LeadService {
     await this.record(ctx, 'lead.status_changed', id, {
       from: lead.statusCode ?? null, to: wanted, byMembershipId: membershipId,
     });
-    return this.view(updated, await this.days.for(ctx));
+    return this.view(updated, await this.days.for(ctx), await this.attribution(ctx, [updated]));
   }
 
   /**
@@ -314,11 +407,10 @@ export class LeadService {
    * move would be a stage nobody worked.
    */
   async setOutcome(
-    ctx: RequestContext, id: string, outcome: 'won' | 'lost' | null,
+    ctx: RequestContext, id: string, outcome: 'won' | 'lost' | null, pinned?: number,
   ): Promise<LeadView> {
     const membershipId = this.me(ctx);
-    const lead = await this.leads.findById(ctx, id);
-    if (!lead) throw new NotFoundException('Lead');
+    const lead = await this.reachable(ctx, id, 'lead:mark_outcome', pinned);
 
     if (outcome && lead.outcome) {
       throw new DomainException(
@@ -356,7 +448,7 @@ export class LeadService {
     await this.record(ctx, outcome ? 'lead.closed' : 'lead.reopened', id, {
       outcome, from: lead.outcome ?? null, statusCode: lead.statusCode ?? null,
     });
-    return this.view(updated, await this.days.for(ctx));
+    return this.view(updated, await this.days.for(ctx), await this.attribution(ctx, [updated]));
   }
 
   /**
@@ -366,7 +458,10 @@ export class LeadService {
    * this button (invariant §6).
    */
   async remove(ctx: RequestContext, id: string): Promise<{ id: string; deletedAt: string }> {
-    this.me(ctx);
+    // `lead:delete` is `own` for the agent and granted to nobody else (§3.7), so this resolves to
+    // their own leads and a leader's 🗑 on a downline's row is a 404. The coaching leads table has
+    // no delete at all, which is the prototype agreeing.
+    await this.reachable(ctx, id, 'lead:delete');
     const removed = await this.leads.softDeleteById(ctx, id, this.clock.now());
     if (!removed) throw new NotFoundException('Lead');
     await this.record(ctx, 'lead.deleted', id, { type: removed.type });
@@ -378,10 +473,8 @@ export class LeadService {
     // Before the repository, so a caller with no office is refused by name rather than by a
     // `MissingTenantContextError` surfacing as 500 — which is what a Super Admin's `all` grant
     // would otherwise produce here (ADR-0044).
-    this.me(ctx);
-    const lead = await this.leads.findById(ctx, id);
-    if (!lead) throw new NotFoundException('Lead');
-    return this.view(lead, await this.days.for(ctx));
+    const lead = await this.reachable(ctx, id, 'lead:read');
+    return this.view(lead, await this.days.for(ctx), await this.attribution(ctx, [lead]));
   }
 
   /**
@@ -399,12 +492,11 @@ export class LeadService {
    * rather than a wider set the service cannot yet scope correctly.
    */
   async list(ctx: RequestContext, query: LeadQuery = {}): Promise<LeadPage> {
-    const membershipId = this.me(ctx);
+    const owners = await this.ownersInScope(ctx, 'lead:read');
 
-    const filter: Record<string, unknown> = {
-      ownerMembershipId: membershipId,
-      deletedAt: null,
-    };
+    const filter: Record<string, unknown> = { deletedAt: null };
+    // `null` is the whole office, which no row-reading grant produces — see `ownersInScope`.
+    if (owners !== null) filter.ownerMembershipId = { $in: owners };
     if (query.type) filter.type = query.type === 'unassigned' ? null : query.type;
     if (query.statusCode) filter.statusCode = query.statusCode;
     if (query.outcome) filter.outcome = query.outcome === 'open' ? null : query.outcome;
@@ -438,9 +530,12 @@ export class LeadService {
     const page = Math.max(1, query.page ?? 1);
     const size = Math.min(Math.max(1, query.pageSize ?? LEAD_PAGE_SIZE), 200);
     const start = (page - 1) * size;
+    const shown = attended.slice(start, start + size);
+    // Names for this page only: the rows nobody is looking at cost nothing to attribute.
+    const names = await this.attribution(ctx, shown);
 
     return {
-      rows: attended.slice(start, start + size).map((row) => this.view(row, day)),
+      rows: shown.map((row) => this.view(row, day, names)),
       total: attended.length,
       page,
       pageSize: size,
@@ -472,6 +567,21 @@ export class LeadService {
     return flags;
   }
 
+  /**
+   * The names behind a page's proxy edits, in one read rather than one per row.
+   *
+   * Only the rows a leader actually touched cost anything: a lead whose last change was its own
+   * owner's contributes no id at all, so an agent working alone resolves nothing.
+   */
+  private async attribution(
+    ctx: RequestContext, rows: readonly LeadDocument[],
+  ): Promise<Map<string, string>> {
+    const editors = rows
+      .filter((r) => r.updatedBy && r.updatedBy !== r.ownerMembershipId)
+      .map((r) => r.updatedBy as string);
+    return this.names.byMembershipId(ctx, editors);
+  }
+
   /** The stored row with the patch applied, for a rule that has to see both. */
   private merge(lead: LeadDocument, input: CheckedLead) {
     return {
@@ -498,8 +608,9 @@ export class LeadService {
     return out;
   }
 
-  private view(doc: LeadDocument, day: OfficeDay): LeadView {
+  private view(doc: LeadDocument, day: OfficeDay, names: Map<string, string>): LeadView {
     const flags = this.flagsFor(doc, day);
+    const editor = doc.updatedBy && doc.updatedBy !== doc.ownerMembershipId ? doc.updatedBy : null;
     return {
       id: String(doc._id),
       ownerMembershipId: doc.ownerMembershipId,
@@ -524,6 +635,7 @@ export class LeadService {
        * of epoch milliseconds, which is what the prototype does and is off by one across a DST
        * boundary. Jakarta has none; the next company's offices are not promised to.
        */
+      lastEditedBy: editor ? { membershipId: editor, name: names.get(editor) ?? null } : null,
       overdueDays: flags.includes('overdue') && doc.nextActionDate
         ? this.clock.daysBetween(day.timezone, doc.nextActionDate, day.today)
         : null,

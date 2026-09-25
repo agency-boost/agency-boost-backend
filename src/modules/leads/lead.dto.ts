@@ -59,9 +59,26 @@ export class UpdateLeadDto extends CreateLeadDto {
   @ApiPropertyOptional({ example: 'Pak Budi', minLength: 2, maxLength: 120 })
   @Allow()
   declare name: string;
+
+  @ApiPropertyOptional({
+    type: Number,
+    example: 3,
+    description:
+      'The `version` this patch was written against. Refused with `409 VERSION_CONFLICT` if the '
+      + 'lead has moved on — two people in one 1-on-1 on two devices is the realistic case.',
+  })
+  @Allow()
+  version?: number;
 }
 
-export class SetLeadStatusDto {
+/** What every pinning route takes beside its own field. */
+class PinnedVersion {
+  @ApiPropertyOptional({ type: Number, example: 3, description: 'The version this write was read at.' })
+  @Allow()
+  version?: number;
+}
+
+export class SetLeadStatusDto extends PinnedVersion {
   @ApiProperty({
     example: 'FOLLOW_UP',
     description:
@@ -72,7 +89,7 @@ export class SetLeadStatusDto {
   statusCode!: string;
 }
 
-export class SetLeadOutcomeDto {
+export class SetLeadOutcomeDto extends PinnedVersion {
   @ApiProperty({
     enum: [...LEAD_OUTCOMES, null],
     nullable: true,

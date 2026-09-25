@@ -151,6 +151,7 @@ import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schem
 import { OnboardingService } from '@/modules/org/onboarding.service';
 import { OnboardingController } from '@/modules/org/onboarding.controller';
 import { LeaderCodeService } from '@/modules/org/leader-code.service';
+import { MemberNames } from '@/modules/org/member-names.service';
 import { ApprovalsService } from '@/modules/org/approvals.service';
 import { Group, GroupSchema } from '@/modules/org/group.schema';
 import { AdminDelegationService } from '@/modules/org/admin-delegation.service';
@@ -344,6 +345,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     DirectoryService,
     OnboardingService,
     LeaderCodeService,
+    MemberNames,
     ApprovalsService,
     RoleChangeService,
     RemovalService,

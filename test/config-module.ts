@@ -74,6 +74,8 @@ import { StubStorage } from './stub-storage';
 import { ProductService } from '@/modules/products/product.service';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
+import { MemberNames } from '@/modules/org/member-names.service';
+import { UserSchema } from '@/modules/users/user.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
@@ -114,6 +116,10 @@ export function configModule(now: Date) {
     new LeadStatusRepository(leadStatuses as never), audit, clock,
   );
   const kpms = model('KpmModelForConfig', KpmSchema);
+  // Shared, because the lead service resolves a leader's downline from the same rows the org
+  // module reads — two handles on one collection is two caches and one of them stale.
+  const memberships = new MembershipRepository(model(Membership.name, MembershipSchema) as never);
+  const users = model('UserModelForConfig', UserSchema);
   const companyOrgLevels = model('CompanyOrgLevelModelForConfig', CompanyOrgLevelSchema);
   const orgLevels = new OrgLevelService(
     companyOrgLevels as never,
@@ -204,6 +210,8 @@ export function configModule(now: Date) {
     audit,
     clock,
     new TenantDay(kpms as never, clock),
+    memberships,
+    new MemberNames(memberships, users as never),
   );
   // P5-T7: the office's campaigns, and the carrier rules it is measured against.
   const campaigns = new CampaignService(

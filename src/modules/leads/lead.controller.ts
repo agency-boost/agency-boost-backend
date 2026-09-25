@@ -90,7 +90,7 @@ export class LeadController {
   async setStatus(
     @Ctx() ctx: RequestContext, @Param('id') id: string, @Body() body: SetLeadStatusDto,
   ) {
-    return this.leads.setStatus(ctx, id, body.statusCode);
+    return this.leads.setStatus(ctx, id, body.statusCode, body.version);
   }
 
   @Patch(':id/outcome')
@@ -106,7 +106,7 @@ export class LeadController {
   async setOutcome(
     @Ctx() ctx: RequestContext, @Param('id') id: string, @Body() body: SetLeadOutcomeDto,
   ) {
-    return this.leads.setOutcome(ctx, id, body.outcome);
+    return this.leads.setOutcome(ctx, id, body.outcome, body.version);
   }
 
   @Delete(':id')

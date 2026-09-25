@@ -395,7 +395,18 @@ export const PERMISSIONS = {
    * **`own` and nothing else** (§3.7). Not the coach — the coaching leads table has no delete —
    * and not the admin, who may not read the rows at all. Soft, with a retention window.
    */
+  /**
+   * **`own` for everybody who carries leads, which is the point** — not *agents only*.
+   *
+   * This granted `AGENT` alone until P7-T7, and the sentence behind it — *"soft, and the agent's
+   * alone; not the coach"* — meant **the owner's alone**. The thing that stops a coach deleting
+   * somebody's record is the `own` *scope*, not the absence of the grant: an AAB and an AB carry
+   * their own prospects like anybody else, and they could not delete one. Found writing AC-5's
+   * six-role tests, which is what those are for.
+   */
   'lead:delete': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
     { grantee: AGENT, scope: 'own' },
   ],
   /**

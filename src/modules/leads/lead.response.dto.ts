@@ -85,6 +85,18 @@ export class LeadResponseDto implements LeadView {
   flags!: LeadFlag[];
 
   @ApiProperty({
+    type: 'object',
+    nullable: true,
+    additionalProperties: false,
+    properties: { membershipId: { type: 'string' }, name: { type: 'string', nullable: true } },
+    description:
+      'Who last changed this lead, when that was not the agent whose lead it is (ADR-0044) — '
+      + '`null` otherwise. A proxy edit is recognisable by `updatedBy` differing from '
+      + '`ownerMembershipId`: two columns, so no flag is needed.',
+  })
+  lastEditedBy!: { membershipId: string; name: string | null } | null;
+
+  @ApiProperty({
     type: Number,
     nullable: true,
     example: 14,
