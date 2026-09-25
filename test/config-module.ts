@@ -199,6 +199,7 @@ export function configModule(now: Date) {
   // P7-T1: one person an agent is working. The first record about somebody who is not a user.
   const leadRecords = new LeadService(
     new LeadRepository(model(Lead.name, LeadSchema) as never),
+    new LeadStatusRepository(leadStatuses as never),
     audit,
     clock,
   );

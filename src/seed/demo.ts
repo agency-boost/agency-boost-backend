@@ -1139,86 +1139,173 @@ async function main(): Promise<void> {
   }
 
   /*
-   * ------------------------------------------------------------------ Leads (P7-T1)
+   * ------------------------------------------------------ Leads (P7-T1, P7-T2, P7-T3)
    *
-   * **No status on any of them, and that is the record rather than an omission.** Setting a lead's
-   * first status is a *move*, and every move is P7-T3's (ADR-0045) — so a seeded status here would
-   * be a row the product cannot yet have written. They gain one when that task lands.
+   * **Without these the Leads screen is an empty table**, and an empty table cannot be reviewed:
+   * every state it has to render — a stage, an attention flag, a closed lead, a commitment for
+   * the month — is a row or it is nothing.
    *
-   * The spread is the **lawful basis**, because that is the rule P7-T1 exists for: one with a name
-   * and nothing else, one on each of the three grounds, and one reachable only by email.
+   * Three things are deliberately spread across them:
+   *
+   * - **The lawful basis**, which is the rule P7-T1 exists for: one with a name and nothing else,
+   *   one on each of the three grounds, and one reachable only by email.
+   * - **The ladder**, because a status is reached by *moving* (ADR-0045) — so each seeded lead
+   *   that holds one also holds the transitions that put it there, walked or jumped.
+   * - **What is asking to be picked up**, so the attention filter has something to find: one
+   *   overdue, one with no next action, one with neither a date nor a remark.
+   *
+   * One lead sits **open on the stage that closes its pipeline**, which is the only way to see
+   * the ✓ enabled; one is **won** there, and one is **lost from the middle of the ladder** —
+   * which is §3.7's asymmetry made visible rather than asserted.
    */
-  const leadSeeds: ReadonlyArray<{
+  interface LeadSeed {
     owner: string;
     name: string;
     type: 'sales' | 'recruitment' | null;
+    /** The stages this lead has been through, oldest first. The last one is where it sits. */
+    path?: string[];
+    outcome?: 'won' | 'lost';
     phone?: string;
     email?: string;
     lawfulBasis?: 'consent' | 'contract' | 'legitimate_interest';
     remarks?: string;
-    nextActionDate?: string;
+    /** Days from today. Negative is in the past, which is what *overdue* means. */
+    nextActionIn?: number;
     nextActionNote?: string;
     thisMonth?: boolean;
     source?: string;
-  }> = [
-    // A name from a Thursday BOP and nothing more — legal to hold, and the reason the gate sits on
-    // the contact fields rather than on the record.
+  }
+
+  /** `YYYY-MM-DD` in the office's timezone — the same day boundary the server resolves. */
+  const leadDay = (inDays: number) => new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(daysAgo(-inDays));
+
+  const seedLeads = async (kpmId: string, seeds: readonly LeadSeed[]) => {
+    for (const seed of seeds) {
+      if (await Leads.findOne({ kpmId, name: seed.name }).exec()) continue;
+      const path = seed.path ?? [];
+      const here = path.at(-1) ?? null;
+      const status = here
+        ? await LeadStatuses.findOne({ kpmId, code: here }).lean().exec()
+        : null;
+
+      // Oldest first, and spaced so the history reads as a fortnight of work rather than as one
+      // instant — which is what makes it useful to a leader reading it in a coaching session.
+      const transitions = path.map((code, i) => ({
+        fromStatusCode: i === 0 ? null : path[i - 1],
+        toStatusCode: code,
+        at: daysAgo(18 - i * 4),
+        byMembershipId: seed.owner,
+      }));
+
+      await Leads.create({
+        kpmId,
+        ownerMembershipId: seed.owner,
+        name: seed.name,
+        type: seed.type,
+        contact: { phone: seed.phone ?? null, email: seed.email ?? null },
+        lawfulBasis: seed.lawfulBasis ?? null,
+        consentAt: seed.lawfulBasis ? daysAgo(20) : null,
+        statusCode: here,
+        statusId: status ? String((status as { _id: unknown })._id) : null,
+        thisMonth: seed.thisMonth ?? false,
+        remarks: seed.remarks ?? null,
+        nextActionDate: seed.nextActionIn === undefined ? null : leadDay(seed.nextActionIn),
+        nextActionNote: seed.nextActionNote ?? null,
+        outcome: seed.outcome ?? null,
+        outcomeAt: seed.outcome ? daysAgo(2) : null,
+        dateRegistered: daysAgo(20),
+        source: seed.source ?? null,
+        // One for the record, one for each move, one for the outcome — what the product would
+        // have written had somebody done this by hand.
+        version: 1 + transitions.length + (seed.outcome ? 1 : 0),
+        transitions,
+        deletedAt: null,
+        createdBy: seed.owner,
+        updatedBy: seed.owner,
+      });
+    }
+  };
+
+  await seedLeads(id0417, [
+    // A name from a Thursday BOP and nothing more — legal to hold, and the reason the gate sits
+    // on the contact fields rather than on the record. No type, so no stage is possible yet.
     { owner: rina.id, name: 'Pak Bambang', type: null, remarks: 'Met at the Thursday BOP.' },
     {
       owner: rina.id, name: 'Ibu Dewi Lestari', type: 'sales',
+      path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'],
       phone: '0812-1100-2200', lawfulBasis: 'consent',
       remarks: 'Hot button: the eldest starts university in two years.',
-      nextActionDate: '2026-10-02', nextActionNote: 'Coffee at Grand Indonesia, 10:00.',
+      nextActionIn: 7, nextActionNote: 'Coffee at Grand Indonesia, 10:00.',
       thisMonth: true, source: 'Referral — Ibu Sari',
     },
     {
+      // Overdue, and committed for the month — the pair the prototype hides behind its green
+      // chip and this product does not (P7-T4 AC-2).
       owner: rina.id, name: 'Pak Hendro Gunawan', type: 'sales',
+      path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED'],
       email: 'hendro.g@example.com', lawfulBasis: 'contract',
       remarks: 'Application already in with another insurer; comparing.',
-      nextActionDate: '2026-09-18', nextActionNote: 'Chase the illustration.',
-      source: 'Canvassing — Senayan',
+      nextActionIn: -6, nextActionNote: 'Chase the illustration.',
+      thisMonth: true, source: 'Canvassing — Senayan',
+    },
+    {
+      // Nothing typed against it at all: no date and no remark, so it carries two flags.
+      owner: rina.id, name: 'Pak Surya Dharma', type: 'sales',
+      path: ['NOT_YET_APPROACHED'],
+      source: 'Walk-in — BSD office',
+    },
+    {
+      // Open, on the stage that closes the pipeline. The only state in which ✓ is available.
+      owner: rina.id, name: 'Ibu Wulan Sari', type: 'sales',
+      path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED', 'APPROVED_NOT_PAID', 'PAID_AND_ISSUED'],
+      phone: '0811-9090-3030', lawfulBasis: 'consent',
+      remarks: 'Premium paid on the 12th; waiting on the policy document.',
+      nextActionIn: 2, nextActionNote: 'Hand over the policy.',
+      thisMonth: true, source: 'Referral — Pak Hendro',
+    },
+    {
+      // Won, and therefore carrying no attention flags whatever its dates say.
+      owner: rina.id, name: 'Ibu Ratna Kusuma', type: 'sales',
+      path: ['NOT_YET_APPROACHED', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'], outcome: 'won',
+      phone: '0812-3344-5566', lawfulBasis: 'consent',
+      remarks: 'Took the education plan. Asked about a second policy for her son.',
+      source: 'Referral — Ibu Sari',
     },
     {
       owner: budi.id, name: 'Sdri. Maya Puspita', type: 'recruitment',
+      path: ['NOT_APPROACHED'],
       phone: '0813-4455-6677', lawfulBasis: 'legitimate_interest',
       remarks: 'Referred by her cousin, who is already an agent. Not yet approached.',
       source: 'Referral — agent network',
     },
     {
       owner: budi.id, name: 'Pak Andi Kurniawan', type: 'recruitment',
+      path: ['NOT_APPROACHED', 'MEETING_SCHEDULED', 'RECRUITMENT_PRESENTATION', 'AGENT_CODE_CREATED', 'AAJI_LICENSED'],
       phone: '0857-7788-9900', lawfulBasis: 'consent',
       remarks: 'Sat through the NBO. Asked about the licence timeline.',
-      nextActionDate: '2026-10-06', nextActionNote: 'Send the AAJI schedule.',
+      nextActionIn: 11, nextActionNote: 'Send the AAJI schedule.',
       thisMonth: true, source: 'BOP — 12 September',
     },
-  ];
-  for (const seed of leadSeeds) {
-    if (await Leads.findOne({ kpmId: id0417, name: seed.name }).exec()) continue;
-    await Leads.create({
-      kpmId: id0417,
-      ownerMembershipId: seed.owner,
-      name: seed.name,
-      type: seed.type,
-      contact: { phone: seed.phone ?? null, email: seed.email ?? null },
-      lawfulBasis: seed.lawfulBasis ?? null,
-      consentAt: seed.lawfulBasis ? daysAgo(20) : null,
-      statusCode: null,
-      statusId: null,
-      thisMonth: seed.thisMonth ?? false,
-      remarks: seed.remarks ?? null,
-      nextActionDate: seed.nextActionDate ?? null,
-      nextActionNote: seed.nextActionNote ?? null,
-      outcome: null,
-      outcomeAt: null,
-      dateRegistered: daysAgo(20),
-      source: seed.source ?? null,
-      version: 1,
-      transitions: [],
-      deletedAt: null,
-      createdBy: seed.owner,
-      updatedBy: seed.owner,
-    });
-  }
+    {
+      // Lost from the middle of the ladder, which is allowed and won is not (§3.7).
+      owner: budi.id, name: 'Pak Joko Prasetyo', type: 'recruitment',
+      path: ['NOT_APPROACHED', 'MEETING_SCHEDULED'], outcome: 'lost',
+      phone: '0856-2233-4455', lawfulBasis: 'consent',
+      remarks: 'Took a salaried role instead. Happy to be asked again next year.',
+      source: 'BOP — 12 September',
+    },
+    {
+      // Somebody else's, so a leader screen has more than one agent's work to show in P7-T7.
+      owner: dewi.id, name: 'Pak Rizal Effendi', type: 'sales',
+      path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'],
+      phone: '0815-6677-8899', lawfulBasis: 'consent',
+      remarks: 'Wants a critical-illness rider costed.',
+      nextActionIn: 4, nextActionNote: 'Send the two illustrations.',
+      source: 'Referral — Pak Agus',
+    },
+  ]);
 
   // ------------------------------------------------- KPM 0555, for cross-tenant checks
 
@@ -1239,8 +1326,33 @@ async function main(): Promise<void> {
 
   const owner0555 = await place(office0555, String(owner0555User._id), 'ab', null);
   const agent0555User = await user('agent@kpm0555.test', 'Lina Marlina');
-  await place(office0555, String(agent0555User._id), 'agent', owner0555);
+  const agent0555 = await place(office0555, String(agent0555User._id), 'agent', owner0555);
   await recount(String(kpm0555._id), owner0555.id);
+
+  /*
+   * Two leads in the second office, on the two ladders.
+   *
+   * **The point is that they are unreachable from the first.** A cross-tenant negative asserted
+   * against an empty collection passes for the wrong reason — there is nothing to leak — so the
+   * office that must not be readable has rows worth reading.
+   */
+  await seedLeads(String(kpm0555._id), [
+    {
+      owner: agent0555.id, name: 'Ibu Christine Halim', type: 'sales',
+      path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'],
+      phone: '0819-2200-3311', lawfulBasis: 'consent',
+      remarks: 'Kelapa Gading. Wants unit-link, sceptical about fees.',
+      nextActionIn: 3, nextActionNote: 'Walk through the fee table.',
+      source: 'Walk-in — Kelapa Gading',
+    },
+    {
+      owner: owner0555.id, name: 'Pak Teguh Santoso', type: 'recruitment',
+      path: ['NOT_APPROACHED', 'MEETING_SCHEDULED'],
+      email: 'teguh.s@example.com', lawfulBasis: 'legitimate_interest',
+      remarks: 'Branch manager at a bank, looking for a second income.',
+      source: 'Referral — Hendra',
+    },
+  ]);
 
   // ------------------------------------------- a suspended office, and somebody in it
 

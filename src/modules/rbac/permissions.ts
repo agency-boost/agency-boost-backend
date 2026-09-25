@@ -355,6 +355,59 @@ export const PERMISSIONS = {
    * guarantee is structural instead: `ActivityService`'s write path takes no subject at all.
    */
 
+  /*
+   * ---- Leads (P7). ----
+   *
+   * **The opposite decision from the activity log above, and §3.7 gives the reason.** A day's log
+   * is evidence, so nobody but its subject writes it; a lead is a shared working board, and a real
+   * 1-on-1 does update it live. A leader writes a downline's lead and the write carries their name
+   * (ADR-0044). The two records sit next to each other in this file deliberately: the next reader
+   * should be able to see that the difference is intended.
+   *
+   * **The scopes are registered; the service still serves `own`.** Resolving a downline is
+   * P7-T7's, which is also where the attribution and the version rule land. That fails closed — a
+   * leader sees their own leads until then — rather than open.
+   *
+   * **Super Admin's `all` is `DEFERRED`, not enforced.** The routes resolve `kpmId` from the
+   * caller's membership and a Super Admin has none, so the grant yields MissingTenantContextError
+   * rather than access. §3.7 argues minimisation harder for a platform reader than for an office
+   * one, so it is a row to revisit rather than a route to build.
+   */
+  'lead:create': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-unit' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  'lead:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-unit' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  'lead:update': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-unit' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /*
+   * **`own` and nothing else** (§3.7). Not the coach — the coaching leads table has no delete —
+   * and not the admin, who may not read the rows at all. Soft, with a retention window.
+   */
+  'lead:delete': [
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /**
+   * Closing a lead. Its own permission because it is its own act: the status says where somebody
+   * is, the outcome says the work stopped and how it ended.
+   */
+  'lead:mark_outcome': [
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-unit' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+
   // ---- Membership. ----
   'member:read_profile': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },

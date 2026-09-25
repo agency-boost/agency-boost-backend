@@ -1,6 +1,699 @@
 {
   "openapi": "3.0.0",
   "paths": {
+    "/api/v1/leads": {
+      "get": {
+        "description": "Search over the name and the remarks, filter by ladder, stage, outcome and attention state, sort on one key, and page. The prototype has none of these on the screen with the most rows. **Your own leads**: a leader reading a downline’s is P7-T7.\n\n**Requires `lead:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeadController_list_v1",
+        "parameters": [
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Over the name and the remarks.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "sales",
+                "recruitment",
+                "unassigned"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "statusCode",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "outcome",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "won",
+                "lost",
+                "open"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "attention",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "overdue",
+                "no-next-action",
+                "no-remarks"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "dateRegistered",
+                "name",
+                "nextActionDate"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "dir",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 200,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `lead:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Your leads",
+        "tags": [
+          "leads"
+        ],
+        "x-required-permission": "lead:read"
+      },
+      "post": {
+        "description": "A name is enough. **Contact details need a recorded lawful basis** (UU 27/2022) — `LEAD_CONSENT_REQUIRED`. The lead starts on no stage: the first one is a move.\n\n**Requires `lead:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeadController_create_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLeadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `lead:create`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add a lead",
+        "tags": [
+          "leads"
+        ],
+        "x-required-permission": "lead:create"
+      }
+    },
+    "/api/v1/leads/{id}": {
+      "get": {
+        "description": "**404, not 403**, for another office’s.\n\n**Requires `lead:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeadController_read_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `lead:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One lead",
+        "tags": [
+          "leads"
+        ],
+        "x-required-permission": "lead:read"
+      },
+      "patch": {
+        "description": "Any of the fields creation takes, one or several. **Not the stage** — that is its own route. Clearing the lawful basis on a lead that still holds contact details is refused, because it is the same act as adding them without one.\n\n**Requires `lead:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeadController_update_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLeadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `lead:update`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change a lead",
+        "tags": [
+          "leads"
+        ],
+        "x-required-permission": "lead:update"
+      },
+      "delete": {
+        "description": "**Soft**, and the owner’s alone (§3.7). Nothing is removed; erasure under PDP is a deliberate, audited, cascading operation and not this button.\n\n**Requires `lead:delete`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeadController_remove_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedLeadDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `lead:delete`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove a lead",
+        "tags": [
+          "leads"
+        ],
+        "x-required-permission": "lead:delete"
+      }
+    },
+    "/api/v1/leads/{id}/status": {
+      "patch": {
+        "description": "Any **active** stage of its own pipeline, at any time (ADR-0045): `rank` is presentation and reorderable, so a forward-only rule would let a drag on the Owner’s settings screen change which moves their agents may make. Refused for the other ladder (`LEAD_STATUS_WRONG_PIPELINE`), for a retired stage (`CONFIG_ARCHIVED`), and for a lead that is already closed (`LEAD_ALREADY_CLOSED`). Every move is appended to the history.\n\n**Requires `lead:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeadController_setStatus_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetLeadStatusDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `lead:update`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Move a lead along its ladder",
+        "tags": [
+          "leads"
+        ],
+        "x-required-permission": "lead:update"
+      }
+    },
+    "/api/v1/leads/{id}/outcome": {
+      "patch": {
+        "description": "`won` needs the stage that closes the pipeline (`LEAD_STATUS_NOT_FINAL` otherwise); `lost` is allowed at any stage; `null` reopens. The two prototype screens disagree about the second and the stricter reading of each half is taken (§3.7).\n\n**Requires `lead:mark_outcome`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeadController_setOutcome_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetLeadOutcomeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `lead:mark_outcome`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Close a lead, or reopen it",
+        "tags": [
+          "leads"
+        ],
+        "x-required-permission": "lead:mark_outcome"
+      }
+    },
     "/api/health": {
       "get": {
         "operationId": "HealthController_live",
@@ -13062,6 +13755,342 @@
       }
     },
     "schemas": {
+      "LeadContactDto": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "phone",
+          "email"
+        ]
+      },
+      "LeadResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "ownerMembershipId": {
+            "type": "string",
+            "description": "The membership whose lead it is, never a user id."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "sales",
+              "recruitment"
+            ],
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "contact": {
+            "$ref": "#/components/schemas/LeadContactDto"
+          },
+          "lawfulBasis": {
+            "type": "string",
+            "enum": [
+              "consent",
+              "contract",
+              "legitimate_interest"
+            ],
+            "nullable": true
+          },
+          "consentAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "statusCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "The code, never the label."
+          },
+          "thisMonth": {
+            "type": "boolean"
+          },
+          "remarks": {
+            "type": "string",
+            "nullable": true
+          },
+          "nextActionDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-02"
+          },
+          "nextActionNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "won",
+              "lost"
+            ],
+            "nullable": true
+          },
+          "source": {
+            "type": "string",
+            "nullable": true
+          },
+          "dateRegistered": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "version": {
+            "type": "number",
+            "description": "What a later write pins, so two people cannot overwrite each other."
+          },
+          "flags": {
+            "type": "array",
+            "description": "Computed on read, never stored — a stored flag is one that is wrong at midnight. A closed lead carries none. **A commitment for this month does not suppress them**, unlike the prototype, which shows only the green chip on a lead that is also two weeks overdue.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "overdue",
+                "no-next-action",
+                "no-remarks"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "ownerMembershipId",
+          "type",
+          "name",
+          "contact",
+          "lawfulBasis",
+          "consentAt",
+          "statusCode",
+          "thisMonth",
+          "remarks",
+          "nextActionDate",
+          "nextActionNote",
+          "outcome",
+          "source",
+          "dateRegistered",
+          "version",
+          "flags"
+        ]
+      },
+      "LeadPageDto": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeadResponseDto"
+            }
+          },
+          "total": {
+            "type": "number",
+            "description": "Matching the filter, not on this page."
+          },
+          "page": {
+            "type": "number"
+          },
+          "pageSize": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "rows",
+          "total",
+          "page",
+          "pageSize"
+        ]
+      },
+      "CreateLeadDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Pak Budi",
+            "minLength": 2,
+            "maxLength": 120
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "sales",
+              "recruitment"
+            ],
+            "nullable": true,
+            "description": "Null until the agent picks a ladder."
+          },
+          "contact": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "phone": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            },
+            "description": "Refused without a lawful basis — LEAD_CONSENT_REQUIRED."
+          },
+          "lawfulBasis": {
+            "type": "string",
+            "enum": [
+              "consent",
+              "contract",
+              "legitimate_interest"
+            ],
+            "nullable": true,
+            "description": "Why these details may be held (UU 27/2022)."
+          },
+          "remarks": {
+            "type": "string",
+            "nullable": true
+          },
+          "nextActionDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-02",
+            "description": "A day, YYYY-MM-DD."
+          },
+          "nextActionNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "source": {
+            "type": "string",
+            "nullable": true
+          },
+          "thisMonth": {
+            "type": "boolean",
+            "description": "The agent’s own commitment for the month."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "UpdateLeadDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Pak Budi",
+            "minLength": 2,
+            "maxLength": 120
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "sales",
+              "recruitment"
+            ],
+            "nullable": true,
+            "description": "Null until the agent picks a ladder."
+          },
+          "contact": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "phone": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            },
+            "description": "Refused without a lawful basis — LEAD_CONSENT_REQUIRED."
+          },
+          "lawfulBasis": {
+            "type": "string",
+            "enum": [
+              "consent",
+              "contract",
+              "legitimate_interest"
+            ],
+            "nullable": true,
+            "description": "Why these details may be held (UU 27/2022)."
+          },
+          "remarks": {
+            "type": "string",
+            "nullable": true
+          },
+          "nextActionDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-02",
+            "description": "A day, YYYY-MM-DD."
+          },
+          "nextActionNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "source": {
+            "type": "string",
+            "nullable": true
+          },
+          "thisMonth": {
+            "type": "boolean",
+            "description": "The agent’s own commitment for the month."
+          }
+        }
+      },
+      "SetLeadStatusDto": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "string",
+            "example": "FOLLOW_UP",
+            "description": "Any **active** stage of this lead’s own ladder, at any time (ADR-0045). Refused for the other pipeline’s stages, for an archived one, and for a lead that is already closed."
+          }
+        },
+        "required": [
+          "statusCode"
+        ]
+      },
+      "SetLeadOutcomeDto": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "won",
+              "lost",
+              null
+            ],
+            "nullable": true,
+            "description": "`won` needs the stage that closes the pipeline; `lost` needs nothing; `null` reopens. Reopening appends no transition — the lead has not moved."
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "DeletedLeadDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "deletedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
       "RegisterDto": {
         "type": "object",
         "properties": {

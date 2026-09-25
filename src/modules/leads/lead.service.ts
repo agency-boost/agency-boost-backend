@@ -1,11 +1,42 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
+import {
+  DomainException, NoMembershipException, NotFoundException,
+} from '@/common/errors/domain.exception';
+import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
+import { LeadStatusRepository } from '@/modules/config/activity.repository';
 import { checkLead, requireLawfulBasis, type CheckedLead } from './lead-input';
 import { LeadRepository } from './lead.repository';
 import type { LeadDocument, LeadType } from './lead.schema';
+
+/** What an agent may be told is asking for them. Derived, never stored. */
+export type LeadFlag = 'overdue' | 'no-next-action' | 'no-remarks';
+
+/** How many rows a page of the Leads screen holds. Stated here, not chosen in a component. */
+export const LEAD_PAGE_SIZE = 50;
+
+/** The screen's search, filter and sort, as the service reads them. */
+export interface LeadQuery {
+  search?: string;
+  type?: 'sales' | 'recruitment' | 'unassigned';
+  statusCode?: string;
+  outcome?: 'won' | 'lost' | 'open';
+  attention?: LeadFlag;
+  sort?: 'dateRegistered' | 'name' | 'nextActionDate';
+  dir?: 'asc' | 'desc';
+  page?: number;
+  pageSize?: number;
+}
+
+/** One page of them, and how many there are to page through. */
+export interface LeadPage {
+  rows: LeadView[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
 
 /** One lead, as a caller reads it. */
 export interface LeadView {
@@ -25,6 +56,8 @@ export interface LeadView {
   source: string | null;
   dateRegistered: string | null;
   version: number;
+  /** Computed on read, so the screen and the service cannot disagree about what is overdue. */
+  flags: LeadFlag[];
 }
 
 /**
@@ -44,6 +77,7 @@ export interface LeadView {
 export class LeadService {
   constructor(
     private readonly leads: LeadRepository,
+    private readonly statuses: LeadStatusRepository,
     private readonly audit: AuditService,
     private readonly clock: Clock,
   ) {}
@@ -119,6 +153,26 @@ export class LeadService {
     if (next.lawfulBasis && !lead.lawfulBasis) $set.consentAt = now;
     if (!next.lawfulBasis) $set.consentAt = null;
 
+    /*
+     * **Changing the ladder clears the rung, and the commitment with it.**
+     *
+     * The two pipelines have no stage in common, so a sales lead reclassified as recruitment
+     * would otherwise go on holding `FOLLOW_UP` — a code from a ladder it is no longer on.
+     * `setStatus` would refuse to move it there, and `setOutcome('won')` would look up its
+     * `isTerminal` on the wrong pipeline's stage and let it close from nowhere.
+     *
+     * The prototype does the same (`leads-management.md` §4), including `thisMonth`: *close this
+     * month* and *recruit this month* are different promises, and one does not survive becoming
+     * the other. **No transition is appended** — the lead has not moved to a stage, it has left
+     * one, and a history row that named a destination would invent one. The `lead.updated` audit
+     * row carries the field change.
+     */
+    if (input.type !== undefined && input.type !== lead.type) {
+      $set.statusCode = null;
+      $set.statusId = null;
+      $set.thisMonth = false;
+    }
+
     const updated = await this.leads.updateById(ctx, id, { $set, $inc: { version: 1 } });
     if (!updated) throw new NotFoundException('Lead');
 
@@ -126,6 +180,137 @@ export class LeadService {
       fields: Object.keys(this.writable(input)),
       hasContact: Boolean(next.contact.phone || next.contact.email),
       lawfulBasis: next.lawfulBasis,
+    });
+    return this.view(updated);
+  }
+
+  /**
+   * Move a lead to a stage (P7-T3).
+   *
+   * **Any active stage of its own pipeline, at any time** (ADR-0045). What refuses is about the
+   * lead's identity and its outcome, never its path — `rank` is presentation and reorderable, so a
+   * forward-only rule would let a drag on the Owner's settings screen change which moves their
+   * agents may make.
+   */
+  async setStatus(ctx: RequestContext, id: string, statusCode: string): Promise<LeadView> {
+    const membershipId = this.me(ctx);
+    const lead = await this.leads.findById(ctx, id);
+    if (!lead) throw new NotFoundException('Lead');
+
+    if (lead.outcome) {
+      throw new DomainException(
+        ErrorCode.LEAD_ALREADY_CLOSED,
+        'This lead is closed. Reopen it before moving it again.',
+        HttpStatus.CONFLICT,
+        { outcome: lead.outcome },
+      );
+    }
+    if (!lead.type) {
+      // The prototype disables the status select until a ladder is chosen, and it is right to:
+      // a stage means nothing until we know which of the two vocabularies it belongs to.
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED,
+        'Choose whether this is a sales or a recruitment lead before setting a stage.',
+        HttpStatus.BAD_REQUEST,
+        { violations: ['type is required before a stage'] },
+      );
+    }
+
+    const wanted = statusCode.trim().toUpperCase();
+    if (wanted === lead.statusCode) return this.view(lead);
+
+    const status = await this.statuses.findOne(ctx, { code: wanted });
+    if (!status) throw new NotFoundException('Lead status', { code: wanted });
+    if (status.pipeline !== lead.type) {
+      throw new DomainException(
+        ErrorCode.LEAD_STATUS_WRONG_PIPELINE,
+        `${wanted} belongs to the ${status.pipeline} ladder; this is a ${lead.type} lead.`,
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        { code: wanted, pipeline: status.pipeline, leadType: lead.type },
+      );
+    }
+    if (status.status === 'archived') {
+      // Invariant §3: archived configuration stays readable so history renders, not writable.
+      throw new DomainException(
+        ErrorCode.CONFIG_ARCHIVED,
+        `${wanted} has been retired. Leads already on it keep it; new ones cannot be moved to it.`,
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        { code: wanted },
+      );
+    }
+
+    const at = this.clock.now();
+    const updated = await this.leads.updateById(ctx, id, {
+      $set: { statusCode: wanted, statusId: String(status._id), updatedBy: membershipId },
+      // Append-only. The lead's current status is the last row's destination, and this is what
+      // makes a jump legible and a leader's edit attributable (ADR-0044, ADR-0045).
+      $push: {
+        transitions: {
+          fromStatusCode: lead.statusCode ?? null, toStatusCode: wanted, at, byMembershipId: membershipId,
+        },
+      },
+      $inc: { version: 1 },
+    });
+    if (!updated) throw new NotFoundException('Lead');
+
+    await this.record(ctx, 'lead.status_changed', id, {
+      from: lead.statusCode ?? null, to: wanted, byMembershipId: membershipId,
+    });
+    return this.view(updated);
+  }
+
+  /**
+   * Close a lead, or reopen one (P7-T3).
+   *
+   * **Won needs the stage that closes the pipeline; lost needs nothing** (§3.7). The two prototype
+   * screens disagree — the agent screen allows Lost anywhere and gates Won, the coaching screen
+   * gates both — and the stricter reading of each half is taken.
+   *
+   * Reopening appends no transition: the lead has not moved, and a history that recorded it as a
+   * move would be a stage nobody worked.
+   */
+  async setOutcome(
+    ctx: RequestContext, id: string, outcome: 'won' | 'lost' | null,
+  ): Promise<LeadView> {
+    const membershipId = this.me(ctx);
+    const lead = await this.leads.findById(ctx, id);
+    if (!lead) throw new NotFoundException('Lead');
+
+    if (outcome && lead.outcome) {
+      throw new DomainException(
+        ErrorCode.LEAD_ALREADY_CLOSED,
+        `This lead is already ${lead.outcome}. Reopen it before closing it again.`,
+        HttpStatus.CONFLICT,
+        { outcome: lead.outcome },
+      );
+    }
+
+    if (outcome === 'won') {
+      const status = lead.statusCode
+        ? await this.statuses.findOne(ctx, { code: lead.statusCode })
+        : null;
+      if (!status?.isTerminal) {
+        throw new DomainException(
+          ErrorCode.LEAD_STATUS_NOT_FINAL,
+          'A lead is won at the stage that closes its pipeline. Move it there first.',
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          { statusCode: lead.statusCode ?? null },
+        );
+      }
+    }
+
+    const updated = await this.leads.updateById(ctx, id, {
+      $set: {
+        outcome,
+        outcomeAt: outcome ? this.clock.now() : null,
+        updatedBy: membershipId,
+      },
+      $inc: { version: 1 },
+    });
+    if (!updated) throw new NotFoundException('Lead');
+
+    await this.record(ctx, outcome ? 'lead.closed' : 'lead.reopened', id, {
+      outcome, from: lead.outcome ?? null, statusCode: lead.statusCode ?? null,
     });
     return this.view(updated);
   }
@@ -146,20 +331,97 @@ export class LeadService {
 
   /** One lead of this office. 404 for another office's, never 403. */
   async read(ctx: RequestContext, id: string): Promise<LeadView> {
+    // Before the repository, so a caller with no office is refused by name rather than by a
+    // `MissingTenantContextError` surfacing as 500 — which is what a Super Admin's `all` grant
+    // would otherwise produce here (ADR-0044).
+    this.me(ctx);
     const lead = await this.leads.findById(ctx, id);
     if (!lead) throw new NotFoundException('Lead');
     return this.view(lead);
   }
 
-  /** The caller's own live leads, newest first — the read the agent's screen is built on. */
-  async listMine(ctx: RequestContext): Promise<LeadView[]> {
+  /**
+   * The caller's own live leads (P7-T2).
+   *
+   * **Search and filter exist because the prototype's busiest screen has neither.** It renders
+   * every row, unpaged and unsearchable, and an agent with two hundred leads scrolls. Registered
+   * as a Fill.
+   *
+   * **Sorting is single-key.** The prototype's own footnote promises *"Sales leads first, then
+   * Recruitment"* and its code does no such thing; the code wins and the footnote is not
+   * reproduced.
+   *
+   * `own` for now: resolving a downline is P7-T7's, and until then a leader sees their own leads
+   * rather than a wider set the service cannot yet scope correctly.
+   */
+  async list(ctx: RequestContext, query: LeadQuery = {}): Promise<LeadPage> {
     const membershipId = this.me(ctx);
-    const rows = await this.leads.find(
-      ctx,
-      { ownerMembershipId: membershipId, deletedAt: null },
-      { sort: { dateRegistered: -1 } },
-    );
-    return rows.map((row) => this.view(row));
+
+    const filter: Record<string, unknown> = {
+      ownerMembershipId: membershipId,
+      deletedAt: null,
+    };
+    if (query.type) filter.type = query.type === 'unassigned' ? null : query.type;
+    if (query.statusCode) filter.statusCode = query.statusCode;
+    if (query.outcome) filter.outcome = query.outcome === 'open' ? null : query.outcome;
+    if (query.search) {
+      /*
+       * Over the name and the remarks, which is where an agent looks for somebody. Escaped,
+       * because a lead's name is user input and `(` in a regular expression is not a bracket.
+       */
+      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const needle = new RegExp(escaped, 'i');
+      filter.$or = [{ name: needle }, { remarks: needle }];
+    }
+
+    const rows = await this.leads.find(ctx, filter, {
+      sort: { [query.sort ?? 'dateRegistered']: query.dir === 'asc' ? 1 : -1 },
+    });
+
+    const attended = query.attention
+      ? rows.filter((row) => this.flagsFor(row).includes(query.attention!))
+      : rows;
+
+    /*
+     * **Paged in the service, not in the screen.** The whole set is read to filter on the derived
+     * attention flags — which is honest about what this costs today and is the thing P7-T4 and
+     * P7-T6 will revisit with an office's real volume in front of them. The page is what the
+     * screen renders either way.
+     */
+    const page = Math.max(1, query.page ?? 1);
+    const size = Math.min(Math.max(1, query.pageSize ?? LEAD_PAGE_SIZE), 200);
+    const start = (page - 1) * size;
+
+    return {
+      rows: attended.slice(start, start + size).map((row) => this.view(row)),
+      total: attended.length,
+      page,
+      pageSize: size,
+    };
+  }
+
+  /**
+   * What is asking to be picked up. **Derived on read, never stored** — a stored flag is one that
+   * is wrong at midnight.
+   *
+   * `thisMonth` does **not** suppress them, which is where the prototype and this part company:
+   * it shows only the green *Closes this month* chip on a lead that is also two weeks overdue,
+   * hiding exactly the leads most needing attention (P7-T4 AC-2).
+   */
+  private flagsFor(lead: LeadDocument): LeadFlag[] {
+    if (lead.outcome) return [];
+    const flags: LeadFlag[] = [];
+    if (!lead.nextActionDate) flags.push('no-next-action');
+    // Against the tenant's day, which P7-T4 makes exact; today's comparison is on the same
+    // `YYYY-MM-DD` string the field stores, so it is timezone-free until then.
+    else if (lead.nextActionDate < this.today()) flags.push('overdue');
+    if (!lead.remarks) flags.push('no-remarks');
+    return flags;
+  }
+
+  /** `YYYY-MM-DD` as the clock sees it. P7-T4 moves this onto the tenant's timezone. */
+  private today(): string {
+    return this.clock.now().toISOString().slice(0, 10);
   }
 
   /** The stored row with the patch applied, for a rule that has to see both. */
@@ -200,6 +462,7 @@ export class LeadService {
       source: doc.source,
       dateRegistered: doc.dateRegistered ? doc.dateRegistered.toISOString() : null,
       version: doc.version,
+      flags: this.flagsFor(doc),
     };
   }
 

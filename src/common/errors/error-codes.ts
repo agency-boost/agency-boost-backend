@@ -50,6 +50,27 @@ export const ErrorCode = {
    * first thing an agent meets a compliance form, and the predictable outcome is a notebook.
    */
   LEAD_CONSENT_REQUIRED: 'LEAD_CONSENT_REQUIRED',
+  /** A stage from the other ladder. Two vocabularies, so this is a type error, not a path rule. */
+  LEAD_STATUS_WRONG_PIPELINE: 'LEAD_STATUS_WRONG_PIPELINE',
+  /**
+   * Marked **won** below the stage that closes the pipeline.
+   *
+   * The outcome is a claim about the world, not a position on a page — which is why *lost* is
+   * allowed anywhere and this is not (§3.7). Free jump (ADR-0045) makes the path irrelevant and
+   * this gate load-bearing: it is the only thing standing between a dropdown and a closed sale.
+   */
+  LEAD_STATUS_NOT_FINAL: 'LEAD_STATUS_NOT_FINAL',
+  /** Already won or lost. Reopening is an explicit act, not a side effect of the next write. */
+  LEAD_ALREADY_CLOSED: 'LEAD_ALREADY_CLOSED',
+  /**
+   * New data written against archived configuration (invariant §3).
+   *
+   * **Catalogued since Phase 4 and raised by nothing until now.** It is one of six `CONFIG_*`
+   * codes documented for shipped modules that no path produced — the drift the `ACTIVITY_*`
+   * family above was caught in, older. P7-T3 is the first path to mean it: a lead may not be
+   * moved onto a stage the office retired, while every lead already sitting on one still renders.
+   */
+  CONFIG_ARCHIVED: 'CONFIG_ARCHIVED',
 
   // Tenant. Note there is deliberately NO cross-tenant code — see NOT_FOUND.
   TENANT_SUSPENDED: 'TENANT_SUSPENDED',

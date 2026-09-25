@@ -1,11 +1,12 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
-import { configModule } from '../../../test/config-module';
+import { configModule, provisionOffice } from '../../../test/config-module';
 
-const NOW = new Date('2026-09-24T02:00:00Z');
+const NOW = new Date('2026-09-25T02:00:00Z');
 const KPM_A = '66f0000000000000000000a1';
 const KPM_B = '66f0000000000000000000b1';
+const COMPANY = '66f0000000000000000000c1';
 
 const member = (kpmId: string, membershipId: string) => new RequestContext('u1', 'none', {
   membershipId, kpmId, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
@@ -81,7 +82,7 @@ describe('the lead record (P7-T1)', () => {
       await create(B(), { name: 'Theirs' });
       await create(A(), { name: 'Ours' });
 
-      expect((await wired.leadRecords.listMine(A())).map((l) => l.name)).toEqual(['Ours']);
+      expect((await wired.leadRecords.list(A())).rows.map((l) => l.name)).toEqual(['Ours']);
     });
 
     it('leaves the other office’s row untouched by a refused write', async () => {
@@ -195,7 +196,7 @@ describe('the lead record (P7-T1)', () => {
       expect(await mongoose.connection.db!.collection('leads').countDocuments()).toBe(1);
       expect((await mongoose.connection.db!.collection('leads').findOne({}))!.deletedAt)
         .not.toBeNull();
-      expect(await wired.leadRecords.listMine(A())).toEqual([]);
+      expect((await wired.leadRecords.list(A())).rows).toEqual([]);
     });
   });
 
@@ -215,6 +216,258 @@ describe('the lead record (P7-T1)', () => {
       expect(after).toMatchObject({ hasContact: true, lawfulBasis: 'consent' });
       expect(JSON.stringify(entry)).not.toContain('Pak Budi');
       expect(JSON.stringify(entry)).not.toContain('0812');
+    });
+  });
+
+  describe('P7-T3 — moving along the ladder', () => {
+    beforeEach(() => provisionOffice(wired, KPM_A, COMPANY));
+
+    const sales = () => create(A(), { type: 'sales' });
+
+    it('AC-5: jumps from the first stage to the last in one write', async () => {
+      /*
+       * The test that distinguishes free jump from a forward-only rule. One that only proved the
+       * refusals would pass under either, which is why ADR-0045 names this one specifically.
+       */
+      const lead = await sales();
+
+      const moved = await wired.leadRecords.setStatus(A(), lead.id, 'PAID_AND_ISSUED');
+
+      expect(moved.statusCode).toBe('PAID_AND_ISSUED');
+      const stored = await mongoose.connection.db!.collection('leads').findOne({ _id: new mongoose.Types.ObjectId(lead.id) });
+      expect(stored!.transitions).toHaveLength(1);
+      expect(stored!.transitions[0]).toMatchObject({
+        fromStatusCode: null, toStatusCode: 'PAID_AND_ISSUED', byMembershipId: 'mem-a1',
+      });
+    });
+
+    it('AC-1: appends every move, oldest first, and never rewrites one', async () => {
+      const lead = await sales();
+      await wired.leadRecords.setStatus(A(), lead.id, 'FOLLOW_UP');
+      await wired.leadRecords.setStatus(A(), lead.id, 'POLICY_SUBMITTED');
+
+      const stored = await mongoose.connection.db!.collection('leads')
+        .findOne({ _id: new mongoose.Types.ObjectId(lead.id) });
+      expect((stored!.transitions as { fromStatusCode: string | null; toStatusCode: string }[])
+        .map((tr) => [tr.fromStatusCode, tr.toStatusCode]))
+        .toEqual([[null, 'FOLLOW_UP'], ['FOLLOW_UP', 'POLICY_SUBMITTED']]);
+    });
+
+    it('AC-2: refuses a stage from the other ladder, naming both', async () => {
+      const lead = await sales();
+
+      await expect(wired.leadRecords.setStatus(A(), lead.id, 'AAJI_LICENSED'))
+        .rejects.toMatchObject({ code: 'LEAD_STATUS_WRONG_PIPELINE' });
+    });
+
+    it('AC-5b: refuses a retired stage, while a lead already on one keeps it', async () => {
+      // Invariant §3: archived configuration stays readable so history renders, not writable.
+      const [salesLadder] = await wired.leads.list(A());
+      const followUp = salesLadder.statuses.find((s) => s.code === 'FOLLOW_UP')!;
+      const lead = await sales();
+      await wired.leadRecords.setStatus(A(), lead.id, 'FOLLOW_UP');
+      await wired.leads.archive(A(), followUp.id);
+
+      const second = await sales();
+      await expect(wired.leadRecords.setStatus(A(), second.id, 'FOLLOW_UP'))
+        .rejects.toMatchObject({ code: 'CONFIG_ARCHIVED' });
+      expect((await wired.leadRecords.read(A(), lead.id)).statusCode).toBe('FOLLOW_UP');
+    });
+
+    it('refuses a stage before the agent has chosen a ladder', async () => {
+      // The prototype disables the select until a type is picked, and it is right to: a stage
+      // means nothing until we know which vocabulary it belongs to.
+      const lead = await create(A());
+
+      await expect(wired.leadRecords.setStatus(A(), lead.id, 'FOLLOW_UP'))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    });
+
+    it('refuses a stage this office does not have', async () => {
+      const lead = await sales();
+      await expect(wired.leadRecords.setStatus(A(), lead.id, 'INVENTED'))
+        .rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('writes nothing when the lead is already there', async () => {
+      const lead = await sales();
+      const once = await wired.leadRecords.setStatus(A(), lead.id, 'FOLLOW_UP');
+      const again = await wired.leadRecords.setStatus(A(), lead.id, 'FOLLOW_UP');
+
+      expect(again.version).toBe(once.version);
+    });
+
+    it('clears the rung and the commitment when the ladder itself changes', async () => {
+      /*
+       * The two ladders share no stage, so a reclassified lead that kept its code would hold one
+       * from a ladder it is not on — and `setOutcome('won')` would then read `isTerminal` off the
+       * wrong pipeline's stage and let it close from nowhere.
+       */
+      const lead = await sales();
+      await wired.leadRecords.setStatus(A(), lead.id, 'PAID_AND_ISSUED');
+      await wired.leadRecords.update(A(), lead.id, { thisMonth: true });
+
+      const moved = await wired.leadRecords.update(A(), lead.id, { type: 'recruitment' });
+
+      expect(moved).toMatchObject({ type: 'recruitment', statusCode: null, thisMonth: false });
+      await expect(wired.leadRecords.setOutcome(A(), lead.id, 'won'))
+        .rejects.toMatchObject({ code: 'LEAD_STATUS_NOT_FINAL' });
+    });
+
+    it('leaves the rung alone when the patch names the type it already has', async () => {
+      const lead = await sales();
+      await wired.leadRecords.setStatus(A(), lead.id, 'FOLLOW_UP');
+
+      const same = await wired.leadRecords.update(A(), lead.id, { type: 'sales' });
+
+      expect(same.statusCode).toBe('FOLLOW_UP');
+    });
+  });
+
+  describe('P7-T3 — closing, and reopening', () => {
+    beforeEach(() => provisionOffice(wired, KPM_A, COMPANY));
+
+    const atStage = async (code: string) => {
+      const lead = await create(A(), { type: 'sales' });
+      return wired.leadRecords.setStatus(A(), lead.id, code);
+    };
+
+    it('AC-3: refuses won below the stage that closes the pipeline', async () => {
+      const lead = await atStage('FOLLOW_UP');
+
+      await expect(wired.leadRecords.setOutcome(A(), lead.id, 'won'))
+        .rejects.toMatchObject({ code: 'LEAD_STATUS_NOT_FINAL' });
+    });
+
+    it('AC-3: takes won at that stage', async () => {
+      const lead = await atStage('PAID_AND_ISSUED');
+
+      const won = await wired.leadRecords.setOutcome(A(), lead.id, 'won');
+
+      expect(won.outcome).toBe('won');
+    });
+
+    it('AC-3: takes lost at any stage, including none at all', async () => {
+      // §3.7 reconciles two prototype screens that disagree, by taking the stricter half of each:
+      // the agent screen allows Lost anywhere and the coaching screen gates it.
+      const early = await atStage('NOT_YET_APPROACHED');
+      const unstaged = await create(A());
+
+      expect((await wired.leadRecords.setOutcome(A(), early.id, 'lost')).outcome).toBe('lost');
+      expect((await wired.leadRecords.setOutcome(A(), unstaged.id, 'lost')).outcome).toBe('lost');
+    });
+
+    it('AC-4: refuses a second outcome, and reopening is the way back', async () => {
+      const lead = await atStage('NOT_YET_APPROACHED');
+      await wired.leadRecords.setOutcome(A(), lead.id, 'lost');
+
+      await expect(wired.leadRecords.setOutcome(A(), lead.id, 'won'))
+        .rejects.toMatchObject({ code: 'LEAD_ALREADY_CLOSED' });
+
+      const reopened = await wired.leadRecords.setOutcome(A(), lead.id, null);
+      expect(reopened).toMatchObject({ outcome: null, statusCode: 'NOT_YET_APPROACHED' });
+    });
+
+    it('AC-4: reopening appends no transition — the lead has not moved', async () => {
+      const lead = await atStage('NOT_YET_APPROACHED');
+      await wired.leadRecords.setOutcome(A(), lead.id, 'lost');
+      await wired.leadRecords.setOutcome(A(), lead.id, null);
+
+      const stored = await mongoose.connection.db!.collection('leads')
+        .findOne({ _id: new mongoose.Types.ObjectId(lead.id) });
+      expect(stored!.transitions).toHaveLength(1);
+    });
+
+    it('refuses moving a closed lead, and says to reopen it', async () => {
+      const lead = await atStage('FOLLOW_UP');
+      await wired.leadRecords.setOutcome(A(), lead.id, 'lost');
+
+      await expect(wired.leadRecords.setStatus(A(), lead.id, 'POLICY_SUBMITTED'))
+        .rejects.toMatchObject({ code: 'LEAD_ALREADY_CLOSED' });
+    });
+  });
+
+  describe('P7-T2 — the read the screen is built on', () => {
+    beforeEach(() => provisionOffice(wired, KPM_A, COMPANY));
+
+    const many = async () => {
+      await create(A(), { name: 'Ibu Dewi', type: 'sales', remarks: 'Golf on Sundays.', nextActionDate: '2026-10-02' });
+      await create(A(), { name: 'Pak Hendro', type: 'sales', remarks: 'Comparing quotes.', nextActionDate: '2026-09-01' });
+      await create(A(), { name: 'Sdri. Maya', type: 'recruitment' });
+    };
+
+    it('searches the name and the remarks', async () => {
+      await many();
+
+      expect((await wired.leadRecords.list(A(), { search: 'dewi' })).rows.map((l) => l.name))
+        .toEqual(['Ibu Dewi']);
+      expect((await wired.leadRecords.list(A(), { search: 'golf' })).rows.map((l) => l.name))
+        .toEqual(['Ibu Dewi']);
+    });
+
+    it('treats a search as text, not as a pattern', async () => {
+      // A lead's name is user input, and `(` in a regular expression is not a bracket.
+      await create(A(), { name: 'Pak Budi (referral)' });
+
+      expect((await wired.leadRecords.list(A(), { search: '(referral)' })).rows)
+        .toHaveLength(1);
+    });
+
+    it('filters by ladder, including the leads that have none', async () => {
+      await many();
+      await create(A(), { name: 'Unassigned one' });
+
+      expect((await wired.leadRecords.list(A(), { type: 'recruitment' })).rows).toHaveLength(1);
+      expect((await wired.leadRecords.list(A(), { type: 'unassigned' })).rows.map((l) => l.name))
+        .toEqual(['Unassigned one']);
+    });
+
+    it('filters by attention, which is derived rather than stored', async () => {
+      await many();
+
+      const overdue = await wired.leadRecords.list(A(), { attention: 'overdue' });
+      expect(overdue.rows.map((l) => l.name)).toEqual(['Pak Hendro']);
+
+      const unplanned = await wired.leadRecords.list(A(), { attention: 'no-next-action' });
+      expect(unplanned.rows.map((l) => l.name)).toEqual(['Sdri. Maya']);
+    });
+
+    it('P7-T4 AC-2: a commitment does not hide an overdue lead', async () => {
+      /*
+       * The prototype shows only the green *Closes this month* chip on a lead that is also two
+       * weeks overdue, hiding exactly the leads most needing attention. Registered as an
+       * Improvement.
+       */
+      const lead = await create(A(), {
+        name: 'Committed and late', type: 'sales', nextActionDate: '2026-09-01', thisMonth: true,
+      });
+
+      expect(lead.flags).toContain('overdue');
+      expect((await wired.leadRecords.list(A(), { attention: 'overdue' })).rows.map((l) => l.id))
+        .toContain(lead.id);
+    });
+
+    it('carries no flags on a closed lead', async () => {
+      const lead = await create(A(), { name: 'Done', type: 'sales' });
+      await wired.leadRecords.setOutcome(A(), lead.id, 'lost');
+
+      expect((await wired.leadRecords.read(A(), lead.id)).flags).toEqual([]);
+    });
+
+    it('sorts on one key, in the direction asked for', async () => {
+      await many();
+
+      const byName = await wired.leadRecords.list(A(), { sort: 'name', dir: 'asc' });
+      expect(byName.rows.map((l) => l.name)).toEqual(['Ibu Dewi', 'Pak Hendro', 'Sdri. Maya']);
+    });
+
+    it('pages, and says how many there are to page through', async () => {
+      await many();
+
+      const page = await wired.leadRecords.list(A(), { pageSize: 2, page: 2, sort: 'name', dir: 'asc' });
+
+      expect(page).toMatchObject({ total: 3, page: 2, pageSize: 2 });
+      expect(page.rows.map((l) => l.name)).toEqual(['Sdri. Maya']);
     });
   });
 });

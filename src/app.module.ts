@@ -13,6 +13,7 @@ import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { HealthController } from '@/modules/health/health.controller';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditReadService } from '@/modules/audit/audit-read.service';
+import { LeadController } from '@/modules/leads/lead.controller';
 import { LeadRepository } from '@/modules/leads/lead.repository';
 import { LeadService } from '@/modules/leads/lead.service';
 import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
@@ -215,6 +216,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ]),
   ],
   controllers: [
+    LeadController,
     HealthController,
     AuthController,
     AdminController,

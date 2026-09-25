@@ -5,6 +5,9 @@ import {
 } from '@/modules/auth/session.response.dto';
 import { InboxDto, InboxItemDto } from '@/modules/notifications/notification.response.dto';
 import {
+  DeletedLeadDto, LeadPageDto, LeadResponseDto,
+} from '@/modules/leads/lead.response.dto';
+import {
   DelegatedAdminDto, DirectoryMemberDto, DirectoryPageDto, GroupSummaryDto, InvitePreviewDto,
   JoinStateDto, KpmDirectoryEntryDto, LeaderChoiceDto, MemberTagsDto,
   MyLeaderCodeDto, OrgTreeDto, PendingRequestDto, RoleChangeEntryDto, RoutingChoiceDto, TeamMemberDto,
@@ -120,6 +123,13 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_renameLeadStatus: { type: LeadStatusDto },
   TenantConfigController_setTerminal: { type: LeadPipelineDto },
   TenantConfigController_setLateStage: { type: LeadStatusDto },
+  LeadController_list: { type: LeadPageDto },
+  LeadController_read: { type: LeadResponseDto },
+  LeadController_create: { type: LeadResponseDto },
+  LeadController_update: { type: LeadResponseDto },
+  LeadController_setStatus: { type: LeadResponseDto },
+  LeadController_setOutcome: { type: LeadResponseDto },
+  LeadController_remove: { type: DeletedLeadDto },
   TenantConfigController_archiveLeadStatus: { type: LeadStatusDto },
   TenantConfigController_restoreLeadStatus: { type: LeadStatusDto },
   AdminController_elevateSession: { type: StatusAckDto },
