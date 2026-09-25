@@ -753,6 +753,180 @@
         "x-required-permission": "lead:mark_outcome"
       }
     },
+    "/api/v1/goals/{period}": {
+      "get": {
+        "description": "The goal, or **the office’s defaults** when there is none — so the screen opens on five filled cards rather than on empty ones, and a first-time reader sees what a plan looks like. `projected` is recomputed on every read; `snapshot` is what was agreed.\n\n**Requires `goal:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "GoalController_read_v1",
+        "parameters": [
+          {
+            "name": "period",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `goal:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Your plan for a period",
+        "tags": [
+          "goals"
+        ],
+        "x-required-permission": "goal:read"
+      },
+      "put": {
+        "description": "Creates it or replaces what it held, in one write. Refused with `GOAL_INVALID_ASSUMPTION` when the numbers cannot produce a plan — a case size of zero, or a conversion rate outside 0–100 — and nothing is written when it is.\n\n**Requires `goal:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "GoalController_save_v1",
+        "parameters": [
+          {
+            "name": "period",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveGoalDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `goal:update`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save your plan",
+        "tags": [
+          "goals"
+        ],
+        "x-required-permission": "goal:update"
+      }
+    },
     "/api/health": {
       "get": {
         "operationId": "HealthController_live",
@@ -14257,6 +14431,266 @@
         },
         "required": [
           "id"
+        ]
+      },
+      "GoalSnapshotDto": {
+        "type": "object",
+        "properties": {
+          "monthlyApeTargetMinor": {
+            "type": "number"
+          },
+          "policiesPerMonth": {
+            "type": "number"
+          },
+          "appointmentsPerMonth": {
+            "type": "number"
+          },
+          "leadsPerMonth": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "monthlyApeTargetMinor",
+          "policiesPerMonth",
+          "appointmentsPerMonth",
+          "leadsPerMonth"
+        ]
+      },
+      "GoalProjectionDto": {
+        "type": "object",
+        "properties": {
+          "annualApeTargetMinor": {
+            "type": "number"
+          },
+          "apeAchievedMinor": {
+            "type": "number"
+          },
+          "remainingApeMinor": {
+            "type": "number",
+            "description": "`max(0, target − achieved)`. Never negative."
+          },
+          "monthlyApeTargetMinor": {
+            "type": "number"
+          },
+          "policiesPerMonth": {
+            "type": "number"
+          },
+          "policiesPerWeek": {
+            "type": "number",
+            "description": "The screen’s `≈ n/week` sub-line. Ceil, like every step."
+          },
+          "appointmentsPerMonth": {
+            "type": "number"
+          },
+          "appointmentsPerWeek": {
+            "type": "number"
+          },
+          "leadsPerMonth": {
+            "type": "number"
+          },
+          "leadsPerWeek": {
+            "type": "number"
+          },
+          "targetMet": {
+            "type": "boolean",
+            "description": "The annual target is reached, so every figure above is zero (ADR-0047). The screen replaces the cascade with a sentence rather than printing *contact 0 leads* to the best producer in the office."
+          }
+        },
+        "required": [
+          "annualApeTargetMinor",
+          "apeAchievedMinor",
+          "remainingApeMinor",
+          "monthlyApeTargetMinor",
+          "policiesPerMonth",
+          "policiesPerWeek",
+          "appointmentsPerMonth",
+          "appointmentsPerWeek",
+          "leadsPerMonth",
+          "leadsPerWeek",
+          "targetMet"
+        ]
+      },
+      "GoalCascadeMappingDto": {
+        "type": "object",
+        "properties": {
+          "leadsCode": {
+            "type": "string",
+            "example": "LEADS_CONTACTED"
+          },
+          "appointmentsCode": {
+            "type": "string",
+            "example": "SELL_PRESENTATION"
+          },
+          "closingsCode": {
+            "type": "string",
+            "example": "SELL_SUBMISSION"
+          }
+        },
+        "required": [
+          "leadsCode",
+          "appointmentsCode",
+          "closingsCode"
+        ]
+      },
+      "GoalResponseDto": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "example": "2026"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "from_savings"
+            ]
+          },
+          "annualApeTargetMinor": {
+            "type": "number"
+          },
+          "savingsTargetMinor": {
+            "type": "number"
+          },
+          "commissionRatePct": {
+            "type": "number"
+          },
+          "monthsLeft": {
+            "type": "number"
+          },
+          "apeAchievedMinor": {
+            "type": "number"
+          },
+          "caseSizeMinor": {
+            "type": "number"
+          },
+          "leadsToApptPct": {
+            "type": "number"
+          },
+          "closingRatePct": {
+            "type": "number"
+          },
+          "snapshot": {
+            "description": "What was agreed, frozen at save time. **Never a display source** — `projected` is what a screen renders, because `monthsLeft` shrinks every day.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoalSnapshotDto"
+              }
+            ]
+          },
+          "projected": {
+            "nullable": true,
+            "description": "What the inputs mean **today**, recomputed on every read. `null` when the stored inputs cannot produce a plan: a write refuses that by name, and a read must not, or a goal saved before the rule would lock its agent out of the screen that could fix it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoalProjectionDto"
+              }
+            ]
+          },
+          "cascadeMapping": {
+            "description": "Activity **codes**, never positions.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoalCascadeMappingDto"
+              }
+            ]
+          },
+          "savedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "savedByMembershipId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Who saved it. Differing from the goal’s own membership is a leader’s goal-setting — two columns, no flag (ADR-0046)."
+          }
+        },
+        "required": [
+          "period",
+          "mode",
+          "annualApeTargetMinor",
+          "savingsTargetMinor",
+          "commissionRatePct",
+          "monthsLeft",
+          "apeAchievedMinor",
+          "caseSizeMinor",
+          "leadsToApptPct",
+          "closingRatePct",
+          "snapshot",
+          "projected",
+          "cascadeMapping",
+          "savedAt",
+          "savedByMembershipId"
+        ]
+      },
+      "SaveGoalDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "from_savings"
+            ],
+            "description": "Which entry mode produced the annual target."
+          },
+          "annualApeTargetMinor": {
+            "type": "number",
+            "example": 50000000000,
+            "description": "IDR **sen**, not rupiah."
+          },
+          "savingsTargetMinor": {
+            "type": "number",
+            "example": 5000000000,
+            "description": "IDR sen. Kept in either mode, so switching back is lossless."
+          },
+          "commissionRatePct": {
+            "type": "number",
+            "example": 10,
+            "description": "Per cent. `12.5` is twelve and a half — decimals survive (I-108)."
+          },
+          "monthsLeft": {
+            "type": "number",
+            "example": 3.2,
+            "description": "The cascade’s divisor. Defaulted per office, and overridable."
+          },
+          "apeAchievedMinor": {
+            "type": "number",
+            "example": 0,
+            "description": "IDR sen. Typed by the agent until Phase 9 imports production."
+          },
+          "caseSizeMinor": {
+            "type": "number",
+            "example": 1800000000,
+            "description": "IDR sen per policy. Zero is refused — GOAL_INVALID_ASSUMPTION."
+          },
+          "leadsToApptPct": {
+            "type": "number",
+            "example": 30,
+            "description": "Per cent of contacted leads that become an appointment."
+          },
+          "closingRatePct": {
+            "type": "number",
+            "example": 30,
+            "description": "Per cent of appointments that become a closing."
+          },
+          "period": {
+            "type": "string",
+            "example": "2026",
+            "description": "Ignored: the period is the path. Accepted so a client may round-trip what it read."
+          }
+        },
+        "required": [
+          "mode",
+          "annualApeTargetMinor",
+          "savingsTargetMinor",
+          "commissionRatePct",
+          "monthsLeft",
+          "apeAchievedMinor",
+          "caseSizeMinor",
+          "leadsToApptPct",
+          "closingRatePct"
         ]
       },
       "RegisterDto": {

@@ -181,6 +181,21 @@ export class GoalService {
     return this.view(saved);
   }
 
+  /**
+   * The goal for a period, or **the office's defaults** when there is none (P8-T3).
+   *
+   * A first-time reader opens on five filled cards rather than five empty ones, which is what the
+   * prototype does and is right to: a cascade with nothing in it teaches nobody what the screen is
+   * for. Nothing is written — the defaults are offered, not saved.
+   */
+  async readOrDefaults(
+    ctx: RequestContext, period: string,
+  ): Promise<Omit<GoalView, 'id' | 'membershipId' | 'version'>> {
+    const membershipId = this.me(ctx);
+    const goal = await this.goals.findOne(ctx, { membershipId, period });
+    return goal ? this.view(goal) : this.defaults(ctx, period);
+  }
+
   /** The caller's own goal for a period. 404 for another office's, never 403. */
   async read(ctx: RequestContext, period: string): Promise<GoalView> {
     const membershipId = this.me(ctx);

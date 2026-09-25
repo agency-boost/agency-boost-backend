@@ -7,6 +7,7 @@ import { InboxDto, InboxItemDto } from '@/modules/notifications/notification.res
 import {
   DeletedLeadDto, LeadPageDto, LeadResponseDto, LeadSummaryDto,
 } from '@/modules/leads/lead.response.dto';
+import { GoalResponseDto } from '@/modules/goals/goal.response.dto';
 import {
   DelegatedAdminDto, DirectoryMemberDto, DirectoryPageDto, GroupSummaryDto, InvitePreviewDto,
   JoinStateDto, KpmDirectoryEntryDto, LeaderChoiceDto, MemberTagsDto,
@@ -123,6 +124,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_renameLeadStatus: { type: LeadStatusDto },
   TenantConfigController_setTerminal: { type: LeadPipelineDto },
   TenantConfigController_setLateStage: { type: LeadStatusDto },
+  GoalController_read: { type: GoalResponseDto },
+  GoalController_save: { type: GoalResponseDto },
   LeadController_list: { type: LeadPageDto },
   LeadController_summary: { type: LeadSummaryDto },
   LeadController_read: { type: LeadResponseDto },

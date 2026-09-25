@@ -21,6 +21,7 @@ import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
 import { Goal, GoalSchema } from '@/modules/goals/goal.schema';
 import { GoalRepository } from '@/modules/goals/goal.repository';
 import { GoalService } from '@/modules/goals/goal.service';
+import { GoalController } from '@/modules/goals/goal.controller';
 import { AuditService } from '@/modules/audit/audit.service';
 import {
   Notification, NotificationPreferences, NotificationPreferencesSchema, NotificationSchema,
@@ -223,6 +224,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
   ],
   controllers: [
     LeadController,
+    GoalController,
     HealthController,
     AuthController,
     AdminController,

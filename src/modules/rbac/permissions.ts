@@ -412,6 +412,34 @@ export const PERMISSIONS = {
    * applies inside the tenant too — so an office's administrators are told *how many*, which is
    * what running an office needs, and never *who*.
    */
+  /**
+   * A goal is an agent's own plan, and §3.6 reads differently from §3.7 because of it.
+   *
+   * **The Owner and the Admin hold `own-kpm` on both**, where on a lead they hold counts and no
+   * rows. A lead carries a third party's name and phone number, typed about somebody who never
+   * interacted with the platform; a goal carries an agent's own intentions about their own
+   * production. Minimisation has nothing to bite on here.
+   *
+   * The AB/AAB grant is the **coaching** grant: the Coaching Session mounts a writable replica of
+   * the coachee's Goal Settings (Phase 13). A leader saves directly and the goal carries their name
+   * (ADR-0046).
+   */
+  'goal:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-unit' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /** No Super Admin grant at all, not even the nominal one `goal:read` carries (§3.6). */
+  'goal:update': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-unit' },
+    { grantee: AGENT, scope: 'own' },
+  ],
   'lead:read_aggregate_counts': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
