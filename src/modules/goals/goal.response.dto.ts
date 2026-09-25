@@ -85,8 +85,20 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
   @ApiProperty({ type: Number })
   commissionRatePct!: number;
 
-  @ApiProperty({ type: Number })
+  @ApiProperty({
+    type: Number,
+    description:
+      'The divisor **in force**, derived on every read from the office’s calendar unless the agent '
+      + 'overrode it. Never served from storage: a plan saved in January would otherwise still '
+      + 'claim eleven months left in October (client PRD §17).',
+  })
   monthsLeft!: number;
+
+  @ApiProperty({
+    type: Boolean,
+    description: 'Whether the figure above is the agent’s own choice or the office’s calendar.',
+  })
+  monthsLeftIsOverride!: boolean;
 
   @ApiProperty({ type: Number })
   apeAchievedMinor!: number;

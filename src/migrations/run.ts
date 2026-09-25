@@ -19,6 +19,7 @@ import { up as activityBackdateGrace } from './0015-kpm-activity-backdate-grace'
 import { up as leadStatusLateStage } from './0016-lead-status-late-stage';
 import { up as companyUsesPlatformDefaults } from './0017-company-uses-platform-defaults';
 import { up as leadCommitments } from './0018-lead-commitments';
+import { up as goalMonthsLeftOverride } from './0019-goal-months-left-override';
 
 /**
  * Every migration, in order. Forward-only and idempotent, so running this twice is a
@@ -43,6 +44,7 @@ const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Date) => P
   ['0016-lead-status-late-stage', leadStatusLateStage],
   ['0017-company-uses-platform-defaults', companyUsesPlatformDefaults],
   ['0018-lead-commitments', leadCommitments],
+  ['0019-goal-months-left-override', goalMonthsLeftOverride],
 ];
 
 async function main(): Promise<void> {

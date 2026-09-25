@@ -186,6 +186,25 @@ export const METRIC_REGISTRY = define([
   },
   { id: 'APE_GAP_TO_TARGET', label: 'Gap to target', period: 'CALENDAR_YEAR', unit: 'money_minor', threshold: null, availableFrom: 9 },
   { id: 'POLICIES_NEEDED', label: 'Policies still needed', period: 'CALENDAR_YEAR', unit: 'count', threshold: null, availableFrom: 9 },
+
+  /*
+   * ---- The goal cascade's three targets (P8-T5) ----
+   *
+   * **`POINT_IN_TIME`, not `CALENDAR_MONTH`.** They are *this month's* numbers, and they change
+   * every day: `monthsLeft` shrinks, so what is left to do per month grows. A period of
+   * `CALENDAR_MONTH` would say the figure belongs to a month and holds for it, which is the
+   * misreading that had a plan agreed in January still claiming eleven months left in October.
+   *
+   * **Registered after P8-T3 had already served them**, which is the rule P7-T6 applied to leads
+   * three days earlier: a number in a DTO the registry does not define is a second definition of
+   * the product's own vocabulary (invariant §8). `registry.spec.ts` is what caught it.
+   *
+   * `MONTHS_LEFT_IN_YEAR` is **not** here: it was already registered below, and the document's table
+   * was what lacked a row for it. The duplicate this file refuses at module load is what said so.
+   */
+  { id: 'POLICY_COUNT_TARGET', label: 'Policies to close this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },
+  { id: 'APPOINTMENT_TARGET', label: 'Appointments to hold this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },
+  { id: 'LEAD_TARGET', label: 'Leads to contact this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },
   {
     id: 'GOAL_PACE_STATUS',
     label: 'On track',

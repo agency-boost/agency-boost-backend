@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { CASCADE_ACTIVITY_CODES, GOAL_DEFAULTS } from '@/domain/constants';
 import { GOAL_BOUNDS } from './goal-input';
@@ -291,7 +292,7 @@ describe('the goal record (P8-T1)', () => {
 
       // The agent revises the runway, and only the inputs move.
       await mongoose.connection.db!.collection('goals').updateOne(
-        { _id: new mongoose.Types.ObjectId(goal.id) }, { $set: { monthsLeft: 2 } },
+        { _id: new mongoose.Types.ObjectId(goal.id) }, { $set: { monthsLeftOverride: 2 } },
       );
       const read = await wired.goals.read(A(), '2026');
 
@@ -321,6 +322,68 @@ describe('the goal record (P8-T1)', () => {
       await expect(save(A(), { caseSizeMinor: 0 })).rejects.toMatchObject({ code: 'GOAL_INVALID_ASSUMPTION' });
 
       expect(await mongoose.connection.db!.collection('goals').countDocuments()).toBe(0);
+    });
+  });
+
+  describe('P8-T5 — the divisor is derived, never served from storage', () => {
+    const at = (instant: string) => (wired.clock as FixedClock).set(new Date(instant));
+    afterEach(() => (wired.clock as FixedClock).set(NOW));
+
+    it('AC-2: a plan agreed in January does not still claim eleven months in October', async () => {
+      /*
+       * The defect this AC exists for, and it was live until P8-T5. Saved in January with the
+       * office's own figure, read back in October: the stored number came out unchanged, and with
+       * it a monthly target a fifth of the truth. The agent was told they were comfortably on
+       * track while they were far behind (client PRD §17).
+       */
+      at('2026-01-05T02:00:00Z');
+      const saved = await save(A(), { monthsLeft: null });
+      expect(saved.monthsLeft).toBeGreaterThan(11);
+
+      at('2026-10-05T02:00:00Z');
+      const later = await wired.goals.read(A(), '2026');
+
+      expect(later.monthsLeft).toBeLessThan(3.5);
+      expect(later.projected!.monthlyApeTargetMinor)
+        .toBeGreaterThan(saved.projected!.monthlyApeTargetMinor * 3);
+    });
+
+    it('AC-2: keeps an override, because the agent knew something the calendar did not', async () => {
+      at('2026-01-05T02:00:00Z');
+      await save(A(), { monthsLeft: 2 });
+
+      at('2026-10-05T02:00:00Z');
+      const later = await wired.goals.read(A(), '2026');
+
+      expect(later.monthsLeft).toBe(2);
+      expect(later.monthsLeftIsOverride).toBe(true);
+    });
+
+    it('stores an override and nothing else, so the derived figure has nowhere to go stale', async () => {
+      await save(A(), { monthsLeft: null });
+
+      const row = await stored((await wired.goals.read(A(), '2026')).id);
+      expect(row!.monthsLeftOverride).toBeNull();
+      expect(row).not.toHaveProperty('monthsLeft');
+    });
+
+    it('says which of the two the figure is', async () => {
+      await save(A(), { monthsLeft: null });
+      expect((await wired.goals.read(A(), '2026')).monthsLeftIsOverride).toBe(false);
+
+      await save(A(), { monthsLeft: 4 });
+      expect((await wired.goals.read(A(), '2026')).monthsLeftIsOverride).toBe(true);
+    });
+
+    it('AC-1: the same computation answers a read, a list and a save', async () => {
+      // One implementation, three readers. The prototype has two — the main editor and the
+      // coaching page's duplicate — and three surfaces that disagree about the answer.
+      const saved = await save(A(), { monthsLeft: 5 });
+      const read = await wired.goals.read(A(), '2026');
+      const [listed] = await wired.goals.list(A());
+
+      expect(read.projected).toEqual(saved.projected);
+      expect(listed.projected).toEqual(saved.projected);
     });
   });
 

@@ -14584,7 +14584,12 @@
             "type": "number"
           },
           "monthsLeft": {
-            "type": "number"
+            "type": "number",
+            "description": "The divisor **in force**, derived on every read from the office’s calendar unless the agent overrode it. Never served from storage: a plan saved in January would otherwise still claim eleven months left in October (client PRD §17)."
+          },
+          "monthsLeftIsOverride": {
+            "type": "boolean",
+            "description": "Whether the figure above is the agent’s own choice or the office’s calendar."
           },
           "apeAchievedMinor": {
             "type": "number"
@@ -14641,6 +14646,7 @@
           "savingsTargetMinor",
           "commissionRatePct",
           "monthsLeft",
+          "monthsLeftIsOverride",
           "apeAchievedMinor",
           "caseSizeMinor",
           "leadsToApptPct",

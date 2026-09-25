@@ -3,7 +3,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { AuditService } from '@/modules/audit/audit.service';
-import { TenantDay } from '@/modules/tenants/tenant-day.service';
+import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { NotificationService } from '@/modules/notifications/notification.service';
@@ -29,9 +29,9 @@ export interface GoalSnapshotView {
  * Outside the class because it is a pure question about a document, and because the alternative —
  * a try/catch inline in `view` — reads as though throwing were expected there.
  */
-function projectionOf(doc: GoalDocument): CascadeResult | null {
+function projectionOf(inputs: Record<string, unknown>): CascadeResult | null {
   try {
-    return computeCascade(doc as never);
+    return computeCascade(inputs as never);
   } catch {
     return null;
   }
@@ -51,7 +51,15 @@ export interface GoalView {
   annualApeTargetMinor: number;
   savingsTargetMinor: number;
   commissionRatePct: number;
+  /**
+   * The divisor **in force**, derived on every read unless the agent overrode it (client PRD §17).
+   *
+   * Never served from storage. A plan saved in January with 11.9 months left, read back in
+   * October, would otherwise still claim 11.9 — and a monthly target a fifth of the truth.
+   */
   monthsLeft: number;
+  /** Whether the number above is the agent's own choice or the office's calendar. */
+  monthsLeftIsOverride: boolean;
   apeAchievedMinor: number;
   caseSizeMinor: number;
   leadsToApptPct: number;
@@ -185,8 +193,12 @@ export class GoalService {
     const membershipId = await this.subject(ctx, forMembershipId, 'goal:update');
     const input = checkGoal(body);
     const now = this.clock.now();
+    const day = await this.days.for(ctx);
+    // The figure in force at the moment of agreement: the agent's own, or the office's calendar.
+    const monthsLeft = input.monthsLeft
+      ?? defaultMonthsLeft(input.period!, this.clock.now(), day.timezone);
     // Refuses an unusable assumption before anything is written (AC-7).
-    const agreed = computeCascade(input as never);
+    const agreed = computeCascade({ ...input, monthsLeft } as never);
 
     const saved = await this.goals.upsertOne(
       ctx,
@@ -197,7 +209,9 @@ export class GoalService {
           annualApeTargetMinor: input.annualApeTargetMinor!,
           savingsTargetMinor: input.savingsTargetMinor!,
           commissionRatePct: input.commissionRatePct!,
-          monthsLeft: input.monthsLeft!,
+          // `null` means *use the office's calendar*, and is what the screen sends unless the
+          // agent typed over the figure.
+          monthsLeftOverride: input.monthsLeft ?? null,
           apeAchievedMinor: input.apeAchievedMinor!,
           caseSizeMinor: input.caseSizeMinor!,
           leadsToApptPct: input.leadsToApptPct!,
@@ -239,7 +253,7 @@ export class GoalService {
     );
     // §3.6 (AC-7): an agent finding their target changed should not have to notice it.
     if (membershipId !== savedBy) await this.announce(ctx, membershipId, savedBy, saved.period);
-    return this.view(saved);
+    return this.view(saved, day);
   }
 
   /**
@@ -254,7 +268,8 @@ export class GoalService {
   ): Promise<Omit<GoalView, 'id' | 'membershipId' | 'version'>> {
     const membershipId = await this.subject(ctx, forMembershipId, 'goal:read');
     const goal = await this.goals.findOne(ctx, { membershipId, period });
-    return goal ? this.view(goal) : this.defaults(ctx, period);
+    if (!goal) return this.defaults(ctx, period);
+    return this.view(goal, await this.days.for(ctx));
   }
 
   /** The caller's own goal for a period. 404 for another office's, never 403. */
@@ -262,14 +277,15 @@ export class GoalService {
     const membershipId = await this.subject(ctx, forMembershipId, 'goal:read');
     const goal = await this.goals.findOne(ctx, { membershipId, period });
     if (!goal) throw new NotFoundException('Goal');
-    return this.view(goal);
+    return this.view(goal, await this.days.for(ctx));
   }
 
   /** The caller's own goals, newest period first. What a history screen reads (P8-T6). */
   async list(ctx: RequestContext): Promise<GoalView[]> {
     const membershipId = this.me(ctx);
+    const day = await this.days.for(ctx);
     const rows = await this.goals.find(ctx, { membershipId }, { sort: { period: -1 } });
-    return rows.map((row) => this.view(row));
+    return rows.map((row) => this.view(row, day));
   }
 
   /**
@@ -289,6 +305,7 @@ export class GoalService {
       // Derived in the **office's** timezone (AC-5, invariant §9), and overridable the moment the
       // agent types over it: somebody starting in November knows something the calendar does not.
       monthsLeft: defaultMonthsLeft(period, this.clock.now(), day.timezone),
+      monthsLeftIsOverride: false,
       apeAchievedMinor: 0,
       caseSizeMinor: GOAL_DEFAULTS.CASE_SIZE_MINOR,
       leadsToApptPct: GOAL_DEFAULTS.LEADS_TO_APPOINTMENT_PCT,
@@ -308,7 +325,7 @@ export class GoalService {
     };
   }
 
-  private view(doc: GoalDocument): GoalView {
+  private view(doc: GoalDocument, day: OfficeDay): GoalView {
     /*
      * **Every read recomputes** (AC-1b). The stored snapshot is the agreement; this is what it
      * means today, and it is what every screen renders.
@@ -317,7 +334,9 @@ export class GoalService {
      * way a bad one reaches here is a row older than the rule — and a read that threw would lock
      * its agent out of the screen they would fix it on. `null`, and the inputs come back regardless.
      */
-    const projected = projectionOf(doc);
+    const monthsLeft = doc.monthsLeftOverride
+      ?? defaultMonthsLeft(doc.period, this.clock.now(), day.timezone);
+    const projected = projectionOf({ ...doc.toObject(), monthsLeft });
 
     return {
       id: String(doc._id),
@@ -327,7 +346,8 @@ export class GoalService {
       annualApeTargetMinor: doc.annualApeTargetMinor,
       savingsTargetMinor: doc.savingsTargetMinor,
       commissionRatePct: doc.commissionRatePct,
-      monthsLeft: doc.monthsLeft,
+      monthsLeft,
+      monthsLeftIsOverride: doc.monthsLeftOverride !== null,
       apeAchievedMinor: doc.apeAchievedMinor,
       caseSizeMinor: doc.caseSizeMinor,
       leadsToApptPct: doc.leadsToApptPct,

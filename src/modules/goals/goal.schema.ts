@@ -105,14 +105,20 @@ export class Goal {
   commissionRatePct!: number;
 
   /**
-   * The cascade's divisor, as the agent agreed it.
+   * The cascade's divisor — **only when the agent chose it** (P8-T5).
    *
-   * Derived by default — days to the period's end ÷ 30.44 — and **overridable**, because an agent
-   * starting in November knows something the calendar does not. A decimal on purpose: 4.3 months
-   * is a real answer and rounding it to 4 moves every number below it.
+   * `null` means *use the office's calendar*, and that is the ordinary case. The number in force is
+   * then derived on **every read**, which is the whole of client PRD §17: a plan saved in January
+   * with 11.9 months left, stored and served back, still claimed 11.9 months in October and a
+   * monthly target a fifth of the truth. The agent was told they were comfortably on track while
+   * they were far behind.
+   *
+   * An override is kept because somebody starting in November knows something the calendar does
+   * not. A decimal on purpose: 4.3 months is a real answer, and rounding it to 4 moves every number
+   * below it.
    */
-  @Prop({ type: Number, required: true, default: 0 })
-  monthsLeft!: number;
+  @Prop({ type: Number, default: null })
+  monthsLeftOverride!: number | null;
 
   /** Typed by the agent until Phase 9 imports production. */
   @Prop({ type: Number, required: true, default: 0 })

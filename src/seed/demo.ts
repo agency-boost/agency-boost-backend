@@ -36,8 +36,10 @@ import {
 import {
   capabilitySeedDocument, defaultCapabilityLadder,
 } from '@/modules/capability/capability-payload';
-import { CASCADE_ACTIVITY_CODES, DEFAULT_ORG_LADDER } from '@/domain/constants';
-import { computeCascade } from '@/modules/goals/goal-cascade';
+import {
+  CASCADE_ACTIVITY_CODES, DEFAULT_ORG_LADDER, DEFAULT_TENANT_TIMEZONE,
+} from '@/domain/constants';
+import { computeCascade, defaultMonthsLeft } from '@/modules/goals/goal-cascade';
 import {
   CompanyOrgLevel, CompanyOrgLevelSchema,
 } from '@/modules/tenants/company-org-level.schema';
@@ -1356,7 +1358,8 @@ async function main(): Promise<void> {
     annual: number;
     savings?: number;
     commissionPct?: number;
-    monthsLeft: number;
+    /** `null` uses the office's calendar, which is what most agents leave it at. */
+    monthsLeft: number | null;
     achieved: number;
     caseSize: number;
     leadsToAppt: number;
@@ -1368,20 +1371,21 @@ async function main(): Promise<void> {
     {
       // Rina: the ordinary case, a plan she set herself and has since updated as she produced.
       owner: rina.id, period: '2026', mode: 'direct',
-      annual: 500_000_000_00, monthsLeft: 3.2, achieved: 120_000_000_00,
+      annual: 500_000_000_00, monthsLeft: null, achieved: 120_000_000_00,
       caseSize: 18_000_000_00, leadsToAppt: 30, closing: 30, version: 3,
     },
     {
       // Budi: the second entry mode. He thinks in take-home pay, not in APE.
       owner: budi.id, period: '2026', mode: 'from_savings',
       annual: 300_000_000_00, savings: 30_000_000_00, commissionPct: 10,
-      monthsLeft: 3.2, achieved: 45_000_000_00,
+      monthsLeft: null, achieved: 45_000_000_00,
       caseSize: 15_000_000_00, leadsToAppt: 25, closing: 20, version: 1,
     },
     {
       // Dewi: **set by her leader**, so the agent's screen has an attribution to show (ADR-0046).
       owner: dewi.id, period: '2026', mode: 'direct',
-      annual: 750_000_000_00, monthsLeft: 3.2, achieved: 210_000_000_00,
+      // Sari set a shorter runway than the calendar says, and the override survives every read.
+      annual: 750_000_000_00, monthsLeft: 2.5, achieved: 210_000_000_00,
       caseSize: 22_000_000_00, leadsToAppt: 35, closing: 30, version: 2,
       savedBy: ab.id,
     },
@@ -1405,7 +1409,7 @@ async function main(): Promise<void> {
       annualApeTargetMinor: seed.annual,
       savingsTargetMinor: seed.savings ?? 0,
       commissionRatePct: seed.commissionPct ?? 0,
-      monthsLeft: seed.monthsLeft,
+      monthsLeftOverride: seed.monthsLeft,
       apeAchievedMinor: seed.achieved,
       caseSizeMinor: seed.caseSize,
       leadsToApptPct: seed.leadsToAppt,
@@ -1416,12 +1420,16 @@ async function main(): Promise<void> {
        * this product is reviewed from.
        */
       snapshot: (() => {
+        const savedOn = daysAgo(seed.period === '2025' ? 300 : 12);
         const agreed = computeCascade({
           mode: seed.mode,
           annualApeTargetMinor: seed.annual,
           savingsTargetMinor: seed.savings ?? 0,
           commissionRatePct: seed.commissionPct ?? 0,
-          monthsLeft: seed.monthsLeft,
+          // The figure in force when the plan was agreed: the agent's own, or the office's
+          // calendar on that day. The override is what the record keeps (P8-T5).
+          monthsLeft: seed.monthsLeft
+            ?? defaultMonthsLeft(seed.period, savedOn, DEFAULT_TENANT_TIMEZONE),
           apeAchievedMinor: seed.achieved,
           caseSizeMinor: seed.caseSize,
           leadsToApptPct: seed.leadsToAppt,

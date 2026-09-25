@@ -41,7 +41,8 @@ export interface CheckedGoal {
   annualApeTargetMinor?: number;
   savingsTargetMinor?: number;
   commissionRatePct?: number;
-  monthsLeft?: number;
+  /** `null` is a value here: *use the office's calendar*, which is the ordinary case. */
+  monthsLeft?: number | null;
   apeAchievedMinor?: number;
   caseSizeMinor?: number;
   leadsToApptPct?: number;
@@ -119,8 +120,17 @@ export function checkGoal(body: unknown, opts: { partial?: boolean } = {}): Chec
     out[field] = value;
   }
 
-  const months = f.number('monthsLeft', GOAL_BOUNDS.monthsLeft, required);
-  if (months !== undefined) out.monthsLeft = months;
+  /*
+   * **`null` is a value, not an absence** (P8-T5): it says *use the office's calendar*, and it is
+   * what the screen sends unless the agent typed over the figure. Taken before the number check,
+   * which would otherwise record a violation for it.
+   */
+  const months = raw(body, 'monthsLeft');
+  if (months === null) out.monthsLeft = null;
+  else if (months !== undefined || required) {
+    const checked = f.number('monthsLeft', GOAL_BOUNDS.monthsLeft, required);
+    if (checked !== undefined) out.monthsLeft = checked;
+  }
 
   return f.done(out);
 }
