@@ -24,7 +24,20 @@ export const NotificationTemplate = {
   MEMBER_REMOVED: 'member.removed',
   ROLE_CHANGED: 'member.role_changed',
   ADMIN_ACCESS_CHANGED: 'member.admin_access_changed',
-  GOAL_PROPOSED_BY_LEADER: 'goal.proposed_by_leader',
+  /**
+   * A leader set somebody's goal (§3.6, ADR-0046).
+   *
+   * **This was `GOAL_PROPOSED_BY_LEADER: 'goal.proposed_by_leader'` until 2026-09-26** — the
+   * fourth artefact written from OD-09's *propose and accept* recommendation before anything
+   * ratified it, after `goals.acceptedByAgentAt`, `GOAL_ACCEPTANCE_REQUIRED`, and the spec's own
+   * permission table. ADR-0046 settled it the other way: a leader sets the goal directly, and what
+   * the agent is owed is knowing.
+   *
+   * It is renamed rather than left alone because **the copy is what a person reads**, and the old
+   * copy told them to *accept* something no screen offers. Nothing had ever written the old id —
+   * no service, no seed, no fixture — so there are no rows to migrate.
+   */
+  GOAL_SET_BY_LEADER: 'goal.set_by_leader',
   COACHING_SESSION_FINALIZED: 'coaching.session_finalized',
   EVENT_REMINDER: 'event.reminder',
   /*
@@ -59,7 +72,7 @@ export const TEMPLATE_CHANNELS: Record<NotificationTemplateId, readonly Notifica
   [NotificationTemplate.MEMBER_REMOVED]: ['in_app', 'email'],
   [NotificationTemplate.ROLE_CHANGED]: ['in_app', 'email'],
   [NotificationTemplate.ADMIN_ACCESS_CHANGED]: ['in_app', 'email'],
-  [NotificationTemplate.GOAL_PROPOSED_BY_LEADER]: ['in_app', 'email'],
+  [NotificationTemplate.GOAL_SET_BY_LEADER]: ['in_app', 'email'],
   [NotificationTemplate.COACHING_SESSION_FINALIZED]: ['in_app'],
   [NotificationTemplate.EVENT_REMINDER]: ['in_app', 'email'],
   [NotificationTemplate.IMPERSONATION_STARTED]: ['in_app', 'email'],

@@ -62,8 +62,16 @@ export function describeNotification(
       return payload.granted === true
         ? { title: 'You can now administer this office', detail: 'The Owner gave you KPM Admin access.' }
         : { title: 'Your admin access was removed', detail: 'You are still in the office; you just cannot administer it.' };
-    case NotificationTemplate.GOAL_PROPOSED_BY_LEADER:
-      return { title: 'Your leader proposed a goal', detail: 'Open Goals to accept it or talk about it.' };
+    case NotificationTemplate.GOAL_SET_BY_LEADER:
+      /*
+       * **Not *"accept it"*.** There is nothing to accept: a leader's write is the agent's goal
+       * immediately (ADR-0046), and the copy that sent somebody looking for a button no screen has
+       * was written from a recommendation nothing had ratified.
+       */
+      return {
+        title: `${name(payload, 'byName', 'Your leader')} set your goal`,
+        detail: 'Open Goal settings to see it — you can change it, it is your plan.',
+      };
     case NotificationTemplate.COACHING_SESSION_FINALIZED:
       return { title: 'A coaching session was finalised', detail: 'What was agreed is now on the record.' };
     case NotificationTemplate.IMPERSONATION_STARTED:

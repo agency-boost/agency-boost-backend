@@ -64,10 +64,21 @@ describe('inbox copy', () => {
       [NotificationTemplate.MEMBER_TAGGED_BY_LEADER, 'A leader added you to their unit'],
       [NotificationTemplate.MEMBER_REMOVED, 'You were removed from your unit'],
       [NotificationTemplate.ROLE_CHANGED, 'Your role changed'],
-      [NotificationTemplate.GOAL_PROPOSED_BY_LEADER, 'Your leader proposed a goal'],
       [NotificationTemplate.COACHING_SESSION_FINALIZED, 'A coaching session was finalised'],
     ];
     for (const [id, title] of cases) expect(describeNotification(id, {}).title).toBe(title);
+
+    /*
+     * **A leader setting a goal, not proposing one.** This read *"Your leader proposed a goal"* and
+     * told the reader to *accept it* — a button no screen has, written from a recommendation
+     * nothing had ratified. ADR-0046 settled OD-09's goals half the other way.
+     */
+    expect(describeNotification(NotificationTemplate.GOAL_SET_BY_LEADER, {}).title)
+      .toBe('Your leader set your goal');
+    expect(describeNotification(NotificationTemplate.GOAL_SET_BY_LEADER, { byName: 'Ibu Sari' }).title)
+      .toBe('Ibu Sari set your goal');
+    expect(describeNotification(NotificationTemplate.GOAL_SET_BY_LEADER, {}).detail)
+      .not.toMatch(/accept/i);
 
     expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { title: 'Leader Forum' }).title)
       .toBe('Leader Forum is coming up');

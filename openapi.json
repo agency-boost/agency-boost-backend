@@ -765,6 +765,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "for",
+            "required": false,
+            "in": "query",
+            "description": "A **membership** in your downline, unit or office, as your grant allows (§3.6). Omitted, it is your own. Somebody outside it is a **404, never a 403**: a refusal that confirmed the person exists would answer a question nobody was entitled to ask.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -774,6 +783,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GoalResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
                 }
               }
             }
@@ -838,6 +857,15 @@
             "name": "period",
             "required": true,
             "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "for",
+            "required": false,
+            "in": "query",
+            "description": "Save **somebody else’s** goal, as §3.6 allows a leader, an Owner and an Admin to. It becomes their goal immediately — there is no acceptance step (ADR-0046) — the record names who saved it, and **they are notified**.",
             "schema": {
               "type": "string"
             }

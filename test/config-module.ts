@@ -78,6 +78,7 @@ import { Goal, GoalSchema } from '@/modules/goals/goal.schema';
 import { GoalRepository } from '@/modules/goals/goal.repository';
 import { GoalService } from '@/modules/goals/goal.service';
 import { MemberNames } from '@/modules/org/member-names.service';
+import { NotificationService } from '@/modules/notifications/notification.service';
 import { UserSchema } from '@/modules/users/user.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
@@ -216,12 +217,26 @@ export function configModule(now: Date) {
     memberships,
     new MemberNames(memberships, users as never),
   );
+  /*
+   * **A recorder, not a second implementation.** `NotificationService` needs a preferences model,
+   * a renderer and its channel adapters, and none of that is what a goal test is asking about —
+   * what it asks is *did a leader's write announce itself* (P8-T4 AC-7). The real service has its
+   * own specs; this captures the request so a caller's test can read it.
+   */
+  const sentNotifications: Record<string, unknown>[] = [];
+  const notifier = {
+    send: async (request: Record<string, unknown>) => { sentNotifications.push(request); },
+  } as unknown as NotificationService;
+
   // P8-T1: one agent's agreed plan for one period.
   const goals = new GoalService(
     new GoalRepository(model(Goal.name, GoalSchema) as never),
     audit,
     clock,
     new TenantDay(kpms as never, clock),
+    memberships,
+    new MemberNames(memberships, users as never),
+    notifier,
   );
   // P5-T7: the office's campaigns, and the carrier rules it is measured against.
   const campaigns = new CampaignService(
@@ -298,6 +313,7 @@ export function configModule(now: Date) {
     products, assets, storage, kpmProducts, events, campaigns, capability, activityLogs,
     leadRecords,
     goals,
+    sentNotifications,
   };
 }
 

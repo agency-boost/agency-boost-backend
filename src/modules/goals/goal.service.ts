@@ -4,6 +4,11 @@ import { RequestContext } from '@/common/context/request-context';
 import { NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { AuditService } from '@/modules/audit/audit.service';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
+import { MemberNames } from '@/modules/org/member-names.service';
+import { MembershipRepository } from '@/modules/org/membership.repository';
+import { NotificationService } from '@/modules/notifications/notification.service';
+import { NotificationTemplate } from '@/modules/notifications/notification.types';
+import { scopeFor, type Permission } from '@/modules/rbac/permissions';
 import { CASCADE_ACTIVITY_CODES, GOAL_DEFAULTS } from '@/domain/constants';
 import { computeCascade, defaultMonthsLeft, type CascadeResult } from './goal-cascade';
 import { checkGoal } from './goal-input';
@@ -98,7 +103,60 @@ export class GoalService {
     private readonly audit: AuditService,
     private readonly clock: Clock,
     private readonly days: TenantDay,
+    private readonly memberships: MembershipRepository,
+    private readonly names: MemberNames,
+    private readonly notifications: NotificationService,
   ) {}
+
+  /**
+   * Whose goal this caller may touch, for the permission the **route** declares (P8-T4).
+   *
+   * **Their own, always — plus whoever the grant reaches.** §3.6 is wider than §3.7's leads: an
+   * office's Owner and Admin hold `own-kpm` here, because a goal carries an agent's own intentions
+   * about their own production rather than a third party's personal data.
+   *
+   * `null` means *anybody in the office*. A leader gets the set of memberships below them; an agent
+   * gets themselves; somebody holding neither grant gets **nobody**, which is fail-closed and is
+   * what the first version of the equivalent for leads got wrong.
+   */
+  private async subjectsInScope(
+    ctx: RequestContext, permission: Permission,
+  ): Promise<string[] | null> {
+    const me = this.me(ctx);
+    const scope = scopeFor(ctx, permission);
+    if (scope === 'own-kpm' || scope === 'all') return null;
+    if (scope === null) return [];
+    if (scope !== 'own-unit' && scope !== 'own-downline') return [me];
+
+    const reports = await this.memberships.find(
+      ctx,
+      scope === 'own-unit' ? { leaderId: me } : { ancestorIds: me },
+      { select: '_id' },
+    );
+    return [me, ...reports.map((r) => String(r._id))];
+  }
+
+  /**
+   * The membership this request is about, or a 404.
+   *
+   * **404 and never 403** (AC-3), the same sentence that has been true of another office's data
+   * since Phase 2: a leader asking after somebody outside their downline should not learn from the
+   * shape of the refusal that the person exists.
+   */
+  private async subject(
+    ctx: RequestContext, asked: string | undefined, permission: Permission,
+  ): Promise<string> {
+    const me = this.me(ctx);
+    if (!asked || asked === me) return me;
+
+    const reach = await this.subjectsInScope(ctx, permission);
+    if (reach !== null && !reach.includes(asked)) throw new NotFoundException('Goal');
+    // Resolve the membership even at `own-kpm`: without it an Owner could probe another office's
+    // ids and tell a real one from an invented one by nothing at all. The leads module learned
+    // this the same way, one phase earlier.
+    if (!(await this.memberships.findById(ctx, asked))) throw new NotFoundException('Goal');
+    return asked;
+  }
 
   /** The caller's own membership, or a refusal that says what to do about it. */
   private me(ctx: RequestContext): string {
@@ -122,8 +180,9 @@ export class GoalService {
    * smuggled into this one — a check can be forgotten, a parameter that does not exist cannot be
    * passed.
    */
-  async save(ctx: RequestContext, body: unknown): Promise<GoalView> {
-    const membershipId = this.me(ctx);
+  async save(ctx: RequestContext, body: unknown, forMembershipId?: string): Promise<GoalView> {
+    const savedBy = this.me(ctx);
+    const membershipId = await this.subject(ctx, forMembershipId, 'goal:update');
     const input = checkGoal(body);
     const now = this.clock.now();
     // Refuses an unusable assumption before anything is written (AC-7).
@@ -144,7 +203,7 @@ export class GoalService {
           leadsToApptPct: input.leadsToApptPct!,
           closingRatePct: input.closingRatePct!,
           savedAt: now,
-          savedByMembershipId: membershipId,
+          savedByMembershipId: savedBy,
           /*
            * **The snapshot is written at save time and never again.** It is what was agreed, which
            * is a different question from what the inputs mean today — and the only moment the two
@@ -176,8 +235,10 @@ export class GoalService {
       ctx,
       saved.version === 1 ? 'goal.created' : 'goal.updated',
       String(saved._id),
-      { period: saved.period, version: saved.version, savedByMembershipId: membershipId },
+      { period: saved.period, version: saved.version, savedByMembershipId: savedBy },
     );
+    // §3.6 (AC-7): an agent finding their target changed should not have to notice it.
+    if (membershipId !== savedBy) await this.announce(ctx, membershipId, savedBy, saved.period);
     return this.view(saved);
   }
 
@@ -189,16 +250,16 @@ export class GoalService {
    * for. Nothing is written — the defaults are offered, not saved.
    */
   async readOrDefaults(
-    ctx: RequestContext, period: string,
+    ctx: RequestContext, period: string, forMembershipId?: string,
   ): Promise<Omit<GoalView, 'id' | 'membershipId' | 'version'>> {
-    const membershipId = this.me(ctx);
+    const membershipId = await this.subject(ctx, forMembershipId, 'goal:read');
     const goal = await this.goals.findOne(ctx, { membershipId, period });
     return goal ? this.view(goal) : this.defaults(ctx, period);
   }
 
   /** The caller's own goal for a period. 404 for another office's, never 403. */
-  async read(ctx: RequestContext, period: string): Promise<GoalView> {
-    const membershipId = this.me(ctx);
+  async read(ctx: RequestContext, period: string, forMembershipId?: string): Promise<GoalView> {
+    const membershipId = await this.subject(ctx, forMembershipId, 'goal:read');
     const goal = await this.goals.findOne(ctx, { membershipId, period });
     if (!goal) throw new NotFoundException('Goal');
     return this.view(goal);
@@ -296,6 +357,33 @@ export class GoalService {
       savedByMembershipId: doc.savedByMembershipId,
       version: doc.version,
     };
+  }
+
+  /**
+   * Tell the agent their goal was set for them (AC-7, §3.6).
+   *
+   * **The attribution says who; this says that it happened.** A banner only reaches somebody who
+   * opens the screen, and the person most likely not to open it is the one who did not know there
+   * was anything new on it.
+   *
+   * A failure here does not fail the save. The goal is agreed either way, and losing a plan because
+   * an SMTP host was slow would be the worse outcome — the notification service logs its own
+   * failures.
+   */
+  private async announce(
+    ctx: RequestContext, subjectMembershipId: string, byMembershipId: string, period: string,
+  ): Promise<void> {
+    const member = await this.memberships.findById(ctx, subjectMembershipId);
+    if (!member) return;
+    const named = await this.names.byMembershipId(ctx, [byMembershipId]);
+
+    await this.notifications.send({
+      userId: String(member.userId),
+      kpmId: ctx.kpmId,
+      membershipId: subjectMembershipId,
+      templateId: NotificationTemplate.GOAL_SET_BY_LEADER,
+      payload: { byName: named.get(byMembershipId) ?? null, period },
+    });
   }
 
   private async record(

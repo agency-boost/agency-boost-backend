@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Put } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Param, Put, Query } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { SaveGoalDto } from './goal.dto';
@@ -32,9 +32,21 @@ export class GoalController {
       + 'filled cards rather than on empty ones, and a first-time reader sees what a plan looks '
       + 'like. `projected` is recomputed on every read; `snapshot` is what was agreed.',
   })
+  @ApiQuery({
+    name: 'for',
+    required: false,
+    description:
+      'A **membership** in your downline, unit or office, as your grant allows (§3.6). Omitted, it '
+      + 'is your own. Somebody outside it is a **404, never a 403**: a refusal that confirmed the '
+      + 'person exists would answer a question nobody was entitled to ask.',
+  })
   @ApiResponse({ status: 200, type: GoalResponseDto })
-  async read(@Ctx() ctx: RequestContext, @Param('period') period: string) {
-    return this.goals.readOrDefaults(ctx, period);
+  async read(
+    @Ctx() ctx: RequestContext,
+    @Param('period') period: string,
+    @Query('for') forMembershipId?: string,
+  ) {
+    return this.goals.readOrDefaults(ctx, period, forMembershipId);
   }
 
   @Put(':period')
@@ -46,13 +58,22 @@ export class GoalController {
       + 'when the numbers cannot produce a plan — a case size of zero, or a conversion rate '
       + 'outside 0–100 — and nothing is written when it is.',
   })
+  @ApiQuery({
+    name: 'for',
+    required: false,
+    description:
+      'Save **somebody else’s** goal, as §3.6 allows a leader, an Owner and an Admin to. It becomes '
+      + 'their goal immediately — there is no acceptance step (ADR-0046) — the record names who '
+      + 'saved it, and **they are notified**.',
+  })
   @ApiResponse({ status: 200, type: GoalResponseDto })
   async save(
     @Ctx() ctx: RequestContext,
     @Param('period') period: string,
     @Body() body: SaveGoalDto,
+    @Query('for') forMembershipId?: string,
   ) {
     // The period is the path, never the body: two sources for one key is one source too many.
-    return this.goals.save(ctx, { ...body, period });
+    return this.goals.save(ctx, { ...body, period }, forMembershipId);
   }
 }
