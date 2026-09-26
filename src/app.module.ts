@@ -22,6 +22,12 @@ import { Goal, GoalSchema } from '@/modules/goals/goal.schema';
 import { GoalRepository } from '@/modules/goals/goal.repository';
 import { GoalService } from '@/modules/goals/goal.service';
 import { GoalController } from '@/modules/goals/goal.controller';
+import { Policy, PolicySchema } from '@/modules/production/policy.schema';
+import { MonthlyAgentData, MonthlyAgentDataSchema } from '@/modules/production/monthly-agent-data.schema';
+import { PolicyRepository } from '@/modules/production/policy.repository';
+import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
+import { ProductionService } from '@/modules/production/production.service';
+import { ProductionController } from '@/modules/production/production.controller';
 import { AuditService } from '@/modules/audit/audit.service';
 import {
   Notification, NotificationPreferences, NotificationPreferencesSchema, NotificationSchema,
@@ -198,6 +204,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: CompanyOrgLevel.name, schema: CompanyOrgLevelSchema },
       { name: Membership.name, schema: MembershipSchema },
       { name: Lead.name, schema: LeadSchema },
+      { name: Policy.name, schema: PolicySchema },
+      { name: MonthlyAgentData.name, schema: MonthlyAgentDataSchema },
       { name: Goal.name, schema: GoalSchema },
       { name: MembershipHistory.name, schema: MembershipHistorySchema },
       { name: JoinRequest.name, schema: JoinRequestSchema },
@@ -225,6 +233,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
   controllers: [
     LeadController,
     GoalController,
+    ProductionController,
     HealthController,
     AuthController,
     AdminController,
@@ -334,6 +343,9 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     LeadService,
     GoalRepository,
     GoalService,
+    PolicyRepository,
+    MonthlyAgentDataRepository,
+    ProductionService,
     TenantDay,
     NotificationService,
     PasswordService,

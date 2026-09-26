@@ -55,6 +55,10 @@ import {
 import {
   GoalCascadeMappingSchema, GoalRevisionSchema, GoalSchema, GoalSnapshotSchema,
 } from '@/modules/goals/goal.schema';
+import { PolicySchema } from '@/modules/production/policy.schema';
+import {
+  MetricValueSchema, MonthlyAgentDataSchema,
+} from '@/modules/production/monthly-agent-data.schema';
 import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
 } from '@/modules/campaigns/campaign.schema';
@@ -102,6 +106,8 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['activityLogs', ActivityLogSchema],
   ['leads', LeadSchema],
   ['goals', GoalSchema],
+  ['policies', PolicySchema],
+  ['monthlyAgentData', MonthlyAgentDataSchema],
   ['campaigns', CampaignSchema],
   ['capabilityCatalogs', CapabilityCatalogSchema],
   // Company-partitioned carrier rules (ADR-0035), soft-deleted like every other row.
@@ -193,6 +199,12 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
       + 'that has been re-planned keeps the version that held the old ones (ADR-0042)',
   ],
   [
+    'metricValue (subdocument)',
+    MetricValueSchema,
+    'one figure and its provenance, inside a month row: twelve of them per row, no collection and '
+      + 'no _id of their own',
+  ],
+  [
     'goalRevision (subdocument)',
     GoalRevisionSchema,
     'a plan the goal replaced (ADR-0042). **Append-only and never removed** — a target somebody '
@@ -275,6 +287,9 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [GoalSchema, 'GoalSchema'],
   [GoalSnapshotSchema, 'GoalSnapshotSchema'],
   [GoalCascadeMappingSchema, 'GoalCascadeMappingSchema'],
+  [PolicySchema, 'PolicySchema'],
+  [MonthlyAgentDataSchema, 'MonthlyAgentDataSchema'],
+  [MetricValueSchema, 'MetricValueSchema'],
   [GoalRevisionSchema, 'GoalRevisionSchema'],
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
   [ActivityLogCorrectionSchema, 'ActivityLogCorrectionSchema'],

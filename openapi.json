@@ -1055,6 +1055,86 @@
         "x-required-permission": "goal:read"
       }
     },
+    "/api/v1/kpm/data-upload/{month}": {
+      "get": {
+        "description": "Every active member, with the six metrics in their monthly and year-to-date figures and the provenance of each cell. **`null` is not zero**: a cell nothing has written says the carrier has not reported this person, where `0` says it reported nothing. Reads only — the file, the correction and the revert each have their own route.\n\n**Requires `data_upload:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductionController_readMonth_v1",
+        "parameters": [
+          {
+            "name": "month",
+            "required": true,
+            "in": "path",
+            "description": "`YYYY-MM`, the office’s calendar month.",
+            "schema": {
+              "example": "2026-09",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonthViewDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `data_upload:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office’s production for a month",
+        "tags": [
+          "production"
+        ],
+        "x-required-permission": "data_upload:read"
+      }
+    },
     "/api/health": {
       "get": {
         "operationId": "HealthController_live",
@@ -14905,6 +14985,125 @@
           "caseSizeMinor",
           "leadsToApptPct",
           "closingRatePct"
+        ]
+      },
+      "MetricCellDto": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "number",
+            "nullable": true,
+            "description": "Money in IDR minor units; persistency in percent; the rest counts. **`null` is not zero** — it is *nothing uploaded*."
+          },
+          "provenance": {
+            "type": "string",
+            "enum": [
+              "imported",
+              "corrected",
+              "self_reported"
+            ],
+            "nullable": true,
+            "description": "Which writer put it there. `null` when nothing has."
+          }
+        },
+        "required": [
+          "value",
+          "provenance"
+        ]
+      },
+      "MetricPairDto": {
+        "type": "object",
+        "properties": {
+          "monthly": {
+            "$ref": "#/components/schemas/MetricCellDto"
+          },
+          "ytd": {
+            "$ref": "#/components/schemas/MetricCellDto"
+          }
+        },
+        "required": [
+          "monthly",
+          "ytd"
+        ]
+      },
+      "MonthMetricsDto": {
+        "type": "object",
+        "properties": {
+          "ape": {
+            "$ref": "#/components/schemas/MetricPairDto"
+          },
+          "persistency": {
+            "$ref": "#/components/schemas/MetricPairDto"
+          },
+          "recruitment": {
+            "$ref": "#/components/schemas/MetricPairDto"
+          },
+          "newActiveAgents": {
+            "$ref": "#/components/schemas/MetricPairDto"
+          },
+          "fyp": {
+            "$ref": "#/components/schemas/MetricPairDto"
+          },
+          "policyCount": {
+            "$ref": "#/components/schemas/MetricPairDto"
+          }
+        },
+        "required": [
+          "ape",
+          "persistency",
+          "recruitment",
+          "newActiveAgents",
+          "fyp",
+          "policyCount"
+        ]
+      },
+      "MonthRowDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership, never a user id (invariant §2)."
+          },
+          "agentCode": {
+            "type": "string",
+            "description": "The carrier-issued code the row is matched on."
+          },
+          "name": {
+            "type": "string"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/MonthMetricsDto"
+          }
+        },
+        "required": [
+          "membershipId",
+          "agentCode",
+          "name",
+          "metrics"
+        ]
+      },
+      "MonthViewDto": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "example": "2026-09"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MonthRowDto"
+            }
+          },
+          "withData": {
+            "type": "number",
+            "description": "Rows holding at least one figure. Zero means nothing uploaded yet."
+          }
+        },
+        "required": [
+          "month",
+          "rows",
+          "withData"
         ]
       },
       "RegisterDto": {

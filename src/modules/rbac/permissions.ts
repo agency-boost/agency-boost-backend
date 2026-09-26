@@ -648,6 +648,19 @@ export const PERMISSIONS = {
   // `AUTHENTICATED`, not the six roles: somebody who has joined no office still has an
   // inbox, and the first thing in it is their own email verification. Listing the roles
   // refused exactly that person — the test that builds a newcomer caught it.
+  /*
+   * P9-T1. **Reading the month table is its own grant.** §3.9 listed eight `data_upload:*`
+   * permissions — download, preview, commit, correct, revert, history, lock, reopen — and every one
+   * is a write or a side-channel; nothing covered *look at the figures*. Reading under a write grant
+   * would be one permission doing two jobs, and the day the two jobs need different holders it
+   * cannot be split without touching every route. The other eight arrive with the tasks that raise
+   * them, so a grant never exists in code before a route can use it.
+   */
+  'data_upload:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
   'notification:read_inbox': [{ grantee: AUTHENTICATED, scope: 'own' }],
   'notification:mark_read': [{ grantee: AUTHENTICATED, scope: 'own' }],
   'notification:receive': [

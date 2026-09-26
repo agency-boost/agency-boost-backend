@@ -153,6 +153,9 @@ const config: Config = {
     // module is at 100/94 on the day it lands, and these are the numbers it may not fall
     // below.
     './src/modules/goals/': { lines: 95, branches: 90, functions: 95, statements: 95 },
+    // P9: the authoritative APE source. Every downstream figure reads it, so the floor is the
+    // domain one from the first task rather than something to ratchet towards.
+    './src/modules/production/': { lines: 95, branches: 90, functions: 95, statements: 95 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],

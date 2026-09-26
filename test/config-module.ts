@@ -75,6 +75,9 @@ import { ProductService } from '@/modules/products/product.service';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { Goal, GoalSchema } from '@/modules/goals/goal.schema';
+import { MonthlyAgentData, MonthlyAgentDataSchema } from '@/modules/production/monthly-agent-data.schema';
+import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
+import { ProductionService } from '@/modules/production/production.service';
 import { GoalRepository } from '@/modules/goals/goal.repository';
 import { GoalService } from '@/modules/goals/goal.service';
 import { MemberNames } from '@/modules/org/member-names.service';
@@ -238,6 +241,12 @@ export function configModule(now: Date) {
     new MemberNames(memberships, users as never),
     notifier,
   );
+  // P9-T1: the office's production, month by month — the authoritative APE source.
+  const production = new ProductionService(
+    new MonthlyAgentDataRepository(model(MonthlyAgentData.name, MonthlyAgentDataSchema) as never),
+    memberships,
+    new MemberNames(memberships, users as never),
+  );
   // P5-T7: the office's campaigns, and the carrier rules it is measured against.
   const campaigns = new CampaignService(
     new CampaignRepository(model(Campaign.name, CampaignSchema) as never),
@@ -312,7 +321,7 @@ export function configModule(now: Date) {
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
     products, assets, storage, kpmProducts, events, campaigns, capability, activityLogs,
     leadRecords,
-    goals,
+    goals, production,
     sentNotifications,
   };
 }
