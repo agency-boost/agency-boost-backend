@@ -1328,6 +1328,67 @@ async function main(): Promise<void> {
       remarks: 'Took a salaried role instead. Happy to be asked again next year.',
       source: 'BOP — 12 September',
     },
+    /*
+     * **A year behind Rina, so the two closed cards can be read.**
+     *
+     * The screen lists five per card and shows the office's real total in the header, with *See all*
+     * handing the rest to the table — none of which can be seen with one closed lead each, and the
+     * two there were belonged to different agents, so nobody saw both cards populated.
+     *
+     * Six won and two lost: enough for one card to exceed what it lists, which is the case the count
+     * exists for.
+     */
+    {
+      owner: rina.id, name: 'Pak Bambang Sutrisno', type: 'sales',
+      path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED', 'APPROVED_NOT_PAID', 'PAID_AND_ISSUED'],
+      outcome: 'won', phone: '0811-2233-4455', lawfulBasis: 'consent',
+      remarks: 'Whole-life, paid annually. Wants his wife reviewed next.',
+      source: 'Referral — Pak Hendro',
+    },
+    {
+      owner: rina.id, name: 'Ibu Dewi Anggraini', type: 'sales',
+      path: ['NOT_YET_APPROACHED', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'],
+      outcome: 'won', email: 'dewi.a@example.com', lawfulBasis: 'consent',
+      remarks: 'Education plan for two children. Asked about topping up next year.',
+      source: 'Canvassing — Senayan',
+    },
+    {
+      owner: rina.id, name: 'Pak Slamet Riyadi', type: 'sales',
+      path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'],
+      outcome: 'won', phone: '0812-9988-7766', lawfulBasis: 'consent',
+      remarks: 'Critical illness rider added at underwriting.',
+      source: 'BOP — 12 September',
+    },
+    {
+      owner: rina.id, name: 'Ibu Lestari Wibowo', type: 'sales',
+      path: ['NOT_YET_APPROACHED', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'],
+      outcome: 'won', lawfulBasis: 'consent',
+      remarks: 'Renewal from a policy she held elsewhere.',
+      source: 'Referral — Ibu Ratna',
+    },
+    {
+      owner: rina.id, name: 'Pak Yusuf Maulana', type: 'sales',
+      path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'],
+      outcome: 'won', phone: '0857-1122-3344', lawfulBasis: 'consent',
+      remarks: 'Paid by transfer on the day. Referred his brother.',
+      source: 'Referral — agent network',
+    },
+    {
+      // Lost late, which the ladder allows at any rung (§3.7) — and the more useful case to see,
+      // because a lead that reached submission and still fell away is the one worth a conversation.
+      owner: rina.id, name: 'Pak Hendra Gunawan', type: 'sales',
+      path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED'], outcome: 'lost',
+      phone: '0813-7766-5544', lawfulBasis: 'legitimate_interest',
+      remarks: 'Underwriting asked for a medical he did not want to take.',
+      source: 'Canvassing — Senayan',
+    },
+    {
+      owner: rina.id, name: 'Sdri. Fitri Handayani', type: 'recruitment',
+      path: ['NOT_APPROACHED', 'MEETING_SCHEDULED'], outcome: 'lost',
+      email: 'fitri.h@example.com', lawfulBasis: 'legitimate_interest',
+      remarks: 'Finishing her degree first. Said to ask again in a year.',
+      source: 'BOP — 12 September',
+    },
     {
       // Somebody else's, so a leader screen has more than one agent's work to show in P7-T7.
       owner: dewi.id, name: 'Pak Rizal Effendi', type: 'sales',
