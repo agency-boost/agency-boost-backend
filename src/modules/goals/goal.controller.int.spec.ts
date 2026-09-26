@@ -19,6 +19,7 @@ const COMPANY = '66f0000000000000000000c1';
 /** Every route, and the permission it must declare (§3.6). */
 const ROUTES: Record<string, string> = {
   read: 'goal:read',
+  history: 'goal:read',
   save: 'goal:update',
 };
 
@@ -146,6 +147,42 @@ describe('goals over HTTP (P8-T3)', () => {
       expect(res.body.snapshot.leadsPerMonth).toBe(67);
       expect(res.body.projected.leadsPerMonth).toBe(67);
       expect(res.body.savedByMembershipId).toBe('mem-a');
+    });
+  });
+
+  describe('a period that has ended (P8-T6)', () => {
+    it('refuses a write to last year with a code a client can branch on', async () => {
+      const res = await http().put('/goals/2025').send(plan()).expect(409);
+
+      expect(res.body.error.code).toBe('GOAL_PERIOD_LOCKED');
+      expect(res.body.error.details).toMatchObject({ period: '2025', currentPeriod: '2026' });
+    });
+
+    it('still reads last year’s plan, because it is history rather than forbidden', async () => {
+      await http().get('/goals/2025').expect(200);
+    });
+
+    it('takes a write to next year, which is planning ahead rather than rewriting', async () => {
+      await http().put('/goals/2027').send(plan()).expect(200);
+    });
+  });
+
+  describe('every plan agreed for a period (P8-T6)', () => {
+    it('answers an empty list when there is no plan', async () => {
+      const res = await http().get(`${url}/history`).expect(200);
+
+      expect(res.body).toEqual([]);
+    });
+
+    it('answers newest first, the current one included', async () => {
+      await http().put(url).send(plan({ annualApeTargetMinor: 300_000_000_00 })).expect(200);
+      await http().put(url).send(plan({ annualApeTargetMinor: 500_000_000_00 })).expect(200);
+
+      const res = await http().get(`${url}/history`).expect(200);
+
+      expect(res.body.map((e: { version: number }) => e.version)).toEqual([2, 1]);
+      expect(res.body[0].annualApeTargetMinor).toBe(500_000_000_00);
+      expect(res.body[1].annualApeTargetMinor).toBe(300_000_000_00);
     });
   });
 

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, isValidObjectId } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { MembershipRepository } from './membership.repository';
@@ -38,7 +38,14 @@ export class MemberNames {
   async byMembershipId(
     ctx: RequestContext, membershipIds: readonly string[],
   ): Promise<Map<string, string>> {
-    const unique = [...new Set(membershipIds)].filter(Boolean);
+    /*
+     * **A malformed id is nobody, not a server fault.** `$in` over a list holding one throws a
+     * `CastError`, which is neither a `DomainException` nor an `HttpException` and renders as a
+     * 500 — for a caller who passed an id from somewhere older or hand-written. The tenant
+     * repository has taken this position on `findById` since Phase 2; this is the same position,
+     * and a fixture using readable ids is what found it missing.
+     */
+    const unique = [...new Set(membershipIds)].filter((id) => Boolean(id) && isValidObjectId(id));
     if (unique.length === 0) return new Map();
 
     const members = await this.memberships.find(ctx, { _id: { $in: unique } });

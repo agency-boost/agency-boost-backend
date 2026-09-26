@@ -84,6 +84,19 @@ describe('a person’s name, from their membership', () => {
     expect(found.size).toBe(0);
   });
 
+  it('treats a malformed id as nobody, rather than as a server fault', async () => {
+    // `$in` over a list holding one throws a CastError, which renders as a 500. The tenant
+    // repository has answered *nothing found* to a malformed id since Phase 2; so does this.
+    const found = await names.byMembershipId(ctx(), ['not-an-object-id', SARI]);
+
+    expect(found.has('not-an-object-id')).toBe(false);
+    expect(found.get(SARI)).toBe('Ibu Sari');
+  });
+
+  it('reads nothing at all when every id is malformed', async () => {
+    expect((await names.byMembershipId(ctx(), ['mem-a', 'mem-b'])).size).toBe(0);
+  });
+
   it('leaves an id that resolves to nobody out of the map', async () => {
     // Absent rather than present with a placeholder: the caller decides what missing means on
     // its own surface, so no screen can render the word "Unknown" as though it were somebody.

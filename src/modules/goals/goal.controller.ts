@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@ne
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { SaveGoalDto } from './goal.dto';
-import { GoalResponseDto } from './goal.response.dto';
+import { GoalHistoryEntryDto, GoalResponseDto } from './goal.response.dto';
 import { GoalService } from './goal.service';
 
 /**
@@ -47,6 +47,30 @@ export class GoalController {
     @Query('for') forMembershipId?: string,
   ) {
     return this.goals.readOrDefaults(ctx, period, forMembershipId);
+  }
+
+  /**
+   * **Before `:period` would not help here** — `history` is a second path segment, not a
+   * competing one — but it is declared beside its sibling so a reader finds both in one place.
+   */
+  @Get(':period/history')
+  @RequirePermission('goal:read')
+  @ApiOperation({
+    summary: 'Every plan agreed for a period',
+    description:
+      'Newest first, the current one included. **Whole states, not diffs**: what changed is '
+      + 'derived from two of them by whoever renders it, and a reader who wants only *what did we '
+      + 'agree in January* gets it without reconstructing anything (ADR-0042). Empty when there is '
+      + 'no plan for the period.',
+  })
+  @ApiQuery({ name: 'for', required: false, description: 'Somebody your grant reaches (§3.6).' })
+  @ApiResponse({ status: 200, type: GoalHistoryEntryDto, isArray: true })
+  async history(
+    @Ctx() ctx: RequestContext,
+    @Param('period') period: string,
+    @Query('for') forMembershipId?: string,
+  ) {
+    return this.goals.history(ctx, period, forMembershipId);
   }
 
   @Put(':period')

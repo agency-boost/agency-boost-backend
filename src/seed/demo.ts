@@ -1364,88 +1364,144 @@ async function main(): Promise<void> {
     caseSize: number;
     leadsToAppt: number;
     closing: number;
-    version: number;
     /** Somebody other than the owner saved it — a leader, in a 1-on-1 (ADR-0046). */
     savedBy?: string;
+    /**
+     * The plans this one replaced, **oldest first** — each written as only what differed.
+     *
+     * Without these, `/goals` has a History panel with nothing in it, and P8-T6 cannot be reviewed
+     * in a browser. `version` is derived from the length rather than typed, because a fixture that
+     * says version 5 and carries no revisions is a state the service cannot produce.
+     */
+    priors?: Array<Partial<{
+      mode: 'direct' | 'from_savings';
+      annual: number;
+      savings: number;
+      commissionPct: number;
+      monthsLeft: number | null;
+      achieved: number;
+      caseSize: number;
+      leadsToAppt: number;
+      closing: number;
+      savedBy: string;
+    }>>;
   }> = [
     {
       // Rina: the ordinary case, a plan she set herself and has since updated as she produced.
       owner: rina.id, period: '2026', mode: 'direct',
       annual: 500_000_000_00, monthsLeft: null, achieved: 120_000_000_00,
-      caseSize: 18_000_000_00, leadsToAppt: 30, closing: 30, version: 3,
+      caseSize: 18_000_000_00, leadsToAppt: 30, closing: 30,
+      priors: [
+        // Where she started: the office's defaults, before she had produced anything.
+        { achieved: 0 },
+        // She raised the target once the year was clearly going better than she planned for.
+        { annual: 420_000_000_00, achieved: 60_000_000_00 },
+      ],
     },
     {
       // Budi: the second entry mode. He thinks in take-home pay, not in APE.
       owner: budi.id, period: '2026', mode: 'from_savings',
       annual: 300_000_000_00, savings: 30_000_000_00, commissionPct: 10,
       monthsLeft: null, achieved: 45_000_000_00,
-      caseSize: 15_000_000_00, leadsToAppt: 25, closing: 20, version: 1,
+      // No priors: the first plan somebody saves, and the History panel says so.
+      caseSize: 15_000_000_00, leadsToAppt: 25, closing: 20,
     },
     {
       // Dewi: **set by her leader**, so the agent's screen has an attribution to show (ADR-0046).
       owner: dewi.id, period: '2026', mode: 'direct',
       // Sari set a shorter runway than the calendar says, and the override survives every read.
       annual: 750_000_000_00, monthsLeft: 2.5, achieved: 210_000_000_00,
-      caseSize: 22_000_000_00, leadsToAppt: 35, closing: 30, version: 2,
+      caseSize: 22_000_000_00, leadsToAppt: 35, closing: 30,
       savedBy: ab.id,
+      // Her own plan, which her leader then replaced — so the History panel shows a name changing
+      // hands, which is the case worth reviewing.
+      priors: [{ annual: 500_000_000_00, monthsLeft: null, savedBy: dewi.id }],
     },
     {
       // Rina, last year: what a history screen reads, and the reason `period` is a key (ADR-0049).
       owner: rina.id, period: '2025', mode: 'direct',
       annual: 400_000_000_00, monthsLeft: 0.1, achieved: 415_000_000_00,
-      caseSize: 16_000_000_00, leadsToAppt: 30, closing: 30, version: 5,
+      caseSize: 16_000_000_00, leadsToAppt: 30, closing: 30,
+      priors: [
+        { achieved: 0, monthsLeft: null },
+        { achieved: 180_000_000_00, monthsLeft: null, closing: 25 },
+      ],
     },
   ];
+
+  type GoalSeed = (typeof goalSeeds)[number];
+
+  /**
+   * One whole state of a plan: the inputs as the record stores them, and what they meant.
+   *
+   * **Derived, not typed** (P8-T2). Seeding a hand-written figure here would be the prototype's own
+   * defect — its markup says 80 leads and its calculator says 67 — planted in the fixture this
+   * product is reviewed from. Used for the current plan and for every revision behind it, so a
+   * history entry cannot disagree with the formula either.
+   */
+  const goalState = (seed: GoalSeed, over: NonNullable<GoalSeed['priors']>[number], savedOn: Date) => {
+    const it = { ...seed, ...over };
+    const inputs = {
+      mode: it.mode,
+      annualApeTargetMinor: it.annual,
+      savingsTargetMinor: it.savings ?? 0,
+      commissionRatePct: it.commissionPct ?? 0,
+      apeAchievedMinor: it.achieved,
+      caseSizeMinor: it.caseSize,
+      leadsToApptPct: it.leadsToAppt,
+      closingRatePct: it.closing,
+    };
+    const agreed = computeCascade({
+      ...inputs,
+      // The figure in force when the plan was agreed: the agent's own, or the office's calendar on
+      // that day. The override is what the record keeps (P8-T5).
+      monthsLeft: it.monthsLeft ?? defaultMonthsLeft(seed.period, savedOn, DEFAULT_TENANT_TIMEZONE),
+    });
+    return {
+      ...inputs,
+      monthsLeftOverride: it.monthsLeft,
+      snapshot: {
+        monthlyApeTargetMinor: agreed.monthlyApeTargetMinor,
+        policiesPerMonth: agreed.policiesPerMonth,
+        appointmentsPerMonth: agreed.appointmentsPerMonth,
+        leadsPerMonth: agreed.leadsPerMonth,
+      },
+    };
+  };
 
   for (const seed of goalSeeds) {
     if (await Goals.findOne({ kpmId: id0417, membershipId: seed.owner, period: seed.period }).exec()) {
       continue;
     }
+    const priors = seed.priors ?? [];
+    const currentDay = daysAgo(seed.period === '2025' ? 300 : 12);
+    // Three weeks apart, oldest first, ending at the current plan — so the History panel reads as a
+    // sequence of conversations rather than a pile sharing one timestamp.
+    const priorDay = (i: number) => daysAgo(
+      (seed.period === '2025' ? 300 : 12) + (priors.length - i) * 21,
+    );
+
     await Goals.create({
       kpmId: id0417,
       membershipId: seed.owner,
       period: seed.period,
-      mode: seed.mode,
-      annualApeTargetMinor: seed.annual,
-      savingsTargetMinor: seed.savings ?? 0,
-      commissionRatePct: seed.commissionPct ?? 0,
-      monthsLeftOverride: seed.monthsLeft,
-      apeAchievedMinor: seed.achieved,
-      caseSizeMinor: seed.caseSize,
-      leadsToApptPct: seed.leadsToAppt,
-      closingRatePct: seed.closing,
-      /*
-       * **Derived, not typed** (P8-T2). Seeding a hand-written figure here would be the prototype's
-       * own defect — its markup says 80 leads and its calculator says 67 — planted in the fixture
-       * this product is reviewed from.
-       */
-      snapshot: (() => {
-        const savedOn = daysAgo(seed.period === '2025' ? 300 : 12);
-        const agreed = computeCascade({
-          mode: seed.mode,
-          annualApeTargetMinor: seed.annual,
-          savingsTargetMinor: seed.savings ?? 0,
-          commissionRatePct: seed.commissionPct ?? 0,
-          // The figure in force when the plan was agreed: the agent's own, or the office's
-          // calendar on that day. The override is what the record keeps (P8-T5).
-          monthsLeft: seed.monthsLeft
-            ?? defaultMonthsLeft(seed.period, savedOn, DEFAULT_TENANT_TIMEZONE),
-          apeAchievedMinor: seed.achieved,
-          caseSizeMinor: seed.caseSize,
-          leadsToApptPct: seed.leadsToAppt,
-          closingRatePct: seed.closing,
-        });
-        return {
-          monthlyApeTargetMinor: agreed.monthlyApeTargetMinor,
-          policiesPerMonth: agreed.policiesPerMonth,
-          appointmentsPerMonth: agreed.appointmentsPerMonth,
-          leadsPerMonth: agreed.leadsPerMonth,
-        };
-      })(),
+      ...goalState(seed, {}, currentDay),
       cascadeMapping: { ...CASCADE_ACTIVITY_CODES },
-      savedAt: daysAgo(seed.period === '2025' ? 300 : 12),
+      savedAt: currentDay,
       savedByMembershipId: seed.savedBy ?? seed.owner,
-      version: seed.version,
+      /*
+       * **Derived from the revisions, never typed** (P8-T6). The service reaches version N by
+       * saving N times and keeping N-1 prior states, so a fixture claiming version 5 with an empty
+       * history is a row the product cannot produce — and the screen would show a version number
+       * with nothing behind it.
+       */
+      version: priors.length + 1,
+      revisions: priors.map((over, i) => ({
+        version: i + 1,
+        ...goalState(seed, over, priorDay(i)),
+        at: priorDay(i),
+        byMembershipId: over.savedBy ?? seed.owner,
+      })),
       deletedAt: null,
       createdBy: seed.savedBy ?? seed.owner,
       updatedBy: seed.savedBy ?? seed.owner,

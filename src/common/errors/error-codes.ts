@@ -76,6 +76,18 @@ export const ErrorCode = {
    */
   GOAL_INVALID_ASSUMPTION: 'GOAL_INVALID_ASSUMPTION',
   /**
+   * A write against a period that has ended (P8-T6, ADR-0042).
+   *
+   * **Catalogued since Phase 0 and raised by nothing until now** — the last of the three `GOAL_*`
+   * codes written ahead of their paths, and the one the phase's exit criterion was waiting on.
+   *
+   * A record freezes when somebody relies on it. Last year's plan is what a leader coached
+   * against and what a promotion case cites; rewriting it would make both of those claims about a
+   * target that never existed. Re-planning the **current** period is ordinary and writes a new
+   * version instead.
+   */
+  GOAL_PERIOD_LOCKED: 'GOAL_PERIOD_LOCKED',
+  /**
    * New data written against archived configuration (invariant §3).
    *
    * **Catalogued since Phase 4 and raised by nothing until now.** It is one of six `CONFIG_*`

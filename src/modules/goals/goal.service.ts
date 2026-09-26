@@ -1,7 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
+import {
+  DomainException, NoMembershipException, NotFoundException,
+} from '@/common/errors/domain.exception';
+import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
 import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
 import { MemberNames } from '@/modules/org/member-names.service';
@@ -37,10 +40,71 @@ function projectionOf(inputs: Record<string, unknown>): CascadeResult | null {
   }
 }
 
+/** The inputs of a plan, current or replaced. One reader, so the two shapes cannot drift. */
+function inputsOf(plan: GoalRevisionInputs): GoalRevisionInputs {
+  return {
+    mode: plan.mode,
+    annualApeTargetMinor: plan.annualApeTargetMinor,
+    savingsTargetMinor: plan.savingsTargetMinor,
+    commissionRatePct: plan.commissionRatePct,
+    monthsLeftOverride: plan.monthsLeftOverride,
+    apeAchievedMinor: plan.apeAchievedMinor,
+    caseSizeMinor: plan.caseSizeMinor,
+    leadsToApptPct: plan.leadsToApptPct,
+    closingRatePct: plan.closingRatePct,
+  };
+}
+
+/** The plan as it stood, ready to be pushed onto the list it is being replaced on. */
+function revisionOf(doc: GoalDocument, at: Date): Record<string, unknown> {
+  return {
+    version: doc.version,
+    ...inputsOf(doc),
+    snapshot: {
+      monthlyApeTargetMinor: doc.snapshot.monthlyApeTargetMinor,
+      policiesPerMonth: doc.snapshot.policiesPerMonth,
+      appointmentsPerMonth: doc.snapshot.appointmentsPerMonth,
+      leadsPerMonth: doc.snapshot.leadsPerMonth,
+    },
+    // The moment it **stopped** being the plan, which is when the next one was agreed.
+    at: doc.savedAt ?? at,
+    byMembershipId: doc.savedByMembershipId ?? doc.membershipId,
+  };
+}
+
 /** A plan nobody has agreed figures for yet. Also what a row written before the field reads as. */
 const EMPTY_SNAPSHOT: GoalSnapshotView = {
   monthlyApeTargetMinor: 0, policiesPerMonth: 0, appointmentsPerMonth: 0, leadsPerMonth: 0,
 };
+
+/** The six inputs a plan is made of, shared by the current row and every version it replaced. */
+export interface GoalRevisionInputs {
+  mode: GoalMode;
+  annualApeTargetMinor: number;
+  savingsTargetMinor: number;
+  commissionRatePct: number;
+  monthsLeftOverride: number | null;
+  apeAchievedMinor: number;
+  caseSizeMinor: number;
+  leadsToApptPct: number;
+  closingRatePct: number;
+}
+
+/**
+ * One plan that was agreed, current or replaced (P8-T6).
+ *
+ * **Whole states, newest first.** What changed between two of them is derived by whoever renders
+ * it; storing a diff would only be readable against a base the reader still has, and the point of
+ * keeping these is that a leader who coached against January's plan can read January's plan.
+ */
+export interface GoalHistoryEntry extends GoalRevisionInputs {
+  version: number;
+  at: string | null;
+  byMembershipId: string | null;
+  /** `null` when the membership resolves to nobody — a person who has since left the office. */
+  byName: string | null;
+  snapshot: GoalSnapshotView;
+}
 
 /** One goal, as a caller reads it. */
 export interface GoalView {
@@ -194,11 +258,18 @@ export class GoalService {
     const input = checkGoal(body);
     const now = this.clock.now();
     const day = await this.days.for(ctx);
+    this.requireOpenPeriod(input.period!, day);
     // The figure in force at the moment of agreement: the agent's own, or the office's calendar.
     const monthsLeft = input.monthsLeft
       ?? defaultMonthsLeft(input.period!, this.clock.now(), day.timezone);
     // Refuses an unusable assumption before anything is written (AC-7).
     const agreed = computeCascade({ ...input, monthsLeft } as never);
+
+    /*
+     * The plan this one replaces, kept whole (ADR-0042). Read before the write rather than derived
+     * after it: once the upsert lands, the previous state is gone from the row it lived on.
+     */
+    const previous = await this.goals.findOne(ctx, { membershipId, period: input.period! });
 
     const saved = await this.goals.upsertOne(
       ctx,
@@ -242,6 +313,7 @@ export class GoalService {
          * is P8-T6's; the number they will be keyed on is here.
          */
         $inc: { version: 1 },
+        ...(previous ? { $push: { revisions: revisionOf(previous, now) } } : {}),
       },
     );
 
@@ -278,6 +350,74 @@ export class GoalService {
     const goal = await this.goals.findOne(ctx, { membershipId, period });
     if (!goal) throw new NotFoundException('Goal');
     return this.view(goal, await this.days.for(ctx));
+  }
+
+  /**
+   * A period that has ended is not the agent's to rewrite (AC-1, ADR-0042).
+   *
+   * **Past only.** Last year's plan is what a leader coached against and what a promotion case
+   * cites; rewriting it would make both of those claims about a target that never existed.
+   * Re-planning the **current** period is ordinary, and a **future** one is somebody planning
+   * ahead — refusing that would be a rule about tidiness rather than about evidence.
+   *
+   * The boundary is the office's year, not the server's (invariant §9).
+   */
+  private requireOpenPeriod(period: string, day: OfficeDay): void {
+    const thisYear = day.today.slice(0, 4);
+    if (period >= thisYear) return;
+    throw new DomainException(
+      ErrorCode.GOAL_PERIOD_LOCKED,
+      `${period} has ended. Its plan is what was agreed at the time and stays as it was; `
+      + `set a plan for ${thisYear} instead.`,
+      HttpStatus.CONFLICT,
+      { period, currentPeriod: thisYear },
+    );
+  }
+
+  /**
+   * Every plan agreed for a period, newest first (AC-3).
+   *
+   * **Whole states, not a diff.** What changed is derived by whoever renders it, from two states
+   * it holds — and a reader who wants only *what did we agree in January* gets it without
+   * reconstructing anything.
+   */
+  async history(
+    ctx: RequestContext, period: string, forMembershipId?: string,
+  ): Promise<GoalHistoryEntry[]> {
+    const membershipId = await this.subject(ctx, forMembershipId, 'goal:read');
+    const goal = await this.goals.findOne(ctx, { membershipId, period });
+    if (!goal) return [];
+
+    const names = await this.names.byMembershipId(ctx, [
+      ...goal.revisions.map((r) => r.byMembershipId),
+      goal.savedByMembershipId ?? '',
+    ]);
+    const entry = (
+      version: number, at: Date | null, by: string | null, inputs: GoalRevisionInputs,
+      snapshot: GoalSnapshotView,
+    ): GoalHistoryEntry => ({
+      version,
+      at: at ? at.toISOString() : null,
+      byMembershipId: by,
+      byName: by ? names.get(by) ?? null : null,
+      ...inputs,
+      snapshot,
+    });
+
+    return [
+      entry(goal.version, goal.savedAt, goal.savedByMembershipId, inputsOf(goal), {
+        monthlyApeTargetMinor: goal.snapshot.monthlyApeTargetMinor,
+        policiesPerMonth: goal.snapshot.policiesPerMonth,
+        appointmentsPerMonth: goal.snapshot.appointmentsPerMonth,
+        leadsPerMonth: goal.snapshot.leadsPerMonth,
+      }),
+      ...[...goal.revisions].reverse().map((r) => entry(r.version, r.at, r.byMembershipId, inputsOf(r), {
+        monthlyApeTargetMinor: r.snapshot.monthlyApeTargetMinor,
+        policiesPerMonth: r.snapshot.policiesPerMonth,
+        appointmentsPerMonth: r.snapshot.appointmentsPerMonth,
+        leadsPerMonth: r.snapshot.leadsPerMonth,
+      })),
+    ];
   }
 
   /** The caller's own goals, newest period first. What a history screen reads (P8-T6). */

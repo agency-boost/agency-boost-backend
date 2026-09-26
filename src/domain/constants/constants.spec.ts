@@ -1,5 +1,6 @@
 import {
   ACTIVATION,
+  CASCADE_ACTIVITY_CODES,
   ASSET_LIMITS,
   ACTIVITY,
   GOAL_DEFAULTS,
@@ -53,6 +54,24 @@ describe('domain constants', () => {
     it('clamps months-left to a floor so the cascade cannot divide by zero', () => {
       expect(GOAL_DEFAULTS.MONTHS_LEFT_MIN).toBe(0.1);
       expect(GOAL_DEFAULTS.MONTHS_LEFT_MIN).toBeGreaterThan(0);
+    });
+  });
+
+  /**
+   * Invariant §4 in three assertions. The prototype's footnote reads "Maps to activities #3, #4, #6
+   * in Activity Management" (`Overall.html:3064`, `:5967`), and those numbers are **display order**,
+   * which an office can drag. These pin the codes the cascade actually binds to, against the table in
+   * `metrics-and-definitions.md` — a test that compares the constant to itself pins nothing.
+   */
+  describe('the goal cascade binds to codes (Overall.html:3064, :5967)', () => {
+    it('pins the leads stage to LEADS_CONTACTED', () => {
+      expect(CASCADE_ACTIVITY_CODES.leadsCode).toBe('LEADS_CONTACTED');
+    });
+    it('pins the appointments stage to SELL_PRESENTATION', () => {
+      expect(CASCADE_ACTIVITY_CODES.appointmentsCode).toBe('SELL_PRESENTATION');
+    });
+    it('pins the closings stage to SELL_SUBMISSION', () => {
+      expect(CASCADE_ACTIVITY_CODES.closingsCode).toBe('SELL_SUBMISSION');
     });
   });
 

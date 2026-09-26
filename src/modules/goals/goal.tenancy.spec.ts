@@ -387,6 +387,101 @@ describe('the goal record (P8-T1)', () => {
     });
   });
 
+  describe('P8-T6 — a period ends, and what was agreed stays agreed', () => {
+    const at = (instant: string) => (wired.clock as FixedClock).set(new Date(instant));
+    afterEach(() => (wired.clock as FixedClock).set(NOW));
+
+    it('AC-1: refuses a write to a period that has ended', async () => {
+      await expect(save(A(), { period: '2025' }))
+        .rejects.toMatchObject({ code: 'GOAL_PERIOD_LOCKED', status: 409 });
+    });
+
+    it('AC-1: still reads it — history is not forbidden, it is finished', async () => {
+      at('2025-06-05T02:00:00Z');
+      await save(A(), { period: '2025' });
+
+      at('2026-09-26T02:00:00Z');
+      expect((await wired.goals.read(A(), '2025')).period).toBe('2025');
+    });
+
+    it('AC-1: takes a write to a period that has not started', async () => {
+      // Planning ahead. Refusing it would be a rule about tidiness rather than about evidence.
+      const ahead = await save(A(), { period: '2027' });
+
+      expect(ahead.period).toBe('2027');
+    });
+
+    it('AC-1: the boundary is the office’s year, not the server’s', async () => {
+      // 2025-12-31T17:30Z is already 2026 in Jakarta and still 2025 in New York. This spec seeds
+      // no offices — `TenantDay` falls back to the platform zone — so the row is written here.
+      await mongoose.connection.db!.collection('kpms').insertOne({
+        _id: new mongoose.Types.ObjectId(KPM_A), timezone: 'America/New_York',
+      } as never);
+      at('2025-12-31T17:30:00Z');
+
+      await expect(save(A(), { period: '2025' })).resolves.toMatchObject({ period: '2025' });
+    });
+
+    it('AC-2: re-planning keeps the plan it replaced, whole', async () => {
+      const first = await save(A(), { annualApeTargetMinor: 300_000_000_00, monthsLeft: 5 });
+      await save(A(), { annualApeTargetMinor: 500_000_000_00, monthsLeft: 5 });
+
+      const history = await wired.goals.history(A(), '2026');
+
+      expect(history).toHaveLength(2);
+      expect(history[0]).toMatchObject({ version: 2, annualApeTargetMinor: 500_000_000_00 });
+      expect(history[1]).toMatchObject({ version: 1, annualApeTargetMinor: 300_000_000_00 });
+      // Whole states, so the replaced plan's own figures are readable without reconstruction.
+      expect(history[1].snapshot.monthlyApeTargetMinor).toBe(60_000_000_00);
+      expect(first.snapshot.monthlyApeTargetMinor).toBe(60_000_000_00);
+    });
+
+    it('AC-2: keeps every one, not only the last', async () => {
+      for (const target of [100, 200, 300, 400]) {
+        await save(A(), { annualApeTargetMinor: target * 1_000_000_00 });
+      }
+
+      const history = await wired.goals.history(A(), '2026');
+
+      expect(history.map((h) => h.version)).toEqual([4, 3, 2, 1]);
+    });
+
+    it('AC-3: says who agreed each one', async () => {
+      const history = await wired.goals.history(A(), '2026');
+      expect(history).toEqual([]);
+
+      await save(A());
+      const [only] = await wired.goals.history(A(), '2026');
+
+      expect(only.byMembershipId).toBe('mem-a1');
+      // No user row for this fixture membership, so the name is absent rather than invented.
+      expect(only.byName).toBeNull();
+    });
+
+    it('AC-3: carries enough to say what changed, without storing a diff', async () => {
+      await save(A(), { annualApeTargetMinor: 300_000_000_00, caseSizeMinor: 18_000_000_00 });
+      await save(A(), { annualApeTargetMinor: 300_000_000_00, caseSizeMinor: 9_000_000_00 });
+
+      const [now, before] = await wired.goals.history(A(), '2026');
+
+      // A reader compares two whole states; nothing had to decide in advance what was worth
+      // recording (ADR-0042).
+      expect(before.caseSizeMinor).toBe(18_000_000_00);
+      expect(now.caseSizeMinor).toBe(9_000_000_00);
+      expect(now.annualApeTargetMinor).toBe(before.annualApeTargetMinor);
+    });
+
+    it('answers an empty history for a period with no plan', async () => {
+      expect(await wired.goals.history(A(), '2026')).toEqual([]);
+    });
+
+    it('does not let one office read another’s history', async () => {
+      await save(A());
+
+      expect(await wired.goals.history(B(), '2026')).toEqual([]);
+    });
+  });
+
   describe('what an office starts somebody on', () => {
     it('offers the registry’s defaults without writing anything', async () => {
       const offered = await wired.goals.defaults(A(), '2026');

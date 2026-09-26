@@ -53,7 +53,7 @@ import {
   LeadCommitmentSchema, LeadContactSchema, LeadSchema, LeadTransitionSchema,
 } from '@/modules/leads/lead.schema';
 import {
-  GoalCascadeMappingSchema, GoalSchema, GoalSnapshotSchema,
+  GoalCascadeMappingSchema, GoalRevisionSchema, GoalSchema, GoalSnapshotSchema,
 } from '@/modules/goals/goal.schema';
 import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
@@ -193,6 +193,12 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
       + 'that has been re-planned keeps the version that held the old ones (ADR-0042)',
   ],
   [
+    'goalRevision (subdocument)',
+    GoalRevisionSchema,
+    'a plan the goal replaced (ADR-0042). **Append-only and never removed** — a target somebody '
+      + 'coached against does not stop having existed because it was revised',
+  ],
+  [
     'goalCascadeMapping (subdocument)',
     GoalCascadeMappingSchema,
     'the three activity codes a goal is measured against. Set once and rewritten only if the '
@@ -269,6 +275,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [GoalSchema, 'GoalSchema'],
   [GoalSnapshotSchema, 'GoalSnapshotSchema'],
   [GoalCascadeMappingSchema, 'GoalCascadeMappingSchema'],
+  [GoalRevisionSchema, 'GoalRevisionSchema'],
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
   [ActivityLogCorrectionSchema, 'ActivityLogCorrectionSchema'],
   [CampaignSchema, 'CampaignSchema'],

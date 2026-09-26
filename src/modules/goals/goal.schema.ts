@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { configSchemaOptions } from '@/common/schema/base.schema';
+import { CASCADE_ACTIVITY_CODES } from '@/domain/constants';
 
 export type GoalDocument = HydratedDocument<Goal>;
 
@@ -18,13 +19,15 @@ export type GoalMode = (typeof GOAL_MODES)[number];
  */
 @Schema({ _id: false })
 export class GoalCascadeMapping {
-  @Prop({ type: String, required: true, default: 'LEADS_CONTACTED' })
+  // The defaults read from the constant rather than repeating it: three literals here and three in
+  // `CASCADE_ACTIVITY_CODES` is two sources for one fact, which is what invariant §7 forbids.
+  @Prop({ type: String, required: true, default: CASCADE_ACTIVITY_CODES.leadsCode })
   leadsCode!: string;
 
-  @Prop({ type: String, required: true, default: 'SELL_PRESENTATION' })
+  @Prop({ type: String, required: true, default: CASCADE_ACTIVITY_CODES.appointmentsCode })
   appointmentsCode!: string;
 
-  @Prop({ type: String, required: true, default: 'SELL_SUBMISSION' })
+  @Prop({ type: String, required: true, default: CASCADE_ACTIVITY_CODES.closingsCode })
   closingsCode!: string;
 }
 export const GoalCascadeMappingSchema = SchemaFactory.createForClass(GoalCascadeMapping);
@@ -52,6 +55,64 @@ export class GoalSnapshot {
   leadsPerMonth!: number;
 }
 export const GoalSnapshotSchema = SchemaFactory.createForClass(GoalSnapshot);
+
+/**
+ * A whole prior state of the plan, kept when it is re-planned (P8-T6, ADR-0042).
+ *
+ * **The inputs in full, not a diff.** A diff is only meaningful against a base somebody still has,
+ * and the point of this list is that a leader who coached against January's plan can read January's
+ * plan without reconstructing it. What changed between two versions is then derived from two whole
+ * states — the same reasoning `activityLogs.corrections` is built on.
+ *
+ * **No reason field, unlike a correction.** Correcting a frozen activity day is an assertion that
+ * the record was wrong and needs one; re-planning a goal is an agent changing their mind about the
+ * future, which needs nothing more than the new plan and who made it.
+ */
+@Schema({ _id: false })
+export class GoalRevision {
+  /** The version this state *was*. The current row carries the next one. */
+  @Prop({ type: Number, required: true })
+  version!: number;
+
+  @Prop({ type: String, enum: GOAL_MODES, required: true })
+  mode!: GoalMode;
+
+  @Prop({ type: Number, required: true })
+  annualApeTargetMinor!: number;
+
+  @Prop({ type: Number, required: true })
+  savingsTargetMinor!: number;
+
+  @Prop({ type: Number, required: true })
+  commissionRatePct!: number;
+
+  @Prop({ type: Number, default: null })
+  monthsLeftOverride!: number | null;
+
+  @Prop({ type: Number, required: true })
+  apeAchievedMinor!: number;
+
+  @Prop({ type: Number, required: true })
+  caseSizeMinor!: number;
+
+  @Prop({ type: Number, required: true })
+  leadsToApptPct!: number;
+
+  @Prop({ type: Number, required: true })
+  closingRatePct!: number;
+
+  /** What that plan was agreed to mean, frozen with it. */
+  @Prop({ type: GoalSnapshotSchema, required: true })
+  snapshot!: GoalSnapshot;
+
+  @Prop({ type: Date, required: true })
+  at!: Date;
+
+  /** Who agreed it. A leader's re-plan carries their name here as on the row (ADR-0046). */
+  @Prop({ type: String, required: true })
+  byMembershipId!: string;
+}
+export const GoalRevisionSchema = SchemaFactory.createForClass(GoalRevision);
 
 /**
  * One agent's agreed plan for one period (P8-T1).
@@ -158,6 +219,15 @@ export class Goal {
 
   @Prop({ type: Number, required: true, default: 1 })
   version!: number;
+
+  /**
+   * Every plan this one replaced, oldest first (P8-T6).
+   *
+   * Append-only. Re-planning is a **new version** and the prior one stays readable (ADR-0042) —
+   * a target somebody coached against does not stop having existed because it was revised.
+   */
+  @Prop({ type: [GoalRevisionSchema], default: [] })
+  revisions!: GoalRevision[];
 
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;

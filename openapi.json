@@ -955,6 +955,106 @@
         "x-required-permission": "goal:update"
       }
     },
+    "/api/v1/goals/{period}/history": {
+      "get": {
+        "description": "Newest first, the current one included. **Whole states, not diffs**: what changed is derived from two of them by whoever renders it, and a reader who wants only *what did we agree in January* gets it without reconstructing anything (ADR-0042). Empty when there is no plan for the period.\n\n**Requires `goal:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "GoalController_history_v1",
+        "parameters": [
+          {
+            "name": "period",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "for",
+            "required": false,
+            "in": "query",
+            "description": "Somebody your grant reaches (§3.6).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GoalHistoryEntryDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `goal:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every plan agreed for a period",
+        "tags": [
+          "goals"
+        ],
+        "x-required-permission": "goal:read"
+      }
+    },
     "/api/health": {
       "get": {
         "operationId": "HealthController_live",
@@ -14656,6 +14756,86 @@
           "cascadeMapping",
           "savedAt",
           "savedByMembershipId"
+        ]
+      },
+      "GoalHistoryEntryDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number",
+            "description": "The version this plan was."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "byMembershipId": {
+            "type": "string",
+            "nullable": true
+          },
+          "byName": {
+            "type": "string",
+            "nullable": true,
+            "description": "`null` when the membership resolves to nobody — somebody who has left the office."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "from_savings"
+            ]
+          },
+          "annualApeTargetMinor": {
+            "type": "number"
+          },
+          "savingsTargetMinor": {
+            "type": "number"
+          },
+          "commissionRatePct": {
+            "type": "number"
+          },
+          "monthsLeftOverride": {
+            "type": "number",
+            "nullable": true,
+            "description": "The agent’s own figure, or `null`."
+          },
+          "apeAchievedMinor": {
+            "type": "number"
+          },
+          "caseSizeMinor": {
+            "type": "number"
+          },
+          "leadsToApptPct": {
+            "type": "number"
+          },
+          "closingRatePct": {
+            "type": "number"
+          },
+          "snapshot": {
+            "description": "What that plan was agreed to mean.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoalSnapshotDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "version",
+          "at",
+          "byMembershipId",
+          "byName",
+          "mode",
+          "annualApeTargetMinor",
+          "savingsTargetMinor",
+          "commissionRatePct",
+          "monthsLeftOverride",
+          "apeAchievedMinor",
+          "caseSizeMinor",
+          "leadsToApptPct",
+          "closingRatePct",
+          "snapshot"
         ]
       },
       "SaveGoalDto": {

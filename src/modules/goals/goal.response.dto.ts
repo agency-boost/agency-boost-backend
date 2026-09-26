@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { GOAL_MODES } from './goal.schema';
 import type { CascadeResult } from './goal-cascade';
-import type { GoalSnapshotView, GoalView } from './goal.service';
+import type { GoalHistoryEntry, GoalSnapshotView, GoalView } from './goal.service';
 
 export class GoalSnapshotDto implements GoalSnapshotView {
   @ApiProperty({ type: Number })
@@ -144,4 +144,52 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
       + 'columns, no flag (ADR-0046).',
   })
   savedByMembershipId!: string | null;
+}
+
+export class GoalHistoryEntryDto implements GoalHistoryEntry {
+  @ApiProperty({ type: Number, description: 'The version this plan was.' })
+  version!: number;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  at!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  byMembershipId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: '`null` when the membership resolves to nobody — somebody who has left the office.',
+  })
+  byName!: string | null;
+
+  @ApiProperty({ enum: GOAL_MODES })
+  mode!: 'direct' | 'from_savings';
+
+  @ApiProperty({ type: Number })
+  annualApeTargetMinor!: number;
+
+  @ApiProperty({ type: Number })
+  savingsTargetMinor!: number;
+
+  @ApiProperty({ type: Number })
+  commissionRatePct!: number;
+
+  @ApiProperty({ type: Number, nullable: true, description: 'The agent’s own figure, or `null`.' })
+  monthsLeftOverride!: number | null;
+
+  @ApiProperty({ type: Number })
+  apeAchievedMinor!: number;
+
+  @ApiProperty({ type: Number })
+  caseSizeMinor!: number;
+
+  @ApiProperty({ type: Number })
+  leadsToApptPct!: number;
+
+  @ApiProperty({ type: Number })
+  closingRatePct!: number;
+
+  @ApiProperty({ type: GoalSnapshotDto, description: 'What that plan was agreed to mean.' })
+  snapshot!: GoalSnapshotView;
 }

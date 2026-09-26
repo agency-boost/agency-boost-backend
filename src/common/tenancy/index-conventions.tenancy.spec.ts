@@ -54,7 +54,7 @@ import {
   LeadCommitmentSchema, LeadContactSchema, LeadSchema, LeadTransitionSchema,
 } from '@/modules/leads/lead.schema';
 import {
-  GoalCascadeMappingSchema, GoalSchema, GoalSnapshotSchema,
+  GoalCascadeMappingSchema, GoalRevisionSchema, GoalSchema, GoalSnapshotSchema,
 } from '@/modules/goals/goal.schema';
 import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
@@ -246,6 +246,11 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
       + '_id of its own',
   ],
   [
+    'goalRevision (subdocument)',
+    GoalRevisionSchema,
+    'a plan the goal replaced, inside the goal: no collection and no _id of its own',
+  ],
+  [
     'activityLogCorrection (subdocument)',
     ActivityLogCorrectionSchema,
     'a prior state of an activity log, held inside the day it belongs to',
@@ -329,6 +334,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [GoalSchema, 'GoalSchema'],
   [GoalSnapshotSchema, 'GoalSnapshotSchema'],
   [GoalCascadeMappingSchema, 'GoalCascadeMappingSchema'],
+  [GoalRevisionSchema, 'GoalRevisionSchema'],
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
   [ActivityLogCorrectionSchema, 'ActivityLogCorrectionSchema'],
   [CampaignSchema, 'CampaignSchema'],

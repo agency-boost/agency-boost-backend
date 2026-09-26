@@ -161,6 +161,23 @@ describe('who may set whose goal (P8-T4)', () => {
       await expect(save(owner(), '66f0000000000000000000ff'))
         .rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
+
+    it('keeps an Owner out of a real membership in another office', async () => {
+      // The sharper version of the test above, and the one that proves the *scope* of the lookup
+      // rather than its existence: this id resolves, so an unscoped `findById` would accept it.
+      // An Owner holds `own-kpm`, which means `subjectsInScope` answers "anybody" — and anybody
+      // means anybody **here**.
+      const FOREIGN = '66f000000000000000000106';
+      await mongoose.connection.db!.collection('memberships').insertOne({
+        ...person(FOREIGN, 'AGENT', null, []),
+        kpmId: '66f0000000000000000000b2',
+      } as never);
+
+      await expect(save(owner(), FOREIGN))
+        .rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      await expect(wired.goals.read(owner(), '2026', FOREIGN))
+        .rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    });
   });
 
   describe('AC-5 — what §3.6 grants each of the six', () => {
