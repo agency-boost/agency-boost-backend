@@ -1135,6 +1135,101 @@
         "x-required-permission": "data_upload:download_template"
       }
     },
+    "/api/v1/kpm/data-upload/preview": {
+      "post": {
+        "description": "Reads the file as bytes — UTF-8, or Windows-1252 when it is not valid UTF-8 — with a comma, semicolon or tab delimiter, and checks its header cell by cell against every template ever issued (ADR-0052). **Writes nothing.** Answers every data row against the roster and what is stored: a row is `refused` when it cannot be attributed to exactly one active member; a ready row carries twelve cells, each `new`, `changed`, `unchanged`, `not_provided` or `refused`, with the reason on the row. A blank cell is not provided and would change nothing (ADR-0051). `UPLOAD_TEMPLATE_MISMATCH` and `UPLOAD_MALFORMED_CSV` (422) refuse the whole file; `ASSET_TOO_LARGE` (413) above 1 MiB.\n\n**Requires `data_upload:upload_and_preview`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductionController_preview_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "month",
+                  "file"
+                ],
+                "properties": {
+                  "month": {
+                    "type": "string",
+                    "example": "2026-09",
+                    "description": "`YYYY-MM`, the month the figures are for."
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The filled template, as it was saved. At most 1 MiB."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadPreviewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `data_upload:upload_and_preview`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "What a filled file would change, before anything does",
+        "tags": [
+          "production"
+        ],
+        "x-required-permission": "data_upload:upload_and_preview"
+      }
+    },
     "/api/v1/kpm/data-upload/{month}": {
       "get": {
         "description": "Every active member, with the six metrics in their monthly and year-to-date figures and the provenance of each cell. **`null` is not zero**: a cell nothing has written says the carrier has not reported this person, where `0` says it reported nothing. Reads only — the file, the correction and the revert each have their own route.\n\n**Requires `data_upload:read`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -15106,6 +15201,267 @@
           "header",
           "file",
           "rowCount"
+        ]
+      },
+      "PreviewSummaryDto": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "number"
+          },
+          "ready": {
+            "type": "number"
+          },
+          "refused": {
+            "type": "number"
+          },
+          "newCells": {
+            "type": "number"
+          },
+          "changedCells": {
+            "type": "number"
+          },
+          "unchangedCells": {
+            "type": "number"
+          },
+          "notProvidedCells": {
+            "type": "number"
+          },
+          "refusedCells": {
+            "type": "number"
+          },
+          "notInFile": {
+            "type": "number",
+            "description": "Active members the file does not list. They keep what they have."
+          }
+        },
+        "required": [
+          "rows",
+          "ready",
+          "refused",
+          "newCells",
+          "changedCells",
+          "unchangedCells",
+          "notProvidedCells",
+          "refusedCells",
+          "notInFile"
+        ]
+      },
+      "PreviewIssueDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "UPLOAD_VALUE_OUT_OF_RANGE",
+            "description": "`UPLOAD_UNKNOWN_AGENT_CODE`, `UPLOAD_DUPLICATE_AGENT_CODE` or `UPLOAD_MALFORMED_CSV` for a row; `UPLOAD_VALUE_OUT_OF_RANGE` for a cell."
+          },
+          "message": {
+            "type": "string",
+            "description": "Names the column in the header’s own words, and what is wrong."
+          },
+          "metric": {
+            "type": "string",
+            "enum": [
+              "ape",
+              "persistency",
+              "recruitment",
+              "newActiveAgents",
+              "fyp",
+              "policyCount"
+            ],
+            "nullable": true,
+            "description": "The cell’s metric; `null` for the row."
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "monthly",
+              "ytd"
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "metric",
+          "cadence"
+        ]
+      },
+      "PreviewCellDto": {
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string",
+            "enum": [
+              "ape",
+              "persistency",
+              "recruitment",
+              "newActiveAgents",
+              "fyp",
+              "policyCount"
+            ]
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "monthly",
+              "ytd"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "new",
+              "changed",
+              "unchanged",
+              "not_provided",
+              "refused"
+            ],
+            "description": "`not_provided` is a blank cell, and changes nothing — a file never clears a figure (ADR-0051)."
+          },
+          "before": {
+            "type": "number",
+            "nullable": true,
+            "description": "Stored now. Money in IDR minor units."
+          },
+          "after": {
+            "type": "number",
+            "nullable": true,
+            "description": "What the file would write, in the same unit. `null` when not provided or refused."
+          },
+          "raw": {
+            "type": "string",
+            "nullable": true,
+            "description": "The cell as the file has it — money in *Rp M*."
+          }
+        },
+        "required": [
+          "metric",
+          "cadence",
+          "status",
+          "before",
+          "after",
+          "raw"
+        ]
+      },
+      "PreviewRowDto": {
+        "type": "object",
+        "properties": {
+          "line": {
+            "type": "number",
+            "description": "The file’s line, as a spreadsheet numbers it; the header is line 1."
+          },
+          "agentCode": {
+            "type": "string",
+            "description": "As the file has it."
+          },
+          "membershipId": {
+            "type": "string",
+            "nullable": true
+          },
+          "resolvedAgentCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "The member’s own code."
+          },
+          "name": {
+            "type": "string",
+            "nullable": true,
+            "description": "The roster’s name. The file’s is never matched on."
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "nameDiffers": {
+            "type": "boolean"
+          },
+          "codeRecovered": {
+            "type": "boolean",
+            "description": "An all-digit code matched without its leading zeros, to the one member it fits (ADR-0052)."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "refused"
+            ]
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreviewIssueDto"
+            }
+          },
+          "cells": {
+            "description": "Twelve, in the template’s order; empty when the row is refused.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreviewCellDto"
+            }
+          }
+        },
+        "required": [
+          "line",
+          "agentCode",
+          "membershipId",
+          "resolvedAgentCode",
+          "name",
+          "fileName",
+          "nameDiffers",
+          "codeRecovered",
+          "status",
+          "issues",
+          "cells"
+        ]
+      },
+      "UploadPreviewDto": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "example": "2026-09"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "templateVersion": {
+            "type": "number",
+            "example": 1
+          },
+          "encoding": {
+            "type": "string",
+            "enum": [
+              "utf-8",
+              "windows-1252"
+            ]
+          },
+          "delimiter": {
+            "type": "string",
+            "enum": [
+              ",",
+              ";",
+              "\t"
+            ]
+          },
+          "summary": {
+            "$ref": "#/components/schemas/PreviewSummaryDto"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreviewRowDto"
+            }
+          }
+        },
+        "required": [
+          "month",
+          "filename",
+          "templateVersion",
+          "encoding",
+          "delimiter",
+          "summary",
+          "rows"
         ]
       },
       "MetricCellDto": {

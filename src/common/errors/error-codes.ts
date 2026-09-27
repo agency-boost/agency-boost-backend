@@ -182,6 +182,25 @@ export const ErrorCode = {
   /** A ratio's display unit does not fit its rule — `band` is points, `gte` never is. */
   CONFIG_RATIO_UNIT_MISMATCH: 'CONFIG_RATIO_UNIT_MISMATCH',
 
+  /*
+   * Production import (P9-T3). The catalog has carried seven `UPLOAD_*` codes since Phase 0; these
+   * land with the path that raises them, and the rest arrive with P9-T4.
+   *
+   * **Two are thrown, three are reported.** A file whose header nobody issued, or that cannot be read
+   * at all, is refused whole. A row or a cell that is wrong is reported **inside the preview** and
+   * the rest of the file still previews — the prototype discards eleven good values for one bad one.
+   */
+  /** The header is not one this product issued. Nothing is previewed. */
+  UPLOAD_TEMPLATE_MISMATCH: 'UPLOAD_TEMPLATE_MISMATCH',
+  /** Not a CSV at all, or unbalanced quotes; row-level for one row with more cells than the template. */
+  UPLOAD_MALFORMED_CSV: 'UPLOAD_MALFORMED_CSV',
+  /** Row-level: no active member of this office answers to the code. */
+  UPLOAD_UNKNOWN_AGENT_CODE: 'UPLOAD_UNKNOWN_AGENT_CODE',
+  /** Row-level: two rows resolve to one member, so neither is taken (ADR-0052). */
+  UPLOAD_DUPLICATE_AGENT_CODE: 'UPLOAD_DUPLICATE_AGENT_CODE',
+  /** Cell-level: not a number, the wrong sign, the wrong mark, above 100, a fraction of a person. */
+  UPLOAD_VALUE_OUT_OF_RANGE: 'UPLOAD_VALUE_OUT_OF_RANGE',
+
   // Validation
   VALIDATION_FAILED: 'VALIDATION_FAILED',
   VALIDATION_UNKNOWN_FIELD: 'VALIDATION_UNKNOWN_FIELD',

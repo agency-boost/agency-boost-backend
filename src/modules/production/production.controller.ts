@@ -1,18 +1,28 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
 import {
-  ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags,
+  Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UploadedFile, UseInterceptors,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags,
 } from '@nestjs/swagger';
+import { IsString } from 'class-validator';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
-import { MonthViewDto, TemplateFileDto } from './production.response.dto';
+import { MonthViewDto, TemplateFileDto, UploadPreviewDto } from './production.response.dto';
+import { ProductionUploadInterceptor, type UploadedCsv } from './production-upload.interceptor';
 import { ProductionService } from './production.service';
 
+/** The multipart form's text field. The file is `file`, read by the interceptor. */
+class PreviewUploadDto {
+  @IsString()
+  month!: string;
+}
+
 /**
- * The office's monthly production (P9-T1, P9-T2).
+ * The office's monthly production (P9-T1, P9-T2, P9-T3).
  *
- * **Two routes, one screen.** `/kpm/data-upload` reads the month and downloads the template; the
- * preview, commit, correct and revert routes arrive with the tasks that give each a control on that
- * screen, so no endpoint here waits for a consumer (`check-api-consumers.py`).
+ * **Three routes, one screen.** `/kpm/data-upload` reads the month, downloads the template and
+ * previews a filled one; commit, correct and revert arrive with the tasks that give each a control on
+ * that screen, so no endpoint here waits for a consumer (`check-api-consumers.py`).
  */
 @ApiTags('production')
 @ApiBearerAuth()
@@ -42,6 +52,42 @@ export class ProductionController {
   @ApiResponse({ status: 200, type: TemplateFileDto })
   async template(@Ctx() ctx: RequestContext, @Query('month') month: string) {
     return this.production.template(ctx, month ?? '');
+  }
+
+  @Post('preview')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('data_upload:upload_and_preview')
+  @UseInterceptors(ProductionUploadInterceptor)
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['month', 'file'],
+      properties: {
+        month: { type: 'string', example: '2026-09', description: '`YYYY-MM`, the month the figures are for.' },
+        file: { type: 'string', format: 'binary', description: 'The filled template, as it was saved. At most 1 MiB.' },
+      },
+    },
+  })
+  @ApiOperation({
+    summary: 'What a filled file would change, before anything does',
+    description:
+      'Reads the file as bytes — UTF-8, or Windows-1252 when it is not valid UTF-8 — with a comma, '
+      + 'semicolon or tab delimiter, and checks its header cell by cell against every template ever '
+      + 'issued (ADR-0052). **Writes nothing.** Answers every data row against the roster and what is '
+      + 'stored: a row is `refused` when it cannot be attributed to exactly one active member; a ready '
+      + 'row carries twelve cells, each `new`, `changed`, `unchanged`, `not_provided` or `refused`, '
+      + 'with the reason on the row. A blank cell is not provided and would change nothing (ADR-0051). '
+      + '`UPLOAD_TEMPLATE_MISMATCH` and `UPLOAD_MALFORMED_CSV` (422) refuse the whole file; '
+      + '`ASSET_TOO_LARGE` (413) above 1 MiB.',
+  })
+  @ApiResponse({ status: 200, type: UploadPreviewDto })
+  async preview(
+    @Ctx() ctx: RequestContext,
+    @Body() body: PreviewUploadDto,
+    @UploadedFile() file?: UploadedCsv,
+  ) {
+    return this.production.preview(ctx, body.month, file);
   }
 
   @Get(':month')

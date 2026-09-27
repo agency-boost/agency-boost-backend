@@ -2,6 +2,7 @@ import {
   ACTIVATION,
   CASCADE_ACTIVITY_CODES,
   ASSET_LIMITS,
+  PRODUCTION_UPLOAD,
   ACTIVITY,
   GOAL_DEFAULTS,
   PERFORMANCE,
@@ -131,6 +132,13 @@ describe('domain constants', () => {
     // 0–999 activity-count clamp even though both read 999 — `metrics:1450` says so.
     expect(PERFORMANCE.ATTAINMENT_PCT_CAP).toBe(999);
     expect(DEFAULT_CURRENCY).toBe('IDR');
+  });
+
+  describe('the monthly production upload (P9-T3)', () => {
+    it('pins the ceiling at 1 MiB — ten thousand rows of the template, more than any office', () => {
+      expect(PRODUCTION_UPLOAD.MAX_BYTES).toBe(1024 * 1024);
+      expect(PRODUCTION_UPLOAD.MAX_BYTES).toBe(1_048_576);
+    });
   });
 
   describe('upload limits (ADR-0032, ADR-0040)', () => {

@@ -41,7 +41,7 @@ describe('the template (P9-T2)', () => {
 
     it('writes the header as the file’s first line, cell for cell', () => {
       // The writer's half only. How a file that came back through a spreadsheet is matched — what is
-      // forgiven on the way — is OD-75 and P9-T3's; nothing here models the reader.
+      // forgiven on the way — is ADR-0052, built by P9-T3; nothing here models the reader.
       expect(templateBody([]).split('\n')[0].split(',')).toEqual([
         'Agent Code', 'Agent Name',
         'APE (Rp M) — This Month', 'Rolling Persistency (%) — This Month', 'Recruitment — This Month',
@@ -117,7 +117,7 @@ describe('the template (P9-T2)', () => {
 
     it('writes the agent code exactly as stored — it is the only join key', () => {
       // A spreadsheet may rewrite these on open (leading zeros, an exponent, a date). Recovering
-      // from that is the reader's and is OD-75; the writer's half is that nothing is lost here.
+      // from that is the reader's, under ADR-0052; the writer's half is that nothing is lost here.
       for (const code of ['00088213', '123456789012', '1E5', '12-05', 'PRU.80003/A']) {
         const [, row] = templateBody([{ agentCode: code, name: 'Rina Wijaya' }]).split('\n');
         expect(row.split(',')[0]).toBe(code);

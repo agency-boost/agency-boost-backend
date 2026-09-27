@@ -3,6 +3,8 @@ import { RequestContext } from '@/common/context/request-context';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { MonthlyAgentData } from './monthly-agent-data.schema';
+import { VALUE_COLUMNS } from './production-preview';
+import { TEMPLATE_HEADER_V1 } from './production-template';
 
 const NOW = new Date('2026-09-27T02:00:00Z');
 const KPM_A = '66f0000000000000000000a1';
@@ -270,6 +272,86 @@ describe('the office’s production, month by month (P9-T1)', () => {
       const t = await wired.production.template(owner(KPM_A), '2026-09');
       expect(t.rowCount).toBe(0);
       expect(t.file.split('\n')).toHaveLength(1);
+    });
+  });
+
+  describe('the preview (P9-T3)', () => {
+    /** A filled template, as bytes: the header, then each row's code, name and cells by `metric.cadence`. */
+    const file = (...rows: [string, string, Record<string, string>][]) => ({
+      buffer: Buffer.from([
+        TEMPLATE_HEADER_V1.join(','),
+        ...rows.map(([code, name, cells]) =>
+          [code, `"${name}"`, ...VALUE_COLUMNS.map((c) => cells[`${c.metric}.${c.cadence}`] ?? '')].join(',')),
+      ].join('\n')),
+      originalname: 'KPM0417-agent-data-Sep-2026.csv',
+      size: 0,
+    });
+
+    it('AC-8: a diff against what is stored, for the uploader alone', async () => {
+      await mongoose.model(MonthlyAgentData.name).create(row(KPM_A, A1, '2026-09', { apeMonthly: 100_000_000, fypMonthly: 5 }));
+      const p = await wired.production.preview(owner(KPM_A), '2026-09', file(
+        ['PRU-001', 'Rina Wijaya', { 'ape.monthly': '2', 'ape.ytd': '2' }],
+      ));
+
+      expect(p).toMatchObject({
+        month: '2026-09', filename: 'KPM0417-agent-data-Sep-2026.csv', templateVersion: 1,
+        encoding: 'utf-8', delimiter: ',',
+        summary: { rows: 1, ready: 1, refused: 0, newCells: 1, changedCells: 1, notInFile: 1 },
+      });
+      const cells = p.rows[0].cells;
+      expect(cells.find((c) => c.metric === 'ape' && c.cadence === 'monthly'))
+        .toMatchObject({ status: 'changed', before: 100_000_000, after: 200_000_000 });
+      // Not in the file, so not provided — the stored figure stays (ADR-0051).
+      expect(cells.find((c) => c.metric === 'fyp' && c.cadence === 'monthly'))
+        .toMatchObject({ status: 'not_provided', before: 5 });
+    });
+
+    it('writes nothing — the preview exists in the response and nowhere else', async () => {
+      await wired.production.preview(owner(KPM_A), '2026-09', file(['PRU-001', 'Rina Wijaya', { 'ape.monthly': '2' }]));
+      expect(await mongoose.connection.db!.collection('monthlyAgentData').countDocuments()).toBe(0);
+    });
+
+    it('reads the month it was asked for, and no other', async () => {
+      await mongoose.model(MonthlyAgentData.name).create(row(KPM_A, A1, '2026-08', { apeMonthly: 100_000_000 }));
+      const p = await wired.production.preview(owner(KPM_A), '2026-09', file(['PRU-001', 'Rina Wijaya', { 'ape.monthly': '1' }]));
+      expect(p.rows[0].cells[0]).toMatchObject({ status: 'new', before: null });
+    });
+
+    it('AC-10: matches one office’s codes and nobody else’s', async () => {
+      await mongoose.connection.db!.collection('memberships').insertOne(
+        { ...person('66f000000000000000000299', KPM_B, 9), agentCode: 'PRU-900' } as never,
+      );
+      const p = await wired.production.preview(owner(KPM_A), '2026-09', file(
+        ['PRU-900', 'Hendra Wijaya', { 'ape.monthly': '1' }],
+        ['PRU-001', 'Rina Wijaya', { 'ape.monthly': '1' }],
+      ));
+      expect(p.rows[0]).toMatchObject({ status: 'refused', membershipId: null, issues: [{ code: 'UPLOAD_UNKNOWN_AGENT_CODE' }] });
+      expect(p.rows[1]).toMatchObject({ status: 'ready', membershipId: A1 });
+    });
+
+    it('AC-10: B’s stored figures never reach A’s diff, though both offices have a PRU-001', async () => {
+      await mongoose.model(MonthlyAgentData.name).create(row(KPM_B, B1, '2026-09', { apeMonthly: 900_000_000 }));
+      const p = await wired.production.preview(owner(KPM_A), '2026-09', file(['PRU-001', 'Rina Wijaya', { 'ape.monthly': '1' }]));
+      expect(p.rows[0]).toMatchObject({ membershipId: A1 });
+      expect(p.rows[0].cells[0]).toMatchObject({ status: 'new', before: null });
+    });
+
+    it('does not match somebody who is only pending', async () => {
+      const p = await wired.production.preview(owner(KPM_A), '2026-09', file(['PRU-003', 'Calon Baru', { 'ape.monthly': '1' }]));
+      expect(p.rows[0]).toMatchObject({ status: 'refused', issues: [{ code: 'UPLOAD_UNKNOWN_AGENT_CODE' }] });
+    });
+
+    it('AC-6: matches on the code when the name in the file is somebody else’s', async () => {
+      const p = await wired.production.preview(owner(KPM_A), '2026-09', file(['PRU-002', 'Rina Wijaya', { 'ape.monthly': '1' }]));
+      expect(p.rows[0]).toMatchObject({ status: 'ready', membershipId: A2, name: 'Budi Santoso', nameDiffers: true });
+    });
+
+    it('refuses somebody with no office, a month that is not one, and no file', async () => {
+      const f = file();
+      await expect(wired.production.preview(noOffice(), '2026-09', f)).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
+      await expect(wired.production.preview(owner(KPM_A), 'Sep-2026', f)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      await expect(wired.production.preview(owner(KPM_A), '2026-09', undefined))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'file' } });
     });
   });
 

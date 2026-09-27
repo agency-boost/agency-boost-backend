@@ -11,7 +11,7 @@
  */
 export const MINOR_UNITS_PER_RP_MILLION = 1_000_000 * 100;
 
-/** `1.5` in the file → `150_000_000_00` sen. */
+/** `1.5` in the file is Rp 1,500,000, which is `150_000_000` sen. */
 export const rpMillionsToMinor = (millions: number): number =>
   Math.round(millions * MINOR_UNITS_PER_RP_MILLION);
 

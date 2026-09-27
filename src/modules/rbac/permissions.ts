@@ -668,6 +668,13 @@ export const PERMISSIONS = {
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
+  // P9-T3. Reading a filled file and saying what it would change. Writes nothing — committing is
+  // `commit_import`, its own grant, which arrives with P9-T4.
+  'data_upload:upload_and_preview': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
   'notification:read_inbox': [{ grantee: AUTHENTICATED, scope: 'own' }],
   'notification:mark_read': [{ grantee: AUTHENTICATED, scope: 'own' }],
   'notification:receive': [

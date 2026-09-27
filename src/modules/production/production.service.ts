@@ -14,8 +14,13 @@ import {
   MetricValue, MonthlyAgentDataDocument, PRODUCTION_METRICS, type ProductionMetric, type Provenance,
 } from './monthly-agent-data.schema';
 import {
+  buildPreview, type PreviewRow, type PreviewSummary, readUpload, type StoredFigures,
+} from './production-preview';
+import type { UploadDelimiter, UploadEncoding } from './production-csv';
+import {
   TEMPLATE_HEADER_V1, TEMPLATE_VERSION, templateBody, templateFilename,
 } from './production-template';
+import type { UploadedCsv } from './production-upload.interceptor';
 import { MONTH_PATTERN } from './production-units';
 
 /** One figure on the wire: what it is, and which writer put it there. */
@@ -49,6 +54,18 @@ export interface TemplateFile {
   file: string;
   /** How many agents it lists — what the operator will be filling in. */
   rowCount: number;
+}
+
+/** What a filled file would change, before anything does (P9-T3). Nothing is stored. */
+export interface UploadPreview {
+  month: string;
+  /** The name the file had on the reader's machine — for them to recognise, never trusted. */
+  filename: string;
+  templateVersion: number;
+  encoding: UploadEncoding;
+  delimiter: UploadDelimiter;
+  summary: PreviewSummary;
+  rows: PreviewRow[];
 }
 
 const EMPTY: MetricCell = { value: null, provenance: null };
@@ -135,6 +152,51 @@ export class ProductionService {
       header: [...TEMPLATE_HEADER_V1],
       file: templateBody(roster),
       rowCount: roster.length,
+    };
+  }
+
+  /**
+   * A filled file, read and checked against the roster and what is stored (P9-T3).
+   *
+   * **Writes nothing.** The preview exists in this response and nowhere else, which is what makes it
+   * transient and the uploader's alone (AC-8). How a preview is held until somebody confirms it is
+   * P9-T4's, with the route that confirms it.
+   *
+   * File-level refusals throw — an unreadable file, a header nobody issued. Everything about one row
+   * or one cell is reported inside the preview, and the rest of the file still previews.
+   */
+  async preview(ctx: RequestContext, month: string, upload: UploadedCsv | undefined): Promise<UploadPreview> {
+    this.requireOffice(ctx);
+    requireMonth(month);
+    if (!upload) {
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED,
+        'Attach the filled template as the `file` field.',
+        HttpStatus.BAD_REQUEST,
+        { field: 'file' },
+      );
+    }
+
+    const read = readUpload(upload.buffer);
+    const roster = await this.roster(ctx);
+    const rows = await this.data.find(ctx, { month, membershipId: { $in: roster.map((r) => r.membershipId) } });
+    const byMember = new Map(rows.map((r) => [r.membershipId, metricsOf(r)]));
+    const nothing = metricsOf(undefined);
+    const stored = (membershipId: string): StoredFigures => {
+      const m = byMember.get(membershipId) ?? nothing;
+      return Object.fromEntries(PRODUCTION_METRICS.map((k) => [
+        k, { monthly: m[k].monthly.value, ytd: m[k].ytd.value },
+      ])) as StoredFigures;
+    };
+
+    const preview = buildPreview({ records: read.records, delimiter: read.delimiter, roster, stored });
+    return {
+      month,
+      filename: upload.originalname,
+      templateVersion: read.templateVersion,
+      encoding: read.encoding,
+      delimiter: read.delimiter,
+      ...preview,
     };
   }
 

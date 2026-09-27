@@ -29,7 +29,7 @@ export const METRIC_FILE_LABEL: Record<ProductionMetric, string> = {
  * expects. The header says that by itself. So a file is identified by its **header cells, compared
  * one by one after the file has been decoded and parsed**, and a header nobody issued is
  * `UPLOAD_TEMPLATE_MISMATCH`. What the importer forgives on the way there — a byte-order mark, a
- * delimiter, a dash a spreadsheet re-encoded — is OD-75, and P9-T3's to build. Changing a label is
+ * delimiter, a dash a spreadsheet re-encoded — is ADR-0052, and P9-T3 builds it. Changing a label is
  * a new version, never an edit to this one.
  */
 export const TEMPLATE_VERSION = 1;

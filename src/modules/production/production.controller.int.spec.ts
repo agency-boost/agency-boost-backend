@@ -11,7 +11,9 @@ import {
   ADMIN, declaredPermissions, FIXTURE_KPM, NOT_ADMINISTRATORS, OWNER, productionPipe, session,
   StubAuth, SUPER_ADMIN,
 } from '../../../test/http-permissions';
+import { PRODUCTION_UPLOAD } from '@/domain/constants';
 import { ProductionController } from './production.controller';
+import { TEMPLATE_HEADER_V1 } from './production-template';
 import { ProductionService } from './production.service';
 
 const NOW = new Date('2026-09-27T02:00:00Z');
@@ -21,6 +23,7 @@ const RINA = '66f000000000000000000101';
 /** Every route, and the permission it must declare. */
 const ROUTES: Record<string, string> = {
   template: 'data_upload:download_template',
+  preview: 'data_upload:upload_and_preview',
   readMonth: 'data_upload:read',
 };
 
@@ -158,6 +161,89 @@ describe('production over HTTP (P9-T1)', () => {
         expect(res.status).toBe(400);
         expect(res.body.error.code).toBe('VALIDATION_FAILED');
       }
+    });
+  });
+
+  describe('the preview (P9-T3)', () => {
+    const FILLED = `${TEMPLATE_HEADER_V1.join(',')}\nPRU-001,"Rina Wijaya",1.5,,,,,,,,,,,\n`;
+    const send = (body: Buffer | string, month: string | null = '2026-09') => {
+      const req = request(app.getHttpServer()).post('/kpm/data-upload/preview');
+      if (month !== null) req.field('month', month);
+      return req.attach('file', Buffer.isBuffer(body) ? body : Buffer.from(body), 'filled.csv');
+    };
+
+    it('answers the Owner what the file would change, as multipart form data', async () => {
+      const res = await send(FILLED);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        month: '2026-09', filename: 'filled.csv', templateVersion: 1,
+        summary: { rows: 1, ready: 1, newCells: 1, notProvidedCells: 11 },
+      });
+      expect(res.body.rows[0].cells[0]).toMatchObject({ metric: 'ape', cadence: 'monthly', status: 'new', after: 150_000_000 });
+    });
+
+    it('answers the Admin the same — §3.9 grants both', async () => {
+      session.current = ADMIN;
+      expect((await send(FILLED)).status).toBe(200);
+    });
+
+    it.each(NOT_ADMINISTRATORS.filter(([who]) => who !== 'a Super Admin'))(
+      'refuses %s',
+      async (_who, ctx) => {
+        session.current = ctx;
+        expect((await send(FILLED)).status).toBe(403);
+      },
+    );
+
+    it('refuses a Super Admin by name — there is no office to read the roster of', async () => {
+      session.current = SUPER_ADMIN;
+      const res = await send(FILLED);
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('TENANT_NO_MEMBERSHIP');
+    });
+
+    it('AC-11: receives bytes — a Windows-1252 file arrives intact and is read as one', async () => {
+      const ansi = Buffer.concat(
+        [...FILLED].map((ch) => (ch === '—' ? Buffer.from([0x97]) : Buffer.from(ch, 'utf8'))),
+      );
+      const res = await send(ansi);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ encoding: 'windows-1252', templateVersion: 1 });
+    });
+
+    it('AC-2: refuses a header nobody issued, whole, with 422 and the column', async () => {
+      const res = await send(FILLED.replace('Recruitment — This Month', 'Recruits'));
+      expect(res.status).toBe(422);
+      expect(res.body.error).toMatchObject({ code: 'UPLOAD_TEMPLATE_MISMATCH', details: { column: 5 } });
+    });
+
+    it('AC-3: refuses a workbook, whole, with 422', async () => {
+      const res = await send(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x01]));
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe('UPLOAD_MALFORMED_CSV');
+    });
+
+    it('refuses a file over the ceiling as ASSET_TOO_LARGE, not as a fault', async () => {
+      const res = await send(Buffer.alloc(PRODUCTION_UPLOAD.MAX_BYTES + 1, 0x41));
+      expect(res.status).toBe(413);
+      expect(res.body.error).toMatchObject({ code: 'ASSET_TOO_LARGE', details: { maxBytes: 1_048_576 } });
+    });
+
+    it('refuses a file sent under another field name as a validation failure, not a fault', async () => {
+      const res = await request(app.getHttpServer()).post('/kpm/data-upload/preview')
+        .field('month', '2026-09').attach('upload', Buffer.from(FILLED), 'filled.csv');
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('refuses a request with no file, or no month, with a code a client can branch on', async () => {
+      const noFile = await request(app.getHttpServer()).post('/kpm/data-upload/preview').field('month', '2026-09');
+      expect(noFile.status).toBe(400);
+      expect(noFile.body.error).toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'file' } });
+
+      const noMonth = await send(FILLED, null);
+      expect(noMonth.status).toBe(400);
+      expect(noMonth.body.error.code).toBe('VALIDATION_FAILED');
     });
   });
 
