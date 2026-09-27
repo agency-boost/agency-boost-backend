@@ -1,7 +1,21 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { GOAL_MODES } from './goal.schema';
 import type { CascadeResult } from './goal-cascade';
-import type { GoalHistoryEntry, GoalSnapshotView, GoalView } from './goal.service';
+import type { GoalAchieved, GoalHistoryEntry, GoalSnapshotView, GoalView } from './goal.service';
+
+export class GoalAchievedDto implements GoalAchieved {
+  @ApiProperty({ type: Number, description: 'The APE `projected` is computed from, in IDR minor units.' })
+  minor!: number;
+
+  @ApiProperty({
+    enum: ['imported', 'corrected', 'self_reported'],
+    description: 'The carrier’s file, a correction by hand, or the agent’s own typed figure — the last only while the office holds no year-to-date figure for the year (P9-T6).',
+  })
+  provenance!: 'imported' | 'corrected' | 'self_reported';
+
+  @ApiProperty({ type: String, nullable: true, example: '2026-08', description: 'The month whose year-to-date figure it is; `null` for the agent’s own.' })
+  month!: string | null;
+}
 
 export class GoalSnapshotDto implements GoalSnapshotView {
   @ApiProperty({ type: Number })
@@ -100,8 +114,11 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
   })
   monthsLeftIsOverride!: boolean;
 
-  @ApiProperty({ type: Number })
+  @ApiProperty({ type: Number, description: 'The agent’s own typed figure — kept, and used only until production arrives.' })
   apeAchievedMinor!: number;
+
+  @ApiProperty({ type: GoalAchievedDto, description: 'The figure the plan is measured against, and whose it is (P9-T6).' })
+  achieved!: GoalAchievedDto;
 
   @ApiProperty({ type: Number })
   caseSizeMinor!: number;

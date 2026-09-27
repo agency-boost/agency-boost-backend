@@ -35,6 +35,7 @@ import { DataUploadRowRepository } from '@/modules/production/data-upload-row.re
 import { ProductionMonths } from '@/modules/production/production-months.service';
 import { ProductionImportService } from '@/modules/production/production-import.service';
 import { ProductionCorrections } from '@/modules/production/production-correction.service';
+import { ProductionReadings } from '@/modules/production/production-readings';
 import { ProductionService } from '@/modules/production/production.service';
 import { ProductionController } from '@/modules/production/production.controller';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -364,6 +365,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ProductionService,
     ProductionImportService,
     ProductionCorrections,
+    ProductionReadings,
     TenantDay,
     NotificationService,
     PasswordService,

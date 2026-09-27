@@ -87,6 +87,7 @@ import { DataUploadRowRepository } from '@/modules/production/data-upload-row.re
 import { ProductionMonths } from '@/modules/production/production-months.service';
 import { ProductionImportService } from '@/modules/production/production-import.service';
 import { ProductionCorrections } from '@/modules/production/production-correction.service';
+import { ProductionReadings } from '@/modules/production/production-readings';
 import { GoalRepository } from '@/modules/goals/goal.repository';
 import { GoalService } from '@/modules/goals/goal.service';
 import { MemberNames } from '@/modules/org/member-names.service';
@@ -240,6 +241,11 @@ export function configModule(now: Date) {
     send: async (request: Record<string, unknown>) => { sentNotifications.push(request); },
   } as unknown as NotificationService;
 
+  // P9-T1: the office's production, month by month — the authoritative APE source. Built before
+  // the goals, which read it (P9-T6).
+  const monthRows = new MonthlyAgentDataRepository(model(MonthlyAgentData.name, MonthlyAgentDataSchema) as never);
+  const productionReadings = new ProductionReadings(monthRows);
+
   // P8-T1: one agent's agreed plan for one period.
   const goals = new GoalService(
     new GoalRepository(model(Goal.name, GoalSchema) as never),
@@ -249,9 +255,8 @@ export function configModule(now: Date) {
     memberships,
     new MemberNames(memberships, users as never),
     notifier,
+    productionReadings,
   );
-  // P9-T1: the office's production, month by month — the authoritative APE source.
-  const monthRows = new MonthlyAgentDataRepository(model(MonthlyAgentData.name, MonthlyAgentDataSchema) as never);
   const productionNames = new MemberNames(memberships, users as never);
   // P9-T4: a month's lock and revision, and the imports that write it.
   const productionMonths = new ProductionMonths(
@@ -348,7 +353,7 @@ export function configModule(now: Date) {
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
     products, assets, storage, kpmProducts, events, campaigns, capability, activityLogs,
     leadRecords,
-    goals, production, productionMonths, productionImport, productionCorrections,
+    goals, production, productionMonths, productionImport, productionCorrections, productionReadings,
     sentNotifications,
   };
 }

@@ -87,6 +87,12 @@ export class HistoryDto implements History {
   @ApiProperty({ type: [BatchViewDto], description: 'Newest first.' }) batches!: BatchViewDto[];
 }
 
+export class CellCorrectionDto {
+  @ApiProperty({ type: String, nullable: true, description: 'Who corrected it, by name.' }) by!: string | null;
+  @ApiProperty({ type: String, nullable: true }) at!: string | null;
+  @ApiProperty({ type: String, nullable: true }) reason!: string | null;
+}
+
 export class MetricCellDto implements MetricCell {
   @ApiProperty({
     type: Number, nullable: true,
@@ -96,6 +102,12 @@ export class MetricCellDto implements MetricCell {
 
   @ApiProperty({ enum: PROVENANCES, nullable: true, description: 'Which writer put it there. `null` when nothing has.' })
   provenance!: Provenance | null;
+
+  @ApiProperty({
+    type: CellCorrectionDto, nullable: true,
+    description: 'A correction by hand — who, when, why — so a figure can say where it came from without a second request (P9-T6). A figure emptied by hand is `corrected` with a `null` value.',
+  })
+  correction!: CellCorrectionDto | null;
 }
 
 export class MetricPairDto {

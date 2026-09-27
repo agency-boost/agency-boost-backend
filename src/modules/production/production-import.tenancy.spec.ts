@@ -112,7 +112,7 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
 
       const view = await wired.production.readMonth(A, '2026-09');
       expect(view.rows.find((r) => r.membershipId === A1)!.metrics.ape.monthly)
-        .toEqual({ value: 150_000_000, provenance: 'imported' });
+        .toEqual({ value: 150_000_000, provenance: 'imported', correction: null });
     });
 
     it('records the file, and every row with what it wrote and what that held before — refused rows too', async () => {

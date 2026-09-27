@@ -13,6 +13,7 @@ import { NotificationService } from '@/modules/notifications/notification.servic
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { scopeFor, type Permission } from '@/modules/rbac/permissions';
 import { CASCADE_ACTIVITY_CODES, GOAL_DEFAULTS } from '@/domain/constants';
+import { ProductionReadings } from '@/modules/production/production-readings';
 import { computeCascade, defaultMonthsLeft, type CascadeResult } from './goal-cascade';
 import { checkGoal } from './goal-input';
 import { GoalRepository } from './goal.repository';
@@ -106,6 +107,20 @@ export interface GoalHistoryEntry extends GoalRevisionInputs {
   snapshot: GoalSnapshotView;
 }
 
+/**
+ * **The APE the plan is measured against, and whose figure it is** (P9-T6, ADR-0008).
+ *
+ * The carrier's year-to-date figure for the latest month the office holds one — imported, or
+ * corrected by hand — and only when there is none, the agent's own typed figure. The typed figure is
+ * never overwritten: it stays in `apeAchievedMinor`, labelled, for the months before a file arrives.
+ */
+export interface GoalAchieved {
+  minor: number;
+  provenance: 'imported' | 'corrected' | 'self_reported';
+  /** The month whose year-to-date figure it is; `null` for the agent's own. */
+  month: string | null;
+}
+
 /** One goal, as a caller reads it. */
 export interface GoalView {
   id: string;
@@ -124,7 +139,10 @@ export interface GoalView {
   monthsLeft: number;
   /** Whether the number above is the agent's own choice or the office's calendar. */
   monthsLeftIsOverride: boolean;
+  /** **The agent's own figure**, as they typed it — kept, and used only until production arrives. */
   apeAchievedMinor: number;
+  /** The figure `projected` is computed from, and which writer it came from (P9-T6). */
+  achieved: GoalAchieved;
   caseSizeMinor: number;
   leadsToApptPct: number;
   closingRatePct: number;
@@ -178,7 +196,22 @@ export class GoalService {
     private readonly memberships: MembershipRepository,
     private readonly names: MemberNames,
     private readonly notifications: NotificationService,
+    private readonly production: ProductionReadings,
   ) {}
+
+  /**
+   * **Which APE the plan is measured against** (P9-T6 AC-3). The promise Phase 8 made: the typed
+   * figure is the agent's until the carrier's file says otherwise, and then the file's is used —
+   * the screen says which. Nothing is overwritten: the typed figure is still the agent's, stored.
+   */
+  private async achievedFor(
+    ctx: RequestContext, membershipId: string, period: string, typed: number,
+  ): Promise<GoalAchieved> {
+    const held = await this.production.apeYearToDate(ctx, membershipId, period);
+    return held
+      ? { minor: held.minor, provenance: held.provenance, month: held.month }
+      : { minor: typed, provenance: 'self_reported', month: null };
+  }
 
   /**
    * Whose goal this caller may touch, for the permission the **route** declares (P8-T4).
@@ -262,8 +295,11 @@ export class GoalService {
     // The figure in force at the moment of agreement: the agent's own, or the office's calendar.
     const monthsLeft = input.monthsLeft
       ?? defaultMonthsLeft(input.period!, this.clock.now(), day.timezone);
+    // What is agreed is measured against the figure the screen showed — the carrier's, once there is
+    // one — and the typed figure is stored as the agent's own either way (P9-T6).
+    const achieved = await this.achievedFor(ctx, membershipId, input.period!, input.apeAchievedMinor!);
     // Refuses an unusable assumption before anything is written (AC-7).
-    const agreed = computeCascade({ ...input, monthsLeft } as never);
+    const agreed = computeCascade({ ...input, monthsLeft, apeAchievedMinor: achieved.minor } as never);
 
     /*
      * The plan this one replaces, kept whole (ADR-0042). Read before the write rather than derived
@@ -325,7 +361,7 @@ export class GoalService {
     );
     // §3.6 (AC-7): an agent finding their target changed should not have to notice it.
     if (membershipId !== savedBy) await this.announce(ctx, membershipId, savedBy, saved.period);
-    return this.view(saved, day);
+    return this.view(saved, day, achieved);
   }
 
   /**
@@ -340,8 +376,8 @@ export class GoalService {
   ): Promise<Omit<GoalView, 'id' | 'membershipId' | 'version'>> {
     const membershipId = await this.subject(ctx, forMembershipId, 'goal:read');
     const goal = await this.goals.findOne(ctx, { membershipId, period });
-    if (!goal) return this.defaults(ctx, period);
-    return this.view(goal, await this.days.for(ctx));
+    if (!goal) return this.defaults(ctx, period, membershipId);
+    return this.view(goal, await this.days.for(ctx), await this.achievedFor(ctx, membershipId, period, goal.apeAchievedMinor));
   }
 
   /** The caller's own goal for a period. 404 for another office's, never 403. */
@@ -349,7 +385,7 @@ export class GoalService {
     const membershipId = await this.subject(ctx, forMembershipId, 'goal:read');
     const goal = await this.goals.findOne(ctx, { membershipId, period });
     if (!goal) throw new NotFoundException('Goal');
-    return this.view(goal, await this.days.for(ctx));
+    return this.view(goal, await this.days.for(ctx), await this.achievedFor(ctx, membershipId, period, goal.apeAchievedMinor));
   }
 
   /**
@@ -425,7 +461,8 @@ export class GoalService {
     const membershipId = this.me(ctx);
     const day = await this.days.for(ctx);
     const rows = await this.goals.find(ctx, { membershipId }, { sort: { period: -1 } });
-    return rows.map((row) => this.view(row, day));
+    return Promise.all(rows.map(async (row) =>
+      this.view(row, day, await this.achievedFor(ctx, membershipId, row.period, row.apeAchievedMinor))));
   }
 
   /**
@@ -435,8 +472,12 @@ export class GoalService {
    * `GOAL_DEFAULTS`, so the constants have exactly one home (invariant §7) and the screen does not
    * carry a second copy of them.
    */
-  async defaults(ctx: RequestContext, period: string): Promise<Omit<GoalView, 'id' | 'membershipId' | 'version'>> {
+  async defaults(
+    ctx: RequestContext, period: string, membershipId: string = this.me(ctx),
+  ): Promise<Omit<GoalView, 'id' | 'membershipId' | 'version'>> {
     const day = await this.days.for(ctx);
+    // Nobody has typed anything yet, so the carrier's figure, if there is one, is the whole answer.
+    const achieved = await this.achievedFor(ctx, membershipId, period, 0);
     const inputs = {
       mode: 'direct' as const,
       annualApeTargetMinor: GOAL_DEFAULTS.ANNUAL_APE_TARGET_MINOR,
@@ -455,17 +496,18 @@ export class GoalService {
     return {
       period,
       ...inputs,
+      achieved,
       // Nothing has been agreed, so there is nothing to snapshot — but the cascade still runs, or
       // the screen would open on five empty cards.
       snapshot: { ...EMPTY_SNAPSHOT },
-      projected: computeCascade(inputs),
+      projected: computeCascade({ ...inputs, apeAchievedMinor: achieved.minor }),
       cascadeMapping: { ...CASCADE_ACTIVITY_CODES },
       savedAt: null,
       savedByMembershipId: null,
     };
   }
 
-  private view(doc: GoalDocument, day: OfficeDay): GoalView {
+  private view(doc: GoalDocument, day: OfficeDay, achieved: GoalAchieved): GoalView {
     /*
      * **Every read recomputes** (AC-1b). The stored snapshot is the agreement; this is what it
      * means today, and it is what every screen renders.
@@ -476,7 +518,7 @@ export class GoalService {
      */
     const monthsLeft = doc.monthsLeftOverride
       ?? defaultMonthsLeft(doc.period, this.clock.now(), day.timezone);
-    const projected = projectionOf({ ...doc.toObject(), monthsLeft });
+    const projected = projectionOf({ ...doc.toObject(), monthsLeft, apeAchievedMinor: achieved.minor });
 
     return {
       id: String(doc._id),
@@ -489,6 +531,7 @@ export class GoalService {
       monthsLeft,
       monthsLeftIsOverride: doc.monthsLeftOverride !== null,
       apeAchievedMinor: doc.apeAchievedMinor,
+      achieved,
       caseSizeMinor: doc.caseSizeMinor,
       leadsToApptPct: doc.leadsToApptPct,
       closingRatePct: doc.closingRatePct,

@@ -102,7 +102,7 @@ describe('production over HTTP (P9-T1)', () => {
     expect(res.body).toMatchObject({ month: '2026-09', withData: 0 });
     expect(res.body.rows).toHaveLength(1);
     expect(res.body.rows[0]).toMatchObject({ name: 'Rina Wijaya', agentCode: 'PRU-001' });
-    expect(res.body.rows[0].metrics.ape.monthly).toEqual({ value: null, provenance: null });
+    expect(res.body.rows[0].metrics.ape.monthly).toEqual({ value: null, provenance: null, correction: null });
   });
 
   it('answers the Admin the same — §3.9 grants both', async () => {
@@ -288,7 +288,7 @@ describe('production over HTTP (P9-T1)', () => {
         state: { month: '2026-09', revision: 1, locked: false },
       });
       const month = await request(app.getHttpServer()).get('/kpm/data-upload/2026-09');
-      expect(month.body.rows[0].metrics.ape.monthly).toEqual({ value: 150_000_000, provenance: 'imported' });
+      expect(month.body.rows[0].metrics.ape.monthly).toEqual({ value: 150_000_000, provenance: 'imported', correction: null });
       expect(month.body.state).toMatchObject({ revision: 1, reason: 'open', editableUntil: '2026-10-07' });
     });
 
@@ -396,7 +396,10 @@ describe('production over HTTP (P9-T1)', () => {
       session.current = ADMIN;
       expect((await patch({ value: 300_000_000, revision: 1 })).status).toBe(200);
       const month = await request(app.getHttpServer()).get('/kpm/data-upload/2026-09');
-      expect(month.body.rows[0].metrics.ape.monthly).toEqual({ value: 300_000_000, provenance: 'corrected' });
+      // The cell says who corrected it, when and why, with no second request (P9-T6).
+      expect(month.body.rows[0].metrics.ape.monthly).toMatchObject({
+        value: 300_000_000, provenance: 'corrected', correction: { reason: 'The carrier restated it' },
+      });
     });
 
     it('clears a figure with an explicit null — and an absent value is not a request to clear', async () => {

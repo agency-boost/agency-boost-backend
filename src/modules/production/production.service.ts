@@ -31,6 +31,12 @@ export { requireMonth, requireOffice };
 export interface MetricCell {
   value: number | null;
   provenance: Provenance | null;
+  /**
+   * A correction by hand, said without a second request (P9-T6 AC-1): who, by name, when and why.
+   * `null` for every other cell. A figure somebody **emptied** by hand keeps this and `corrected`,
+   * with a `null` value — nothing is held, and the table can say who decided that.
+   */
+  correction: { by: string | null; at: string | null; reason: string | null } | null;
 }
 
 /** One agent's row: the two cadences of each of the six metrics. */
@@ -84,7 +90,7 @@ export interface Analysis {
   summary: PreviewSummary;
 }
 
-const EMPTY: MetricCell = { value: null, provenance: null };
+const EMPTY: MetricCell = { value: null, provenance: null, correction: null };
 
 /** A member as the table and the template both list them. */
 interface RosterEntry {
@@ -136,7 +142,14 @@ export class ProductionService {
     const rows = await this.data.find(ctx, { month, membershipId: { $in: ids } });
     const byMember = new Map(rows.map((r) => [r.membershipId, r]));
 
-    const view = roster.map((r): MonthRow => ({ ...r, metrics: metricsOf(byMember.get(r.membershipId)) }));
+    // Who corrected what, by name — resolved once for the month, so every cell can say it.
+    const correctors = [...new Set(rows.flatMap((row) => PRODUCTION_METRICS.flatMap((m) => [
+      (row[`${m}Monthly`] as MetricValue | undefined)?.correctedBy,
+      (row[`${m}Ytd`] as MetricValue | undefined)?.correctedBy,
+    ])).filter((x): x is string => !!x))];
+    const names = correctors.length ? await this.names.byMembershipId(ctx, correctors) : new Map<string, string>();
+
+    const view = roster.map((r): MonthRow => ({ ...r, metrics: metricsOf(byMember.get(r.membershipId), names) }));
 
     return {
       month,
@@ -282,13 +295,16 @@ export class ProductionService {
   }
 }
 
-/** Twelve cells from a row, or twelve empty ones from no row. */
-function metricsOf(row: MonthlyAgentDataDocument | undefined): MonthRow['metrics'] {
+/** Twelve cells from a row, or twelve empty ones from no row. `names` resolves who corrected a cell. */
+function metricsOf(
+  row: MonthlyAgentDataDocument | undefined,
+  names: ReadonlyMap<string, string> = new Map(),
+): MonthRow['metrics'] {
   const out = {} as MonthRow['metrics'];
   for (const metric of PRODUCTION_METRICS) {
     out[metric] = {
-      monthly: cellOf(row?.[`${metric}Monthly`]),
-      ytd: cellOf(row?.[`${metric}Ytd`]),
+      monthly: cellOf(row?.[`${metric}Monthly`], names),
+      ytd: cellOf(row?.[`${metric}Ytd`], names),
     };
   }
   return out;
@@ -298,9 +314,21 @@ function metricsOf(row: MonthlyAgentDataDocument | undefined): MonthRow['metrics
  * `undefined` is not a case: Mongoose applies a subdocument's defaults on hydration, so a stored cell
  * always carries `value: null` at the least. An arm for it would be one nothing could ever take.
  */
-function cellOf(stored: MetricValue | undefined): MetricCell {
-  if (!stored || stored.value === null) return EMPTY;
-  return { value: stored.value, provenance: stored.provenance };
+function cellOf(stored: MetricValue | undefined, names: ReadonlyMap<string, string>): MetricCell {
+  const corrected = stored?.provenance === 'corrected';
+  // Nothing held, and nobody decided it: empty. A figure emptied **by hand** is not this case.
+  if (!stored || (stored.value === null && !corrected)) return EMPTY;
+  return {
+    value: stored.value,
+    provenance: stored.provenance,
+    correction: corrected
+      ? {
+        by: stored.correctedBy ? names.get(stored.correctedBy) || null : null,
+        at: stored.correctedAt ? stored.correctedAt.toISOString() : null,
+        reason: stored.reason ?? null,
+      }
+      : null,
+  };
 }
 
 function hasAnyFigure(row: MonthRow): boolean {

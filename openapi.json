@@ -15316,6 +15316,35 @@
           "id"
         ]
       },
+      "GoalAchievedDto": {
+        "type": "object",
+        "properties": {
+          "minor": {
+            "type": "number",
+            "description": "The APE `projected` is computed from, in IDR minor units."
+          },
+          "provenance": {
+            "type": "string",
+            "enum": [
+              "imported",
+              "corrected",
+              "self_reported"
+            ],
+            "description": "The carrier’s file, a correction by hand, or the agent’s own typed figure — the last only while the office holds no year-to-date figure for the year (P9-T6)."
+          },
+          "month": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-08",
+            "description": "The month whose year-to-date figure it is; `null` for the agent’s own."
+          }
+        },
+        "required": [
+          "minor",
+          "provenance",
+          "month"
+        ]
+      },
       "GoalSnapshotDto": {
         "type": "object",
         "properties": {
@@ -15447,7 +15476,16 @@
             "description": "Whether the figure above is the agent’s own choice or the office’s calendar."
           },
           "apeAchievedMinor": {
-            "type": "number"
+            "type": "number",
+            "description": "The agent’s own typed figure — kept, and used only until production arrives."
+          },
+          "achieved": {
+            "description": "The figure the plan is measured against, and whose it is (P9-T6).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoalAchievedDto"
+              }
+            ]
           },
           "caseSizeMinor": {
             "type": "number"
@@ -15503,6 +15541,7 @@
           "monthsLeft",
           "monthsLeftIsOverride",
           "apeAchievedMinor",
+          "achieved",
           "caseSizeMinor",
           "leadsToApptPct",
           "closingRatePct",
@@ -16290,6 +16329,29 @@
           "state"
         ]
       },
+      "CellCorrectionDto": {
+        "type": "object",
+        "properties": {
+          "by": {
+            "type": "string",
+            "nullable": true,
+            "description": "Who corrected it, by name."
+          },
+          "at": {
+            "type": "string",
+            "nullable": true
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "by",
+          "at",
+          "reason"
+        ]
+      },
       "MetricCellDto": {
         "type": "object",
         "properties": {
@@ -16307,11 +16369,21 @@
             ],
             "nullable": true,
             "description": "Which writer put it there. `null` when nothing has."
+          },
+          "correction": {
+            "nullable": true,
+            "description": "A correction by hand — who, when, why — so a figure can say where it came from without a second request (P9-T6). A figure emptied by hand is `corrected` with a `null` value.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CellCorrectionDto"
+              }
+            ]
           }
         },
         "required": [
           "value",
-          "provenance"
+          "provenance",
+          "correction"
         ]
       },
       "MetricPairDto": {

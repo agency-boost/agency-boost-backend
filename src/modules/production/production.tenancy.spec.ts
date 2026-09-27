@@ -93,8 +93,8 @@ describe('the office’s production, month by month (P9-T1)', () => {
       expect(view.withData).toBe(0);
       for (const r of view.rows) {
         for (const metric of Object.values(r.metrics)) {
-          expect(metric.monthly).toEqual({ value: null, provenance: null });
-          expect(metric.ytd).toEqual({ value: null, provenance: null });
+          expect(metric.monthly).toEqual({ value: null, provenance: null, correction: null });
+          expect(metric.ytd).toEqual({ value: null, provenance: null, correction: null });
         }
       }
     });
@@ -107,8 +107,8 @@ describe('the office’s production, month by month (P9-T1)', () => {
 
       const view = await wired.production.readMonth(owner(KPM_A), '2026-09');
       const [rina, budi] = view.rows;
-      expect(rina.metrics.ape.monthly).toEqual({ value: 0, provenance: 'imported' });
-      expect(budi.metrics.ape.monthly).toEqual({ value: null, provenance: null });
+      expect(rina.metrics.ape.monthly).toEqual({ value: 0, provenance: 'imported', correction: null });
+      expect(budi.metrics.ape.monthly).toEqual({ value: null, provenance: null, correction: null });
       expect(view.withData).toBe(1);
     });
 
@@ -119,7 +119,7 @@ describe('the office’s production, month by month (P9-T1)', () => {
 
       const view = await wired.production.readMonth(owner(KPM_A), '2026-09');
       expect(view.rows[0].metrics.ape.monthly.value).toBe(150_000_000);
-      expect(view.rows[0].metrics.ape.ytd).toEqual({ value: null, provenance: null });
+      expect(view.rows[0].metrics.ape.ytd).toEqual({ value: null, provenance: null, correction: null });
     });
 
     it('keeps months apart', async () => {
