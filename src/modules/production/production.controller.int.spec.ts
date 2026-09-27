@@ -103,6 +103,18 @@ describe('production over HTTP (P9-T1)', () => {
     expect(res.body.rows).toHaveLength(1);
     expect(res.body.rows[0]).toMatchObject({ name: 'Rina Wijaya', agentCode: 'PRU-001' });
     expect(res.body.rows[0].metrics.ape.monthly).toEqual({ value: null, provenance: null, correction: null });
+    // Not reported is sent as `null`, not dropped: a missing key and `false` would read alike.
+    expect(res.body.rows[0]).toHaveProperty('monthlyActiveAgent', null);
+  });
+
+  it('OD-21: carries each row’s Monthly Active Agent as the metric computes it (ADR-0054)', async () => {
+    const figure = (value: number) => ({ value, provenance: 'imported', sourceBatchId: 'batch-1' });
+    await mongoose.connection.db!.collection('monthlyAgentData').insertOne({
+      kpmId: FIXTURE_KPM, membershipId: RINA, month: '2026-09', agentCode: 'PRU-001', deletedAt: null,
+      apeMonthly: figure(0), policyCountMonthly: figure(0),
+    } as never);
+    const res = await request(app.getHttpServer()).get('/kpm/data-upload/2026-09');
+    expect(res.body.rows[0].monthlyActiveAgent).toBe(false);
   });
 
   it('answers the Admin the same — §3.9 grants both', async () => {

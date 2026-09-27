@@ -139,6 +139,13 @@ export class MonthRowDto implements MonthRow {
 
   @ApiProperty({ type: MonthMetricsDto })
   metrics!: MonthRow['metrics'];
+
+  @ApiProperty({
+    type: Boolean, nullable: true,
+    description: '`MONTHLY_ACTIVE_AGENT` for the month (ADR-0054): APE or a policy above zero this month. '
+      + '**`null` is not `false`** — it is *not reported*: neither figure is positive and at least one is not held.',
+  })
+  monthlyActiveAgent!: boolean | null;
 }
 
 export class TemplateFileDto implements TemplateFile {

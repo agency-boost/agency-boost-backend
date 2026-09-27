@@ -6,6 +6,7 @@ import {
   DomainException, NotFoundException,
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { monthlyActiveAgent } from '@/domain/metrics/monthly-active-agent';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { Kpm } from '@/modules/tenants/kpm.schema';
@@ -45,6 +46,11 @@ export interface MonthRow {
   agentCode: string;
   name: string;
   metrics: Record<ProductionMetric, { monthly: MetricCell; ytd: MetricCell }>;
+  /**
+   * `MONTHLY_ACTIVE_AGENT` for the month (ADR-0054): APE or a policy above zero. **`null` is not
+   * `false`** — it is *not reported*, and the table draws a dash for it.
+   */
+  monthlyActiveAgent: boolean | null;
 }
 
 export interface MonthView {
@@ -149,7 +155,14 @@ export class ProductionService {
     ])).filter((x): x is string => !!x))];
     const names = correctors.length ? await this.names.byMembershipId(ctx, correctors) : new Map<string, string>();
 
-    const view = roster.map((r): MonthRow => ({ ...r, metrics: metricsOf(byMember.get(r.membershipId), names) }));
+    const view = roster.map((r): MonthRow => {
+      const metrics = metricsOf(byMember.get(r.membershipId), names);
+      return {
+        ...r,
+        metrics,
+        monthlyActiveAgent: monthlyActiveAgent(metrics.ape.monthly.value, metrics.policyCount.monthly.value),
+      };
+    });
 
     return {
       month,

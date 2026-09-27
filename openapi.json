@@ -16448,13 +16448,19 @@
           },
           "metrics": {
             "$ref": "#/components/schemas/MonthMetricsDto"
+          },
+          "monthlyActiveAgent": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "`MONTHLY_ACTIVE_AGENT` for the month (ADR-0054): APE or a policy above zero this month. **`null` is not `false`** — it is *not reported*: neither figure is positive and at least one is not held."
           }
         },
         "required": [
           "membershipId",
           "agentCode",
           "name",
-          "metrics"
+          "metrics",
+          "monthlyActiveAgent"
         ]
       },
       "MonthViewDto": {

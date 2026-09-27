@@ -174,6 +174,80 @@ describe('the office’s production, month by month (P9-T1)', () => {
     });
   });
 
+  describe('OD-21 — the Monthly Active Agent, on every row (ADR-0054)', () => {
+    const insert = (...docs: unknown[]) =>
+      mongoose.connection.db!.collection('monthlyAgentData').insertMany(docs as never);
+    const active = async () => Object.fromEntries(
+      (await wired.production.readMonth(owner(KPM_A), '2026-09')).rows.map((r) => [r.name, r.monthlyActiveAgent]),
+    );
+
+    it('is true for APE above zero, false for two reported zeroes, and null for nothing reported', async () => {
+      await insert(
+        row(KPM_A, A1, '2026-09', { apeMonthly: 150_000_000_00, policyCountMonthly: 2 }),
+        row(KPM_A, A2, '2026-09', { apeMonthly: 0, policyCountMonthly: 0 }),
+      );
+      expect(await active()).toEqual({ 'Rina Wijaya': true, 'Budi Santoso': false });
+
+      await mongoose.connection.db!.collection('monthlyAgentData').deleteMany({});
+      expect(await active()).toEqual({ 'Rina Wijaya': null, 'Budi Santoso': null });
+    });
+
+    it('counts a policy written with no APE — either figure is enough', async () => {
+      await insert(row(KPM_A, A1, '2026-09', { apeMonthly: 0, policyCountMonthly: 1 }));
+      expect((await active())['Rina Wijaya']).toBe(true);
+    });
+
+    it('is not known from a file that carried neither figure — persistency alone says nothing about selling', async () => {
+      // The prototype would call this row *not active*: it holds a figure. ADR-0051 lets a file carry
+      // only some columns, and ADR-0054 reads only the two this metric is about.
+      await insert(row(KPM_A, A1, '2026-09', { persistencyMonthly: 92, apeYtd: 900_000_000_00 }));
+      expect((await active())['Rina Wijaya']).toBeNull();
+    });
+
+    it('reads last month’s figures for last month, never this month’s', async () => {
+      await insert(row(KPM_A, A1, '2026-08', { apeMonthly: 150_000_000_00, policyCountMonthly: 1 }));
+      expect((await active())['Rina Wijaya']).toBeNull();
+    });
+
+    it('reads a figure corrected by hand as the figure — and one emptied by hand as not reported', async () => {
+      const corrected = (value: number | null) => ({
+        value, provenance: 'corrected', sourceBatchId: null, correctedBy: 'mem-owner-a1',
+        correctedAt: NOW, reason: 'Carrier restated it', replacedValue: 0,
+      });
+      await insert(
+        { ...row(KPM_A, A1, '2026-09', { policyCountMonthly: 0 }), apeMonthly: corrected(40_000_000_00) },
+        { ...row(KPM_A, A2, '2026-09', { policyCountMonthly: 0 }), apeMonthly: corrected(null) },
+      );
+      expect(await active()).toEqual({ 'Rina Wijaya': true, 'Budi Santoso': null });
+    });
+
+    it('conflict regression: an agent who logged activity and sold nothing is compliant, and not active', async () => {
+      /*
+       * `metrics-and-definitions.md`, testing obligation 3: the definitions of *active* the prototypes
+       * mixed up must give different answers on one fixture, on purpose. `ACTIVITY_COMPLIANCE_MONTH`
+       * asks whether they reported; this asks whether they produced. `PACING_TO_MAA`, the third, joins
+       * this fixture in the phase that computes it — nothing does yet.
+       */
+      const agent = new RequestContext('u-agent-a1', 'none', {
+        membershipId: A1, kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
+        status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      } as never);
+      await mongoose.connection.db!.collection('activityLogs').insertOne({
+        kpmId: KPM_A, membershipId: A1, localDate: '2026-09-20', entries: [], totalCount: 6,
+        source: 'self', deletedAt: null,
+      } as never);
+      await insert(row(KPM_A, A1, '2026-09', { apeMonthly: 0, policyCountMonthly: 0 }));
+
+      expect((await wired.activityLogs.compliance(agent, {})).compliantMonth).toBe(true);
+      expect((await active())['Rina Wijaya']).toBe(false);
+    });
+
+    it('is never made true by another office’s row, even one filed against the same membership', async () => {
+      await insert(row(KPM_B, A1, '2026-09', { apeMonthly: 150_000_000_00, policyCountMonthly: 5 }));
+      expect((await active())['Rina Wijaya']).toBeNull();
+    });
+  });
+
   describe('AC-6 — one office cannot reach another’s', () => {
     it('shows an office only its own members and its own figures', async () => {
       await mongoose.connection.db!.collection('monthlyAgentData').insertMany([

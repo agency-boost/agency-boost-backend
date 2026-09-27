@@ -85,6 +85,10 @@ export const METRIC_REGISTRY = define([
     // Tri-state, and the third state is the point: `null` means "no production uploaded
     // for this month", which is not `false`. An office that has not uploaded September
     // must show an em dash, never "0 active agents".
+    //
+    // D1 of the four readings, chosen by ADR-0054 (OD-21) and computed in one place:
+    // `monthly-active-agent.ts`. No threshold — *above zero* is the definition, not a
+    // benchmark an office could move. The carrier's "Monthly2 AA" is OD-22's, not this.
     unit: 'tri_state',
     threshold: null,
     availableFrom: 9,
