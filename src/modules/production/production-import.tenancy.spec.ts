@@ -105,7 +105,7 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
       // An imported figure carries no correction: who, when and why are empty.
       expect(row!.apeMonthly).toEqual({
         value: 150_000_000, provenance: 'imported', sourceBatchId: batch.id,
-        correctedBy: null, correctedAt: null, reason: null,
+        correctedBy: null, correctedAt: null, reason: null, replacedValue: null,
       });
       expect(row!.apeYtd).toMatchObject({ value: 600_000_000, provenance: 'imported', sourceBatchId: batch.id });
       expect(row!.fypMonthly.value ?? null).toBeNull();

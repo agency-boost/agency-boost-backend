@@ -3,8 +3,8 @@ import {
   PRODUCTION_METRICS, PROVENANCES, type ProductionMetric, type Provenance,
 } from './monthly-agent-data.schema';
 import {
-  CADENCES, type Cadence, type CellStatus, type PreviewCell, type PreviewIssue, type PreviewRow,
-  type PreviewSummary,
+  CADENCES, type Cadence, type CellStatus, type PreviewCell, type PreviewCorrection, type PreviewIssue,
+  type PreviewRow, type PreviewSummary,
 } from './production-preview';
 import type { UploadDelimiter, UploadEncoding } from './production-csv';
 import type {
@@ -55,6 +55,8 @@ export class BatchViewDto implements BatchView {
   @ApiProperty({ type: String, nullable: true, description: 'By name.' }) revertedBy!: string | null;
   @ApiProperty({ type: Number, description: 'Figures a revert put back.' }) restoredCellCount!: number;
   @ApiProperty({ type: Number, description: 'Figures a revert kept, because something else wrote them since.' }) keptCellCount!: number;
+  @ApiProperty({ type: Number, description: 'Corrections by hand the file would have changed, left as they were (ADR-0053).' }) keptCorrectionCount!: number;
+  @ApiProperty({ type: Number, description: 'Corrections by hand replaced with the file’s figure, because the importer ticked them.' }) replacedCorrectionCount!: number;
 
   @ApiProperty({ type: Boolean, description: 'Standing, and the month’s latest standing import — the only one revert takes.' })
   canRevert!: boolean;
@@ -181,6 +183,14 @@ export class PreviewIssueDto implements PreviewIssue {
   cadence!: Cadence | null;
 }
 
+export class PreviewCorrectionDto implements PreviewCorrection {
+  @ApiProperty({ type: String, nullable: true, description: 'Who corrected it, by name.' }) by!: string | null;
+  @ApiProperty({ type: String, nullable: true }) at!: string | null;
+  @ApiProperty({ type: String, nullable: true }) reason!: string | null;
+  @ApiProperty({ type: Number, nullable: true, description: 'The figure the correction replaced. The file carrying it again is how a re-upload of the old file looks.' })
+  replacedValue!: number | null;
+}
+
 export class PreviewCellDto implements PreviewCell {
   @ApiProperty({ enum: PRODUCTION_METRICS }) metric!: ProductionMetric;
   @ApiProperty({ enum: CADENCES }) cadence!: Cadence;
@@ -199,6 +209,12 @@ export class PreviewCellDto implements PreviewCell {
 
   @ApiProperty({ type: String, nullable: true, description: 'The cell as the file has it — money in *Rp M*.' })
   raw!: string | null;
+
+  @ApiProperty({
+    type: PreviewCorrectionDto, nullable: true,
+    description: 'Set when the stored figure was corrected by hand and the file would change it. Replaced only if named in the commit’s `replace` (ADR-0053).',
+  })
+  correction!: PreviewCorrectionDto | null;
 }
 
 export class PreviewRowDto implements PreviewRow {
@@ -238,6 +254,7 @@ export class PreviewSummaryDto implements PreviewSummary {
   @ApiProperty({ type: Number }) unchangedCells!: number;
   @ApiProperty({ type: Number }) notProvidedCells!: number;
   @ApiProperty({ type: Number }) refusedCells!: number;
+  @ApiProperty({ type: Number, description: 'Figures corrected by hand the file would change — each replaced only if ticked.' }) correctionCells!: number;
 
   @ApiProperty({ type: Number, description: 'Active members the file does not list. They keep what they have.' })
   notInFile!: number;

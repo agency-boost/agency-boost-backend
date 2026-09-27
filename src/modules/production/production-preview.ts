@@ -29,6 +29,19 @@ export interface PreviewIssue {
   cadence: Cadence | null;
 }
 
+/**
+ * A figure somebody corrected by hand that the file would change (ADR-0053). Listed apart in the
+ * preview, with a choice: it is only replaced if whoever imports ticks it.
+ */
+export interface PreviewCorrection {
+  /** Who corrected it, by name. */
+  by: string | null;
+  at: string | null;
+  reason: string | null;
+  /** The figure the correction replaced. When the file carries it again, the file is probably the old one. */
+  replacedValue: number | null;
+}
+
 export interface PreviewCell {
   metric: ProductionMetric;
   cadence: Cadence;
@@ -39,6 +52,8 @@ export interface PreviewCell {
   after: number | null;
   /** The cell as the file has it, for a refusal the reader has to find in their spreadsheet. */
   raw: string | null;
+  /** Set when the stored figure was corrected by hand and the file would change it (ADR-0053). */
+  correction: PreviewCorrection | null;
 }
 
 export interface PreviewRow {
@@ -71,6 +86,8 @@ export interface PreviewSummary {
   unchangedCells: number;
   notProvidedCells: number;
   refusedCells: number;
+  /** Figures corrected by hand that the file would change — each replaced only if ticked (ADR-0053). */
+  correctionCells: number;
   /** Active members the file does not list. They keep what they have (ADR-0051). */
   notInFile: number;
 }
@@ -355,14 +372,14 @@ export function buildPreview(input: {
     const cells = VALUE_COLUMNS.map(({ metric, cadence }, i): PreviewCell => {
       const raw = (record.cells[2 + i] ?? '').trim();
       const before = stored[metric][cadence];
-      if (raw === '') return { metric, cadence, status: 'not_provided', before, after: null, raw: null };
+      if (raw === '') return { metric, cadence, status: 'not_provided', before, after: null, raw: null, correction: null };
       const read = readCell(metric, raw, decimalMark);
       if ('reason' in read) {
         issues.push(issue(ErrorCode.UPLOAD_VALUE_OUT_OF_RANGE, `${columnLabel(metric, cadence)}: “${raw}” ${read.reason}`, metric, cadence));
-        return { metric, cadence, status: 'refused', before, after: null, raw };
+        return { metric, cadence, status: 'refused', before, after: null, raw, correction: null };
       }
       const status: CellStatus = before === null ? 'new' : before === read.value ? 'unchanged' : 'changed';
-      return { metric, cadence, status, before, after: read.value, raw };
+      return { metric, cadence, status, before, after: read.value, raw, correction: null };
     });
 
     // YTD is a sum of months, so it cannot be less than this month — after the file is applied.
@@ -417,6 +434,8 @@ export function buildPreview(input: {
       unchangedCells: count('unchanged'),
       notProvidedCells: count('not_provided'),
       refusedCells: count('refused'),
+      // What is stored is only numbers here; the service knows which were corrected and fills this in.
+      correctionCells: 0,
       notInFile: input.roster.filter((m) => !seen.has(m.membershipId)).length,
     },
   };

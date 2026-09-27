@@ -98,6 +98,14 @@ export class DataUploadBatch {
   @Prop({ type: String, default: null })
   revertedBy!: string | null;
 
+  /** Figures corrected by hand that the file would have changed, and the importer left as they were (ADR-0053). */
+  @Prop({ type: Number, default: 0 })
+  keptCorrectionCount!: number;
+
+  /** Figures corrected by hand that the importer chose to replace with the file's. */
+  @Prop({ type: Number, default: 0 })
+  replacedCorrectionCount!: number;
+
   /** Figures a revert put back. */
   @Prop({ type: Number, default: 0 })
   restoredCellCount!: number;

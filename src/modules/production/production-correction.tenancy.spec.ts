@@ -89,6 +89,8 @@ describe('correcting one figure by hand (P9-T5)', () => {
       expect(row!.apeMonthly).toEqual({
         value: 200_000_000, provenance: 'corrected', sourceBatchId: null,
         correctedBy: A1, correctedAt: NOW, reason: 'The carrier restated it by email',
+        // Nothing was there: the correction replaced no figure.
+        replacedValue: null,
       });
     });
 
@@ -205,6 +207,106 @@ describe('correcting one figure by hand (P9-T5)', () => {
       const row = await monthRow(A1);
       expect(row!.apeMonthly.value).toBeNull();
       expect(row!.fypMonthly).toMatchObject({ value: 70_000_000, provenance: 'corrected' });
+    });
+  });
+
+  describe('AC-3 — a later import keeps a correction unless it is ticked (ADR-0053)', () => {
+    const importWith = async (f: ReturnType<typeof file>, replace?: string) => {
+      const p = await wired.production.preview(A, '2026-09', f);
+      return wired.productionImport.commit(A, '2026-09', String(p.revision), f, replace);
+    };
+
+    it('remembers the figure a chain of corrections replaced — the first, not the last hand’s', async () => {
+      await importFile(file(['PRU-001', { 'ape.monthly': '1.5' }]));
+      await correct({ value: 200_000_000 });
+      await correct({ value: 300_000_000 });
+      expect((await monthRow(A1))!.apeMonthly.replacedValue).toBe(150_000_000);
+    });
+
+    it('lists a corrected figure the file would change, with who, when, why and what it replaced', async () => {
+      await importFile(file(['PRU-001', { 'ape.monthly': '1.5' }]));
+      await correct({ value: 200_000_000 });
+
+      const p = await wired.production.preview(A, '2026-09', file(['PRU-001', { 'ape.monthly': '1.5', 'fyp.monthly': '1' }]));
+
+      const ape = p.rows[0].cells.find((c) => c.metric === 'ape' && c.cadence === 'monthly')!;
+      expect(ape).toMatchObject({
+        status: 'changed', before: 200_000_000, after: 150_000_000,
+        correction: {
+          by: null, at: NOW.toISOString(), reason: 'The carrier restated it by email',
+          // The file carries the very figure the correction replaced: the old file, uploaded again.
+          replacedValue: 150_000_000,
+        },
+      });
+      expect(p.rows[0].cells.find((c) => c.metric === 'fyp' && c.cadence === 'monthly')!.correction).toBeNull();
+      expect(p.summary.correctionCells).toBe(1);
+    });
+
+    it('names who corrected it', async () => {
+      await db().collection('users').insertOne({
+        _id: new mongoose.Types.ObjectId('66f000000000000000003101'), email: 'r@k.test', fullName: 'Rina Wijaya', deletedAt: null,
+      } as never);
+      await correct();
+      const p = await wired.production.preview(A, '2026-09', file(['PRU-001', { 'ape.monthly': '9' }]));
+      expect(p.rows[0].cells[0].correction!.by).toBe('Rina Wijaya');
+    });
+
+    it('does not list a correction the file agrees with, or leaves blank', async () => {
+      await correct({ value: 200_000_000 });
+      const same = await wired.production.preview(A, '2026-09', file(['PRU-001', { 'ape.monthly': '2' }]));
+      const blank = await wired.production.preview(A, '2026-09', file(['PRU-001', { 'fyp.monthly': '1' }]));
+      expect(same.summary.correctionCells).toBe(0);
+      expect(same.rows[0].cells[0].status).toBe('unchanged');
+      expect(blank.summary.correctionCells).toBe(0);
+    });
+
+    it('lists a figure somebody cleared by hand, which the file would fill again', async () => {
+      await importFile(file(['PRU-001', { 'ape.monthly': '1.5' }]));
+      await correct({ value: null, reason: 'Belongs to August' });
+      const p = await wired.production.preview(A, '2026-09', file(['PRU-001', { 'ape.monthly': '1.5' }]));
+      expect(p.rows[0].cells[0]).toMatchObject({ status: 'new', correction: { reason: 'Belongs to August', replacedValue: 150_000_000 } });
+    });
+
+    it('keeps an unticked correction and writes the rest of the file', async () => {
+      await importFile(file(['PRU-001', { 'ape.monthly': '1.5' }]));
+      await correct({ value: 200_000_000 });
+
+      const { batch } = await importWith(file(['PRU-001', { 'ape.monthly': '1.5', 'fyp.monthly': '1' }]));
+
+      expect(batch).toMatchObject({ cellCount: 1, keptCorrectionCount: 1, replacedCorrectionCount: 0 });
+      const row = await monthRow(A1);
+      expect(row!.apeMonthly).toMatchObject({ value: 200_000_000, provenance: 'corrected', reason: 'The carrier restated it by email' });
+      expect(row!.fypMonthly).toMatchObject({ value: 100_000_000, provenance: 'imported' });
+      expect(await db().collection('auditLog').findOne({ action: 'upload.commit', 'after.keptCorrectionCount': 1 })).toBeTruthy();
+    });
+
+    it('replaces a ticked one with the file’s figure — and a revert of that import brings the correction back whole', async () => {
+      await importFile(file(['PRU-001', { 'ape.monthly': '1.5' }]));
+      await correct({ value: 200_000_000 });
+      const corrected = (await monthRow(A1))!.apeMonthly;
+
+      const { batch } = await importWith(file(['PRU-001', { 'ape.monthly': '1.7' }]), `${A1}:apeMonthly`);
+
+      expect(batch).toMatchObject({ keptCorrectionCount: 0, replacedCorrectionCount: 1 });
+      expect((await monthRow(A1))!.apeMonthly).toMatchObject({
+        value: 170_000_000, provenance: 'imported', sourceBatchId: batch.id, reason: null, replacedValue: null,
+      });
+
+      await wired.productionImport.revert(A, batch.id);
+      expect((await monthRow(A1))!.apeMonthly).toEqual(corrected);
+    });
+
+    it('refuses a correction named to be replaced that the file would not change', async () => {
+      await correct({ value: 200_000_000 });
+      await expect(importWith(file(['PRU-001', { 'fyp.monthly': '1' }]), `${A1}:apeMonthly`)).rejects.toMatchObject({
+        code: 'VALIDATION_FAILED', details: { field: 'replace', key: `${A1}:apeMonthly` },
+      });
+    });
+
+    it('refuses a file whose only change is a correction left unticked — it would change nothing', async () => {
+      await correct({ value: 200_000_000 });
+      await expect(importWith(file(['PRU-001', { 'ape.monthly': '1.5' }]))).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      expect((await monthRow(A1))!.apeMonthly.value).toBe(200_000_000);
     });
   });
 

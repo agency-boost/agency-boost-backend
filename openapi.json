@@ -1256,6 +1256,11 @@
                     "example": "4",
                     "description": "The `revision` the preview answered with."
                   },
+                  "replace": {
+                    "type": "string",
+                    "example": "66f000000000000000000101:apeMonthly",
+                    "description": "Corrections by hand to replace, `membershipId:field`, comma-separated. Absent: every correction stays (ADR-0053)."
+                  },
                   "file": {
                     "type": "string",
                     "format": "binary",
@@ -15725,6 +15730,10 @@
           "refusedCells": {
             "type": "number"
           },
+          "correctionCells": {
+            "type": "number",
+            "description": "Figures corrected by hand the file would change — each replaced only if ticked."
+          },
           "notInFile": {
             "type": "number",
             "description": "Active members the file does not list. They keep what they have."
@@ -15739,6 +15748,7 @@
           "unchangedCells",
           "notProvidedCells",
           "refusedCells",
+          "correctionCells",
           "notInFile"
         ]
       },
@@ -15781,6 +15791,35 @@
           "message",
           "metric",
           "cadence"
+        ]
+      },
+      "PreviewCorrectionDto": {
+        "type": "object",
+        "properties": {
+          "by": {
+            "type": "string",
+            "nullable": true,
+            "description": "Who corrected it, by name."
+          },
+          "at": {
+            "type": "string",
+            "nullable": true
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "replacedValue": {
+            "type": "number",
+            "nullable": true,
+            "description": "The figure the correction replaced. The file carrying it again is how a re-upload of the old file looks."
+          }
+        },
+        "required": [
+          "by",
+          "at",
+          "reason",
+          "replacedValue"
         ]
       },
       "PreviewCellDto": {
@@ -15829,6 +15868,15 @@
             "type": "string",
             "nullable": true,
             "description": "The cell as the file has it — money in *Rp M*."
+          },
+          "correction": {
+            "nullable": true,
+            "description": "Set when the stored figure was corrected by hand and the file would change it. Replaced only if named in the commit’s `replace` (ADR-0053).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PreviewCorrectionDto"
+              }
+            ]
           }
         },
         "required": [
@@ -15837,7 +15885,8 @@
           "status",
           "before",
           "after",
-          "raw"
+          "raw",
+          "correction"
         ]
       },
       "PreviewRowDto": {
@@ -16032,6 +16081,14 @@
             "type": "number",
             "description": "Figures a revert kept, because something else wrote them since."
           },
+          "keptCorrectionCount": {
+            "type": "number",
+            "description": "Corrections by hand the file would have changed, left as they were (ADR-0053)."
+          },
+          "replacedCorrectionCount": {
+            "type": "number",
+            "description": "Corrections by hand replaced with the file’s figure, because the importer ticked them."
+          },
           "canRevert": {
             "type": "boolean",
             "description": "Standing, and the month’s latest standing import — the only one revert takes."
@@ -16053,6 +16110,8 @@
           "revertedBy",
           "restoredCellCount",
           "keptCellCount",
+          "keptCorrectionCount",
+          "replacedCorrectionCount",
           "canRevert"
         ]
       },

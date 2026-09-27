@@ -50,6 +50,14 @@ export class MetricValue {
 
   @Prop({ type: String, default: null })
   reason!: string | null;
+
+  /**
+   * The figure the first correction in a chain replaced — the carrier's, usually (ADR-0053). A second
+   * correction keeps the first one's: what the preview needs to say is *this file carries the figure
+   * the correction replaced*, which is how a re-upload of the old file looks.
+   */
+  @Prop({ type: Number, default: null })
+  replacedValue!: number | null;
 }
 export const MetricValueSchema = SchemaFactory.createForClass(MetricValue);
 

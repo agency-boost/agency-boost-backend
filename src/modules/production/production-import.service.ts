@@ -35,6 +35,10 @@ export interface BatchView {
   revertedBy: string | null;
   restoredCellCount: number;
   keptCellCount: number;
+  /** Corrections by hand the file would have changed, left as they were (ADR-0053). */
+  keptCorrectionCount: number;
+  /** Corrections by hand the importer chose to replace with the file's figure. */
+  replacedCorrectionCount: number;
   /** Standing, and the month's latest standing import — the only one revert will take. */
   canRevert: boolean;
 }
@@ -55,8 +59,12 @@ const fieldOf = (c: { metric: string; cadence: Cadence }) =>
 
 const writes = (c: PreviewCell) => c.status === 'new' || c.status === 'changed';
 
+/** How a ticked correction is named in the commit: the member and the month row's field. */
+const correctionKey = (membershipId: string | null, c: PreviewCell) => `${membershipId}:${fieldOf(c)}`;
+
 const EMPTY_CELL: NonNullable<PreviousValue> = {
   value: null, provenance: null, sourceBatchId: null, correctedBy: null, correctedAt: null, reason: null,
+  replacedValue: null,
 };
 
 /** Statuses that mean the preview behind them went through — what "committed twice" is checked against. */
@@ -95,8 +103,18 @@ export class ProductionImportService {
    *
    * Writes only `new` and `changed` figures, each as `imported` with this batch as its source (AC-6).
    * A blank is not provided and is not written (ADR-0051); a figure already as stored is left as it is.
+   *
+   * **A figure corrected by hand is written only if it is named in `replace`** (ADR-0053) — the
+   * preview listed it with who corrected it and why, and whoever imports ticked it. Unticked, it
+   * stays; a revert of this import brings back one it replaced.
    */
-  async commit(ctx: RequestContext, month: string, revision: string | undefined, upload: UploadedCsv | undefined): Promise<ImportResult> {
+  async commit(
+    ctx: RequestContext,
+    month: string,
+    revision: string | undefined,
+    upload: UploadedCsv | undefined,
+    replace?: string,
+  ): Promise<ImportResult> {
     requireOffice(ctx);
     requireMonth(month);
     const basedOn = Number(revision);
@@ -124,7 +142,25 @@ export class ProductionImportService {
 
     this.months.refuseIfLocked(await this.months.state(ctx, month));
 
-    const writable = a.rows.filter((r) => r.status === 'ready' && r.cells.some(writes));
+    // The corrections to replace, by name. One the file would not change at this revision is refused
+    // rather than ignored: it means the screen and the server are not looking at the same preview.
+    const conflicts = new Set(a.rows.flatMap((r) => r.cells.filter((c) => writes(c) && c.correction)
+      .map((c) => correctionKey(r.membershipId, c))));
+    const ticked = new Set((replace ?? '').split(',').map((k) => k.trim()).filter(Boolean));
+    for (const key of ticked) {
+      if (!conflicts.has(key)) {
+        throw new DomainException(
+          ErrorCode.VALIDATION_FAILED,
+          'A correction named to be replaced is not one this file would change. Upload the file again.',
+          HttpStatus.BAD_REQUEST,
+          { field: 'replace', key },
+        );
+      }
+    }
+    const writesHere = (r: PreviewRow) => (c: PreviewCell) =>
+      writes(c) && (!c.correction || ticked.has(correctionKey(r.membershipId, c)));
+
+    const writable = a.rows.filter((r) => r.status === 'ready' && r.cells.some(writesHere(r)));
     if (writable.length === 0) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
@@ -148,8 +184,10 @@ export class ProductionImportService {
       monthRevision,
       rowCount: a.summary.rows,
       writtenRowCount: writable.length,
-      cellCount: writable.reduce((n, r) => n + r.cells.filter(writes).length, 0),
+      cellCount: writable.reduce((n, r) => n + r.cells.filter(writesHere(r)).length, 0),
       issueCount: a.rows.reduce((n, r) => n + r.issues.length, 0),
+      keptCorrectionCount: conflicts.size - ticked.size,
+      replacedCorrectionCount: ticked.size,
       startedAt: this.clock.now(),
     });
     const batchId = String(batch._id);
@@ -162,15 +200,15 @@ export class ProductionImportService {
       agentCode: r.agentCode,
       membershipId: r.membershipId,
       status: r.status,
-      values: Object.fromEntries(r.cells.filter(writes).map((c) => [fieldOf(c), c.after as number])),
-      previousValues: previousOf(r, a.stored.get(r.membershipId ?? '')),
+      values: Object.fromEntries(r.cells.filter(writesHere(r)).map((c) => [fieldOf(c), c.after as number])),
+      previousValues: previousOf(r, a.stored.get(r.membershipId ?? ''), writesHere(r)),
       issues: r.issues,
     })));
 
     try {
       for (const r of writable) {
         await this.data.upsertOne(ctx, { membershipId: r.membershipId, month }, {
-          $set: Object.fromEntries(r.cells.filter(writes).map((c) => [
+          $set: Object.fromEntries(r.cells.filter(writesHere(r)).map((c) => [
             fieldOf(c), { ...EMPTY_CELL, value: c.after, provenance: 'imported', sourceBatchId: batchId },
           ])),
           $setOnInsert: { agentCode: r.resolvedAgentCode },
@@ -189,7 +227,10 @@ export class ProductionImportService {
       action: 'upload.commit',
       targetCollection: 'dataUploadBatches',
       targetId: batchId,
-      after: { month, filename: upload!.originalname, writtenRowCount: writable.length },
+      after: {
+        month, filename: upload!.originalname, writtenRowCount: writable.length,
+        keptCorrectionCount: conflicts.size - ticked.size, replacedCorrectionCount: ticked.size,
+      },
     });
     return this.result(ctx, batchId, month);
   }
@@ -345,15 +386,21 @@ export class ProductionImportService {
       revertedBy: b.revertedBy ? names.get(b.revertedBy) || null : null,
       restoredCellCount: b.restoredCellCount ?? 0,
       keptCellCount: b.keptCellCount ?? 0,
+      keptCorrectionCount: b.keptCorrectionCount ?? 0,
+      replacedCorrectionCount: b.replacedCorrectionCount ?? 0,
       canRevert: b.status === 'committed' && b === latest,
     }));
   }
 }
 
 /** What each figure a row writes held a moment before — the whole cell, provenance and source included. */
-function previousOf(row: PreviewRow, stored: MonthlyAgentDataDocument | undefined): Record<string, PreviousValue> {
+function previousOf(
+  row: PreviewRow,
+  stored: MonthlyAgentDataDocument | undefined,
+  written: (c: PreviewCell) => boolean,
+): Record<string, PreviousValue> {
   const doc = stored as unknown as Record<string, MetricValue | undefined> | undefined;
-  return Object.fromEntries(row.cells.filter(writes).map((c) => {
+  return Object.fromEntries(row.cells.filter(written).map((c) => {
     const cell = doc?.[fieldOf(c)];
     return [fieldOf(c), doc ? {
       value: cell?.value ?? null,
@@ -362,6 +409,7 @@ function previousOf(row: PreviewRow, stored: MonthlyAgentDataDocument | undefine
       correctedBy: cell?.correctedBy ?? null,
       correctedAt: cell?.correctedAt ?? null,
       reason: cell?.reason ?? null,
+      replacedValue: cell?.replacedValue ?? null,
     } : null];
   }));
 }

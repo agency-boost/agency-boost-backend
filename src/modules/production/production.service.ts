@@ -14,7 +14,7 @@ import {
   MetricValue, MonthlyAgentDataDocument, PRODUCTION_METRICS, type ProductionMetric, type Provenance,
 } from './monthly-agent-data.schema';
 import {
-  buildPreview, type PreviewRow, type PreviewSummary, readUpload, type StoredFigures,
+  buildPreview, type PreviewCell, type PreviewRow, type PreviewSummary, readUpload, type StoredFigures,
 } from './production-preview';
 import type { UploadDelimiter, UploadEncoding } from './production-csv';
 import {
@@ -232,6 +232,30 @@ export class ProductionService {
     };
 
     const preview = buildPreview({ records: read.records, delimiter: read.delimiter, roster, stored: figures });
+
+    // Which of the figures the file would change were corrected by hand (ADR-0053). `buildPreview`
+    // sees numbers only; the stored cells say who corrected what, and why.
+    const flagged: { cell: PreviewCell; by: string | null }[] = [];
+    for (const row of preview.rows) {
+      const cells = (stored.get(row.membershipId ?? '') ?? {}) as unknown as Record<string, MetricValue | undefined>;
+      for (const cell of row.cells) {
+        if (cell.status !== 'new' && cell.status !== 'changed') continue;
+        const held = cells[`${cell.metric}${cell.cadence === 'monthly' ? 'Monthly' : 'Ytd'}`];
+        if (held?.provenance !== 'corrected') continue;
+        cell.correction = {
+          by: null,
+          at: held.correctedAt ? held.correctedAt.toISOString() : null,
+          reason: held.reason ?? null,
+          replacedValue: held.replacedValue ?? null,
+        };
+        flagged.push({ cell, by: held.correctedBy ?? null });
+      }
+    }
+    if (flagged.length) {
+      const names = await this.names.byMembershipId(ctx, [...new Set(flagged.map((f) => f.by).filter((x): x is string => !!x))]);
+      for (const f of flagged) f.cell.correction!.by = f.by ? names.get(f.by) || null : null;
+    }
+    preview.summary.correctionCells = flagged.length;
     return { read, stored, ...preview };
   }
 

@@ -1710,6 +1710,7 @@ async function main(): Promise<void> {
     const correction = {
       value: firstApe, provenance: 'corrected', sourceBatchId: null,
       correctedBy: admin.id, correctedAt, reason: 'Carrier restated the APE by email after the file was sent',
+      replacedValue: right[0]?.values.apeMonthly ?? null,
     };
     await MonthRows.insertMany(roster.map((member, i) => monthRow(member, thisMonth, {
       ...Object.fromEntries(Object.entries(written.get(String(member._id)) ?? {})

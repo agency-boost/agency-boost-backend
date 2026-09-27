@@ -355,6 +355,24 @@ describe('production over HTTP (P9-T1)', () => {
       expect(badMonth.body.error.code).toBe('VALIDATION_FAILED');
     });
 
+    it('replaces a correction named in the form, and keeps one that is not (ADR-0053)', async () => {
+      await request(app.getHttpServer()).patch('/kpm/data-upload/cell').send({
+        month: '2026-09', membershipId: RINA, metric: 'ape', cadence: 'monthly', value: 300_000_000, revision: 0, reason: 'x',
+      });
+      const preview = await request(app.getHttpServer()).post('/kpm/data-upload/preview')
+        .field('month', '2026-09').attach('file', Buffer.from(FILLED), 'filled.csv');
+      expect(preview.body.summary.correctionCells).toBe(1);
+
+      const kept = await commit('1', FILLED);
+      expect(kept.status).toBe(400);
+
+      const replaced = await request(app.getHttpServer()).post('/kpm/data-upload/commit')
+        .field('month', '2026-09').field('revision', '1').field('replace', `${RINA}:apeMonthly`)
+        .attach('file', Buffer.from(FILLED), 'filled.csv');
+      expect(replaced.status).toBe(201);
+      expect(replaced.body.batch).toMatchObject({ replacedCorrectionCount: 1, keptCorrectionCount: 0 });
+    });
+
     it('answers a stale preview with 409 VERSION_CONFLICT', async () => {
       await commit();
       const res = await commit('0', FILLED.replace('1.5', '2'));

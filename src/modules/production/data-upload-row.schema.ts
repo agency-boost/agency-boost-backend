@@ -10,7 +10,7 @@ export type DataUploadRowDocument = HydratedDocument<DataUploadRow>;
  * so a revert puts a correction back as a correction. `null` when there was no row to hold it.
  */
 export type PreviousValue = Pick<
-  MetricValue, 'value' | 'provenance' | 'sourceBatchId' | 'correctedBy' | 'correctedAt' | 'reason'
+  MetricValue, 'value' | 'provenance' | 'sourceBatchId' | 'correctedBy' | 'correctedAt' | 'reason' | 'replacedValue'
 > | null;
 
 /**

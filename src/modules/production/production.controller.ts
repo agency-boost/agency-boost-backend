@@ -5,7 +5,7 @@ import {
   ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags,
 } from '@nestjs/swagger';
 import {
-  IsIn, IsInt, IsNumber, IsString, MaxLength, Min, ValidateIf,
+  IsIn, IsInt, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateIf,
 } from 'class-validator';
 import { PRODUCTION_METRICS, type ProductionMetric } from './monthly-agent-data.schema';
 import { CADENCES, type Cadence } from './production-preview';
@@ -34,6 +34,14 @@ class CommitUploadDto {
 
   @IsString()
   revision!: string;
+
+  /**
+   * The corrections by hand to replace with the file's figure, as `membershipId:field` joined by
+   * commas — `66f…101:apeMonthly`. Absent, every correction stays (ADR-0053).
+   */
+  @IsOptional()
+  @IsString()
+  replace?: string;
 }
 
 class RevertDto {
@@ -158,6 +166,7 @@ export class ProductionController {
       properties: {
         month: { type: 'string', example: '2026-09' },
         revision: { type: 'string', example: '4', description: 'The `revision` the preview answered with.' },
+        replace: { type: 'string', example: '66f000000000000000000101:apeMonthly', description: 'Corrections by hand to replace, `membershipId:field`, comma-separated. Absent: every correction stays (ADR-0053).' },
         file: { type: 'string', format: 'binary', description: 'The same file that was previewed.' },
       },
     },
@@ -179,7 +188,7 @@ export class ProductionController {
     @Body() body: CommitUploadDto,
     @UploadedFile() file?: UploadedCsv,
   ) {
-    return this.imports.commit(ctx, body.month, body.revision, file);
+    return this.imports.commit(ctx, body.month, body.revision, file, body.replace);
   }
 
   @Post('revert')

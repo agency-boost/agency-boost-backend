@@ -122,6 +122,8 @@ export class ProductionCorrections {
         [field]: {
           value, provenance: 'corrected', sourceBatchId: null,
           correctedBy: ctx.membershipId, correctedAt: now, reason,
+          // The figure the chain of corrections replaced: kept from the first, never the last hand's.
+          replacedValue: before.provenance === 'corrected' ? (cells[field]?.replacedValue ?? null) : before.value,
         },
       },
       $setOnInsert: { agentCode: (member as { agentCode?: string }).agentCode ?? '' },
