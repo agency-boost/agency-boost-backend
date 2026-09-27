@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import {
-  DomainException, NoMembershipException, NotFoundException,
+  DomainException, NotFoundException,
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { MemberNames } from '@/modules/org/member-names.service';
@@ -23,7 +23,9 @@ import {
 import type { UploadedCsv } from './production-upload.interceptor';
 import { type MonthState, ProductionMonths } from './production-months.service';
 import type { ReadUpload } from './production-preview';
-import { MONTH_PATTERN } from './production-units';
+import { requireMonth, requireOffice } from './production-guards';
+
+export { requireMonth, requireOffice };
 
 /** One figure on the wire: what it is, and which writer put it there. */
 export interface MetricCell {
@@ -253,27 +255,6 @@ export class ProductionService {
         name: names.get(id) ?? '',
       };
     });
-  }
-}
-
-/**
- * Refused by name, before any repository is reached. §3.9 grants a Super Admin `all`, and the guard
- * lets them through — but the office is resolved from the caller's membership, which they have none
- * of. The repository would refuse too, as an internal error nobody can branch on.
- */
-export function requireOffice(ctx: RequestContext): void {
-  if (!ctx.kpmId) throw new NoMembershipException();
-}
-
-/** `YYYY-MM`, or `VALIDATION_FAILED`. */
-export function requireMonth(month: string): void {
-  if (!MONTH_PATTERN.test(month)) {
-    throw new DomainException(
-      ErrorCode.VALIDATION_FAILED,
-      month ? `${month} is not a month. Use YYYY-MM.` : 'A month is required. Use YYYY-MM.',
-      HttpStatus.BAD_REQUEST,
-      { month },
-    );
   }
 }
 

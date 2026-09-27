@@ -36,6 +36,20 @@ export class MetricValue {
   /** The import that wrote it, when one did — what revert reads. */
   @Prop({ type: String, default: null })
   sourceBatchId!: string | null;
+
+  /**
+   * A correction's who, when and why (P9-T5, ADR-0042) — `null` unless `provenance` is `corrected`.
+   * The audit log holds every correction; these hold the one standing, so a figure can say where it
+   * came from without a trip to the log (P9-T6).
+   */
+  @Prop({ type: String, default: null })
+  correctedBy!: string | null;
+
+  @Prop({ type: Date, default: null })
+  correctedAt!: Date | null;
+
+  @Prop({ type: String, default: null })
+  reason!: string | null;
 }
 export const MetricValueSchema = SchemaFactory.createForClass(MetricValue);
 

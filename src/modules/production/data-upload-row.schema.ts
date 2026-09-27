@@ -5,8 +5,13 @@ import type { MetricValue } from './monthly-agent-data.schema';
 
 export type DataUploadRowDocument = HydratedDocument<DataUploadRow>;
 
-/** A figure as it stood before an import — `null` when there was no row to hold it. */
-export type PreviousValue = Pick<MetricValue, 'value' | 'provenance' | 'sourceBatchId'> | null;
+/**
+ * A figure as it stood before an import — the whole cell, a correction's who, when and why included,
+ * so a revert puts a correction back as a correction. `null` when there was no row to hold it.
+ */
+export type PreviousValue = Pick<
+  MetricValue, 'value' | 'provenance' | 'sourceBatchId' | 'correctedBy' | 'correctedAt' | 'reason'
+> | null;
 
 /**
  * One line of an imported file, and what it did (P9-T4, AC-1).

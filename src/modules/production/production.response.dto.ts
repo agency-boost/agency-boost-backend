@@ -11,6 +11,7 @@ import type {
   MetricCell, MonthRow, MonthView, TemplateFile, UploadPreview,
 } from './production.service';
 import type { BatchView, History, ImportResult } from './production-import.service';
+import type { CorrectionResult } from './production-correction.service';
 import type { LockReason, MonthState } from './production-months.service';
 import { BATCH_STATUSES, type BatchStatus } from './data-upload-batch.schema';
 
@@ -61,6 +62,21 @@ export class BatchViewDto implements BatchView {
 
 export class ImportResultDto implements ImportResult {
   @ApiProperty({ type: BatchViewDto }) batch!: BatchViewDto;
+  @ApiProperty({ type: MonthStateDto, description: 'The month after the write, with its new revision.' }) state!: MonthStateDto;
+}
+
+export class CorrectedCellDto {
+  @ApiProperty({ type: Number, nullable: true, description: 'Money in IDR minor units.' }) value!: number | null;
+  @ApiProperty({ enum: PROVENANCES, nullable: true }) provenance!: Provenance | null;
+}
+
+export class CorrectionResultDto implements CorrectionResult {
+  @ApiProperty({ type: String }) membershipId!: string;
+  @ApiProperty({ enum: PRODUCTION_METRICS }) metric!: ProductionMetric;
+  @ApiProperty({ enum: CADENCES }) cadence!: Cadence;
+  @ApiProperty({ type: Boolean, description: '`false` when the figure already held that value — nothing was written, audited or advanced.' }) changed!: boolean;
+  @ApiProperty({ type: CorrectedCellDto }) before!: CorrectedCellDto;
+  @ApiProperty({ type: CorrectedCellDto }) after!: CorrectedCellDto;
   @ApiProperty({ type: MonthStateDto, description: 'The month after the write, with its new revision.' }) state!: MonthStateDto;
 }
 

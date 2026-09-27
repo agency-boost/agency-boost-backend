@@ -693,6 +693,12 @@ export const PERMISSIONS = {
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
+  // P9-T5. One figure by hand, with a reason, audited — and the only way a figure is cleared.
+  'data_upload:correct_cell': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
   // ADR-0050. Locking and reopening are acts on the month, each audited.
   'data_upload:lock_month': [
     { grantee: SUPER_ADMIN, scope: 'all' },

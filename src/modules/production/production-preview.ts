@@ -1,12 +1,11 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import {
-  MONEY_METRICS, PRODUCTION_METRICS, type ProductionMetric,
-} from './monthly-agent-data.schema';
+import { PRODUCTION_METRICS, type ProductionMetric } from './monthly-agent-data.schema';
 import {
   type CsvRecord, decodeUpload, delimiterOf, parseCsv, type UploadDelimiter, type UploadEncoding,
 } from './production-csv';
+import { breaksYtd, isMoney, refusalFor } from './production-rules';
 import { METRIC_FILE_LABEL, TEMPLATE_HEADERS } from './production-template';
 import { minorToRpMillions, rpMillionsToMinor } from './production-units';
 
@@ -100,17 +99,6 @@ export const VALUE_COLUMNS: readonly { metric: ProductionMetric; cadence: Cadenc
 ];
 
 const COLUMN_COUNT = 2 + VALUE_COLUMNS.length;
-
-/** Counts of people or policies: whole numbers. */
-const COUNT_METRICS: readonly ProductionMetric[] = ['recruitment', 'newActiveAgents', 'policyCount'];
-
-/**
- * The metrics a year-to-date figure is a **sum** of months for, so YTD can never be less than the
- * month. Persistency is a rate — a year's can be lower than one good month's — so it is not here.
- */
-const ADDITIVE_METRICS: readonly ProductionMetric[] = ['ape', 'recruitment', 'newActiveAgents', 'fyp', 'policyCount'];
-
-const isMoney = (m: ProductionMetric) => (MONEY_METRICS as readonly string[]).includes(m);
 
 /** The header's own words for a value column — what the reader will look for in their spreadsheet. */
 export const columnLabel = (metric: ProductionMetric, cadence: Cadence) =>
@@ -226,27 +214,15 @@ export function readNumber(raw: string, decimalMark: ',' | '.', allowPercent: bo
 /**
  * A value column's cell, read and range-checked, in the unit it is stored in.
  *
- * Money arrives in millions of rupiah and leaves in sen (invariant §9, AC-7). Persistency is a
- * percentage, 0 to 100. The three counts are whole and never negative.
+ * Money arrives in millions of rupiah and leaves in sen (invariant §9, AC-7) — converted **before**
+ * the range is checked, so the check is `production-rules.ts`'s, the one a correction meets too.
  */
 export function readCell(metric: ProductionMetric, raw: string, decimalMark: ',' | '.'): Read {
   const read = readNumber(raw, decimalMark, metric === 'persistency');
   if ('reason' in read) return read;
-  const { value } = read;
-  if (value < 0) return { reason: 'is negative.' };
-  if (metric === 'persistency') {
-    return value > 100 ? { reason: 'is above 100 — persistency is a percentage.' } : { value };
-  }
-  if (isMoney(metric)) {
-    const minor = rpMillionsToMinor(value);
-    return Number.isSafeInteger(minor)
-      ? { value: minor }
-      : { reason: 'is larger than any figure this product can hold.' };
-  }
-  if (COUNT_METRICS.includes(metric) && !Number.isInteger(value)) {
-    return { reason: `is not a whole number — it counts ${metric === 'policyCount' ? 'policies' : 'people'}.` };
-  }
-  return { value };
+  const stored = isMoney(metric) ? rpMillionsToMinor(read.value) : read.value;
+  const reason = refusalFor(metric, stored);
+  return reason ? { reason } : { value: stored };
 }
 
 /** A stored value as the file would write it, for a message comparing the two. */
@@ -390,13 +366,13 @@ export function buildPreview(input: {
     });
 
     // YTD is a sum of months, so it cannot be less than this month — after the file is applied.
-    for (const metric of ADDITIVE_METRICS) {
+    for (const metric of PRODUCTION_METRICS) {
       const month = cells.find((c) => c.metric === metric && c.cadence === 'monthly')!;
       const ytd = cells.find((c) => c.metric === metric && c.cadence === 'ytd')!;
       const fromFile = (c: PreviewCell) => c.status !== 'not_provided' && c.status !== 'refused';
       const m = fromFile(month) ? month.after : month.status === 'not_provided' ? month.before : null;
       const y = fromFile(ytd) ? ytd.after : ytd.status === 'not_provided' ? ytd.before : null;
-      if (m === null || y === null || y >= m) continue;
+      if (m === null || y === null || !breaksYtd(metric, m, y)) continue;
 
       if (fromFile(ytd)) {
         issues.push(issue(

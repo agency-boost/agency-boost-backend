@@ -10,6 +10,7 @@ import { DEFAULT_TENANT_TIMEZONE, PRODUCTION } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { Kpm } from '@/modules/tenants/kpm.schema';
+import { requireMonth } from './production-guards';
 import { ProductionMonthRepository } from './production-month.repository';
 
 /**
@@ -59,6 +60,8 @@ export class ProductionMonths {
   ) {}
 
   async state(ctx: RequestContext, month: string): Promise<MonthState> {
+    // Every caller has checked already; this is so that none can reach the date arithmetic without.
+    requireMonth(month);
     const [office, row] = await Promise.all([
       this.kpms.findById(ctx.kpmId).select('timezone settings').lean().exec(),
       this.months.findOne(ctx, { month }),

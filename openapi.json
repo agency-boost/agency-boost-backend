@@ -1646,6 +1646,85 @@
         "x-required-permission": "data_upload:reopen_month"
       }
     },
+    "/api/v1/kpm/data-upload/cell": {
+      "patch": {
+        "description": "Writes the figure as `corrected`, with who, when and the reason, and an audit entry carrying the figure before and after. `value: null` clears it — the only way a figure is cleared (ADR-0051). The same range rules as the import: `UPLOAD_VALUE_OUT_OF_RANGE` (422) names the figure and what is wrong. `UPLOAD_MONTH_LOCKED` / `VERSION_CONFLICT` (409); `NOT_FOUND` (404) for somebody who is not an active member of the office; `VALIDATION_FAILED` (400) without a reason. A figure already holding that value is answered `changed: false`, and nothing is written.\n\n**Requires `data_upload:correct_cell`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductionController_correct_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectCellDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectionResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `data_upload:correct_cell`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Correct one figure by hand",
+        "tags": [
+          "production"
+        ],
+        "x-required-permission": "data_upload:correct_cell"
+      }
+    },
     "/api/v1/kpm/data-upload/{month}": {
       "get": {
         "description": "Every active member, with the six metrics in their monthly and year-to-date figures and the provenance of each cell. **`null` is not zero**: a cell nothing has written says the carrier has not reported this person, where `0` says it reported nothing. Reads only — the file, the correction and the revert each have their own route.\n\n**Requires `data_upload:read`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -16070,6 +16149,86 @@
         "required": [
           "month",
           "batches"
+        ]
+      },
+      "CorrectCellDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CorrectedCellDto": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "number",
+            "nullable": true,
+            "description": "Money in IDR minor units."
+          },
+          "provenance": {
+            "type": "string",
+            "enum": [
+              "imported",
+              "corrected",
+              "self_reported"
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "value",
+          "provenance"
+        ]
+      },
+      "CorrectionResultDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "metric": {
+            "type": "string",
+            "enum": [
+              "ape",
+              "persistency",
+              "recruitment",
+              "newActiveAgents",
+              "fyp",
+              "policyCount"
+            ]
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "monthly",
+              "ytd"
+            ]
+          },
+          "changed": {
+            "type": "boolean",
+            "description": "`false` when the figure already held that value — nothing was written, audited or advanced."
+          },
+          "before": {
+            "$ref": "#/components/schemas/CorrectedCellDto"
+          },
+          "after": {
+            "$ref": "#/components/schemas/CorrectedCellDto"
+          },
+          "state": {
+            "description": "The month after the write, with its new revision.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MonthStateDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "membershipId",
+          "metric",
+          "cadence",
+          "changed",
+          "before",
+          "after",
+          "state"
         ]
       },
       "MetricCellDto": {

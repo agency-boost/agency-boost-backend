@@ -18,6 +18,7 @@ import { ProductionService } from './production.service';
 import { ProductionImportService } from './production-import.service';
 import { ProductionMonths } from './production-months.service';
 import { ProductionMonth } from './production-month.schema';
+import { ProductionCorrections } from './production-correction.service';
 
 const NOW = new Date('2026-09-27T02:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
@@ -32,6 +33,7 @@ const ROUTES: Record<string, string> = {
   history: 'data_upload:read_history',
   lock: 'data_upload:lock_month',
   reopen: 'data_upload:reopen_month',
+  correct: 'data_upload:correct_cell',
   readMonth: 'data_upload:read',
 };
 
@@ -55,6 +57,7 @@ describe('production over HTTP (P9-T1)', () => {
         { provide: ProductionService, useValue: wired.production },
         { provide: ProductionImportService, useValue: wired.productionImport },
         { provide: ProductionMonths, useValue: wired.productionMonths },
+        { provide: ProductionCorrections, useValue: wired.productionCorrections },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -357,6 +360,64 @@ describe('production over HTTP (P9-T1)', () => {
       const res = await commit('0', FILLED.replace('1.5', '2'));
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('VERSION_CONFLICT');
+    });
+  });
+
+  describe('correcting one figure (P9-T5)', () => {
+    const patch = (body: Record<string, unknown>) => request(app.getHttpServer()).patch('/kpm/data-upload/cell').send({
+      month: '2026-09', membershipId: RINA, metric: 'ape', cadence: 'monthly', value: 200_000_000,
+      revision: 0, reason: 'The carrier restated it', ...body,
+    });
+
+    it('corrects for the Owner and the Admin, answering the figure before and after', async () => {
+      const res = await patch({});
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        changed: true, before: { value: null }, after: { value: 200_000_000, provenance: 'corrected' }, state: { revision: 1 },
+      });
+      session.current = ADMIN;
+      expect((await patch({ value: 300_000_000, revision: 1 })).status).toBe(200);
+      const month = await request(app.getHttpServer()).get('/kpm/data-upload/2026-09');
+      expect(month.body.rows[0].metrics.ape.monthly).toEqual({ value: 300_000_000, provenance: 'corrected' });
+    });
+
+    it('clears a figure with an explicit null — and an absent value is not a request to clear', async () => {
+      await patch({});
+      expect((await patch({ value: null, revision: 1 })).body.after).toEqual({ value: null, provenance: 'corrected' });
+      const absent = await request(app.getHttpServer()).patch('/kpm/data-upload/cell').send({
+        month: '2026-09', membershipId: RINA, metric: 'ape', cadence: 'monthly', revision: 2, reason: 'x',
+      });
+      expect(absent.status).toBe(400);
+      expect(absent.body.error.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('answers a figure out of range with 422 and the reason', async () => {
+      const res = await patch({ metric: 'persistency', value: 140 });
+      expect(res.status).toBe(422);
+      expect(res.body.error).toMatchObject({
+        code: 'UPLOAD_VALUE_OUT_OF_RANGE', message: 'Rolling persistency this month is above 100 — persistency is a percentage.',
+      });
+    });
+
+    it.each(NOT_ADMINISTRATORS.filter(([who]) => who !== 'a Super Admin'))('refuses %s', async (_who, ctx) => {
+      session.current = ctx;
+      expect((await patch({})).status).toBe(403);
+    });
+
+    it('refuses a Super Admin by name', async () => {
+      session.current = SUPER_ADMIN;
+      const res = await patch({});
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('TENANT_NO_MEMBERSHIP');
+    });
+
+    it('refuses what the form gets wrong, field by field', async () => {
+      for (const body of [
+        { metric: 'ytd' }, { cadence: 'weekly' }, { revision: -1 }, { revision: 1.5 }, { value: 'lots' }, { reason: 5 },
+      ]) {
+        const res = await patch(body);
+        expect([JSON.stringify(body), res.status]).toEqual([JSON.stringify(body), 400]);
+      }
     });
   });
 

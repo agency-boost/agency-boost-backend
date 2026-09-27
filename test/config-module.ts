@@ -86,6 +86,7 @@ import { DataUploadRow, DataUploadRowSchema } from '@/modules/production/data-up
 import { DataUploadRowRepository } from '@/modules/production/data-upload-row.repository';
 import { ProductionMonths } from '@/modules/production/production-months.service';
 import { ProductionImportService } from '@/modules/production/production-import.service';
+import { ProductionCorrections } from '@/modules/production/production-correction.service';
 import { GoalRepository } from '@/modules/goals/goal.repository';
 import { GoalService } from '@/modules/goals/goal.service';
 import { MemberNames } from '@/modules/org/member-names.service';
@@ -271,6 +272,8 @@ export function configModule(now: Date) {
     audit,
     clock,
   );
+  // P9-T5: one figure by hand.
+  const productionCorrections = new ProductionCorrections(productionMonths, monthRows, memberships, audit, clock);
   // P5-T7: the office's campaigns, and the carrier rules it is measured against.
   const campaigns = new CampaignService(
     new CampaignRepository(model(Campaign.name, CampaignSchema) as never),
@@ -345,7 +348,7 @@ export function configModule(now: Date) {
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
     products, assets, storage, kpmProducts, events, campaigns, capability, activityLogs,
     leadRecords,
-    goals, production, productionMonths, productionImport,
+    goals, production, productionMonths, productionImport, productionCorrections,
     sentNotifications,
   };
 }

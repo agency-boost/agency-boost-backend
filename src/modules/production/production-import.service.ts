@@ -55,7 +55,9 @@ const fieldOf = (c: { metric: string; cadence: Cadence }) =>
 
 const writes = (c: PreviewCell) => c.status === 'new' || c.status === 'changed';
 
-const EMPTY_CELL: NonNullable<PreviousValue> = { value: null, provenance: null, sourceBatchId: null };
+const EMPTY_CELL: NonNullable<PreviousValue> = {
+  value: null, provenance: null, sourceBatchId: null, correctedBy: null, correctedAt: null, reason: null,
+};
 
 /** Statuses that mean the preview behind them went through — what "committed twice" is checked against. */
 const WENT_THROUGH: BatchStatus[] = ['committed', 'reverting', 'reverted'];
@@ -169,7 +171,7 @@ export class ProductionImportService {
       for (const r of writable) {
         await this.data.upsertOne(ctx, { membershipId: r.membershipId, month }, {
           $set: Object.fromEntries(r.cells.filter(writes).map((c) => [
-            fieldOf(c), { value: c.after, provenance: 'imported', sourceBatchId: batchId },
+            fieldOf(c), { ...EMPTY_CELL, value: c.after, provenance: 'imported', sourceBatchId: batchId },
           ])),
           $setOnInsert: { agentCode: r.resolvedAgentCode },
         });
@@ -354,7 +356,12 @@ function previousOf(row: PreviewRow, stored: MonthlyAgentDataDocument | undefine
   return Object.fromEntries(row.cells.filter(writes).map((c) => {
     const cell = doc?.[fieldOf(c)];
     return [fieldOf(c), doc ? {
-      value: cell?.value ?? null, provenance: cell?.provenance ?? null, sourceBatchId: cell?.sourceBatchId ?? null,
+      value: cell?.value ?? null,
+      provenance: cell?.provenance ?? null,
+      sourceBatchId: cell?.sourceBatchId ?? null,
+      correctedBy: cell?.correctedBy ?? null,
+      correctedAt: cell?.correctedAt ?? null,
+      reason: cell?.reason ?? null,
     } : null];
   }));
 }

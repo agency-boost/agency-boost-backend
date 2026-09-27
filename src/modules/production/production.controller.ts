@@ -1,14 +1,20 @@
 import {
-  Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UploadedFile, UseInterceptors,
+  Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, UploadedFile, UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags,
 } from '@nestjs/swagger';
-import { IsString } from 'class-validator';
+import {
+  IsIn, IsInt, IsNumber, IsString, MaxLength, Min, ValidateIf,
+} from 'class-validator';
+import { PRODUCTION_METRICS, type ProductionMetric } from './monthly-agent-data.schema';
+import { CADENCES, type Cadence } from './production-preview';
+import { ProductionCorrections } from './production-correction.service';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import {
-  HistoryDto, ImportResultDto, MonthStateDto, MonthViewDto, TemplateFileDto, UploadPreviewDto,
+  CorrectionResultDto, HistoryDto, ImportResultDto, MonthStateDto, MonthViewDto, TemplateFileDto,
+  UploadPreviewDto,
 } from './production.response.dto';
 import { ProductionImportService } from './production-import.service';
 import { ProductionMonths } from './production-months.service';
@@ -35,12 +41,40 @@ class RevertDto {
   batchId!: string;
 }
 
+/** One figure, in the unit it is stored in — money in sen — or `null` to clear it. */
+class CorrectCellDto {
+  @IsString()
+  month!: string;
+
+  @IsString()
+  membershipId!: string;
+
+  @IsIn(PRODUCTION_METRICS)
+  metric!: ProductionMetric;
+
+  @IsIn(CADENCES)
+  cadence!: Cadence;
+
+  /** Required, and `null` to clear: an absent value is not a request to empty a figure. */
+  @ValidateIf((o: CorrectCellDto) => o.value !== null)
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  value!: number | null;
+
+  @IsInt()
+  @Min(0)
+  revision!: number;
+
+  @IsString()
+  @MaxLength(500)
+  reason!: string;
+}
+
 /**
- * The office's monthly production (P9-T1 to P9-T4).
+ * The office's monthly production (P9-T1 to P9-T5).
  *
- * **Eight routes, one screen.** `/kpm/data-upload` reads the month, downloads the template, previews
- * and confirms a filled one, lists and reverts imports, and locks and reopens the month. Correction
- * arrives with P9-T5, with the control that calls it (`check-api-consumers.py`).
+ * **Nine routes, one screen.** `/kpm/data-upload` reads the month, downloads the template, previews
+ * and confirms a filled one, lists and reverts imports, locks and reopens the month, and corrects one
+ * figure by hand. No endpoint here waits for a consumer (`check-api-consumers.py`).
  */
 @ApiTags('production')
 @ApiBearerAuth()
@@ -50,6 +84,7 @@ export class ProductionController {
     private readonly production: ProductionService,
     private readonly imports: ProductionImportService,
     private readonly months: ProductionMonths,
+    private readonly corrections: ProductionCorrections,
   ) {}
 
   /**
@@ -199,6 +234,23 @@ export class ProductionController {
   async reopen(@Ctx() ctx: RequestContext, @Param('month') month: string) {
     requireOfficeAndMonth(ctx, month);
     return this.months.reopen(ctx, month);
+  }
+
+  @Patch('cell')
+  @RequirePermission('data_upload:correct_cell')
+  @ApiOperation({
+    summary: 'Correct one figure by hand',
+    description:
+      'Writes the figure as `corrected`, with who, when and the reason, and an audit entry carrying the '
+      + 'figure before and after. `value: null` clears it — the only way a figure is cleared '
+      + '(ADR-0051). The same range rules as the import: `UPLOAD_VALUE_OUT_OF_RANGE` (422) names the '
+      + 'figure and what is wrong. `UPLOAD_MONTH_LOCKED` / `VERSION_CONFLICT` (409); `NOT_FOUND` (404) '
+      + 'for somebody who is not an active member of the office; `VALIDATION_FAILED` (400) without a '
+      + 'reason. A figure already holding that value is answered `changed: false`, and nothing is written.',
+  })
+  @ApiResponse({ status: 200, type: CorrectionResultDto })
+  async correct(@Ctx() ctx: RequestContext, @Body() body: CorrectCellDto) {
+    return this.corrections.correct(ctx, body);
   }
 
   @Get(':month')

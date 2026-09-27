@@ -9,7 +9,8 @@ import {
 } from '@/modules/leads/lead.response.dto';
 import { GoalHistoryEntryDto, GoalResponseDto } from '@/modules/goals/goal.response.dto';
 import {
-  HistoryDto, ImportResultDto, MonthStateDto, MonthViewDto, TemplateFileDto, UploadPreviewDto,
+  CorrectionResultDto, HistoryDto, ImportResultDto, MonthStateDto, MonthViewDto, TemplateFileDto,
+  UploadPreviewDto,
 } from '@/modules/production/production.response.dto';
 import {
   DelegatedAdminDto, DirectoryMemberDto, DirectoryPageDto, GroupSummaryDto, InvitePreviewDto,
@@ -138,6 +139,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   ProductionController_history: { type: HistoryDto },
   ProductionController_lock: { type: MonthStateDto },
   ProductionController_reopen: { type: MonthStateDto },
+  ProductionController_correct: { type: CorrectionResultDto },
   LeadController_list: { type: LeadPageDto },
   LeadController_summary: { type: LeadSummaryDto },
   LeadController_read: { type: LeadResponseDto },

@@ -34,6 +34,7 @@ import { DataUploadRow, DataUploadRowSchema } from '@/modules/production/data-up
 import { DataUploadRowRepository } from '@/modules/production/data-upload-row.repository';
 import { ProductionMonths } from '@/modules/production/production-months.service';
 import { ProductionImportService } from '@/modules/production/production-import.service';
+import { ProductionCorrections } from '@/modules/production/production-correction.service';
 import { ProductionService } from '@/modules/production/production.service';
 import { ProductionController } from '@/modules/production/production.controller';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -362,6 +363,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ProductionMonths,
     ProductionService,
     ProductionImportService,
+    ProductionCorrections,
     TenantDay,
     NotificationService,
     PasswordService,

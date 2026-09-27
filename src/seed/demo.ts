@@ -1703,11 +1703,29 @@ async function main(): Promise<void> {
       rows: right, previous: () => ({ ...EMPTY }),
     });
     const written = new Map(right.map((r) => [String(r.member._id), r.values]));
-    await MonthRows.insertMany(roster.map((member) => monthRow(member, thisMonth, Object.fromEntries(
-      Object.entries(written.get(String(member._id)) ?? {})
-        .map(([k, v]) => [k, { value: v, provenance: 'imported', sourceBatchId: rightId }]),
-    ))));
-    await Months.create({ kpmId: id0417, month: thisMonth, revision: 3, deletedAt: null, createdBy: owner.id, updatedBy: admin.id });
+    // … and one figure corrected by hand over it (P9-T5): the first member's APE, which the carrier
+    // restated after the file was sent. A revert of the standing import keeps it, and says so.
+    const correctedAt = daysAgo(0.5);
+    const firstApe = right[0] ? Math.round(right[0].values.apeMonthly * 1.1) : 0;
+    const correction = {
+      value: firstApe, provenance: 'corrected', sourceBatchId: null,
+      correctedBy: admin.id, correctedAt, reason: 'Carrier restated the APE by email after the file was sent',
+    };
+    await MonthRows.insertMany(roster.map((member, i) => monthRow(member, thisMonth, {
+      ...Object.fromEntries(Object.entries(written.get(String(member._id)) ?? {})
+        .map(([k, v]) => [k, { value: v, provenance: 'imported', sourceBatchId: rightId }])),
+      ...(i === 0 && right[0] ? { apeMonthly: correction } : {}),
+    })));
+    if (right[0]) {
+      await Audit.create({
+        kpmId: id0417, actorUserId: String(adminUser._id), actorMembershipId: admin.id,
+        action: 'upload.cell_corrected', targetCollection: 'monthlyAgentData',
+        targetMembershipId: String(right[0].member._id),
+        before: { month: thisMonth, field: 'apeMonthly', value: right[0].values.apeMonthly, provenance: 'imported', sourceBatchId: rightId },
+        after: { month: thisMonth, field: 'apeMonthly', value: firstApe, provenance: 'corrected', reason: correction.reason },
+      });
+    }
+    await Months.create({ kpmId: id0417, month: thisMonth, revision: 4, deletedAt: null, createdBy: owner.id, updatedBy: admin.id });
   }
 
   // ------------------------------------------------- KPM 0555, for cross-tenant checks
@@ -2216,11 +2234,13 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
   MONTHLY UPLOAD at /kpm/data-upload  (owner@kpm0417.test or admin@kpm0417.test)
     This month   one import reverted by the Admin (figures typed in thousands), then
                  the corrected file standing — Revert is offered on it. The last two
-                 members are not in it, so their rows are dashes
+                 members are not in it, so their rows are dashes. The first member's
+                 APE this month was corrected by hand afterwards; a revert keeps it
     Last month   one import. Locked once its window closed (7 days after month end),
                  so Reopen is offered; before then it is still open
     Month before nothing uploaded
     Download the template, fill a few cells, upload it: the preview, then Confirm import
+    Click any figure in an open month to correct it, with a reason
 
   AUDIT LOG at /admin/audit  (Super Admin)
     Platform-level and tenant-level rows, so the scope toggle has both sides.

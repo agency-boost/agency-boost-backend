@@ -102,8 +102,12 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
       expect(state).toMatchObject({ revision: 1, locked: false, reason: 'open' });
 
       const row = await monthRow(A1);
-      expect(row!.apeMonthly).toEqual({ value: 150_000_000, provenance: 'imported', sourceBatchId: batch.id });
-      expect(row!.apeYtd).toEqual({ value: 600_000_000, provenance: 'imported', sourceBatchId: batch.id });
+      // An imported figure carries no correction: who, when and why are empty.
+      expect(row!.apeMonthly).toEqual({
+        value: 150_000_000, provenance: 'imported', sourceBatchId: batch.id,
+        correctedBy: null, correctedAt: null, reason: null,
+      });
+      expect(row!.apeYtd).toMatchObject({ value: 600_000_000, provenance: 'imported', sourceBatchId: batch.id });
       expect(row!.fypMonthly.value ?? null).toBeNull();
 
       const view = await wired.production.readMonth(A, '2026-09');
@@ -176,9 +180,9 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
 
       expect(batch).toMatchObject({ status: 'reverted', revertedBy: 'Rina Wijaya', restoredCellCount: 2, keptCellCount: 0 });
       const row = await monthRow(A1);
-      expect(row!.apeMonthly).toEqual({ value: 100_000_000, provenance: 'imported', sourceBatchId: first.batch.id });
+      expect(row!.apeMonthly).toMatchObject({ value: 100_000_000, provenance: 'imported', sourceBatchId: first.batch.id });
       expect(row!.persistencyMonthly.value).toBe(90);
-      expect(row!.fypMonthly).toEqual({ value: null, provenance: null, sourceBatchId: null });
+      expect(row!.fypMonthly).toMatchObject({ value: null, provenance: null, sourceBatchId: null });
     });
 
     it('keeps a figure something else has written since, and counts it', async () => {
