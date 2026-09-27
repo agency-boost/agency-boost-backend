@@ -246,6 +246,7 @@ export function configModule(now: Date) {
     new MonthlyAgentDataRepository(model(MonthlyAgentData.name, MonthlyAgentDataSchema) as never),
     memberships,
     new MemberNames(memberships, users as never),
+    kpms as never,
   );
   // P5-T7: the office's campaigns, and the carrier rules it is measured against.
   const campaigns = new CampaignService(

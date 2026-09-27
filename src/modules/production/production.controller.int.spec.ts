@@ -20,6 +20,7 @@ const RINA = '66f000000000000000000101';
 
 /** Every route, and the permission it must declare. */
 const ROUTES: Record<string, string> = {
+  template: 'data_upload:download_template',
   readMonth: 'data_upload:read',
 };
 
@@ -108,6 +109,55 @@ describe('production over HTTP (P9-T1)', () => {
       expect(res.status).not.toBe(500);
       expect(res.status).toBeGreaterThanOrEqual(400);
       expect(typeof res.body.error?.code).toBe('string');
+    });
+  });
+
+  describe('the template (P9-T2)', () => {
+    it('answers the Owner the file, named for the office and the month', async () => {
+      const res = await request(app.getHttpServer()).get('/kpm/data-upload/template?month=2026-09');
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        month: '2026-09', version: 1, filename: 'KPM0417-agent-data-Sep-2026.csv', rowCount: 1,
+      });
+      expect(res.body.file.split('\n')[1]).toBe('PRU-001,"Rina Wijaya",,,,,,,,,,,,');
+    });
+
+    it('is reached as itself, not as a month called "template"', async () => {
+      // Declaration order: `template` above `:month`, or Nest reads the word as a bad month.
+      const res = await request(app.getHttpServer()).get('/kpm/data-upload/template?month=2026-09');
+      expect(res.body.error).toBeUndefined();
+    });
+
+    it('answers the Admin the same — §3.9 grants both', async () => {
+      session.current = ADMIN;
+      const res = await request(app.getHttpServer()).get('/kpm/data-upload/template?month=2026-09');
+      expect(res.status).toBe(200);
+    });
+
+    it.each(NOT_ADMINISTRATORS.filter(([who]) => who !== 'a Super Admin'))(
+      'refuses %s a file in the office’s name',
+      async (_who, ctx) => {
+        session.current = ctx;
+        const res = await request(app.getHttpServer()).get('/kpm/data-upload/template?month=2026-09');
+        expect(res.status).toBe(403);
+      },
+    );
+
+    it('refuses a Super Admin by name rather than by a 500', async () => {
+      // The same shape as the month: §3.9 grants `all`, the guard passes, and the service refuses
+      // because the file is named for an office the caller does not belong to.
+      session.current = SUPER_ADMIN;
+      const res = await request(app.getHttpServer()).get('/kpm/data-upload/template?month=2026-09');
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('TENANT_NO_MEMBERSHIP');
+    });
+
+    it('refuses a missing or malformed month with a code a client can branch on', async () => {
+      for (const q of ['', '?month=', '?month=Sep-2026']) {
+        const res = await request(app.getHttpServer()).get(`/kpm/data-upload/template${q}`);
+        expect(res.status).toBe(400);
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      }
     });
   });
 

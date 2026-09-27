@@ -57,6 +57,10 @@ describe('the office’s production, month by month (P9-T1)', () => {
   beforeEach(async () => {
     await clearCollections();
     await mongoose.model(MonthlyAgentData.name).syncIndexes();
+    await mongoose.connection.db!.collection('kpms').insertMany([
+      { _id: new mongoose.Types.ObjectId(KPM_A), code: '0417', branchName: 'A', timezone: 'Asia/Jakarta' },
+      { _id: new mongoose.Types.ObjectId(KPM_B), code: '0555', branchName: 'B', timezone: 'Asia/Jakarta' },
+    ] as never);
     await mongoose.connection.db!.collection('memberships').insertMany([
       person(A2, KPM_A, 2),
       person(A1, KPM_A, 1),
@@ -196,6 +200,76 @@ describe('the office’s production, month by month (P9-T1)', () => {
     it('refuses somebody with no office rather than reading everything', async () => {
       await expect(wired.production.readMonth(noOffice(), '2026-09'))
         .rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
+    });
+  });
+
+  describe('the template (P9-T2)', () => {
+    it('AC-4: lists every active member, in roster order, with twelve empty fields each', async () => {
+      const t = await wired.production.template(owner(KPM_A), '2026-09');
+      const lines = t.file.split('\n');
+
+      expect(t.rowCount).toBe(2);
+      expect(lines).toHaveLength(3);
+      expect(lines[1]).toBe('PRU-001,"Rina Wijaya",,,,,,,,,,,,');
+      expect(lines[2]).toBe('PRU-002,"Budi Santoso",,,,,,,,,,,,');
+      // Not the pending one — they have registered and nothing more.
+      expect(t.file).not.toContain('Calon Baru');
+    });
+
+    it('AC-1, AC-3: opens with the versioned header, monthly before YTD', async () => {
+      const t = await wired.production.template(owner(KPM_A), '2026-09');
+      expect(t.version).toBe(1);
+      expect(t.file.split('\n')[0]).toBe(t.header.join(','));
+      expect(t.header.indexOf('APE (Rp M) — This Month')).toBeLessThan(t.header.indexOf('APE (Rp M) — YTD'));
+    });
+
+    it('AC-5: names the file after the office, the month and the year', async () => {
+      const t = await wired.production.template(owner(KPM_A), '2026-09');
+      expect(t.filename).toBe('KPM0417-agent-data-Sep-2026.csv');
+      expect((await wired.production.template(owner(KPM_B), '2026-01')).filename)
+        .toBe('KPM0555-agent-data-Jan-2026.csv');
+    });
+
+    it('AC-2: quotes a name that would otherwise shift every later column', async () => {
+      await mongoose.connection.db!.collection('users').updateOne(
+        { fullName: 'Rina Wijaya' }, { $set: { fullName: 'Wijaya, Rina "Rin"' } },
+      );
+      const t = await wired.production.template(owner(KPM_A), '2026-09');
+      expect(t.file.split('\n')[1]).toBe('PRU-001,"Wijaya, Rina ""Rin""",,,,,,,,,,,,');
+    });
+
+    it('AC-6: lists one office’s agents and nobody else’s', async () => {
+      const a = await wired.production.template(owner(KPM_A), '2026-09');
+      const b = await wired.production.template(owner(KPM_B), '2026-09');
+      expect(a.file).toContain('Rina Wijaya');
+      expect(a.file).not.toContain('Hendra Wijaya');
+      expect(b.file).toContain('Hendra Wijaya');
+      expect(b.file).not.toContain('Rina Wijaya');
+    });
+
+    it('refuses somebody with no office, and a month that is not one', async () => {
+      await expect(wired.production.template(noOffice(), '2026-09'))
+        .rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
+      await expect(wired.production.template(owner(KPM_A), 'september'))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    });
+
+    it('answers not-found, not a file named for nothing, when the office row is gone', async () => {
+      // The roster alone would still build a body; the filename needs the office's own code.
+      await mongoose.connection.db!.collection('kpms').deleteOne(
+        { _id: new mongoose.Types.ObjectId(KPM_A) } as never,
+      );
+      await expect(wired.production.template(owner(KPM_A), '2026-09'))
+        .rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('is the header alone for an office with nobody active yet', async () => {
+      await mongoose.connection.db!.collection('memberships').updateMany(
+        { kpmId: KPM_A }, { $set: { status: 'pending' } },
+      );
+      const t = await wired.production.template(owner(KPM_A), '2026-09');
+      expect(t.rowCount).toBe(0);
+      expect(t.file.split('\n')).toHaveLength(1);
     });
   });
 

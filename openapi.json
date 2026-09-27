@@ -1055,6 +1055,86 @@
         "x-required-permission": "goal:read"
       }
     },
+    "/api/v1/kpm/data-upload/template": {
+      "get": {
+        "description": "The header that is the contract — code, name, six metrics monthly, the same six YTD, in the prototype’s own order — and one row per active agent with twelve empty fields. A name is one quoted field: a quote inside it is doubled, a line break becomes a space, and a name that starts like a formula is written as text. The agent code is written exactly as stored. **The header is the version**: there is no version line, and an importer identifies a file by its header cells.\n\n**Requires `data_upload:download_template`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductionController_template_v1",
+        "parameters": [
+          {
+            "name": "month",
+            "required": true,
+            "in": "query",
+            "description": "`YYYY-MM`, the office’s calendar month. Names the file; the rows are the same for every month.",
+            "schema": {
+              "example": "2026-09",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateFileDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `data_upload:download_template`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The file to fill in for a month",
+        "tags": [
+          "production"
+        ],
+        "x-required-permission": "data_upload:download_template"
+      }
+    },
     "/api/v1/kpm/data-upload/{month}": {
       "get": {
         "description": "Every active member, with the six metrics in their monthly and year-to-date figures and the provenance of each cell. **`null` is not zero**: a cell nothing has written says the carrier has not reported this person, where `0` says it reported nothing. Reads only — the file, the correction and the revert each have their own route.\n\n**Requires `data_upload:read`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -14985,6 +15065,47 @@
           "caseSizeMinor",
           "leadsToApptPct",
           "closingRatePct"
+        ]
+      },
+      "TemplateFileDto": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "example": "2026-09"
+          },
+          "version": {
+            "type": "number",
+            "example": 1,
+            "description": "The header *is* the version: an importer identifies a file by matching its header against every version ever issued."
+          },
+          "filename": {
+            "type": "string",
+            "example": "KPM0417-agent-data-Sep-2026.csv"
+          },
+          "header": {
+            "description": "Fourteen columns: code, name, six metrics monthly, the same six YTD.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "file": {
+            "type": "string",
+            "description": "The whole file. Names are quoted; a quote inside one is doubled (RFC 4180)."
+          },
+          "rowCount": {
+            "type": "number",
+            "description": "How many active agents it lists."
+          }
+        },
+        "required": [
+          "month",
+          "version",
+          "filename",
+          "header",
+          "file",
+          "rowCount"
         ]
       },
       "MetricCellDto": {

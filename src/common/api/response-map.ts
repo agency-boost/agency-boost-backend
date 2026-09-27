@@ -8,7 +8,7 @@ import {
   DeletedLeadDto, LeadPageDto, LeadResponseDto, LeadSummaryDto,
 } from '@/modules/leads/lead.response.dto';
 import { GoalHistoryEntryDto, GoalResponseDto } from '@/modules/goals/goal.response.dto';
-import { MonthViewDto } from '@/modules/production/production.response.dto';
+import { MonthViewDto, TemplateFileDto } from '@/modules/production/production.response.dto';
 import {
   DelegatedAdminDto, DirectoryMemberDto, DirectoryPageDto, GroupSummaryDto, InvitePreviewDto,
   JoinStateDto, KpmDirectoryEntryDto, LeaderChoiceDto, MemberTagsDto,
@@ -129,6 +129,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   GoalController_save: { type: GoalResponseDto },
   GoalController_history: { type: GoalHistoryEntryDto, isArray: true },
   ProductionController_readMonth: { type: MonthViewDto },
+  ProductionController_template: { type: TemplateFileDto },
   LeadController_list: { type: LeadPageDto },
   LeadController_summary: { type: LeadSummaryDto },
   LeadController_read: { type: LeadResponseDto },

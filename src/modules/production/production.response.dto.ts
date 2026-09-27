@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { PROVENANCES, type Provenance } from './monthly-agent-data.schema';
-import type { MetricCell, MonthRow, MonthView } from './production.service';
+import type { MetricCell, MonthRow, MonthView, TemplateFile } from './production.service';
 
 export class MetricCellDto implements MetricCell {
   @ApiProperty({
@@ -42,6 +42,26 @@ export class MonthRowDto implements MonthRow {
 
   @ApiProperty({ type: MonthMetricsDto })
   metrics!: MonthRow['metrics'];
+}
+
+export class TemplateFileDto implements TemplateFile {
+  @ApiProperty({ type: String, example: '2026-09' })
+  month!: string;
+
+  @ApiProperty({ type: Number, example: 1, description: 'The header *is* the version: an importer identifies a file by matching its header against every version ever issued.' })
+  version!: number;
+
+  @ApiProperty({ type: String, example: 'KPM0417-agent-data-Sep-2026.csv' })
+  filename!: string;
+
+  @ApiProperty({ type: [String], description: 'Fourteen columns: code, name, six metrics monthly, the same six YTD.' })
+  header!: string[];
+
+  @ApiProperty({ type: String, description: 'The whole file. Names are quoted; a quote inside one is doubled (RFC 4180).' })
+  file!: string;
+
+  @ApiProperty({ type: Number, description: 'How many active agents it lists.' })
+  rowCount!: number;
 }
 
 export class MonthViewDto implements MonthView {

@@ -661,6 +661,13 @@ export const PERMISSIONS = {
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
+  // P9-T2. The file to fill in. Its own grant rather than `read`'s, as §3.9 has it: an office that
+  // one day lets a leader see the table need not let them issue a file in the office's name.
+  'data_upload:download_template': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
   'notification:read_inbox': [{ grantee: AUTHENTICATED, scope: 'own' }],
   'notification:mark_read': [{ grantee: AUTHENTICATED, scope: 'own' }],
   'notification:receive': [
