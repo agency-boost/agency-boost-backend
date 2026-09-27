@@ -3,7 +3,7 @@ import { HydratedDocument } from 'mongoose';
 import type { SeedRecord, TemplateKind } from '@/modules/config/company-template.schema';
 import { baseSchemaOptions } from '@/common/schema/base.schema';
 import {
-  ACTIVATION, DEFAULT_CURRENCY, DEFAULT_TENANT_TIMEZONE, PERFORMANCE, ACTIVITY, TIME,
+  ACTIVATION, DEFAULT_CURRENCY, DEFAULT_TENANT_TIMEZONE, PERFORMANCE, PRODUCTION, ACTIVITY, TIME,
 } from '@/domain/constants';
 
 export type KpmDocument = HydratedDocument<Kpm>;
@@ -21,6 +21,8 @@ export class KpmSettings {
   activityDailyMaxCount!: number;
   /** How many days past month end an activity day stays freely editable (ADR-0042). */
   activityBackdateGraceDays!: number;
+  /** How many days past month end a month of production stays open to writes (ADR-0050). */
+  productionLockGraceDays!: number;
   weeksPerMonth!: number;
   avgDaysPerMonth!: number;
 }
@@ -33,6 +35,7 @@ export const DEFAULT_KPM_SETTINGS: KpmSettings = {
   onTrackPaceThreshold: PERFORMANCE.ON_TRACK_PACE_THRESHOLD,
   activityDailyMaxCount: ACTIVITY.COUNT_MAX,
   activityBackdateGraceDays: ACTIVITY.BACKDATE_GRACE_DAYS,
+  productionLockGraceDays: PRODUCTION.LOCK_GRACE_DAYS,
   weeksPerMonth: TIME.WEEKS_PER_MONTH,
   avgDaysPerMonth: TIME.AVG_DAYS_PER_MONTH,
 };

@@ -1230,6 +1230,422 @@
         "x-required-permission": "data_upload:upload_and_preview"
       }
     },
+    "/api/v1/kpm/data-upload/commit": {
+      "post": {
+        "description": "Reads the file again against what is stored now, and writes each `new` and `changed` figure as `imported`, with this batch as its source. A blank is not written (ADR-0051). The batch and its rows — every figure’s previous value — are written before any figure changes, and a failure part-way puts back what was written. `VERSION_CONFLICT` (409) when the month has moved since the preview; `UPLOAD_BATCH_ALREADY_COMMITTED` (409) for the same file against the same revision; `UPLOAD_MONTH_LOCKED` (409); `VALIDATION_FAILED` (400) when the file would change nothing; the preview’s own refusals for the file itself.\n\n**Requires `data_upload:commit_import`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductionController_commit_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "month",
+                  "revision",
+                  "file"
+                ],
+                "properties": {
+                  "month": {
+                    "type": "string",
+                    "example": "2026-09"
+                  },
+                  "revision": {
+                    "type": "string",
+                    "example": "4",
+                    "description": "The `revision` the preview answered with."
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The same file that was previewed."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `data_upload:commit_import`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Confirm import: write what the preview showed",
+        "tags": [
+          "production"
+        ],
+        "x-required-permission": "data_upload:commit_import"
+      }
+    },
+    "/api/v1/kpm/data-upload/revert": {
+      "post": {
+        "description": "Puts every figure the import wrote back to exactly what it was, empty included. Only the month’s latest standing import — `UPLOAD_BATCH_NOT_LATEST` (409) otherwise — and a figure written since by something else is kept and counted. `UPLOAD_NOTHING_TO_REVERT` (409) for one already reverted; `UPLOAD_MONTH_LOCKED` (409); `NOT_FOUND` (404) for another office’s.\n\n**Requires `data_upload:revert_batch`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductionController_revert_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevertDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `data_upload:revert_batch`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Revert an import",
+        "tags": [
+          "production"
+        ],
+        "x-required-permission": "data_upload:revert_batch"
+      }
+    },
+    "/api/v1/kpm/data-upload/history": {
+      "get": {
+        "operationId": "ProductionController_history_v1",
+        "parameters": [
+          {
+            "name": "month",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "example": "2026-09",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `data_upload:read_history`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every import of a month that went through, newest first",
+        "tags": [
+          "production"
+        ],
+        "x-required-permission": "data_upload:read_history",
+        "description": "**Requires `data_upload:read_history`.** See `docs/00-product/roles-and-permissions.md`."
+      }
+    },
+    "/api/v1/kpm/data-upload/months/{month}/lock": {
+      "post": {
+        "description": "Ahead of its schedule, or again after a reopen. Audited. A month already locked is answered as it is (ADR-0050).\n\n**Requires `data_upload:lock_month`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductionController_lock_v1",
+        "parameters": [
+          {
+            "name": "month",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "example": "2026-09",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonthStateDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `data_upload:lock_month`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Lock a month now",
+        "tags": [
+          "production"
+        ],
+        "x-required-permission": "data_upload:lock_month"
+      }
+    },
+    "/api/v1/kpm/data-upload/months/{month}/reopen": {
+      "post": {
+        "description": "It stays open until somebody locks it again. Audited. A month already open is answered as it is (ADR-0050).\n\n**Requires `data_upload:reopen_month`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductionController_reopen_v1",
+        "parameters": [
+          {
+            "name": "month",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "example": "2026-09",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonthStateDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `data_upload:reopen_month`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reopen a locked month",
+        "tags": [
+          "production"
+        ],
+        "x-required-permission": "data_upload:reopen_month"
+      }
+    },
     "/api/v1/kpm/data-upload/{month}": {
       "get": {
         "description": "Every active member, with the six metrics in their monthly and year-to-date figures and the provenance of each cell. **`null` is not zero**: a cell nothing has written says the carrier has not reported this person, where `0` says it reported nothing. Reads only — the file, the correction and the revert each have their own route.\n\n**Requires `data_upload:read`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -15444,6 +15860,10 @@
               "\t"
             ]
           },
+          "revision": {
+            "type": "number",
+            "description": "The month’s revision the preview was taken against. Confirm import sends it back."
+          },
           "summary": {
             "$ref": "#/components/schemas/PreviewSummaryDto"
           },
@@ -15460,8 +15880,196 @@
           "templateVersion",
           "encoding",
           "delimiter",
+          "revision",
           "summary",
           "rows"
+        ]
+      },
+      "BatchViewDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "month": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "committed",
+              "reverting",
+              "reverted",
+              "failed"
+            ],
+            "description": "The history lists `committed`, `reverting` and `reverted`."
+          },
+          "templateVersion": {
+            "type": "number"
+          },
+          "rowCount": {
+            "type": "number",
+            "description": "Data rows in the file."
+          },
+          "writtenRowCount": {
+            "type": "number",
+            "description": "Rows with at least one figure written."
+          },
+          "cellCount": {
+            "type": "number",
+            "description": "Figures written."
+          },
+          "issueCount": {
+            "type": "number",
+            "description": "Rows and figures not taken."
+          },
+          "committedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "committedBy": {
+            "type": "string",
+            "nullable": true,
+            "description": "By name."
+          },
+          "revertedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "revertedBy": {
+            "type": "string",
+            "nullable": true,
+            "description": "By name."
+          },
+          "restoredCellCount": {
+            "type": "number",
+            "description": "Figures a revert put back."
+          },
+          "keptCellCount": {
+            "type": "number",
+            "description": "Figures a revert kept, because something else wrote them since."
+          },
+          "canRevert": {
+            "type": "boolean",
+            "description": "Standing, and the month’s latest standing import — the only one revert takes."
+          }
+        },
+        "required": [
+          "id",
+          "month",
+          "filename",
+          "status",
+          "templateVersion",
+          "rowCount",
+          "writtenRowCount",
+          "cellCount",
+          "issueCount",
+          "committedAt",
+          "committedBy",
+          "revertedAt",
+          "revertedBy",
+          "restoredCellCount",
+          "keptCellCount",
+          "canRevert"
+        ]
+      },
+      "MonthStateDto": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "example": "2026-09"
+          },
+          "revision": {
+            "type": "number",
+            "description": "Advanced by every write to the month. A preview carries it; Confirm import must send it back unchanged, or is refused `VERSION_CONFLICT`."
+          },
+          "locked": {
+            "type": "boolean",
+            "description": "A locked month refuses import, revert and correction with `UPLOAD_MONTH_LOCKED` (ADR-0050)."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "open",
+              "schedule",
+              "locked_by_hand",
+              "reopened"
+            ],
+            "description": "`open`/`schedule` follow the office’s window; `locked_by_hand`/`reopened` are somebody’s decision, which holds until the other is taken."
+          },
+          "editableUntil": {
+            "type": "string",
+            "example": "2026-10-07",
+            "description": "The last day the schedule leaves it open: month end plus `kpms.settings.productionLockGraceDays`, in the office’s calendar."
+          },
+          "changedAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "When it was last locked or reopened by hand."
+          },
+          "changedBy": {
+            "type": "string",
+            "nullable": true,
+            "description": "Who did it, by name."
+          }
+        },
+        "required": [
+          "month",
+          "revision",
+          "locked",
+          "reason",
+          "editableUntil",
+          "changedAt",
+          "changedBy"
+        ]
+      },
+      "ImportResultDto": {
+        "type": "object",
+        "properties": {
+          "batch": {
+            "$ref": "#/components/schemas/BatchViewDto"
+          },
+          "state": {
+            "description": "The month after the write, with its new revision.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MonthStateDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "batch",
+          "state"
+        ]
+      },
+      "RevertDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "HistoryDto": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "example": "2026-09"
+          },
+          "batches": {
+            "description": "Newest first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchViewDto"
+            }
+          }
+        },
+        "required": [
+          "month",
+          "batches"
         ]
       },
       "MetricCellDto": {
@@ -15575,12 +16183,21 @@
           "withData": {
             "type": "number",
             "description": "Rows holding at least one figure. Zero means nothing uploaded yet."
+          },
+          "state": {
+            "description": "Open or locked, and why (P9-T4).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MonthStateDto"
+              }
+            ]
           }
         },
         "required": [
           "month",
           "rows",
-          "withData"
+          "withData",
+          "state"
         ]
       },
       "RegisterDto": {

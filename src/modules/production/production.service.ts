@@ -21,6 +21,8 @@ import {
   TEMPLATE_HEADER_V1, TEMPLATE_VERSION, templateBody, templateFilename,
 } from './production-template';
 import type { UploadedCsv } from './production-upload.interceptor';
+import { type MonthState, ProductionMonths } from './production-months.service';
+import type { ReadUpload } from './production-preview';
 import { MONTH_PATTERN } from './production-units';
 
 /** One figure on the wire: what it is, and which writer put it there. */
@@ -42,6 +44,8 @@ export interface MonthView {
   rows: MonthRow[];
   /** How many of the rows hold at least one figure. Zero is *nothing uploaded yet*. */
   withData: number;
+  /** Open or locked, and why; and the revision a preview of this month will carry (P9-T4). */
+  state: MonthState;
 }
 
 /** The file to download, and enough about it to name and to validate it. */
@@ -64,8 +68,18 @@ export interface UploadPreview {
   templateVersion: number;
   encoding: UploadEncoding;
   delimiter: UploadDelimiter;
+  /** The month's revision the preview was taken against. Confirm import sends it back (P9-T4). */
+  revision: number;
   summary: PreviewSummary;
   rows: PreviewRow[];
+}
+
+/** A file read against the roster and what is stored — what a preview shows and a commit writes. */
+export interface Analysis {
+  read: ReadUpload;
+  stored: Map<string, MonthlyAgentDataDocument>;
+  rows: PreviewRow[];
+  summary: PreviewSummary;
 }
 
 const EMPTY: MetricCell = { value: null, provenance: null };
@@ -108,10 +122,11 @@ export class ProductionService {
      * scope *is* the id.
      */
     @InjectModel(Kpm.name) private readonly kpms: Model<Kpm>,
+    private readonly months: ProductionMonths,
   ) {}
 
   async readMonth(ctx: RequestContext, month: string): Promise<MonthView> {
-    this.requireOffice(ctx);
+    requireOffice(ctx);
     requireMonth(month);
 
     const roster = await this.roster(ctx);
@@ -125,6 +140,7 @@ export class ProductionService {
       month,
       rows: view,
       withData: view.filter((r) => hasAnyFigure(r)).length,
+      state: await this.months.state(ctx, month),
     };
   }
 
@@ -136,7 +152,7 @@ export class ProductionService {
    * the same list the table shows, for the same reason (I-125).
    */
   async template(ctx: RequestContext, month: string): Promise<TemplateFile> {
-    this.requireOffice(ctx);
+    requireOffice(ctx);
     requireMonth(month);
 
     const [office, roster] = await Promise.all([
@@ -166,7 +182,30 @@ export class ProductionService {
    * or one cell is reported inside the preview, and the rest of the file still previews.
    */
   async preview(ctx: RequestContext, month: string, upload: UploadedCsv | undefined): Promise<UploadPreview> {
-    this.requireOffice(ctx);
+    requireOffice(ctx);
+    requireMonth(month);
+    // The revision first, the figures second: a write between the two leaves the preview carrying
+    // the older revision, and its commit is refused — never a diff against figures it did not see.
+    const { revision } = await this.months.state(ctx, month);
+    const a = await this.analyse(ctx, month, upload);
+    return {
+      month,
+      filename: upload!.originalname,
+      templateVersion: a.read.templateVersion,
+      encoding: a.read.encoding,
+      delimiter: a.read.delimiter,
+      revision,
+      summary: a.summary,
+      rows: a.rows,
+    };
+  }
+
+  /**
+   * The file against the roster and what is stored: the preview's substance, and what a commit
+   * writes (P9-T4 reads it again rather than trusting the browser's copy of the preview).
+   */
+  async analyse(ctx: RequestContext, month: string, upload: UploadedCsv | undefined): Promise<Analysis> {
+    requireOffice(ctx);
     requireMonth(month);
     if (!upload) {
       throw new DomainException(
@@ -180,33 +219,18 @@ export class ProductionService {
     const read = readUpload(upload.buffer);
     const roster = await this.roster(ctx);
     const rows = await this.data.find(ctx, { month, membershipId: { $in: roster.map((r) => r.membershipId) } });
-    const byMember = new Map(rows.map((r) => [r.membershipId, metricsOf(r)]));
+    const stored = new Map(rows.map((r) => [r.membershipId, r]));
     const nothing = metricsOf(undefined);
-    const stored = (membershipId: string): StoredFigures => {
-      const m = byMember.get(membershipId) ?? nothing;
+    const figures = (membershipId: string): StoredFigures => {
+      const row = stored.get(membershipId);
+      const m = row ? metricsOf(row) : nothing;
       return Object.fromEntries(PRODUCTION_METRICS.map((k) => [
         k, { monthly: m[k].monthly.value, ytd: m[k].ytd.value },
       ])) as StoredFigures;
     };
 
-    const preview = buildPreview({ records: read.records, delimiter: read.delimiter, roster, stored });
-    return {
-      month,
-      filename: upload.originalname,
-      templateVersion: read.templateVersion,
-      encoding: read.encoding,
-      delimiter: read.delimiter,
-      ...preview,
-    };
-  }
-
-  /**
-   * Refused by name, before any repository is reached. §3.9 grants a Super Admin `all`, and the
-   * guard lets them through — but the office is resolved from the caller's membership, which they
-   * have none of. The repository would refuse too, as an internal error nobody can branch on.
-   */
-  private requireOffice(ctx: RequestContext): void {
-    if (!ctx.kpmId) throw new NoMembershipException();
+    const preview = buildPreview({ records: read.records, delimiter: read.delimiter, roster, stored: figures });
+    return { read, stored, ...preview };
   }
 
   /**
@@ -232,7 +256,17 @@ export class ProductionService {
   }
 }
 
-function requireMonth(month: string): void {
+/**
+ * Refused by name, before any repository is reached. §3.9 grants a Super Admin `all`, and the guard
+ * lets them through — but the office is resolved from the caller's membership, which they have none
+ * of. The repository would refuse too, as an internal error nobody can branch on.
+ */
+export function requireOffice(ctx: RequestContext): void {
+  if (!ctx.kpmId) throw new NoMembershipException();
+}
+
+/** `YYYY-MM`, or `VALIDATION_FAILED`. */
+export function requireMonth(month: string): void {
   if (!MONTH_PATTERN.test(month)) {
     throw new DomainException(
       ErrorCode.VALIDATION_FAILED,

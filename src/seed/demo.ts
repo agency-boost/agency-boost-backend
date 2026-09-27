@@ -83,6 +83,13 @@ import {
   activationSeedAspects, defaultActivationChecklist,
 } from '@/modules/activation/activation-payload';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
+import { createHash } from 'node:crypto';
+import { DataUploadBatch, DataUploadBatchSchema } from '@/modules/production/data-upload-batch.schema';
+import { DataUploadRow, DataUploadRowSchema } from '@/modules/production/data-upload-row.schema';
+import { MonthlyAgentData, MonthlyAgentDataSchema, PRODUCTION_METRICS } from '@/modules/production/monthly-agent-data.schema';
+import { ProductionMonth, ProductionMonthSchema } from '@/modules/production/production-month.schema';
+import { MINOR_UNITS_PER_RP_MILLION } from '@/modules/production/production-units';
+import { templateFilename } from '@/modules/production/production-template';
 import {
   CompanyTemplate, CompanyTemplateSchema,
 } from '@/modules/config/company-template.schema';
@@ -175,6 +182,9 @@ async function main(): Promise<void> {
       // Leads screen then reads none of them — it lists the caller's own — while the rows sit
       // in the database forever, which is the same orphaning the two comments above describe.
       'leads',
+      // Phase 9. The month rows and the imports that wrote them, and the months' own state — a
+      // `--reset` that kept a batch would offer to revert figures that are no longer there.
+      'monthlyAgentData', 'policies', 'productionMonths', 'dataUploadBatches', 'dataUploadRows',
     ];
     for (const name of owned) {
       const { deletedCount } = await mongoose.connection.collection(name).deleteMany({});
@@ -1569,6 +1579,137 @@ async function main(): Promise<void> {
     });
   }
 
+  // --------------------------------------------------- monthly production (P9-T4)
+
+  /*
+   * Three months, each a state the Data upload screen has to be reviewable in:
+   *
+   * - **This month** — an import that was reverted, then a corrected one standing over it. History
+   *   shows both, and Revert is offered on the standing one. Two members are left out of it, so the
+   *   table shows dashes beside figures and the preview says who a file does not list.
+   * - **Last month** — one import. Locked by the schedule once its window closes, seven days after
+   *   the month ends, so Reopen is offered.
+   * - **The month before** — nothing at all, which is its own state.
+   *
+   * Written as the service writes it — batch, rows with their previous values, month rows carrying
+   * the batch as their source, the month's revision, and the audit entries — so a revert of the seeded
+   * import puts back exactly what the seed says was there.
+   */
+  const Batches = mongoose.model(DataUploadBatch.name, DataUploadBatchSchema);
+  const UploadRows = mongoose.model(DataUploadRow.name, DataUploadRowSchema);
+  const MonthRows = mongoose.model(MonthlyAgentData.name, MonthlyAgentDataSchema);
+  const Months = mongoose.model(ProductionMonth.name, ProductionMonthSchema);
+
+  if (!(await Batches.exists({ kpmId: id0417 }).exec())) {
+    const roster = await Memberships.find({ kpmId: id0417, status: 'active', deletedAt: null })
+      .sort({ agentSeq: 1 }).lean().exec() as unknown as { _id: unknown; agentCode: string }[];
+    const thisMonth = clock.localDateFor(DEFAULT_TENANT_TIMEZONE).slice(0, 7);
+    const shift = (month: string, by: number) => {
+      const d = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)) - 1 + by, 1));
+      return d.toISOString().slice(0, 7);
+    };
+    const lastMonth = shift(thisMonth, -1);
+
+    const field = (metric: string, cadence: 'monthly' | 'ytd') => `${metric}${cadence === 'monthly' ? 'Monthly' : 'Ytd'}`;
+    const EMPTY = { value: null, provenance: null, sourceBatchId: null };
+
+    /** Believable, different per person and per month, and YTD never below the month. */
+    const figures = (i: number, month: string, scale = 1): Record<string, number> => {
+      const m = Number(month.slice(5));
+      const apeM = (8 + ((i * 13 + m * 5) % 55)) * scale;
+      const monthly: Record<string, number> = {
+        ape: Math.round(apeM * MINOR_UNITS_PER_RP_MILLION),
+        persistency: 80 + ((i * 7 + m) % 20),
+        recruitment: (i + m) % 3,
+        newActiveAgents: (i + m) % 2,
+        fyp: Math.round(apeM * 0.6 * MINOR_UNITS_PER_RP_MILLION),
+        policyCount: 1 + ((i * 3 + m) % 5),
+      };
+      return Object.fromEntries(PRODUCTION_METRICS.flatMap((metric) => [
+        [field(metric, 'monthly'), monthly[metric]],
+        [field(metric, 'ytd'), metric === 'persistency' ? monthly[metric] - 2 : monthly[metric] * m],
+      ]));
+    };
+
+    const batchOf = async (spec: {
+      month: string; filename: string; revision: number; at: Date;
+      rows: { member: (typeof roster)[number]; values: Record<string, number> }[];
+      previous: (field: string) => typeof EMPTY | null;
+      reverted?: Date;
+    }) => {
+      const cells = spec.rows.length * 12;
+      const batch = await Batches.create({
+        kpmId: id0417, month: spec.month, status: spec.reverted ? 'reverted' : 'committed',
+        filename: spec.filename,
+        fileSha256: createHash('sha256').update(`${spec.filename}:${spec.month}`).digest('hex'),
+        templateVersion: 1, encoding: 'utf-8', delimiter: ',',
+        basedOnRevision: spec.revision - 1, monthRevision: spec.revision,
+        rowCount: spec.rows.length, writtenRowCount: spec.rows.length, cellCount: cells, issueCount: 0,
+        startedAt: spec.at, committedAt: spec.at, committedBy: owner.id,
+        revertedAt: spec.reverted ?? null, revertedBy: spec.reverted ? admin.id : null,
+        restoredCellCount: spec.reverted ? cells : 0, keptCellCount: 0,
+        deletedAt: null, createdBy: owner.id, updatedBy: spec.reverted ? admin.id : owner.id,
+      });
+      const batchId = String(batch._id);
+      await UploadRows.insertMany(spec.rows.map((r, n) => ({
+        kpmId: id0417, batchId, month: spec.month, line: n + 2, agentCode: r.member.agentCode,
+        membershipId: String(r.member._id), status: 'ready', values: r.values,
+        previousValues: Object.fromEntries(Object.keys(r.values).map((k) => [k, spec.previous(k)])),
+        issues: [], deletedAt: null, createdBy: owner.id, updatedBy: owner.id,
+      })));
+      await Audit.create({
+        kpmId: id0417, actorUserId: String(ownerUser._id), actorMembershipId: owner.id,
+        action: 'upload.commit', targetCollection: 'dataUploadBatches', targetId: batchId,
+        after: { month: spec.month, filename: spec.filename, writtenRowCount: spec.rows.length },
+      });
+      if (spec.reverted) {
+        await Audit.create({
+          kpmId: id0417, actorUserId: String(adminUser._id), actorMembershipId: admin.id,
+          action: 'upload.revert', targetCollection: 'dataUploadBatches', targetId: batchId,
+          before: { status: 'committed' }, after: { status: 'reverted', restoredCellCount: cells, keptCellCount: 0 },
+        });
+      }
+      return batchId;
+    };
+
+    const monthRow = (member: (typeof roster)[number], month: string, cells: Record<string, unknown>) => ({
+      kpmId: id0417, membershipId: String(member._id), agentCode: member.agentCode, month,
+      ...Object.fromEntries(PRODUCTION_METRICS.flatMap((metric) => (['monthly', 'ytd'] as const)
+        .map((c) => [field(metric, c), cells[field(metric, c)] ?? EMPTY]))),
+      deletedAt: null, createdBy: owner.id, updatedBy: owner.id,
+    });
+
+    // Last month: one import, standing.
+    const lastRows = roster.map((member, i) => ({ member, values: figures(i, lastMonth) }));
+    const lastId = await batchOf({
+      month: lastMonth, filename: templateFilename('0417', lastMonth), revision: 1, at: daysAgo(20),
+      rows: lastRows, previous: () => null,
+    });
+    await MonthRows.insertMany(lastRows.map((r) => monthRow(r.member, lastMonth, Object.fromEntries(
+      Object.entries(r.values).map(([k, v]) => [k, { value: v, provenance: 'imported', sourceBatchId: lastId }]),
+    ))));
+    await Months.create({ kpmId: id0417, month: lastMonth, revision: 1, deletedAt: null, createdBy: owner.id, updatedBy: owner.id });
+
+    // This month: an import typed in thousands instead of millions, reverted by the Admin …
+    const wrong = roster.map((member, i) => ({ member, values: figures(i, thisMonth, 1000) }));
+    await batchOf({
+      month: thisMonth, filename: templateFilename('0417', thisMonth), revision: 1, at: daysAgo(3),
+      rows: wrong, previous: () => null, reverted: daysAgo(2),
+    });
+    // … then the corrected file, standing — everybody but the last two.
+    const right = roster.slice(0, Math.max(0, roster.length - 2)).map((member, i) => ({ member, values: figures(i, thisMonth) }));
+    const rightId = await batchOf({
+      month: thisMonth, filename: templateFilename('0417', thisMonth).replace('.csv', '-corrected.csv'), revision: 3, at: daysAgo(1),
+      rows: right, previous: () => ({ ...EMPTY }),
+    });
+    const written = new Map(right.map((r) => [String(r.member._id), r.values]));
+    await MonthRows.insertMany(roster.map((member) => monthRow(member, thisMonth, Object.fromEntries(
+      Object.entries(written.get(String(member._id)) ?? {})
+        .map(([k, v]) => [k, { value: v, provenance: 'imported', sourceBatchId: rightId }]),
+    ))));
+    await Months.create({ kpmId: id0417, month: thisMonth, revision: 3, deletedAt: null, createdBy: owner.id, updatedBy: admin.id });
+  }
+
   // ------------------------------------------------- KPM 0555, for cross-tenant checks
 
   const owner0555User = await user('owner@kpm0555.test', 'Hendra Wijaya');
@@ -2071,6 +2212,15 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     owner@kpm0417.test           empty, deliberately: nothing in this fixture is
                                  addressed to the Owner, and an empty inbox is a
                                  state worth seeing too
+
+  MONTHLY UPLOAD at /kpm/data-upload  (owner@kpm0417.test or admin@kpm0417.test)
+    This month   one import reverted by the Admin (figures typed in thousands), then
+                 the corrected file standing — Revert is offered on it. The last two
+                 members are not in it, so their rows are dashes
+    Last month   one import. Locked once its window closed (7 days after month end),
+                 so Reopen is offered; before then it is still open
+    Month before nothing uploaded
+    Download the template, fill a few cells, upload it: the preview, then Confirm import
 
   AUDIT LOG at /admin/audit  (Super Admin)
     Platform-level and tenant-level rows, so the scope toggle has both sides.

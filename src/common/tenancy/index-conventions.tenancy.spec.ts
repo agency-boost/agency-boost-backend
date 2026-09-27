@@ -57,6 +57,9 @@ import {
   GoalCascadeMappingSchema, GoalRevisionSchema, GoalSchema, GoalSnapshotSchema,
 } from '@/modules/goals/goal.schema';
 import { PolicySchema } from '@/modules/production/policy.schema';
+import { ProductionMonthSchema } from '@/modules/production/production-month.schema';
+import { DataUploadBatchSchema } from '@/modules/production/data-upload-batch.schema';
+import { DataUploadRowSchema } from '@/modules/production/data-upload-row.schema';
 import {
   MetricValueSchema, MonthlyAgentDataSchema,
 } from '@/modules/production/monthly-agent-data.schema';
@@ -102,6 +105,9 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['goals', GoalSchema],
   ['policies', PolicySchema],
   ['monthlyAgentData', MonthlyAgentDataSchema],
+  ['productionMonths', ProductionMonthSchema],
+  ['dataUploadBatches', DataUploadBatchSchema],
+  ['dataUploadRows', DataUploadRowSchema],
   ['campaigns', CampaignSchema],
   ['capabilityCatalogs', CapabilityCatalogSchema],
 ];
@@ -348,6 +354,9 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [GoalCascadeMappingSchema, 'GoalCascadeMappingSchema'],
   [PolicySchema, 'PolicySchema'],
   [MonthlyAgentDataSchema, 'MonthlyAgentDataSchema'],
+  [ProductionMonthSchema, 'ProductionMonthSchema'],
+  [DataUploadBatchSchema, 'DataUploadBatchSchema'],
+  [DataUploadRowSchema, 'DataUploadRowSchema'],
   [MetricValueSchema, 'MetricValueSchema'],
   [GoalRevisionSchema, 'GoalRevisionSchema'],
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],

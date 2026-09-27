@@ -10,6 +10,64 @@ import type { UploadDelimiter, UploadEncoding } from './production-csv';
 import type {
   MetricCell, MonthRow, MonthView, TemplateFile, UploadPreview,
 } from './production.service';
+import type { BatchView, History, ImportResult } from './production-import.service';
+import type { LockReason, MonthState } from './production-months.service';
+import { BATCH_STATUSES, type BatchStatus } from './data-upload-batch.schema';
+
+const LOCK_REASONS: readonly LockReason[] = ['open', 'schedule', 'locked_by_hand', 'reopened'];
+
+export class MonthStateDto implements MonthState {
+  @ApiProperty({ type: String, example: '2026-09' }) month!: string;
+
+  @ApiProperty({ type: Number, description: 'Advanced by every write to the month. A preview carries it; Confirm import must send it back unchanged, or is refused `VERSION_CONFLICT`.' })
+  revision!: number;
+
+  @ApiProperty({ type: Boolean, description: 'A locked month refuses import, revert and correction with `UPLOAD_MONTH_LOCKED` (ADR-0050).' })
+  locked!: boolean;
+
+  @ApiProperty({ enum: LOCK_REASONS, description: '`open`/`schedule` follow the office’s window; `locked_by_hand`/`reopened` are somebody’s decision, which holds until the other is taken.' })
+  reason!: LockReason;
+
+  @ApiProperty({ type: String, example: '2026-10-07', description: 'The last day the schedule leaves it open: month end plus `kpms.settings.productionLockGraceDays`, in the office’s calendar.' })
+  editableUntil!: string;
+
+  @ApiProperty({ type: String, nullable: true, description: 'When it was last locked or reopened by hand.' })
+  changedAt!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, description: 'Who did it, by name.' })
+  changedBy!: string | null;
+}
+
+export class BatchViewDto implements BatchView {
+  @ApiProperty({ type: String }) id!: string;
+  @ApiProperty({ type: String }) month!: string;
+  @ApiProperty({ type: String }) filename!: string;
+  @ApiProperty({ enum: BATCH_STATUSES, description: 'The history lists `committed`, `reverting` and `reverted`.' }) status!: BatchStatus;
+  @ApiProperty({ type: Number }) templateVersion!: number;
+  @ApiProperty({ type: Number, description: 'Data rows in the file.' }) rowCount!: number;
+  @ApiProperty({ type: Number, description: 'Rows with at least one figure written.' }) writtenRowCount!: number;
+  @ApiProperty({ type: Number, description: 'Figures written.' }) cellCount!: number;
+  @ApiProperty({ type: Number, description: 'Rows and figures not taken.' }) issueCount!: number;
+  @ApiProperty({ type: String, nullable: true }) committedAt!: string | null;
+  @ApiProperty({ type: String, nullable: true, description: 'By name.' }) committedBy!: string | null;
+  @ApiProperty({ type: String, nullable: true }) revertedAt!: string | null;
+  @ApiProperty({ type: String, nullable: true, description: 'By name.' }) revertedBy!: string | null;
+  @ApiProperty({ type: Number, description: 'Figures a revert put back.' }) restoredCellCount!: number;
+  @ApiProperty({ type: Number, description: 'Figures a revert kept, because something else wrote them since.' }) keptCellCount!: number;
+
+  @ApiProperty({ type: Boolean, description: 'Standing, and the month’s latest standing import — the only one revert takes.' })
+  canRevert!: boolean;
+}
+
+export class ImportResultDto implements ImportResult {
+  @ApiProperty({ type: BatchViewDto }) batch!: BatchViewDto;
+  @ApiProperty({ type: MonthStateDto, description: 'The month after the write, with its new revision.' }) state!: MonthStateDto;
+}
+
+export class HistoryDto implements History {
+  @ApiProperty({ type: String, example: '2026-09' }) month!: string;
+  @ApiProperty({ type: [BatchViewDto], description: 'Newest first.' }) batches!: BatchViewDto[];
+}
 
 export class MetricCellDto implements MetricCell {
   @ApiProperty({
@@ -82,6 +140,9 @@ export class MonthViewDto implements MonthView {
 
   @ApiProperty({ type: Number, description: 'Rows holding at least one figure. Zero means nothing uploaded yet.' })
   withData!: number;
+
+  @ApiProperty({ type: MonthStateDto, description: 'Open or locked, and why (P9-T4).' })
+  state!: MonthStateDto;
 }
 
 const CELL_STATUSES: readonly CellStatus[] = ['new', 'changed', 'unchanged', 'not_provided', 'refused'];
@@ -172,6 +233,7 @@ export class UploadPreviewDto implements UploadPreview {
   @ApiProperty({ type: Number, example: 1 }) templateVersion!: number;
   @ApiProperty({ enum: ['utf-8', 'windows-1252'] }) encoding!: UploadEncoding;
   @ApiProperty({ enum: [',', ';', '\t'] }) delimiter!: UploadDelimiter;
+  @ApiProperty({ type: Number, description: 'The month’s revision the preview was taken against. Confirm import sends it back.' }) revision!: number;
   @ApiProperty({ type: PreviewSummaryDto }) summary!: PreviewSummaryDto;
   @ApiProperty({ type: [PreviewRowDto] }) rows!: PreviewRowDto[];
 }

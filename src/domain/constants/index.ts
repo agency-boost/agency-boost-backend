@@ -194,7 +194,7 @@ export {
 } from './product-catalog';
 
 export { ASSET_LIMITS } from './assets';
-export { PRODUCTION_UPLOAD } from './production';
+export { PRODUCTION, PRODUCTION_UPLOAD } from './production';
 
 export {
   EVENT_ISSUERS,

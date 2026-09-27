@@ -26,6 +26,14 @@ import { Policy, PolicySchema } from '@/modules/production/policy.schema';
 import { MonthlyAgentData, MonthlyAgentDataSchema } from '@/modules/production/monthly-agent-data.schema';
 import { PolicyRepository } from '@/modules/production/policy.repository';
 import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
+import { ProductionMonth, ProductionMonthSchema } from '@/modules/production/production-month.schema';
+import { ProductionMonthRepository } from '@/modules/production/production-month.repository';
+import { DataUploadBatch, DataUploadBatchSchema } from '@/modules/production/data-upload-batch.schema';
+import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
+import { DataUploadRow, DataUploadRowSchema } from '@/modules/production/data-upload-row.schema';
+import { DataUploadRowRepository } from '@/modules/production/data-upload-row.repository';
+import { ProductionMonths } from '@/modules/production/production-months.service';
+import { ProductionImportService } from '@/modules/production/production-import.service';
 import { ProductionService } from '@/modules/production/production.service';
 import { ProductionController } from '@/modules/production/production.controller';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -206,6 +214,9 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: Lead.name, schema: LeadSchema },
       { name: Policy.name, schema: PolicySchema },
       { name: MonthlyAgentData.name, schema: MonthlyAgentDataSchema },
+      { name: ProductionMonth.name, schema: ProductionMonthSchema },
+      { name: DataUploadBatch.name, schema: DataUploadBatchSchema },
+      { name: DataUploadRow.name, schema: DataUploadRowSchema },
       { name: Goal.name, schema: GoalSchema },
       { name: MembershipHistory.name, schema: MembershipHistorySchema },
       { name: JoinRequest.name, schema: JoinRequestSchema },
@@ -345,7 +356,12 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     GoalService,
     PolicyRepository,
     MonthlyAgentDataRepository,
+    ProductionMonthRepository,
+    DataUploadBatchRepository,
+    DataUploadRowRepository,
+    ProductionMonths,
     ProductionService,
+    ProductionImportService,
     TenantDay,
     NotificationService,
     PasswordService,

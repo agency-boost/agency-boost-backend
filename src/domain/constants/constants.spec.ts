@@ -2,6 +2,7 @@ import {
   ACTIVATION,
   CASCADE_ACTIVITY_CODES,
   ASSET_LIMITS,
+  PRODUCTION,
   PRODUCTION_UPLOAD,
   ACTIVITY,
   GOAL_DEFAULTS,
@@ -138,6 +139,15 @@ describe('domain constants', () => {
     it('pins the ceiling at 1 MiB — ten thousand rows of the template, more than any office', () => {
       expect(PRODUCTION_UPLOAD.MAX_BYTES).toBe(1024 * 1024);
       expect(PRODUCTION_UPLOAD.MAX_BYTES).toBe(1_048_576);
+    });
+
+    it('pins a half-written import as stranded after ten minutes (P9-T4)', () => {
+      expect(PRODUCTION_UPLOAD.STRANDED_AFTER_MINUTES).toBe(10);
+    });
+
+    it('locks a month seven days after it ends — the activity window’s number, as ADR-0050 decided', () => {
+      expect(PRODUCTION.LOCK_GRACE_DAYS).toBe(7);
+      expect(PRODUCTION.LOCK_GRACE_DAYS).toBe(ACTIVITY.BACKDATE_GRACE_DAYS);
     });
   });
 

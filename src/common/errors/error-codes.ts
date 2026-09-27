@@ -183,8 +183,8 @@ export const ErrorCode = {
   CONFIG_RATIO_UNIT_MISMATCH: 'CONFIG_RATIO_UNIT_MISMATCH',
 
   /*
-   * Production import (P9-T3). The catalog has carried seven `UPLOAD_*` codes since Phase 0; these
-   * land with the path that raises them, and the rest arrive with P9-T4.
+   * Production import (P9-T3, P9-T4). The catalog has carried seven `UPLOAD_*` codes since Phase 0;
+   * each landed with the path that raises it, and two were added that it did not have.
    *
    * **Two are thrown, three are reported.** A file whose header nobody issued, or that cannot be read
    * at all, is refused whole. A row or a cell that is wrong is reported **inside the preview** and
@@ -200,6 +200,14 @@ export const ErrorCode = {
   UPLOAD_DUPLICATE_AGENT_CODE: 'UPLOAD_DUPLICATE_AGENT_CODE',
   /** Cell-level: not a number, the wrong sign, the wrong mark, above 100, a fraction of a person. */
   UPLOAD_VALUE_OUT_OF_RANGE: 'UPLOAD_VALUE_OUT_OF_RANGE',
+  /** A write to a month past its window, or locked by hand, and not reopened (ADR-0050). */
+  UPLOAD_MONTH_LOCKED: 'UPLOAD_MONTH_LOCKED',
+  /** This very preview — the same file against the same month revision — was committed already. */
+  UPLOAD_BATCH_ALREADY_COMMITTED: 'UPLOAD_BATCH_ALREADY_COMMITTED',
+  /** The import is not standing: reverted already, or never committed. */
+  UPLOAD_NOTHING_TO_REVERT: 'UPLOAD_NOTHING_TO_REVERT',
+  /** A later import of the month is still standing; it is reverted first, so each revert is exact. */
+  UPLOAD_BATCH_NOT_LATEST: 'UPLOAD_BATCH_NOT_LATEST',
 
   // Validation
   VALIDATION_FAILED: 'VALIDATION_FAILED',

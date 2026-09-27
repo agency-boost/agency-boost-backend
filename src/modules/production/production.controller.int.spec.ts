@@ -15,6 +15,9 @@ import { PRODUCTION_UPLOAD } from '@/domain/constants';
 import { ProductionController } from './production.controller';
 import { TEMPLATE_HEADER_V1 } from './production-template';
 import { ProductionService } from './production.service';
+import { ProductionImportService } from './production-import.service';
+import { ProductionMonths } from './production-months.service';
+import { ProductionMonth } from './production-month.schema';
 
 const NOW = new Date('2026-09-27T02:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
@@ -24,6 +27,11 @@ const RINA = '66f000000000000000000101';
 const ROUTES: Record<string, string> = {
   template: 'data_upload:download_template',
   preview: 'data_upload:upload_and_preview',
+  commit: 'data_upload:commit_import',
+  revert: 'data_upload:revert_batch',
+  history: 'data_upload:read_history',
+  lock: 'data_upload:lock_month',
+  reopen: 'data_upload:reopen_month',
   readMonth: 'data_upload:read',
 };
 
@@ -43,7 +51,11 @@ describe('production over HTTP (P9-T1)', () => {
     wired = configModule(NOW);
     const moduleRef = await Test.createTestingModule({
       controllers: [ProductionController],
-      providers: [{ provide: ProductionService, useValue: wired.production }],
+      providers: [
+        { provide: ProductionService, useValue: wired.production },
+        { provide: ProductionImportService, useValue: wired.productionImport },
+        { provide: ProductionMonths, useValue: wired.productionMonths },
+      ],
     }).compile();
     app = moduleRef.createNestApplication();
     app.useGlobalPipes(productionPipe());
@@ -61,6 +73,8 @@ describe('production over HTTP (P9-T1)', () => {
   beforeEach(async () => {
     session.current = OWNER;
     await clearCollections();
+    // The first claim on a month is made safe by its unique index, which has to exist to enforce it.
+    await mongoose.model(ProductionMonth.name).syncIndexes();
     await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create({
       _id: FIXTURE_KPM, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta',
     });
@@ -244,6 +258,105 @@ describe('production over HTTP (P9-T1)', () => {
       const noMonth = await send(FILLED, null);
       expect(noMonth.status).toBe(400);
       expect(noMonth.body.error.code).toBe('VALIDATION_FAILED');
+    });
+  });
+
+  describe('confirm, revert, history and the month lock (P9-T4)', () => {
+    const FILLED = `${TEMPLATE_HEADER_V1.join(',')}\nPRU-001,"Rina Wijaya",1.5,,,,,,,,,,,\n`;
+    const commit = (revision: string | null = '0', body = FILLED) => {
+      const req = request(app.getHttpServer()).post('/kpm/data-upload/commit').field('month', '2026-09');
+      if (revision !== null) req.field('revision', revision);
+      return req.attach('file', Buffer.from(body), 'filled.csv');
+    };
+    /** Every write route, as the caller of the moment sends it. */
+    const WRITES: [string, () => request.Test][] = [
+      ['commit', () => commit()],
+      ['revert', () => request(app.getHttpServer()).post('/kpm/data-upload/revert').send({ batchId: '66f0000000000000000000ff' })],
+      ['history', () => request(app.getHttpServer()).get('/kpm/data-upload/history?month=2026-09')],
+      ['lock', () => request(app.getHttpServer()).post('/kpm/data-upload/months/2026-09/lock')],
+      ['reopen', () => request(app.getHttpServer()).post('/kpm/data-upload/months/2026-09/reopen')],
+    ];
+
+    it('confirms an import for the Owner, answering the batch and the month after it', async () => {
+      const res = await commit();
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({
+        batch: { filename: 'filled.csv', status: 'committed', cellCount: 1, canRevert: true },
+        state: { month: '2026-09', revision: 1, locked: false },
+      });
+      const month = await request(app.getHttpServer()).get('/kpm/data-upload/2026-09');
+      expect(month.body.rows[0].metrics.ape.monthly).toEqual({ value: 150_000_000, provenance: 'imported' });
+      expect(month.body.state).toMatchObject({ revision: 1, reason: 'open', editableUntil: '2026-10-07' });
+    });
+
+    it('lists, then reverts, over HTTP', async () => {
+      const { body } = await commit();
+      const history = await request(app.getHttpServer()).get('/kpm/data-upload/history?month=2026-09');
+      expect(history.status).toBe(200);
+      expect(history.body.batches.map((b: { id: string }) => b.id)).toEqual([body.batch.id]);
+
+      const res = await request(app.getHttpServer()).post('/kpm/data-upload/revert').send({ batchId: body.batch.id });
+      expect(res.status).toBe(200);
+      expect(res.body.batch).toMatchObject({ status: 'reverted', restoredCellCount: 1 });
+    });
+
+    it('locks and reopens a month over HTTP', async () => {
+      const locked = await request(app.getHttpServer()).post('/kpm/data-upload/months/2026-09/lock');
+      expect(locked.status).toBe(200);
+      expect(locked.body).toMatchObject({ locked: true, reason: 'locked_by_hand' });
+      expect((await commit('1')).body.error.code).toBe('UPLOAD_MONTH_LOCKED');
+
+      const reopened = await request(app.getHttpServer()).post('/kpm/data-upload/months/2026-09/reopen');
+      expect(reopened.body).toMatchObject({ locked: false, reason: 'reopened' });
+    });
+
+    it('answers the Admin on every route — §3.9 grants both', async () => {
+      session.current = ADMIN;
+      // The revert names a batch that does not exist: its 404 is the service answering, past the guard.
+      const expected: Record<string, number> = { commit: 201, revert: 404, history: 200, lock: 200, reopen: 200 };
+      for (const [route, send] of WRITES) expect([route, (await send()).status]).toEqual([route, expected[route]]);
+    });
+
+    it.each(NOT_ADMINISTRATORS.filter(([who]) => who !== 'a Super Admin'))(
+      'refuses %s every route',
+      async (_who, ctx) => {
+        session.current = ctx;
+        for (const [, send] of WRITES) expect((await send()).status).toBe(403);
+      },
+    );
+
+    it('refuses a Super Admin every route by name — there is no office to write to', async () => {
+      session.current = SUPER_ADMIN;
+      for (const [, send] of WRITES) {
+        const res = await send();
+        expect(res.status).toBe(403);
+        expect(res.body.error.code).toBe('TENANT_NO_MEMBERSHIP');
+      }
+    });
+
+    it('reaches history as itself, not as a month called "history"', async () => {
+      const res = await request(app.getHttpServer()).get('/kpm/data-upload/history?month=2026-09');
+      expect(res.body).toEqual({ month: '2026-09', batches: [] });
+    });
+
+    it('refuses what is missing with a code a client can branch on', async () => {
+      const noRevision = await commit(null);
+      expect(noRevision.status).toBe(400);
+      expect(noRevision.body.error.code).toBe('VALIDATION_FAILED');
+
+      const noBatch = await request(app.getHttpServer()).post('/kpm/data-upload/revert').send({});
+      expect(noBatch.status).toBe(400);
+
+      const badMonth = await request(app.getHttpServer()).post('/kpm/data-upload/months/Sep/lock');
+      expect(badMonth.status).toBe(400);
+      expect(badMonth.body.error.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('answers a stale preview with 409 VERSION_CONFLICT', async () => {
+      await commit();
+      const res = await commit('0', FILLED.replace('1.5', '2'));
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('VERSION_CONFLICT');
     });
   });
 
