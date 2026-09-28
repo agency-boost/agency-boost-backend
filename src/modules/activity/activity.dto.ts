@@ -78,6 +78,23 @@ export class ActivitySummaryQueryDto {
   membershipId?: string;
 }
 
+export class ActivityDashboardQueryDto {
+  @ApiPropertyOptional({
+    enum: ['ROLLING_7D', 'ROLLING_30D', 'CUSTOM'],
+    description: 'The two presets end today in the office’s timezone. `CUSTOM` needs `from` and `to`.',
+  })
+  @IsOptional() @IsIn(['ROLLING_7D', 'ROLLING_30D', 'CUSTOM'])
+  range?: string;
+
+  @ApiPropertyOptional({ example: '2026-09-01', description: '`CUSTOM` only.' })
+  @IsOptional() @IsString() @Matches(LOCAL_DATE, { message: DATE_MESSAGE })
+  from?: string;
+
+  @ApiPropertyOptional({ example: '2026-09-28', description: '`CUSTOM` only. Not after today.' })
+  @IsOptional() @IsString() @Matches(LOCAL_DATE, { message: DATE_MESSAGE })
+  to?: string;
+}
+
 export class ActivityComplianceQueryDto {
   @ApiPropertyOptional({ description: 'Whose compliance. Defaults to your own.' })
   @IsOptional() @IsString() @MaxLength(64)

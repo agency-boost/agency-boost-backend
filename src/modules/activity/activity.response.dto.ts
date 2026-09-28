@@ -60,6 +60,71 @@ export class ActivitySummaryDto {
   @ApiProperty({ example: 31 }) totalCount!: number;
 }
 
+const STANDINGS = ['shown', 'archived', 'not_shown'];
+
+export class DashboardBucketDto {
+  @ApiProperty({ example: '2026-09-22' }) from!: string;
+  @ApiProperty({ example: '2026-09-28' }) to!: string;
+  @ApiProperty({ example: 7 }) days!: number;
+
+  @ApiProperty({
+    enum: ['day', 'week', 'remainder'],
+    description: '`week` is a 7-day block counted back from the range’s end — *Week 1* is the most '
+      + 'recent seven days, not a calendar week. `remainder` is what is left at the old end.',
+  })
+  kind!: 'day' | 'week' | 'remainder';
+}
+
+export class DashboardTypeDto {
+  @ApiProperty({ example: 'SELL_SUBMISSION' }) code!: string;
+  @ApiProperty({ example: 'Submission polis' }) label!: string;
+  @ApiProperty({ type: String, nullable: true }) description!: string | null;
+  @ApiProperty({ example: 6, description: 'Display order — the number beside it, never an identity.' })
+  displayOrder!: number;
+
+  @ApiProperty({
+    enum: STANDINGS,
+    description: '`shown` is a type this rung logs against today. `archived` and `not_shown` are history '
+      + 'kept on the table so the totals add up.',
+  })
+  standing!: 'shown' | 'archived' | 'not_shown';
+
+  @ApiProperty() total!: number;
+  @ApiProperty({ type: [Number], description: 'One per bucket, in the buckets’ order.' }) counts!: number[];
+}
+
+export class DashboardSectionDto {
+  @ApiProperty({ example: 'SELLING' }) code!: string;
+  @ApiProperty({ example: 'Selling' }) label!: string;
+  @ApiProperty({ enum: STANDINGS }) standing!: 'shown' | 'archived' | 'not_shown';
+  @ApiProperty() total!: number;
+  @ApiProperty({ type: [Number] }) counts!: number[];
+  @ApiProperty({ type: [DashboardTypeDto] }) types!: DashboardTypeDto[];
+}
+
+export class ActivityDashboardDto {
+  @ApiProperty({ enum: ['ROLLING_7D', 'ROLLING_30D', 'CUSTOM'] }) range!: 'ROLLING_7D' | 'ROLLING_30D' | 'CUSTOM';
+  @ApiProperty({ example: '2026-09-22' }) from!: string;
+  @ApiProperty({ example: '2026-09-28' }) to!: string;
+  @ApiProperty({ example: 7 }) days!: number;
+  @ApiProperty({ example: '2026-09-28', description: 'Today in the office’s timezone.' }) today!: string;
+  @ApiProperty({ type: [DashboardBucketDto], description: 'Most recent first.' }) buckets!: DashboardBucketDto[];
+
+  @ApiProperty({
+    type: [DashboardSectionDto],
+    description: 'The sections this rung is shown, in the office’s order, then any archived or no-longer-'
+      + 'shown one that holds counts in the range.',
+  })
+  sections!: DashboardSectionDto[];
+
+  @ApiProperty() total!: number;
+  @ApiProperty({ type: [Number] }) counts!: number[];
+  @ApiProperty({ description: 'Days with an entry, zeroes included (ADR-0042).' }) daysLogged!: number;
+
+  @ApiProperty({ description: 'Days in the range corrected after they closed, counted at their current figures.' })
+  correctedDays!: number;
+}
+
 export class ActivityComplianceDto {
   @ApiProperty() membershipId!: string;
 

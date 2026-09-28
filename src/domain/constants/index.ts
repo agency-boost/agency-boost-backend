@@ -61,6 +61,19 @@ export const TIME = {
   MS_PER_DAY: 86_400_000,
 } as const;
 
+/**
+ * The named periods' lengths (ADR-0022, resolving OD-11).
+ *
+ * **Fixed, not an office setting.** *"Last 30 days"* has to mean thirty days in every office, or two
+ * offices' ratios under one name are two different numbers. `kpms.settings.ratioWindowDays` exists and
+ * was read for `ROLLING_30D` until P10-T1, against ADR-0022 and against `metrics-and-definitions.md`
+ * §B.1, which class the window *Fixed*; no route ever wrote it, so no office moved.
+ */
+export const PERIOD = {
+  ROLLING_7D_DAYS: 7,
+  ROLLING_30D_DAYS: 30,
+} as const;
+
 /** Activity logging. Overall.html clamp helper. */
 export const ACTIVITY = {
   COUNT_MIN: 0,
@@ -75,6 +88,18 @@ export const ACTIVITY = {
    * than editing. Tenant-configurable, because month-end differs by office.
    */
   BACKDATE_GRACE_DAYS: 7,
+  /**
+   * The Activity Dashboard (P10-T1). A custom range up to this many days is shown a column a day —
+   * a month fits whatever its length …
+   */
+  DASHBOARD_DAILY_MAX_DAYS: 31,
+  /** … and above it, in blocks of this many days counted back from the range's end, as *Last 30 days* is. */
+  DASHBOARD_BLOCK_DAYS: 7,
+  /**
+   * The longest range the Dashboard shows: a year, a leap day included. Longer is **refused, not cut** —
+   * the prototype silently kept the latest 30 days of whatever was asked for.
+   */
+  DASHBOARD_RANGE_MAX_DAYS: 366,
 } as const;
 
 /** 90-day activation programme. Overall.html:3270-3352. Tenant-configurable window. */
@@ -92,8 +117,8 @@ export const PERFORMANCE = {
   COACHING_OVERDUE_DAYS: 7,
   /** Activity-logging compliance window. KPM_Owner.html:964. */
   COMPLIANCE_WINDOW_DAYS: 7,
-  /** Ratio computation window. Overall.html:5200. Tenant-configurable. */
-  RATIO_WINDOW_DAYS: 30,
+  /** Ratio computation window. Overall.html:5200. **Fixed** — it is `ROLLING_30D` (ADR-0022). */
+  RATIO_WINDOW_DAYS: PERIOD.ROLLING_30D_DAYS,
   /** Attainment percentages are displayed capped at this. Overall.html:6303. */
   ATTAINMENT_PCT_CAP: 999,
 } as const;

@@ -2154,6 +2154,39 @@ async function main(): Promise<void> {
     await logDay(rina.id, back, counts);
   }
 
+  /*
+   * **Six weeks behind that week (P10-T1).** The Activity Dashboard's *Last 30 days*, and a custom range
+   * reaching further back, need history to show anything but zeroes — five days only ever filled one
+   * column. Most days, not all, because a gap is a column worth seeing; and a little recruitment,
+   * because an agent may log it and the ratios read it.
+   */
+  for (let back = 6; back <= 44; back += 1) {
+    if (back % 7 === 3 || back % 11 === 0) continue; // the days she did not log
+    await logDay(rina.id, back, {
+      LEADS_GEN_ACTIVITY: back % 3,
+      LEADS_NEW_PROSPECT: back % 4 === 0 ? 2 : back % 5 === 0 ? 1 : 0,
+      LEADS_CONTACTED: 2 + (back % 5),
+      SELL_PRESENTATION: back % 2,
+      SELL_FOLLOWUP: back % 3 === 1 ? 1 : 0,
+      SELL_SUBMISSION: back % 9 === 0 ? 1 : 0,
+      RECRUIT_PRESENTATION: back % 13 === 0 ? 1 : 0,
+      DEV_TRAINING_ATTEND: back % 14 === 0 ? 1 : 0,
+    });
+  }
+
+  // Sari leads a unit: a month of recruitment and team development, most days.
+  for (let back = 0; back <= 34; back += 1) {
+    if (back % 4 === 2) continue;
+    await logDay(sari.id, back, {
+      LEADS_CONTACTED: 1 + (back % 3),
+      SELL_PRESENTATION: back % 3 === 0 ? 1 : 0,
+      RECRUIT_PRESENTATION: back % 2,
+      RECRUIT_FOLLOWUP: back % 5 === 0 ? 1 : 0,
+      RECRUIT_AGENT_CODE: back % 12 === 0 ? 1 : 0,
+      DEV_TEAM_ACTIVITY: back % 6 === 0 ? 1 : 0,
+    });
+  }
+
   // Budi: nine days ago, so he is outside the window and the Owner has somebody to chase.
   await logDay(budi.id, 9, { LEADS_CONTACTED: 2, SELL_PRESENTATION: 1 });
 
@@ -2244,6 +2277,14 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     owner@kpm0417.test           empty, deliberately: nothing in this fixture is
                                  addressed to the Owner, and an empty inbox is a
                                  state worth seeing too
+
+  ACTIVITY at /activity/log and /activity/dashboard
+    rina@kpm0417.test            six weeks of days, a few missed — Last 30 days fills every
+                                 column, and a custom range reaches further back
+    sari@kpm0417.test            a leader's month: recruitment and team development most days,
+                                 and a day corrected after it closed, 40 days back — a custom
+                                 range that includes it says "1 corrected day"
+    budi / dewi                  one day each: nine days ago, and a day of zeroes
 
   MONTHLY UPLOAD at /kpm/data-upload  (owner@kpm0417.test or admin@kpm0417.test)
     This month   one import reverted by the Admin (figures typed in thousands), then

@@ -46,7 +46,7 @@ export function isLocalDate(value: unknown): value is LocalDate {
  * `2026-04-01` everywhere. UTC is used because it is the one zone with no DST transition to trip
  * over; this is not a conversion, and no instant crosses in or out.
  */
-function addDays(date: LocalDate, days: number): LocalDate {
+export function addDays(date: LocalDate, days: number): LocalDate {
   const [y, m, d] = date.split('-').map(Number);
   const moved = new Date(Date.UTC(y, m - 1, d + days));
   return moved.toISOString().slice(0, 10);

@@ -495,9 +495,12 @@ describe('an agent’s activity log (P6)', () => {
   });
 
   describe('the periods a summary is taken over (ADR-0022)', () => {
-    it('takes the office’s own ratio window for ROLLING_30D', async () => {
-      // 30 days ending today, from `kpms.settings.ratioWindowDays` — not a constant here, so an
-      // office that narrows its ratio window narrows this with it.
+    it('takes ROLLING_30D as thirty days whatever the office’s stored setting says (ADR-0022)', async () => {
+      // `kpms.settings.ratioWindowDays` was read here until P10-T1. ADR-0022 fixed the window: an
+      // office whose setting says 14 still gets thirty days, because *last 30 days* is a definition.
+      await mongoose.connection.db!.collection('kpms').updateOne(
+        { _id: new mongoose.Types.ObjectId(KPM_A) }, { $set: { 'settings.ratioWindowDays': 14 } },
+      );
       const window = await wired.activityLogs.summary(member(KPM_A), { period: 'ROLLING_30D' });
 
       expect(window).toMatchObject({ from: '2026-02-10', to: TODAY });

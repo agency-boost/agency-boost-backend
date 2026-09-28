@@ -3,11 +3,11 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import {
-  ActivityComplianceQueryDto, ActivitySummaryQueryDto, CorrectActivityDayDto,
+  ActivityComplianceQueryDto, ActivityDashboardQueryDto, ActivitySummaryQueryDto, CorrectActivityDayDto,
   ReadActivityDayQueryDto, SaveActivityDayDto,
 } from './activity.dto';
 import {
-  ActivityComplianceDto, ActivityDayDto, ActivitySummaryDto,
+  ActivityComplianceDto, ActivityDashboardDto, ActivityDayDto, ActivitySummaryDto,
 } from './activity.response.dto';
 import { ActivityService } from './activity.service';
 
@@ -82,6 +82,22 @@ export class ActivityController {
   @ApiResponse({ status: 200, type: ActivitySummaryDto })
   async summary(@Ctx() ctx: RequestContext, @Query() query: ActivitySummaryQueryDto) {
     return this.activity.summary(ctx, query);
+  }
+
+  @Get('dashboard')
+  @RequirePermission('activity_log:read_raw')
+  @ApiOperation({
+    summary: 'Your own activity over a range, per type and per column (P10-T1)',
+    description:
+      '*Last 7 days* (the default), *Last 30 days*, or a custom range of up to 366 days, ending today in '
+      + 'the office’s timezone. Seven days is a column a day; thirty days is 7-day blocks counted back '
+      + 'from today and a remainder; a custom range is daily up to 31 days and blocks above.\n\n'
+      + '**There is no `membershipId` parameter.** The screen is first-person; a leader’s view of a '
+      + 'downline is Phase 13’s, where the read audit `roles-and-permissions.md` §3.5 requires is built.',
+  })
+  @ApiResponse({ status: 200, type: ActivityDashboardDto })
+  async dashboard(@Ctx() ctx: RequestContext, @Query() query: ActivityDashboardQueryDto) {
+    return this.activity.dashboard(ctx, query);
   }
 
   @Get('compliance')

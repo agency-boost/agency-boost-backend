@@ -7,6 +7,7 @@ import {
   ACTIVITY,
   GOAL_DEFAULTS,
   PERFORMANCE,
+  PERIOD,
   RATIO_BENCHMARKS,
   TIME,
   DEFAULT_CURRENCY,
@@ -96,6 +97,13 @@ describe('domain constants', () => {
       // ADR-0042: the current calendar month, plus this many days into the next.
       expect(ACTIVITY.BACKDATE_GRACE_DAYS).toBe(7);
     });
+    it('pins the Activity Dashboard: daily to 31 days, 7-day blocks above, nothing past a year (P10-T1)', () => {
+      expect(ACTIVITY.DASHBOARD_DAILY_MAX_DAYS).toBe(31);
+      expect(ACTIVITY.DASHBOARD_BLOCK_DAYS).toBe(7);
+      expect(ACTIVITY.DASHBOARD_RANGE_MAX_DAYS).toBe(366);
+      // The block is the 7-day period's length: *Week 1* of *Last 30 days* is *Last 7 days*.
+      expect(ACTIVITY.DASHBOARD_BLOCK_DAYS).toBe(PERIOD.ROLLING_7D_DAYS);
+    });
     it('pins the activation window at 90 days, counted from day 1', () => {
       expect(ACTIVATION.WINDOW_DAYS).toBe(90);
       expect(ACTIVATION.DAY_INDEX_BASE).toBe(1);
@@ -111,6 +119,12 @@ describe('domain constants', () => {
     });
     it('pins the ratio window at 30 days', () => {
       expect(PERFORMANCE.RATIO_WINDOW_DAYS).toBe(30);
+      // It is `ROLLING_30D`, and fixed (ADR-0022): one number, not an office's.
+      expect(PERFORMANCE.RATIO_WINDOW_DAYS).toBe(PERIOD.ROLLING_30D_DAYS);
+    });
+    it('pins the named rolling periods at 7 and 30 days (ADR-0022)', () => {
+      expect(PERIOD.ROLLING_7D_DAYS).toBe(7);
+      expect(PERIOD.ROLLING_30D_DAYS).toBe(30);
     });
   });
 

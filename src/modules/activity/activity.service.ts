@@ -18,7 +18,7 @@ import {
   calendarMonth, isFutureDay, isLocalDate, isWithinCorrectionWindow, localDayOf, rollingWindow,
   type LocalDate,
 } from '@/common/time/local-day';
-import { ACTIVITY, DEFAULT_TENANT_TIMEZONE, PERFORMANCE } from '@/domain/constants';
+import { ACTIVITY, DEFAULT_TENANT_TIMEZONE, PERFORMANCE, PERIOD } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import {
   ActivityCategoryRepository, ActivityTypeRepository,
@@ -28,6 +28,9 @@ import { Kpm } from '@/modules/tenants/kpm.schema';
 import { scopeFor } from '@/modules/rbac/permissions';
 import { ActivityLogRepository } from './activity-log.repository';
 import type { ActivityLogDocument } from './activity-log.schema';
+import {
+  bucketIndex, bucketsFor, dashboardRange, type DashboardBucket, type DashboardRange,
+} from './activity-dashboard';
 
 /** One activity type's count on one day, as the wire carries it. */
 export interface ActivityCountView {
@@ -56,6 +59,53 @@ export interface ActivitySummaryView {
   totals: { activityTypeCode: string; label: string; count: number }[];
   daysLogged: number;
   totalCount: number;
+}
+
+/**
+ * Why a row is on the Dashboard. `shown` is a type the reader logs against today; the other two are
+ * history that has to stay visible so the totals add up (invariant §3) — a type the office archived,
+ * or one in a section no longer shown to this rung.
+ */
+export type DashboardStanding = 'shown' | 'archived' | 'not_shown';
+
+export interface DashboardTypeView {
+  code: string;
+  label: string;
+  description: string | null;
+  /** The number the log screen shows beside it — display order, never an identity (invariant §4). */
+  displayOrder: number;
+  standing: DashboardStanding;
+  total: number;
+  /** One per bucket, in the buckets' order. */
+  counts: number[];
+}
+
+export interface DashboardSectionView {
+  code: string;
+  label: string;
+  standing: DashboardStanding;
+  total: number;
+  counts: number[];
+  types: DashboardTypeView[];
+}
+
+/** The Activity Dashboard (P10-T1): the reader's own days over a range, types down and time across. */
+export interface ActivityDashboardView {
+  range: DashboardRange;
+  from: LocalDate;
+  to: LocalDate;
+  days: number;
+  /** The office's today, so the screen can bound a custom range without a clock of its own. */
+  today: LocalDate;
+  /** Most recent first. */
+  buckets: DashboardBucket[];
+  sections: DashboardSectionView[];
+  total: number;
+  counts: number[];
+  /** Days with an entry, zeroes included (ADR-0042). */
+  daysLogged: number;
+  /** Days in the range corrected after they closed — counted at their current figures, and said so. */
+  correctedDays: number;
 }
 
 export interface ActivityComplianceView {
@@ -119,7 +169,7 @@ export class ActivityService {
     const office = await this.office(ctx);
     const today = localDayOf(this.clock.now(), office.timezone);
     const subject = await this.subjectFor(ctx, input.membershipId, 'activity_ratios:read');
-    const window = this.windowFor(input, today, office.settings.ratioWindowDays);
+    const window = this.windowFor(input, today);
 
     const rows = await this.logs.find(ctx, {
       membershipId: subject.membershipId,
@@ -145,6 +195,115 @@ export class ActivityService {
       })),
       daysLogged: rows.length,
       totalCount,
+    };
+  }
+
+  /**
+   * The Activity Dashboard (P10-T1): **your own** days over a range, per type and per column.
+   *
+   * **No subject.** The screen is first-person and the route takes nobody else's id: a leader reading a
+   * downline's day-by-day is Phase 13's coaching copy, and §3.5 owes every such read an audit entry
+   * that this route would otherwise have to write.
+   *
+   * **Summed from what is stored, not from the summary's `totals`.** Those keep only the codes this
+   * rung is shown today, while `totalCount` counts everything; reusing them would make a section's
+   * rows add up to less than its total the day an office archives a type.
+   */
+  async dashboard(
+    ctx: RequestContext, input: { range?: string; from?: string; to?: string },
+  ): Promise<ActivityDashboardView> {
+    // The membership first: a Super Admin holds `read_raw` over everything and has no days of their
+    // own, and *you have no membership here* is the true answer — not *office not found*.
+    const me = this.requireMembership(ctx);
+    const office = await this.office(ctx);
+    const rung = ctx.membership?.orgLevelCode ?? '';
+    const today = localDayOf(this.clock.now(), office.timezone);
+    const range = dashboardRange(input, today);
+    const buckets = bucketsFor(range);
+
+    const [rows, categories, types] = await Promise.all([
+      this.logs.find(ctx, { membershipId: me, localDate: { $gte: range.from, $lte: range.to } }),
+      this.categories.find(ctx, {}, { sort: { displayOrder: 1 } }),
+      this.types.find(ctx, {}, { sort: { displayOrder: 1 } }),
+    ]);
+
+    const byCode = new Map<string, number[]>();
+    for (const row of rows) {
+      const column = bucketIndex(buckets, row.localDate);
+      for (const entry of row.entries) {
+        if (entry.count === 0) continue;
+        const counts = byCode.get(entry.activityTypeCode) ?? buckets.map(() => 0);
+        counts[column] += entry.count;
+        byCode.set(entry.activityTypeCode, counts);
+      }
+    }
+    const zero = () => buckets.map(() => 0);
+    const sum = (lists: number[][]) => buckets.map((_, i) => lists.reduce((t, l) => t + l[i], 0));
+    const total = (counts: number[]) => counts.reduce((t, n) => t + n, 0);
+
+    const shownHere = (c: { status: string; appliesToOrgLevelCodes?: string[] }) => c.status === 'active'
+      && ((c.appliesToOrgLevelCodes ?? []).length === 0 || (c.appliesToOrgLevelCodes ?? []).includes(rung));
+    const placed = new Set<string>();
+
+    const section = (
+      code: string, label: string, standing: DashboardStanding, members: typeof types,
+    ): DashboardSectionView | null => {
+      const rowsHere = members
+        .filter((t) => (standing === 'shown' && t.status === 'active') || byCode.has(t.code))
+        .map((t): DashboardTypeView => {
+          placed.add(t.code);
+          const counts = byCode.get(t.code) ?? zero();
+          return {
+            code: t.code,
+            label: t.label,
+            description: t.description ?? null,
+            displayOrder: t.displayOrder,
+            standing: standing !== 'shown' ? standing : t.status === 'active' ? 'shown' : 'archived',
+            total: total(counts),
+            counts,
+          };
+        });
+      if (standing !== 'shown' && rowsHere.length === 0) return null;
+      const counts = sum(rowsHere.map((r) => r.counts));
+      return { code, label, standing, total: total(counts), counts, types: rowsHere };
+    };
+
+    const ordered = [
+      ...categories.filter(shownHere),
+      ...categories.filter((c) => !shownHere(c)),
+    ];
+    const sections = ordered
+      .map((c) => section(
+        c.code, c.label, shownHere(c) ? 'shown' : c.status === 'active' ? 'not_shown' : 'archived',
+        types.filter((t) => t.categoryCode === c.code),
+      ))
+      .filter((s): s is DashboardSectionView => s !== null);
+
+    // A count against a code no category holds. Nothing writes one — a code is refused unless the
+    // office has it — but a row the totals include and the table does not is the defect this screen
+    // exists to avoid, so it gets a section rather than a silent gap.
+    const stray = [...byCode.keys()].filter((code) => !placed.has(code));
+    if (stray.length > 0) {
+      const counts = stray.map((code) => byCode.get(code)!);
+      sections.push({
+        code: '', label: 'Other', standing: 'archived', total: total(sum(counts)), counts: sum(counts),
+        types: stray.map((code, i) => ({
+          code, label: code, description: null, displayOrder: 0, standing: 'archived',
+          total: total(counts[i]), counts: counts[i],
+        })),
+      });
+    }
+
+    const counts = sum(sections.map((s) => s.counts));
+    return {
+      ...range,
+      today,
+      buckets,
+      sections,
+      total: total(counts),
+      counts,
+      daysLogged: rows.length,
+      correctedDays: rows.filter((r) => (r.corrections ?? []).length > 0).length,
     };
   }
 
@@ -358,7 +517,6 @@ export class ActivityService {
         // The platform defaults, not literals: these are the same numbers `kpm.schema.ts` seeds
         // `KpmSettings` from, and a second copy here is what invariant §7 forbids.
         complianceWindowDays: settings.complianceWindowDays ?? PERFORMANCE.COMPLIANCE_WINDOW_DAYS,
-        ratioWindowDays: settings.ratioWindowDays ?? PERFORMANCE.RATIO_WINDOW_DAYS,
       },
     };
   }
@@ -514,10 +672,14 @@ export class ActivityService {
     });
   }
 
+  /**
+   * A named period (ADR-0022), or a custom range. **Both rolling lengths are constants**: `ROLLING_7D`
+   * was a literal 7, and `ROLLING_30D` read `kpms.settings.ratioWindowDays` — an office setting for a
+   * window ADR-0022 fixed, so *"last 30 days"* could have meant something else in the next office.
+   */
   private windowFor(
     input: { period?: string; from?: string; to?: string },
     today: LocalDate,
-    ratioWindowDays: number,
   ): { from: LocalDate; to: LocalDate } {
     if (input.from || input.to) {
       const from = this.requireDay(input.from ?? today);
@@ -529,8 +691,8 @@ export class ActivityService {
     }
     switch (input.period ?? 'ROLLING_7D') {
       case 'CALENDAR_MONTH': return calendarMonth(today);
-      case 'ROLLING_30D': return rollingWindow(today, ratioWindowDays);
-      case 'ROLLING_7D': return rollingWindow(today, 7);
+      case 'ROLLING_30D': return rollingWindow(today, PERIOD.ROLLING_30D_DAYS);
+      case 'ROLLING_7D': return rollingWindow(today, PERIOD.ROLLING_7D_DAYS);
       default:
         throw new BadRequestException(
           `${input.period} is not a period. One of: ROLLING_7D, ROLLING_30D, CALENDAR_MONTH.`,

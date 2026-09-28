@@ -13844,6 +13844,110 @@
         "x-required-permission": "activity_ratios:read"
       }
     },
+    "/api/v1/activity/dashboard": {
+      "get": {
+        "description": "*Last 7 days* (the default), *Last 30 days*, or a custom range of up to 366 days, ending today in the office’s timezone. Seven days is a column a day; thirty days is 7-day blocks counted back from today and a remainder; a custom range is daily up to 31 days and blocks above.\n\n**There is no `membershipId` parameter.** The screen is first-person; a leader’s view of a downline is Phase 13’s, where the read audit `roles-and-permissions.md` §3.5 requires is built.\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivityController_dashboard_v1",
+        "parameters": [
+          {
+            "name": "range",
+            "required": false,
+            "in": "query",
+            "description": "The two presets end today in the office’s timezone. `CUSTOM` needs `from` and `to`.",
+            "schema": {
+              "enum": [
+                "ROLLING_7D",
+                "ROLLING_30D",
+                "CUSTOM"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "`CUSTOM` only.",
+            "schema": {
+              "example": "2026-09-01",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "`CUSTOM` only. Not after today.",
+            "schema": {
+              "example": "2026-09-28",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityDashboardDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activity_log:read_raw`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Your own activity over a range, per type and per column (P10-T1)",
+        "tags": [
+          "activity"
+        ],
+        "x-required-permission": "activity_log:read_raw"
+      }
+    },
     "/api/v1/activity/compliance": {
       "get": {
         "description": "`ACTIVITY_COMPLIANCE_7D` and `ACTIVITY_COMPLIANCE_MONTH`. **Existence, not a total**: an all-zero entry is a statement that nothing happened and counts as reporting, where no entry is silence and does not (ADR-0042). There is no partial state — Logged or Missed.\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -18865,6 +18969,206 @@
           "totals",
           "daysLogged",
           "totalCount"
+        ]
+      },
+      "DashboardBucketDto": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "example": "2026-09-22"
+          },
+          "to": {
+            "type": "string",
+            "example": "2026-09-28"
+          },
+          "days": {
+            "type": "number",
+            "example": 7
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "remainder"
+            ],
+            "description": "`week` is a 7-day block counted back from the range’s end — *Week 1* is the most recent seven days, not a calendar week. `remainder` is what is left at the old end."
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "days",
+          "kind"
+        ]
+      },
+      "DashboardTypeDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SELL_SUBMISSION"
+          },
+          "label": {
+            "type": "string",
+            "example": "Submission polis"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "displayOrder": {
+            "type": "number",
+            "example": 6,
+            "description": "Display order — the number beside it, never an identity."
+          },
+          "standing": {
+            "type": "string",
+            "enum": [
+              "shown",
+              "archived",
+              "not_shown"
+            ],
+            "description": "`shown` is a type this rung logs against today. `archived` and `not_shown` are history kept on the table so the totals add up."
+          },
+          "total": {
+            "type": "number"
+          },
+          "counts": {
+            "description": "One per bucket, in the buckets’ order.",
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "description",
+          "displayOrder",
+          "standing",
+          "total",
+          "counts"
+        ]
+      },
+      "DashboardSectionDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SELLING"
+          },
+          "label": {
+            "type": "string",
+            "example": "Selling"
+          },
+          "standing": {
+            "type": "string",
+            "enum": [
+              "shown",
+              "archived",
+              "not_shown"
+            ]
+          },
+          "total": {
+            "type": "number"
+          },
+          "counts": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardTypeDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "standing",
+          "total",
+          "counts",
+          "types"
+        ]
+      },
+      "ActivityDashboardDto": {
+        "type": "object",
+        "properties": {
+          "range": {
+            "type": "string",
+            "enum": [
+              "ROLLING_7D",
+              "ROLLING_30D",
+              "CUSTOM"
+            ]
+          },
+          "from": {
+            "type": "string",
+            "example": "2026-09-22"
+          },
+          "to": {
+            "type": "string",
+            "example": "2026-09-28"
+          },
+          "days": {
+            "type": "number",
+            "example": 7
+          },
+          "today": {
+            "type": "string",
+            "example": "2026-09-28",
+            "description": "Today in the office’s timezone."
+          },
+          "buckets": {
+            "description": "Most recent first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardBucketDto"
+            }
+          },
+          "sections": {
+            "description": "The sections this rung is shown, in the office’s order, then any archived or no-longer-shown one that holds counts in the range.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardSectionDto"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "counts": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "daysLogged": {
+            "type": "number",
+            "description": "Days with an entry, zeroes included (ADR-0042)."
+          },
+          "correctedDays": {
+            "type": "number",
+            "description": "Days in the range corrected after they closed, counted at their current figures."
+          }
+        },
+        "required": [
+          "range",
+          "from",
+          "to",
+          "days",
+          "today",
+          "buckets",
+          "sections",
+          "total",
+          "counts",
+          "daysLogged",
+          "correctedDays"
         ]
       },
       "ActivityComplianceDto": {

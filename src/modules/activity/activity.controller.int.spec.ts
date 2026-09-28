@@ -23,6 +23,7 @@ const ROUTES: Record<string, string> = {
   saveDay: 'activity_log:create',
   correctDay: 'activity_log:update',
   summary: 'activity_ratios:read',
+  dashboard: 'activity_log:read_raw',
   compliance: 'activity_log:read_raw',
 };
 
@@ -208,6 +209,56 @@ describe('logging a day over HTTP (P6)', () => {
       session.current = who;
 
       await request(app.getHttpServer()).get(`${url}/compliance`).expect(200);
+    });
+  });
+
+  describe('the Activity Dashboard (P10-T1)', () => {
+    it.each(EVERY_MEMBER)('answers %s their own days, the last 7 by default', async (_name, who) => {
+      session.current = who;
+      await request(app.getHttpServer()).put(`${url}/log`)
+        .send({ counts: { SELL_SUBMISSION: 2 } }).expect(200);
+
+      const res = await request(app.getHttpServer()).get(`${url}/dashboard`).expect(200);
+
+      expect(res.body).toMatchObject({ range: 'ROLLING_7D', from: '2026-03-05', to: TODAY, today: TODAY, total: 2 });
+      expect(res.body.buckets).toHaveLength(7);
+    });
+
+    it('refuses a Super Admin, who has no days of their own', async () => {
+      session.current = SUPER_ADMIN;
+      await request(app.getHttpServer()).get(`${url}/dashboard`).expect(403);
+    });
+
+    it('has no way to name whose days are read', async () => {
+      const res = await request(app.getHttpServer()).get(`${url}/dashboard`)
+        .query({ membershipId: 'somebody-else' }).expect(400);
+      expect(res.body.error.details.violations)
+        .toEqual(expect.arrayContaining([expect.stringContaining('membershipId')]));
+    });
+
+    it('answers the last 30 days in blocks, and a custom range as asked', async () => {
+      const month = await request(app.getHttpServer()).get(`${url}/dashboard`)
+        .query({ range: 'ROLLING_30D' }).expect(200);
+      expect(month.body.buckets.map((b: { kind: string }) => b.kind))
+        .toEqual(['week', 'week', 'week', 'week', 'remainder']);
+
+      const custom = await request(app.getHttpServer()).get(`${url}/dashboard`)
+        .query({ range: 'CUSTOM', from: '2026-03-01', to: '2026-03-03' }).expect(200);
+      expect(custom.body).toMatchObject({ days: 3, from: '2026-03-01', to: '2026-03-03' });
+    });
+
+    it('refuses a range it cannot show, with a code and the field a client can point at', async () => {
+      const future = await request(app.getHttpServer()).get(`${url}/dashboard`)
+        .query({ range: 'CUSTOM', from: '2026-03-01', to: '2026-03-20' }).expect(400);
+      expect(future.body.error).toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'to', today: TODAY } });
+
+      const tooLong = await request(app.getHttpServer()).get(`${url}/dashboard`)
+        .query({ range: 'CUSTOM', from: '2024-01-01', to: TODAY }).expect(400);
+      expect(tooLong.body.error.details).toMatchObject({ max: 366 });
+
+      await request(app.getHttpServer()).get(`${url}/dashboard`).query({ range: 'LAST_QUARTER' }).expect(400);
+      await request(app.getHttpServer()).get(`${url}/dashboard`)
+        .query({ range: 'CUSTOM', from: '01-03-2026', to: TODAY }).expect(400);
     });
   });
 });
