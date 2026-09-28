@@ -206,6 +206,15 @@ export const METRIC_REGISTRY = define([
    * `MONTHS_LEFT_IN_YEAR` is **not** here: it was already registered below, and the document's table
    * was what lacked a row for it. The duplicate this file refuses at module load is what said so.
    */
+  /*
+   * ---- The two conversion assumptions, measured (ADR-0055, P10-T9) ----
+   *
+   * Goal Settings prints each under the field it measures. Over the goal's own cascade codes, not the
+   * office's ratios — those an office redefines and benchmarks (ADR-0024); these follow the field. No
+   * threshold: the agent's own assumption is the comparison, and nothing is judged.
+   */
+  { id: 'MEASURED_LEAD_TO_APPOINTMENT_RATE', label: 'Your logged leads-to-appointment rate', period: 'ROLLING_30D', unit: 'ratio', threshold: null, availableFrom: 10 },
+  { id: 'MEASURED_CLOSING_RATE', label: 'Your logged closing rate', period: 'ROLLING_30D', unit: 'ratio', threshold: null, availableFrom: 10 },
   { id: 'POLICY_COUNT_TARGET', label: 'Policies to close this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },
   { id: 'APPOINTMENT_TARGET', label: 'Appointments to hold this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },
   { id: 'LEAD_TARGET', label: 'Leads to contact this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },

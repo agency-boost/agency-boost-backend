@@ -137,6 +137,9 @@ describe('goals over HTTP (P8-T3)', () => {
       expect(res.body.savedAt).toBeNull();
       expect(res.body.annualApeTargetMinor).toBe(500_000_000_00);
       expect(res.body.projected.leadsPerMonth).toBeGreaterThan(0);
+      // P10-T9: the measured line, with not enough data sent as null rather than dropped or zeroed.
+      expect(res.body.measured).toMatchObject({ days: 30, leadToAppointmentRate: null, closingRate: null });
+      expect(res.body.measured).toHaveProperty('closingRate', null);
     });
 
     it('answers the goal once there is one, with both halves', async () => {

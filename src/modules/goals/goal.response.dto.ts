@@ -1,7 +1,26 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { GOAL_MODES } from './goal.schema';
 import type { CascadeResult } from './goal-cascade';
-import type { GoalAchieved, GoalHistoryEntry, GoalSnapshotView, GoalView } from './goal.service';
+import type { GoalAchieved, GoalHistoryEntry, GoalMeasured, GoalSnapshotView, GoalView } from './goal.service';
+
+export class GoalMeasuredDto implements GoalMeasured {
+  @ApiProperty({ example: '2026-08-30' }) from!: string;
+  @ApiProperty({ example: '2026-09-28' }) to!: string;
+  @ApiProperty({ example: 30, description: '`ROLLING_30D` — the ratio window, fixed (ADR-0022).' }) days!: number;
+
+  @ApiProperty({
+    type: Number, nullable: true, example: 0.25,
+    description: '`MEASURED_LEAD_TO_APPOINTMENT_RATE` (ADR-0055): the goal’s appointments code ÷ its leads code, '
+      + 'as a proportion. **`null` is not enough data** — nothing to divide by — never 0.',
+  })
+  leadToAppointmentRate!: number | null;
+
+  @ApiProperty({
+    type: Number, nullable: true, example: 0.2,
+    description: '`MEASURED_CLOSING_RATE` (ADR-0055): the goal’s closings code ÷ its appointments code. `null` is not enough data.',
+  })
+  closingRate!: number | null;
+}
 
 export class GoalAchievedDto implements GoalAchieved {
   @ApiProperty({ type: Number, description: 'The APE `projected` is computed from, in IDR minor units.' })
@@ -149,6 +168,13 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
 
   @ApiProperty({ type: GoalCascadeMappingDto, description: 'Activity **codes**, never positions.' })
   cascadeMapping!: { leadsCode: string; appointmentsCode: string; closingsCode: string };
+
+  @ApiProperty({
+    type: GoalMeasuredDto,
+    description: 'The subject’s own conversion rates over the last 30 days, over **this goal’s** cascade codes — '
+      + 'printed under the assumptions they measure. Read only: nothing is filled in (ADR-0048, ADR-0055).',
+  })
+  measured!: GoalMeasured;
 
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   savedAt!: string | null;

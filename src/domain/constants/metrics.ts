@@ -51,6 +51,8 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'RECRUITMENT_SUCCESS_RATE', name: 'Recruitment success rate', unit: 'ratio', phase: 6 },
   { key: 'LEADS_PER_ACTIVITY', name: 'Leads per activity', unit: 'ratio', phase: 6 },
   { key: 'MEETING_PER_APPROACH', name: 'Meeting per approach', unit: 'ratio', phase: 6 },
+  { key: 'MEASURED_LEAD_TO_APPOINTMENT_RATE', name: 'Your logged leads-to-appointment rate', unit: 'ratio', phase: 10 },
+  { key: 'MEASURED_CLOSING_RATE', name: 'Your logged closing rate', unit: 'ratio', phase: 10 },
   { key: 'ACTIVATION_COMPLETION_PCT', name: 'Activation completion', unit: 'percentage', phase: 11 },
   { key: 'ACTIVATION_DAY_INDEX', name: 'Activation day', unit: 'days', phase: 11 },
   { key: 'TRAINING_COMPLETION_PCT', name: 'Training completion', unit: 'percentage', phase: 12 },

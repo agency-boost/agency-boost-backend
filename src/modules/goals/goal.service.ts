@@ -12,8 +12,11 @@ import { MembershipRepository } from '@/modules/org/membership.repository';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { scopeFor, type Permission } from '@/modules/rbac/permissions';
-import { CASCADE_ACTIVITY_CODES, GOAL_DEFAULTS } from '@/domain/constants';
+import { CASCADE_ACTIVITY_CODES, GOAL_DEFAULTS, PERIOD } from '@/domain/constants';
 import { ProductionReadings } from '@/modules/production/production-readings';
+import { ActivityReadings } from '@/modules/activity/activity-readings';
+import { measuredRates, type MeasuredRates } from '@/domain/metrics/measured-rates';
+import { rollingWindow, type LocalDate } from '@/common/time/local-day';
 import { computeCascade, defaultMonthsLeft, type CascadeResult } from './goal-cascade';
 import { checkGoal } from './goal-input';
 import { GoalRepository } from './goal.repository';
@@ -122,6 +125,23 @@ export interface GoalAchieved {
 }
 
 /** One goal, as a caller reads it. */
+/**
+ * The two conversion assumptions as the subject actually logged them (ADR-0055, P10-T9): printed under
+ * the fields they measure, over the goal's own cascade codes, for the last 30 days.
+ */
+export interface GoalMeasured extends MeasuredRates {
+  from: LocalDate;
+  to: LocalDate;
+  days: number;
+}
+
+/** A member's counts over the measuring window, fetched once and read against each goal's own codes. */
+interface ActivityWindow {
+  from: LocalDate;
+  to: LocalDate;
+  counts: ReadonlyMap<string, number>;
+}
+
 export interface GoalView {
   id: string;
   membershipId: string;
@@ -168,6 +188,8 @@ export interface GoalView {
   projected: CascadeResult | null;
   /** The three activity **codes** the cascade counts against — never the prototype's #3, #4, #6. */
   cascadeMapping: { leadsCode: string; appointmentsCode: string; closingsCode: string };
+  /** The subject's own rates over the last 30 days, beside the assumptions they measure (ADR-0055). */
+  measured: GoalMeasured;
   savedAt: string | null;
   savedByMembershipId: string | null;
   version: number;
@@ -197,7 +219,24 @@ export class GoalService {
     private readonly names: MemberNames,
     private readonly notifications: NotificationService,
     private readonly production: ProductionReadings,
+    private readonly activity: ActivityReadings,
   ) {}
+
+  /**
+   * **The subject's counts over the last 30 days** (ADR-0055) — `ROLLING_30D`, the ratio window, ending
+   * today in the office's timezone. Fetched once per request and read against each goal's own codes,
+   * so a history of several periods costs one query.
+   */
+  private async activityFor(ctx: RequestContext, membershipId: string, day: OfficeDay): Promise<ActivityWindow> {
+    const window = rollingWindow(day.today, PERIOD.ROLLING_30D_DAYS);
+    return { ...window, counts: await this.activity.countsOver(ctx, membershipId, window) };
+  }
+
+  private measured(window: ActivityWindow, mapping: GoalView['cascadeMapping']): GoalMeasured {
+    return {
+      from: window.from, to: window.to, days: PERIOD.ROLLING_30D_DAYS, ...measuredRates(window.counts, mapping),
+    };
+  }
 
   /**
    * **Which APE the plan is measured against** (P9-T6 AC-3). The promise Phase 8 made: the typed
@@ -361,7 +400,7 @@ export class GoalService {
     );
     // §3.6 (AC-7): an agent finding their target changed should not have to notice it.
     if (membershipId !== savedBy) await this.announce(ctx, membershipId, savedBy, saved.period);
-    return this.view(saved, day, achieved);
+    return this.view(saved, day, achieved, await this.activityFor(ctx, membershipId, day));
   }
 
   /**
@@ -377,7 +416,11 @@ export class GoalService {
     const membershipId = await this.subject(ctx, forMembershipId, 'goal:read');
     const goal = await this.goals.findOne(ctx, { membershipId, period });
     if (!goal) return this.defaults(ctx, period, membershipId);
-    return this.view(goal, await this.days.for(ctx), await this.achievedFor(ctx, membershipId, period, goal.apeAchievedMinor));
+    const day = await this.days.for(ctx);
+    return this.view(
+      goal, day, await this.achievedFor(ctx, membershipId, period, goal.apeAchievedMinor),
+      await this.activityFor(ctx, membershipId, day),
+    );
   }
 
   /** The caller's own goal for a period. 404 for another office's, never 403. */
@@ -385,7 +428,11 @@ export class GoalService {
     const membershipId = await this.subject(ctx, forMembershipId, 'goal:read');
     const goal = await this.goals.findOne(ctx, { membershipId, period });
     if (!goal) throw new NotFoundException('Goal');
-    return this.view(goal, await this.days.for(ctx), await this.achievedFor(ctx, membershipId, period, goal.apeAchievedMinor));
+    const day = await this.days.for(ctx);
+    return this.view(
+      goal, day, await this.achievedFor(ctx, membershipId, period, goal.apeAchievedMinor),
+      await this.activityFor(ctx, membershipId, day),
+    );
   }
 
   /**
@@ -461,8 +508,9 @@ export class GoalService {
     const membershipId = this.me(ctx);
     const day = await this.days.for(ctx);
     const rows = await this.goals.find(ctx, { membershipId }, { sort: { period: -1 } });
+    const activity = await this.activityFor(ctx, membershipId, day);
     return Promise.all(rows.map(async (row) =>
-      this.view(row, day, await this.achievedFor(ctx, membershipId, row.period, row.apeAchievedMinor))));
+      this.view(row, day, await this.achievedFor(ctx, membershipId, row.period, row.apeAchievedMinor), activity)));
   }
 
   /**
@@ -502,12 +550,13 @@ export class GoalService {
       snapshot: { ...EMPTY_SNAPSHOT },
       projected: computeCascade({ ...inputs, apeAchievedMinor: achieved.minor }),
       cascadeMapping: { ...CASCADE_ACTIVITY_CODES },
+      measured: this.measured(await this.activityFor(ctx, membershipId, day), CASCADE_ACTIVITY_CODES),
       savedAt: null,
       savedByMembershipId: null,
     };
   }
 
-  private view(doc: GoalDocument, day: OfficeDay, achieved: GoalAchieved): GoalView {
+  private view(doc: GoalDocument, day: OfficeDay, achieved: GoalAchieved, activity: ActivityWindow): GoalView {
     /*
      * **Every read recomputes** (AC-1b). The stored snapshot is the agreement; this is what it
      * means today, and it is what every screen renders.
@@ -556,6 +605,7 @@ export class GoalService {
         appointmentsCode: doc.cascadeMapping.appointmentsCode,
         closingsCode: doc.cascadeMapping.closingsCode,
       },
+      measured: this.measured(activity, doc.cascadeMapping),
       savedAt: doc.savedAt ? doc.savedAt.toISOString() : null,
       savedByMembershipId: doc.savedByMembershipId,
       version: doc.version,

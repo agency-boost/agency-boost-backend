@@ -15607,6 +15607,43 @@
           "closingsCode"
         ]
       },
+      "GoalMeasuredDto": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "example": "2026-08-30"
+          },
+          "to": {
+            "type": "string",
+            "example": "2026-09-28"
+          },
+          "days": {
+            "type": "number",
+            "example": 30,
+            "description": "`ROLLING_30D` — the ratio window, fixed (ADR-0022)."
+          },
+          "leadToAppointmentRate": {
+            "type": "number",
+            "nullable": true,
+            "example": 0.25,
+            "description": "`MEASURED_LEAD_TO_APPOINTMENT_RATE` (ADR-0055): the goal’s appointments code ÷ its leads code, as a proportion. **`null` is not enough data** — nothing to divide by — never 0."
+          },
+          "closingRate": {
+            "type": "number",
+            "nullable": true,
+            "example": 0.2,
+            "description": "`MEASURED_CLOSING_RATE` (ADR-0055): the goal’s closings code ÷ its appointments code. `null` is not enough data."
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "days",
+          "leadToAppointmentRate",
+          "closingRate"
+        ]
+      },
       "GoalResponseDto": {
         "type": "object",
         "properties": {
@@ -15684,6 +15721,14 @@
               }
             ]
           },
+          "measured": {
+            "description": "The subject’s own conversion rates over the last 30 days, over **this goal’s** cascade codes — printed under the assumptions they measure. Read only: nothing is filled in (ADR-0048, ADR-0055).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoalMeasuredDto"
+              }
+            ]
+          },
           "savedAt": {
             "type": "string",
             "format": "date-time",
@@ -15711,6 +15756,7 @@
           "snapshot",
           "projected",
           "cascadeMapping",
+          "measured",
           "savedAt",
           "savedByMembershipId"
         ]
@@ -19684,6 +19730,8 @@
               "RECRUITMENT_SUCCESS_RATE",
               "LEADS_PER_ACTIVITY",
               "MEETING_PER_APPROACH",
+              "MEASURED_LEAD_TO_APPOINTMENT_RATE",
+              "MEASURED_CLOSING_RATE",
               "ACTIVATION_COMPLETION_PCT",
               "ACTIVATION_DAY_INDEX",
               "TRAINING_COMPLETION_PCT",

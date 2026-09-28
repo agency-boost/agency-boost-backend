@@ -2281,7 +2281,9 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
   ACTIVITY at /activity/log, /activity/dashboard and /activity/ratio
     rina@kpm0417.test            six weeks of days, a few missed — Last 30 days fills every
                                  column, and a custom range reaches further back. An agent:
-                                 three ratios, the recruitment ones not hers to be judged by
+                                 three ratios, the recruitment ones not hers to be judged by.
+                                 /goals prints her logged rate under each conversion
+                                 assumption; Sari, opening Rina's plan, reads "Their" rate
     sari@kpm0417.test            a leader's month: recruitment and team development most days,
                                  and a day corrected after it closed, 40 days back — a custom
                                  range that includes it says "1 corrected day". All five

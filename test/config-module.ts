@@ -55,6 +55,7 @@ import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
 import { LeadRepository } from '@/modules/leads/lead.repository';
 import { LeadService } from '@/modules/leads/lead.service';
 import { ActivityService } from '@/modules/activity/activity.service';
+import { ActivityReadings } from '@/modules/activity/activity-readings';
 import {
   Campaign, CampaignSchema, QualificationRule, QualificationRuleSchema,
 } from '@/modules/campaigns/campaign.schema';
@@ -257,6 +258,7 @@ export function configModule(now: Date) {
     new MemberNames(memberships, users as never),
     notifier,
     productionReadings,
+    new ActivityReadings(new ActivityLogRepository(model(ActivityLog.name, ActivityLogSchema) as never)),
   );
   const productionNames = new MemberNames(memberships, users as never);
   // P9-T4: a month's lock and revision, and the imports that write it.
