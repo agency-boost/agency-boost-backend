@@ -3,11 +3,12 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import {
-  ActivityComplianceQueryDto, ActivityDashboardQueryDto, ActivitySummaryQueryDto, CorrectActivityDayDto,
+  ActivityComplianceQueryDto, ActivityDashboardQueryDto, ActivityRatiosQueryDto, ActivitySummaryQueryDto,
+  CorrectActivityDayDto,
   ReadActivityDayQueryDto, SaveActivityDayDto,
 } from './activity.dto';
 import {
-  ActivityComplianceDto, ActivityDashboardDto, ActivityDayDto, ActivitySummaryDto,
+  ActivityComplianceDto, ActivityDashboardDto, ActivityDayDto, ActivityRatiosDto, ActivitySummaryDto,
 } from './activity.response.dto';
 import { ActivityService } from './activity.service';
 
@@ -98,6 +99,23 @@ export class ActivityController {
   @ApiResponse({ status: 200, type: ActivityDashboardDto })
   async dashboard(@Ctx() ctx: RequestContext, @Query() query: ActivityDashboardQueryDto) {
     return this.activity.dashboard(ctx, query);
+  }
+
+  @Get('ratios')
+  @RequirePermission('activity_ratios:read')
+  @ApiOperation({
+    summary: 'The office’s ratios over the last 30 days (P10-T2)',
+    description:
+      'Every active ratio of the office **that applies to the subject’s rung** (ADR-0020), computed over '
+      + '`ROLLING_30D` — fixed, ending today in the office’s timezone — with the office’s own formula and '
+      + 'benchmark. A zero denominator is `null` and `neutral`: *not enough data*, never 0.\n\n'
+      + '**Your own, only** — there is no `membershipId` parameter. A leader’s view of a downline’s '
+      + 'ratios is Phase 13’s coaching copy.',
+  })
+  @ApiResponse({ status: 200, type: ActivityRatiosDto })
+  // The query is validated, and empty: anything sent is refused by name (`ActivityRatiosQueryDto`).
+  async ratios(@Ctx() ctx: RequestContext, @Query() _query: ActivityRatiosQueryDto) {
+    return this.activity.ratios(ctx);
   }
 
   @Get('compliance')

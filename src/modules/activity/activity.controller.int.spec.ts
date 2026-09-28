@@ -24,6 +24,7 @@ const ROUTES: Record<string, string> = {
   correctDay: 'activity_log:update',
   summary: 'activity_ratios:read',
   dashboard: 'activity_log:read_raw',
+  ratios: 'activity_ratios:read',
   compliance: 'activity_log:read_raw',
 };
 
@@ -209,6 +210,33 @@ describe('logging a day over HTTP (P6)', () => {
       session.current = who;
 
       await request(app.getHttpServer()).get(`${url}/compliance`).expect(200);
+    });
+  });
+
+  describe('the ratios (P10-T2, P10-T3)', () => {
+    it.each(EVERY_MEMBER)('answers %s their own ratios over the last 30 days', async (_name, who) => {
+      session.current = who;
+      const res = await request(app.getHttpServer()).get(`${url}/ratios`).expect(200);
+      expect(res.body).toMatchObject({ membershipId: who.membershipId, from: '2026-02-10', to: TODAY, days: 30 });
+      expect(res.body.ratios.length).toBeGreaterThan(0);
+    });
+
+    it('sends not enough data as null, not as a missing key or a zero', async () => {
+      const res = await request(app.getHttpServer()).get(`${url}/ratios`).expect(200);
+      expect(res.body.ratios[0]).toHaveProperty('value', null);
+      expect(res.body.ratios[0]).toHaveProperty('status', 'neutral');
+    });
+
+    it('refuses a Super Admin, who has no ratios of their own', async () => {
+      session.current = SUPER_ADMIN;
+      await request(app.getHttpServer()).get(`${url}/ratios`).expect(403);
+    });
+
+    it('has no way to name whose ratios are read — a leader’s view of a downline is Phase 13’s', async () => {
+      const res = await request(app.getHttpServer()).get(`${url}/ratios`)
+        .query({ membershipId: 'somebody-else' }).expect(400);
+      expect(res.body.error.details.violations)
+        .toEqual(expect.arrayContaining([expect.stringContaining('membershipId')]));
     });
   });
 

@@ -56,7 +56,7 @@ const sameCodes = (a: readonly string[], b: readonly string[]) =>
  * `false` for a ratio the office created: there is no standard it could have moved away
  * from, which is not the same as agreeing with one.
  */
-function diverges(doc: RatioDefinitionDocument): boolean {
+export function diverges(doc: RatioDefinitionDocument): boolean {
   if (!doc.standardNumerator || !doc.standardDenominator) return false;
   return !sameCodes(doc.numerator, doc.standardNumerator)
     || !sameCodes(doc.denominator, doc.standardDenominator);

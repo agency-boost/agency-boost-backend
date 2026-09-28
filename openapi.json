@@ -13948,6 +13948,65 @@
         "x-required-permission": "activity_log:read_raw"
       }
     },
+    "/api/v1/activity/ratios": {
+      "get": {
+        "description": "Every active ratio of the office **that applies to the subject’s rung** (ADR-0020), computed over `ROLLING_30D` — fixed, ending today in the office’s timezone — with the office’s own formula and benchmark. A zero denominator is `null` and `neutral`: *not enough data*, never 0.\n\n**Your own, only** — there is no `membershipId` parameter. A leader’s view of a downline’s ratios is Phase 13’s coaching copy.\n\n**Requires `activity_ratios:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivityController_ratios_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityRatiosDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activity_ratios:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office’s ratios over the last 30 days (P10-T2)",
+        "tags": [
+          "activity"
+        ],
+        "x-required-permission": "activity_ratios:read"
+      }
+    },
     "/api/v1/activity/compliance": {
       "get": {
         "description": "`ACTIVITY_COMPLIANCE_7D` and `ACTIVITY_COMPLIANCE_MONTH`. **Existence, not a total**: an all-zero entry is a statement that nothing happened and counts as reporting, where no entry is silence and does not (ADR-0042). There is no partial state — Logged or Missed.\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -19169,6 +19228,215 @@
           "counts",
           "daysLogged",
           "correctedDays"
+        ]
+      },
+      "RatioTagDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true,
+            "example": "SELLING"
+          },
+          "label": {
+            "type": "string",
+            "example": "Selling"
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
+      "RatioSidesDto": {
+        "type": "object",
+        "properties": {
+          "numerator": {
+            "type": "string",
+            "nullable": true,
+            "example": "Selling"
+          },
+          "denominator": {
+            "type": "string",
+            "nullable": true,
+            "example": "Recruitment"
+          }
+        },
+        "required": [
+          "numerator",
+          "denominator"
+        ]
+      },
+      "RatioTermDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SELL_SUBMISSION"
+          },
+          "label": {
+            "type": "string",
+            "example": "Submission polis"
+          },
+          "displayOrder": {
+            "type": "number",
+            "example": 6,
+            "description": "Display order — the number the log screen shows. 0 when the code is unknown."
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "displayOrder"
+        ]
+      },
+      "ActivityRatioDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SELLING_SUCCESS_RATE"
+          },
+          "label": {
+            "type": "string",
+            "example": "Selling success rate"
+          },
+          "comparison": {
+            "type": "string",
+            "enum": [
+              "gte",
+              "band"
+            ]
+          },
+          "displayUnit": {
+            "type": "string",
+            "enum": [
+              "percent",
+              "decimal",
+              "points"
+            ]
+          },
+          "benchmark": {
+            "type": "number",
+            "example": 0.15,
+            "description": "The office’s own — a proportion for a rate, points either side of an even split for the balance."
+          },
+          "tag": {
+            "nullable": true,
+            "description": "The section the ratio measures, from its denominator, or *Balance*. `null` when the denominator spans sections.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RatioTagDto"
+              }
+            ]
+          },
+          "sides": {
+            "nullable": true,
+            "description": "The balance’s two ends, by the section each side counts. `null` for a rate.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RatioSidesDto"
+              }
+            ]
+          },
+          "numerator": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RatioTermDto"
+            }
+          },
+          "denominator": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RatioTermDto"
+            }
+          },
+          "purpose": {
+            "type": "string",
+            "nullable": true,
+            "description": "What a platform ratio measures, in the prototype’s words. `null` for an office’s own formula, or one it changed."
+          },
+          "divergesFromStandard": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "number",
+            "nullable": true,
+            "description": "A rate’s proportion, or the balance’s lean in points (positive toward the numerator). **`null` is not enough data** — a zero denominator — never 0."
+          },
+          "share": {
+            "type": "number",
+            "nullable": true,
+            "description": "Balance only: the numerator side’s share of both, in percent."
+          },
+          "numeratorCount": {
+            "type": "number"
+          },
+          "denominatorCount": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "alert",
+              "neutral"
+            ],
+            "description": "*On track*, *Below benchmark*, *Not enough data*."
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "comparison",
+          "displayUnit",
+          "benchmark",
+          "tag",
+          "sides",
+          "numerator",
+          "denominator",
+          "purpose",
+          "divergesFromStandard",
+          "value",
+          "share",
+          "numeratorCount",
+          "denominatorCount",
+          "status"
+        ]
+      },
+      "ActivityRatiosDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string",
+            "example": "2026-08-30"
+          },
+          "to": {
+            "type": "string",
+            "example": "2026-09-28"
+          },
+          "days": {
+            "type": "number",
+            "example": 30,
+            "description": "`ROLLING_30D` — fixed (ADR-0022)."
+          },
+          "ratios": {
+            "description": "The office’s active ratios **that apply to the subject’s rung** (ADR-0020), in its order. One that does not apply is absent, never failed.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityRatioDto"
+            }
+          }
+        },
+        "required": [
+          "membershipId",
+          "from",
+          "to",
+          "days",
+          "ratios"
         ]
       },
       "ActivityComplianceDto": {

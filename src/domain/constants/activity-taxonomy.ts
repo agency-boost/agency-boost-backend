@@ -293,3 +293,19 @@ export const SEED_RATIO_DEFINITIONS: readonly SeedRatioDefinition[] = [
     displayOrder: 5,
   },
 ];
+
+/**
+ * What each platform ratio measures, in the prototype's own words (`Overall.html:5215-5268`).
+ *
+ * Keyed by code and **shown only for a platform ratio whose formula the office has not changed**: an
+ * office that moves `SELLING_SUCCESS_RATE` to count something else has a ratio this sentence no longer
+ * describes, and the card shows its formula alone (P10-T2, ADR-0024).
+ */
+export const SEED_RATIO_PURPOSES: Readonly<Record<string, string>> = {
+  SELLING_VS_RECRUITMENT: 'Memantau keseimbangan fokus antara aktivitas selling dan recruitment',
+  SELLING_SUCCESS_RATE: 'Mengukur tingkat konversi aktivitas selling menjadi submission',
+  RECRUITMENT_SUCCESS_RATE: 'Mengukur tingkat konversi aktivitas recruitment menjadi agen baru',
+  LEADS_PER_ACTIVITY: 'Mengukur efektivitas aktivitas pencarian prospek dalam menghasilkan prospek baru',
+  MEETING_PER_APPROACH: 'Mengukur efektivitas pendekatan prospek dalam menghasilkan pertemuan',
+};
+

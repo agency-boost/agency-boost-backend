@@ -60,7 +60,7 @@ export interface ResponseShape {
  * their interfaces, so the *shape* cannot drift either. This table only says which one.
  */
 import {
-  ActivityComplianceDto, ActivityDashboardDto, ActivityDayDto, ActivitySummaryDto,
+  ActivityComplianceDto, ActivityDashboardDto, ActivityDayDto, ActivityRatiosDto, ActivitySummaryDto,
 } from '@/modules/activity/activity.response.dto';
 
 export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
@@ -70,6 +70,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   ActivityController_correctDay: { type: ActivityDayDto },
   ActivityController_summary: { type: ActivitySummaryDto },
   ActivityController_dashboard: { type: ActivityDashboardDto },
+  ActivityController_ratios: { type: ActivityRatiosDto },
   ActivityController_compliance: { type: ActivityComplianceDto },
   AuthController_resendVerification: { type: StatusAckDto },
   AuthController_sessions: { type: SessionDto, isArray: true },

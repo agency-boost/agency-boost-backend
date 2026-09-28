@@ -2278,13 +2278,16 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
                                  addressed to the Owner, and an empty inbox is a
                                  state worth seeing too
 
-  ACTIVITY at /activity/log and /activity/dashboard
+  ACTIVITY at /activity/log, /activity/dashboard and /activity/ratio
     rina@kpm0417.test            six weeks of days, a few missed — Last 30 days fills every
-                                 column, and a custom range reaches further back
+                                 column, and a custom range reaches further back. An agent:
+                                 three ratios, the recruitment ones not hers to be judged by
     sari@kpm0417.test            a leader's month: recruitment and team development most days,
                                  and a day corrected after it closed, 40 days back — a custom
-                                 range that includes it says "1 corrected day"
-    budi / dewi                  one day each: nine days ago, and a day of zeroes
+                                 range that includes it says "1 corrected day". All five
+                                 ratios, the balance leaning toward recruitment
+    budi / dewi                  one day each: nine days ago, and a day of zeroes — Dewi's
+                                 ratios all read "Not enough data"
 
   MONTHLY UPLOAD at /kpm/data-upload  (owner@kpm0417.test or admin@kpm0417.test)
     This month   one import reverted by the Admin (figures typed in thousands), then

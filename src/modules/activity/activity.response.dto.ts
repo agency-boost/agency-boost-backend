@@ -125,6 +125,85 @@ export class ActivityDashboardDto {
   correctedDays!: number;
 }
 
+export class RatioTermDto {
+  @ApiProperty({ example: 'SELL_SUBMISSION' }) code!: string;
+  @ApiProperty({ example: 'Submission polis' }) label!: string;
+  @ApiProperty({ example: 6, description: 'Display order — the number the log screen shows. 0 when the code is unknown.' })
+  displayOrder!: number;
+}
+
+export class RatioTagDto {
+  @ApiProperty({ type: String, nullable: true, example: 'SELLING' }) code!: string | null;
+  @ApiProperty({ example: 'Selling' }) label!: string;
+}
+
+export class RatioSidesDto {
+  @ApiProperty({ type: String, nullable: true, example: 'Selling' }) numerator!: string | null;
+  @ApiProperty({ type: String, nullable: true, example: 'Recruitment' }) denominator!: string | null;
+}
+
+export class ActivityRatioDto {
+  @ApiProperty({ example: 'SELLING_SUCCESS_RATE' }) code!: string;
+  @ApiProperty({ example: 'Selling success rate' }) label!: string;
+  @ApiProperty({ enum: ['gte', 'band'] }) comparison!: 'gte' | 'band';
+  @ApiProperty({ enum: ['percent', 'decimal', 'points'] }) displayUnit!: 'percent' | 'decimal' | 'points';
+
+  @ApiProperty({ example: 0.15, description: 'The office’s own — a proportion for a rate, points either side of an even split for the balance.' })
+  benchmark!: number;
+
+  @ApiProperty({
+    type: RatioTagDto, nullable: true,
+    description: 'The section the ratio measures, from its denominator, or *Balance*. `null` when the denominator spans sections.',
+  })
+  tag!: RatioTagDto | null;
+
+  @ApiProperty({
+    type: RatioSidesDto, nullable: true,
+    description: 'The balance’s two ends, by the section each side counts. `null` for a rate.',
+  })
+  sides!: RatioSidesDto | null;
+
+  @ApiProperty({ type: [RatioTermDto] }) numerator!: RatioTermDto[];
+  @ApiProperty({ type: [RatioTermDto] }) denominator!: RatioTermDto[];
+
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'What a platform ratio measures, in the prototype’s words. `null` for an office’s own formula, or one it changed.',
+  })
+  purpose!: string | null;
+
+  @ApiProperty() divergesFromStandard!: boolean;
+
+  @ApiProperty({
+    type: Number, nullable: true,
+    description: 'A rate’s proportion, or the balance’s lean in points (positive toward the numerator). '
+      + '**`null` is not enough data** — a zero denominator — never 0.',
+  })
+  value!: number | null;
+
+  @ApiProperty({ type: Number, nullable: true, description: 'Balance only: the numerator side’s share of both, in percent.' })
+  share!: number | null;
+
+  @ApiProperty() numeratorCount!: number;
+  @ApiProperty() denominatorCount!: number;
+
+  @ApiProperty({ enum: ['success', 'alert', 'neutral'], description: '*On track*, *Below benchmark*, *Not enough data*.' })
+  status!: 'success' | 'alert' | 'neutral';
+}
+
+export class ActivityRatiosDto {
+  @ApiProperty() membershipId!: string;
+  @ApiProperty({ example: '2026-08-30' }) from!: string;
+  @ApiProperty({ example: '2026-09-28' }) to!: string;
+  @ApiProperty({ example: 30, description: '`ROLLING_30D` — fixed (ADR-0022).' }) days!: number;
+
+  @ApiProperty({
+    type: [ActivityRatioDto],
+    description: 'The office’s active ratios **that apply to the subject’s rung** (ADR-0020), in its order. One that does not apply is absent, never failed.',
+  })
+  ratios!: ActivityRatioDto[];
+}
+
 export class ActivityComplianceDto {
   @ApiProperty() membershipId!: string;
 

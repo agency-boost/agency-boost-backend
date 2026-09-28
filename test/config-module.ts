@@ -219,6 +219,7 @@ export function configModule(now: Date) {
     kpms as never,
     clock,
     audit,
+    new RatioDefinitionRepository(ratioDefinitions as never),
   );
   // P7-T1: one person an agent is working. The first record about somebody who is not a user.
   const leadRecords = new LeadService(

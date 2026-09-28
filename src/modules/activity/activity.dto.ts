@@ -95,6 +95,13 @@ export class ActivityDashboardQueryDto {
   to?: string;
 }
 
+/**
+ * **Empty on purpose.** The ratios are your own, and a class with no fields is how the validation
+ * pipe's `forbidNonWhitelisted` refuses a `membershipId` by name — with no DTO at all it would be
+ * ignored, and a caller who sent one would read their own ratios believing they were somebody else's.
+ */
+export class ActivityRatiosQueryDto {}
+
 export class ActivityComplianceQueryDto {
   @ApiPropertyOptional({ description: 'Whose compliance. Defaults to your own.' })
   @IsOptional() @IsString() @MaxLength(64)

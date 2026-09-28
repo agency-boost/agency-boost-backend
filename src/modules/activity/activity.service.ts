@@ -18,11 +18,15 @@ import {
   calendarMonth, isFutureDay, isLocalDate, isWithinCorrectionWindow, localDayOf, rollingWindow,
   type LocalDate,
 } from '@/common/time/local-day';
-import { ACTIVITY, DEFAULT_TENANT_TIMEZONE, PERFORMANCE, PERIOD } from '@/domain/constants';
+import {
+  ACTIVITY, DEFAULT_TENANT_TIMEZONE, PERFORMANCE, PERIOD, SEED_RATIO_PURPOSES,
+} from '@/domain/constants';
+import type { RatioDisplayUnit } from '@/domain/constants/ratio-display';
 import { AuditService } from '@/modules/audit/audit.service';
 import {
-  ActivityCategoryRepository, ActivityTypeRepository,
+  ActivityCategoryRepository, ActivityTypeRepository, RatioDefinitionRepository,
 } from '@/modules/config/activity.repository';
+import { diverges } from '@/modules/config/ratio.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { Kpm } from '@/modules/tenants/kpm.schema';
 import { scopeFor } from '@/modules/rbac/permissions';
@@ -31,6 +35,7 @@ import type { ActivityLogDocument } from './activity-log.schema';
 import {
   bucketIndex, bucketsFor, dashboardRange, type DashboardBucket, type DashboardRange,
 } from './activity-dashboard';
+import { appliesTo, computeRatio, type RatioStatus } from './activity-ratios';
 
 /** One activity type's count on one day, as the wire carries it. */
 export interface ActivityCountView {
@@ -108,6 +113,53 @@ export interface ActivityDashboardView {
   correctedDays: number;
 }
 
+/** One activity code in a ratio's formula, as the office names and numbers it. */
+export interface RatioTermView {
+  code: string;
+  label: string;
+  /** The number the log screen shows — display order, never an identity (invariant §4). 0 when unknown. */
+  displayOrder: number;
+}
+
+/** One of the office's ratios, computed over the member's last 30 days (P10-T2). */
+export interface ActivityRatioView {
+  code: string;
+  label: string;
+  comparison: 'gte' | 'band';
+  displayUnit: RatioDisplayUnit;
+  /** The office's own benchmark — a proportion for a rate, points either side for the balance. */
+  benchmark: number;
+  /**
+   * The section the ratio measures, read from its denominator — *Selling* for a selling success rate —
+   * or *Balance* for the two-sided one. `null` when the denominator spans sections.
+   */
+  tag: { code: string | null; label: string } | null;
+  numerator: RatioTermView[];
+  denominator: RatioTermView[];
+  /**
+   * The balance's two ends, named by the section each side counts — *Selling* and *Recruitment* on the
+   * seed — so an office that rebuilds it is not told it leans toward selling. `null` for a rate, and a
+   * side is `null` when its codes span sections.
+   */
+  sides: { numerator: string | null; denominator: string | null } | null;
+  /** The platform's sentence for what it measures; `null` for an office's own formula, or one it changed. */
+  purpose: string | null;
+  divergesFromStandard: boolean;
+  value: number | null;
+  share: number | null;
+  numeratorCount: number;
+  denominatorCount: number;
+  status: RatioStatus;
+}
+
+export interface ActivityRatiosView {
+  membershipId: string;
+  from: LocalDate;
+  to: LocalDate;
+  days: number;
+  ratios: ActivityRatioView[];
+}
+
 export interface ActivityComplianceView {
   membershipId: string;
   /** `ACTIVITY_COMPLIANCE_7D` — logged at least once in the rolling window. */
@@ -142,6 +194,7 @@ export class ActivityService {
     @InjectModel(Kpm.name) private readonly kpms: Model<Kpm>,
     private readonly clock: Clock,
     private readonly audit: AuditService,
+    private readonly ratioDefinitions: RatioDefinitionRepository,
   ) {}
 
   // ------------------------------------------------------------------ reading
@@ -304,6 +357,86 @@ export class ActivityService {
       counts,
       daysLogged: rows.length,
       correctedDays: rows.filter((r) => (r.corrections ?? []).length > 0).length,
+    };
+  }
+
+  /**
+   * The office's ratios, computed over a member's last 30 days (P10-T2, P10-T3).
+   *
+   * **The window is `ROLLING_30D`, fixed** (ADR-0022) — *last 30 days* in every office. **The
+   * definitions are the office's own**: its formulas, including one it changed (ADR-0024), and its
+   * benchmarks. **The counts are every stored entry by code**, archived types included: archiving a
+   * type does not stop the ratios that name it from computing over the days it covers.
+   *
+   * **Only the ratios that are a question about the subject's rung** (ADR-0020): one that does not
+   * apply is left out of the answer altogether — hidden, never shown as failed. The subject's rung,
+   * not the reader's: a leader reading a downline reads the downline's ratios.
+   *
+   * **Your own, only**, as the Dashboard is. A leader reading a downline's ratios is Phase 13's coaching
+   * copy; Goal Settings' measured line (P10-T9) is two metrics of its own over the goal's cascade codes
+   * (ADR-0055), not these — so a subject parameter here would be one nothing calls.
+   */
+  async ratios(ctx: RequestContext): Promise<ActivityRatiosView> {
+    const subject = { membershipId: this.requireMembership(ctx), orgLevelCode: ctx.membership?.orgLevelCode ?? '' };
+    const office = await this.office(ctx);
+    const today = localDayOf(this.clock.now(), office.timezone);
+    const window = rollingWindow(today, PERIOD.ROLLING_30D_DAYS);
+
+    const [rows, definitions, categories, types] = await Promise.all([
+      this.logs.find(ctx, { membershipId: subject.membershipId, localDate: { $gte: window.from, $lte: window.to } }),
+      this.ratioDefinitions.find(ctx, { status: 'active' }, { sort: { displayOrder: 1 } }),
+      this.categories.find(ctx, {}),
+      this.types.find(ctx, {}),
+    ]);
+
+    const sums = new Map<string, number>();
+    for (const row of rows) {
+      for (const entry of row.entries) {
+        sums.set(entry.activityTypeCode, (sums.get(entry.activityTypeCode) ?? 0) + entry.count);
+      }
+    }
+    const typeOf = new Map(types.map((t) => [t.code, t]));
+    const sectionOf = new Map(categories.map((c) => [c.code, c]));
+    const term = (code: string): RatioTermView => {
+      const type = typeOf.get(code);
+      return { code, label: type?.label ?? code, displayOrder: type?.displayOrder ?? 0 };
+    };
+    /** The one section a list of codes belongs to, or undefined when they span more than one. */
+    const sectionFor = (codes: readonly string[]) => {
+      const sections = [...new Set(codes.map((code) => typeOf.get(code)?.categoryCode))];
+      return sections.length === 1 && sections[0] ? sectionOf.get(sections[0]) : undefined;
+    };
+    const tagFor = (comparison: string, denominator: readonly string[]) => {
+      if (comparison === 'band') return { code: null, label: 'Balance' };
+      const section = sectionFor(denominator);
+      return section ? { code: section.code, label: section.label } : null;
+    };
+
+    return {
+      membershipId: subject.membershipId,
+      ...window,
+      days: PERIOD.ROLLING_30D_DAYS,
+      ratios: definitions
+        .filter((d) => appliesTo(d.appliesToOrgLevelCodes, subject.orgLevelCode))
+        .map((d): ActivityRatioView => {
+          const diverged = diverges(d);
+          return {
+            code: d.code,
+            label: d.label,
+            comparison: d.comparison,
+            displayUnit: d.displayUnit,
+            benchmark: d.benchmark,
+            tag: tagFor(d.comparison, d.denominator),
+            sides: d.comparison === 'band'
+              ? { numerator: sectionFor(d.numerator)?.label ?? null, denominator: sectionFor(d.denominator)?.label ?? null }
+              : null,
+            numerator: d.numerator.map(term),
+            denominator: d.denominator.map(term),
+            purpose: d.origin === 'platform' && !diverged ? SEED_RATIO_PURPOSES[d.code] ?? null : null,
+            divergesFromStandard: diverged,
+            ...computeRatio(d, sums),
+          };
+        }),
     };
   }
 
