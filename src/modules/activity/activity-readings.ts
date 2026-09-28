@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import type { LocalDate } from '@/common/time/local-day';
+import { ActivityCategoryRepository, ActivityTypeRepository } from '@/modules/config/activity.repository';
 import { ActivityLogRepository } from './activity-log.repository';
 
 /**
@@ -10,7 +11,11 @@ import { ActivityLogRepository } from './activity-log.repository';
  */
 @Injectable()
 export class ActivityReadings {
-  constructor(private readonly logs: ActivityLogRepository) {}
+  constructor(
+    private readonly logs: ActivityLogRepository,
+    private readonly categories: ActivityCategoryRepository,
+    private readonly types: ActivityTypeRepository,
+  ) {}
 
   /**
    * Every code's count over a member's stored days in a window, **archived types included** — the
@@ -29,5 +34,30 @@ export class ActivityReadings {
       }
     }
     return counts;
+  }
+
+  /**
+   * **The sections a rung is shown**, in the office's order, each with every type it holds — archived ones
+   * included, so a reader can keep what was logged against them (P10-T5).
+   *
+   * The rule is ADR-0020's, on the **category**: an active one whose `appliesToOrgLevelCodes` is empty or
+   * names the rung. A section the office restricted to leaders is not an agent's to be shown.
+   */
+  async sectionsShown(ctx: RequestContext, orgLevelCode: string): Promise<{
+    code: string; label: string; types: { code: string; label: string; status: 'active' | 'archived' }[];
+  }[]> {
+    const [categories, types] = await Promise.all([
+      this.categories.find(ctx, { status: 'active' }, { sort: { displayOrder: 1 } }),
+      this.types.find(ctx, {}, { sort: { displayOrder: 1 } }),
+    ]);
+    return categories
+      .filter((c) => (c.appliesToOrgLevelCodes ?? []).length === 0 || (c.appliesToOrgLevelCodes ?? []).includes(orgLevelCode))
+      .map((c) => ({
+        code: c.code,
+        label: c.label,
+        types: types
+          .filter((t) => t.categoryCode === c.code)
+          .map((t) => ({ code: t.code, label: t.label, status: t.status })),
+      }));
   }
 }

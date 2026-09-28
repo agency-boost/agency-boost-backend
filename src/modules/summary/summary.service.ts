@@ -3,11 +3,13 @@ import { RequestContext } from '@/common/context/request-context';
 import { NoMembershipException } from '@/common/errors/domain.exception';
 import { endOfMonth, type LocalDate } from '@/common/time/local-day';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
+import { cascadeCounts } from '@/modules/goals/goal-cascade';
 import { GoalService } from '@/modules/goals/goal.service';
 import { ProductionReadings } from '@/modules/production/production-readings';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import {
-  madeFigures, monthlyApeTarget, paceFor, periodFigures, ytdBeforeThisMonth, type Pace, type PeriodFigures,
+  activityTargets, madeFigures, monthlyApeTarget, paceFor, periodFigures, sectionChips, totalLogged,
+  ytdBeforeThisMonth, type ActivityTarget, type Pace, type PeriodFigures, type SectionChip,
 } from './summary-figures';
 
 /** Where a production figure came from, said with it (ADR-0008, P9-T6). */
@@ -15,6 +17,19 @@ export interface FigureSource {
   provenance: 'imported' | 'corrected' | 'self_reported';
   /** `YYYY-MM` — the month the figure is for, or whose year to date it is; `null` for the agent's own. */
   month: string | null;
+}
+
+/** *Your sales activity targets* for one period (P10-T5, ADR-0056). */
+export interface SummaryActivity {
+  /** The days counted: the calendar month, or the year, to today — the office's. */
+  from: LocalDate;
+  to: LocalDate;
+  /** Leads contacted, appointments, closings — each against the cascade run on the period's APE target. */
+  targets: ActivityTarget[];
+  /** *N total activities logged … across all categories.* */
+  total: number;
+  /** One per other section the reader is shown. */
+  sections: SectionChip[];
 }
 
 export interface SummaryView {
@@ -31,6 +46,8 @@ export interface SummaryView {
   yearly: PeriodFigures & { source: FigureSource };
   /** The pace sentence (ADR-0057); `null` without a goal. */
   pace: Pace | null;
+  /** What was logged against the plan, and the rest of the reader's sections (P10-T5). */
+  activity: { monthly: SummaryActivity; yearly: SummaryActivity };
 }
 
 /**
@@ -67,10 +84,14 @@ export class SummaryService {
     const planned = goal.projected?.annualApeTargetMinor ?? 0;
     const annual = set && planned > 0 ? planned : null;
 
-    const [through, thisMonth, counts] = await Promise.all([
+    const monthWindow = { from: `${day.month}-01` as LocalDate, to: day.today };
+    const yearWindow = { from: `${year}-01-01` as LocalDate, to: day.today };
+    const [through, thisMonth, counts, yearCounts, sections] = await Promise.all([
       previous ? this.production.apeYearToDateThrough(ctx, me, previous) : Promise.resolve(null),
       this.production.apeForMonth(ctx, me, day.month),
-      this.activity.countsOver(ctx, me, { from: `${day.month}-01`, to: day.today }),
+      this.activity.countsOver(ctx, me, monthWindow),
+      this.activity.countsOver(ctx, me, yearWindow),
+      this.activity.sectionsShown(ctx, ctx.membership?.orgLevelCode ?? ''),
     ]);
 
     const before = ytdBeforeThisMonth({
@@ -89,12 +110,29 @@ export class SummaryService {
     const yearly = periodFigures(annual, goal.achieved.minor, goal.caseSizeMinor);
 
     /*
-     * **The month's closing target is this month's APE target over the case size** — the Summary's own
-     * month, so the policies it says are needed and the target the pace sentence names are one number.
-     * Goal Settings' plan is re-derived from today and can differ; the manual says why (ADR-0056).
+     * **The chips' targets are the cascade run on the Summary's own APE targets** (ADR-0056, P10-T5).
+     *
+     * *Monthly*: this month's fixed target — so the closings chip, the policies the gap says are needed and
+     * the target the pace sentence names are one number. Goal Settings' plan is re-derived from today and
+     * can differ; the manual says why. *Yearly*: the monthly pace annualised — the year's target over
+     * twelve, run through the cascade and multiplied back — **rounded once, at the end**, which is the
+     * cascade on the year's target. Ceiling each month first would ask for up to twelve extra policies.
      */
-    const closingTarget = monthlyTarget !== null && goal.caseSizeMinor > 0
-      ? Math.ceil(monthlyTarget / goal.caseSizeMinor) : null;
+    const rates = goal.caseSizeMinor > 0 ? goal : null;
+    const monthlyCounts = monthlyTarget !== null && rates ? cascadeCounts(monthlyTarget, rates) : null;
+    const yearlyCounts = annual !== null && rates ? cascadeCounts(annual, rates) : null;
+    const closingTarget = monthlyCounts?.policies ?? null;
+
+    const mapping = goal.cascadeMapping;
+    const cascadeCodes = [mapping.leadsCode, mapping.appointmentsCode, mapping.closingsCode];
+    const activityFor = (
+      window: { from: LocalDate; to: LocalDate }, logged: Map<string, number>, plan: typeof monthlyCounts,
+    ): SummaryActivity => ({
+      ...window,
+      targets: activityTargets(plan, mapping, logged),
+      total: totalLogged(logged),
+      sections: sectionChips(sections, logged, cascadeCodes),
+    });
 
     return {
       year,
@@ -106,11 +144,15 @@ export class SummaryService {
       yearly: { ...yearly, source: { provenance: goal.achieved.provenance, month: goal.achieved.month } },
       pace: closingTarget === null ? null : paceFor({
         closingTarget,
-        closingsLogged: counts.get(goal.cascadeMapping.closingsCode) ?? 0,
+        closingsLogged: counts.get(mapping.closingsCode) ?? 0,
         dayOfMonth: Number(day.today.slice(8, 10)),
         daysInMonth: Number(endOfMonth(day.today).slice(8, 10)),
         apeTargetMet: monthly.targetMet || yearly.targetMet,
       }),
+      activity: {
+        monthly: activityFor(monthWindow, counts, monthlyCounts),
+        yearly: activityFor(yearWindow, yearCounts, yearlyCounts),
+      },
     };
   }
 }

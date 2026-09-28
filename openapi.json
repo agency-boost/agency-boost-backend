@@ -15287,6 +15287,161 @@
           "targetMet"
         ]
       },
+      "ActivityTargetDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "leads",
+              "appointments",
+              "closings"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "example": "SELL_SUBMISSION",
+            "description": "The goal’s own code for this count (`cascadeMapping`)."
+          },
+          "logged": {
+            "type": "number",
+            "description": "Logged over the period, archived types included."
+          },
+          "target": {
+            "type": "number",
+            "nullable": true,
+            "description": "`SUMMARY_ACTIVITY_TARGET`. `null` without an APE target; 0 when the month needs nothing more — met, not unmeasured."
+          },
+          "attainmentPct": {
+            "type": "number",
+            "nullable": true,
+            "description": "`ACTIVITY_TARGET_ATTAINMENT_PCT`, capped at 999; `null` on a zero or missing target."
+          },
+          "targetMet": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "code",
+          "logged",
+          "target",
+          "attainmentPct",
+          "targetMet"
+        ]
+      },
+      "SectionRowDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "RECRUIT_PRESENTATION"
+          },
+          "label": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "count"
+        ]
+      },
+      "SectionChipDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "RECRUITMENT"
+          },
+          "label": {
+            "type": "string",
+            "example": "Recruitment"
+          },
+          "total": {
+            "type": "number",
+            "description": "`ACTIVITY_TOTAL_BY_CATEGORY` over the period; the rows add up to it."
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SectionRowDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "total",
+          "rows"
+        ]
+      },
+      "SummaryActivityDto": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "example": "2026-09-01"
+          },
+          "to": {
+            "type": "string",
+            "example": "2026-09-28"
+          },
+          "targets": {
+            "description": "Leads contacted, appointments, closings — in that order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityTargetDto"
+            }
+          },
+          "total": {
+            "type": "number",
+            "description": "Every activity logged over the period, across all categories."
+          },
+          "sections": {
+            "description": "One per section the reader is shown that holds none of the three codes above.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SectionChipDto"
+            }
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "targets",
+          "total",
+          "sections"
+        ]
+      },
+      "SummaryActivityPeriodsDto": {
+        "type": "object",
+        "properties": {
+          "monthly": {
+            "description": "This calendar month, against the cascade on `MONTHLY_APE_TARGET`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SummaryActivityDto"
+              }
+            ]
+          },
+          "yearly": {
+            "description": "The year to date, against the cascade on the annual target.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SummaryActivityDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "monthly",
+          "yearly"
+        ]
+      },
       "SummaryDto": {
         "type": "object",
         "properties": {
@@ -15332,6 +15487,14 @@
                 "$ref": "#/components/schemas/PaceDto"
               }
             ]
+          },
+          "activity": {
+            "description": "*Your sales activity targets* and the other sections (P10-T5).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SummaryActivityPeriodsDto"
+              }
+            ]
           }
         },
         "required": [
@@ -15342,7 +15505,8 @@
           "caseSizeMinor",
           "monthly",
           "yearly",
-          "pace"
+          "pace",
+          "activity"
         ]
       },
       "LeadContactDto": {
@@ -20046,6 +20210,8 @@
               "MONTHLY_APE_TARGET",
               "PROJECTED_CLOSINGS_THIS_MONTH",
               "CLOSINGS_NEEDED_PER_WEEK",
+              "SUMMARY_ACTIVITY_TARGET",
+              "ACTIVITY_TARGET_ATTAINMENT_PCT",
               "ACTIVATION_COMPLETION_PCT",
               "ACTIVATION_DAY_INDEX",
               "TRAINING_COMPLETION_PCT",

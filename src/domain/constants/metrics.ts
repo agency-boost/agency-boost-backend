@@ -56,6 +56,8 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'MONTHLY_APE_TARGET', name: 'This month’s APE target', unit: 'idr_minor', phase: 10 },
   { key: 'PROJECTED_CLOSINGS_THIS_MONTH', name: 'Closings at your current pace', unit: 'count', phase: 10 },
   { key: 'CLOSINGS_NEEDED_PER_WEEK', name: 'Closings needed per week', unit: 'count', phase: 10 },
+  { key: 'SUMMARY_ACTIVITY_TARGET', name: 'Activity target for the period', unit: 'count', phase: 10 },
+  { key: 'ACTIVITY_TARGET_ATTAINMENT_PCT', name: 'Logged against the activity target', unit: 'percentage', phase: 10 },
   { key: 'ACTIVATION_COMPLETION_PCT', name: 'Activation completion', unit: 'percentage', phase: 11 },
   { key: 'ACTIVATION_DAY_INDEX', name: 'Activation day', unit: 'days', phase: 11 },
   { key: 'TRAINING_COMPLETION_PCT', name: 'Training completion', unit: 'percentage', phase: 12 },

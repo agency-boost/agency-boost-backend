@@ -122,10 +122,7 @@ export function computeCascade(inputs: CascadeInputs): CascadeResult {
   const remaining = Math.max(0, annual - inputs.apeAchievedMinor);
   const monthly = Math.round(remaining / monthsLeft);
 
-  const policies = Math.ceil(monthly / inputs.caseSizeMinor);
-  // Percentages arrive as `30`; the cascade divides by `0.30`.
-  const appointments = Math.ceil(policies / (inputs.closingRatePct / 100));
-  const leads = Math.ceil(appointments / (inputs.leadsToApptPct / 100));
+  const { policies, appointments, leads } = cascadeCounts(monthly, inputs);
 
   return {
     annualApeTargetMinor: annual,
@@ -141,6 +138,33 @@ export function computeCascade(inputs: CascadeInputs): CascadeResult {
     // `remaining` is clamped at zero, so this is exactly *the plan has been met*.
     targetMet: remaining === 0,
   };
+}
+
+/** The three counts an APE figure needs, at the member's own rates. */
+export interface CascadeCounts {
+  policies: number;
+  appointments: number;
+  leads: number;
+}
+
+/**
+ * **An APE figure, turned into the three counts an agent can act on** — steps 3 to 5 of the cascade
+ * (`POLICY_COUNT_TARGET`, `APPOINTMENT_TARGET`, `LEAD_TARGET`).
+ *
+ * One definition for every reader: the plan Goal Settings shows runs it on the monthly figure it plans
+ * from today, and the Personal Summary on its own month's fixed target and on the year's (P10-T5), so a
+ * closing target means the same arithmetic wherever it is printed. The caller has already refused an
+ * unusable assumption; a zero case size here would be a division by nothing.
+ */
+export function cascadeCounts(
+  apeMinor: number,
+  rates: Pick<CascadeInputs, 'caseSizeMinor' | 'closingRatePct' | 'leadsToApptPct'>,
+): CascadeCounts {
+  const policies = Math.ceil(apeMinor / rates.caseSizeMinor);
+  // Percentages arrive as `30`; the cascade divides by `0.30`.
+  const appointments = Math.ceil(policies / (rates.closingRatePct / 100));
+  const leads = Math.ceil(appointments / (rates.leadsToApptPct / 100));
+  return { policies, appointments, leads };
 }
 
 /** `≈ n/week` (`Overall.html:5818`). Ceil, like every other step. */

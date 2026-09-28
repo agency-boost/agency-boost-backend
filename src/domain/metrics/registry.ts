@@ -224,6 +224,21 @@ export const METRIC_REGISTRY = define([
   { id: 'MONTHLY_APE_TARGET', label: 'This month’s APE target', period: 'CALENDAR_MONTH', unit: 'money_minor', threshold: null, availableFrom: 10 },
   { id: 'PROJECTED_CLOSINGS_THIS_MONTH', label: 'Closings at your current pace', period: 'CALENDAR_MONTH', unit: 'count', threshold: SUMMARY.PACE_MIN_DAYS, availableFrom: 10 },
   { id: 'CLOSINGS_NEEDED_PER_WEEK', label: 'Closings needed per week', period: 'CALENDAR_MONTH', unit: 'count', threshold: null, availableFrom: 10 },
+  /*
+   * The Summary's activity chips (P10-T5, ADR-0056): the cascade run on `MONTHLY_APE_TARGET` for the
+   * month, and on the annual target for the year to date. `CALENDAR_MONTH` is the default view; the
+   * *Yearly* view is the same definition over `CALENDAR_YEAR`.
+   */
+  { id: 'SUMMARY_ACTIVITY_TARGET', label: 'Activity target for the period', period: 'CALENDAR_MONTH', unit: 'count', threshold: null, availableFrom: 10 },
+  {
+    id: 'ACTIVITY_TARGET_ATTAINMENT_PCT',
+    label: 'Logged against the activity target',
+    period: 'CALENDAR_MONTH',
+    unit: 'percentage',
+    // Capped like APE_ATTAINMENT_PCT, and `null` on a zero target — never `NaN%` (F-25).
+    threshold: PERFORMANCE.ATTAINMENT_PCT_CAP,
+    availableFrom: 10,
+  },
   { id: 'POLICY_COUNT_TARGET', label: 'Policies to close this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },
   { id: 'APPOINTMENT_TARGET', label: 'Appointments to hold this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },
   { id: 'LEAD_TARGET', label: 'Leads to contact this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },

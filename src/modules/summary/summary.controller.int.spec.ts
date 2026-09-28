@@ -63,6 +63,13 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
     // Nothing measured is sent as null, not dropped: a missing key and a zero would read alike.
     expect(res.body.monthly).toHaveProperty('attainmentPct', null);
     expect(res.body).toHaveProperty('pace', null);
+    // P10-T5: the chips go out for both periods, with a null target rather than none.
+    for (const period of ['monthly', 'yearly']) {
+      expect(res.body.activity[period].targets.map((t: { key: string }) => t.key)).toEqual(['leads', 'appointments', 'closings']);
+      expect(res.body.activity[period].targets[0]).toHaveProperty('target', null);
+      expect(res.body.activity[period]).toHaveProperty('total');
+      expect(res.body.activity[period]).toHaveProperty('sections');
+    }
   });
 
   it('refuses a Super Admin, who has no Summary of their own', async () => {

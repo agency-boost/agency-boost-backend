@@ -1,4 +1,6 @@
-import { madeFigures, monthlyApeTarget, paceFor, periodFigures, ytdBeforeThisMonth } from './summary-figures';
+import {
+  activityTargets, madeFigures, monthlyApeTarget, paceFor, periodFigures, sectionChips, totalLogged, ytdBeforeThisMonth,
+} from './summary-figures';
 
 const RP = 100; // minor units per rupiah
 const M = 1_000_000 * RP;
@@ -116,6 +118,77 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
     it('reads the APE target reached — this month’s or the year’s — as met, whatever the closings say (ADR-0047)', () => {
       expect(paceFor({ closingTarget: 0, closingsLogged: 0, dayOfMonth: 20, daysInMonth: 30, apeTargetMet: true }))
         .toMatchObject({ targetMet: true, neededPerWeek: 0 });
+    });
+  });
+
+  describe('P10-T5 AC-1 — the three chips, logged against the period’s targets', () => {
+    const mapping = { leadsCode: 'LEADS_CONTACTED', appointmentsCode: 'SELL_PRESENTATION', closingsCode: 'SELL_SUBMISSION' };
+    const logged = new Map([['LEADS_CONTACTED', 62], ['SELL_PRESENTATION', 18], ['SELL_SUBMISSION', 2], ['RECRUIT_FOLLOWUP', 9]]);
+
+    it('reads each count by the goal’s own code, in the prototype’s order', () => {
+      expect(activityTargets({ leads: 80, appointments: 24, policies: 6 }, mapping, logged)).toEqual([
+        { key: 'leads', code: 'LEADS_CONTACTED', logged: 62, target: 80, attainmentPct: 78, targetMet: false },
+        { key: 'appointments', code: 'SELL_PRESENTATION', logged: 18, target: 24, attainmentPct: 75, targetMet: false },
+        { key: 'closings', code: 'SELL_SUBMISSION', logged: 2, target: 6, attainmentPct: 33, targetMet: false },
+      ]);
+    });
+
+    it('follows a goal bound to other codes (invariant §4)', () => {
+      const [leads] = activityTargets({ leads: 10, appointments: 1, policies: 1 }, { ...mapping, leadsCode: 'RECRUIT_FOLLOWUP' }, logged);
+      expect(leads).toMatchObject({ code: 'RECRUIT_FOLLOWUP', logged: 9 });
+    });
+
+    it('F-25: no target is null, never NaN% — and a code with nothing logged is 0, not missing', () => {
+      expect(activityTargets(null, mapping, new Map()).map((t) => [t.logged, t.target, t.attainmentPct, t.targetMet]))
+        .toEqual([[0, null, null, false], [0, null, null, false], [0, null, null, false]]);
+    });
+
+    it('a target of 0 is a month that needs nothing more: met, with no percentage to show', () => {
+      const [, , closings] = activityTargets({ leads: 0, appointments: 0, policies: 0 }, mapping, logged);
+      expect(closings).toMatchObject({ target: 0, attainmentPct: null, targetMet: true });
+    });
+
+    it('meets a target on reaching it, and caps the percentage past it', () => {
+      const [leads, , closings] = activityTargets({ leads: 6, appointments: 24, policies: 2 }, mapping, logged);
+      expect(closings).toMatchObject({ attainmentPct: 100, targetMet: true });
+      expect(leads).toMatchObject({ attainmentPct: 999, targetMet: true });
+    });
+  });
+
+  describe('P10-T5 AC-2 — one chip per other section', () => {
+    const sections = [
+      { code: 'LEADS_GENERATION', label: 'Leads Generation', types: [{ code: 'LEADS_CONTACTED', label: 'Leads', status: 'active' as const }] },
+      { code: 'SELLING', label: 'Selling', types: [{ code: 'SELL_SUBMISSION', label: 'Submission', status: 'archived' as const }] },
+      {
+        code: 'RECRUITMENT',
+        label: 'Recruitment',
+        types: [
+          { code: 'RECRUIT_PRESENTATION', label: 'Presentasi', status: 'active' as const },
+          { code: 'RECRUIT_OLD', label: 'Retired, with history', status: 'archived' as const },
+          { code: 'RECRUIT_GONE', label: 'Retired, nothing this period', status: 'archived' as const },
+        ],
+      },
+    ];
+    const cascade = ['LEADS_CONTACTED', 'SELL_PRESENTATION', 'SELL_SUBMISSION'];
+
+    it('leaves out every section holding a cascade code — archived ones too — and keeps the office’s order', () => {
+      expect(sectionChips(sections, new Map(), cascade).map((s) => s.code)).toEqual(['RECRUITMENT']);
+    });
+
+    it('lists active types at zero, and an archived one only while it holds a count, so the rows add up', () => {
+      const [recruitment] = sectionChips(sections, new Map([['RECRUIT_PRESENTATION', 3], ['RECRUIT_OLD', 2]]), cascade);
+      expect(recruitment).toEqual({
+        code: 'RECRUITMENT', label: 'Recruitment', total: 5,
+        rows: [
+          { code: 'RECRUIT_PRESENTATION', label: 'Presentasi', count: 3 },
+          { code: 'RECRUIT_OLD', label: 'Retired, with history', count: 2 },
+        ],
+      });
+    });
+
+    it('totals every code logged, in any section or none', () => {
+      expect(totalLogged(new Map([['A', 3], ['B', 0], ['C', 4]]))).toBe(7);
+      expect(totalLogged(new Map())).toBe(0);
     });
   });
 });

@@ -250,6 +250,12 @@ export function configModule(now: Date) {
   const productionReadings = new ProductionReadings(monthRows);
 
   // P8-T1: one agent's agreed plan for one period.
+  // P10-T9, P10-T5: a member's counts, and the sections their rung is shown — the activity module's seam.
+  const activityReadings = new ActivityReadings(
+    new ActivityLogRepository(model(ActivityLog.name, ActivityLogSchema) as never),
+    new ActivityCategoryRepository(categories as never),
+    new ActivityTypeRepository(types as never),
+  );
   const goals = new GoalService(
     new GoalRepository(model(Goal.name, GoalSchema) as never),
     audit,
@@ -259,13 +265,13 @@ export function configModule(now: Date) {
     new MemberNames(memberships, users as never),
     notifier,
     productionReadings,
-    new ActivityReadings(new ActivityLogRepository(model(ActivityLog.name, ActivityLogSchema) as never)),
+    activityReadings,
   );
   // P10-T4: the Personal Summary, read from the goal, the office's production and the member's log.
   const summary = new SummaryService(
     goals,
     productionReadings,
-    new ActivityReadings(new ActivityLogRepository(model(ActivityLog.name, ActivityLogSchema) as never)),
+    activityReadings,
     new TenantDay(kpms as never, clock),
   );
   const productionNames = new MemberNames(memberships, users as never);

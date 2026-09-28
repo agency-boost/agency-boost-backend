@@ -131,3 +131,95 @@ export function paceFor(input: {
     targetMet,
   };
 }
+
+/** Which of the cascade's three counts a chip is (`Overall.html:3146-3160`). */
+export type ActivityTargetKey = 'leads' | 'appointments' | 'closings';
+
+/** One of *Your sales activity targets* (P10-T5): a cascade code logged against the period's target. */
+export interface ActivityTarget {
+  key: ActivityTargetKey;
+  /** The goal's own code for this count — `cascadeMapping`, never an item number (invariant §4). */
+  code: string;
+  logged: number;
+  /**
+   * `SUMMARY_ACTIVITY_TARGET`: `null` without an APE target to derive it from. **0 is a month that needs
+   * nothing more** — the year was made before it began — which is met, not unmeasured.
+   */
+  target: number | null;
+  /** `ACTIVITY_TARGET_ATTAINMENT_PCT`, capped; `null` on a zero or missing target — never `NaN%` (F-25). */
+  attainmentPct: number | null;
+  targetMet: boolean;
+}
+
+/**
+ * The three chips, in the prototype's order: leads contacted, appointments, closings.
+ *
+ * `counts` is the cascade run on the period's APE target — this month's fixed one, or the year's — so
+ * the closings chip and the pace sentence name one number. `null` is no target to run it on.
+ */
+export function activityTargets(
+  counts: { leads: number; appointments: number; policies: number } | null,
+  mapping: { leadsCode: string; appointmentsCode: string; closingsCode: string },
+  logged: ReadonlyMap<string, number>,
+): ActivityTarget[] {
+  const chip = (key: ActivityTargetKey, code: string, target: number | null): ActivityTarget => {
+    const n = logged.get(code) ?? 0;
+    return {
+      key,
+      code,
+      logged: n,
+      target,
+      attainmentPct: target !== null && target > 0
+        ? Math.min(PERFORMANCE.ATTAINMENT_PCT_CAP, Math.round((n / target) * 100)) : null,
+      targetMet: target !== null && n >= target,
+    };
+  };
+  return [
+    chip('leads', mapping.leadsCode, counts?.leads ?? null),
+    chip('appointments', mapping.appointmentsCode, counts?.appointments ?? null),
+    chip('closings', mapping.closingsCode, counts?.policies ?? null),
+  ];
+}
+
+/** A section as the reader is shown it, with every type it has held — the office's order. */
+export interface ShownSection {
+  code: string;
+  label: string;
+  types: { code: string; label: string; status: 'active' | 'archived' }[];
+}
+
+export interface SectionChip {
+  code: string;
+  label: string;
+  /** `ACTIVITY_TOTAL_BY_CATEGORY` over the period — the rows below add up to it. */
+  total: number;
+  rows: { code: string; label: string; count: number }[];
+}
+
+/**
+ * **One chip per other section the reader is shown** (P10-T5 AC-2) — every section holding none of the
+ * cascade's three codes, which the target chips already count. The prototype's two, *Recruitment* and
+ * *Development*, are three on v1's seed: one tile per section (OD-63, I-117).
+ *
+ * A type the office archived stays as a row while the period holds a count against it, so the chip's rows
+ * add up to its total; one with nothing in the period is gone, as it is from the log screen.
+ */
+export function sectionChips(
+  sections: readonly ShownSection[], counts: ReadonlyMap<string, number>, cascadeCodes: readonly string[],
+): SectionChip[] {
+  return sections
+    .filter((section) => !section.types.some((type) => cascadeCodes.includes(type.code)))
+    .map((section) => {
+      const rows = section.types
+        .filter((type) => type.status === 'active' || (counts.get(type.code) ?? 0) > 0)
+        .map((type) => ({ code: type.code, label: type.label, count: counts.get(type.code) ?? 0 }));
+      return { code: section.code, label: section.label, total: rows.reduce((n, row) => n + row.count, 0), rows };
+    });
+}
+
+/** *N total activities logged … across all categories* — every code, archived and unshown included. */
+export function totalLogged(counts: ReadonlyMap<string, number>): number {
+  let total = 0;
+  for (const n of counts.values()) total += n;
+  return total;
+}

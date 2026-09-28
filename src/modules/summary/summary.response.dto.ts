@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import type { FigureSource, SummaryView } from './summary.service';
-import type { Pace, PeriodFigures } from './summary-figures';
+import type { FigureSource, SummaryActivity, SummaryView } from './summary.service';
+import type { ActivityTarget, ActivityTargetKey, Pace, PeriodFigures, SectionChip } from './summary-figures';
 
 /** Declared for OpenAPI. The wire shapes live on `SummaryService`'s view types. */
 
@@ -43,6 +43,47 @@ export class PaceDto implements Pace {
   @ApiProperty() targetMet!: boolean;
 }
 
+export class ActivityTargetDto implements ActivityTarget {
+  @ApiProperty({ enum: ['leads', 'appointments', 'closings'] }) key!: ActivityTargetKey;
+  @ApiProperty({ example: 'SELL_SUBMISSION', description: 'The goal’s own code for this count (`cascadeMapping`).' }) code!: string;
+  @ApiProperty({ description: 'Logged over the period, archived types included.' }) logged!: number;
+  @ApiProperty({
+    type: Number, nullable: true,
+    description: '`SUMMARY_ACTIVITY_TARGET`. `null` without an APE target; 0 when the month needs nothing more — met, not unmeasured.',
+  })
+  target!: number | null;
+  @ApiProperty({ type: Number, nullable: true, description: '`ACTIVITY_TARGET_ATTAINMENT_PCT`, capped at 999; `null` on a zero or missing target.' })
+  attainmentPct!: number | null;
+  @ApiProperty() targetMet!: boolean;
+}
+
+class SectionRowDto {
+  @ApiProperty({ example: 'RECRUIT_PRESENTATION' }) code!: string;
+  @ApiProperty() label!: string;
+  @ApiProperty() count!: number;
+}
+
+export class SectionChipDto implements SectionChip {
+  @ApiProperty({ example: 'RECRUITMENT' }) code!: string;
+  @ApiProperty({ example: 'Recruitment' }) label!: string;
+  @ApiProperty({ description: '`ACTIVITY_TOTAL_BY_CATEGORY` over the period; the rows add up to it.' }) total!: number;
+  @ApiProperty({ type: [SectionRowDto] }) rows!: SectionRowDto[];
+}
+
+export class SummaryActivityDto implements SummaryActivity {
+  @ApiProperty({ example: '2026-09-01' }) from!: string;
+  @ApiProperty({ example: '2026-09-28' }) to!: string;
+  @ApiProperty({ type: [ActivityTargetDto], description: 'Leads contacted, appointments, closings — in that order.' }) targets!: ActivityTargetDto[];
+  @ApiProperty({ description: 'Every activity logged over the period, across all categories.' }) total!: number;
+  @ApiProperty({ type: [SectionChipDto], description: 'One per section the reader is shown that holds none of the three codes above.' })
+  sections!: SectionChipDto[];
+}
+
+class SummaryActivityPeriodsDto {
+  @ApiProperty({ type: SummaryActivityDto, description: 'This calendar month, against the cascade on `MONTHLY_APE_TARGET`.' }) monthly!: SummaryActivityDto;
+  @ApiProperty({ type: SummaryActivityDto, description: 'The year to date, against the cascade on the annual target.' }) yearly!: SummaryActivityDto;
+}
+
 class SummaryGoalDto {
   @ApiProperty({ description: 'A goal has been saved for the year. The defaults a first-time reader sees are not one.' }) set!: boolean;
   @ApiProperty({ type: String, nullable: true, format: 'date-time' }) savedAt!: string | null;
@@ -66,4 +107,7 @@ export class SummaryDto implements SummaryView {
 
   @ApiProperty({ type: PaceDto, nullable: true, description: 'The pace sentence (ADR-0057); `null` without a goal.' })
   pace!: Pace | null;
+
+  @ApiProperty({ type: SummaryActivityPeriodsDto, description: '*Your sales activity targets* and the other sections (P10-T5).' })
+  activity!: { monthly: SummaryActivityDto; yearly: SummaryActivityDto };
 }

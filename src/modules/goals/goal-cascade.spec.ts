@@ -1,6 +1,6 @@
 import { GOAL_DEFAULTS, TIME } from '@/domain/constants';
 import {
-  annualTargetOf, clampMonths, computeCascade, defaultMonthsLeft, weeklyOf,
+  annualTargetOf, cascadeCounts, clampMonths, computeCascade, defaultMonthsLeft, weeklyOf,
   type CascadeInputs,
 } from './goal-cascade';
 
@@ -277,6 +277,21 @@ describe('the goal cascade', () => {
       } catch (err) {
         expect((err as { details: { violations: string[] } }).details.violations).toHaveLength(3);
       }
+    });
+  });
+
+  describe('cascadeCounts — steps 3 to 5, one definition for every reader (P10-T5)', () => {
+    it('is the plan’s own three counts, run on its monthly figure', () => {
+      const plan = computeCascade(defaults);
+      expect(cascadeCounts(plan.monthlyApeTargetMinor, defaults)).toEqual({
+        policies: plan.policiesPerMonth, appointments: plan.appointmentsPerMonth, leads: plan.leadsPerMonth,
+      });
+    });
+
+    it('runs on any APE figure — a year’s target is ceiled once, not twelve times', () => {
+      const rates = { caseSizeMinor: 18_000_000_00, closingRatePct: 30, leadsToApptPct: 30 };
+      expect(cascadeCounts(500_000_000_00, rates)).toEqual({ policies: 28, appointments: 94, leads: 314 });
+      expect(cascadeCounts(0, rates)).toEqual({ policies: 0, appointments: 0, leads: 0 });
     });
   });
 });

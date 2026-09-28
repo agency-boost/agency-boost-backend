@@ -2,20 +2,22 @@ import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { FixedClock } from '@/common/clock/clock.port';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
-import { configModule } from '../../../test/config-module';
+import { configModule, provisionOffice } from '../../../test/config-module';
 import { Goal } from '@/modules/goals/goal.schema';
 
 /** 09:00 in Jakarta on 14 September — day 14 of a 30-day month, 17 days left today included. */
 const NOW = new Date('2026-09-14T02:00:00Z');
 const KPM = '66f0000000000000000000a1';
 const OTHER_KPM = '66f0000000000000000000b1';
+const COMPANY = '66f0000000000000000000c1';
 const ME = '66f000000000000000000103';
 const M = 1_000_000 * 100;
 
-const agent = () => new RequestContext('u-me', 'none', {
+const agent = (over: Record<string, unknown> = {}) => new RequestContext('u-me', 'none', {
   membershipId: ME, kpmId: KPM, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
-  status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+  status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0, ...over,
 } as never);
+const owner = () => agent({ membershipId: 'mem-owner', isKpmOwner: true, orgLevelCode: null, hierarchyRole: null });
 
 /** The Personal Summary (P10-T4): the goal against the office's production and the member's log. */
 describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', () => {
@@ -225,6 +227,151 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
     expect(view.monthly.actualMinor).toBe(10 * M);
     expect(view.pace?.closingsLogged).toBe(1);
+  });
+
+  describe('P10-T5 — your sales activity targets, and the rest of your sections', () => {
+    beforeEach(async () => {
+      await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create([
+        { _id: KPM, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta' },
+        { _id: OTHER_KPM, companyId: COMPANY, code: '0555', branchName: 'B', timezone: 'Asia/Jakarta' },
+      ]);
+      await wired.orgLevels.seedDefaultLadder(COMPANY);
+      await provisionOffice(wired, KPM, COMPANY);
+    });
+
+    const chips = (view: Awaited<ReturnType<typeof wired.summary.read>>['activity']['monthly']) =>
+      Object.fromEntries(view.targets.map((t) => [t.key, t]));
+
+    it('AC-1: this month against the cascade on this month’s fixed target, the year to date against the year’s', async () => {
+      await wired.goals.save(agent(), plan());
+      await production('2026-08', { apeYtd: cell(200 * M) });
+      await day('2026-09-02', { LEADS_CONTACTED: 12, SELL_PRESENTATION: 4, SELL_SUBMISSION: 1 });
+      await day('2026-09-10', { LEADS_CONTACTED: 8, SELL_PRESENTATION: 2, SELL_SUBMISSION: 1 });
+      await day('2026-08-31', { LEADS_CONTACTED: 100, SELL_PRESENTATION: 30, SELL_SUBMISSION: 9 }); // the year's, not the month's
+
+      const view = await wired.summary.read(agent());
+      const month = chips(view.activity.monthly);
+      const year = chips(view.activity.yearly);
+
+      // 75 this month: ceil(75 / 18) = 5 closings, ceil(5 / 0.3) = 17 appointments, ceil(17 / 0.3) = 57 leads.
+      expect(view.activity.monthly).toMatchObject({ from: '2026-09-01', to: '2026-09-14' });
+      expect(month.leads).toEqual({ key: 'leads', code: 'LEADS_CONTACTED', logged: 20, target: 57, attainmentPct: 35, targetMet: false });
+      expect(month.appointments).toMatchObject({ code: 'SELL_PRESENTATION', logged: 6, target: 17, attainmentPct: 35 });
+      expect(month.closings).toMatchObject({ code: 'SELL_SUBMISSION', logged: 2, target: 5, attainmentPct: 40 });
+      // The closings chip and the pace sentence name one number.
+      expect(view.pace?.closingTarget).toBe(month.closings.target);
+
+      // The year: 500 through the cascade once — ceil(500 / 18) = 28, ceil(28 / 0.3) = 94, ceil(94 / 0.3) = 314.
+      expect(view.activity.yearly).toMatchObject({ from: '2026-01-01', to: '2026-09-14' });
+      expect(year.closings).toMatchObject({ logged: 11, target: 28, attainmentPct: 39 });
+      expect(year.appointments).toMatchObject({ logged: 36, target: 94 });
+      expect(year.leads).toMatchObject({ logged: 120, target: 314, attainmentPct: 38 });
+    });
+
+    it('AC-1: holds this month’s chip targets when this month’s own APE arrives (ADR-0056)', async () => {
+      await wired.goals.save(agent(), plan());
+      await production('2026-08', { apeYtd: cell(200 * M) });
+      const before = (await wired.summary.read(agent())).activity.monthly.targets;
+
+      await production('2026-09', { apeMonthly: cell(60 * M), apeYtd: cell(260 * M) });
+
+      expect((await wired.summary.read(agent())).activity.monthly.targets).toEqual(before);
+    });
+
+    it('AC-1: no goal is no target — the counts still show, with nothing to divide them by', async () => {
+      await day('2026-09-10', { LEADS_CONTACTED: 5, SELL_SUBMISSION: 1 });
+
+      const view = await wired.summary.read(agent());
+
+      for (const period of [view.activity.monthly, view.activity.yearly]) {
+        expect(period.targets.map((t) => [t.logged, t.target, t.attainmentPct, t.targetMet]))
+          .toEqual([[5, null, null, false], [0, null, null, false], [1, null, null, false]]);
+      }
+    });
+
+    it('AC-1: a year made before this month began leaves the chips met at 0, not unmeasured (ADR-0047)', async () => {
+      await wired.goals.save(agent(), plan());
+      await production('2026-08', { apeYtd: cell(520 * M) });
+      await day('2026-09-10', { SELL_SUBMISSION: 2 });
+
+      const month = chips((await wired.summary.read(agent())).activity.monthly);
+
+      expect(month.closings).toMatchObject({ logged: 2, target: 0, attainmentPct: null, targetMet: true });
+      expect(month.leads).toMatchObject({ logged: 0, target: 0, targetMet: true });
+    });
+
+    it('AC-1: counts a cascade code whose type the office archived since', async () => {
+      await wired.goals.save(agent(), plan());
+      await day('2026-09-10', { SELL_PRESENTATION: 4 });
+      const type = (await wired.activity.list(owner())).flatMap((c) => c.types).find((t) => t.code === 'SELL_PRESENTATION')!;
+      await wired.activity.archiveType(owner(), type.id);
+
+      expect(chips((await wired.summary.read(agent())).activity.monthly).appointments.logged).toBe(4);
+    });
+
+    it('AC-2: one chip per other section, with its total, its rows, and the total across every category', async () => {
+      await day('2026-09-03', { RECRUIT_PRESENTATION: 3, RECRUIT_FOLLOWUP: 2, DEV_TRAINING_ATTEND: 1, SELL_SUBMISSION: 1 });
+      await day('2026-09-10', { RECRUIT_AGENT_CODE: 1, DEV_TEAM_ACTIVITY: 4, LEADS_NEW_PROSPECT: 6 });
+
+      const view = await wired.summary.read(agent());
+      const sections = view.activity.monthly.sections;
+
+      // Leads Generation and Selling hold the cascade's codes, so the three target chips stand for them.
+      expect(sections.map((s) => [s.code, s.total])).toEqual([
+        ['RECRUITMENT', 6], ['PERSONAL_DEVELOPMENT', 1], ['TEAM_DEVELOPMENT', 4],
+      ]);
+      expect(sections[0].rows.map((r) => [r.code, r.count])).toEqual([
+        ['RECRUIT_PRESENTATION', 3], ['RECRUIT_FOLLOWUP', 2], ['RECRUIT_AGENT_CODE', 1],
+      ]);
+      expect(sections[1].rows.map((r) => r.code)).toEqual(['DEV_TRAINING_ATTEND', 'DEV_COACHING_RECEIVED']);
+      expect(view.activity.monthly.total).toBe(18);
+    });
+
+    it('AC-2: shows no chip for a section the office keeps from this rung (ADR-0020)', async () => {
+      await mongoose.connection.db!.collection('activityCategories').updateOne(
+        { code: 'RECRUITMENT' }, { $set: { appliesToOrgLevelCodes: ['AB', 'AAB'] } },
+      );
+      await day('2026-09-03', { RECRUIT_PRESENTATION: 3 });
+
+      const asAgent = await wired.summary.read(agent());
+      const asLeader = await wired.summary.read(agent({ orgLevelCode: 'AB', hierarchyRole: 'ab' }));
+
+      expect(asAgent.activity.monthly.sections.map((s) => s.code)).toEqual(['PERSONAL_DEVELOPMENT', 'TEAM_DEVELOPMENT']);
+      // The total is every category's, so a history the reader is not shown still adds up.
+      expect(asAgent.activity.monthly.total).toBe(3);
+      expect(asLeader.activity.monthly.sections.map((s) => s.code)).toContain('RECRUITMENT');
+    });
+
+    it('AC-2: keeps an archived type’s row while the period holds a count against it, and drops it after', async () => {
+      await day('2026-09-03', { DEV_COACHING_RECEIVED: 2 });
+      const type = (await wired.activity.list(owner())).flatMap((c) => c.types).find((t) => t.code === 'DEV_COACHING_RECEIVED')!;
+      await wired.activity.archiveType(owner(), type.id);
+
+      const view = await wired.summary.read(agent());
+      const development = view.activity.monthly.sections.find((s) => s.code === 'PERSONAL_DEVELOPMENT')!;
+      expect(development).toMatchObject({ total: 2 });
+      expect(development.rows.map((r) => r.code)).toEqual(['DEV_TRAINING_ATTEND', 'DEV_COACHING_RECEIVED']);
+
+      at('2026-10-14T02:00:00Z'); // a month on: nothing logged against it this month
+      const later = (await wired.summary.read(agent())).activity.monthly.sections.find((s) => s.code === 'PERSONAL_DEVELOPMENT')!;
+      expect(later.rows.map((r) => r.code)).toEqual(['DEV_TRAINING_ATTEND']);
+    });
+
+    it('reads its own office’s sections and days — another office’s names and counts do not reach it', async () => {
+      await provisionOffice(wired, OTHER_KPM, COMPANY);
+      await mongoose.connection.db!.collection('activityCategories').updateOne(
+        { kpmId: OTHER_KPM, code: 'RECRUITMENT' }, { $set: { label: 'Office B recruiting' } },
+      );
+      await day('2026-09-03', { RECRUIT_PRESENTATION: 1 });
+      await day('2026-09-03', { RECRUIT_PRESENTATION: 50 }, { kpmId: OTHER_KPM });
+
+      const recruitment = (await wired.summary.read(agent())).activity.monthly.sections[0];
+      const theirs = await wired.summary.read(agent({ kpmId: OTHER_KPM }));
+
+      expect(recruitment).toMatchObject({ code: 'RECRUITMENT', label: 'Recruitment', total: 1 });
+      // The same member id in office B reads office B's — the fixture is real, not a no-op.
+      expect(theirs.activity.monthly.sections[0]).toMatchObject({ label: 'Office B recruiting', total: 50 });
+    });
   });
 
   it('refuses somebody with no membership — a Super Admin has no Summary of their own', async () => {
