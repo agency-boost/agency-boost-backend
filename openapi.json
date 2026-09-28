@@ -1,6 +1,65 @@
 {
   "openapi": "3.0.0",
   "paths": {
+    "/api/v1/summary": {
+      "get": {
+        "description": "Your goal against what you produced, this month and this year, the gap, and the pace — read from your goal, the office’s production and your own log. **Your own, only**: there is no `membershipId`, and a leader’s view of a downline’s is Phase 13’s coaching copy.\n\n**Requires `personal_summary:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "SummaryController_read_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SummaryDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `personal_summary:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Your Personal Summary (P10-T4)",
+        "tags": [
+          "summary"
+        ],
+        "x-required-permission": "personal_summary:read"
+      }
+    },
     "/api/v1/leads": {
       "get": {
         "description": "Search over the name and the remarks, filter by ladder, stage, outcome and attention state, sort on one key, and page. The prototype has none of these on the screen with the most rows. **Scoped to what your grant reaches**: your own, plus your unit or your downline. A lead outside it is a 404, never a 403.\n\n**Requires `lead:read`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -15034,6 +15093,258 @@
       }
     },
     "schemas": {
+      "SummaryGoalDto": {
+        "type": "object",
+        "properties": {
+          "set": {
+            "type": "boolean",
+            "description": "A goal has been saved for the year. The defaults a first-time reader sees are not one."
+          },
+          "savedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "set",
+          "savedAt"
+        ]
+      },
+      "FigureSourceDto": {
+        "type": "object",
+        "properties": {
+          "provenance": {
+            "type": "string",
+            "enum": [
+              "imported",
+              "corrected",
+              "self_reported"
+            ]
+          },
+          "month": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09"
+          }
+        },
+        "required": [
+          "provenance",
+          "month"
+        ]
+      },
+      "MonthlyFiguresDto": {
+        "type": "object",
+        "properties": {
+          "targetMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR minor units. `null` without a goal."
+          },
+          "actualMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "`null` when nothing is held yet — not zero."
+          },
+          "attainmentPct": {
+            "type": "number",
+            "nullable": true,
+            "description": "`APE_ATTAINMENT_PCT`, capped at 999. `null` without a target or an actual."
+          },
+          "gapMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "`APE_GAP_TO_TARGET`."
+          },
+          "overMinor": {
+            "type": "number",
+            "nullable": true
+          },
+          "policiesNeeded": {
+            "type": "number",
+            "nullable": true,
+            "description": "`POLICIES_NEEDED`."
+          },
+          "targetMet": {
+            "type": "boolean"
+          },
+          "source": {
+            "nullable": true,
+            "description": "Where this month’s APE came from; `null` until the file for the month arrives.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FigureSourceDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "targetMinor",
+          "actualMinor",
+          "attainmentPct",
+          "gapMinor",
+          "overMinor",
+          "policiesNeeded",
+          "targetMet",
+          "source"
+        ]
+      },
+      "YearlyFiguresDto": {
+        "type": "object",
+        "properties": {
+          "targetMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR minor units. `null` without a goal."
+          },
+          "actualMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "`null` when nothing is held yet — not zero."
+          },
+          "attainmentPct": {
+            "type": "number",
+            "nullable": true,
+            "description": "`APE_ATTAINMENT_PCT`, capped at 999. `null` without a target or an actual."
+          },
+          "gapMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "`APE_GAP_TO_TARGET`."
+          },
+          "overMinor": {
+            "type": "number",
+            "nullable": true
+          },
+          "policiesNeeded": {
+            "type": "number",
+            "nullable": true,
+            "description": "`POLICIES_NEEDED`."
+          },
+          "targetMet": {
+            "type": "boolean"
+          },
+          "source": {
+            "description": "The office’s year to date, or the agent’s own figure (P9-T6).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FigureSourceDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "targetMinor",
+          "actualMinor",
+          "attainmentPct",
+          "gapMinor",
+          "overMinor",
+          "policiesNeeded",
+          "targetMet",
+          "source"
+        ]
+      },
+      "PaceDto": {
+        "type": "object",
+        "properties": {
+          "closingTarget": {
+            "type": "number"
+          },
+          "closingsLogged": {
+            "type": "number"
+          },
+          "dayOfMonth": {
+            "type": "number"
+          },
+          "daysInMonth": {
+            "type": "number"
+          },
+          "projected": {
+            "type": "number",
+            "nullable": true,
+            "description": "`PROJECTED_CLOSINGS_THIS_MONTH`; `null` before the 7th of the month."
+          },
+          "weeksLeft": {
+            "type": "number",
+            "description": "Days left today included, over 7, rounded up — never zero."
+          },
+          "neededPerWeek": {
+            "type": "number",
+            "description": "`CLOSINGS_NEEDED_PER_WEEK`; 0 once the target is reached."
+          },
+          "targetMet": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "closingTarget",
+          "closingsLogged",
+          "dayOfMonth",
+          "daysInMonth",
+          "projected",
+          "weeksLeft",
+          "neededPerWeek",
+          "targetMet"
+        ]
+      },
+      "SummaryDto": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "string",
+            "example": "2026"
+          },
+          "month": {
+            "type": "string",
+            "example": "2026-09"
+          },
+          "today": {
+            "type": "string",
+            "example": "2026-09-28"
+          },
+          "goal": {
+            "$ref": "#/components/schemas/SummaryGoalDto"
+          },
+          "caseSizeMinor": {
+            "type": "number"
+          },
+          "monthly": {
+            "description": "*Monthly* (ADR-0056): `MONTHLY_APE_TARGET` — fixed against this month’s own figure — against this month’s uploaded APE.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MonthlyFiguresDto"
+              }
+            ]
+          },
+          "yearly": {
+            "description": "*Yearly*: the annual target against the year to date.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/YearlyFiguresDto"
+              }
+            ]
+          },
+          "pace": {
+            "nullable": true,
+            "description": "The pace sentence (ADR-0057); `null` without a goal.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaceDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "year",
+          "month",
+          "today",
+          "goal",
+          "caseSizeMinor",
+          "monthly",
+          "yearly",
+          "pace"
+        ]
+      },
       "LeadContactDto": {
         "type": "object",
         "properties": {
@@ -19732,6 +20043,9 @@
               "MEETING_PER_APPROACH",
               "MEASURED_LEAD_TO_APPOINTMENT_RATE",
               "MEASURED_CLOSING_RATE",
+              "MONTHLY_APE_TARGET",
+              "PROJECTED_CLOSINGS_THIS_MONTH",
+              "CLOSINGS_NEEDED_PER_WEEK",
               "ACTIVATION_COMPLETION_PCT",
               "ACTIVATION_DAY_INDEX",
               "TRAINING_COMPLETION_PCT",

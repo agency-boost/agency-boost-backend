@@ -1,4 +1,4 @@
-import { ACTIVATION, PERFORMANCE, RATIO_BENCHMARKS, TIME } from '@/domain/constants';
+import { ACTIVATION, PERFORMANCE, RATIO_BENCHMARKS, SUMMARY, TIME } from '@/domain/constants';
 
 /**
  * The metric registry (P4-T4) — one definition per metric, and one place to find it.
@@ -215,6 +215,15 @@ export const METRIC_REGISTRY = define([
    */
   { id: 'MEASURED_LEAD_TO_APPOINTMENT_RATE', label: 'Your logged leads-to-appointment rate', period: 'ROLLING_30D', unit: 'ratio', threshold: null, availableFrom: 10 },
   { id: 'MEASURED_CLOSING_RATE', label: 'Your logged closing rate', period: 'ROLLING_30D', unit: 'ratio', threshold: null, availableFrom: 10 },
+  /*
+   * ---- The Personal Summary (P10-T4, ADR-0056, ADR-0057) ----
+   *
+   * `MONTHLY_APE_TARGET` is **not** the cascade's `POINT_IN_TIME` monthly figure: it is taken from the
+   * year to date through last month, so this month's own upload cannot shrink this month's target.
+   */
+  { id: 'MONTHLY_APE_TARGET', label: 'This month’s APE target', period: 'CALENDAR_MONTH', unit: 'money_minor', threshold: null, availableFrom: 10 },
+  { id: 'PROJECTED_CLOSINGS_THIS_MONTH', label: 'Closings at your current pace', period: 'CALENDAR_MONTH', unit: 'count', threshold: SUMMARY.PACE_MIN_DAYS, availableFrom: 10 },
+  { id: 'CLOSINGS_NEEDED_PER_WEEK', label: 'Closings needed per week', period: 'CALENDAR_MONTH', unit: 'count', threshold: null, availableFrom: 10 },
   { id: 'POLICY_COUNT_TARGET', label: 'Policies to close this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },
   { id: 'APPOINTMENT_TARGET', label: 'Appointments to hold this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },
   { id: 'LEAD_TARGET', label: 'Leads to contact this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },

@@ -102,6 +102,16 @@ export const ACTIVITY = {
   DASHBOARD_RANGE_MAX_DAYS: 366,
 } as const;
 
+/** The Personal Summary (P10-T4). */
+export const SUMMARY = {
+  /**
+   * How far into a month the pace sentence projects (ADR-0057). Before this many days of the month
+   * have passed a run-rate is noise — one closing on the 2nd is fifteen by the 30th — and the sentence
+   * says only how many of the target are closed so far.
+   */
+  PACE_MIN_DAYS: 7,
+} as const;
+
 /** 90-day activation programme. Overall.html:3270-3352. Tenant-configurable window. */
 export const ACTIVATION = {
   WINDOW_DAYS: 90,

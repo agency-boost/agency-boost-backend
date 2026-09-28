@@ -156,6 +156,9 @@ const config: Config = {
     // P9: the authoritative APE source. Every downstream figure reads it, so the floor is the
     // domain one from the first task rather than something to ratchet towards.
     './src/modules/production/': { lines: 95, branches: 90, functions: 95, statements: 95 },
+    // P10-T4: the Personal Summary is arithmetic over three modules' readings — every branch is a
+    // figure somebody reads as their standing, so it carries the domain floor whole.
+    './src/modules/summary/': { lines: 95, branches: 95, functions: 95, statements: 95 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],

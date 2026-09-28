@@ -2291,6 +2291,15 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     budi / dewi                  one day each: nine days ago, and a day of zeroes — Dewi's
                                  ratios all read "Not enough data"
 
+  PERSONAL SUMMARY at /summary
+    rina@kpm0417.test            a saved goal, and last month's and this month's production:
+                                 Monthly measures this month's upload against a target held
+                                 from last month's year to date; Yearly the year so far; her
+                                 closings this month make the pace sentence
+    budi@kpm0417.test            a goal (from savings), and not in this month's file — this
+                                 month reads "Not uploaded yet", never zero
+    sari@kpm0417.test            no goal saved — "You haven't set a goal", and Set your goal
+
   MONTHLY UPLOAD at /kpm/data-upload  (owner@kpm0417.test or admin@kpm0417.test)
     This month   one import reverted by the Admin (figures typed in thousands), then
                  the corrected file standing — Revert is offered on it. The last two

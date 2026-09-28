@@ -37,6 +37,8 @@ import { ProductionImportService } from '@/modules/production/production-import.
 import { ProductionCorrections } from '@/modules/production/production-correction.service';
 import { ProductionReadings } from '@/modules/production/production-readings';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
+import { SummaryController } from '@/modules/summary/summary.controller';
+import { SummaryService } from '@/modules/summary/summary.service';
 import { ProductionService } from '@/modules/production/production.service';
 import { ProductionController } from '@/modules/production/production.controller';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -245,6 +247,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ]),
   ],
   controllers: [
+    SummaryController,
     LeadController,
     GoalController,
     ProductionController,
@@ -332,6 +335,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ActivityLogRepository,
     ActivityService,
     ActivityReadings,
+    SummaryService,
     CampaignRepository,
     CampaignService,
     CapabilityCatalogRepository,

@@ -31,15 +31,38 @@ export class ProductionReadings {
    */
   async apeYearToDate(ctx: RequestContext, membershipId: string, year: string): Promise<HeldFigure | null> {
     if (!/^\d{4}$/.test(year)) return null;
+    return this.apeYearToDateThrough(ctx, membershipId, `${year}-12`);
+  }
+
+  /**
+   * The same, but **no later than `month`** (P10-T4): the year to date as it stood through last month,
+   * which is what this month's APE target is taken from (ADR-0056). January has nothing before it.
+   */
+  async apeYearToDateThrough(ctx: RequestContext, membershipId: string, month: string): Promise<HeldFigure | null> {
+    if (!/^\d{4}-\d{2}$/.test(month)) return null;
     const [row] = await this.data.find(
       ctx,
-      { membershipId, month: { $gte: `${year}-01`, $lte: `${year}-12` }, 'apeYtd.value': { $ne: null } },
+      { membershipId, month: { $gte: `${month.slice(0, 4)}-01`, $lte: month }, 'apeYtd.value': { $ne: null } },
       { sort: { month: -1 }, limit: 1 },
     );
     if (!row) return null;
     return {
       minor: row.apeYtd.value as number,
       provenance: row.apeYtd.provenance === 'corrected' ? 'corrected' : 'imported',
+      month: row.month,
+    };
+  }
+
+  /**
+   * One month's own APE the office holds (P10-T4) — the Summary's *this month* — or `null` when the file
+   * for it has not arrived, which is not zero (ADR-0050: a month's file lands after it ends).
+   */
+  async apeForMonth(ctx: RequestContext, membershipId: string, month: string): Promise<HeldFigure | null> {
+    const row = await this.data.findOne(ctx, { membershipId, month, 'apeMonthly.value': { $ne: null } });
+    if (!row) return null;
+    return {
+      minor: row.apeMonthly.value as number,
+      provenance: row.apeMonthly.provenance === 'corrected' ? 'corrected' : 'imported',
       month: row.month,
     };
   }

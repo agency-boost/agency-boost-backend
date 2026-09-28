@@ -148,7 +148,15 @@ describe('the daily loop, measured (P6)', () => {
   });
 
   describe('the server’s share of the sixty seconds', () => {
-    /** The slowest of `runs`, because a budget is met at p95 and not on average. */
+    /**
+     * **The p95 of `runs`**, by nearest rank — because the budget is a p95 (`performance-and-scale.md`),
+     * not an average and not a maximum.
+     *
+     * It was the maximum, under a comment saying p95, and in a full coverage run beside 140 other suites
+     * one garbage-collection pause made a 90 ms read measure 2.4 s and failed the phase's suite on every
+     * run of 2026-09-28 — while every run of the file alone passed. With 20 runs the p95 drops the single
+     * worst sample and keeps the rest; with 10 it is still the worst.
+     */
     const slowest = async (runs: number, work: () => Promise<unknown>) => {
       const times: number[] = [];
       for (let i = 0; i < runs; i += 1) {
@@ -156,7 +164,8 @@ describe('the daily loop, measured (P6)', () => {
         await work();
         times.push(Number(process.hrtime.bigint() - started) / 1e6);
       }
-      return Math.max(...times);
+      times.sort((a, b) => a - b);
+      return times[Math.ceil(0.95 * times.length) - 1];
     };
 
     it('opens the day well inside the read budget', async () => {
@@ -167,7 +176,7 @@ describe('the daily loop, measured (P6)', () => {
       // service, with no network in it — the number to watch is that it does not grow with the
       // office, which the plans above are what guarantee.
       expect(ms).toBeLessThan(300);
-      console.log(`  readDay        slowest of 20: ${ms.toFixed(1)} ms`);
+      console.log(`  readDay        p95 of 20: ${ms.toFixed(1)} ms`);
     });
 
     it('saves a day well inside the write budget', async () => {
@@ -178,7 +187,7 @@ describe('the daily loop, measured (P6)', () => {
 
       // performance-and-scale.md: 500 ms for writes, and "Save a day < 500 ms" as an interaction.
       expect(ms).toBeLessThan(500);
-      console.log(`  saveDay        slowest of 20: ${ms.toFixed(1)} ms`);
+      console.log(`  saveDay        p95 of 20: ${ms.toFixed(1)} ms`);
     });
 
     it('answers compliance and the week’s summary inside the read budget', async () => {
@@ -191,8 +200,8 @@ describe('the daily loop, measured (P6)', () => {
 
       expect(compliance).toBeLessThan(300);
       expect(summary).toBeLessThan(300);
-      console.log(`  compliance     slowest of 20: ${compliance.toFixed(1)} ms`);
-      console.log(`  summary        slowest of 20: ${summary.toFixed(1)} ms`);
+      console.log(`  compliance     p95 of 20: ${compliance.toFixed(1)} ms`);
+      console.log(`  summary        p95 of 20: ${summary.toFixed(1)} ms`);
     });
 
     it('costs the same for the fortieth agent as for the first', async () => {

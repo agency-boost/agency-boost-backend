@@ -9,6 +9,7 @@ import {
   PERFORMANCE,
   PERIOD,
   RATIO_BENCHMARKS,
+  SUMMARY,
   TIME,
   DEFAULT_CURRENCY,
   DEFAULT_ORG_LADDER,
@@ -103,6 +104,9 @@ describe('domain constants', () => {
       expect(ACTIVITY.DASHBOARD_RANGE_MAX_DAYS).toBe(366);
       // The block is the 7-day period's length: *Week 1* of *Last 30 days* is *Last 7 days*.
       expect(ACTIVITY.DASHBOARD_BLOCK_DAYS).toBe(PERIOD.ROLLING_7D_DAYS);
+    });
+    it('pins the pace projection’s first day at the 7th of the month (ADR-0057)', () => {
+      expect(SUMMARY.PACE_MIN_DAYS).toBe(7);
     });
     it('pins the activation window at 90 days, counted from day 1', () => {
       expect(ACTIVATION.WINDOW_DAYS).toBe(90);

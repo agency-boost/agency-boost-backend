@@ -336,6 +336,18 @@ export const PERMISSIONS = {
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
   ],
+  /*
+   * The Personal Summary (P10-T4). The matrix's grant, whole; the route is first-person today, and a
+   * leader's view of a downline's is Phase 13's coaching copy.
+   */
+  'personal_summary:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-unit' },
+    { grantee: AGENT, scope: 'own' },
+  ],
   'activity_ratios:read': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },

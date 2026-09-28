@@ -56,6 +56,7 @@ import { LeadRepository } from '@/modules/leads/lead.repository';
 import { LeadService } from '@/modules/leads/lead.service';
 import { ActivityService } from '@/modules/activity/activity.service';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
+import { SummaryService } from '@/modules/summary/summary.service';
 import {
   Campaign, CampaignSchema, QualificationRule, QualificationRuleSchema,
 } from '@/modules/campaigns/campaign.schema';
@@ -260,6 +261,13 @@ export function configModule(now: Date) {
     productionReadings,
     new ActivityReadings(new ActivityLogRepository(model(ActivityLog.name, ActivityLogSchema) as never)),
   );
+  // P10-T4: the Personal Summary, read from the goal, the office's production and the member's log.
+  const summary = new SummaryService(
+    goals,
+    productionReadings,
+    new ActivityReadings(new ActivityLogRepository(model(ActivityLog.name, ActivityLogSchema) as never)),
+    new TenantDay(kpms as never, clock),
+  );
   const productionNames = new MemberNames(memberships, users as never);
   // P9-T4: a month's lock and revision, and the imports that write it.
   const productionMonths = new ProductionMonths(
@@ -356,7 +364,7 @@ export function configModule(now: Date) {
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
     products, assets, storage, kpmProducts, events, campaigns, capability, activityLogs,
     leadRecords,
-    goals, production, productionMonths, productionImport, productionCorrections, productionReadings,
+    goals, production, productionMonths, productionImport, productionCorrections, productionReadings, summary,
     sentNotifications,
   };
 }

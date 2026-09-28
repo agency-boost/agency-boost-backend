@@ -1,3 +1,4 @@
+import { SummaryDto } from '@/modules/summary/summary.response.dto';
 import { Type } from '@nestjs/common';
 import {
   AccessTokenDto, ImpersonationSessionDto, MeDto, MyKpmRequestDto, ReadinessDto,
@@ -71,6 +72,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   ActivityController_summary: { type: ActivitySummaryDto },
   ActivityController_dashboard: { type: ActivityDashboardDto },
   ActivityController_ratios: { type: ActivityRatiosDto },
+  SummaryController_read: { type: SummaryDto },
   ActivityController_compliance: { type: ActivityComplianceDto },
   AuthController_resendVerification: { type: StatusAckDto },
   AuthController_sessions: { type: SessionDto, isArray: true },
