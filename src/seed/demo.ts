@@ -2298,12 +2298,15 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
                                  closings this month make the pace sentence. Her activity
                                  targets: leads, appointments and closings against the
                                  cascade on this month's target (Yearly: on the year's), a
-                                 chip per other section, and the pulse — her three ratios
+                                 chip per other section, and the pulse — her three ratios.
+                                 Leads that need you: Pak Hendro first, overdue and promised
+                                 this month; Pak Bambang and Pak Surya last, with no date set
     budi@kpm0417.test            a goal (from savings), and not in this month's file — this
                                  month reads "Not uploaded yet", never zero
     sari@kpm0417.test            no goal saved — "You haven't set a goal", and Set your goal.
                                  Her activity still counts, with no target to divide it by;
-                                 her pulse has four ratios, the balance left to /activity/ratio
+                                 her pulse has four ratios, the balance left to /activity/ratio.
+                                 No leads of her own — the card says so, with a way to add one
 
   MONTHLY UPLOAD at /kpm/data-upload  (owner@kpm0417.test or admin@kpm0417.test)
     This month   one import reverted by the Admin (figures typed in thousands), then

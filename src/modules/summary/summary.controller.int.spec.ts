@@ -70,6 +70,8 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
       expect(res.body.activity[period]).toHaveProperty('total');
       expect(res.body.activity[period]).toHaveProperty('sections');
     }
+    // P10-T6: the reader's own open leads, and how many.
+    expect(res.body.leads).toEqual({ rows: [], total: 0 });
   });
 
   it('refuses a Super Admin, who has no Summary of their own', async () => {

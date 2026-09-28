@@ -374,6 +374,100 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     });
   });
 
+  describe('P10-T6 — leads that need you', () => {
+    beforeEach(async () => {
+      await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create([
+        { _id: KPM, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta' },
+        { _id: OTHER_KPM, companyId: COMPANY, code: '0555', branchName: 'B', timezone: 'Asia/Jakarta' },
+      ]);
+      await wired.orgLevels.seedDefaultLadder(COMPANY);
+      await provisionOffice(wired, KPM, COMPANY);
+    });
+
+    let registered = 0;
+    const lead = (name: string, over: Record<string, unknown> = {}) => {
+      registered += 1;
+      return mongoose.connection.db!.collection('leads').insertOne({
+        kpmId: KPM, ownerMembershipId: ME, type: 'sales', name, statusCode: 'FOLLOW_UP', commitments: [],
+        remarks: 'Hobi golf', nextActionDate: null, nextActionNote: null, outcome: null, source: null,
+        contact: { phone: null, email: null }, lawfulBasis: null, consentAt: null, statusHistory: [],
+        dateRegistered: new Date(Date.UTC(2026, 0, registered)), version: 1, deletedAt: null,
+        createdAt: NOW, updatedAt: NOW, createdBy: ME, updatedBy: ME, ...over,
+      } as never);
+    };
+    const names = async (ctx = agent()) => (await wired.summary.read(ctx)).leads.rows.map((r) => r.name);
+
+    it('AC-1: your own open leads, nearest next action first and undated last', async () => {
+      await lead('Undated, registered first');
+      await lead('Next week', { nextActionDate: '2026-09-20' });
+      await lead('Four days late', { nextActionDate: '2026-09-10' });
+      await lead('Today', { nextActionDate: '2026-09-14' });
+      await lead('Undated, registered second');
+
+      expect(await names()).toEqual(['Four days late', 'Today', 'Next week', 'Undated, registered first', 'Undated, registered second']);
+    });
+
+    it('AC-1: leaves out a closed lead, a deleted one, and anybody else’s — a leader’s downline included', async () => {
+      await lead('Mine');
+      await lead('Won', { outcome: 'won' });
+      await lead('Lost', { outcome: 'lost' });
+      await lead('Deleted', { deletedAt: NOW });
+      await lead('My downline’s', { ownerMembershipId: 'mem-downline' });
+      await lead('Another office’s', { kpmId: OTHER_KPM });
+
+      const asLeader = await wired.summary.read(agent({ orgLevelCode: 'AB', hierarchyRole: 'ab', directCount: 1 }));
+
+      expect(asLeader.leads).toMatchObject({ total: 1, rows: [{ name: 'Mine' }] });
+    });
+
+    it('AC-1: each with its flags as the Leads screen derives them — the commitment hiding none (I-103)', async () => {
+      await lead('Late and promised', { nextActionDate: '2026-09-10', commitments: [{ month: '2026-09', at: NOW }] });
+      await lead('Nothing written', { remarks: null, statusCode: null, type: null });
+
+      const [late, blank] = (await wired.summary.read(agent())).leads.rows;
+
+      expect(late).toMatchObject({
+        name: 'Late and promised', thisMonth: true, flags: ['overdue'], overdueDays: 4,
+        statusCode: 'FOLLOW_UP', statusLabel: 'Follow-up', type: 'sales', nextActionDate: '2026-09-10',
+      });
+      expect(blank).toMatchObject({
+        thisMonth: false, flags: ['no-next-action', 'no-remarks'], overdueDays: null, statusLabel: null, type: null,
+      });
+    });
+
+    it('AC-1: still names a stage the office has since archived', async () => {
+      await mongoose.connection.db!.collection('leadStatuses').updateOne({ code: 'FOLLOW_UP' }, { $set: { status: 'archived' } });
+      await lead('On an archived stage');
+
+      expect((await wired.summary.read(agent())).leads.rows[0].statusLabel).toBe('Follow-up');
+    });
+
+    it('lists the nearest ten and counts the rest', async () => {
+      for (let i = 1; i <= 12; i += 1) await lead(`Lead ${i}`, { nextActionDate: `2026-09-${String(i + 14).padStart(2, '0')}` });
+
+      const view = await wired.summary.read(agent());
+
+      expect(view.leads.total).toBe(12);
+      expect(view.leads.rows.map((r) => r.name)).toEqual(Array.from({ length: 10 }, (_, i) => `Lead ${i + 1}`));
+    });
+
+    it('reads its own office’s leads and stage names — another office’s do not reach it', async () => {
+      await provisionOffice(wired, OTHER_KPM, COMPANY);
+      await mongoose.connection.db!.collection('leadStatuses').updateOne(
+        { kpmId: OTHER_KPM, code: 'FOLLOW_UP' }, { $set: { label: 'Office B follow-up' } },
+      );
+      await lead('Mine');
+      await lead('Theirs', { kpmId: OTHER_KPM });
+
+      const mine = await wired.summary.read(agent());
+      const theirs = await wired.summary.read(agent({ kpmId: OTHER_KPM }));
+
+      expect(mine.leads.rows).toEqual([expect.objectContaining({ name: 'Mine', statusLabel: 'Follow-up' })]);
+      // The same member id in office B reads office B's — the fixture is real, not a no-op.
+      expect(theirs.leads.rows).toEqual([expect.objectContaining({ name: 'Theirs', statusLabel: 'Office B follow-up' })]);
+    });
+  });
+
   it('refuses somebody with no membership — a Super Admin has no Summary of their own', async () => {
     await expect(wired.summary.read(RequestContext.platform('root'))).rejects.toMatchObject({ status: 403, code: 'TENANT_NO_MEMBERSHIP' });
   });

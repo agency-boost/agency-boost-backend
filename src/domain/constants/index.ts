@@ -110,6 +110,12 @@ export const SUMMARY = {
    * says only how many of the target are closed so far.
    */
   PACE_MIN_DAYS: 7,
+  /**
+   * How many of a member's open leads *Leads that need you* lists, nearest next action first (P10-T6).
+   * The prototype lists every one; a summary of two hundred rows is the Leads screen without its search,
+   * so the card shows the nearest and counts the rest, with the way to all of them.
+   */
+  LEADS_SHOWN: 10,
 } as const;
 
 /** 90-day activation programme. Overall.html:3270-3352. Tenant-configurable window. */

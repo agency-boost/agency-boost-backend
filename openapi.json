@@ -15442,6 +15442,96 @@
           "yearly"
         ]
       },
+      "OpenLeadDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "sales",
+              "recruitment"
+            ],
+            "nullable": true
+          },
+          "statusCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "statusLabel": {
+            "type": "string",
+            "nullable": true,
+            "description": "The office’s name for the stage, archived stages included."
+          },
+          "thisMonth": {
+            "type": "boolean",
+            "description": "Promised for the office’s current month."
+          },
+          "flags": {
+            "type": "array",
+            "description": "As the Leads screen derives them (`leadFlags`).",
+            "items": {
+              "type": "string",
+              "enum": [
+                "overdue",
+                "no-next-action",
+                "no-remarks"
+              ]
+            }
+          },
+          "overdueDays": {
+            "type": "number",
+            "nullable": true,
+            "description": "Whole days in the office’s zone; `null` unless overdue."
+          },
+          "nextActionDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-18"
+          },
+          "nextActionNote": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "statusCode",
+          "statusLabel",
+          "thisMonth",
+          "flags",
+          "overdueDays",
+          "nextActionDate",
+          "nextActionNote"
+        ]
+      },
+      "SummaryLeadsDto": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "description": "The nearest `SUMMARY.LEADS_SHOWN` (10), nearest next action first, undated last.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenLeadDto"
+            }
+          },
+          "total": {
+            "type": "number",
+            "description": "Every open lead of the reader’s own."
+          }
+        },
+        "required": [
+          "rows",
+          "total"
+        ]
+      },
       "SummaryDto": {
         "type": "object",
         "properties": {
@@ -15495,6 +15585,14 @@
                 "$ref": "#/components/schemas/SummaryActivityPeriodsDto"
               }
             ]
+          },
+          "leads": {
+            "description": "*Leads that need you* (P10-T6): the reader’s own open leads.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SummaryLeadsDto"
+              }
+            ]
           }
         },
         "required": [
@@ -15506,7 +15604,8 @@
           "monthly",
           "yearly",
           "pace",
-          "activity"
+          "activity",
+          "leads"
         ]
       },
       "LeadContactDto": {

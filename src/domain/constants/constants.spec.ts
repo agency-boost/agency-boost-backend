@@ -108,6 +108,9 @@ describe('domain constants', () => {
     it('pins the pace projection’s first day at the 7th of the month (ADR-0057)', () => {
       expect(SUMMARY.PACE_MIN_DAYS).toBe(7);
     });
+    it('pins how many open leads the Summary lists before it counts the rest (P10-T6)', () => {
+      expect(SUMMARY.LEADS_SHOWN).toBe(10);
+    });
     it('pins the activation window at 90 days, counted from day 1', () => {
       expect(ACTIVATION.WINDOW_DAYS).toBe(90);
       expect(ACTIVATION.DAY_INDEX_BASE).toBe(1);

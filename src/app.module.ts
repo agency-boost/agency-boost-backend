@@ -16,6 +16,7 @@ import { AuditReadService } from '@/modules/audit/audit-read.service';
 import { LeadController } from '@/modules/leads/lead.controller';
 import { LeadRepository } from '@/modules/leads/lead.repository';
 import { LeadService } from '@/modules/leads/lead.service';
+import { LeadReadings } from '@/modules/leads/lead-readings';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
 import { Goal, GoalSchema } from '@/modules/goals/goal.schema';
@@ -360,6 +361,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     AuditReadService,
     LeadRepository,
     LeadService,
+    LeadReadings,
     GoalRepository,
     GoalService,
     PolicyRepository,

@@ -54,6 +54,7 @@ import { ActivityLogRepository } from '@/modules/activity/activity-log.repositor
 import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
 import { LeadRepository } from '@/modules/leads/lead.repository';
 import { LeadService } from '@/modules/leads/lead.service';
+import { LeadReadings } from '@/modules/leads/lead-readings';
 import { ActivityService } from '@/modules/activity/activity.service';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { SummaryService } from '@/modules/summary/summary.service';
@@ -273,6 +274,11 @@ export function configModule(now: Date) {
     productionReadings,
     activityReadings,
     new TenantDay(kpms as never, clock),
+    new LeadReadings(
+      new LeadRepository(model(Lead.name, LeadSchema) as never),
+      new LeadStatusRepository(leadStatuses as never),
+      clock,
+    ),
   );
   const productionNames = new MemberNames(memberships, users as never);
   // P9-T4: a month's lock and revision, and the imports that write it.

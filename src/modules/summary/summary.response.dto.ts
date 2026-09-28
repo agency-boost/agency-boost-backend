@@ -1,4 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
+import type { LeadFlag } from '@/modules/leads/lead-attention';
+import type { OpenLead } from '@/modules/leads/lead-readings';
+import type { LeadType } from '@/modules/leads/lead.schema';
 import type { FigureSource, SummaryActivity, SummaryView } from './summary.service';
 import type { ActivityTarget, ActivityTargetKey, Pace, PeriodFigures, SectionChip } from './summary-figures';
 
@@ -84,6 +87,24 @@ class SummaryActivityPeriodsDto {
   @ApiProperty({ type: SummaryActivityDto, description: 'The year to date, against the cascade on the annual target.' }) yearly!: SummaryActivityDto;
 }
 
+export class OpenLeadDto implements OpenLead {
+  @ApiProperty() id!: string;
+  @ApiProperty() name!: string;
+  @ApiProperty({ enum: ['sales', 'recruitment'], nullable: true }) type!: LeadType | null;
+  @ApiProperty({ type: String, nullable: true }) statusCode!: string | null;
+  @ApiProperty({ type: String, nullable: true, description: 'The office’s name for the stage, archived stages included.' }) statusLabel!: string | null;
+  @ApiProperty({ description: 'Promised for the office’s current month.' }) thisMonth!: boolean;
+  @ApiProperty({ enum: ['overdue', 'no-next-action', 'no-remarks'], isArray: true, description: 'As the Leads screen derives them (`leadFlags`).' }) flags!: LeadFlag[];
+  @ApiProperty({ type: Number, nullable: true, description: 'Whole days in the office’s zone; `null` unless overdue.' }) overdueDays!: number | null;
+  @ApiProperty({ type: String, nullable: true, example: '2026-09-18' }) nextActionDate!: string | null;
+  @ApiProperty({ type: String, nullable: true }) nextActionNote!: string | null;
+}
+
+class SummaryLeadsDto {
+  @ApiProperty({ type: [OpenLeadDto], description: 'The nearest `SUMMARY.LEADS_SHOWN` (10), nearest next action first, undated last.' }) rows!: OpenLeadDto[];
+  @ApiProperty({ description: 'Every open lead of the reader’s own.' }) total!: number;
+}
+
 class SummaryGoalDto {
   @ApiProperty({ description: 'A goal has been saved for the year. The defaults a first-time reader sees are not one.' }) set!: boolean;
   @ApiProperty({ type: String, nullable: true, format: 'date-time' }) savedAt!: string | null;
@@ -110,4 +131,7 @@ export class SummaryDto implements SummaryView {
 
   @ApiProperty({ type: SummaryActivityPeriodsDto, description: '*Your sales activity targets* and the other sections (P10-T5).' })
   activity!: { monthly: SummaryActivityDto; yearly: SummaryActivityDto };
+
+  @ApiProperty({ type: SummaryLeadsDto, description: '*Leads that need you* (P10-T6): the reader’s own open leads.' })
+  leads!: { rows: OpenLeadDto[]; total: number };
 }

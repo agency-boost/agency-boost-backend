@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import { NoMembershipException } from '@/common/errors/domain.exception';
+import { SUMMARY } from '@/domain/constants';
 import { endOfMonth, type LocalDate } from '@/common/time/local-day';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { cascadeCounts } from '@/modules/goals/goal-cascade';
 import { GoalService } from '@/modules/goals/goal.service';
+import { LeadReadings, type OpenLead } from '@/modules/leads/lead-readings';
 import { ProductionReadings } from '@/modules/production/production-readings';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import {
@@ -48,6 +50,11 @@ export interface SummaryView {
   pace: Pace | null;
   /** What was logged against the plan, and the rest of the reader's sections (P10-T5). */
   activity: { monthly: SummaryActivity; yearly: SummaryActivity };
+  /**
+   * *Leads that need you* (P10-T6): the reader's own open leads, nearest next action first and undated
+   * last — the first `SUMMARY.LEADS_SHOWN` of them — and how many there are.
+   */
+  leads: { rows: OpenLead[]; total: number };
 }
 
 /**
@@ -64,6 +71,7 @@ export class SummaryService {
     private readonly production: ProductionReadings,
     private readonly activity: ActivityReadings,
     private readonly days: TenantDay,
+    private readonly leadReadings: LeadReadings,
   ) {}
 
   async read(ctx: RequestContext): Promise<SummaryView> {
@@ -86,12 +94,13 @@ export class SummaryService {
 
     const monthWindow = { from: `${day.month}-01` as LocalDate, to: day.today };
     const yearWindow = { from: `${year}-01-01` as LocalDate, to: day.today };
-    const [through, thisMonth, counts, yearCounts, sections] = await Promise.all([
+    const [through, thisMonth, counts, yearCounts, sections, openLeads] = await Promise.all([
       previous ? this.production.apeYearToDateThrough(ctx, me, previous) : Promise.resolve(null),
       this.production.apeForMonth(ctx, me, day.month),
       this.activity.countsOver(ctx, me, monthWindow),
       this.activity.countsOver(ctx, me, yearWindow),
       this.activity.sectionsShown(ctx, ctx.membership?.orgLevelCode ?? ''),
+      this.leadReadings.openOf(ctx, me, day),
     ]);
 
     const before = ytdBeforeThisMonth({
@@ -153,6 +162,7 @@ export class SummaryService {
         monthly: activityFor(monthWindow, counts, monthlyCounts),
         yearly: activityFor(yearWindow, yearCounts, yearlyCounts),
       },
+      leads: { rows: openLeads.slice(0, SUMMARY.LEADS_SHOWN), total: openLeads.length },
     };
   }
 }

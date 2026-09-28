@@ -71,11 +71,25 @@ describe('the Personal Summary, measured (P10-T4)', () => {
         }
       }
     }
+    // Thirty open leads each, and ten closed — *Leads that need you* reads the open ones (P10-T6).
+    const leads: Record<string, unknown>[] = [];
+    for (const id of agents) {
+      for (const kpmId of [KPM_A, KPM_B]) {
+        for (let l = 0; l < 40; l += 1) {
+          leads.push({
+            kpmId, ownerMembershipId: id, type: 'sales', name: `Lead ${l}`, statusCode: 'FOLLOW_UP', commitments: [],
+            remarks: l % 3 ? 'Hobi golf' : null, nextActionDate: l % 4 ? `2026-09-${String((l % 28) + 1).padStart(2, '0')}` : null,
+            nextActionNote: null, outcome: l < 30 ? null : 'won', source: null, dateRegistered: NOW, version: 1, deletedAt: null,
+          });
+        }
+      }
+    }
     const db = mongoose.connection.db!;
+    await db.collection('leads').insertMany(leads as never);
     await db.collection('goals').insertMany(goals as never);
     await db.collection('monthlyAgentData').insertMany(production as never);
     await db.collection('activityLogs').insertMany(logs as never);
-    await Promise.all(['Goal', 'MonthlyAgentData', 'ActivityLog']
+    await Promise.all(['Goal', 'MonthlyAgentData', 'ActivityLog', 'Lead']
       .filter((name) => mongoose.modelNames().includes(name))
       .map((name) => mongoose.model(name).syncIndexes()));
     await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create([
@@ -106,6 +120,8 @@ describe('the Personal Summary, measured (P10-T4)', () => {
     expect(view.activity.yearly.targets[2]).toMatchObject({ logged: 257, target: 28 });
     expect(view.activity.yearly.sections[0]).toMatchObject({ code: 'RECRUITMENT', total: 257 });
     expect(view.activity.yearly.total).toBe(514);
+    expect(view.leads).toMatchObject({ total: 30 });
+    expect(view.leads.rows).toHaveLength(10);
   });
 
   it('AC-6: answers well inside the read budget, at p95', async () => {

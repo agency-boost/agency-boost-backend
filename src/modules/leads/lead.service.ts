@@ -11,12 +11,13 @@ import { MembershipRepository } from '@/modules/org/membership.repository';
 import { scopeFor, type Permission } from '@/modules/rbac/permissions';
 import { LeadStatusRepository } from '@/modules/config/activity.repository';
 import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
+import { leadFlags, type LeadFlag } from './lead-attention';
 import { checkLead, requireLawfulBasis, type CheckedLead } from './lead-input';
 import { LeadRepository } from './lead.repository';
 import type { LeadDocument, LeadType } from './lead.schema';
 
 /** What an agent may be told is asking for them. Derived, never stored. */
-export type LeadFlag = 'overdue' | 'no-next-action' | 'no-remarks';
+export type { LeadFlag } from './lead-attention';
 
 /** How many rows a page of the Leads screen holds. Stated here, not chosen in a component. */
 export const LEAD_PAGE_SIZE = 50;
@@ -648,27 +649,11 @@ export class LeadService {
 
   /**
    * What is asking to be picked up. **Derived on read, never stored** — a stored flag is one that
-   * is wrong at midnight.
-   *
-   * `thisMonth` does **not** suppress them, which is where the prototype and this part company:
-   * it shows only the green *Closes this month* chip on a lead that is also two weeks overdue,
-   * hiding exactly the leads most needing attention (P7-T4 AC-2).
+   * is wrong at midnight. The rule is `leadFlags` (`lead-attention.ts`), which the Personal Summary
+   * reads too (P10-T6), so two screens cannot disagree about what is overdue.
    */
   private flagsFor(lead: LeadDocument, day: OfficeDay): LeadFlag[] {
-    if (lead.outcome) return [];
-    const flags: LeadFlag[] = [];
-    /*
-     * **Two flags, not one** (AC-4). Forgetting to set a date and missing one are different
-     * failures with different answers: the first wants a decision, the second wants a call. The
-     * `else` is precedence rather than suppression — a lead with no date cannot also be late for
-     * one — and it is the prototype's own order (`leads-management.md` §4).
-     */
-    if (!lead.nextActionDate) flags.push('no-next-action');
-    // `YYYY-MM-DD` sorts lexicographically in calendar order, which is the reason the field is
-    // stored in this shape. `today` is the **office's** day (invariant §9, AC-3).
-    else if (lead.nextActionDate < day.today) flags.push('overdue');
-    if (!lead.remarks) flags.push('no-remarks');
-    return flags;
+    return leadFlags(lead, day.today);
   }
 
   /**
