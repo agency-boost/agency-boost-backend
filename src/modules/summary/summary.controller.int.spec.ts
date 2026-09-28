@@ -72,6 +72,10 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
     }
     // P10-T6: the reader's own open leads, and how many.
     expect(res.body.leads).toEqual({ rows: [], total: 0 });
+    // P10-T7: nobody has logged anything here, so the one card is that rule's — named, with its facts.
+    expect(res.body.insights).toEqual([
+      { rule: 'NOTHING_LOGGED', kind: 'action', facts: { windowDays: expect.any(Number), lastLoggedOn: null } },
+    ]);
   });
 
   it('refuses a Super Admin, who has no Summary of their own', async () => {

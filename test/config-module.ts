@@ -279,6 +279,7 @@ export function configModule(now: Date) {
       new LeadStatusRepository(leadStatuses as never),
       clock,
     ),
+    activityLogs,
   );
   const productionNames = new MemberNames(memberships, users as never);
   // P9-T4: a month's lock and revision, and the imports that write it.

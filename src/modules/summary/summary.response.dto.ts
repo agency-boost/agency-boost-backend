@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import type { LeadFlag } from '@/modules/leads/lead-attention';
 import type { OpenLead } from '@/modules/leads/lead-readings';
 import type { LeadType } from '@/modules/leads/lead.schema';
+import { INSIGHT_RULES, type Insight, type InsightKind, type InsightRule } from './insights';
 import type { FigureSource, SummaryActivity, SummaryView } from './summary.service';
 import type { ActivityTarget, ActivityTargetKey, Pace, PeriodFigures, SectionChip } from './summary-figures';
 
@@ -105,6 +106,18 @@ class SummaryLeadsDto {
   @ApiProperty({ description: 'Every open lead of the reader’s own.' }) total!: number;
 }
 
+export class InsightDto {
+  @ApiProperty({ enum: INSIGHT_RULES, description: 'The rule that fired — the card names it (ADR-0060).' }) rule!: InsightRule;
+  @ApiProperty({ enum: ['action', 'improve'], description: '*What to do next*, or *How you can improve your performance*.' }) kind!: InsightKind;
+  @ApiProperty({
+    type: 'object', additionalProperties: true,
+    description: 'What the rule read. NOTHING_LOGGED: `windowDays`, `lastLoggedOn`. BEHIND_PACE: `projected`, `closingTarget`, '
+      + '`neededPerWeek`, `weeksLeft`. LEAD_OVERDUE: `leadId`, `name`, `overdueDays`, `others`. LEAD_NEGLECTED: `leadId`, `name`, '
+      + '`others`. RATIO_BELOW, RATIO_STRENGTH: `code`, `label`, `value`, `benchmark`, `displayUnit`.',
+  })
+  facts!: Record<string, unknown>;
+}
+
 class SummaryGoalDto {
   @ApiProperty({ description: 'A goal has been saved for the year. The defaults a first-time reader sees are not one.' }) set!: boolean;
   @ApiProperty({ type: String, nullable: true, format: 'date-time' }) savedAt!: string | null;
@@ -134,4 +147,7 @@ export class SummaryDto implements SummaryView {
 
   @ApiProperty({ type: SummaryLeadsDto, description: '*Leads that need you* (P10-T6): the reader’s own open leads.' })
   leads!: { rows: OpenLeadDto[]; total: number };
+
+  @ApiProperty({ type: [InsightDto], description: 'The insight cards (P10-T7): the rules that fired, in their fixed priority, at most four.' })
+  insights!: Insight[];
 }

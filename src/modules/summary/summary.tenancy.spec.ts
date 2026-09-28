@@ -34,6 +34,11 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
   beforeEach(async () => {
     await clearCollections();
     await mongoose.model(Goal.name).syncIndexes();
+    // Every office has its record: the insight rules read its compliance window (P10-T7).
+    await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create([
+      { _id: KPM, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta' },
+      { _id: OTHER_KPM, companyId: COMPANY, code: '0555', branchName: 'B', timezone: 'Asia/Jakarta' },
+    ]);
   });
 
   const plan = (over: Record<string, unknown> = {}) => ({
@@ -172,6 +177,14 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     );
     const unusable = await wired.summary.read(agent());
     expect(unusable).toMatchObject({ pace: null, monthly: { targetMinor: null }, yearly: { targetMinor: null } });
+
+    // A case size of nothing is a plan with no policies in it: no target to divide the chips by either.
+    await mongoose.connection.db!.collection('goals').updateOne(
+      { membershipId: ME }, { $set: { closingRatePct: 30, caseSizeMinor: 0 } },
+    );
+    const noCaseSize = await wired.summary.read(agent());
+    expect(noCaseSize).toMatchObject({ pace: null, yearly: { targetMinor: null } });
+    expect(noCaseSize.activity.monthly.targets.map((t) => t.target)).toEqual([null, null, null]);
   });
 
   it('AC-3: says the year is made, needs nothing more, and the pace asks for nothing (ADR-0047)', async () => {
@@ -231,10 +244,6 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
   describe('P10-T5 — your sales activity targets, and the rest of your sections', () => {
     beforeEach(async () => {
-      await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create([
-        { _id: KPM, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta' },
-        { _id: OTHER_KPM, companyId: COMPANY, code: '0555', branchName: 'B', timezone: 'Asia/Jakarta' },
-      ]);
       await wired.orgLevels.seedDefaultLadder(COMPANY);
       await provisionOffice(wired, KPM, COMPANY);
     });
@@ -342,6 +351,16 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       expect(asLeader.activity.monthly.sections.map((s) => s.code)).toContain('RECRUITMENT');
     });
 
+    it('AC-2: a member with no rung is shown only the sections every rung is', async () => {
+      await mongoose.connection.db!.collection('activityCategories').updateOne(
+        { code: 'RECRUITMENT' }, { $set: { appliesToOrgLevelCodes: ['AB', 'AAB'] } },
+      );
+
+      const sections = (await wired.summary.read(agent({ orgLevelCode: null }))).activity.monthly.sections;
+
+      expect(sections.map((s) => s.code)).toEqual(['PERSONAL_DEVELOPMENT', 'TEAM_DEVELOPMENT']);
+    });
+
     it('AC-2: keeps an archived type’s row while the period holds a count against it, and drops it after', async () => {
       await day('2026-09-03', { DEV_COACHING_RECEIVED: 2 });
       const type = (await wired.activity.list(owner())).flatMap((c) => c.types).find((t) => t.code === 'DEV_COACHING_RECEIVED')!;
@@ -376,10 +395,6 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
   describe('P10-T6 — leads that need you', () => {
     beforeEach(async () => {
-      await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create([
-        { _id: KPM, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta' },
-        { _id: OTHER_KPM, companyId: COMPANY, code: '0555', branchName: 'B', timezone: 'Asia/Jakarta' },
-      ]);
       await wired.orgLevels.seedDefaultLadder(COMPANY);
       await provisionOffice(wired, KPM, COMPANY);
     });
@@ -465,6 +480,79 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       expect(mine.leads.rows).toEqual([expect.objectContaining({ name: 'Mine', statusLabel: 'Follow-up' })]);
       // The same member id in office B reads office B's — the fixture is real, not a no-op.
       expect(theirs.leads.rows).toEqual([expect.objectContaining({ name: 'Theirs', statusLabel: 'Office B follow-up' })]);
+    });
+  });
+
+  describe('P10-T7 — the insight cards, from the reader’s own numbers', () => {
+    beforeEach(async () => {
+      await wired.orgLevels.seedDefaultLadder(COMPANY);
+      await provisionOffice(wired, KPM, COMPANY);
+    });
+
+    const lead = (name: string, over: Record<string, unknown> = {}) => mongoose.connection.db!.collection('leads').insertOne({
+      kpmId: KPM, ownerMembershipId: ME, type: 'sales', name, statusCode: 'FOLLOW_UP', commitments: [],
+      remarks: 'Hobi golf', nextActionDate: '2026-09-20', nextActionNote: null, outcome: null, source: null,
+      dateRegistered: NOW, version: 1, deletedAt: null, ...over,
+    } as never);
+    const cards = async (ctx = agent()) => (await wired.summary.read(ctx)).insights;
+
+    it('AC-1, AC-3: each rule that fired, from the reader’s pace, leads and ratios, in the fixed priority', async () => {
+      await wired.goals.save(agent(), plan());
+      await production('2026-08', { apeYtd: cell(200 * M) });
+      // One closing by the 14th against a target of 5: two at this rate. Ten presentations, one submission:
+      // a selling success rate of 0.10 against 0.15, over enough of them to say so.
+      await day('2026-09-10', { SELL_SUBMISSION: 1, SELL_PRESENTATION: 10 });
+      await lead('Pak Heri', { nextActionDate: '2026-09-06' });
+      await lead('Pak Alvin', { nextActionDate: null, remarks: null });
+
+      const view = await cards();
+
+      expect(view.map((c) => c.rule)).toEqual(['BEHIND_PACE', 'LEAD_OVERDUE', 'LEAD_NEGLECTED', 'RATIO_BELOW']);
+      expect(view[0]).toMatchObject({ kind: 'action', facts: { projected: 2, closingTarget: 5, weeksLeft: 3 } });
+      expect(view[1]).toMatchObject({ facts: { name: 'Pak Heri', overdueDays: 8, others: 0 } });
+      expect(view[3]).toMatchObject({
+        kind: 'improve', facts: { code: 'SELLING_SUCCESS_RATE', label: 'Selling success rate', value: 0.1, benchmark: 0.15 },
+      });
+    });
+
+    it('AC-1: nothing logged in the window leads, and says when the last day was', async () => {
+      expect(await cards()).toEqual([{ rule: 'NOTHING_LOGGED', kind: 'action', facts: { windowDays: 7, lastLoggedOn: null } }]);
+
+      await day('2026-09-01', { SELL_PRESENTATION: 0 });
+      expect((await cards())[0]).toMatchObject({ rule: 'NOTHING_LOGGED', facts: { lastLoggedOn: '2026-09-01' } });
+
+      // A day of zeroes inside the window is a statement that nothing happened, not silence (ADR-0042).
+      await day('2026-09-12', { SELL_PRESENTATION: 0 });
+      expect((await cards()).map((c) => c.rule)).not.toContain('NOTHING_LOGGED');
+    });
+
+    it('AC-1: a ratio that is not a question about the reader’s rung makes no card (ADR-0020)', async () => {
+      await day('2026-09-10', { RECRUIT_PRESENTATION: 10 }); // a recruitment success rate of 0
+
+      expect((await cards()).map((c) => c.rule)).not.toContain('RATIO_BELOW');
+      expect(await cards(agent({ orgLevelCode: 'AB', hierarchyRole: 'ab' }))).toContainEqual(
+        expect.objectContaining({ rule: 'RATIO_BELOW', facts: expect.objectContaining({ code: 'RECRUITMENT_SUCCESS_RATE', value: 0 }) }),
+      );
+    });
+
+    it('AC-1: names a strength only well above its benchmark', async () => {
+      // Leads per activity: 6 new prospects over 10 activities is 0.6 against 0.3 — twice the benchmark.
+      await day('2026-09-10', { LEADS_NEW_PROSPECT: 6, LEADS_GEN_ACTIVITY: 10 });
+
+      expect(await cards()).toContainEqual(
+        expect.objectContaining({ rule: 'RATIO_STRENGTH', kind: 'improve', facts: expect.objectContaining({ code: 'LEADS_PER_ACTIVITY', value: 0.6 }) }),
+      );
+    });
+
+    it('reads nobody else’s leads or days — the same member id in another office included', async () => {
+      await provisionOffice(wired, OTHER_KPM, COMPANY);
+      await day('2026-09-12', { SELL_PRESENTATION: 1 });
+      await day('2026-09-10', { SELL_PRESENTATION: 20 }, { kpmId: OTHER_KPM });
+      await lead('Office B’s overdue lead', { kpmId: OTHER_KPM, nextActionDate: '2026-09-01' });
+
+      expect(await cards()).toEqual([]);
+      // The fixture is real: office B's reader gets office B's cards.
+      expect((await cards(agent({ kpmId: OTHER_KPM }))).map((c) => c.rule)).toEqual(['LEAD_OVERDUE', 'RATIO_BELOW']);
     });
   });
 

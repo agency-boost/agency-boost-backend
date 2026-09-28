@@ -4,11 +4,13 @@ import { NoMembershipException } from '@/common/errors/domain.exception';
 import { SUMMARY } from '@/domain/constants';
 import { endOfMonth, type LocalDate } from '@/common/time/local-day';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
+import { ActivityService } from '@/modules/activity/activity.service';
 import { cascadeCounts } from '@/modules/goals/goal-cascade';
 import { GoalService } from '@/modules/goals/goal.service';
 import { LeadReadings, type OpenLead } from '@/modules/leads/lead-readings';
 import { ProductionReadings } from '@/modules/production/production-readings';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
+import { insightsFor, type Insight } from './insights';
 import {
   activityTargets, madeFigures, monthlyApeTarget, paceFor, periodFigures, sectionChips, totalLogged,
   ytdBeforeThisMonth, type ActivityTarget, type Pace, type PeriodFigures, type SectionChip,
@@ -55,6 +57,11 @@ export interface SummaryView {
    * last — the first `SUMMARY.LEADS_SHOWN` of them — and how many there are.
    */
   leads: { rows: OpenLead[]; total: number };
+  /**
+   * The insight cards (P10-T7, ADR-0060): the rules that fired, in their fixed priority, at most four —
+   * each naming its rule and carrying the facts it read.
+   */
+  insights: Insight[];
 }
 
 /**
@@ -72,6 +79,11 @@ export class SummaryService {
     private readonly activity: ActivityReadings,
     private readonly days: TenantDay,
     private readonly leadReadings: LeadReadings,
+    /*
+     * The ratio engine and the compliance read, for the insight rules (P10-T7) — the same answers the
+     * ratio screen and the log screen give, not a second calculation of either.
+     */
+    private readonly activityLog: ActivityService,
   ) {}
 
   async read(ctx: RequestContext): Promise<SummaryView> {
@@ -94,13 +106,15 @@ export class SummaryService {
 
     const monthWindow = { from: `${day.month}-01` as LocalDate, to: day.today };
     const yearWindow = { from: `${year}-01-01` as LocalDate, to: day.today };
-    const [through, thisMonth, counts, yearCounts, sections, openLeads] = await Promise.all([
+    const [through, thisMonth, counts, yearCounts, sections, openLeads, compliance, ratios] = await Promise.all([
       previous ? this.production.apeYearToDateThrough(ctx, me, previous) : Promise.resolve(null),
       this.production.apeForMonth(ctx, me, day.month),
       this.activity.countsOver(ctx, me, monthWindow),
       this.activity.countsOver(ctx, me, yearWindow),
       this.activity.sectionsShown(ctx, ctx.membership?.orgLevelCode ?? ''),
       this.leadReadings.openOf(ctx, me, day),
+      this.activityLog.compliance(ctx, {}),
+      this.activityLog.ratios(ctx),
     ]);
 
     const before = ytdBeforeThisMonth({
@@ -143,6 +157,14 @@ export class SummaryService {
       sections: sectionChips(sections, logged, cascadeCodes),
     });
 
+    const pace = closingTarget === null ? null : paceFor({
+      closingTarget,
+      closingsLogged: counts.get(mapping.closingsCode) ?? 0,
+      dayOfMonth: Number(day.today.slice(8, 10)),
+      daysInMonth: Number(endOfMonth(day.today).slice(8, 10)),
+      apeTargetMet: monthly.targetMet || yearly.targetMet,
+    });
+
     return {
       year,
       month: day.month,
@@ -151,18 +173,18 @@ export class SummaryService {
       caseSizeMinor: goal.caseSizeMinor,
       monthly: { ...monthly, source: thisMonth ? { provenance: thisMonth.provenance, month: thisMonth.month } : null },
       yearly: { ...yearly, source: { provenance: goal.achieved.provenance, month: goal.achieved.month } },
-      pace: closingTarget === null ? null : paceFor({
-        closingTarget,
-        closingsLogged: counts.get(mapping.closingsCode) ?? 0,
-        dayOfMonth: Number(day.today.slice(8, 10)),
-        daysInMonth: Number(endOfMonth(day.today).slice(8, 10)),
-        apeTargetMet: monthly.targetMet || yearly.targetMet,
-      }),
+      pace,
       activity: {
         monthly: activityFor(monthWindow, counts, monthlyCounts),
         yearly: activityFor(yearWindow, yearCounts, yearlyCounts),
       },
       leads: { rows: openLeads.slice(0, SUMMARY.LEADS_SHOWN), total: openLeads.length },
+      insights: insightsFor({
+        compliance: { compliant: compliance.compliant7d, windowDays: compliance.windowDays, lastLoggedOn: compliance.lastLoggedOn },
+        pace,
+        leads: openLeads,
+        ratios: ratios.ratios,
+      }),
     };
   }
 }

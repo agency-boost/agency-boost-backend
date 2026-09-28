@@ -9,6 +9,7 @@ import {
   PERFORMANCE,
   PERIOD,
   RATIO_BENCHMARKS,
+  INSIGHTS,
   SUMMARY,
   TIME,
   DEFAULT_CURRENCY,
@@ -110,6 +111,11 @@ describe('domain constants', () => {
     });
     it('pins how many open leads the Summary lists before it counts the rest (P10-T6)', () => {
       expect(SUMMARY.LEADS_SHOWN).toBe(10);
+    });
+    it('pins the insight rules’ thresholds (P10-T7, ADR-0060)', () => {
+      expect(INSIGHTS.MAX_CARDS).toBe(4);
+      expect(INSIGHTS.RATIO_MIN_DENOMINATOR).toBe(5);
+      expect(INSIGHTS.STRENGTH_FACTOR).toBe(1.5);
     });
     it('pins the activation window at 90 days, counted from day 1', () => {
       expect(ACTIVATION.WINDOW_DAYS).toBe(90);

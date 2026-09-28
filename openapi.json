@@ -15532,6 +15532,41 @@
           "total"
         ]
       },
+      "InsightDto": {
+        "type": "object",
+        "properties": {
+          "rule": {
+            "type": "string",
+            "enum": [
+              "NOTHING_LOGGED",
+              "BEHIND_PACE",
+              "LEAD_OVERDUE",
+              "LEAD_NEGLECTED",
+              "RATIO_BELOW",
+              "RATIO_STRENGTH"
+            ],
+            "description": "The rule that fired — the card names it (ADR-0060)."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "action",
+              "improve"
+            ],
+            "description": "*What to do next*, or *How you can improve your performance*."
+          },
+          "facts": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "What the rule read. NOTHING_LOGGED: `windowDays`, `lastLoggedOn`. BEHIND_PACE: `projected`, `closingTarget`, `neededPerWeek`, `weeksLeft`. LEAD_OVERDUE: `leadId`, `name`, `overdueDays`, `others`. LEAD_NEGLECTED: `leadId`, `name`, `others`. RATIO_BELOW, RATIO_STRENGTH: `code`, `label`, `value`, `benchmark`, `displayUnit`."
+          }
+        },
+        "required": [
+          "rule",
+          "kind",
+          "facts"
+        ]
+      },
       "SummaryDto": {
         "type": "object",
         "properties": {
@@ -15593,6 +15628,13 @@
                 "$ref": "#/components/schemas/SummaryLeadsDto"
               }
             ]
+          },
+          "insights": {
+            "description": "The insight cards (P10-T7): the rules that fired, in their fixed priority, at most four.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InsightDto"
+            }
           }
         },
         "required": [
@@ -15605,7 +15647,8 @@
           "yearly",
           "pace",
           "activity",
-          "leads"
+          "leads",
+          "insights"
         ]
       },
       "LeadContactDto": {

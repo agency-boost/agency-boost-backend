@@ -118,6 +118,23 @@ export const SUMMARY = {
   LEADS_SHOWN: 10,
 } as const;
 
+/**
+ * The Personal Summary's insight cards (P10-T7, ADR-0060): named rules over registered metrics, computed
+ * on read. Every threshold a rule reads is here, once (invariant §7).
+ */
+export const INSIGHTS = {
+  /** At most this many cards, taken in the rules' fixed priority (ADR-0060). */
+  MAX_CARDS: 4,
+  /**
+   * A ratio says something about a member only over this many of its denominator. The engine answers any
+   * denominator above zero — correctly — but *1 of 2 presentations* is an anecdote, and a card built on
+   * one tells an agent to change what they do on the strength of a coin toss.
+   */
+  RATIO_MIN_DENOMINATOR: 5,
+  /** *Well above* its benchmark — a strength worth naming — is at least this multiple of it. */
+  STRENGTH_FACTOR: 1.5,
+} as const;
+
 /** 90-day activation programme. Overall.html:3270-3352. Tenant-configurable window. */
 export const ACTIVATION = {
   WINDOW_DAYS: 90,
