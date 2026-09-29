@@ -12,6 +12,7 @@ import {
 } from '../../../test/http-permissions';
 import { GoalController } from './goal.controller';
 import { GoalService } from './goal.service';
+import { listenOnLoopback } from '../../../test/listen';
 
 const NOW = new Date('2026-09-25T02:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
@@ -50,7 +51,7 @@ describe('goals over HTTP (P8-T3)', () => {
     app.useGlobalFilters(new DomainExceptionFilter());
     app.useGlobalGuards(new StubAuth(), new PermissionsGuard(app.get(Reflector)));
     await app.init();
-    await app.listen(0);
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

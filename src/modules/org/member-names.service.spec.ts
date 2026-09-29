@@ -38,6 +38,8 @@ describe('a person’s name, from their membership', () => {
 
   beforeEach(async () => {
     await clearCollections();
+    // Built before the rows go in, so the fixture meets the constraint every time rather than when it wins a race.
+    await mongoose.model(Membership.name).syncIndexes();
     await mongoose.connection.db!.collection('memberships').insertMany([
       member(SARI, KPM, '01'), member(RINA, KPM, '02'), member(ELSEWHERE, OTHER, '03'),
     ] as never);
@@ -46,10 +48,17 @@ describe('a person’s name, from their membership', () => {
     ] as never);
   });
 
+  /*
+   * **A membership as the schema has it** — `leaderCode` included. It is required and unique among
+   * live memberships, and these rows went in without one: three nulls under a unique index. They
+   * passed only while the index was slow to build, and failed once the test database stopped
+   * rebuilding itself for every suite (2026-09-29).
+   */
   const member = (id: string, kpmId: string, userSuffix: string) => ({
     _id: new mongoose.Types.ObjectId(id),
     kpmId,
     userId: `66f0000000000000000002${userSuffix}`,
+    leaderCode: `LEAD${userSuffix}`,
     orgLevelCode: 'AGENT', hierarchyRole: 'agent', leaderId: null, ancestorIds: [],
     status: 'active', deletedAt: null,
   });

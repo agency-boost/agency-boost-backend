@@ -11,6 +11,7 @@ import { configModule } from '../../../test/config-module';
 import { productionPipe } from '../../../test/http-permissions';
 import { ProductController } from './product.controller';
 import { ProductService } from './product.service';
+import { listenOnLoopback } from '../../../test/listen';
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
@@ -65,7 +66,7 @@ describe('the product catalog controller (P5-T4)', () => {
     app.useGlobalFilters(new DomainExceptionFilter());
     app.useGlobalGuards(new StubAuth(), new PermissionsGuard(app.get(Reflector)));
     await app.init();
-    await app.listen(0);
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

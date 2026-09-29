@@ -19,6 +19,7 @@ import { ProductionImportService } from './production-import.service';
 import { ProductionMonths } from './production-months.service';
 import { ProductionMonth } from './production-month.schema';
 import { ProductionCorrections } from './production-correction.service';
+import { listenOnLoopback } from '../../../test/listen';
 
 const NOW = new Date('2026-09-27T02:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
@@ -65,7 +66,7 @@ describe('production over HTTP (P9-T1)', () => {
     app.useGlobalFilters(new DomainExceptionFilter());
     app.useGlobalGuards(new StubAuth(), new PermissionsGuard(app.get(Reflector)));
     await app.init();
-    await app.listen(0);
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

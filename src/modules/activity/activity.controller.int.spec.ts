@@ -12,6 +12,7 @@ import {
 } from '../../../test/http-permissions';
 import { ActivityController } from './activity.controller';
 import { ActivityService } from './activity.service';
+import { listenOnLoopback } from '../../../test/listen';
 
 const NOW = new Date('2026-03-11T02:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
@@ -58,7 +59,7 @@ describe('logging a day over HTTP (P6)', () => {
     app.useGlobalFilters(new DomainExceptionFilter());
     app.useGlobalGuards(new StubAuth(), new PermissionsGuard(app.get(Reflector)));
     await app.init();
-    await app.listen(0);
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

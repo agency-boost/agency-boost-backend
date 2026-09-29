@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
 import { AppModule } from './app.module';
 import { startMongo, stopMongo } from '../test/mongo';
+import { listenOnLoopback } from '../test/listen';
 
 /**
  * Boots the real AppModule.
@@ -43,7 +44,7 @@ describe('AppModule boots', () => {
     await app.init();
     // Listening once keeps supertest from cycling an ephemeral port per
     // request — see auth.e2e.int.spec.ts for what that causes.
-    await app.listen(0);
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

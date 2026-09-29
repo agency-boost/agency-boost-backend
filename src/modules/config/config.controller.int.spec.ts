@@ -22,6 +22,7 @@ import { TenantConfigService } from './tenant-config.service';
 import { TenantService } from '@/modules/tenants/tenant.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
+import { listenOnLoopback } from '../../../test/listen';
 
 const NOW = new Date('2026-09-17T02:00:00Z');
 const KPM_A = '66f0000000000000000000a1';
@@ -100,7 +101,7 @@ describe('the configuration controllers', () => {
     app.useGlobalGuards(new StubAuth(), new PermissionsGuard(app.get(Reflector)));
     await app.init();
     // Listening once keeps supertest from cycling an ephemeral port per request.
-    await app.listen(0);
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

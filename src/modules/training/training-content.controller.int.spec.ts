@@ -11,6 +11,7 @@ import {
 } from '../../../test/http-permissions';
 import { TrainingController } from './training.controller';
 import { TrainingService } from './training.service';
+import { listenOnLoopback } from '../../../test/listen';
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
@@ -48,7 +49,7 @@ describe('a training module’s content over HTTP (P5-T2)', () => {
     app.useGlobalFilters(new DomainExceptionFilter());
     app.useGlobalGuards(new StubAuth(), new PermissionsGuard(app.get(Reflector)));
     await app.init();
-    await app.listen(0);
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

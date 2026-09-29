@@ -137,6 +137,7 @@ import { TemplateService } from '@/modules/config/template.service';
 import { OfficeCounter } from '@/modules/config/office-counter.port';
 import { CampaignKindsApplier } from '@/modules/config/campaign-kinds.port';
 import { KpmOfficeCounter } from '@/modules/config/office-counter';
+import { listenOnLoopback } from '../../../test/listen';
 
 /**
  * Boots the real controllers, guards and filter over a real database, and walks the
@@ -297,7 +298,7 @@ describe('auth and admin over HTTP', () => {
     // up, in a run where nothing was wrong with the code under test.
     //
     // With the server already listening, supertest reuses it and never closes it.
-    await app.listen(0);
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

@@ -13,6 +13,7 @@ import {
 import { CampaignController } from './campaign.controller';
 import { CampaignService } from './campaign.service';
 import { MetricRegistryController } from './metric-registry.controller';
+import { listenOnLoopback } from '../../../test/listen';
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 const PRUDENTIAL = '66f0000000000000000000c1';
@@ -65,7 +66,7 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
     app.useGlobalFilters(new DomainExceptionFilter());
     app.useGlobalGuards(new StubAuth(), new PermissionsGuard(app.get(Reflector)));
     await app.init();
-    await app.listen(0);
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

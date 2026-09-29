@@ -178,6 +178,12 @@ const config: Config = {
    * *fastest* run of the four. A fixed 4 rather than a percentage, because the limit belongs to
    * the database server, not to the number of cores — a 32-core runner would scale a percentage
    * straight back over the edge.
+   *
+   * **What the ceiling was, found 2026-09-29.** Not connections: table churn. Every suite built a
+   * database from nothing and dropped it, and WiredTiger's schema lock serialised the workers'
+   * index builds behind the drops — a 42 s `syncIndexes`, one full run in three failed. A database
+   * per worker, wiped rather than dropped (`test/mongo.ts`), ended it; `TEST_DB_TRACE=1` shows any
+   * slow operation on the shared server if it comes back.
    */
   maxWorkers: 4,
 };

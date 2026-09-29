@@ -12,6 +12,7 @@ import {
 } from '../../../test/http-permissions';
 import { EventController } from './event.controller';
 import { EventService } from './event.service';
+import { listenOnLoopback } from '../../../test/listen';
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 
@@ -65,7 +66,7 @@ describe('an office’s events over HTTP (P5-T6)', () => {
     app.useGlobalFilters(new DomainExceptionFilter());
     app.useGlobalGuards(new StubAuth(), new PermissionsGuard(app.get(Reflector)));
     await app.init();
-    await app.listen(0);
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { HealthController } from './health.controller';
 import { getConnectionToken } from '@nestjs/mongoose';
+import { listenOnLoopback } from '../../../test/listen';
 
 /**
  * Proves the routing contract the frontend depends on:
@@ -46,7 +47,7 @@ describe('API versioning', () => {
     await app.init();
     // Listening once keeps supertest from cycling an ephemeral port per
     // request — see auth.e2e.int.spec.ts for what that causes.
-    await app.listen(0);
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

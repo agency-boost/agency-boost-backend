@@ -13,8 +13,9 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
  * which is worse than slow: a flaky isolation suite is one somebody learns to re-run.
  *
  * Jest forks workers after this runs, so `process.env` set here reaches all of them.
- * Suites stay isolated by taking a database of their own on the shared server rather
- * than a server of their own (see `test/mongo.ts`).
+ * Each worker keeps one database on it, wiped when a suite starts rather than dropped when
+ * one ends — creating and dropping a database per suite was what stalled the server
+ * (see `test/mongo.ts`).
  */
 export default async function globalSetup(): Promise<void> {
   const server = await MongoMemoryServer.create();

@@ -12,6 +12,7 @@ import {
 } from '../../../test/http-permissions';
 import { KpmProductController } from './kpm-product.controller';
 import { KpmProductService } from './kpm-product.service';
+import { listenOnLoopback } from '../../../test/listen';
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 const PRUDENTIAL = '66f0000000000000000000c1';
@@ -64,7 +65,7 @@ describe('an office’s products over HTTP (P5-T5, P5-T10)', () => {
     app.useGlobalFilters(new DomainExceptionFilter());
     app.useGlobalGuards(new StubAuth(), new PermissionsGuard(app.get(Reflector)));
     await app.init();
-    await app.listen(0);
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {
