@@ -204,6 +204,18 @@ describe('the daily loop, measured (P6)', () => {
       console.log(`  summary        p95 of 20: ${summary.toFixed(1)} ms`);
     });
 
+    it('answers the Dashboard’s widest preset and the ratios inside the read budget (P10-T8 AC-4)', async () => {
+      const ctx = member(KPM_A, agents[3]);
+
+      const dashboard = await slowest(20, () => wired.activityLogs.dashboard(ctx, { range: 'ROLLING_30D' }));
+      const ratios = await slowest(20, () => wired.activityLogs.ratios(ctx));
+
+      expect(dashboard).toBeLessThan(300);
+      expect(ratios).toBeLessThan(300);
+      console.log(`  dashboard 30d  p95 of 20: ${dashboard.toFixed(1)} ms`);
+      console.log(`  ratios         p95 of 20: ${ratios.toFixed(1)} ms`);
+    });
+
     it('costs the same for the fortieth agent as for the first', async () => {
       /*
        * The check that actually matters. A plan that scanned would be fast on a small office

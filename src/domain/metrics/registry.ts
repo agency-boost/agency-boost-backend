@@ -1,4 +1,5 @@
 import { ACTIVATION, PERFORMANCE, RATIO_BENCHMARKS, SUMMARY, TIME } from '@/domain/constants';
+import { METRIC_REGISTRY as SERVED, type MetricUnit } from '@/domain/constants/metrics';
 
 /**
  * The metric registry (P4-T4) — one definition per metric, and one place to find it.
@@ -18,6 +19,10 @@ import { ACTIVATION, PERFORMANCE, RATIO_BENCHMARKS, SUMMARY, TIME } from '@/doma
  * sessions (Phase 13). Declaring them now means the phase that builds one binds to a
  * definition already agreed, instead of inventing a fourth "active agent" and discovering
  * the conflict in review.
+ *
+ * **What a metric is called, what it answers with and the phase that computes it live once**, in
+ * `domain/constants/metrics.ts` — the list `GET /metrics` serves (P10-T8). This file adds what a
+ * computation needs and that list does not: the period and the threshold.
  */
 
 /** What a metric is computed over. Never mixed: a rolling window is not a calendar month. */
@@ -30,19 +35,11 @@ export type MetricPeriod =
   | 'POINT_IN_TIME'
   | 'PROGRAMME_WINDOW';
 
-/** What it answers with. `tri_state` is boolean-or-unknown, and the unknown is load-bearing. */
-export type MetricUnit =
-  | 'boolean'
-  | 'tri_state'
-  | 'count'
-  | 'ratio'
-  | 'percentage'
-  | 'money_minor'
-  | 'days'
-  | 'status';
+export type { MetricUnit };
 
 export interface MetricDefinition {
   readonly id: string;
+  /** The served name. */
   readonly label: string;
   readonly period: MetricPeriod;
   readonly unit: MetricUnit;
@@ -53,8 +50,20 @@ export interface MetricDefinition {
    * literal: a benchmark restated here would be a second source for it (invariant §7).
    */
   readonly threshold: number | null;
-  /** The earliest phase whose data makes this computable. Documentation, and honest. */
-  readonly availableFrom: number;
+  /**
+   * The phase that first computes it for real — the served list's, and the document's index.
+   *
+   * This was `availableFrom`, *the earliest phase whose data makes it computable*, beside a served
+   * `phase` meaning the other thing: `PACING_TO_MAA` was 8 here and 13 there, and a campaign asking
+   * which is true got the answer from whichever list it happened to read.
+   */
+  readonly phase: number;
+}
+
+/** What a computation needs beyond the served entry. */
+export interface MetricComputation {
+  readonly period: MetricPeriod;
+  readonly threshold: number | null;
 }
 
 /**
@@ -76,120 +85,64 @@ export function define(entries: readonly MetricDefinition[]): ReadonlyMap<string
   return map;
 }
 
-export const METRIC_REGISTRY = define([
+/**
+ * **The served list and the computations, joined — or refused** (P10-T8). A served metric with no
+ * period, or a period for a metric nobody serves, is two registries drifting apart again; either
+ * throws at load, naming the metric. Exported so the refusal itself is tested.
+ */
+export function join(
+  served: readonly { key: string; name: string; unit: MetricUnit; phase: number }[],
+  computations: Readonly<Record<string, MetricComputation>>,
+): MetricDefinition[] {
+  const keys = new Set(served.map((m) => m.key));
+  const orphan = Object.keys(computations).find((id) => !keys.has(id));
+  if (orphan) {
+    throw new Error(`Metric ${orphan} has a period here and no entry in domain/constants/metrics.ts. One list.`);
+  }
+  return served.map((m) => {
+    const how = computations[m.key];
+    if (!how) {
+      throw new Error(`Metric ${m.key} is served with no period or threshold in domain/metrics/registry.ts.`);
+    }
+    return { id: m.key, label: m.name, unit: m.unit, phase: m.phase, ...how };
+  });
+}
+
+/** Each metric's period and threshold, by id — the only thing this file says that the served list does not. */
+const COMPUTATIONS: Record<string, MetricComputation> = {
   // ---- Production and activity ----
-  {
-    id: 'MONTHLY_ACTIVE_AGENT',
-    label: 'Monthly Active Agent',
-    period: 'CALENDAR_MONTH',
-    // Tri-state, and the third state is the point: `null` means "no production uploaded
-    // for this month", which is not `false`. An office that has not uploaded September
-    // must show an em dash, never "0 active agents".
-    //
-    // D1 of the four readings, chosen by ADR-0054 (OD-21) and computed in one place:
-    // `monthly-active-agent.ts`. No threshold — *above zero* is the definition, not a
-    // benchmark an office could move. The carrier's "Monthly2 AA" is OD-22's, not this.
-    unit: 'tri_state',
-    threshold: null,
-    availableFrom: 9,
-  },
-  {
-    id: 'MAA_COUNT_IN_UNIT',
-    label: 'Active agents in a unit',
-    period: 'CALENDAR_MONTH',
-    unit: 'count',
-    threshold: null,
-    availableFrom: 9,
-  },
-  {
-    id: 'PACING_TO_MAA',
-    label: 'Pacing to Monthly Active Agent',
-    period: 'CALENDAR_MONTH',
-    unit: 'boolean',
-    threshold: null,
-    availableFrom: 8,
-  },
-  {
-    id: 'ACTIVITY_COMPLIANCE_7D',
-    label: 'Logged activity in the last 7 days',
-    period: 'ROLLING_7D',
-    unit: 'boolean',
-    threshold: PERFORMANCE.COMPLIANCE_WINDOW_DAYS,
-    availableFrom: 6,
-  },
-  {
-    id: 'ACTIVITY_COMPLIANCE_MONTH',
-    label: 'Logged activity this month',
-    period: 'CALENDAR_MONTH',
-    unit: 'boolean',
-    threshold: null,
-    availableFrom: 6,
-  },
-  {
-    id: 'ACTIVITY_COMPLIANCE_RATE',
-    label: 'Activity-logging compliance rate',
-    period: 'ROLLING_7D',
-    unit: 'percentage',
-    threshold: null,
-    availableFrom: 6,
-  },
-  {
-    id: 'ACTIVITY_TOTAL_BY_CATEGORY',
-    label: 'Logged touches by category',
-    period: 'ROLLING_30D',
-    unit: 'count',
-    threshold: null,
-    availableFrom: 6,
-  },
+  /*
+   * Tri-state, and the third state is the point: `null` means "no production uploaded for this
+   * month", which is not `false`. An office that has not uploaded September must show an em dash,
+   * never "0 active agents".
+   *
+   * D1 of the four readings, chosen by ADR-0054 (OD-21) and computed in one place:
+   * `monthly-active-agent.ts`. No threshold — *above zero* is the definition, not a benchmark an
+   * office could move. The carrier's "Monthly2 AA" is OD-22's, not this.
+   */
+  MONTHLY_ACTIVE_AGENT: { period: 'CALENDAR_MONTH', threshold: null },
+  MAA_COUNT_IN_UNIT: { period: 'CALENDAR_MONTH', threshold: null },
+  PACING_TO_MAA: { period: 'CALENDAR_MONTH', threshold: null },
+  ACTIVITY_COMPLIANCE_7D: { period: 'ROLLING_7D', threshold: PERFORMANCE.COMPLIANCE_WINDOW_DAYS },
+  ACTIVITY_COMPLIANCE_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
+  ACTIVITY_COMPLIANCE_RATE: { period: 'ROLLING_7D', threshold: null },
+  ACTIVITY_TOTAL_BY_CATEGORY: { period: 'ROLLING_30D', threshold: null },
 
   // ---- Coaching ----
-  {
-    id: 'DAYS_SINCE_LAST_COACHING',
-    label: 'Days since last 1:1',
-    period: 'POINT_IN_TIME',
-    unit: 'days',
-    threshold: PERFORMANCE.COACHING_OVERDUE_DAYS,
-    availableFrom: 13,
-  },
-  {
-    id: 'COACHED_7D',
-    label: 'Coached in the last 7 days',
-    period: 'ROLLING_7D',
-    unit: 'boolean',
-    threshold: PERFORMANCE.COACHING_OVERDUE_DAYS,
-    availableFrom: 13,
-  },
-  {
-    id: 'COACHING_COVERAGE',
-    label: 'Coaching coverage',
-    period: 'ROLLING_7D',
-    unit: 'percentage',
-    threshold: null,
-    availableFrom: 13,
-  },
-  {
-    id: 'LEADER_COACHING_FREQUENCY',
-    label: 'AB / AAB coaching frequency',
-    period: 'ROLLING_30D',
-    unit: 'count',
-    threshold: null,
-    availableFrom: 13,
-  },
+  DAYS_SINCE_LAST_COACHING: { period: 'POINT_IN_TIME', threshold: PERFORMANCE.COACHING_OVERDUE_DAYS },
+  COACHED_7D: { period: 'ROLLING_7D', threshold: PERFORMANCE.COACHING_OVERDUE_DAYS },
+  // Served since Phase 5 and absent here until P10-T8 compared the two lists.
+  COACHED_30D: { period: 'ROLLING_30D', threshold: null },
+  COACHING_COVERAGE: { period: 'ROLLING_7D', threshold: null },
+  LEADER_COACHING_FREQUENCY: { period: 'ROLLING_30D', threshold: null },
 
   // ---- Goals and production ----
-  { id: 'APE_TARGET', label: 'APE target', period: 'CALENDAR_YEAR', unit: 'money_minor', threshold: null, availableFrom: 7 },
-  { id: 'APE_ACHIEVED', label: 'APE achieved', period: 'CALENDAR_YEAR', unit: 'money_minor', threshold: null, availableFrom: 9 },
-  {
-    id: 'APE_ATTAINMENT_PCT',
-    label: 'APE achieved vs target',
-    period: 'CALENDAR_YEAR',
-    unit: 'percentage',
-    // Displayed capped, so the cap belongs to the definition rather than to a formatter.
-    threshold: PERFORMANCE.ATTAINMENT_PCT_CAP,
-    availableFrom: 9,
-  },
-  { id: 'APE_GAP_TO_TARGET', label: 'Gap to target', period: 'CALENDAR_YEAR', unit: 'money_minor', threshold: null, availableFrom: 9 },
-  { id: 'POLICIES_NEEDED', label: 'Policies still needed', period: 'CALENDAR_YEAR', unit: 'count', threshold: null, availableFrom: 9 },
+  APE_TARGET: { period: 'CALENDAR_YEAR', threshold: null },
+  APE_ACHIEVED: { period: 'CALENDAR_YEAR', threshold: null },
+  // Displayed capped, so the cap belongs to the definition rather than to a formatter.
+  APE_ATTAINMENT_PCT: { period: 'CALENDAR_YEAR', threshold: PERFORMANCE.ATTAINMENT_PCT_CAP },
+  APE_GAP_TO_TARGET: { period: 'CALENDAR_YEAR', threshold: null },
+  POLICIES_NEEDED: { period: 'CALENDAR_YEAR', threshold: null },
 
   /*
    * ---- The goal cascade's three targets (P8-T5) ----
@@ -198,14 +151,14 @@ export const METRIC_REGISTRY = define([
    * every day: `monthsLeft` shrinks, so what is left to do per month grows. A period of
    * `CALENDAR_MONTH` would say the figure belongs to a month and holds for it, which is the
    * misreading that had a plan agreed in January still claiming eleven months left in October.
-   *
-   * **Registered after P8-T3 had already served them**, which is the rule P7-T6 applied to leads
-   * three days earlier: a number in a DTO the registry does not define is a second definition of
-   * the product's own vocabulary (invariant §8). `registry.spec.ts` is what caught it.
-   *
-   * `MONTHS_LEFT_IN_YEAR` is **not** here: it was already registered below, and the document's table
-   * was what lacked a row for it. The duplicate this file refuses at module load is what said so.
    */
+  POLICY_COUNT_TARGET: { period: 'POINT_IN_TIME', threshold: null },
+  APPOINTMENT_TARGET: { period: 'POINT_IN_TIME', threshold: null },
+  LEAD_TARGET: { period: 'POINT_IN_TIME', threshold: null },
+  // Clamped, so the cascade never divides by ~0 in the last days of December.
+  MONTHS_LEFT_IN_YEAR: { period: 'CALENDAR_YEAR', threshold: TIME.MONTHS_PER_YEAR },
+  GOAL_PACE_STATUS: { period: 'CALENDAR_YEAR', threshold: PERFORMANCE.ON_TRACK_PACE_THRESHOLD },
+
   /*
    * ---- The two conversion assumptions, measured (ADR-0055, P10-T9) ----
    *
@@ -213,77 +166,53 @@ export const METRIC_REGISTRY = define([
    * office's ratios — those an office redefines and benchmarks (ADR-0024); these follow the field. No
    * threshold: the agent's own assumption is the comparison, and nothing is judged.
    */
-  { id: 'MEASURED_LEAD_TO_APPOINTMENT_RATE', label: 'Your logged leads-to-appointment rate', period: 'ROLLING_30D', unit: 'ratio', threshold: null, availableFrom: 10 },
-  { id: 'MEASURED_CLOSING_RATE', label: 'Your logged closing rate', period: 'ROLLING_30D', unit: 'ratio', threshold: null, availableFrom: 10 },
+  MEASURED_LEAD_TO_APPOINTMENT_RATE: { period: 'ROLLING_30D', threshold: null },
+  MEASURED_CLOSING_RATE: { period: 'ROLLING_30D', threshold: null },
+
   /*
    * ---- The Personal Summary (P10-T4, ADR-0056, ADR-0057) ----
    *
    * `MONTHLY_APE_TARGET` is **not** the cascade's `POINT_IN_TIME` monthly figure: it is taken from the
-   * year to date through last month, so this month's own upload cannot shrink this month's target.
+   * year to date before this month, so this month's own upload cannot shrink this month's target.
    */
-  { id: 'MONTHLY_APE_TARGET', label: 'This month’s APE target', period: 'CALENDAR_MONTH', unit: 'money_minor', threshold: null, availableFrom: 10 },
-  { id: 'PROJECTED_CLOSINGS_THIS_MONTH', label: 'Closings at your current pace', period: 'CALENDAR_MONTH', unit: 'count', threshold: SUMMARY.PACE_MIN_DAYS, availableFrom: 10 },
-  { id: 'CLOSINGS_NEEDED_PER_WEEK', label: 'Closings needed per week', period: 'CALENDAR_MONTH', unit: 'count', threshold: null, availableFrom: 10 },
+  MONTHLY_APE_TARGET: { period: 'CALENDAR_MONTH', threshold: null },
+  PROJECTED_CLOSINGS_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: SUMMARY.PACE_MIN_DAYS },
+  CLOSINGS_NEEDED_PER_WEEK: { period: 'CALENDAR_MONTH', threshold: null },
   /*
    * The Summary's activity chips (P10-T5, ADR-0056): the cascade run on `MONTHLY_APE_TARGET` for the
    * month, and on the annual target for the year to date. `CALENDAR_MONTH` is the default view; the
    * *Yearly* view is the same definition over `CALENDAR_YEAR`.
    */
-  { id: 'SUMMARY_ACTIVITY_TARGET', label: 'Activity target for the period', period: 'CALENDAR_MONTH', unit: 'count', threshold: null, availableFrom: 10 },
-  {
-    id: 'ACTIVITY_TARGET_ATTAINMENT_PCT',
-    label: 'Logged against the activity target',
-    period: 'CALENDAR_MONTH',
-    unit: 'percentage',
-    // Capped like APE_ATTAINMENT_PCT, and `null` on a zero target — never `NaN%` (F-25).
-    threshold: PERFORMANCE.ATTAINMENT_PCT_CAP,
-    availableFrom: 10,
-  },
-  { id: 'POLICY_COUNT_TARGET', label: 'Policies to close this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },
-  { id: 'APPOINTMENT_TARGET', label: 'Appointments to hold this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },
-  { id: 'LEAD_TARGET', label: 'Leads to contact this month', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },
-  {
-    id: 'GOAL_PACE_STATUS',
-    label: 'On track',
-    period: 'CALENDAR_YEAR',
-    unit: 'status',
-    threshold: PERFORMANCE.ON_TRACK_PACE_THRESHOLD,
-    availableFrom: 7,
-  },
-  {
-    id: 'MONTHS_LEFT_IN_YEAR',
-    label: 'Months left in the year',
-    period: 'CALENDAR_YEAR',
-    unit: 'ratio',
-    // Clamped, so the cascade never divides by ~0 in the last days of December.
-    threshold: TIME.MONTHS_PER_YEAR,
-    availableFrom: 7,
-  },
+  SUMMARY_ACTIVITY_TARGET: { period: 'CALENDAR_MONTH', threshold: null },
+  // Capped like APE_ATTAINMENT_PCT, and `null` on a zero target — never `NaN%` (F-25).
+  ACTIVITY_TARGET_ATTAINMENT_PCT: { period: 'CALENDAR_MONTH', threshold: PERFORMANCE.ATTAINMENT_PCT_CAP },
 
   // ---- Ratios. The benchmarks are the office's own; these are the platform defaults. ----
-  { id: 'SELLING_SUCCESS_RATE', label: 'Selling success rate', period: 'ROLLING_30D', unit: 'ratio', threshold: RATIO_BENCHMARKS.SELLING_SUCCESS_RATE, availableFrom: 6 },
-  { id: 'RECRUITMENT_SUCCESS_RATE', label: 'Recruitment success rate', period: 'ROLLING_30D', unit: 'ratio', threshold: RATIO_BENCHMARKS.RECRUITMENT_SUCCESS_RATE, availableFrom: 6 },
-  { id: 'LEADS_PER_ACTIVITY', label: 'Leads per activity', period: 'ROLLING_30D', unit: 'ratio', threshold: RATIO_BENCHMARKS.LEADS_PER_ACTIVITY, availableFrom: 6 },
-  { id: 'MEETING_PER_APPROACH', label: 'Meeting per approach', period: 'ROLLING_30D', unit: 'ratio', threshold: RATIO_BENCHMARKS.MEETING_PER_APPROACH, availableFrom: 6 },
-  { id: 'SELLING_RECRUITMENT_BALANCE', label: 'Selling vs Recruitment balance', period: 'ROLLING_30D', unit: 'percentage', threshold: RATIO_BENCHMARKS.BALANCE_BAND_PP, availableFrom: 6 },
+  SELLING_SUCCESS_RATE: { period: 'ROLLING_30D', threshold: RATIO_BENCHMARKS.SELLING_SUCCESS_RATE },
+  RECRUITMENT_SUCCESS_RATE: { period: 'ROLLING_30D', threshold: RATIO_BENCHMARKS.RECRUITMENT_SUCCESS_RATE },
+  LEADS_PER_ACTIVITY: { period: 'ROLLING_30D', threshold: RATIO_BENCHMARKS.LEADS_PER_ACTIVITY },
+  MEETING_PER_APPROACH: { period: 'ROLLING_30D', threshold: RATIO_BENCHMARKS.MEETING_PER_APPROACH },
+  SELLING_RECRUITMENT_BALANCE: { period: 'ROLLING_30D', threshold: RATIO_BENCHMARKS.BALANCE_BAND_PP },
 
   // ---- Activation, training, events, campaigns ----
-  { id: 'ACTIVATION_COMPLETION_PCT', label: '90-day activation completion', period: 'PROGRAMME_WINDOW', unit: 'percentage', threshold: null, availableFrom: 11 },
-  { id: 'ACTIVATION_DAY_INDEX', label: 'Activation day', period: 'PROGRAMME_WINDOW', unit: 'days', threshold: ACTIVATION.WINDOW_DAYS, availableFrom: 11 },
-  { id: 'TRAINING_COMPLETION_PCT', label: 'Training completion', period: 'POINT_IN_TIME', unit: 'percentage', threshold: null, availableFrom: 10 },
-  { id: 'EVENT_ATTENDANCE_STATUS', label: 'Event attendance', period: 'POINT_IN_TIME', unit: 'status', threshold: null, availableFrom: 12 },
-  { id: 'EVENT_ATTENDANCE_RATE', label: 'Event attendance rate', period: 'POINT_IN_TIME', unit: 'percentage', threshold: null, availableFrom: 12 },
-  { id: 'EVENT_NPS', label: 'Event Net Promoter Score', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 12 },
-  { id: 'CAMPAIGN_QUALIFICATION_STATUS', label: 'Campaign qualification', period: 'CALENDAR_MONTH', unit: 'status', threshold: null, availableFrom: 12 },
+  ACTIVATION_COMPLETION_PCT: { period: 'PROGRAMME_WINDOW', threshold: null },
+  ACTIVATION_DAY_INDEX: { period: 'PROGRAMME_WINDOW', threshold: ACTIVATION.WINDOW_DAYS },
+  TRAINING_COMPLETION_PCT: { period: 'POINT_IN_TIME', threshold: null },
+  EVENT_ATTENDANCE_STATUS: { period: 'POINT_IN_TIME', threshold: null },
+  EVENT_ATTENDANCE_RATE: { period: 'POINT_IN_TIME', threshold: null },
+  EVENT_NPS: { period: 'POINT_IN_TIME', threshold: null },
+  CAMPAIGN_QUALIFICATION_STATUS: { period: 'CALENDAR_MONTH', threshold: null },
 
   // ---- Carrier contract ----
-  { id: 'MOC_STATUS', label: 'Maintenance of Contract', period: 'ROLLING_12M', unit: 'status', threshold: null, availableFrom: 14 },
-  { id: 'PRODUCTION_CLUB_TIER', label: 'Production club tier', period: 'CALENDAR_YEAR', unit: 'status', threshold: null, availableFrom: 14 },
-  { id: 'RECRUITMENT_PIPELINE_NOW', label: 'Recruitment pipeline', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 8 },
-  { id: 'RECRUITMENT_EXPECTED_TO_CLOSE', label: 'Expected to close', period: 'CALENDAR_MONTH', unit: 'count', threshold: null, availableFrom: 8 },
-  { id: 'NEW_ACTIVE_AGENTS', label: 'New active agents', period: 'CALENDAR_MONTH', unit: 'count', threshold: null, availableFrom: 9 },
-  { id: 'ROLLING_PERSISTENCY', label: 'Rolling persistency', period: 'ROLLING_12M', unit: 'percentage', threshold: null, availableFrom: 14 },
-]);
+  MOC_STATUS: { period: 'ROLLING_12M', threshold: null },
+  PRODUCTION_CLUB_TIER: { period: 'CALENDAR_YEAR', threshold: null },
+  RECRUITMENT_PIPELINE_NOW: { period: 'POINT_IN_TIME', threshold: null },
+  RECRUITMENT_EXPECTED_TO_CLOSE: { period: 'CALENDAR_MONTH', threshold: null },
+  NEW_ACTIVE_AGENTS: { period: 'CALENDAR_MONTH', threshold: null },
+  ROLLING_PERSISTENCY: { period: 'ROLLING_12M', threshold: null },
+};
+
+export const METRIC_REGISTRY = define(join(SERVED, COMPUTATIONS));
 
 /**
  * One metric, by id.
@@ -297,8 +226,9 @@ export function metric(id: string): MetricDefinition {
   if (!found) {
     throw new Error(
       `No metric called ${id}. A screen needing a variant registers a new named metric in `
-        + 'domain/metrics/registry.ts and documents it in metrics-and-definitions.md — it '
-        + 'does not reinterpret an existing one locally (domain-invariants.md §8).',
+        + 'domain/constants/metrics.ts, gives it a period in domain/metrics/registry.ts and '
+        + 'documents it in metrics-and-definitions.md — it does not reinterpret an existing one '
+        + 'locally (domain-invariants.md §8).',
     );
   }
   return found;

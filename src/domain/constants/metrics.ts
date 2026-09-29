@@ -4,6 +4,12 @@
  * `docs/00-product/metrics-and-definitions.md` Part A is the definition of each of these; this is
  * the **set of names a requirement may use**, and the phase that first computes each one for real.
  *
+ * **One list, not two** (P10-T8). `domain/metrics/registry.ts` carried its own copy — its own names,
+ * its own units, and an *available from* that meant something else — and the two disagreed on
+ * seventeen phases and a dozen names before anybody compared them. It now **derives** from this one,
+ * adding only what a computation needs — the period and the threshold — and refuses at load a metric
+ * either side has and the other lacks. `registry.spec.ts` holds both to the document's index.
+ *
  * A campaign requirement or a qualification rule may only name a metric this product can compute
  * (ADR-0035). The prototype's requirements are display strings — *"Net APE ≥ Rp 600 juta"* — which
  * nothing can evaluate and nothing can refuse, so a campaign could promise a reward against a number
@@ -21,20 +27,23 @@ export interface MetricDefinition {
  * What a metric's number means.
  *
  * `idr_minor` is integer sen, never a float and never a display string (invariant §9): the
- * prototype stores *"Rp 600,000,000"* and one campaign's reward in **pesos**.
+ * prototype stores *"Rp 600,000,000"* and one campaign's reward in **pesos**. `tri_state` is
+ * boolean-or-unknown, and the unknown is load-bearing: an office that has not uploaded a month has
+ * no Monthly Active Agents to count, which is not zero of them. `months` is a decimal count of them.
  */
 export const METRIC_UNITS = [
-  'boolean', 'count', 'percentage', 'percentage_points', 'ratio', 'days', 'idr_minor', 'enum', 'score',
+  'boolean', 'tri_state', 'count', 'percentage', 'percentage_points', 'ratio', 'days', 'months', 'idr_minor', 'enum', 'score',
 ] as const;
 export type MetricUnit = (typeof METRIC_UNITS)[number];
 
 export const METRIC_REGISTRY: readonly MetricDefinition[] = [
-  { key: 'MONTHLY_ACTIVE_AGENT', name: 'Monthly Active Agent (MAA)', unit: 'boolean', phase: 9 },
+  { key: 'MONTHLY_ACTIVE_AGENT', name: 'Monthly Active Agent (MAA)', unit: 'tri_state', phase: 9 },
   { key: 'MAA_COUNT_IN_UNIT', name: 'Active agents in unit', unit: 'count', phase: 13 },
   { key: 'PACING_TO_MAA', name: 'Pacing to MAA', unit: 'boolean', phase: 13 },
-  { key: 'ACTIVITY_COMPLIANCE_7D', name: 'Activity compliance, last 7 days', unit: 'boolean', phase: 6 },
-  { key: 'ACTIVITY_COMPLIANCE_MONTH', name: 'Activity compliance, this month', unit: 'boolean', phase: 6 },
-  { key: 'ACTIVITY_COMPLIANCE_RATE', name: 'Activity compliance rate', unit: 'percentage', phase: 13 },
+  { key: 'ACTIVITY_COMPLIANCE_7D', name: 'Activity-logging compliance, last 7 days', unit: 'boolean', phase: 6 },
+  { key: 'ACTIVITY_COMPLIANCE_MONTH', name: 'Activity-logging compliance, this month', unit: 'boolean', phase: 6 },
+  { key: 'ACTIVITY_COMPLIANCE_RATE', name: 'Activity-logging compliance rate', unit: 'percentage', phase: 13 },
+  { key: 'ACTIVITY_TOTAL_BY_CATEGORY', name: 'Logged touches by category', unit: 'count', phase: 6 },
   { key: 'COACHED_7D', name: 'Coached in the last 7 days', unit: 'boolean', phase: 13 },
   { key: 'COACHED_30D', name: 'Coached in the last 30 days', unit: 'boolean', phase: 13 },
   { key: 'DAYS_SINCE_LAST_COACHING', name: 'Days since last 1:1', unit: 'days', phase: 13 },
@@ -45,6 +54,10 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'APE_ATTAINMENT_PCT', name: 'APE achieved vs target', unit: 'percentage', phase: 10 },
   { key: 'APE_GAP_TO_TARGET', name: 'Gap to target', unit: 'idr_minor', phase: 10 },
   { key: 'POLICIES_NEEDED', name: 'Policies still needed', unit: 'count', phase: 10 },
+  { key: 'MONTHS_LEFT_IN_YEAR', name: 'Months left in the year', unit: 'months', phase: 8 },
+  { key: 'POLICY_COUNT_TARGET', name: 'Policies to close this month', unit: 'count', phase: 8 },
+  { key: 'APPOINTMENT_TARGET', name: 'Appointments to hold this month', unit: 'count', phase: 8 },
+  { key: 'LEAD_TARGET', name: 'Leads to contact this month', unit: 'count', phase: 8 },
   { key: 'GOAL_PACE_STATUS', name: 'On-track / pace status', unit: 'enum', phase: 13 },
   { key: 'SELLING_RECRUITMENT_BALANCE', name: 'Selling vs Recruitment balance', unit: 'percentage_points', phase: 6 },
   { key: 'SELLING_SUCCESS_RATE', name: 'Selling success rate', unit: 'ratio', phase: 6 },
@@ -67,8 +80,9 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'CAMPAIGN_QUALIFICATION_STATUS', name: 'Campaign qualification', unit: 'enum', phase: 12 },
   { key: 'MOC_STATUS', name: 'Maintenance of Contract', unit: 'boolean', phase: 14 },
   { key: 'PRODUCTION_CLUB_TIER', name: 'Production club tier', unit: 'enum', phase: 14 },
-  { key: 'RECRUITMENT_PIPELINE_NOW', name: 'Recruitment pipeline now', unit: 'count', phase: 14 },
-  { key: 'RECRUITMENT_EXPECTED_TO_CLOSE', name: 'Expected to close', unit: 'count', phase: 14 },
+  // Computed since P7-T6, in `LeadService.summary` — the document's index said 14 until P10-T8.
+  { key: 'RECRUITMENT_PIPELINE_NOW', name: 'Recruitment pipeline now', unit: 'count', phase: 7 },
+  { key: 'RECRUITMENT_EXPECTED_TO_CLOSE', name: 'Expected to close', unit: 'count', phase: 7 },
   { key: 'NEW_ACTIVE_AGENTS', name: 'New active agents', unit: 'count', phase: 9 },
   { key: 'ROLLING_PERSISTENCY', name: 'Rolling persistency', unit: 'percentage', phase: 9 },
 ];

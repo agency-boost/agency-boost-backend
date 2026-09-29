@@ -8,7 +8,7 @@ import { metric } from './registry';
 describe('MONTHLY_ACTIVE_AGENT (ADR-0054)', () => {
   it('is registered as the tri-state, calendar-month metric this computes', () => {
     expect(metric('MONTHLY_ACTIVE_AGENT')).toMatchObject({
-      unit: 'tri_state', period: 'CALENDAR_MONTH', threshold: null, availableFrom: 9,
+      unit: 'tri_state', period: 'CALENDAR_MONTH', threshold: null, phase: 9,
     });
   });
 

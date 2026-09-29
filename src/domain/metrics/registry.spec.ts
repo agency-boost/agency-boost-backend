@@ -1,13 +1,32 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ACTIVATION, PERFORMANCE, RATIO_BENCHMARKS } from '@/domain/constants';
-import { METRIC_IDS, METRIC_REGISTRY, metric, define } from './registry';
+import { METRIC_REGISTRY as SERVED } from '@/domain/constants/metrics';
+import { METRIC_IDS, METRIC_REGISTRY, metric, define, join as joinLists } from './registry';
 
 const DOC = join(__dirname, '../../../../docs/00-product/metrics-and-definitions.md');
 
+/**
+ * The document's index table — `| \`ID\` | Name | Unit | Phase |` — one row per metric, or one row for
+ * two ids written `A` / `B`.
+ */
+function indexRows(): { ids: string[]; name: string; phase: number }[] {
+  const text = readFileSync(DOC, 'utf8');
+  const table = text.slice(text.indexOf('| Code | Name | Unit | Phase |'));
+  const rows: { ids: string[]; name: string; phase: number }[] = [];
+  for (const line of table.split('\n').slice(2)) {
+    if (!line.startsWith('| `')) break;
+    const [, codes, name, , phase] = line.split('|').map((cell) => cell.trim());
+    rows.push({ ids: [...codes.matchAll(/`([A-Z_0-9]+)`/g)].map((m) => m[1]), name, phase: Number(phase) });
+  }
+  return rows;
+}
+
 /** Every `### \`ID\`` heading in the registry document. */
 function documentedIds(): string[] {
-  return [...readFileSync(DOC, 'utf8').matchAll(/^### `([A-Z_0-9]+)`/gm)].map((m) => m[1]);
+  // A heading may define two — `COACHED_7D` and `COACHED_30D` share one — so every id before its dash.
+  return [...readFileSync(DOC, 'utf8').matchAll(/^### (`[A-Z_0-9]+`(?:(?: and |, | \/ )`[A-Z_0-9]+`)*)/gm)]
+    .flatMap((m) => [...m[1].matchAll(/`([A-Z_0-9]+)`/g)].map((id) => id[1]));
 }
 
 describe('the metric registry (P4-T4)', () => {
@@ -44,7 +63,7 @@ describe('the metric registry (P4-T4)', () => {
       const activeish = METRIC_IDS.filter((id) => id.includes('ACTIVE_AGENT'));
       expect(activeish.sort()).toEqual(['MONTHLY_ACTIVE_AGENT', 'NEW_ACTIVE_AGENTS']);
       // And the engagement measure is not called an active agent anywhere.
-      expect(metric('ACTIVITY_COMPLIANCE_MONTH').label).toBe('Logged activity this month');
+      expect(metric('ACTIVITY_COMPLIANCE_MONTH').label).toBe('Activity-logging compliance, this month');
     });
   });
 
@@ -98,10 +117,48 @@ describe('the metric registry (P4-T4)', () => {
     it('says which phase each one becomes real in, honestly', () => {
       // Most of these cannot be computed yet, and saying so is what stops a screen being
       // built against a definition whose data does not exist.
-      expect(metric('MONTHLY_ACTIVE_AGENT').availableFrom).toBe(9);
-      expect(metric('SELLING_SUCCESS_RATE').availableFrom).toBe(6);
+      expect(metric('MONTHLY_ACTIVE_AGENT').phase).toBe(9);
+      expect(metric('SELLING_SUCCESS_RATE').phase).toBe(6);
+      // Computed since P7-T6 — the index said 14, and a campaign asking was told it could not be.
+      expect(metric('RECRUITMENT_PIPELINE_NOW').phase).toBe(7);
       for (const id of METRIC_IDS) {
-        expect(metric(id).availableFrom).toBeGreaterThanOrEqual(4);
+        expect(metric(id).phase).toBeGreaterThanOrEqual(4);
+      }
+    });
+  });
+
+  describe('P10-T8 AC-2 — one list, served and computed, agreeing with the document', () => {
+    it('serves exactly what it computes, under the same name, unit and phase', () => {
+      expect([...METRIC_IDS].sort()).toEqual(SERVED.map((m) => m.key).sort());
+      for (const served of SERVED) {
+        const computed = metric(served.key);
+        expect({ label: computed.label, unit: computed.unit, phase: computed.phase })
+          .toEqual({ label: served.name, unit: served.unit, phase: served.phase });
+      }
+    });
+
+    it('refuses, at load, a served metric with no period — and a period for a metric nobody serves', () => {
+      const served = [{ key: 'A', name: 'A', unit: 'count' as const, phase: 6 }];
+      expect(() => joinLists(served, {})).toThrow(/A is served with no period/);
+      expect(() => joinLists(served, { A: { period: 'ROLLING_7D', threshold: null }, B: { period: 'ROLLING_7D', threshold: null } }))
+        .toThrow(/B has a period here and no entry/);
+      expect(joinLists(served, { A: { period: 'ROLLING_7D', threshold: null } })).toEqual([
+        { id: 'A', label: 'A', unit: 'count', phase: 6, period: 'ROLLING_7D', threshold: null },
+      ]);
+    });
+
+    it('has a row in the document’s index for every metric, and a metric for every row', () => {
+      const indexed = indexRows().flatMap((row) => row.ids);
+      expect([...indexed].sort()).toEqual([...METRIC_IDS].sort());
+    });
+
+    it('agrees with the index on every phase, and on every name the index gives one metric', () => {
+      for (const row of indexRows()) {
+        for (const id of row.ids) expect({ id, phase: metric(id).phase }).toEqual({ id, phase: row.phase });
+        // `COACHED_7D` / `COACHED_30D` share a row and a name; each keeps its own.
+        if (row.ids.length === 1) {
+          expect({ id: row.ids[0], name: metric(row.ids[0]).label.replace(/’/g, "'") }).toEqual({ id: row.ids[0], name: row.name });
+        }
       }
     });
   });
@@ -114,13 +171,13 @@ describe('the metric registry (P4-T4)', () => {
        * duplicate — not that a duplicate would be caught. The prototypes carry three
        * conflicting definitions of "active agent"; this is what stops a fourth.
        */
-      const entry = { id: 'X', label: 'X', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 1 } as never;
+      const entry = { id: 'X', label: 'X', period: 'POINT_IN_TIME', unit: 'count', threshold: null, phase: 1 } as never;
       expect(() => define([entry, entry])).toThrow(/defined twice/);
     });
 
     it('keeps every distinct id', () => {
-      const one = { id: 'A', label: 'A', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 1 } as never;
-      const two = { id: 'B', label: 'B', period: 'POINT_IN_TIME', unit: 'count', threshold: null, availableFrom: 1 } as never;
+      const one = { id: 'A', label: 'A', period: 'POINT_IN_TIME', unit: 'count', threshold: null, phase: 1 } as never;
+      const two = { id: 'B', label: 'B', period: 'POINT_IN_TIME', unit: 'count', threshold: null, phase: 1 } as never;
       expect([...define([one, two]).keys()]).toEqual(['A', 'B']);
     });
   });
