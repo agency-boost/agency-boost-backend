@@ -409,6 +409,8 @@ async function main(): Promise<void> {
     if (await missing(ActivityTypes as never)) {
     await ActivityCategories.insertMany(SEED_ACTIVITY_CATEGORIES.map((c) => ({
       kpmId, code: c.code, label: c.label, displayOrder: c.displayOrder,
+      // The prototype's four tiles (ADR-0064); a database seeded before them gets them from 0021.
+      summaryGroupCode: c.summaryGroupCode, summaryGroupLabel: c.summaryGroupLabel,
       version: 1, status: 'active', archivedAt: null, deletedAt: null,
     })));
     await ActivityTypes.insertMany(SEED_ACTIVITY_TYPES.map((t) => ({

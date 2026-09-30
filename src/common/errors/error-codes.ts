@@ -181,6 +181,15 @@ export const ErrorCode = {
   CONFIG_RATIO_UNREACHABLE_INPUT: 'CONFIG_RATIO_UNREACHABLE_INPUT',
   /** A ratio's display unit does not fit its rule — `band` is points, `gte` never is. */
   CONFIG_RATIO_UNIT_MISMATCH: 'CONFIG_RATIO_UNIT_MISMATCH',
+  /**
+   * Two sections share a summary tile and disagree on what it is called (ADR-0064). `422`, with
+   * `details: { summaryGroupCode, labels }`.
+   *
+   * **Refused, not reconciled.** One tile has one label, and picking either would rename a tile
+   * somebody else set. Counted across every section the office holds, archived included — an
+   * archived section still renders the days it was logged against.
+   */
+  CONFIG_SUMMARY_GROUP_LABEL_MISMATCH: 'CONFIG_SUMMARY_GROUP_LABEL_MISMATCH',
 
   /*
    * Production import (P9-T3, P9-T4). The catalog has carried seven `UPLOAD_*` codes since Phase 0;

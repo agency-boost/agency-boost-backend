@@ -41,6 +41,7 @@ import {
   defaultActivationChecklist, type ActivationChecklistPayload,
 } from '@/modules/activation/activation-payload';
 import { TenantConfigService } from './tenant-config.service';
+import { summaryGroupConflict } from './summary-group';
 import {
   TrainingCategory, TrainingCategoryDocument,
 } from '@/modules/training/training-category.schema';
@@ -248,11 +249,27 @@ export class ProvisioningService {
       );
     }
 
+    /*
+     * One tile, one label (ADR-0064). Publishing refuses a template that breaks it, so this is a
+     * template older than that check — and an office built from it would refuse its Owner's first
+     * edit to the section for a disagreement they never made.
+     */
+    const conflict = summaryGroupConflict(categories);
+    if (conflict) {
+      throw new Error(
+        `The published activity taxonomy for company ${companyId} labels the summary tile `
+          + `${conflict.summaryGroupCode} as ${conflict.labels.join(' and ')}. One tile has one label.`,
+      );
+    }
+
     await this.categories.insertMany(categories.map((c) => ({
       kpmId,
       code: c.code,
       label: c.label,
       displayOrder: c.displayOrder,
+      // The tile it counts toward, as the template says; none is a tile of its own (ADR-0064).
+      summaryGroupCode: c.summaryGroupCode ?? null,
+      summaryGroupLabel: c.summaryGroupLabel ?? null,
       version: 1,
       status: 'active',
       archivedAt: null,

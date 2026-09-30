@@ -558,6 +558,98 @@ describe('the configuration controllers', () => {
     });
   });
 
+  describe('the summary tile a section counts toward (ADR-0064, P10.1-T5)', () => {
+    /*
+     * The same rules the service spec pins, through the pipe and the filter: a refusal reaches the
+     * client as the envelope a screen reads, with the details it points at the field with.
+     */
+    const section = async (code: string) =>
+      (await wired.activity.list(OWNER, true)).find((c) => c.code === code)!;
+
+    it('regroups a section on its own edit, bumping its version', async () => {
+      const selling = await section('SELLING');
+      const res = await request(app.getHttpServer())
+        .patch(`/kpm/settings/activity-categories/${selling.id}`)
+        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development' })
+        .expect(200);
+      expect(res.body).toMatchObject({
+        summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development', version: selling.version + 1,
+      });
+    });
+
+    it('refuses a label the tile does not carry: 422 and the envelope’s details', async () => {
+      const selling = await section('SELLING');
+      const res = await request(app.getHttpServer())
+        .patch(`/kpm/settings/activity-categories/${selling.id}`)
+        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Growth' })
+        .expect(422);
+      expect(res.body.error).toMatchObject({
+        code: 'CONFIG_SUMMARY_GROUP_LABEL_MISMATCH',
+        details: { summaryGroupCode: 'DEVELOPMENT', labels: ['Growth', 'Development'] },
+      });
+
+      const batch = await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({
+          ops: [{
+            op: 'category.update', id: selling.id, expectedVersion: selling.version,
+            body: { summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Growth' },
+          }],
+        })
+        .expect(422);
+      expect(batch.body.error).toMatchObject({
+        code: 'CONFIG_SUMMARY_GROUP_LABEL_MISMATCH',
+        details: { summaryGroupCode: 'DEVELOPMENT', labels: ['Growth', 'Development'] },
+      });
+    });
+
+    it('refuses a code without a label on a new section, as the batch would', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/kpm/settings/activity-categories')
+        .send({ code: 'REFERRALS', label: 'Referrals', summaryGroupCode: 'SELLING' })
+        .expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('serves the tiles in /kpm/config, and null on a section with none', async () => {
+      await request(app.getHttpServer())
+        .post('/kpm/settings/activity-categories')
+        .send({ code: 'REFERRALS', label: 'Referrals', summaryGroupCode: null, summaryGroupLabel: null })
+        .expect(201);
+      await request(app.getHttpServer()).post('/kpm/settings/publish').expect(201);
+
+      current = AGENT;
+      const res = await request(app.getHttpServer()).get('/kpm/config').expect(200);
+      const tiles = Object.fromEntries(res.body.activity.map(
+        (c: { code: string; summaryGroupCode: string | null; summaryGroupLabel: string | null }) =>
+          [c.code, [c.summaryGroupCode, c.summaryGroupLabel]],
+      ));
+      expect(tiles).toEqual({
+        LEADS_GENERATION: [null, null],
+        SELLING: [null, null],
+        RECRUITMENT: [null, null],
+        PERSONAL_DEVELOPMENT: ['DEVELOPMENT', 'Development'],
+        TEAM_DEVELOPMENT: ['DEVELOPMENT', 'Development'],
+        REFERRALS: [null, null],
+      });
+    });
+
+    it('refuses an agent the edit, which is the Owner’s and the Admins’', async () => {
+      const selling = await section('SELLING');
+      current = AGENT;
+      await request(app.getHttpServer())
+        .patch(`/kpm/settings/activity-categories/${selling.id}`)
+        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development' })
+        .expect(403);
+
+      current = ADMIN;
+      await request(app.getHttpServer())
+        .patch(`/kpm/settings/activity-categories/${selling.id}`)
+        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development' })
+        .expect(200);
+    });
+  });
+
   describe('branch info', () => {
     it('is readable, and writable by the Owner and the Admin alike (ADR-0027)', async () => {
       await request(app.getHttpServer()).get('/kpm/settings/branch-info').expect(200);

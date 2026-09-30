@@ -29,6 +29,8 @@ export { CODE_MESSAGE, CODE_PATTERN, checkNoFields };
 
 export const CONFIG_BOUNDS = {
   categoryLabel: { min: 1, max: 80 },
+  /** A summary tile's label (ADR-0064) sits where a section's does, so it has a section's room. */
+  summaryGroupLabel: { min: 1, max: 80 },
   typeLabel: { min: 1, max: 200 },
   ratioLabel: { min: 1, max: 80 },
   leadStatusLabel: { min: 1, max: 80 },
@@ -45,21 +47,60 @@ export const CONFIG_BOUNDS = {
 
 // ------------------------------------------------------------- activity categories
 
+/** The fields a section's summary tile is set by (ADR-0064). */
+const SUMMARY_GROUP_FIELDS = ['summaryGroupCode', 'summaryGroupLabel'] as const;
+
+/** Said once, because a create, an update and a template row all refuse it the same way. */
+export const SUMMARY_GROUP_PAIR_MESSAGE =
+  'summaryGroupCode and summaryGroupLabel are set together, or cleared together with null.';
+
+/**
+ * A section's summary tile: both fields, or neither (ADR-0064).
+ *
+ * `null` clears, and is only accepted on both at once: a code with no label is a tile nobody can
+ * name, and a label with no code is a tile no other section can join. **Absent leaves both
+ * alone**, the way every update field here does — so an update that sends one of the two is
+ * refused rather than read as half a change.
+ *
+ * The pair is a rule across two fields, which the pipe's per-field decorators cannot state; the
+ * route reaches this checker through its service, so it refuses the same body the batch does.
+ */
+function summaryGroup(
+  f: Fields, body: unknown,
+): { summaryGroupCode?: string | null; summaryGroupLabel?: string | null } {
+  const raw = (body !== null && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+  const [codeSent, labelSent] = SUMMARY_GROUP_FIELDS.map((key) => raw[key] !== undefined);
+  const [codeNull, labelNull] = SUMMARY_GROUP_FIELDS.map((key) => raw[key] === null);
+
+  const summaryGroupCode = codeNull ? null : f.code('summaryGroupCode', false);
+  const summaryGroupLabel = labelNull
+    ? null
+    : f.text('summaryGroupLabel', CONFIG_BOUNDS.summaryGroupLabel, false);
+  if (codeSent !== labelSent || codeNull !== labelNull) f.violations.push(SUMMARY_GROUP_PAIR_MESSAGE);
+  return { summaryGroupCode, summaryGroupLabel };
+}
+
 export interface CategoryCreateInput {
   code: string;
   label: string;
   description: string | null;
   appliesToOrgLevelCodes: string[];
+  /** `null` on both: a tile of its own, under its own label. */
+  summaryGroupCode: string | null;
+  summaryGroupLabel: string | null;
 }
 
 export function checkCategoryCreate(body: unknown): CategoryCreateInput {
-  const f = new Fields(body, ['code', 'label', 'description', 'appliesToOrgLevelCodes']);
+  const f = new Fields(body, ['code', 'label', 'description', 'appliesToOrgLevelCodes', ...SUMMARY_GROUP_FIELDS]);
+  const group = summaryGroup(f, body);
   return f.done({
     code: f.code('code', true),
     label: f.text('label', CONFIG_BOUNDS.categoryLabel, true),
     description: f.note('description', CONFIG_BOUNDS.description) ?? null,
     appliesToOrgLevelCodes:
       f.codes('appliesToOrgLevelCodes', { min: 0, ...CONFIG_BOUNDS.rungs }, false) ?? [],
+    summaryGroupCode: group.summaryGroupCode ?? null,
+    summaryGroupLabel: group.summaryGroupLabel ?? null,
   }) as CategoryCreateInput;
 }
 
@@ -68,14 +109,18 @@ export interface CategoryUpdateInput {
   label?: string;
   description?: string | null;
   appliesToOrgLevelCodes?: string[];
+  summaryGroupCode?: string | null;
+  summaryGroupLabel?: string | null;
 }
 
 export function checkCategoryUpdate(body: unknown): CategoryUpdateInput {
-  const f = new Fields(body, ['label', 'description', 'appliesToOrgLevelCodes']);
+  const f = new Fields(body, ['label', 'description', 'appliesToOrgLevelCodes', ...SUMMARY_GROUP_FIELDS]);
+  const group = summaryGroup(f, body);
   return f.done({
     label: f.text('label', CONFIG_BOUNDS.categoryLabel, false),
     description: f.note('description', CONFIG_BOUNDS.description),
     appliesToOrgLevelCodes: f.codes('appliesToOrgLevelCodes', { min: 0, ...CONFIG_BOUNDS.rungs }, false),
+    ...group,
   });
 }
 

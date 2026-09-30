@@ -14,8 +14,9 @@ export class SaveTemplateDraftDto {
     type: Object,
     description:
       'The whole payload for this kind. Shape depends on the kind: '
-      + '`activity_taxonomy` is `{ categories, types }`, `lead_pipeline` is `{ statuses }`, '
-      + '`ratio_set` is `{ ratios }`.',
+      + '`activity_taxonomy` is `{ categories, types }` — a category may carry '
+      + '`summaryGroupCode` and `summaryGroupLabel`, both or neither (ADR-0064) — '
+      + '`lead_pipeline` is `{ statuses }`, `ratio_set` is `{ ratios }`.',
   })
   @IsObject()
   payload!: Record<string, unknown>;

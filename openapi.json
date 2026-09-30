@@ -3890,7 +3890,7 @@
         "x-required-permission": "company_template:read"
       },
       "put": {
-        "description": "The whole payload, not a patch: a template is edited and copied as one document, and merging two versions of an ordered list of codes has no answer anybody would predict. Creates the draft if this is the first edit since publishing.\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The whole payload, not a patch: a template is edited and copied as one document, and merging two versions of an ordered list of codes has no answer anybody would predict. Creates the draft if this is the first edit since publishing. An `activity_taxonomy` draft has its summary tiles checked here (ADR-0064): `summaryGroupCode` and `summaryGroupLabel` on a category together or not at all (`400 VALIDATION_FAILED`), and one label per tile (`422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`).\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_saveTemplateDraft_v1",
         "parameters": [
           {
@@ -7995,7 +7995,7 @@
     },
     "/api/v1/kpm/settings/changes": {
       "post": {
-        "description": "The settings screens stage every edit and send one request. **Validated entirely before anything is written**, so a refusal leaves the office exactly as it was, and so a `type.create` can name a section a `category.create` makes earlier in the same batch. Every change to an existing row carries the `version` the screen read: a row that moved on refuses the whole batch with `409 VERSION_CONFLICT`, naming what changed, rather than letting the second of two admins erase the first. Returns the working copy as it now stands — publishing is still a separate act.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The settings screens stage every edit and send one request. **Validated entirely before anything is written**, so a refusal leaves the office exactly as it was, and so a `type.create` can name a section a `category.create` makes earlier in the same batch. Every change to an existing row carries the `version` the screen read: a row that moved on refuses the whole batch with `409 VERSION_CONFLICT`, naming what changed, rather than letting the second of two admins erase the first. Returns the working copy as it now stands — publishing is still a separate act. The summary tiles (ADR-0064) are checked against the state the **whole batch** leaves, so a tile of two sections is renamed in one request: two sections of one tile left with different labels is `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TenantConfigController_applyChanges_v1",
         "parameters": [],
         "requestBody": {
@@ -8074,6 +8074,7 @@
     },
     "/api/v1/kpm/settings/activity-categories": {
       "post": {
+        "description": "Appended, never inserted. `summaryGroupCode` and `summaryGroupLabel` put it in a summary tile (ADR-0064) — both or neither; neither is a tile of its own. Joining a tile under a label its sections do not carry is `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TenantConfigController_createCategory_v1",
         "parameters": [],
         "requestBody": {
@@ -8147,8 +8148,7 @@
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "tenant_config:write",
-        "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
+        "x-required-permission": "tenant_config:write"
       }
     },
     "/api/v1/kpm/settings/activity-categories/reorder": {
@@ -8235,7 +8235,7 @@
     },
     "/api/v1/kpm/settings/activity-categories/{id}": {
       "patch": {
-        "description": "Label, description and the rungs it applies to. **Never the code** — that is the identity every type under it holds. Narrowing the rungs is refused when a ratio counting this section still applies to a rung the section would lose.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Label, description, the rungs it applies to, and the summary tile it counts toward. **Never the code** — that is the identity every type under it holds. Narrowing the rungs is refused when a ratio counting this section still applies to a rung the section would lose. `summaryGroupCode` and `summaryGroupLabel` travel together, and `null` on both gives the section a tile of its own (ADR-0064); a label its tile's other sections do not carry is `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH` — rename a shared tile through `POST /kpm/settings/changes`, in one batch.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TenantConfigController_updateCategory_v1",
         "parameters": [
           {
@@ -17529,7 +17529,7 @@
         "properties": {
           "payload": {
             "type": "object",
-            "description": "The whole payload for this kind. Shape depends on the kind: `activity_taxonomy` is `{ categories, types }`, `lead_pipeline` is `{ statuses }`, `ratio_set` is `{ ratios }`."
+            "description": "The whole payload for this kind. Shape depends on the kind: `activity_taxonomy` is `{ categories, types }` — a category may carry `summaryGroupCode` and `summaryGroupLabel`, both or neither (ADR-0064) — `lead_pipeline` is `{ statuses }`, `ratio_set` is `{ ratios }`."
           }
         },
         "required": [
@@ -17880,6 +17880,20 @@
       "CreateActivityCategoryDto": {
         "type": "object",
         "properties": {
+          "summaryGroupCode": {
+            "type": "string",
+            "nullable": true,
+            "example": "DEVELOPMENT",
+            "description": "The summary tile this section counts toward. Sections sharing a code share a tile; `null` is a tile of its own. Sent with `summaryGroupLabel`, or not at all."
+          },
+          "summaryGroupLabel": {
+            "type": "string",
+            "nullable": true,
+            "example": "Development",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "The tile's label. Every section of one tile carries the same one: a write that would leave two disagreeing is refused `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`."
+          },
           "code": {
             "type": "string",
             "example": "SELLING",
@@ -17934,6 +17948,20 @@
       "UpdateActivityCategoryDto": {
         "type": "object",
         "properties": {
+          "summaryGroupCode": {
+            "type": "string",
+            "nullable": true,
+            "example": "DEVELOPMENT",
+            "description": "The summary tile this section counts toward. Sections sharing a code share a tile; `null` is a tile of its own. Sent with `summaryGroupLabel`, or not at all."
+          },
+          "summaryGroupLabel": {
+            "type": "string",
+            "nullable": true,
+            "example": "Development",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "The tile's label. Every section of one tile carries the same one: a write that would leave two disagreeing is refused `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`."
+          },
           "label": {
             "type": "string",
             "example": "Penjualan",
@@ -21356,6 +21384,18 @@
               "type": "string"
             }
           },
+          "summaryGroupCode": {
+            "type": "string",
+            "nullable": true,
+            "example": "DEVELOPMENT",
+            "description": "The summary tile this section counts toward (ADR-0064). Sections sharing a code share a tile; `null` is a tile of its own, under `label`. **Presentation only** — the strips on `/activity/log` and `/activity/dashboard` read it, and no metric does."
+          },
+          "summaryGroupLabel": {
+            "type": "string",
+            "nullable": true,
+            "example": "Development",
+            "description": "The tile's label, identical on every section of the group — a write leaving two that disagree is refused `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`. `null` exactly when `summaryGroupCode` is."
+          },
           "displayOrder": {
             "type": "number",
             "example": 2
@@ -21384,6 +21424,8 @@
           "label",
           "description",
           "appliesToOrgLevelCodes",
+          "summaryGroupCode",
+          "summaryGroupLabel",
           "displayOrder",
           "version",
           "status",

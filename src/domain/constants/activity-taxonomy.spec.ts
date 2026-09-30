@@ -169,3 +169,62 @@ describe('the seeded ratios against the prototype', () => {
     ]);
   });
 });
+
+describe('the seeded summary tiles against the prototype’s strip (ADR-0064)', () => {
+  /*
+   * `Overall.html:2720-2726` and `:2752-2757`: four tiles and a total, each summing a range of
+   * item numbers. The ranges went with OD-63; the grouping is the seed's now, and this pins it to
+   * the strip it was read from — labels in order, and which items each tile counts.
+   */
+  const OVERALL = join(__dirname, '../../../../prototype/AgencyBoost_Overall.html');
+
+  /** One strip's tiles: label and the item numbers it sums, the total included. */
+  function stripOf(id: string): { label: string; items: number[] }[] {
+    const html = readFileSync(OVERALL, 'utf8');
+    const start = html.indexOf(`id="${id}"`);
+    const block = html.slice(start, html.indexOf('</div>\n', html.indexOf('Total touches', start)));
+    return [...block.matchAll(
+      /<div class="label">([^<]+)<\/div><div class="value[^"]*" data-sum="([\d,]+)">/g,
+    )].map(([, label, sum]) => ({ label, items: sum.split(',').map(Number) }));
+  }
+
+  /** The seed's tiles, derived the way a strip derives them: first section's position, group label. */
+  function seededTiles(): { label: string; items: number[] }[] {
+    const tiles = new Map<string, { label: string; items: number[] }>();
+    for (const category of [...SEED_ACTIVITY_CATEGORIES].sort((a, b) => a.displayOrder - b.displayOrder)) {
+      const key = category.summaryGroupCode ?? `category:${category.code}`;
+      const tile = tiles.get(key) ?? { label: category.summaryGroupLabel ?? category.label, items: [] };
+      tile.items.push(...SEED_ACTIVITY_TYPES
+        .filter((t) => t.categoryCode === category.code).map((t) => t.displayOrder));
+      tiles.set(key, tile);
+    }
+    return [...tiles.values()];
+  }
+
+  it.each(['log-summary-strip', 'dashboard-summary-strip'])('%s: four tiles, then the total', (id) => {
+    const strip = stripOf(id);
+    // Guards the parser: a regex that matched nothing would make the comparison vacuous.
+    expect(strip).toHaveLength(5);
+    expect(strip.at(-1)!.items).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+
+    expect(seededTiles()).toEqual(strip.slice(0, -1));
+  });
+
+  it('gives every section both fields or neither, and one label per group', () => {
+    for (const c of SEED_ACTIVITY_CATEGORIES) {
+      expect(c.summaryGroupCode === null).toBe(c.summaryGroupLabel === null);
+    }
+    const labels = new Map<string, Set<string>>();
+    for (const c of SEED_ACTIVITY_CATEGORIES) {
+      if (!c.summaryGroupCode) continue;
+      labels.set(c.summaryGroupCode, (labels.get(c.summaryGroupCode) ?? new Set()).add(c.summaryGroupLabel!));
+    }
+    expect([...labels.values()].every((set) => set.size === 1)).toBe(true);
+    // Only a tile of two or more sections carries a code (OD-101): a tile of one is the section's
+    // own, and follows its name.
+    expect([...labels.keys()]).toEqual(['DEVELOPMENT']);
+    for (const [code, members] of [...labels.keys()].map((k) => [k, SEED_ACTIVITY_CATEGORIES.filter((c) => c.summaryGroupCode === k)] as const)) {
+      expect({ code, members: members.length }).toEqual({ code, members: 2 });
+    }
+  });
+});

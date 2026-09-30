@@ -92,6 +92,28 @@ export class ActivityCategoryDto implements ActivityCategoryView {
   })
   appliesToOrgLevelCodes!: string[];
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'DEVELOPMENT',
+    description:
+      'The summary tile this section counts toward (ADR-0064). Sections sharing a code share a '
+      + 'tile; `null` is a tile of its own, under `label`. **Presentation only** — the strips on '
+      + '`/activity/log` and `/activity/dashboard` read it, and no metric does.',
+  })
+  summaryGroupCode!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'Development',
+    description:
+      'The tile\'s label, identical on every section of the group — a write leaving two that '
+      + 'disagree is refused `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`. `null` exactly when '
+      + '`summaryGroupCode` is.',
+  })
+  summaryGroupLabel!: string | null;
+
   @ApiProperty({ type: Number, example: 2 })
   displayOrder!: number;
 

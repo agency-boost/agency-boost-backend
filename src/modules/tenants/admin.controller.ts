@@ -316,7 +316,11 @@ export class AdminController {
     description:
       'The whole payload, not a patch: a template is edited and copied as one document, '
       + 'and merging two versions of an ordered list of codes has no answer anybody would '
-      + 'predict. Creates the draft if this is the first edit since publishing.',
+      + 'predict. Creates the draft if this is the first edit since publishing. An '
+      + '`activity_taxonomy` draft has its summary tiles checked here (ADR-0064): '
+      + '`summaryGroupCode` and `summaryGroupLabel` on a category together or not at all '
+      + '(`400 VALIDATION_FAILED`), and one label per tile '
+      + '(`422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`).',
   })
   async saveTemplateDraft(
     @Ctx() ctx: RequestContext,

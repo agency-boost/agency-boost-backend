@@ -76,7 +76,10 @@ export class TenantConfigController {
       + 'read: a row that moved on refuses the whole batch with `409 VERSION_CONFLICT`, '
       + 'naming what changed, rather than letting the second of two admins erase the '
       + 'first. Returns the working copy as it now stands — publishing is still a '
-      + 'separate act.',
+      + 'separate act. The summary tiles (ADR-0064) are checked against the state the '
+      + '**whole batch** leaves, so a tile of two sections is renamed in one request: '
+      + 'two sections of one tile left with different labels is '
+      + '`422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`.',
   })
   async applyChanges(@Ctx() ctx: RequestContext, @Body() dto: ApplyConfigChangesDto) {
     return this.changes.apply(ctx, dto.ops);
@@ -84,7 +87,13 @@ export class TenantConfigController {
 
   @Post('activity-categories')
   @RequirePermission('tenant_config:write')
-  @ApiOperation({ summary: 'Add a category' })
+  @ApiOperation({
+    summary: 'Add a category',
+    description:
+      'Appended, never inserted. `summaryGroupCode` and `summaryGroupLabel` put it in a '
+      + 'summary tile (ADR-0064) — both or neither; neither is a tile of its own. Joining a '
+      + 'tile under a label its sections do not carry is `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`.',
+  })
   async createCategory(@Ctx() ctx: RequestContext, @Body() dto: CreateActivityCategoryDto) {
     return this.activity.createCategory(ctx, dto);
   }
@@ -107,9 +116,13 @@ export class TenantConfigController {
   @ApiOperation({
     summary: 'Edit a category',
     description:
-      'Label, description and the rungs it applies to. **Never the code** — that is the '
-      + 'identity every type under it holds. Narrowing the rungs is refused when a ratio '
-      + 'counting this section still applies to a rung the section would lose.',
+      'Label, description, the rungs it applies to, and the summary tile it counts toward. '
+      + '**Never the code** — that is the identity every type under it holds. Narrowing the '
+      + 'rungs is refused when a ratio counting this section still applies to a rung the '
+      + 'section would lose. `summaryGroupCode` and `summaryGroupLabel` travel together, and '
+      + '`null` on both gives the section a tile of its own (ADR-0064); a label its tile\'s '
+      + 'other sections do not carry is `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH` — rename a '
+      + 'shared tile through `POST /kpm/settings/changes`, in one batch.',
   })
   async updateCategory(
     @Ctx() ctx: RequestContext,

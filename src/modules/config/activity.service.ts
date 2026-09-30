@@ -13,6 +13,19 @@ import { ActivityTypeDocument } from './activity-type.schema';
 import {
   checkCategoryCreate, checkCategoryUpdate, checkTypeCreate, checkTypeUpdate,
 } from './config-input';
+import { refuseSummaryGroupConflict } from './summary-group';
+
+/**
+ * How a category write reaches the service.
+ *
+ * `summaryGroupsChecked` is the staged batch saying it has already checked ADR-0064's one-label
+ * rule against the state the **whole batch** leaves. Renaming a two-section tile takes two ops,
+ * and the state between them disagrees by construction — checked per op, no group could ever be
+ * renamed.
+ */
+export interface CategoryWriteOptions {
+  summaryGroupsChecked?: boolean;
+}
 
 export interface ActivityTypeView {
   id: string;
@@ -44,6 +57,12 @@ export interface ActivityCategoryView {
   description: string | null;
   /** The stored truth. Empty means every rung; it cascades to every type inside. */
   appliesToOrgLevelCodes: string[];
+  /**
+   * The summary tile this section counts toward, and its label (ADR-0064). `null` on both: a
+   * tile of its own, under `label`. Presentation only — the strips read it, and no metric does.
+   */
+  summaryGroupCode: string | null;
+  summaryGroupLabel: string | null;
   displayOrder: number;
   version: number;
   status: 'active' | 'archived';
@@ -116,12 +135,17 @@ export class ActivityConfigService {
     body: {
       code: string; label: string; description?: string | null;
       appliesToOrgLevelCodes?: string[];
+      summaryGroupCode?: string | null; summaryGroupLabel?: string | null;
     },
+    options: CategoryWriteOptions = {},
   ): Promise<ActivityCategoryView> {
     // The body's own rules first, however it arrived — a route or the batch (ADR-0030).
     const input = checkCategoryCreate(body);
     const { code } = input;
     await this.refuseDuplicateCategory(ctx, code);
+    if (!options.summaryGroupsChecked) {
+      await this.refuseSummaryGroupConflict(ctx, null, input);
+    }
 
     const created = await this.categories.create(ctx, {
       code,
@@ -130,6 +154,8 @@ export class ActivityConfigService {
       appliesToOrgLevelCodes: await this.orgLevels.checkedRungs(
         ctx, input.appliesToOrgLevelCodes, 'section',
       ),
+      summaryGroupCode: input.summaryGroupCode,
+      summaryGroupLabel: input.summaryGroupLabel,
       // Appended, not inserted. Somebody adding a category has not said where it goes,
       // and guessing would renumber rows they did not touch.
       displayOrder: (await this.categories.count(ctx, {})) + 1,
@@ -142,7 +168,12 @@ export class ActivityConfigService {
   }
 
   /**
-   * Label, description and who the section is for. **Never the code** (ADR-0006).
+   * Label, description, who the section is for, and the summary tile it counts toward. **Never
+   * the code** (ADR-0006).
+   *
+   * **Regrouping bumps the version** like any other edit (ADR-0064), so it shows on the publish
+   * bar and reaches agents only when the office publishes (P4-T6). It is refused when it would
+   * leave two sections of one tile with different labels.
    *
    * Narrowing `appliesToOrgLevelCodes` is checked against the ratios that count this
    * section's types: a ratio that still applies to a rung this section no longer does
@@ -153,7 +184,11 @@ export class ActivityConfigService {
   async updateCategory(
     ctx: RequestContext,
     id: string,
-    body: { label?: string; description?: string | null; appliesToOrgLevelCodes?: string[] },
+    body: {
+      label?: string; description?: string | null; appliesToOrgLevelCodes?: string[];
+      summaryGroupCode?: string | null; summaryGroupLabel?: string | null;
+    },
+    options: CategoryWriteOptions = {},
   ): Promise<ActivityCategoryView> {
     const input = checkCategoryUpdate(body);
     const existing = await this.categories.findById(ctx, id);
@@ -166,6 +201,15 @@ export class ActivityConfigService {
       const rungs = await this.orgLevels.checkedRungs(ctx, input.appliesToOrgLevelCodes, 'section');
       await this.refuseUnreachableInputs(ctx, existing.code, rungs);
       set.appliesToOrgLevelCodes = rungs;
+    }
+    // The checker has already refused one without the other, so one being present means both are.
+    if (input.summaryGroupCode !== undefined) {
+      const group = {
+        summaryGroupCode: input.summaryGroupCode,
+        summaryGroupLabel: input.summaryGroupLabel ?? null,
+      };
+      if (!options.summaryGroupsChecked) await this.refuseSummaryGroupConflict(ctx, id, group);
+      Object.assign(set, group);
     }
     if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
 
@@ -368,6 +412,27 @@ export class ActivityConfigService {
     }
   }
 
+  /**
+   * ADR-0064's one-label rule, over every section this office holds **once this write lands** —
+   * archived ones included, because an archived section still renders the days it holds.
+   *
+   * `replacing` is the row being edited, or `null` for a new one.
+   */
+  private async refuseSummaryGroupConflict(
+    ctx: RequestContext,
+    replacing: string | null,
+    group: { summaryGroupCode: string | null; summaryGroupLabel: string | null },
+  ): Promise<void> {
+    if (!group.summaryGroupCode) return; // Leaving a tile, or never in one, disagrees with nobody.
+    // In display order, the edited row in its own place and a new one last — the order the batch's
+    // projection holds, so a refusal lists the labels alike on either path.
+    const rows = (await this.categories.find(ctx, {}, { sort: { displayOrder: 1 } }))
+      .map((c) => (String(c._id) === replacing
+        ? group
+        : { summaryGroupCode: c.summaryGroupCode, summaryGroupLabel: c.summaryGroupLabel }));
+    refuseSummaryGroupConflict(replacing === null ? [...rows, group] : rows);
+  }
+
   private categoryView(doc: ActivityCategoryDocument): Omit<ActivityCategoryView, 'types'> {
     return {
       id: String(doc._id),
@@ -375,6 +440,10 @@ export class ActivityConfigService {
       label: doc.label,
       description: doc.description,
       appliesToOrgLevelCodes: doc.appliesToOrgLevelCodes,
+      // `?? null`: a row written before the field existed has no key at all (migration 0021
+      // writes one, and a read before it runs still answers in one shape).
+      summaryGroupCode: doc.summaryGroupCode ?? null,
+      summaryGroupLabel: doc.summaryGroupLabel ?? null,
       displayOrder: doc.displayOrder,
       version: doc.version,
       status: doc.status,

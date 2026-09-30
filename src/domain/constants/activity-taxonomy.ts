@@ -24,6 +24,15 @@ export interface SeedActivityCategory {
   readonly code: string;
   readonly label: string;
   readonly displayOrder: number;
+  /**
+   * The summary tile this section counts toward (ADR-0064), and that tile's label.
+   *
+   * **Both or neither.** Sections sharing a code share a tile, and every one of them carries the
+   * same label; a section with neither gets a tile of its own under its own label. Presentation
+   * only: no ratio, metric or cascade reads either field — they bind to type codes (invariant §4).
+   */
+  readonly summaryGroupCode: string | null;
+  readonly summaryGroupLabel: string | null;
 }
 
 export interface SeedActivityType {
@@ -34,13 +43,41 @@ export interface SeedActivityType {
   readonly displayOrder: number;
 }
 
-/** `KPM_Owner.html:1340-1440`. Five, and the agent strip merges the last two into one tile. */
+/**
+ * `KPM_Owner.html:1340-1440`. Five sections, and four summary tiles.
+ *
+ * **The last two share the tile *Development*** (ADR-0064), which is the prototype's strip:
+ * *Leads Generation*, *Selling*, *Recruitment*, *Development* (`Overall.html:2720-2726`). The
+ * prototype did it with item ranges — *Development* summed items 10–12 — and OD-63 took the
+ * ranges out; the grouping now lives here, as data the office owns, so a section an office adds
+ * is counted somewhere rather than nowhere.
+ *
+ * **A section with a tile of its own carries neither field** (OD-101, resolved 2026-10-01 as
+ * ADR-0064 has it): its tile's label *is* the section's, so renaming *Selling* renames its tile,
+ * with no second field for the Owner to remember. Only a tile of two or more sections carries a
+ * code and a label.
+ */
 export const SEED_ACTIVITY_CATEGORIES: readonly SeedActivityCategory[] = [
-  { code: 'LEADS_GENERATION', label: 'Leads Generation', displayOrder: 1 },
-  { code: 'SELLING', label: 'Selling', displayOrder: 2 },
-  { code: 'RECRUITMENT', label: 'Recruitment', displayOrder: 3 },
-  { code: 'PERSONAL_DEVELOPMENT', label: 'Personal Development', displayOrder: 4 },
-  { code: 'TEAM_DEVELOPMENT', label: 'Team Development', displayOrder: 5 },
+  {
+    code: 'LEADS_GENERATION', label: 'Leads Generation', displayOrder: 1,
+    summaryGroupCode: null, summaryGroupLabel: null,
+  },
+  {
+    code: 'SELLING', label: 'Selling', displayOrder: 2,
+    summaryGroupCode: null, summaryGroupLabel: null,
+  },
+  {
+    code: 'RECRUITMENT', label: 'Recruitment', displayOrder: 3,
+    summaryGroupCode: null, summaryGroupLabel: null,
+  },
+  {
+    code: 'PERSONAL_DEVELOPMENT', label: 'Personal Development', displayOrder: 4,
+    summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development',
+  },
+  {
+    code: 'TEAM_DEVELOPMENT', label: 'Team Development', displayOrder: 5,
+    summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development',
+  },
 ];
 
 /** The twelve. Labels verbatim from `KPM_Owner.html`, descriptions included where it has them. */

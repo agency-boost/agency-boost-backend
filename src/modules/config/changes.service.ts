@@ -14,6 +14,7 @@ import {
   checkTypeCreate, checkTypeUpdate,
 } from './config-input';
 import { TrainingService } from '@/modules/training/training.service';
+import { refuseSummaryGroupConflict, type SummaryGrouped } from './summary-group';
 import {
   checkTrainingCategoryCreate, checkTrainingCategoryUpdate, checkTrainingModuleCreate,
   checkTrainingModuleUpdate, checkTrainingSkillCreate, checkTrainingSkillUpdate,
@@ -57,6 +58,8 @@ interface Checked {
   code?: string;
   categoryCode?: string;
   skillCode?: string;
+  summaryGroupCode?: string | null;
+  summaryGroupLabel?: string | null;
 }
 
 /** One live row, reduced to what the validate pass needs to reason about. */
@@ -130,9 +133,18 @@ export class ConfigChangeService {
     const categories = new Map<string, Known>();
     const types = new Map<string, Known>();
     const ratios = new Map<string, Known>();
+    /*
+     * Each section's summary tile (ADR-0064), archived sections included, projected through the
+     * batch and checked once at the end: renaming a two-section tile takes two ops, and the state
+     * between them disagrees by construction.
+     */
+    const groups = new Map<string, SummaryGrouped>();
+    /** The last op to touch each tile — the one a refusal names. */
+    const groupTouchedBy = new Map<string, number>();
 
     for (const c of await this.activity.list(ctx, true)) {
       categories.set(c.id, { id: c.id, code: c.code, version: c.version, status: c.status });
+      groups.set(c.id, { summaryGroupCode: c.summaryGroupCode, summaryGroupLabel: c.summaryGroupLabel });
       for (const t of c.types) {
         types.set(t.id, { id: t.id, code: t.code, version: t.version, status: t.status });
       }
@@ -244,6 +256,19 @@ export class ConfigChangeService {
 
       if (op.op.startsWith('training')) this.projectTraining(op, index, checked, tree, fail);
 
+      if (op.op === 'category.create' || op.op === 'category.update') {
+        const key = op.op === 'category.create' ? `pending:${index}` : op.id!;
+        // A checked update carries both or neither, so `undefined` means the tile is untouched.
+        if (checked.summaryGroupCode !== undefined) {
+          const before = groups.get(key)?.summaryGroupCode;
+          groups.set(key, {
+            summaryGroupCode: checked.summaryGroupCode,
+            summaryGroupLabel: checked.summaryGroupLabel ?? null,
+          });
+          for (const code of [before, checked.summaryGroupCode]) if (code) groupTouchedBy.set(code, index);
+        }
+      }
+
       /*
        * The display unit against the rule it will sit under (P4-T25), in the projection like
        * every other refusal — so a batch that sets `percent` on a band ratio is refused
@@ -281,6 +306,18 @@ export class ConfigChangeService {
           );
         }
       }
+    }
+
+    /*
+     * One tile, one label — over the state the whole batch leaves, before anything is written.
+     * Named for the last op that touched the tile, since that is the edit that left it split.
+     */
+    try {
+      refuseSummaryGroupConflict([...groups.values()]);
+    } catch (err) {
+      const code = (err as { details?: { summaryGroupCode?: string } }).details?.summaryGroupCode ?? '';
+      const index = groupTouchedBy.get(code) ?? ops.length - 1;
+      throw this.atOp(index, ops[index].op, err);
     }
   }
 
@@ -391,9 +428,11 @@ export class ConfigChangeService {
   private async run(ctx: RequestContext, op: ConfigChangeDto): Promise<void> {
     const body = (op.body ?? {}) as never;
     const id = op.id ?? '';
+    // The validate pass checked every tile against the state the whole batch leaves (ADR-0064).
+    const grouped = { summaryGroupsChecked: true };
     const handlers: Record<ChangeOp, () => Promise<unknown>> = {
-      'category.create': () => this.activity.createCategory(ctx, body),
-      'category.update': () => this.activity.updateCategory(ctx, id, body),
+      'category.create': () => this.activity.createCategory(ctx, body, grouped),
+      'category.update': () => this.activity.updateCategory(ctx, id, body, grouped),
       'category.archive': () => this.activity.archiveCategory(ctx, id),
       'category.restore': () => this.activity.restoreCategory(ctx, id),
       'type.create': () => this.activity.createType(ctx, body),
@@ -430,6 +469,9 @@ export class ConfigChangeService {
     const detail = err instanceof Error ? err.message : String(err);
     const code = err instanceof DomainException ? err.code : ErrorCode.VALIDATION_FAILED;
     const status = err instanceof DomainException ? err.getStatus() : HttpStatus.BAD_REQUEST;
-    return new DomainException(code, `Change ${index + 1} (${op}): ${detail}`, status);
+    // The details travel with the refusal: a mismatched tile names its code and its labels
+    // (ADR-0064), and a screen pointing at the field needs them as much as a single route's does.
+    const details = err instanceof DomainException ? err.details : undefined;
+    return new DomainException(code, `Change ${index + 1} (${op}): ${detail}`, status, details);
   }
 }

@@ -13,6 +13,9 @@ import {
   CompanyTemplate, CompanyTemplateDocument, TemplateKind,
 } from './company-template.schema';
 import { OfficeCounter, type OfficeStanding } from './office-counter.port';
+import {
+  checkTemplateSummaryGroups, refuseSummaryGroupConflict, type SummaryGrouped,
+} from './summary-group';
 import { CampaignKindsApplier } from './campaign-kinds.port';
 import {
   defaultTrainingTaxonomy, trainingTaxonomyProblems,
@@ -148,7 +151,14 @@ export class TemplateService {
     };
   }
 
-  /** Save the working copy. Creates the draft if this is the first edit since publishing. */
+  /**
+   * Save the working copy. Creates the draft if this is the first edit since publishing.
+   *
+   * **An `activity_taxonomy` draft has its summary tiles checked here, not only at publish**
+   * (ADR-0064): both fields or neither on each section, and one label per tile. The office's own
+   * settings refuse the same body at save, and a Super Admin should not meet a rule an Owner
+   * meets earlier.
+   */
   async saveDraft(
     ctx: RequestContext,
     companyId: string,
@@ -156,6 +166,7 @@ export class TemplateService {
     payload: Record<string, unknown>,
   ): Promise<TemplateView> {
     await this.requireCompany(companyId);
+    if (kind === 'activity_taxonomy') payload = this.checkedTaxonomy(payload);
 
     const existing = await this.templates
       .findOne({ companyId, kind, status: 'draft', deletedAt: null }).exec();
@@ -406,6 +417,18 @@ export class TemplateService {
     }
   }
 
+  /**
+   * A taxonomy payload with its summary tiles checked and normalised (ADR-0064), and the rest of
+   * it untouched. Refuses `VALIDATION_FAILED` for a malformed pair, and
+   * `CONFIG_SUMMARY_GROUP_LABEL_MISMATCH` for one tile carrying two labels.
+   */
+  private checkedTaxonomy(payload: Record<string, unknown>): Record<string, unknown> {
+    if (!Array.isArray(payload.categories)) return payload;
+    const categories = checkTemplateSummaryGroups(payload.categories);
+    refuseSummaryGroupConflict(categories as SummaryGrouped[]);
+    return { ...payload, categories };
+  }
+
   private refuseEmpty(kind: TemplateKind, payload: Record<string, unknown>): void {
     if (kind === 'activity_taxonomy') {
       const { categories, types } = payload as { categories?: unknown[]; types?: unknown[] };
@@ -415,6 +438,8 @@ export class TemplateService {
             + 'Log Activity screen.',
         );
       }
+      // Again at publish: a draft saved before the rule existed is what would reach offices.
+      this.checkedTaxonomy(payload);
     }
     if (kind === 'lead_pipeline') {
       const { statuses } = payload as { statuses?: { pipeline: string; isTerminal: boolean }[] };

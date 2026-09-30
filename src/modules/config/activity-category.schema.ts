@@ -42,6 +42,29 @@ export class ActivityCategory {
   @Prop({ type: [String], required: true, default: [] })
   appliesToOrgLevelCodes!: string[];
 
+  /**
+   * The summary tile this section counts toward (ADR-0064, P10.1-T5): `DEVELOPMENT`.
+   *
+   * **Presentation, never a metric input.** The strips on `/activity/log` and
+   * `/activity/dashboard` read it, and nothing else: every ratio, cascade binding and
+   * compliance count is by type code (invariant §4), so regrouping moves a count between tiles
+   * and never changes one.
+   *
+   * **Sections sharing a code share a tile; a section with none has a tile of its own**, under
+   * its own label — so a section an office adds is always counted somewhere, which is what OD-63
+   * was resolved to guarantee. Set together with `summaryGroupLabel` or not at all.
+   */
+  @Prop({ type: String, default: null, uppercase: true, trim: true })
+  summaryGroupCode!: string | null;
+
+  /**
+   * The tile's label, **held on every section in the group and identical across them** — the
+   * service refuses a write that would leave two disagreeing (`CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`).
+   * Configuration, never a frontend literal.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  summaryGroupLabel!: string | null;
+
   /** Presentation only, and reorderable — which is why nothing references it. */
   @Prop({ type: Number, required: true })
   displayOrder!: number;

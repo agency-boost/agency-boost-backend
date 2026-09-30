@@ -21,6 +21,7 @@ import { up as companyUsesPlatformDefaults } from './0017-company-uses-platform-
 import { up as leadCommitments } from './0018-lead-commitments';
 import { up as goalMonthsLeftOverride } from './0019-goal-months-left-override';
 import { up as productionLockGrace } from './0020-kpm-production-lock-grace';
+import { up as activityCategorySummaryGroup } from './0021-activity-category-summary-group';
 
 /**
  * Every migration, in order. Forward-only and idempotent, so running this twice is a
@@ -47,6 +48,7 @@ const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Date) => P
   ['0018-lead-commitments', leadCommitments],
   ['0019-goal-months-left-override', goalMonthsLeftOverride],
   ['0020-kpm-production-lock-grace', productionLockGrace],
+  ['0021-activity-category-summary-group', activityCategorySummaryGroup],
 ];
 
 async function main(): Promise<void> {

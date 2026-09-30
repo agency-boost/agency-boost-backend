@@ -29,7 +29,11 @@ describe('configuration field rules (ADR-0030)', () => {
   describe('what a checker gives back', () => {
     it('trims text, upper-cases codes, and reads a blank description as none', () => {
       expect(checkCategoryCreate({ code: ' referrals ', label: '  Referrals  ', description: '   ' }))
-        .toEqual({ code: 'REFERRALS', label: 'Referrals', description: null, appliesToOrgLevelCodes: [] });
+        .toEqual({
+          code: 'REFERRALS', label: 'Referrals', description: null, appliesToOrgLevelCodes: [],
+          // No tile named is a tile of its own (ADR-0064).
+          summaryGroupCode: null, summaryGroupLabel: null,
+        });
       expect(checkTypeCreate({ code: 'sell_x', categoryCode: 'selling', label: 'X', description: ' a ' }))
         .toEqual({ code: 'SELL_X', categoryCode: 'SELLING', label: 'X', description: 'a' });
     });
@@ -44,6 +48,37 @@ describe('configuration field rules (ADR-0030)', () => {
 
     it('keeps an explicit null description, which clears it', () => {
       expect(checkTypeUpdate({ description: null })).toEqual({ description: null });
+    });
+
+    it('reads a section’s summary tile as a pair: set together, cleared together, or left alone (ADR-0064)', () => {
+      expect(checkCategoryCreate({ code: 'ref', label: 'Ref' }))
+        .toMatchObject({ summaryGroupCode: null, summaryGroupLabel: null });
+      expect(checkCategoryCreate({
+        code: 'ref', label: 'Ref', summaryGroupCode: ' development ', summaryGroupLabel: ' Development ',
+      })).toMatchObject({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development' });
+      expect(checkCategoryUpdate({ summaryGroupCode: null, summaryGroupLabel: null }))
+        .toEqual({ summaryGroupCode: null, summaryGroupLabel: null });
+      // Absent is untouched, as every update field here is.
+      expect(checkCategoryUpdate({ label: 'Penjualan' })).toEqual({ label: 'Penjualan' });
+    });
+
+    it('refuses half a summary tile, and a malformed one', () => {
+      const pair = 'summaryGroupCode and summaryGroupLabel are set together, or cleared together with null.';
+      for (const body of [
+        { summaryGroupCode: 'SALES' },
+        { summaryGroupLabel: 'Sales' },
+        { summaryGroupCode: null, summaryGroupLabel: 'Sales' },
+        { summaryGroupCode: 'SALES', summaryGroupLabel: null },
+        { summaryGroupCode: null },
+      ]) {
+        expect(refusal(() => checkCategoryUpdate(body))?.violations).toEqual([pair]);
+      }
+      expect(refusal(() => checkCategoryUpdate({ summaryGroupCode: 'no spaces', summaryGroupLabel: 'x' }))?.violations)
+        .toEqual([expect.stringContaining('summaryGroupCode: A code is')]);
+      expect(refusal(() => checkCategoryUpdate({ summaryGroupCode: 'SALES', summaryGroupLabel: 7 }))?.violations)
+        .toEqual(['summaryGroupLabel must be text.']);
+      expect(refusal(() => checkCategoryCreate({ code: 'REF', label: 'x', summaryGroupCode: 'SALES' }))?.violations)
+        .toEqual([pair]);
     });
 
     it('accepts a whole ratio and a whole lead status', () => {
@@ -171,6 +206,18 @@ describe('configuration field rules (ADR-0030)', () => {
       ['category create, too many rungs', CreateActivityCategoryDto, checkCategoryCreate, { code: 'REFERRALS', label: 'x', appliesToOrgLevelCodes: codes(21) }],
       ['category update, label only', UpdateActivityCategoryDto, checkCategoryUpdate, { label: 'Penjualan' }],
       ['category update, description too long', UpdateActivityCategoryDto, checkCategoryUpdate, { description: long(201) }],
+      /*
+       * The summary tile (ADR-0064), field by field. **Half a pair is deliberately absent**: it is a
+       * rule across two fields, which a per-field decorator cannot state, and the route reaches the
+       * checker through its service — so the pipe passing it is the pipe not knowing, not the two
+       * disagreeing.
+       */
+      ['category update, a whole tile', UpdateActivityCategoryDto, checkCategoryUpdate, { summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development' }],
+      ['category update, a tile cleared', UpdateActivityCategoryDto, checkCategoryUpdate, { summaryGroupCode: null, summaryGroupLabel: null }],
+      ['category update, tile code not a code', UpdateActivityCategoryDto, checkCategoryUpdate, { summaryGroupCode: 'no spaces', summaryGroupLabel: 'x' }],
+      ['category update, tile label too long', UpdateActivityCategoryDto, checkCategoryUpdate, { summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: long(81) }],
+      ['category update, tile label blank', UpdateActivityCategoryDto, checkCategoryUpdate, { summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: '  ' }],
+      ['category create, in a tile', CreateActivityCategoryDto, checkCategoryCreate, { code: 'REFERRALS', label: 'x', summaryGroupCode: 'SELLING', summaryGroupLabel: 'Selling' }],
       ['type create, whole', CreateActivityTypeDto, checkTypeCreate, { code: 'SELL_X', categoryCode: 'SELLING', label: 'x' }],
       ['type create, label too long', CreateActivityTypeDto, checkTypeCreate, { code: 'SELL_X', categoryCode: 'SELLING', label: long(201) }],
       ['type create, section not a code', CreateActivityTypeDto, checkTypeCreate, { code: 'SELL_X', categoryCode: 'sell ing', label: 'x' }],

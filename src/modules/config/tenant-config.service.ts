@@ -148,6 +148,17 @@ export class TenantConfigService {
      */
     return {
       ...published,
+      /*
+       * A section published before ADR-0064 has no summary tile fields. `null` on both is what
+       * it means — a tile of its own, under its own label — said so every reader meets one shape.
+       * Migration 0021 writes them into the snapshot agents read; this is the read that does not
+       * depend on it having run.
+       */
+      activity: published.activity.map((category) => ({
+        ...category,
+        summaryGroupCode: category.summaryGroupCode ?? null,
+        summaryGroupLabel: category.summaryGroupLabel ?? null,
+      })),
       training: published.training ?? [],
       activationChecklist: published.activationChecklist ?? null,
       eventTypes: published.eventTypes ?? [],
@@ -246,6 +257,15 @@ export class TenantConfigService {
     const keys = new Set<string>();
     for (const category of view.activity) {
       keys.add(`category:${category.id}:${category.version}`);
+      /*
+       * The summary tile, by value as well as by version (ADR-0064). Regrouping bumps the version
+       * already; this is the second lock, so a write that forgot to could not leave agents on the
+       * old strip with a silent publish bar. Absent reads as `null`, so a snapshot published before
+       * the field existed agrees with a working copy that holds none.
+       */
+      keys.add(
+        `category_tile:${category.id}:${category.summaryGroupCode ?? ''}:${category.summaryGroupLabel ?? ''}`,
+      );
       for (const type of category.types) keys.add(`type:${type.id}:${type.version}`);
     }
     for (const ratio of view.ratios) keys.add(`ratio:${ratio.id}:${ratio.version}`);
