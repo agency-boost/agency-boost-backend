@@ -13549,7 +13549,7 @@
     },
     "/api/v1/activity/log": {
       "get": {
-        "description": "Defaults to **today in the office’s timezone** and to your own membership. Every active activity type comes back, zeros included — the screen is the office’s taxonomy, so a type with no count still has a row to type into. `editable` says whether the Save button is live for this caller on this day.\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Defaults to **today in the office’s timezone** and to your own membership. Every active activity type comes back, zeros included — the screen is the office’s taxonomy, so a type with no count still has a row to type into. `editable` says whether the Save button is live for this caller on this day. **Another member’s day is audited**: the read writes `activity_log.read_raw` with the subject, the day and the surface (§3.5). Your own writes nothing.\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ActivityController_readDay_v1",
         "parameters": [
           {
@@ -13566,7 +13566,7 @@
             "name": "membershipId",
             "required": false,
             "in": "query",
-            "description": "Whose day. Defaults to your own; needs the scope to read.",
+            "description": "Whose day. Defaults to your own; needs the scope to read, and another member’s read is audited.",
             "schema": {
               "type": "string"
             }
@@ -13794,7 +13794,7 @@
     },
     "/api/v1/activity/summary": {
       "get": {
-        "description": "The read Phase 10’s dashboard and ratio cards will use. Periods are the **named** ones (ADR-0022), resolved in the office’s timezone: a rolling window is never labelled *this month*. `from`/`to` override `period` for a custom range.\n\n**Requires `activity_ratios:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Periods are the **named** ones (ADR-0022), resolved in the office’s timezone: a rolling window is never labelled *this month*. `from`/`to` override `period` for a custom range. **Another member’s totals are audited**: the read writes `activity_log.read_raw` with the subject, the range and the surface (§3.5).\n\n**Requires `activity_ratios:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ActivityController_summary_v1",
         "parameters": [
           {
@@ -13833,7 +13833,7 @@
             "name": "membershipId",
             "required": false,
             "in": "query",
-            "description": "Whose totals. Defaults to your own.",
+            "description": "Whose totals. Defaults to your own; another member’s read is audited.",
             "schema": {
               "type": "string"
             }
@@ -14068,14 +14068,14 @@
     },
     "/api/v1/activity/compliance": {
       "get": {
-        "description": "`ACTIVITY_COMPLIANCE_7D` and `ACTIVITY_COMPLIANCE_MONTH`. **Existence, not a total**: an all-zero entry is a statement that nothing happened and counts as reporting, where no entry is silence and does not (ADR-0042). There is no partial state — Logged or Missed.\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "`ACTIVITY_COMPLIANCE_7D` and `ACTIVITY_COMPLIANCE_MONTH`. **Existence, not a total**: an all-zero entry is a statement that nothing happened and counts as reporting, where no entry is silence and does not (ADR-0042). There is no partial state — Logged or Missed. **Another member’s is audited**: the read writes `activity_log.read_raw`, with no start to its range, because `lastLoggedOn` discloses the latest day logged whenever it was (§3.5).\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ActivityController_compliance_v1",
         "parameters": [
           {
             "name": "membershipId",
             "required": false,
             "in": "query",
-            "description": "Whose compliance. Defaults to your own.",
+            "description": "Whose compliance. Defaults to your own; another member’s read is audited.",
             "schema": {
               "type": "string"
             }

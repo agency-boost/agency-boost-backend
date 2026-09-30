@@ -39,6 +39,24 @@ const TENANT_SCOPED_MODELS = [
 ];
 
 /**
+ * Models deliberately **not** on the list above, each with the reason (P10.1-T7).
+ *
+ * Phase 10's exit review recorded `ActivityService` and `TenantDay` reading `kpms` through the
+ * raw model as *"the one exception to invariant §1's no raw model in a service"* (carry-forward
+ * #1). It is not an exception, it is a classification that was never written down, and nineteen
+ * services depend on it — so it is written down here, where the rule it qualifies is enforced,
+ * rather than wrapped in a repository only one of them would use.
+ */
+const NOT_TENANT_SCOPED = new Map<string, string>([
+  [
+    'Kpm',
+    'the tenant record itself. It has no `kpmId` to scope by: its `_id` is the scope. An office '
+      + 'reads its own row by `_id: ctx.kpmId`, which cannot reach another office, and '
+      + '`raw-writes.tenancy.spec.ts` exempts its writes for the same reason',
+  ],
+]);
+
+/**
  * Files allowed to inject one, each with the reason.
  *
  * A repository has to reach its own model, and provisioning writes into an office that
@@ -103,6 +121,16 @@ describe('tenant-scoped collections go through a repository (P4-T11)', () => {
     for (const [file, reason] of ALLOWED) {
       expect(reason.length).toBeGreaterThan(10);
       expect(files).toContain(file);
+    }
+  });
+
+  it('classifies a model once, and says why one is not tenant-scoped (P10.1-T7)', () => {
+    for (const [model, reason] of NOT_TENANT_SCOPED) {
+      expect(TENANT_SCOPED_MODELS).not.toContain(model);
+      expect(reason.length).toBeGreaterThan(10);
+      // A classification nobody relies on is a stale entry, not a decision.
+      expect(files.some((f) => readFileSync(join(MODULES, f), 'utf8')
+        .includes(`@InjectModel(${model}.name)`))).toBe(true);
     }
   });
 });

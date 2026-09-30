@@ -33,7 +33,9 @@ export class ActivityController {
       'Defaults to **today in the office’s timezone** and to your own membership. Every active '
       + 'activity type comes back, zeros included — the screen is the office’s taxonomy, so a type '
       + 'with no count still has a row to type into. `editable` says whether the Save button is '
-      + 'live for this caller on this day.',
+      + 'live for this caller on this day.'
+      + ' **Another member’s day is audited**: the read writes `activity_log.read_raw` with the '
+      + 'subject, the day and the surface (§3.5). Your own writes nothing.',
   })
   @ApiResponse({ status: 200, type: ActivityDayDto })
   async readDay(@Ctx() ctx: RequestContext, @Query() query: ReadActivityDayQueryDto) {
@@ -76,9 +78,10 @@ export class ActivityController {
   @ApiOperation({
     summary: 'Totals per activity code over a period',
     description:
-      'The read Phase 10’s dashboard and ratio cards will use. Periods are the **named** ones '
-      + '(ADR-0022), resolved in the office’s timezone: a rolling window is never labelled *this '
-      + 'month*. `from`/`to` override `period` for a custom range.',
+      'Periods are the **named** ones (ADR-0022), resolved in the office’s timezone: a rolling '
+      + 'window is never labelled *this month*. `from`/`to` override `period` for a custom range. '
+      + '**Another member’s totals are audited**: the read writes `activity_log.read_raw` with the '
+      + 'subject, the range and the surface (§3.5).',
   })
   @ApiResponse({ status: 200, type: ActivitySummaryDto })
   async summary(@Ctx() ctx: RequestContext, @Query() query: ActivitySummaryQueryDto) {
@@ -125,7 +128,9 @@ export class ActivityController {
     description:
       '`ACTIVITY_COMPLIANCE_7D` and `ACTIVITY_COMPLIANCE_MONTH`. **Existence, not a total**: an '
       + 'all-zero entry is a statement that nothing happened and counts as reporting, where no '
-      + 'entry is silence and does not (ADR-0042). There is no partial state — Logged or Missed.',
+      + 'entry is silence and does not (ADR-0042). There is no partial state — Logged or Missed. '
+      + '**Another member’s is audited**: the read writes `activity_log.read_raw`, with no start to '
+      + 'its range, because `lastLoggedOn` discloses the latest day logged whenever it was (§3.5).',
   })
   @ApiResponse({ status: 200, type: ActivityComplianceDto })
   async compliance(@Ctx() ctx: RequestContext, @Query() query: ActivityComplianceQueryDto) {

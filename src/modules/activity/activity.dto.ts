@@ -19,7 +19,7 @@ export class ReadActivityDayQueryDto {
   @IsOptional() @IsString() @Matches(LOCAL_DATE, { message: DATE_MESSAGE })
   date?: string;
 
-  @ApiPropertyOptional({ description: 'Whose day. Defaults to your own; needs the scope to read.' })
+  @ApiPropertyOptional({ description: 'Whose day. Defaults to your own; needs the scope to read, and another member’s read is audited.' })
   @IsOptional() @IsString() @MaxLength(64)
   membershipId?: string;
 }
@@ -73,7 +73,7 @@ export class ActivitySummaryQueryDto {
   @IsOptional() @IsString() @Matches(LOCAL_DATE, { message: DATE_MESSAGE })
   to?: string;
 
-  @ApiPropertyOptional({ description: 'Whose totals. Defaults to your own.' })
+  @ApiPropertyOptional({ description: 'Whose totals. Defaults to your own; another member’s read is audited.' })
   @IsOptional() @IsString() @MaxLength(64)
   membershipId?: string;
 }
@@ -103,7 +103,7 @@ export class ActivityDashboardQueryDto {
 export class ActivityRatiosQueryDto {}
 
 export class ActivityComplianceQueryDto {
-  @ApiPropertyOptional({ description: 'Whose compliance. Defaults to your own.' })
+  @ApiPropertyOptional({ description: 'Whose compliance. Defaults to your own; another member’s read is audited.' })
   @IsOptional() @IsString() @MaxLength(64)
   membershipId?: string;
 }

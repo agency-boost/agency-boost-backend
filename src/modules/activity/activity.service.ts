@@ -172,6 +172,12 @@ export interface ActivityComplianceView {
 }
 
 /**
+ * The three reads that take a subject, as `activity_log.read_raw` names them. The Dashboard, the
+ * ratios and the Summary take none, so they have no surface here.
+ */
+export type RawActivitySurface = 'log' | 'summary' | 'compliance';
+
+/**
  * What an agent did, day by day (P6-T1, P6-T3, P6-T4, P6-T5, P6-T6).
  *
  * **Only the person themselves writes their own log.** `roles-and-permissions.md` §3.5 grants
@@ -182,7 +188,7 @@ export interface ActivityComplianceView {
  * anybody could pass to log for somebody else.
  *
  * **Reading is wide and writing is narrow, and the asymmetry is the design.** A leader reads a
- * downline's rows because coaching depends on it.
+ * downline's rows because coaching depends on it — and every such read is audited (P10.1-T7).
  */
 @Injectable()
 export class ActivityService {
@@ -191,6 +197,12 @@ export class ActivityService {
     private readonly types: ActivityTypeRepository,
     private readonly categories: ActivityCategoryRepository,
     private readonly memberships: MembershipRepository,
+    /*
+     * The office's own row, read by `_id: ctx.kpmId` in `office()` and nowhere else. `Kpm` is the
+     * tenant record itself, not a tenant-scoped collection — it has no `kpmId` to scope by — and
+     * `repositories.tenancy.spec.ts` names it so, with the reason (P10.1-T7, closing Phase 10's
+     * carry-forward #1).
+     */
     @InjectModel(Kpm.name) private readonly kpms: Model<Kpm>,
     private readonly clock: Clock,
     private readonly audit: AuditService,
@@ -211,6 +223,7 @@ export class ActivityService {
     const row = await this.logs.findOne(ctx, {
       membershipId: subject.membershipId, localDate: date,
     });
+    await this.auditRawRead(ctx, subject, 'log', { from: date, to: date });
     return this.view(row, subject, date, today, office, ctx);
   }
 
@@ -239,6 +252,7 @@ export class ActivityService {
       }
     }
 
+    await this.auditRawRead(ctx, subject, 'summary', window);
     return {
       ...window,
       // Every active code, including the ones with no activity: a screen showing only what was
@@ -255,8 +269,8 @@ export class ActivityService {
    * The Activity Dashboard (P10-T1): **your own** days over a range, per type and per column.
    *
    * **No subject.** The screen is first-person and the route takes nobody else's id: a leader reading a
-   * downline's day-by-day is Phase 13's coaching copy, and §3.5 owes every such read an audit entry
-   * that this route would otherwise have to write.
+   * downline's day-by-day is Phase 11's coaching copy, and §3.5 owes every such read the audit entry
+   * `auditRawRead` writes, which this route would otherwise have to write too.
    *
    * **Summed from what is stored, not from the summary's `totals`.** Those keep only the codes this
    * rung is shown today, while `totalCount` counts everything; reusing them would make a section's
@@ -471,6 +485,8 @@ export class ActivityService {
       ),
     ]);
 
+    // `from: null`, because `lastLoggedOn` discloses the latest day logged, whenever it was.
+    await this.auditRawRead(ctx, subject, 'compliance', { from: null, to: today });
     return {
       membershipId: subject.membershipId,
       compliant7d: inWindow > 0,
@@ -727,6 +743,43 @@ export class ActivityService {
       : (member.ancestorIds ?? []).includes(me!);
     if (!reaches) throw new NotFoundException('Membership');
     return resolved;
+  }
+
+  /**
+   * **Every read of another member's raw activity is audited** — `roles-and-permissions.md` §3.5,
+   * obligation 1, which Phase 6 granted the reads on and never built (P10.1-T7).
+   *
+   * The Owner, the Admin and a leader read a member's days because §3.5 dropped a restriction three
+   * other grants already routed around; the price of that honesty was that every such read leaves a
+   * record of who read whose days, over which range, from which surface. This is that record.
+   *
+   * **Called last, once the answer exists.** A refused read — out of scope, another office, a date
+   * that is not a date, a range that ends before it starts — has thrown before this line, so it
+   * writes nothing: the log says what was *disclosed*, not what was asked for.
+   *
+   * **Reading yourself writes nothing.** Under impersonation the session is the record
+   * (`impersonation.started`); a read of a third member there writes this entry naming both actors,
+   * as `AuditService.record` always does.
+   *
+   * **The target is the membership**, so the Super Admin's audit screen names the person, and the
+   * member's own *who viewed my activity* view (§3.5 obligation 2, not built yet) is one query on
+   * `targetMembershipId`. A failed write never fails the read — `AuditService.record` logs it at
+   * error level, the convention every audited write follows.
+   */
+  private async auditRawRead(
+    ctx: RequestContext,
+    subject: { membershipId: string },
+    surface: RawActivitySurface,
+    range: { from: LocalDate | null; to: LocalDate },
+  ): Promise<void> {
+    if (subject.membershipId === ctx.membershipId) return;
+    await this.audit.record(ctx, {
+      action: 'activity_log.read_raw',
+      targetCollection: 'memberships',
+      targetId: subject.membershipId,
+      targetMembershipId: subject.membershipId,
+      after: { surface, from: range.from, to: range.to },
+    });
   }
 
   /**
