@@ -10,9 +10,11 @@ import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { scopeFor, type Permission } from '@/modules/rbac/permissions';
 import { LeadStatusRepository } from '@/modules/config/activity.repository';
+import { TenantConfigService } from '@/modules/config/tenant-config.service';
 import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
 import { leadFlags, type LeadFlag } from './lead-attention';
 import { checkLead, requireLawfulBasis, type CheckedLead } from './lead-input';
+import { isInMemorySort, ladderRanks, leadOrder, type LeadSortKey } from './lead-order';
 import { LeadRepository } from './lead.repository';
 import type { LeadDocument, LeadType } from './lead.schema';
 
@@ -29,7 +31,7 @@ export interface LeadQuery {
   statusCode?: string;
   outcome?: 'won' | 'lost' | 'open';
   attention?: LeadFlag;
-  sort?: 'dateRegistered' | 'name' | 'nextActionDate';
+  sort?: LeadSortKey;
   dir?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
@@ -41,6 +43,11 @@ export interface LeadQuery {
  * **Every number here is something already defined somewhere else.** Two are the metric registry's
  * (invariant §8); the other four are this module's own rules — the commitment T5 defines and the
  * attention flags T4 does — and nothing in this shape is a figure invented for a screen.
+ *
+ * **No route serves it since P10.1-T4.** Its one reader was the counts strip on `/leads`, which went
+ * back to the prototype. `RECRUITMENT_PIPELINE_NOW` and `RECRUITMENT_EXPECTED_TO_CLOSE` are
+ * registered as computed from Phase 7, and this is the only place that computes them. The route was
+ * retired and the computation kept, for the next screen that reads them.
  */
 export interface LeadSummary {
   /** Open leads in scope: `outcome` null, not deleted. */
@@ -133,6 +140,7 @@ export class LeadService {
     private readonly days: TenantDay,
     private readonly memberships: MembershipRepository,
     private readonly names: MemberNames,
+    private readonly config: TenantConfigService,
   ) {}
 
   /**
@@ -501,17 +509,19 @@ export class LeadService {
   /**
    * The caller's own live leads (P7-T2).
    *
-   * **Search and filter exist because the prototype's busiest screen has neither.** It renders
-   * every row, unpaged and unsearchable, and an agent with two hundred leads scrolls. Registered
-   * as a Fill.
+   * **`/leads` sends no search and no filter since P10.1-T4**, because the prototype's table has
+   * neither. The parameters stay for coaching's *Leads* card, which has the prototype's own search
+   * box and type filter (`Overall.html:4258-4266`, ADR-0063).
    *
    * **Sorting is single-key.** The prototype's own footnote promises *"Sales leads first, then
    * Recruitment"* and its code does no such thing; the code wins and the footnote is not
-   * reproduced.
+   * reproduced. *Lead name*, *Type* and *Status* are ordered here, in memory (`lead-order.ts`
+   * says why). The other two keys are the database's. **Every order ends on the id**, so a tie
+   * cannot fall differently on two requests and repeat or skip a lead across the page boundary.
    *
    * **Scoped to what the caller's grant reaches** (P7-T7): their own, plus their unit or their
    * downline. `ownersInScope` is the one place that decides, and `summary` asks it the same
-   * question — a count above a table has to count the table.
+   * question.
    */
   async list(ctx: RequestContext, query: LeadQuery = {}): Promise<LeadPage> {
     const owners = await this.ownersInScope(ctx, 'lead:read');
@@ -532,9 +542,25 @@ export class LeadService {
       filter.$or = [{ name: needle }, { remarks: needle }];
     }
 
-    const rows = await this.leads.find(ctx, filter, {
-      sort: { [query.sort ?? 'dateRegistered']: query.dir === 'asc' ? 1 : -1 },
+    const inMemory = isInMemorySort(query.sort) ? query.sort : null;
+    const dir = query.dir === 'asc' ? 1 : -1;
+    const found = await this.leads.find(ctx, filter, inMemory ? {} : {
+      // MongoDB promises no order among equal keys, and `/leads` reads 200 at a time.
+      sort: { [query.sort ?? 'dateRegistered']: dir, _id: dir },
     });
+    /*
+     * **Over the whole filtered set, before the page is cut**, so page 2 of a status sort carries on
+     * where page 1 stopped. `/leads` asks for every page in turn (ADR-0063 §3), and a set ordered
+     * page by page would interleave.
+     *
+     * **The ranks are the published ladders, the ones `/kpm/config` gives the screen**, so the
+     * sort follows the order the *Status* dropdown lists and the tint it draws, and an Owner's
+     * reorder moves both when it is published. Read only when a rank is needed.
+     */
+    const ranks = ladderRanks(
+      inMemory === 'status' ? (await this.config.readPublished(ctx)).leadPipelines : [],
+    );
+    const rows = inMemory ? found.sort(leadOrder(inMemory, query.dir, ranks)) : found;
 
     // Once for the page. `flagsFor` runs for every row here and again for every row rendered,
     // and the office's day does not change between two rows of one response.
@@ -565,12 +591,13 @@ export class LeadService {
   }
 
   /**
-   * The rollups, in one indexed pass (P7-T6).
+   * The rollups, in one indexed pass (P7-T6). No route calls it since P10.1-T4 — see `LeadSummary`.
    *
    * **Scoped exactly as the list is**, from `lead:read_aggregate_counts` rather than from
    * `lead:read` — an Owner and an Admin hold this one and hold no row-reading grant at all, which
    * is §3.7 in the permission matrix rather than in a check somebody has to remember. A count
-   * above a table has to count the table, and for everybody who has both, it does.
+   * of somebody's leads has to count the leads their list shows, and for everybody who has both
+   * grants, it does.
    *
    * **One aggregation with `$facet`, not six round trips.** The `$match` is the same
    * `{kpmId, ownerMembershipId, deletedAt}` prefix the list uses, so it is served by the index

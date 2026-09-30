@@ -62,7 +62,7 @@
     },
     "/api/v1/leads": {
       "get": {
-        "description": "Search over the name and the remarks, filter by ladder, stage, outcome and attention state, sort on one key, and page. The prototype has none of these on the screen with the most rows. **Scoped to what your grant reaches**: your own, plus your unit or your downline. A lead outside it is a 404, never a 403.\n\n**Requires `lead:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Search over the name and the remarks, filter by ladder, stage, outcome and attention state, sort on one key, and page. The Leads table sorts on name, type, status and registration, and asks for every page in turn. **Scoped to what your grant reaches**: your own, plus your unit or your downline. A lead outside it is a 404, never a 403.\n\n**Requires `lead:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "LeadController_list_v1",
         "parameters": [
           {
@@ -125,11 +125,14 @@
             "name": "sort",
             "required": false,
             "in": "query",
+            "description": "`name` ignores case and accents. `type` orders blank, Sales, Recruitment. `status` orders by the stage’s place in its own ladder as the office last published it, blank first; equal places are ordered by type and then by registration, oldest first. Every order ends on the id, so equal leads keep their places from one page to the next. `desc` reverses the whole order. Sorted before the page is cut.",
             "schema": {
               "enum": [
                 "dateRegistered",
                 "name",
-                "nextActionDate"
+                "nextActionDate",
+                "type",
+                "status"
               ],
               "type": "string"
             }
@@ -305,65 +308,6 @@
           "leads"
         ],
         "x-required-permission": "lead:create"
-      }
-    },
-    "/api/v1/leads/summary": {
-      "get": {
-        "description": "Counts and never rows (§3.7). **The one lead route an Owner and an Admin may call**: a lead carries third-party personal data an agent typed about somebody who never interacted with the platform, so administrators are told how many and never who. Everybody else gets the counts behind the list they can see.\n\n**Requires `lead:read_aggregate_counts`.** See `docs/00-product/roles-and-permissions.md`.",
-        "operationId": "LeadController_summary_v1",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LeadSummaryDto"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `lead:read_aggregate_counts`. `details.permission` names it.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "The counts, scoped like the list",
-        "tags": [
-          "leads"
-        ],
-        "x-required-permission": "lead:read_aggregate_counts"
       }
     },
     "/api/v1/leads/{id}": {
@@ -15842,64 +15786,6 @@
           "total",
           "page",
           "pageSize"
-        ]
-      },
-      "LeadAttentionDto": {
-        "type": "object",
-        "properties": {
-          "overdue": {
-            "type": "number",
-            "description": "The next-action date has passed."
-          },
-          "no-next-action": {
-            "type": "number",
-            "description": "No next-action date at all."
-          },
-          "no-remarks": {
-            "type": "number",
-            "description": "Nothing written down."
-          }
-        },
-        "required": [
-          "overdue",
-          "no-next-action",
-          "no-remarks"
-        ]
-      },
-      "LeadSummaryDto": {
-        "type": "object",
-        "properties": {
-          "open": {
-            "type": "number",
-            "description": "Open leads in scope."
-          },
-          "committedThisMonth": {
-            "type": "number",
-            "description": "Open leads promised for the office’s **current** month — the glossary’s *Commitment*. Nothing clears it: a promise carries the month it was made for (P7-T5)."
-          },
-          "recruitmentPipelineNow": {
-            "type": "number",
-            "description": "`RECRUITMENT_PIPELINE_NOW`: open recruitment candidates not on the stage that closes the pipeline. The office’s own `isTerminal` flag decides which that is (invariant §4)."
-          },
-          "recruitmentExpectedToClose": {
-            "type": "number",
-            "description": "`RECRUITMENT_EXPECTED_TO_CLOSE`: open recruitment candidates on a stage the office flagged `isLateStage` (ADR-0043). A lead on the terminal stage is excluded by construction."
-          },
-          "attention": {
-            "description": "How many open leads carry each attention flag. **They overlap** — a lead with no date and no remark is in two of them — so they do not sum to `open`. The keys are the values `GET /leads?attention=` takes, so a count links straight to the rows behind it.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LeadAttentionDto"
-              }
-            ]
-          }
-        },
-        "required": [
-          "open",
-          "committedThisMonth",
-          "recruitmentPipelineNow",
-          "recruitmentExpectedToClose",
-          "attention"
         ]
       },
       "CreateLeadDto": {

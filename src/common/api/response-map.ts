@@ -5,9 +5,7 @@ import {
   RedeemedInviteDto, SessionDto, StatusAckDto,
 } from '@/modules/auth/session.response.dto';
 import { InboxDto, InboxItemDto } from '@/modules/notifications/notification.response.dto';
-import {
-  DeletedLeadDto, LeadPageDto, LeadResponseDto, LeadSummaryDto,
-} from '@/modules/leads/lead.response.dto';
+import { DeletedLeadDto, LeadPageDto, LeadResponseDto } from '@/modules/leads/lead.response.dto';
 import { GoalHistoryEntryDto, GoalResponseDto } from '@/modules/goals/goal.response.dto';
 import {
   CorrectionResultDto, HistoryDto, ImportResultDto, MonthStateDto, MonthViewDto, TemplateFileDto,
@@ -145,7 +143,6 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   ProductionController_reopen: { type: MonthStateDto },
   ProductionController_correct: { type: CorrectionResultDto },
   LeadController_list: { type: LeadPageDto },
-  LeadController_summary: { type: LeadSummaryDto },
   LeadController_read: { type: LeadResponseDto },
   LeadController_create: { type: LeadResponseDto },
   LeadController_update: { type: LeadResponseDto },

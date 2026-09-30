@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { LAWFUL_BASES, LEAD_OUTCOMES, LEAD_TYPES } from './lead.schema';
-import type { LeadFlag, LeadPage, LeadSummary, LeadView } from './lead.service';
+import type { LeadFlag, LeadPage, LeadView } from './lead.service';
 
 export class LeadContactDto {
   @ApiProperty({ type: String, nullable: true })
@@ -128,53 +128,4 @@ export class DeletedLeadDto {
 
   @ApiPropertyOptional({ type: String, format: 'date-time' })
   deletedAt!: string;
-}
-
-export class LeadAttentionDto {
-  @ApiProperty({ type: Number, description: 'The next-action date has passed.' })
-  overdue!: number;
-
-  @ApiProperty({ type: Number, name: 'no-next-action', description: 'No next-action date at all.' })
-  'no-next-action'!: number;
-
-  @ApiProperty({ type: Number, name: 'no-remarks', description: 'Nothing written down.' })
-  'no-remarks'!: number;
-}
-
-export class LeadSummaryDto implements LeadSummary {
-  @ApiProperty({ type: Number, description: 'Open leads in scope.' })
-  open!: number;
-
-  @ApiProperty({
-    type: Number,
-    description:
-      'Open leads promised for the office’s **current** month — the glossary’s *Commitment*. '
-      + 'Nothing clears it: a promise carries the month it was made for (P7-T5).',
-  })
-  committedThisMonth!: number;
-
-  @ApiProperty({
-    type: Number,
-    description:
-      '`RECRUITMENT_PIPELINE_NOW`: open recruitment candidates not on the stage that closes the '
-      + 'pipeline. The office’s own `isTerminal` flag decides which that is (invariant §4).',
-  })
-  recruitmentPipelineNow!: number;
-
-  @ApiProperty({
-    type: Number,
-    description:
-      '`RECRUITMENT_EXPECTED_TO_CLOSE`: open recruitment candidates on a stage the office flagged '
-      + '`isLateStage` (ADR-0043). A lead on the terminal stage is excluded by construction.',
-  })
-  recruitmentExpectedToClose!: number;
-
-  @ApiProperty({
-    type: LeadAttentionDto,
-    description:
-      'How many open leads carry each attention flag. **They overlap** — a lead with no date and '
-      + 'no remark is in two of them — so they do not sum to `open`. The keys are the values '
-      + '`GET /leads?attention=` takes, so a count links straight to the rows behind it.',
-  })
-  attention!: Record<'overdue' | 'no-next-action' | 'no-remarks', number>;
 }

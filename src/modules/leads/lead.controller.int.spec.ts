@@ -20,7 +20,6 @@ const COMPANY = '66f0000000000000000000c1';
 /** Every route, and the permission it must declare. */
 const ROUTES: Record<string, string> = {
   list: 'lead:read',
-  summary: 'lead:read_aggregate_counts',
   read: 'lead:read',
   create: 'lead:create',
   update: 'lead:update',
@@ -221,6 +220,40 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
       expect(paged.body).toMatchObject({ total: 2, page: 1, pageSize: 1 });
       expect(paged.body.rows).toHaveLength(1);
     });
+
+    it('P10.1-T4 AC-3: takes the Type and Status sorts through the pipe', async () => {
+      // The decorator is `@IsIn` now, so the list it names is the whole vocabulary over the wire —
+      // a key left out of it would be a 400 on a header the screen offers.
+      await add({ name: 'Sdri. Maya', type: 'recruitment' }).expect(201);
+      await add({ name: 'Ibu Dewi', type: 'sales' }).expect(201);
+      await add({ name: 'Pak Budi' }).expect(201);
+
+      const byType = await http().get(url).query({ sort: 'type', dir: 'asc' }).expect(200);
+      expect(byType.body.rows.map((l: { name: string }) => l.name))
+        .toEqual(['Pak Budi', 'Ibu Dewi', 'Sdri. Maya']);
+
+      for (const sort of ['status', 'name', 'dateRegistered', 'nextActionDate']) {
+        await http().get(url).query({ sort, dir: 'desc' }).expect(200);
+      }
+    });
+
+    it('P10.1-T4: refuses a sort key it does not have, rather than answering in some order', async () => {
+      // With `@Allow()` this reached the database as a sort on a field no lead has, and answered
+      // 200. That looks like a sort that works.
+      const res = await http().get(url).query({ sort: 'nextAction' }).expect(400);
+
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      expect(JSON.stringify(res.body.error.details)).toMatch(/sort/);
+    });
+  });
+
+  it('P10.1-T4 AC-13: GET /leads/summary is retired, and reads as a lead that does not exist', async () => {
+    // Its only caller was the counts strip on `/leads`. Nothing is declared above `:id` now, so
+    // the word *summary* is read as an id — the 404 the controller's route note describes.
+    const res = await http().get(`${url}/summary`).expect(404);
+
+    expect(res.body.error.code).toBe('NOT_FOUND');
+    expect(res.body).not.toHaveProperty('open');
   });
 
   describe('who may do what', () => {

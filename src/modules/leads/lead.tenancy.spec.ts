@@ -482,6 +482,211 @@ describe('the lead record (P7-T1)', () => {
   });
 
   /**
+   * The prototype's four header sorts, on the server (P10.1-T4 AC-3, ADR-0063 §3).
+   *
+   * **Two of them need the office's ladders beside the row**, so they are ordered in the service
+   * rather than by the database — over the whole filtered set, before the page is cut, because
+   * `/leads` asks for every page in turn and a set ordered page by page would interleave.
+   */
+  describe('P10.1-T4 — Type and Status sort on the server', () => {
+    // Published, as provisioning publishes a real office's first copy: the ranks are what agents
+    // were given, not the rows the Owner is editing.
+    beforeEach(async () => {
+      await provisionOffice(wired, KPM_A, COMPANY);
+      await wired.config.publish(A());
+    });
+    afterEach(() => (wired.clock as FixedClock).set(NOW));
+
+    /** Registered on `day` of September, then moved to `stage` if one is named. */
+    const lead = async (
+      name: string, type: 'sales' | 'recruitment' | null, stage: string | null, day: number,
+    ) => {
+      (wired.clock as FixedClock).set(new Date(`2026-09-${String(day).padStart(2, '0')}T02:00:00Z`));
+      const made = await create(A(), { name, type });
+      if (stage) await wired.leadRecords.setStatus(A(), made.id, stage);
+      return made;
+    };
+
+    /*
+     * Created in an order that matches none of the expected ones, so neither the insertion order
+     * nor the id can pass for the rule. *Sales, Sep 15* is created after *Sales, Sep 22* and
+     * registered before it: only the registration tie-break puts it first.
+     */
+    const office = async () => {
+      await lead('Sales, Sep 22', 'sales', 'FOLLOW_UP', 22);
+      await lead('Recruit, Sep 5', 'recruitment', 'MEETING_SCHEDULED', 5);
+      await lead('Sales new, Sep 24', 'sales', 'NOT_YET_APPROACHED', 24);
+      await lead('Sales blank, Sep 1', 'sales', null, 1);
+      await lead('Recruit late, Sep 2', 'recruitment', 'AAJI_LICENSED', 2);
+      await lead('No type, Sep 10', null, null, 10);
+      await lead('Sales, Sep 15', 'sales', 'FOLLOW_UP', 15);
+      (wired.clock as FixedClock).set(NOW);
+    };
+
+    const names = async (query: Record<string, unknown>) =>
+      (await wired.leadRecords.list(A(), { pageSize: 200, ...query })).rows.map((l) => l.name);
+
+    /*
+     * Blank first — the lead with no type, then the sales lead with no stage. Then rank 1, then
+     * the three on rank 2: FOLLOW_UP is sales rank 2 and MEETING_SCHEDULED recruitment rank 2, so
+     * the tie goes to sales, and inside sales to the earlier registration. Rank 5 last.
+     */
+    const STATUS_ASC = [
+      'No type, Sep 10', 'Sales blank, Sep 1', 'Sales new, Sep 24',
+      'Sales, Sep 15', 'Sales, Sep 22', 'Recruit, Sep 5', 'Recruit late, Sep 2',
+    ];
+
+    it('orders status by the stage’s rank in its own ladder, blank first', async () => {
+      await office();
+
+      expect(await names({ sort: 'status', dir: 'asc' })).toEqual(STATUS_ASC);
+    });
+
+    it('breaks a tie on rank by type, then by registration — D-06’s objection, answered', async () => {
+      await office();
+      const rankTwo = (await names({ sort: 'status', dir: 'asc' }))
+        .filter((n) => ['Sales, Sep 15', 'Sales, Sep 22', 'Recruit, Sep 5'].includes(n));
+
+      // A sales rank 2 is not a recruitment rank 2. The recruitment lead is the oldest of the
+      // three, so registration alone would have put it first.
+      expect(rankTwo).toEqual(['Sales, Sep 15', 'Sales, Sep 22', 'Recruit, Sep 5']);
+    });
+
+    it('reverses the whole comparison for desc, tie-breaks included', async () => {
+      await office();
+
+      expect(await names({ sort: 'status', dir: 'desc' })).toEqual([...STATUS_ASC].reverse());
+    });
+
+    it('orders type blank, Sales, Recruitment, each by registration', async () => {
+      await office();
+
+      expect(await names({ sort: 'type', dir: 'asc' })).toEqual([
+        'No type, Sep 10',
+        'Sales blank, Sep 1', 'Sales, Sep 15', 'Sales, Sep 22', 'Sales new, Sep 24',
+        'Recruit late, Sep 2', 'Recruit, Sep 5',
+      ]);
+      expect(await names({ sort: 'type', dir: 'desc' })).toEqual([
+        'Recruit, Sep 5', 'Recruit late, Sep 2',
+        'Sales new, Sep 24', 'Sales, Sep 22', 'Sales, Sep 15', 'Sales blank, Sep 1',
+        'No type, Sep 10',
+      ]);
+    });
+
+    it('sorts before it pages, so page 2 carries on where page 1 stopped', async () => {
+      await office();
+
+      const pages = await Promise.all([1, 2, 3].map((page) =>
+        wired.leadRecords.list(A(), { sort: 'status', dir: 'asc', pageSize: 3, page })));
+
+      expect(pages[1].rows.map((l) => l.name)).toEqual(['Sales, Sep 15', 'Sales, Sep 22', 'Recruit, Sep 5']);
+      expect(pages.flatMap((p) => p.rows.map((l) => l.name))).toEqual(STATUS_ASC);
+      expect(pages.map((p) => p.total)).toEqual([7, 7, 7]);
+    });
+
+    it('ranks by the published ladder the Status dropdown lists, so a reorder moves the sort when it is published', async () => {
+      // Invariant §4: the rank is presentation, and the Owner's settings screen reorders it. The
+      // screen's options and tints come from `/kpm/config`, the published copy, so the sort does too:
+      // read from the live rows, it moved while every dropdown still showed the old order.
+      await office();
+      const [sales] = await wired.leads.list(A());
+      await wired.leads.reorder(A(), 'sales', [...sales.statuses].reverse().map((s) => s.id));
+
+      expect(await names({ sort: 'status', dir: 'asc' })).toEqual(STATUS_ASC);
+
+      await wired.config.publish(A());
+
+      // Sales now reads PAID … FOLLOW_UP (4th), NOT_YET_APPROACHED (5th). MEETING_SCHEDULED is 2nd
+      // on its own ladder, AAJI_LICENSED 5th, and the sales lead takes the tie on 5th.
+      expect(await names({ sort: 'status', dir: 'asc' })).toEqual([
+        'No type, Sep 10', 'Sales blank, Sep 1', 'Recruit, Sep 5',
+        'Sales, Sep 15', 'Sales, Sep 22', 'Sales new, Sep 24', 'Recruit late, Sep 2',
+      ]);
+    });
+
+    it('sorts a lead on a stage retired and published since with the blanks, as its row shows it', async () => {
+      // Invariant §3: the lead keeps the code. The published ladder no longer lists the stage, so
+      // the row shows the code marked *(retired)*, untinted, and the prototype's `indexOf` gives -1.
+      await office();
+      const [sales] = await wired.leads.list(A());
+      await wired.leads.archive(A(), sales.statuses.find((s) => s.code === 'FOLLOW_UP')!.id);
+
+      // Until it is published, agents still have the stage, in its place.
+      expect(await names({ sort: 'status', dir: 'asc' })).toEqual(STATUS_ASC);
+
+      await wired.config.publish(A());
+
+      expect(await names({ sort: 'status', dir: 'asc' })).toEqual([
+        'No type, Sep 10', 'Sales blank, Sep 1', 'Sales, Sep 15', 'Sales, Sep 22',
+        'Sales new, Sep 24', 'Recruit, Sep 5', 'Recruit late, Sep 2',
+      ]);
+    });
+
+    it('reads this office’s published ladder and never another’s', async () => {
+      // The snapshot comes through the tenant-scoped repository. Another office reversing its own
+      // sales ladder and publishing it changes nothing here.
+      await provisionOffice(wired, KPM_B, COMPANY);
+      await office();
+      const [theirs] = await wired.leads.list(B());
+      await wired.leads.reorder(B(), 'sales', [...theirs.statuses].reverse().map((s) => s.id));
+      await wired.config.publish(B());
+
+      expect(await names({ sort: 'status', dir: 'asc' })).toEqual(STATUS_ASC);
+    });
+
+    it('sorts only the filtered set, and the filters still apply', async () => {
+      await office();
+
+      expect(await names({ sort: 'status', dir: 'asc', type: 'recruitment' }))
+        .toEqual(['Recruit, Sep 5', 'Recruit late, Sep 2']);
+    });
+
+    it('leaves registration and next action to the database', async () => {
+      await office();
+      const id = new Map((await wired.leadRecords.list(A())).rows.map((l) => [l.name, l.id]));
+      await wired.leadRecords.update(A(), id.get('Sales new, Sep 24')!, { nextActionDate: '2026-10-01' });
+      await wired.leadRecords.update(A(), id.get('Sales blank, Sep 1')!, { nextActionDate: '2026-09-30' });
+
+      // Newest registration first when nothing is asked for — the prototype's default (`:5432`).
+      expect((await names({})).slice(0, 2)).toEqual(['Sales new, Sep 24', 'Sales, Sep 22']);
+      expect((await names({ sort: 'nextActionDate', dir: 'desc' })).slice(0, 2))
+        .toEqual(['Sales new, Sep 24', 'Sales blank, Sep 1']);
+    });
+
+    it('sorts names without regard to case or accents, as the prototype’s lowercase `localeCompare`', async () => {
+      // A name is stored as typed (D-12). In byte order *budi* and *Émile* came after *Zed*.
+      for (const name of ['Zed', 'budi', 'Émile', 'Adi', 'Fikri']) await create(A(), { name });
+
+      expect(await names({ sort: 'name', dir: 'asc' })).toEqual(['Adi', 'budi', 'Émile', 'Fikri', 'Zed']);
+      expect(await names({ sort: 'name', dir: 'desc' })).toEqual(['Zed', 'Fikri', 'Émile', 'budi', 'Adi']);
+    });
+
+    /*
+     * **Ties are the ordinary case, not the edge.** Leads added in one sitting share a registration
+     * date to the minute, most have no next action, and names repeat. `/leads` reads 200 at a time,
+     * and MongoDB promises no order among equal keys, so without a last key a tie across a page
+     * boundary may fall one way for page 1 and the other for page 2: one lead twice, another never.
+     */
+    it.each([
+      ['dateRegistered', 'asc'], ['dateRegistered', 'desc'],
+      ['nextActionDate', 'asc'], ['nextActionDate', 'desc'],
+      ['name', 'asc'], ['name', 'desc'],
+    ] as const)('pages a tie on %s %s by the id, never repeating or skipping a lead', async (sort, dir) => {
+      // Nine leads at one instant, with one name and no next action: every key ties.
+      const made: string[] = [];
+      for (let i = 0; i < 9; i += 1) made.push((await create(A(), { name: 'Pak Budi' })).id);
+      const byId = [...made].sort();
+
+      const pages = await Promise.all([1, 2, 3, 4, 5].map((page) =>
+        wired.leadRecords.list(A(), { sort, dir, pageSize: 2, page })));
+      const paged = pages.flatMap((p) => p.rows.map((l) => l.id));
+
+      expect(new Set(paged).size).toBe(9);
+      expect(paged).toEqual(dir === 'asc' ? byId : byId.reverse());
+    });
+  });
+
+  /**
    * Triage (P7-T4).
    *
    * **The flags are derived on every read and stored nowhere.** A stored flag is one that is

@@ -290,6 +290,10 @@ describe('who may touch whose lead (P7-T7)', () => {
    * **Every number is something already defined elsewhere.** Two are the metric registry's
    * (invariant §8); the rest are this module's own rules — T5's commitment and T4's attention
    * flags — so nothing here is a figure invented for a screen.
+   *
+   * **The route went in P10.1-T4 and these stay.** `LeadService.summary` is the only computation of
+   * `RECRUITMENT_PIPELINE_NOW` and `RECRUITMENT_EXPECTED_TO_CLOSE`, which the registry says are
+   * computed from Phase 7. Until another screen reads them, these tests are what keeps that true.
    */
   describe('the counts (P7-T6)', () => {
     const summary = (who: RequestContext) => wired.leadRecords.summary(who);

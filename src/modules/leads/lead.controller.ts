@@ -5,17 +5,16 @@ import { RequestContext } from '@/common/context/request-context';
 import {
   CreateLeadDto, ListLeadsQueryDto, SetLeadOutcomeDto, SetLeadStatusDto, UpdateLeadDto,
 } from './lead.dto';
-import {
-  DeletedLeadDto, LeadPageDto, LeadResponseDto, LeadSummaryDto,
-} from './lead.response.dto';
+import { DeletedLeadDto, LeadPageDto, LeadResponseDto } from './lead.response.dto';
 import { LeadService } from './lead.service';
 
 /**
  * One person an agent is working (P7-T2, P7-T3).
  *
- * **Six routes, one screen.** Everything here is called by `/leads`; nothing is an endpoint
+ * **Seven routes, one screen.** Everything here is called by `/leads`; nothing is an endpoint
  * waiting for a consumer, which is the rule `check-api-consumers.py` enforces and the reason
- * P7-T1 shipped with none at all.
+ * P7-T1 shipped with none at all. The eighth, `GET /leads/summary`, lost its only caller when
+ * `/leads` went back to the prototype and was retired with it (P10.1-T4).
  *
  * **Moving and closing are separate routes on separate permissions**, because they are separate
  * acts: a status says where somebody is, an outcome says the work stopped and how it ended. The
@@ -34,9 +33,9 @@ export class LeadController {
     summary: 'Your leads',
     description:
       'Search over the name and the remarks, filter by ladder, stage, outcome and attention '
-      + 'state, sort on one key, and page. The prototype has none of these on the screen with the '
-      + 'most rows. **Scoped to what your grant reaches**: your own, plus your unit or your '
-      + 'downline. A lead outside it is a 404, never a 403.',
+      + 'state, sort on one key, and page. The Leads table sorts on name, type, status and '
+      + 'registration, and asks for every page in turn. **Scoped to what your grant reaches**: '
+      + 'your own, plus your unit or your downline. A lead outside it is a 404, never a 403.',
   })
   @ApiResponse({ status: 200, type: LeadPageDto })
   async list(@Ctx() ctx: RequestContext, @Query() query: ListLeadsQueryDto) {
@@ -44,25 +43,11 @@ export class LeadController {
   }
 
   /**
-   * **Declared before `:id`, and that is load-bearing.** Nest matches in declaration order, so
-   * below it `/leads/summary` would be read as a lead whose id is the word *summary* — a 404 that
-   * looks like a missing record rather than a shadowed route.
+   * **`:id` is the last `GET` in this class, and a literal path added later goes above it.** Nest
+   * matches in declaration order, so a `GET /leads/<word>` declared below would be read as a lead
+   * whose id is that word — a 404 that looks like a missing record rather than a shadowed route.
+   * That 404 is now what `GET /leads/summary` answers: the route stood here until P10.1-T4.
    */
-  @Get('summary')
-  @RequirePermission('lead:read_aggregate_counts')
-  @ApiOperation({
-    summary: 'The counts, scoped like the list',
-    description:
-      'Counts and never rows (§3.7). **The one lead route an Owner and an Admin may call**: a '
-      + 'lead carries third-party personal data an agent typed about somebody who never '
-      + 'interacted with the platform, so administrators are told how many and never who. '
-      + 'Everybody else gets the counts behind the list they can see.',
-  })
-  @ApiResponse({ status: 200, type: LeadSummaryDto })
-  async summary(@Ctx() ctx: RequestContext) {
-    return this.leads.summary(ctx);
-  }
-
   @Get(':id')
   @RequirePermission('lead:read')
   @ApiOperation({ summary: 'One lead', description: '**404, not 403**, for another office’s.' })

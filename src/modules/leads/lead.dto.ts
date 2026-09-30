@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Allow } from 'class-validator';
+import { Allow, IsIn, IsOptional } from 'class-validator';
+import { LEAD_SORT_KEYS, type LeadSortKey } from './lead-order';
 import { LAWFUL_BASES, LEAD_OUTCOMES, LEAD_TYPES } from './lead.schema';
 
 /**
@@ -123,9 +124,23 @@ export class ListLeadsQueryDto {
   @Allow()
   attention?: 'overdue' | 'no-next-action' | 'no-remarks';
 
-  @ApiPropertyOptional({ enum: ['dateRegistered', 'name', 'nextActionDate'] })
-  @Allow()
-  sort?: 'dateRegistered' | 'name' | 'nextActionDate';
+  /**
+   * **Validated, where its neighbours are only allowed through.** An unknown key used to reach the
+   * database as a sort on a field no lead has, and answered 200 in whatever order the index
+   * returned. That looks like a sort that works (P10.1-T4).
+   */
+  @ApiPropertyOptional({
+    enum: [...LEAD_SORT_KEYS],
+    description:
+      '`name` ignores case and accents. `type` orders blank, Sales, Recruitment. `status` orders '
+      + 'by the stage’s place in its own ladder as the office last published it, blank first; '
+      + 'equal places are ordered by type and then by registration, oldest first. Every order '
+      + 'ends on the id, so equal leads keep their places from one page to the next. `desc` '
+      + 'reverses the whole order. Sorted before the page is cut.',
+  })
+  @IsOptional()
+  @IsIn(LEAD_SORT_KEYS as unknown as string[])
+  sort?: LeadSortKey;
 
   @ApiPropertyOptional({ enum: ['asc', 'desc'] })
   @Allow()

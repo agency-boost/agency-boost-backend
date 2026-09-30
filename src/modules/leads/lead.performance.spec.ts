@@ -35,7 +35,8 @@ const member = (kpmId: string, membershipId: string) => new RequestContext('u1',
  * `performance-and-scale.md` asks for an `explain()` assertion on every aggregate — no `COLLSCAN`
  * on a tenant-scoped collection. `leads` is the **second** per-person collection and the one an
  * office fills fastest by hand: forty agents with thirty prospects each is 1,200 rows in a quiet
- * office, and the summary reads across all of them on every load of the screen.
+ * office, and the summary reads across all of them every time it is asked. No route asks since
+ * P10.1-T4; the budget stands for the next reader of the two recruitment metrics.
  *
  * Two offices are seeded, because a plan that looks efficient inside one tenant and reads the
  * other's rows to get there is the failure this measures, not a slow one.
@@ -140,7 +141,7 @@ describe('the lead rollups, measured (P7-T6)', () => {
     });
   });
 
-  describe('what the screen waits for', () => {
+  describe('what a reader waits for', () => {
     it('answers an agent’s counts well inside the read budget', async () => {
       const ctx = member(KPM_A, agents[0]);
       // Warm, then the slowest of twenty: a cold first call measures the connection pool.

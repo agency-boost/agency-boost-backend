@@ -224,16 +224,6 @@ export function configModule(now: Date) {
     audit,
     new RatioDefinitionRepository(ratioDefinitions as never),
   );
-  // P7-T1: one person an agent is working. The first record about somebody who is not a user.
-  const leadRecords = new LeadService(
-    new LeadRepository(model(Lead.name, LeadSchema) as never),
-    new LeadStatusRepository(leadStatuses as never),
-    audit,
-    clock,
-    new TenantDay(kpms as never, clock),
-    memberships,
-    new MemberNames(memberships, users as never),
-  );
   /*
    * **A recorder, not a second implementation.** `NotificationService` needs a preferences model,
    * a renderer and its channel adapters, and none of that is what a goal test is asking about —
@@ -334,6 +324,20 @@ export function configModule(now: Date) {
     activation,
     events,
     capability,
+  );
+  /*
+   * P7-T1: one person an agent is working. The first record about somebody who is not a user.
+   * After `config` since P10.1-T4: the *Status* sort ranks stages by the published ladders.
+   */
+  const leadRecords = new LeadService(
+    new LeadRepository(model(Lead.name, LeadSchema) as never),
+    new LeadStatusRepository(leadStatuses as never),
+    audit,
+    clock,
+    new TenantDay(kpms as never, clock),
+    memberships,
+    new MemberNames(memberships, users as never),
+    config,
   );
   const provisioning = new ProvisioningService(
     categories as never,
