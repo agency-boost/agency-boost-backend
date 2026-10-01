@@ -85,7 +85,7 @@ export class MeMembershipDto {
     type: String,
     example: 'AB',
     description:
-      'The rung of the company\'s ladder this person stands on (P4-T9). What a role badge '
+      'The rung of the company\'s ladder this person stands on. What a role badge '
       + 'is drawn from, and what a hierarchy permission is compared against.',
   })
   orgLevelCode!: string;
@@ -143,7 +143,7 @@ export class MeDto {
   @ApiProperty({
     type: Boolean,
     description: 'They are on a password somebody else generated. Every route but this one, '
-      + 'change-password and logout answers 403 until it is replaced (P3.6-T4).',
+      + 'change-password and logout answers 403 until it is replaced.',
   })
   mustChangePassword!: boolean;
 

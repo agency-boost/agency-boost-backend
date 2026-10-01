@@ -91,7 +91,7 @@ export class ActivityController {
   @Get('dashboard')
   @RequirePermission('activity_log:read_raw')
   @ApiOperation({
-    summary: 'Your own activity over a range, per type and per column (P10-T1)',
+    summary: 'Your own activity over a range, per type and per column',
     description:
       '*Last 7 days* (the default), *Last 30 days*, or a custom range of up to 366 days, ending today in '
       + 'the office’s timezone. Seven days is a column a day; thirty days is 7-day blocks counted back '
@@ -107,7 +107,7 @@ export class ActivityController {
   @Get('ratios')
   @RequirePermission('activity_ratios:read')
   @ApiOperation({
-    summary: 'The office’s ratios over the last 30 days (P10-T2)',
+    summary: 'The office’s ratios over the last 30 days',
     description:
       'Every active ratio of the office **that applies to the subject’s rung** (ADR-0020), computed over '
       + '`ROLLING_30D` — fixed, ending today in the office’s timezone — with the office’s own formula and '

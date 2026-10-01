@@ -1,7 +1,13 @@
 import type { LocalDate } from '@/common/time/local-day';
 
-/** What is asking to be picked up (P7-T4). Derived on read, never stored. */
-export type LeadFlag = 'overdue' | 'no-next-action' | 'no-remarks';
+/**
+ * What is asking to be picked up (P7-T4). Derived on read, never stored.
+ *
+ * A constant and not only a type, so `ListLeadsQueryDto` can refuse an `attention` value outside it
+ * without naming the three flags a second time.
+ */
+export const LEAD_FLAGS = ['overdue', 'no-next-action', 'no-remarks'] as const;
+export type LeadFlag = (typeof LEAD_FLAGS)[number];
 
 /**
  * **The one definition of a lead's attention flags** — the Leads screen's rows, its counts' check, and

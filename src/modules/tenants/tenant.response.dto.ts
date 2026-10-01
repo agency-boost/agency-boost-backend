@@ -60,7 +60,7 @@ export class KpmViewDto implements KpmView {
     type: Number,
     example: 1,
     description:
-      'The month the office\'s financial year starts, 1–12 (P4-T5). Stored and shown now; '
+      'The month the office\'s financial year starts, 1–12. Stored and shown now; '
       + 'no period computation reads it yet.',
   })
   fiscalYearStartMonth!: number;

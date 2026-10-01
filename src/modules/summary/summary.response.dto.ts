@@ -32,7 +32,7 @@ export class MonthlyFiguresDto extends PeriodFiguresDto {
 }
 
 export class YearlyFiguresDto extends PeriodFiguresDto {
-  @ApiProperty({ type: FigureSourceDto, description: 'The office’s year to date, or the agent’s own figure (P9-T6).' })
+  @ApiProperty({ type: FigureSourceDto, description: 'The office’s year to date, or the agent’s own figure.' })
   source!: FigureSource;
 }
 
@@ -143,12 +143,12 @@ export class SummaryDto implements SummaryView {
   @ApiProperty({ type: PaceDto, nullable: true, description: 'The pace sentence (ADR-0057); `null` without a goal.' })
   pace!: Pace | null;
 
-  @ApiProperty({ type: SummaryActivityPeriodsDto, description: '*Your sales activity targets* and the other sections (P10-T5).' })
+  @ApiProperty({ type: SummaryActivityPeriodsDto, description: '*Your sales activity targets* and the other sections.' })
   activity!: { monthly: SummaryActivityDto; yearly: SummaryActivityDto };
 
-  @ApiProperty({ type: SummaryLeadsDto, description: '*Leads that need you* (P10-T6): the reader’s own open leads.' })
+  @ApiProperty({ type: SummaryLeadsDto, description: '*Leads that need you*: the reader’s own open leads.' })
   leads!: { rows: OpenLeadDto[]; total: number };
 
-  @ApiProperty({ type: [InsightDto], description: 'The insight cards (P10-T7): the rules that fired, in their fixed priority, at most four.' })
+  @ApiProperty({ type: [InsightDto], description: 'The insight cards: the rules that fired, in their fixed priority, at most four.' })
   insights!: Insight[];
 }

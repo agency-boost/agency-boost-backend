@@ -180,7 +180,7 @@ export class OnboardingController {
     summary: 'Your leader code, and the link that carries it',
     description:
       'One code, generated with your membership and never reissued. It replaced ' +
-      'GET/POST/DELETE /join/invites in P3.6-T1: no prototype has ever had a control ' +
+      'GET/POST/DELETE /join/invites: no prototype has ever had a control ' +
       'that creates or withdraws one, and a code that cannot be reissued must not be ' +
       'revocable — withdrawing it would leave you unable to invite anybody.',
   })

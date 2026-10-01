@@ -53,7 +53,7 @@
             "bearer": []
           }
         ],
-        "summary": "Your Personal Summary (P10-T4)",
+        "summary": "Your Personal Summary",
         "tags": [
           "summary"
         ],
@@ -71,6 +71,7 @@
             "in": "query",
             "description": "Over the name and the remarks.",
             "schema": {
+              "maxLength": 120,
               "type": "string"
             }
           },
@@ -91,7 +92,9 @@
             "name": "statusCode",
             "required": false,
             "in": "query",
+            "description": "A stage code of either ladder.",
             "schema": {
+              "maxLength": 64,
               "type": "string"
             }
           },
@@ -141,6 +144,7 @@
             "name": "dir",
             "required": false,
             "in": "query",
+            "description": "Omitted is `desc`.",
             "schema": {
               "enum": [
                 "asc",
@@ -6834,7 +6838,7 @@
     },
     "/api/v1/join/my-code": {
       "get": {
-        "description": "One code, generated with your membership and never reissued. It replaced GET/POST/DELETE /join/invites in P3.6-T1: no prototype has ever had a control that creates or withdraws one, and a code that cannot be reissued must not be revocable — withdrawing it would leave you unable to invite anybody.\n\n**Any signed-in user.** No further permission.",
+        "description": "One code, generated with your membership and never reissued. It replaced GET/POST/DELETE /join/invites: no prototype has ever had a control that creates or withdraws one, and a code that cannot be reissued must not be revocable — withdrawing it would leave you unable to invite anybody.\n\n**Any signed-in user.** No further permission.",
         "operationId": "OnboardingController_myLeaderCode_v1",
         "parameters": [],
         "responses": {
@@ -10050,7 +10054,7 @@
     },
     "/api/v1/kpm/org-levels": {
       "get": {
-        "description": "Junior first, active rungs only. Every member reads it because every member's own badge is drawn from it — before `P4-T9` the labels and colours were five hard-coded maps in the frontend, which is a second definition of a company's own vocabulary and cannot describe a rung a second insurer publishes.\n\n**Requires `org_level:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Junior first, active rungs only. Every member reads it because every member's own badge is drawn from it — before this route existed, the labels and colours were five hard-coded maps in the frontend, which is a second definition of a company's own vocabulary and cannot describe a rung a second insurer publishes.\n\n**Requires `org_level:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TenantConfigReadController_orgLevels_v1",
         "parameters": [],
         "responses": {
@@ -13844,7 +13848,7 @@
             "bearer": []
           }
         ],
-        "summary": "Your own activity over a range, per type and per column (P10-T1)",
+        "summary": "Your own activity over a range, per type and per column",
         "tags": [
           "activity"
         ],
@@ -13903,7 +13907,7 @@
             "bearer": []
           }
         ],
-        "summary": "The office’s ratios over the last 30 days (P10-T2)",
+        "summary": "The office’s ratios over the last 30 days",
         "tags": [
           "activity"
         ],
@@ -15069,7 +15073,7 @@
             "type": "boolean"
           },
           "source": {
-            "description": "The office’s year to date, or the agent’s own figure (P9-T6).",
+            "description": "The office’s year to date, or the agent’s own figure.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/FigureSourceDto"
@@ -15460,7 +15464,7 @@
             ]
           },
           "activity": {
-            "description": "*Your sales activity targets* and the other sections (P10-T5).",
+            "description": "*Your sales activity targets* and the other sections.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/SummaryActivityPeriodsDto"
@@ -15468,7 +15472,7 @@
             ]
           },
           "leads": {
-            "description": "*Leads that need you* (P10-T6): the reader’s own open leads.",
+            "description": "*Leads that need you*: the reader’s own open leads.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/SummaryLeadsDto"
@@ -15476,7 +15480,7 @@
             ]
           },
           "insights": {
-            "description": "The insight cards (P10-T7): the rules that fired, in their fixed priority, at most four.",
+            "description": "The insight cards: the rules that fired, in their fixed priority, at most four.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/InsightDto"
@@ -15559,7 +15563,7 @@
           },
           "thisMonth": {
             "type": "boolean",
-            "description": "**Derived** (P7-T5): is there a commitment for the office’s current month? Nothing clears it, so it cannot be left true for an agent who has not opened the app since March."
+            "description": "**Derived**: is there a commitment for the office’s current month? Nothing clears it, so it cannot be left true for an agent who has not opened the app since March."
           },
           "committedMonths": {
             "example": [
@@ -15898,7 +15902,7 @@
               "corrected",
               "self_reported"
             ],
-            "description": "The carrier’s file, a correction by hand, or the agent’s own typed figure — the last only while the office holds no year-to-date figure for the year (P9-T6)."
+            "description": "The carrier’s file, a correction by hand, or the agent’s own typed figure — the last only while the office holds no year-to-date figure for the year."
           },
           "month": {
             "type": "string",
@@ -16085,7 +16089,7 @@
             "description": "The agent’s own typed figure — kept, and used only until production arrives."
           },
           "achieved": {
-            "description": "The figure the plan is measured against, and whose it is (P9-T6).",
+            "description": "The figure the plan is measured against, and whose it is.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/GoalAchievedDto"
@@ -16906,7 +16910,7 @@
           },
           "correction": {
             "nullable": true,
-            "description": "A correction by hand — who, when, why — so a figure can say where it came from without a second request (P9-T6). A figure emptied by hand is `corrected` with a `null` value.",
+            "description": "A correction by hand — who, when, why — so a figure can say where it came from without a second request. A figure emptied by hand is `corrected` with a `null` value.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/CellCorrectionDto"
@@ -17015,7 +17019,7 @@
             "description": "Rows holding at least one figure. Zero means nothing uploaded yet."
           },
           "state": {
-            "description": "Open or locked, and why (P9-T4).",
+            "description": "Open or locked, and why.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/MonthStateDto"
@@ -19175,7 +19179,7 @@
               "running",
               "past"
             ],
-            "description": "Derived on every read from the instants, never stored (P5-T6 AC-3)."
+            "description": "Derived on every read from the instants, never stored."
           },
           "status": {
             "type": "string",
@@ -20664,7 +20668,7 @@
           "orgLevelCode": {
             "type": "string",
             "example": "AB",
-            "description": "The rung of the company's ladder this person stands on (P4-T9). What a role badge is drawn from, and what a hierarchy permission is compared against."
+            "description": "The rung of the company's ladder this person stands on. What a role badge is drawn from, and what a hierarchy permission is compared against."
           },
           "hierarchyRole": {
             "type": "string",
@@ -20733,7 +20737,7 @@
           },
           "mustChangePassword": {
             "type": "boolean",
-            "description": "They are on a password somebody else generated. Every route but this one, change-password and logout answers 403 until it is replaced (P3.6-T4)."
+            "description": "They are on a password somebody else generated. Every route but this one, change-password and logout answers 403 until it is replaced."
           },
           "permissions": {
             "description": "Resolved from the database on every request.",
@@ -21814,7 +21818,7 @@
             }
           },
           "training": {
-            "description": "The training taxonomy agents are offered: active categories and skills, and **published** active modules only (P5-T1). A draft never reaches an agent.",
+            "description": "The training taxonomy agents are offered: active categories and skills, and **published** active modules only. A draft never reaches an agent.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TrainingCategoryDto"
@@ -21822,7 +21826,7 @@
           },
           "activationChecklist": {
             "nullable": true,
-            "description": "The 90-day checklist a new hire is given (P5-T3) — the **published** version only, and `null` before an office has published one. A draft never reaches an agent.",
+            "description": "The 90-day checklist a new hire is given — the **published** version only, and `null` before an office has published one. A draft never reaches an agent.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ActivationVersionDto"
@@ -21830,7 +21834,7 @@
             ]
           },
           "eventTypes": {
-            "description": "What an event may be filed under (P5-T6), active rows only — without the live event count the settings screen carries, because a count frozen into a snapshot is wrong the moment anybody files an event.",
+            "description": "What an event may be filed under, active rows only — without the live event count the settings screen carries, because a count frozen into a snapshot is wrong the moment anybody files an event.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SnapshotEventTypeDto"
@@ -21838,7 +21842,7 @@
           },
           "capability": {
             "nullable": true,
-            "description": "The capability catalog a leader assesses against (P5-T8), active rows only. `null` only for an office provisioned before it existed.",
+            "description": "The capability catalog a leader assesses against, active rows only. `null` only for an office provisioned before it existed.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/CapabilityCatalogDto"
@@ -21915,7 +21919,7 @@
           },
           "officesUnrecorded": {
             "type": "number",
-            "description": "How many were created before provisioning recorded this kind, so whether they are current is not known. Counted apart from `officesBehind`, which only counts offices known to be behind (P5-T12)."
+            "description": "How many were created before provisioning recorded this kind, so whether they are current is not known. Counted apart from `officesBehind`, which only counts offices known to be behind."
           }
         },
         "required": [
@@ -22048,7 +22052,7 @@
           "fiscalYearStartMonth": {
             "type": "number",
             "example": 1,
-            "description": "The month the office's financial year starts, 1–12 (P4-T5). Stored and shown now; no period computation reads it yet."
+            "description": "The month the office's financial year starts, 1–12. Stored and shown now; no period computation reads it yet."
           },
           "settings": {
             "type": "object",

@@ -74,7 +74,7 @@ export class EventDto {
 
   @ApiProperty({
     enum: EVENT_PHASES,
-    description: 'Derived on every read from the instants, never stored (P5-T6 AC-3).',
+    description: 'Derived on every read from the instants, never stored.',
   })
   phase!: string;
 

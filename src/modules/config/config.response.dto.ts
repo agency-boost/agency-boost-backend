@@ -305,7 +305,7 @@ export class TenantConfigDto implements TenantConfigView {
     type: [TrainingCategoryDto],
     description:
       'The training taxonomy agents are offered: active categories and skills, and **published** '
-      + 'active modules only (P5-T1). A draft never reaches an agent.',
+      + 'active modules only. A draft never reaches an agent.',
   })
   training!: TrainingCategoryDto[];
 
@@ -313,7 +313,7 @@ export class TenantConfigDto implements TenantConfigView {
     type: ActivationVersionDto,
     nullable: true,
     description:
-      'The 90-day checklist a new hire is given (P5-T3) — the **published** version only, and '
+      'The 90-day checklist a new hire is given — the **published** version only, and '
       + '`null` before an office has published one. A draft never reaches an agent.',
   })
   activationChecklist!: ActivationVersionDto | null;
@@ -321,7 +321,7 @@ export class TenantConfigDto implements TenantConfigView {
   @ApiProperty({
     type: [SnapshotEventTypeDto],
     description:
-      'What an event may be filed under (P5-T6), active rows only — without the live event '
+      'What an event may be filed under, active rows only — without the live event '
       + 'count the settings screen carries, because a count frozen into a snapshot is wrong the '
       + 'moment anybody files an event.',
   })
@@ -331,7 +331,7 @@ export class TenantConfigDto implements TenantConfigView {
     type: CapabilityCatalogDto,
     nullable: true,
     description:
-      'The capability catalog a leader assesses against (P5-T8), active rows only. `null` only '
+      'The capability catalog a leader assesses against, active rows only. `null` only '
       + 'for an office provisioned before it existed.',
   })
   capability!: CapabilityCatalogDto | null;
@@ -389,7 +389,7 @@ export class CompanyTemplateDto implements TemplateView {
     description:
       'How many were created before provisioning recorded this kind, so whether they are '
       + 'current is not known. Counted apart from `officesBehind`, which only counts offices '
-      + 'known to be behind (P5-T12).',
+      + 'known to be behind.',
   })
   officesUnrecorded!: number;
 }

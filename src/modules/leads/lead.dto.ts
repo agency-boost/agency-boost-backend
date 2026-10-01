@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Allow, IsIn, IsOptional } from 'class-validator';
+import { Type } from 'class-transformer';
+import { Allow, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { LEAD_FLAGS, type LeadFlag } from './lead-attention';
 import { LEAD_SORT_KEYS, type LeadSortKey } from './lead-order';
 import { LAWFUL_BASES, LEAD_OUTCOMES, LEAD_TYPES } from './lead.schema';
 
@@ -102,32 +104,51 @@ export class SetLeadOutcomeDto extends PinnedVersion {
   outcome!: 'won' | 'lost' | null;
 }
 
-/** The screen's search, filter, sort and page, as they arrive on the query string. */
+/**
+ * The screen's search, filter, sort and page, as they arrive on the query string.
+ *
+ * **Every field is validated as the string, number or enum it is; none is `@Allow()`.** The pipe
+ * refuses a field it does not know, but `@Allow()` passes a known field in any shape, and Express
+ * parses `?search[$ne]=x` into an object: `search` reached `.trim()` and answered 500, and
+ * `statusCode` would have reached the database as an operator on the field (found at the Phase 10.1
+ * exit review, 2026-10-01). Neither could leave the caller's scope, which `ownersInScope` sets in the
+ * service — so this is a wrong answer closed, not a leak — but a 500 is not a refusal and an operator
+ * is not a filter. The two numbers opt in to conversion explicitly: query strings arrive as strings,
+ * and `VALIDATION_PIPE_OPTIONS` says why implicit conversion is off.
+ */
 export class ListLeadsQueryDto {
-  @ApiPropertyOptional({ type: String, description: 'Over the name and the remarks.' })
-  @Allow()
+  @ApiPropertyOptional({ type: String, maxLength: 120, description: 'Over the name and the remarks.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
   search?: string;
 
   @ApiPropertyOptional({ enum: [...LEAD_TYPES, 'unassigned'] })
-  @Allow()
+  @IsOptional()
+  @IsIn([...LEAD_TYPES, 'unassigned'])
   type?: 'sales' | 'recruitment' | 'unassigned';
 
-  @ApiPropertyOptional({ type: String })
-  @Allow()
+  @ApiPropertyOptional({ type: String, maxLength: 64, description: 'A stage code of either ladder.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
   statusCode?: string;
 
   @ApiPropertyOptional({ enum: [...LEAD_OUTCOMES, 'open'] })
-  @Allow()
+  @IsOptional()
+  @IsIn([...LEAD_OUTCOMES, 'open'])
   outcome?: 'won' | 'lost' | 'open';
 
-  @ApiPropertyOptional({ enum: ['overdue', 'no-next-action', 'no-remarks'] })
-  @Allow()
-  attention?: 'overdue' | 'no-next-action' | 'no-remarks';
+  @ApiPropertyOptional({ enum: [...LEAD_FLAGS] })
+  @IsOptional()
+  @IsIn(LEAD_FLAGS as unknown as string[])
+  attention?: LeadFlag;
 
   /**
-   * **Validated, where its neighbours are only allowed through.** An unknown key used to reach the
-   * database as a sort on a field no lead has, and answered 200 in whatever order the index
-   * returned. That looks like a sort that works (P10.1-T4).
+   * **Validated first, on 2026-09-30, when its neighbours were still only allowed through.** An
+   * unknown key used to reach the database as a sort on a field no lead has, and answered 200 in
+   * whatever order the index returned. That looks like a sort that works (P10.1-T4). The rest
+   * followed on 2026-10-01 — see the class comment.
    */
   @ApiPropertyOptional({
     enum: [...LEAD_SORT_KEYS],
@@ -142,15 +163,23 @@ export class ListLeadsQueryDto {
   @IsIn(LEAD_SORT_KEYS as unknown as string[])
   sort?: LeadSortKey;
 
-  @ApiPropertyOptional({ enum: ['asc', 'desc'] })
-  @Allow()
+  @ApiPropertyOptional({ enum: ['asc', 'desc'], description: 'Omitted is `desc`.' })
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
   dir?: 'asc' | 'desc';
 
   @ApiPropertyOptional({ type: Number, minimum: 1 })
-  @Allow()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   page?: number;
 
+  // Above 200 is answered as 200 — the service's clamp, which `/leads` asks for by name.
   @ApiPropertyOptional({ type: Number, minimum: 1, maximum: 200 })
-  @Allow()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   pageSize?: number;
 }

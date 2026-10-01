@@ -38,7 +38,7 @@ export class LeadResponseDto implements LeadView {
   @ApiProperty({
     type: Boolean,
     description:
-      '**Derived** (P7-T5): is there a commitment for the office’s current month? Nothing clears '
+      '**Derived**: is there a commitment for the office’s current month? Nothing clears '
       + 'it, so it cannot be left true for an agent who has not opened the app since March.',
   })
   thisMonth!: boolean;

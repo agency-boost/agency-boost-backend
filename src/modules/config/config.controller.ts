@@ -455,7 +455,7 @@ export class TenantConfigReadController {
     summary: 'The ladder this office\'s company promotes people along',
     description:
       'Junior first, active rungs only. Every member reads it because every member\'s own '
-      + 'badge is drawn from it — before `P4-T9` the labels and colours were five '
+      + 'badge is drawn from it — before this route existed, the labels and colours were five '
       + 'hard-coded maps in the frontend, which is a second definition of a company\'s own '
       + 'vocabulary and cannot describe a rung a second insurer publishes.',
   })

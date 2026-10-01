@@ -245,6 +245,61 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
       expect(JSON.stringify(res.body.error.details)).toMatch(/sort/);
     });
+
+    describe('2026-10-01: every query field is validated as what it is, so an operator cannot ride in', () => {
+      /*
+       * Express parses `?search[$ne]=x` into `{ search: { $ne: 'x' } }`, and `@Allow()` passed it
+       * through: `search` reached `.trim()` and answered 500, and `statusCode` would have reached
+       * the database as an operator on the field (the Phase 10.1 exit review). Neither leaves the
+       * caller's scope — the owner filter is the service's — so this is a wrong answer rather than
+       * a leak, and the fix is the decorator every other query DTO already carries.
+       */
+      const refused = async (query: string, field: string) => {
+        const res = await http().get(url).query(query).expect(400);
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
+        expect(JSON.stringify(res.body.error.details)).toMatch(new RegExp(field));
+      };
+
+      it('refuses an object where `search` is a string, rather than crashing on it', () =>
+        refused('search[$ne]=x', 'search'));
+
+      it('refuses an object where `statusCode` is a string, rather than handing it to the database', () =>
+        refused('statusCode[$ne]=x', 'statusCode'));
+
+      it.each([
+        ['type', 'type[$ne]=x'],
+        ['outcome', 'outcome[$ne]=x'],
+        ['attention', 'attention[$ne]=x'],
+        ['dir', 'dir[$ne]=x'],
+        ['page', 'page[$ne]=1'],
+        ['pageSize', 'pageSize[$ne]=1'],
+      ])('refuses an object in `%s` the same way', (field, query) => refused(query, field));
+
+      it.each([
+        ['type', 'type=wholesale'],
+        ['outcome', 'outcome=maybe'],
+        ['attention', 'attention=urgent'],
+        ['dir', 'dir=sideways'],
+        ['page', 'page=0'],
+        ['pageSize', 'pageSize=many'],
+      ])('refuses a value outside `%s`’s vocabulary', (field, query) => refused(query, field));
+
+      it('takes every field in its own shape, and answers the page with real numbers', async () => {
+        const { body } = await add({ name: 'Ibu Dewi', type: 'sales', remarks: 'Golf.' }).expect(201);
+        await http().patch(`${url}/${body.id}/status`).send({ statusCode: 'FOLLOW_UP' }).expect(200);
+        await add({ name: 'Sdri. Maya', type: 'recruitment' }).expect(201);
+
+        const res = await http().get(url).query({
+          search: 'golf', type: 'sales', statusCode: 'FOLLOW_UP', outcome: 'open',
+          attention: 'no-next-action', sort: 'name', dir: 'asc', page: 1, pageSize: 50,
+        }).expect(200);
+
+        // `page` and `pageSize` arrive as the strings "1" and "50" and are answered as numbers:
+        // the conversion is the DTO's, not a coincidence of `Math.max`.
+        expect(res.body).toEqual(expect.objectContaining({ total: 1, page: 1, pageSize: 50 }));
+        expect(res.body.rows.map((l: { name: string }) => l.name)).toEqual(['Ibu Dewi']);
+      });
+    });
   });
 
   it('P10.1-T4 AC-13: GET /leads/summary is retired, and reads as a lead that does not exist', async () => {

@@ -21,7 +21,7 @@ export class SummaryController {
   @Get()
   @RequirePermission('personal_summary:read')
   @ApiOperation({
-    summary: 'Your Personal Summary (P10-T4)',
+    summary: 'Your Personal Summary',
     description:
       'Your goal against what you produced, this month and this year, the gap, and the pace — read from '
       + 'your goal, the office’s production and your own log. **Your own, only**: there is no '

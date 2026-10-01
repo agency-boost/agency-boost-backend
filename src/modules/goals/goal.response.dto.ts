@@ -28,7 +28,7 @@ export class GoalAchievedDto implements GoalAchieved {
 
   @ApiProperty({
     enum: ['imported', 'corrected', 'self_reported'],
-    description: 'The carrier’s file, a correction by hand, or the agent’s own typed figure — the last only while the office holds no year-to-date figure for the year (P9-T6).',
+    description: 'The carrier’s file, a correction by hand, or the agent’s own typed figure — the last only while the office holds no year-to-date figure for the year.',
   })
   provenance!: 'imported' | 'corrected' | 'self_reported';
 
@@ -136,7 +136,7 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
   @ApiProperty({ type: Number, description: 'The agent’s own typed figure — kept, and used only until production arrives.' })
   apeAchievedMinor!: number;
 
-  @ApiProperty({ type: GoalAchievedDto, description: 'The figure the plan is measured against, and whose it is (P9-T6).' })
+  @ApiProperty({ type: GoalAchievedDto, description: 'The figure the plan is measured against, and whose it is.' })
   achieved!: GoalAchievedDto;
 
   @ApiProperty({ type: Number })

@@ -105,7 +105,7 @@ export class MetricCellDto implements MetricCell {
 
   @ApiProperty({
     type: CellCorrectionDto, nullable: true,
-    description: 'A correction by hand — who, when, why — so a figure can say where it came from without a second request (P9-T6). A figure emptied by hand is `corrected` with a `null` value.',
+    description: 'A correction by hand — who, when, why — so a figure can say where it came from without a second request. A figure emptied by hand is `corrected` with a `null` value.',
   })
   correction!: CellCorrectionDto | null;
 }
@@ -178,7 +178,7 @@ export class MonthViewDto implements MonthView {
   @ApiProperty({ type: Number, description: 'Rows holding at least one figure. Zero means nothing uploaded yet.' })
   withData!: number;
 
-  @ApiProperty({ type: MonthStateDto, description: 'Open or locked, and why (P9-T4).' })
+  @ApiProperty({ type: MonthStateDto, description: 'Open or locked, and why.' })
   state!: MonthStateDto;
 }
 

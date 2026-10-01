@@ -113,6 +113,48 @@ describe('the OpenAPI document describes the API', () => {
     expect(Object.keys(document.paths['/api/v1/admin/impersonate/end'].post.responses)).not.toContain('201');
   });
 
+  /**
+   * 2026-10-01, the Phase 10.1 exit. ADR-0062 §3: a customer string names no phase, and an
+   * OpenAPI description is one — Swagger serves the document at `/api/docs` outside production.
+   * Twenty-three summaries and descriptions carried a task id in parentheses, which
+   * `check-docs.py` already counts as naming a phase in a manual. This walks the **whole**
+   * document rather than the operations alone, because a DTO's `description` lives under
+   * `components.schemas`, which is where most of them were.
+   */
+  it('names no phase in any summary, description, title or example (ADR-0062 §3)', () => {
+    const NAMES_A_PHASE = /\bP\d+(?:\.\d+)?-T\d+\b|\bphases?\s+\d|\blater\s+phase\b/i;
+    const SERVED = new Set(['summary', 'description', 'title', 'example', 'examples']);
+    const offending: string[] = [];
+
+    // Every string under a served key counts — an `example` may be an object.
+    const strings = (node: unknown, path: string): void => {
+      if (typeof node === 'string') {
+        const hit = NAMES_A_PHASE.exec(node);
+        if (hit) {
+          const from = Math.max(0, hit.index - 30);
+          offending.push(`${path}: …${node.slice(from, hit.index + hit[0].length + 10)}…`);
+        }
+      } else if (Array.isArray(node)) {
+        node.forEach((item, i) => strings(item, `${path}[${i}]`));
+      } else if (node && typeof node === 'object') {
+        for (const [key, value] of Object.entries(node)) strings(value, `${path}.${key}`);
+      }
+    };
+    const walk = (node: unknown, path: string): void => {
+      if (Array.isArray(node)) {
+        node.forEach((item, i) => walk(item, `${path}[${i}]`));
+      } else if (node && typeof node === 'object') {
+        for (const [key, value] of Object.entries(node)) {
+          if (SERVED.has(key)) strings(value, `${path}.${key}`);
+          else walk(value, `${path}.${key}`);
+        }
+      }
+    };
+
+    walk(document, '$');
+    expect(offending).toEqual([]);
+  });
+
   it('a 404 is described as indistinguishable from another tenant, wherever it appears', () => {
     // The invariant that makes cross-tenant probing useless. If the document explained it
     // on some routes and not others, an integrator would reasonably read the difference
