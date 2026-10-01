@@ -26,7 +26,7 @@ export type ActivationFeatureLink = (typeof ACTIVATION_FEATURE_LINKS)[number];
 export const ACTIVATION_TRAINING_LINK_PREFIX = 'training:';
 
 export interface ActivationLinkKind {
-  /** What the agent's screen calls it in *"Go to {label} →"* (P11-T4). */
+  /** What the agent's screen calls it in *"Go to {label} →"* (P13-T4). */
   readonly label: string;
   /** Where that link sends them. */
   readonly route: string;

@@ -40,7 +40,7 @@ export interface MemberTags {
  *
  * **Neither is hierarchy, and neither is access.** A group is a label an office puts on
  * people it wants to organise — a mentoring circle, a task force. Core Leader is a
- * separate label with exactly one consequence, and it arrives in Phase 14: who may
+ * separate label with exactly one consequence, and it arrives in Phase 18: who may
  * co-edit a Strategic Leader Forum minute (`KPM_Owner.html:2842`). Until then it is
  * stored and shown and does nothing, which is the honest state to be in.
  *

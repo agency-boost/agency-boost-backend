@@ -72,7 +72,7 @@ export interface KpmView {
   timezone: string;
   locale: string;
   currency: string;
-  /** 1–12. Stored and shown now; read by the period computations in Phase 14 (P4-T5). */
+  /** 1–12. Stored and shown now; read by the period computations in Phase 18 (P4-T5). */
   fiscalYearStartMonth: number;
   settings: Record<string, number>;
   status: 'active' | 'suspended' | 'archived';
@@ -973,7 +973,7 @@ export class TenantService {
    * overview already shows them read-only. `kpms.timezone` stays a real column and every
    * day boundary reads it — the thing that rule guards against is the *server's* clock.
    *
-   * The fiscal year start month is stored, displayed, and read by nobody until Phase 14.
+   * The fiscal year start month is stored, displayed, and read by nobody until Phase 18.
    * Writing it now costs nothing and means the first period computation does not have to
    * ask every office to go and set it.
    */

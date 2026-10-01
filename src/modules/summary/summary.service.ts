@@ -69,7 +69,7 @@ export interface SummaryView {
  * the office's production, the member's own log. Nothing is written here, and nothing is stored.
  *
  * **Your own, only.** `personal_summary:read` reaches further on the matrix, and a leader's view of a
- * downline's Summary is Phase 13's coaching copy; this route takes no subject.
+ * downline's Summary is Phase 11's coaching copy; this route takes no subject.
  */
 @Injectable()
 export class SummaryService {

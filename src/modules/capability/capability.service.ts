@@ -197,7 +197,7 @@ export class CapabilityService {
   /**
    * Which stage somebody is at, from what a leader has ticked (AC-6).
    *
-   * No route reads it: Phase 13's Leader Notes calls it when it renders an assessment, and an
+   * No route reads it: Phase 11's Leader Notes calls it when it renders an assessment, and an
    * endpoint nothing calls is the defect `backend-then-frontend.md` exists to prevent.
    */
   async stageFor(ctx: RequestContext, ticked: string[]): Promise<CapabilityStageView | null> {

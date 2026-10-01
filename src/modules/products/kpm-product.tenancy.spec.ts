@@ -196,7 +196,7 @@ describe('an office’s product decisions (P5-T5)', () => {
       const ctx = member(KPM_A);
       await write(ctx);
 
-      // Written, not approved. Phase 12 reads this and nothing else, which is what stops it
+      // Written, not approved. Phase 14 reads this and nothing else, which is what stops it
       // rendering an override nobody approved.
       const pending = await wired.kpmProducts.effectiveScript(ctx, mapanId);
       expect(pending.source).toBe('company');

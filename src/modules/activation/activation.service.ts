@@ -19,7 +19,7 @@ import {
 } from './activation-payload';
 import { ActivationTemplateRepository } from './activation.repository';
 
-/** What an item's link waits for, resolved — the one place Phase 11's *"Go to {label} →"* reads. */
+/** What an item's link waits for, resolved — the one place Phase 13's *"Go to {label} →"* reads. */
 export interface ActivationLinkView {
   kind: string;
   label: string;
@@ -71,7 +71,7 @@ export interface ActivationChecklistView {
  * An office's 90-day activation checklist (P5-T3).
  *
  * **A document with immutable versions, not rows.** A hire's `activationProgress` pins
- * `(templateId, templateVersion)` at creation (Phase 11), so the checklist somebody is working
+ * `(templateId, templateVersion)` at creation (Phase 13), so the checklist somebody is working
  * through cannot change under them. Editing writes a draft; publishing turns that draft into the
  * next version, which reaches hires who start after it and nobody else.
  *
@@ -143,7 +143,7 @@ export class ActivationService {
   /**
    * One published version, by number — what a hire's instance pins.
    *
-   * No route reads it: Phase 11 calls it when it renders somebody's activation, and an endpoint
+   * No route reads it: Phase 13 calls it when it renders somebody's activation, and an endpoint
    * nothing calls is the defect `backend-then-frontend.md` exists to prevent.
    */
   async findVersion(ctx: RequestContext, version: number): Promise<ActivationVersionView | null> {

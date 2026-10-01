@@ -1,4 +1,4 @@
-import { CAMPAIGN_EVALUATION_PHASE, METRIC_REGISTRY } from '@/domain/constants';
+import { CAMPAIGN_EVALUATION_PHASE, METRIC_REGISTRY, metricByKey } from '@/domain/constants';
 import { checkCampaign } from './campaign-input';
 
 const whole = (over: Record<string, unknown> = {}) => ({
@@ -127,6 +127,38 @@ describe('reading one campaign (P5-T7)', () => {
       expect(said).not.toMatch(/phase/i);
       // Nor a bare number after the metric's name. The *Requirement 1* before it is the row.
       expect(said.slice(said.indexOf(later!.name) + later!.name.length)).not.toMatch(/\d/);
+    });
+
+    it('accepts a coaching metric: coaching (Phase 11) precedes campaign evaluation (14) now (P10.1-T2 AC-7)', () => {
+      /*
+       * Decided, not inherited. The 2026-09-29 re-plan brought coaching forward from the old
+       * plan's 13 to 11 and campaigns from 12 to 14, so these six are measured by the time a
+       * campaign is evaluated. Under the old numbers each was refused as not measured yet.
+       * `registry.spec.ts` pins the whole set and the difference; this proves the refusal reads it.
+       */
+      const coaching = [
+        'COACHED_7D', 'COACHED_30D', 'DAYS_SINCE_LAST_COACHING', 'COACHING_COVERAGE', 'GOAL_PACE_STATUS', 'PACING_TO_MAA',
+      ];
+      for (const metricKey of coaching) {
+        const read = checkCampaign(whole({ requirements: [{ metricKey, comparator: 'gte', value: 1 }] }));
+        expect(read.requirements![0]).toMatchObject({ metricKey, unit: metricByKey(metricKey)!.unit });
+      }
+    });
+
+    it('still refuses the seven nothing measures by then, each by its name', () => {
+      // The unit rollups (Phase 15) and the Owner's reporting metrics (18): refused before the
+      // phases moved, refused after. Nothing but the coaching six changed sides.
+      const refused = [
+        'MAA_COUNT_IN_UNIT', 'ACTIVITY_COMPLIANCE_RATE', 'LEADER_COACHING_FREQUENCY',
+        'EVENT_ATTENDANCE_RATE', 'EVENT_NPS', 'MOC_STATUS', 'PRODUCTION_CLUB_TIER',
+      ];
+      for (const metricKey of refused) {
+        expect(refusal(whole({ requirements: [{ metricKey, comparator: 'gte', value: 1 }] })))
+          .toContain(`${metricByKey(metricKey)!.name} is not measured yet`);
+      }
+      // And those are all of them: the refusal and `GET /metrics` draw the same line.
+      expect(METRIC_REGISTRY.filter((m) => m.phase > CAMPAIGN_EVALUATION_PHASE).map((m) => m.key).sort())
+        .toEqual([...refused].sort());
     });
 
     it('collects every violation rather than stopping at the first', () => {

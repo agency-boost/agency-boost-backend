@@ -76,6 +76,9 @@ describe('campaigns and carrier rules (P5-T7)', () => {
     it('refuses a metric nothing measures yet, saying so and naming no phase', async () => {
       // Accepting it would be a campaign nobody could ever qualify for, failing silently. The
       // Owner reads the refusal, so it says what is true now, not our schedule (P10.1-T2 AC-3).
+      // Event NPS is the Owner's reporting metric (Phase 18), after campaign evaluation (14): it
+      // was refused under the old plan's numbers and is refused still (P10.1-T2 AC-7 — the set
+      // itself is pinned by key in `registry.spec.ts`).
       await expect(wired.campaigns.create(member(KPM_A), aCampaign({
         requirements: [{ metricKey: 'EVENT_NPS', comparator: 'gte', value: 50 }],
       }))).rejects.toThrow(/Event NPS is not measured yet, so a campaign asking for it could never qualify anybody/);

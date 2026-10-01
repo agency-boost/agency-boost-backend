@@ -233,7 +233,7 @@ describe('logging a day over HTTP (P6)', () => {
       await request(app.getHttpServer()).get(`${url}/ratios`).expect(403);
     });
 
-    it('has no way to name whose ratios are read — a leader’s view of a downline is Phase 13’s', async () => {
+    it('has no way to name whose ratios are read — a leader’s view of a downline is Phase 11’s', async () => {
       const res = await request(app.getHttpServer()).get(`${url}/ratios`)
         .query({ membershipId: 'somebody-else' }).expect(400);
       expect(res.body.error.details.violations)

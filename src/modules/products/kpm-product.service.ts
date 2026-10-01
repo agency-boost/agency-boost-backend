@@ -357,7 +357,7 @@ export class KpmProductService {
   /**
    * The script an agent is actually served (AC-5).
    *
-   * **Phase 12 reads this and nothing else**, which is what stops it bypassing the gate: an
+   * **Phase 14 reads this and nothing else**, which is what stops it bypassing the gate: an
    * override that is `pending` or `rejected` is not in the answer at all, so a caller cannot
    * accidentally render one by reading the wrong field.
    *

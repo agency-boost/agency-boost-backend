@@ -84,7 +84,7 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
     await request(app.getHttpServer()).get('/summary').expect(403);
   });
 
-  it('has no way to name whose Summary is read — a leader’s view of a downline is Phase 13’s', async () => {
+  it('has no way to name whose Summary is read — a leader’s view of a downline is Phase 11’s', async () => {
     const res = await request(app.getHttpServer()).get('/summary').query({ membershipId: 'somebody-else' }).expect(400);
     expect(res.body.error.details.violations).toEqual(expect.arrayContaining([expect.stringContaining('membershipId')]));
   });

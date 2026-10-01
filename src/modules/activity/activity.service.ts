@@ -386,7 +386,7 @@ export class ActivityService {
    * apply is left out of the answer altogether — hidden, never shown as failed. The subject's rung,
    * not the reader's: a leader reading a downline reads the downline's ratios.
    *
-   * **Your own, only**, as the Dashboard is. A leader reading a downline's ratios is Phase 13's coaching
+   * **Your own, only**, as the Dashboard is. A leader reading a downline's ratios is Phase 11's coaching
    * copy; Goal Settings' measured line (P10-T9) is two metrics of its own over the goal's cascade codes
    * (ADR-0055), not these — so a subject parameter here would be one nothing calls.
    */

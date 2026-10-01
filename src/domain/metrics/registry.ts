@@ -16,7 +16,8 @@ import { METRIC_REGISTRY as SERVED, type MetricUnit } from '@/domain/constants/m
  *
  * **Most of these cannot be computed yet**, and that is deliberate rather than premature.
  * `MONTHLY_ACTIVE_AGENT` needs the production upload (Phase 9); `COACHED_7D` needs coaching
- * sessions (Phase 13). Declaring them now means the phase that builds one binds to a
+ * sessions (Phase 11 — the old plan's 13, moved by the 2026-09-29 crosswalk in P10.1-T2 AC-6).
+ * Declaring them now means the phase that builds one binds to a
  * definition already agreed, instead of inventing a fourth "active agent" and discovering
  * the conflict in review.
  *
@@ -54,8 +55,9 @@ export interface MetricDefinition {
    * The phase that first computes it for real — the served list's, and the document's index.
    *
    * This was `availableFrom`, *the earliest phase whose data makes it computable*, beside a served
-   * `phase` meaning the other thing: `PACING_TO_MAA` was 8 here and 13 there, and a campaign asking
-   * which is true got the answer from whichever list it happened to read.
+   * `phase` meaning the other thing: `PACING_TO_MAA` was 8 here and 13 there (the old plan's
+   * coaching phase; 11 since P10.1-T2 AC-6), and a campaign asking which is true got the answer
+   * from whichever list it happened to read.
    */
   readonly phase: number;
 }

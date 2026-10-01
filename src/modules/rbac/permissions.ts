@@ -179,7 +179,7 @@ export const PERMISSIONS = {
    * entirely for anybody without this, rather than sending it and hiding it on screen.
    *
    * The matrix also gives it to the Owner, the Admin and — for the people they lead — a leader.
-   * Those wait for P5-T5 and Phase 12, where an office and an agent can read a product at all;
+   * Those wait for P5-T5 and Phase 14, where an office and an agent can read a product at all;
    * `permissions.spec.ts` records each with the phase that settles it.
    */
   'commission_rates:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
@@ -338,7 +338,7 @@ export const PERMISSIONS = {
   ],
   /*
    * The Personal Summary (P10-T4). The matrix's grant, whole; the route is first-person today, and a
-   * leader's view of a downline's is Phase 13's coaching copy.
+   * leader's view of a downline's is Phase 11's coaching copy.
    */
   'personal_summary:read': [
     { grantee: SUPER_ADMIN, scope: 'all' },
@@ -433,7 +433,7 @@ export const PERMISSIONS = {
    * production. Minimisation has nothing to bite on here.
    *
    * The AB/AAB grant is the **coaching** grant: the Coaching Session mounts a writable replica of
-   * the coachee's Goal Settings (Phase 13). A leader saves directly and the goal carries their name
+   * the coachee's Goal Settings (Phase 11). A leader saves directly and the goal carries their name
    * (ADR-0046).
    */
   'goal:read': [

@@ -9,7 +9,7 @@
  * and the copies have diverged, so this takes each field from the file that owns it, by the rule in
  * `prototype-sources.md`: `Sales_Catalog.html` for the catalog's own content and order — it carries
  * the fuller benefits and prose — and the age and budget bands from the copy in `Overall.html`,
- * which Phase 12's fit check reads. The bands are the one place the copies disagree in **meaning**:
+ * which Phase 14's fit check reads. The bands are the one place the copies disagree in **meaning**:
  * `Overall.html` scores budget on seven bands and `Sales_Attack_Plan.html` on five, where its
  * fourth band swallows three of the other's. The seven-band scale is the one the ERD and the flow
  * doc record, and it keeps a distinction the coarser one throws away — an affluent product and a
@@ -86,7 +86,7 @@ export const SCRIPT_OVERRIDE_FIELDS = OVERRIDABLE_PRODUCT_FIELDS.filter((f) => f
 export const PRODUCT_LIFECYCLES = ['active', 'closed_to_new_business', 'withdrawn'] as const;
 export type ProductLifecycle = (typeof PRODUCT_LIFECYCLES)[number];
 
-/** The five age bands and the seven budget bands the fit check scores against (Phase 12). */
+/** The five age bands and the seven budget bands the fit check scores against (Phase 14). */
 export const PRODUCT_AGE_BANDS = [1, 2, 3, 4, 5] as const;
 export const PRODUCT_BUDGET_BANDS = [1, 2, 3, 4, 5, 6, 7] as const;
 

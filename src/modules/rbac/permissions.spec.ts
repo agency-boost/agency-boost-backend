@@ -124,10 +124,10 @@ describe('permission matrix', () => {
       'commission_rates:read/KPM_OWNER': 'P5-T5 shipped the office\'s product read and did **not** '
         + 'carry the commission schedule: `KpmProductView` has no such field, so the grant still '
         + 'has no route exercising it. That fails closed — an Owner cannot see rates anywhere — '
-        + 'and the reader is Phase 12\'s member-scoped read (ADR-0038), not a catalog task.',
+        + 'and the reader is Phase 14\'s member-scoped read (ADR-0038), not a catalog task.',
       'commission_rates:read/KPM_ADMIN': 'as KPM_OWNER',
       'commission_rates:read/AB': 'as KPM_OWNER — and a leader reads the rates of the people they '
-        + 'lead (ADR-0038), which needs the member-scoped read Phase 12 builds',
+        + 'lead (ADR-0038), which needs the member-scoped read Phase 14 builds',
       'commission_rates:read/AAB': 'as AB',
       'commission_rates:read/AGENT': 'as KPM_OWNER',
     };

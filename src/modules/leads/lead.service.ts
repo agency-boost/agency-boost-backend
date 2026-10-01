@@ -213,7 +213,7 @@ export class LeadService {
      *
      * Optional, and honoured whenever it is sent. The screen always sends it; a second writer
      * that forgets is unprotected, which is an argument for making it required once there is a
-     * second writer — the coaching session, in Phase 13.
+     * second writer — the coaching session, in Phase 11.
      */
     if (pinned !== undefined && pinned !== lead.version) {
       throw new VersionConflictException(pinned, lead.version);

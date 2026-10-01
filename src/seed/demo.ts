@@ -1143,7 +1143,7 @@ async function main(): Promise<void> {
       { $addToSet: { groupIds: String(group._id) } },
     ).exec();
   }
-  // Core Leader gates Leader Forum co-editing (Phase 14) and nothing else.
+  // Core Leader gates Leader Forum co-editing (Phase 18) and nothing else.
   await Memberships.updateMany(
     { _id: { $in: [ab.id, sari.id] } },
     { $set: { isCoreLeader: true } },

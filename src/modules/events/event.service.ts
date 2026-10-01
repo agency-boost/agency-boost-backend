@@ -56,7 +56,7 @@ export interface EventView {
 /**
  * The events an office runs (P5-T6, ADR-0034).
  *
- * **Nothing per-person lives here** (AC-6). RSVP, attendance and feedback are Phase 12's, each its
+ * **Nothing per-person lives here** (AC-6). RSVP, attendance and feedback are Phase 14's, each its
  * own per-member record — the prototype keeps all three on the shared event object, so with two
  * users the second overwrites the first's RSVP and reads the first's feedback as their own.
  */

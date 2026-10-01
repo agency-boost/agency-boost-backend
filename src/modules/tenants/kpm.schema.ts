@@ -107,7 +107,7 @@ export class Kpm {
   /**
    * The month the office's financial year starts, 1–12 (P4-T5).
    *
-   * Stored and displayed now; **read by nobody until Phase 14**. Writing it here costs
+   * Stored and displayed now; **read by nobody until Phase 18**. Writing it here costs
    * nothing and means the first period computation does not have to go back and ask every
    * office to set it. January by default, which is what every office in v1 uses.
    */

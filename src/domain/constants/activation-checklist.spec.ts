@@ -158,7 +158,7 @@ describe('the link registry (P5-T3 AC-7)', () => {
   });
 
   it('stops letting anybody tick it the moment that kind goes live', () => {
-    // The flag flips in Phase 11, and this is the rule that has to follow it. Flipped here
+    // The flag flips in Phase 13, and this is the rule that has to follow it. Flipped here
     // rather than asserted in prose, so the day somebody sets `live` the behaviour is proven.
     jest.replaceProperty(ACTIVATION_LINK_KINDS['feature:goals'] as { live: boolean }, 'live', true);
 
