@@ -20,7 +20,6 @@ const COMPANY = '66f0000000000000000000c1';
 /** Every route, and the permission it must declare (§3.6). */
 const ROUTES: Record<string, string> = {
   read: 'goal:read',
-  history: 'goal:read',
   save: 'goal:update',
 };
 
@@ -171,22 +170,14 @@ describe('goals over HTTP (P8-T3)', () => {
     });
   });
 
-  describe('every plan agreed for a period (P8-T6)', () => {
-    it('answers an empty list when there is no plan', async () => {
-      const res = await http().get(`${url}/history`).expect(200);
-
-      expect(res.body).toEqual([]);
-    });
-
-    it('answers newest first, the current one included', async () => {
+  describe('every plan agreed for a period — retired (P10.1-T6 AC-10)', () => {
+    it('answers 404: the prototype draws no goal history, so no screen reads one', async () => {
       await http().put(url).send(plan({ annualApeTargetMinor: 300_000_000_00 })).expect(200);
       await http().put(url).send(plan({ annualApeTargetMinor: 500_000_000_00 })).expect(200);
 
-      const res = await http().get(`${url}/history`).expect(200);
-
-      expect(res.body.map((e: { version: number }) => e.version)).toEqual([2, 1]);
-      expect(res.body[0].annualApeTargetMinor).toBe(500_000_000_00);
-      expect(res.body[1].annualApeTargetMinor).toBe(300_000_000_00);
+      await http().get(`${url}/history`).expect(404);
+      // The plan itself still reads; its stored versions are pinned in goal.tenancy.spec.ts (ADR-0042).
+      expect((await http().get(url).expect(200)).body.annualApeTargetMinor).toBe(500_000_000_00);
     });
   });
 

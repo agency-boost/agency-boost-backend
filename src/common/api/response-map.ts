@@ -6,7 +6,7 @@ import {
 } from '@/modules/auth/session.response.dto';
 import { InboxDto, InboxItemDto } from '@/modules/notifications/notification.response.dto';
 import { DeletedLeadDto, LeadPageDto, LeadResponseDto } from '@/modules/leads/lead.response.dto';
-import { GoalHistoryEntryDto, GoalResponseDto } from '@/modules/goals/goal.response.dto';
+import { GoalResponseDto } from '@/modules/goals/goal.response.dto';
 import {
   CorrectionResultDto, HistoryDto, ImportResultDto, MonthStateDto, MonthViewDto, TemplateFileDto,
   UploadPreviewDto,
@@ -132,7 +132,6 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_setLateStage: { type: LeadStatusDto },
   GoalController_read: { type: GoalResponseDto },
   GoalController_save: { type: GoalResponseDto },
-  GoalController_history: { type: GoalHistoryEntryDto, isArray: true },
   ProductionController_readMonth: { type: MonthViewDto },
   ProductionController_template: { type: TemplateFileDto },
   ProductionController_preview: { type: UploadPreviewDto },

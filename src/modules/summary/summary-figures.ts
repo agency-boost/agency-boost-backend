@@ -185,21 +185,38 @@ export function activityTargets(
 export interface ShownSection {
   code: string;
   label: string;
+  /**
+   * The summary tile the section counts toward (ADR-0064), or none: a section with a tile of its own
+   * carries neither field. Both or neither — the settings write refuses one alone.
+   */
+  summaryGroupCode?: string | null;
+  summaryGroupLabel?: string | null;
   types: { code: string; label: string; status: 'active' | 'archived' }[];
 }
 
 export interface SectionChip {
+  /** The tile's group code, or the section's own code when it has a tile of its own. */
   code: string;
+  /** The group's label, or the section's own — the screen adds *activities*. */
   label: string;
-  /** `ACTIVITY_TOTAL_BY_CATEGORY` over the period — the rows below add up to it. */
+  /** `ACTIVITY_TOTAL_BY_CATEGORY` over the period, summed over the tile's sections — the rows add up to it. */
   total: number;
   rows: { code: string; label: string; count: number }[];
 }
 
 /**
- * **One chip per other section the reader is shown** (P10-T5 AC-2) — every section holding none of the
- * cascade's three codes, which the target chips already count. The prototype's two, *Recruitment* and
- * *Development*, are three on v1's seed: one tile per section (OD-63, I-117).
+ * **One chip per summary tile the reader is shown** (ADR-0064, P10.1-T6 AC-5), less the tiles holding
+ * any of the cascade's three codes, which the target chips already count. On the seed that is the
+ * prototype's two, *Recruitment activities* and *Development activities* (`Overall.html:3164-3183`):
+ * Personal and Team Development share the tile `DEVELOPMENT`.
+ *
+ * - **A tile is the sections sharing a `summaryGroupCode`**, labelled by the group; a section with
+ *   neither field is a tile of its own, under its own label, so a section an office adds is always
+ *   counted somewhere. The grouping is presentation: it moves a count between chips and never
+ *   changes one.
+ * - **A tile sits where its first section sits** — `sections` arrive in the office's order.
+ * - **A tile is excluded whole** when any of its sections holds a cascade code, as a section was
+ *   before there were tiles.
  *
  * A type the office archived stays as a row while the period holds a count against it, so the chip's rows
  * add up to its total; one with nothing in the period is gone, as it is from the log screen.
@@ -207,13 +224,30 @@ export interface SectionChip {
 export function sectionChips(
   sections: readonly ShownSection[], counts: ReadonlyMap<string, number>, cascadeCodes: readonly string[],
 ): SectionChip[] {
-  return sections
-    .filter((section) => !section.types.some((type) => cascadeCodes.includes(type.code)))
-    .map((section) => {
-      const rows = section.types
+  // A `Map` keeps insertion order: each tile's first section. Keys are prefixed because a section's own
+  // code may equal another section's group code, and the two are different tiles.
+  const tiles = new Map<string, { code: string; label: string; sections: ShownSection[] }>();
+  for (const section of sections) {
+    const group = section.summaryGroupCode?.trim() || null;
+    const key = group ? `group:${group}` : `own:${section.code}`;
+    const tile = tiles.get(key);
+    if (tile) tile.sections.push(section);
+    else {
+      tiles.set(key, {
+        code: group ?? section.code,
+        label: (group && section.summaryGroupLabel?.trim()) || section.label,
+        sections: [section],
+      });
+    }
+  }
+  return [...tiles.values()]
+    .filter((tile) => !tile.sections.some((section) => section.types.some((type) => cascadeCodes.includes(type.code))))
+    .map((tile) => {
+      const rows = tile.sections
+        .flatMap((section) => section.types)
         .filter((type) => type.status === 'active' || (counts.get(type.code) ?? 0) > 0)
         .map((type) => ({ code: type.code, label: type.label, count: counts.get(type.code) ?? 0 }));
-      return { code: section.code, label: section.label, total: rows.reduce((n, row) => n + row.count, 0), rows };
+      return { code: tile.code, label: tile.label, total: rows.reduce((n, row) => n + row.count, 0), rows };
     });
 }
 

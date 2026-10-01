@@ -3,14 +3,15 @@ import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@ne
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { SaveGoalDto } from './goal.dto';
-import { GoalHistoryEntryDto, GoalResponseDto } from './goal.response.dto';
+import { GoalResponseDto } from './goal.response.dto';
 import { GoalService } from './goal.service';
 
 /**
  * An agent's agreed plan for a period (P8-T3).
  *
- * **Two routes, one screen.** Both are called by `/goals`; the history a period list would feed is
- * P8-T6's, and it arrives with the screen that reads it rather than waiting here for one.
+ * **Two routes, one screen.** Both are called by `/goals`. `GET /goals/:period/history` was retired
+ * by P10.1-T6 with the card that read it: the prototype draws no goal history, so no screen would
+ * call it again. The stored revisions keep every version and who saved it (ADR-0042).
  *
  * **`PUT`, not `PATCH`.** The five cards are one plan — a case size that changes without the
  * conversion rates beside it is not a partial edit, it is a different plan — and the screen sends
@@ -47,30 +48,6 @@ export class GoalController {
     @Query('for') forMembershipId?: string,
   ) {
     return this.goals.readOrDefaults(ctx, period, forMembershipId);
-  }
-
-  /**
-   * **Before `:period` would not help here** — `history` is a second path segment, not a
-   * competing one — but it is declared beside its sibling so a reader finds both in one place.
-   */
-  @Get(':period/history')
-  @RequirePermission('goal:read')
-  @ApiOperation({
-    summary: 'Every plan agreed for a period',
-    description:
-      'Newest first, the current one included. **Whole states, not diffs**: what changed is '
-      + 'derived from two of them by whoever renders it, and a reader who wants only *what did we '
-      + 'agree in January* gets it without reconstructing anything (ADR-0042). Empty when there is '
-      + 'no plan for the period.',
-  })
-  @ApiQuery({ name: 'for', required: false, description: 'Somebody your grant reaches (§3.6).' })
-  @ApiResponse({ status: 200, type: GoalHistoryEntryDto, isArray: true })
-  async history(
-    @Ctx() ctx: RequestContext,
-    @Param('period') period: string,
-    @Query('for') forMembershipId?: string,
-  ) {
-    return this.goals.history(ctx, period, forMembershipId);
   }
 
   @Put(':period')

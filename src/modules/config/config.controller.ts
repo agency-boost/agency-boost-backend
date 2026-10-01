@@ -79,7 +79,8 @@ export class TenantConfigController {
       + 'separate act. The summary tiles (ADR-0064) are checked against the state the '
       + '**whole batch** leaves, so a tile of two sections is renamed in one request: '
       + 'two sections of one tile left with different labels is '
-      + '`422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`.',
+      + '`422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`, and a shared tile whose code a section '
+      + 'outside it carries is `422 CONFIG_SUMMARY_GROUP_CODE_TAKEN`.',
   })
   async applyChanges(@Ctx() ctx: RequestContext, @Body() dto: ApplyConfigChangesDto) {
     return this.changes.apply(ctx, dto.ops);
@@ -92,7 +93,9 @@ export class TenantConfigController {
     description:
       'Appended, never inserted. `summaryGroupCode` and `summaryGroupLabel` put it in a '
       + 'summary tile (ADR-0064) — both or neither; neither is a tile of its own. Joining a '
-      + 'tile under a label its sections do not carry is `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`.',
+      + 'tile under a label its sections do not carry is `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`; '
+      + 'a code that is already a shared tile\'s, outside that tile, is '
+      + '`422 CONFIG_SUMMARY_GROUP_CODE_TAKEN`.',
   })
   async createCategory(@Ctx() ctx: RequestContext, @Body() dto: CreateActivityCategoryDto) {
     return this.activity.createCategory(ctx, dto);
@@ -122,7 +125,8 @@ export class TenantConfigController {
       + 'section would lose. `summaryGroupCode` and `summaryGroupLabel` travel together, and '
       + '`null` on both gives the section a tile of its own (ADR-0064); a label its tile\'s '
       + 'other sections do not carry is `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH` — rename a '
-      + 'shared tile through `POST /kpm/settings/changes`, in one batch.',
+      + 'shared tile through `POST /kpm/settings/changes`, in one batch — and joining a tile '
+      + 'whose code another section carries is `422 CONFIG_SUMMARY_GROUP_CODE_TAKEN`.',
   })
   async updateCategory(
     @Ctx() ctx: RequestContext,

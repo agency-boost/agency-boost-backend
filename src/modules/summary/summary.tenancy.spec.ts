@@ -318,7 +318,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       expect(chips((await wired.summary.read(agent())).activity.monthly).appointments.logged).toBe(4);
     });
 
-    it('AC-2: one chip per other section, with its total, its rows, and the total across every category', async () => {
+    it('AC-2, P10.1-T6 AC-5: one chip per other summary tile — the seed’s two — with its total, its rows, and the total across every category', async () => {
       await day('2026-09-03', { RECRUIT_PRESENTATION: 3, RECRUIT_FOLLOWUP: 2, DEV_TRAINING_ATTEND: 1, SELL_SUBMISSION: 1 });
       await day('2026-09-10', { RECRUIT_AGENT_CODE: 1, DEV_TEAM_ACTIVITY: 4, LEADS_NEW_PROSPECT: 6 });
 
@@ -326,14 +326,37 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       const sections = view.activity.monthly.sections;
 
       // Leads Generation and Selling hold the cascade's codes, so the three target chips stand for them.
-      expect(sections.map((s) => [s.code, s.total])).toEqual([
-        ['RECRUITMENT', 6], ['PERSONAL_DEVELOPMENT', 1], ['TEAM_DEVELOPMENT', 4],
+      // Personal and Team Development share the tile DEVELOPMENT (ADR-0064): the prototype's two chips.
+      expect(sections.map((s) => [s.code, s.label, s.total])).toEqual([
+        ['RECRUITMENT', 'Recruitment', 6], ['DEVELOPMENT', 'Development', 5],
       ]);
       expect(sections[0].rows.map((r) => [r.code, r.count])).toEqual([
         ['RECRUIT_PRESENTATION', 3], ['RECRUIT_FOLLOWUP', 2], ['RECRUIT_AGENT_CODE', 1],
       ]);
-      expect(sections[1].rows.map((r) => r.code)).toEqual(['DEV_TRAINING_ATTEND', 'DEV_COACHING_RECEIVED']);
+      expect(sections[1].rows.map((r) => [r.code, r.count])).toEqual([
+        ['DEV_TRAINING_ATTEND', 1], ['DEV_COACHING_RECEIVED', 0], ['DEV_TEAM_ACTIVITY', 4],
+      ]);
+      expect(view.activity.yearly.sections.map((s) => s.code)).toEqual(['RECRUITMENT', 'DEVELOPMENT']);
       expect(view.activity.monthly.total).toBe(18);
+    });
+
+    it('P10.1-T6 AC-5: a tile counts only the sections this rung is shown, and a section left ungrouped is a chip of its own', async () => {
+      await mongoose.connection.db!.collection('activityCategories').updateOne(
+        { code: 'TEAM_DEVELOPMENT' }, { $set: { appliesToOrgLevelCodes: ['AB', 'AAB'] } },
+      );
+      await day('2026-09-03', { DEV_TRAINING_ATTEND: 2, DEV_TEAM_ACTIVITY: 4 });
+
+      const asAgent = (await wired.summary.read(agent())).activity.monthly.sections;
+      expect(asAgent.find((s) => s.code === 'DEVELOPMENT')).toMatchObject({ label: 'Development', total: 2 });
+
+      await mongoose.connection.db!.collection('activityCategories').updateMany(
+        { code: { $in: ['PERSONAL_DEVELOPMENT', 'TEAM_DEVELOPMENT'] } },
+        { $set: { summaryGroupCode: null, summaryGroupLabel: null, appliesToOrgLevelCodes: [] } },
+      );
+      const ungrouped = (await wired.summary.read(agent())).activity.monthly.sections;
+      expect(ungrouped.map((s) => [s.code, s.label, s.total])).toEqual([
+        ['RECRUITMENT', 'Recruitment', 0], ['PERSONAL_DEVELOPMENT', 'Personal Development', 2], ['TEAM_DEVELOPMENT', 'Team Development', 4],
+      ]);
     });
 
     it('AC-2: shows no chip for a section the office keeps from this rung (ADR-0020)', async () => {
@@ -345,7 +368,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       const asAgent = await wired.summary.read(agent());
       const asLeader = await wired.summary.read(agent({ orgLevelCode: 'AB', hierarchyRole: 'ab' }));
 
-      expect(asAgent.activity.monthly.sections.map((s) => s.code)).toEqual(['PERSONAL_DEVELOPMENT', 'TEAM_DEVELOPMENT']);
+      expect(asAgent.activity.monthly.sections.map((s) => s.code)).toEqual(['DEVELOPMENT']);
       // The total is every category's, so a history the reader is not shown still adds up.
       expect(asAgent.activity.monthly.total).toBe(3);
       expect(asLeader.activity.monthly.sections.map((s) => s.code)).toContain('RECRUITMENT');
@@ -358,7 +381,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
       const sections = (await wired.summary.read(agent({ orgLevelCode: null }))).activity.monthly.sections;
 
-      expect(sections.map((s) => s.code)).toEqual(['PERSONAL_DEVELOPMENT', 'TEAM_DEVELOPMENT']);
+      expect(sections.map((s) => s.code)).toEqual(['DEVELOPMENT']);
     });
 
     it('AC-2: keeps an archived type’s row while the period holds a count against it, and drops it after', async () => {
@@ -367,13 +390,13 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       await wired.activity.archiveType(owner(), type.id);
 
       const view = await wired.summary.read(agent());
-      const development = view.activity.monthly.sections.find((s) => s.code === 'PERSONAL_DEVELOPMENT')!;
+      const development = view.activity.monthly.sections.find((s) => s.code === 'DEVELOPMENT')!;
       expect(development).toMatchObject({ total: 2 });
-      expect(development.rows.map((r) => r.code)).toEqual(['DEV_TRAINING_ATTEND', 'DEV_COACHING_RECEIVED']);
+      expect(development.rows.map((r) => r.code)).toEqual(['DEV_TRAINING_ATTEND', 'DEV_COACHING_RECEIVED', 'DEV_TEAM_ACTIVITY']);
 
       at('2026-10-14T02:00:00Z'); // a month on: nothing logged against it this month
-      const later = (await wired.summary.read(agent())).activity.monthly.sections.find((s) => s.code === 'PERSONAL_DEVELOPMENT')!;
-      expect(later.rows.map((r) => r.code)).toEqual(['DEV_TRAINING_ATTEND']);
+      const later = (await wired.summary.read(agent())).activity.monthly.sections.find((s) => s.code === 'DEVELOPMENT')!;
+      expect(later.rows.map((r) => r.code)).toEqual(['DEV_TRAINING_ATTEND', 'DEV_TEAM_ACTIVITY']);
     });
 
     it('reads its own office’s sections and days — another office’s names and counts do not reach it', async () => {

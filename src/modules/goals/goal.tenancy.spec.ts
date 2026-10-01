@@ -422,63 +422,63 @@ describe('the goal record (P8-T1)', () => {
       await expect(save(A(), { period: '2025' })).resolves.toMatchObject({ period: '2025' });
     });
 
+    /*
+     * P10.1-T6 AC-10 retired `GET /goals/:period/history` and the service read behind it: the
+     * prototype draws no goal history, so nothing read it. **The stored revisions are untouched**
+     * (ADR-0042), so what these pin is the document itself.
+     */
     it('AC-2: re-planning keeps the plan it replaced, whole', async () => {
       const first = await save(A(), { annualApeTargetMinor: 300_000_000_00, monthsLeft: 5 });
-      await save(A(), { annualApeTargetMinor: 500_000_000_00, monthsLeft: 5 });
+      const now = await save(A(), { annualApeTargetMinor: 500_000_000_00, monthsLeft: 5 });
 
-      const history = await wired.goals.history(A(), '2026');
+      const row = await stored(now.id);
 
-      expect(history).toHaveLength(2);
-      expect(history[0]).toMatchObject({ version: 2, annualApeTargetMinor: 500_000_000_00 });
-      expect(history[1]).toMatchObject({ version: 1, annualApeTargetMinor: 300_000_000_00 });
+      expect(row).toMatchObject({ version: 2, annualApeTargetMinor: 500_000_000_00 });
+      expect(row!.revisions).toHaveLength(1);
+      expect(row!.revisions[0]).toMatchObject({ version: 1, annualApeTargetMinor: 300_000_000_00 });
       // Whole states, so the replaced plan's own figures are readable without reconstruction.
-      expect(history[1].snapshot.monthlyApeTargetMinor).toBe(60_000_000_00);
+      expect(row!.revisions[0].snapshot.monthlyApeTargetMinor).toBe(60_000_000_00);
       expect(first.snapshot.monthlyApeTargetMinor).toBe(60_000_000_00);
     });
 
-    it('AC-2: keeps every one, not only the last', async () => {
+    it('AC-2: keeps every one, not only the last, oldest first', async () => {
+      let id = '';
       for (const target of [100, 200, 300, 400]) {
-        await save(A(), { annualApeTargetMinor: target * 1_000_000_00 });
+        id = (await save(A(), { annualApeTargetMinor: target * 1_000_000_00 })).id;
       }
 
-      const history = await wired.goals.history(A(), '2026');
+      const row = await stored(id);
 
-      expect(history.map((h) => h.version)).toEqual([4, 3, 2, 1]);
+      expect(row!.version).toBe(4);
+      expect(row!.revisions.map((r: { version: number }) => r.version)).toEqual([1, 2, 3]);
     });
 
     it('AC-3: says who agreed each one', async () => {
-      const history = await wired.goals.history(A(), '2026');
-      expect(history).toEqual([]);
-
       await save(A());
-      const [only] = await wired.goals.history(A(), '2026');
+      const goal = await save(A(), { caseSizeMinor: 9_000_000_00 });
 
-      expect(only.byMembershipId).toBe('mem-a1');
-      // No user row for this fixture membership, so the name is absent rather than invented.
-      expect(only.byName).toBeNull();
+      const row = await stored(goal.id);
+
+      expect(row!.savedByMembershipId).toBe('mem-a1');
+      expect(row!.revisions[0]).toMatchObject({ byMembershipId: 'mem-a1', at: NOW });
     });
 
     it('AC-3: carries enough to say what changed, without storing a diff', async () => {
       await save(A(), { annualApeTargetMinor: 300_000_000_00, caseSizeMinor: 18_000_000_00 });
-      await save(A(), { annualApeTargetMinor: 300_000_000_00, caseSizeMinor: 9_000_000_00 });
+      const goal = await save(A(), { annualApeTargetMinor: 300_000_000_00, caseSizeMinor: 9_000_000_00 });
 
-      const [now, before] = await wired.goals.history(A(), '2026');
+      const row = await stored(goal.id);
+      const [before] = row!.revisions;
 
       // A reader compares two whole states; nothing had to decide in advance what was worth
       // recording (ADR-0042).
       expect(before.caseSizeMinor).toBe(18_000_000_00);
-      expect(now.caseSizeMinor).toBe(9_000_000_00);
-      expect(now.annualApeTargetMinor).toBe(before.annualApeTargetMinor);
+      expect(row!.caseSizeMinor).toBe(9_000_000_00);
+      expect(row!.annualApeTargetMinor).toBe(before.annualApeTargetMinor);
     });
 
-    it('answers an empty history for a period with no plan', async () => {
-      expect(await wired.goals.history(A(), '2026')).toEqual([]);
-    });
-
-    it('does not let one office read another’s history', async () => {
-      await save(A());
-
-      expect(await wired.goals.history(B(), '2026')).toEqual([]);
+    it('P10.1-T6 AC-10: the service no longer offers a history read', () => {
+      expect((wired.goals as unknown as Record<string, unknown>).history).toBeUndefined();
     });
   });
 

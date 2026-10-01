@@ -95,22 +95,6 @@ export interface GoalRevisionInputs {
 }
 
 /**
- * One plan that was agreed, current or replaced (P8-T6).
- *
- * **Whole states, newest first.** What changed between two of them is derived by whoever renders
- * it; storing a diff would only be readable against a base the reader still has, and the point of
- * keeping these is that a leader who coached against January's plan can read January's plan.
- */
-export interface GoalHistoryEntry extends GoalRevisionInputs {
-  version: number;
-  at: string | null;
-  byMembershipId: string | null;
-  /** `null` when the membership resolves to nobody — a person who has since left the office. */
-  byName: string | null;
-  snapshot: GoalSnapshotView;
-}
-
-/**
  * **The APE the plan is measured against, and whose figure it is** (P9-T6, ADR-0008).
  *
  * The carrier's year-to-date figure for the latest month the office holds one — imported, or
@@ -225,7 +209,7 @@ export class GoalService {
   /**
    * **The subject's counts over the last 30 days** (ADR-0055) — `ROLLING_30D`, the ratio window, ending
    * today in the office's timezone. Fetched once per request and read against each goal's own codes,
-   * so a history of several periods costs one query.
+   * so `list`, over every period, costs one query.
    */
   private async activityFor(ctx: RequestContext, membershipId: string, day: OfficeDay): Promise<ActivityWindow> {
     const window = rollingWindow(day.today, PERIOD.ROLLING_30D_DAYS);
@@ -384,8 +368,9 @@ export class GoalService {
         /*
          * **Bumped on every save, including the first.** `version` starts at 0 on insert and this
          * takes it to 1, so there is no branch deciding which — and re-planning is a new version
-         * rather than an overwrite (ADR-0042). What keeping the prior versions readable looks like
-         * is P8-T6's; the number they will be keyed on is here.
+         * rather than an overwrite (ADR-0042). The prior versions are kept, whole, with who saved
+         * each; no screen reads them since P10.1-T6 retired `GET /goals/:period/history`, and the
+         * prototype draws no goal history for one to.
          */
         $inc: { version: 1 },
         ...(previous ? { $push: { revisions: revisionOf(previous, now) } } : {}),
@@ -458,52 +443,10 @@ export class GoalService {
   }
 
   /**
-   * Every plan agreed for a period, newest first (AC-3).
-   *
-   * **Whole states, not a diff.** What changed is derived by whoever renders it, from two states
-   * it holds — and a reader who wants only *what did we agree in January* gets it without
-   * reconstructing anything.
+   * The caller's own goals, newest period first. **No route serves it, and none has:** the history
+   * card read its own endpoint, and both went in P10.1-T6. The specs read every period through it,
+   * which is how they pin that a list recomputes exactly as a read does.
    */
-  async history(
-    ctx: RequestContext, period: string, forMembershipId?: string,
-  ): Promise<GoalHistoryEntry[]> {
-    const membershipId = await this.subject(ctx, forMembershipId, 'goal:read');
-    const goal = await this.goals.findOne(ctx, { membershipId, period });
-    if (!goal) return [];
-
-    const names = await this.names.byMembershipId(ctx, [
-      ...goal.revisions.map((r) => r.byMembershipId),
-      goal.savedByMembershipId ?? '',
-    ]);
-    const entry = (
-      version: number, at: Date | null, by: string | null, inputs: GoalRevisionInputs,
-      snapshot: GoalSnapshotView,
-    ): GoalHistoryEntry => ({
-      version,
-      at: at ? at.toISOString() : null,
-      byMembershipId: by,
-      byName: by ? names.get(by) ?? null : null,
-      ...inputs,
-      snapshot,
-    });
-
-    return [
-      entry(goal.version, goal.savedAt, goal.savedByMembershipId, inputsOf(goal), {
-        monthlyApeTargetMinor: goal.snapshot.monthlyApeTargetMinor,
-        policiesPerMonth: goal.snapshot.policiesPerMonth,
-        appointmentsPerMonth: goal.snapshot.appointmentsPerMonth,
-        leadsPerMonth: goal.snapshot.leadsPerMonth,
-      }),
-      ...[...goal.revisions].reverse().map((r) => entry(r.version, r.at, r.byMembershipId, inputsOf(r), {
-        monthlyApeTargetMinor: r.snapshot.monthlyApeTargetMinor,
-        policiesPerMonth: r.snapshot.policiesPerMonth,
-        appointmentsPerMonth: r.snapshot.appointmentsPerMonth,
-        leadsPerMonth: r.snapshot.leadsPerMonth,
-      })),
-    ];
-  }
-
-  /** The caller's own goals, newest period first. What a history screen reads (P8-T6). */
   async list(ctx: RequestContext): Promise<GoalView[]> {
     const membershipId = this.me(ctx);
     const day = await this.days.for(ctx);

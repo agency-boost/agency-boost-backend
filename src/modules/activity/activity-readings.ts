@@ -42,9 +42,13 @@ export class ActivityReadings {
    *
    * The rule is ADR-0020's, on the **category**: an active one whose `appliesToOrgLevelCodes` is empty or
    * names the rung. A section the office restricted to leaders is not an agent's to be shown.
+   *
+   * Each carries the summary tile it counts toward (ADR-0064) — `null` for a tile of its own — so the
+   * Summary's chips group the way the strips do (P10.1-T6).
    */
   async sectionsShown(ctx: RequestContext, orgLevelCode: string): Promise<{
-    code: string; label: string; types: { code: string; label: string; status: 'active' | 'archived' }[];
+    code: string; label: string; summaryGroupCode: string | null; summaryGroupLabel: string | null;
+    types: { code: string; label: string; status: 'active' | 'archived' }[];
   }[]> {
     const [categories, types] = await Promise.all([
       this.categories.find(ctx, { status: 'active' }, { sort: { displayOrder: 1 } }),
@@ -55,6 +59,8 @@ export class ActivityReadings {
       .map((c) => ({
         code: c.code,
         label: c.label,
+        summaryGroupCode: c.summaryGroupCode ?? null,
+        summaryGroupLabel: c.summaryGroupLabel ?? null,
         types: types
           .filter((t) => t.categoryCode === c.code)
           .map((t) => ({ code: t.code, label: t.label, status: t.status })),

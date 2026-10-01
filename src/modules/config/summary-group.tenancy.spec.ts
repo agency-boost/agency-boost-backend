@@ -184,6 +184,38 @@ describe('the summary tile a section counts toward (ADR-0064)', () => {
       expect(await section('REFERRALS')).toBeUndefined();
     });
 
+    it('refuses a new section under a shared tile’s code, in a tile or not — 422, naming the tile (P10.1-T6)', async () => {
+      // Its own tile would be a second *DEVELOPMENT* beside the shared one: two chips, one code.
+      const refused = await refusalOf(wired.activity.createCategory(owner(), { code: 'DEVELOPMENT', label: 'Growth' }));
+      expect(refused).toMatchObject({
+        code: 'CONFIG_SUMMARY_GROUP_CODE_TAKEN',
+        status: 422,
+        details: { summaryGroupCode: 'DEVELOPMENT', label: 'Development' },
+      });
+      await expect(wired.activity.createCategory(owner(), {
+        code: 'DEVELOPMENT', label: 'Growth', summaryGroupCode: 'SALES', summaryGroupLabel: 'Sales',
+      })).rejects.toMatchObject({ code: 'CONFIG_SUMMARY_GROUP_CODE_TAKEN' });
+      expect(await section('DEVELOPMENT')).toBeUndefined();
+
+      // Inside the tile it names, the code collides with nothing.
+      const inside = await wired.activity.createCategory(owner(), {
+        code: 'DEVELOPMENT', label: 'Growth', summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development',
+      });
+      expect(inside).toMatchObject({ code: 'DEVELOPMENT', summaryGroupCode: 'DEVELOPMENT' });
+    });
+
+    it('refuses moving sections into a shared tile under another section’s code, archived included', async () => {
+      const [personal, selling] = [await section('PERSONAL_DEVELOPMENT'), await section('SELLING')];
+      await wired.activity.archiveCategory(owner(), selling.id);
+
+      expect(await refusalOf(wired.activity.updateCategory(owner(), personal.id, {
+        summaryGroupCode: 'SELLING', summaryGroupLabel: 'Selling',
+      }))).toMatchObject({
+        code: 'CONFIG_SUMMARY_GROUP_CODE_TAKEN', status: 422, details: { summaryGroupCode: 'SELLING' },
+      });
+      expect(await section('PERSONAL_DEVELOPMENT')).toMatchObject({ summaryGroupCode: 'DEVELOPMENT', version: personal.version });
+    });
+
     it('counts an archived section, which still renders the days it holds', async () => {
       const personal = await section('PERSONAL_DEVELOPMENT');
       await wired.activity.archiveCategory(owner(), personal.id);
@@ -268,6 +300,42 @@ describe('the summary tile a section counts toward (ADR-0064)', () => {
         op: 'category.create',
         body: { code: 'REFERRALS', label: 'Referrals', summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Growth' },
       }])).rejects.toMatchObject({ code: 'CONFIG_SUMMARY_GROUP_LABEL_MISMATCH' });
+    });
+
+    it('refuses a batch that creates a section under a shared tile’s code, naming that op, and writes none of it', async () => {
+      const refused = await refusalOf(wired.changes.apply(owner(), [
+        { op: 'category.create', body: { code: 'DEVELOPMENT', label: 'Growth' } },
+        { op: 'category.create', body: { code: 'REFERRALS', label: 'Referrals' } },
+      ]));
+      expect(refused).toMatchObject({
+        code: 'CONFIG_SUMMARY_GROUP_CODE_TAKEN',
+        status: 422,
+        details: { summaryGroupCode: 'DEVELOPMENT', label: 'Development' },
+      });
+      // The op that created it, not the batch's last.
+      expect(refused.message).toMatch(/^Change 1 \(category\.create\): /);
+      expect(await section('REFERRALS')).toBeUndefined();
+    });
+
+    it('lets a batch take a section out of the tile its code names, and refuses the state that leaves', async () => {
+      // Two sections in a tile called *SELLING*, then *SELLING* leaves it: the tile outlives the section it is named for.
+      const [selling, personal] = [await section('SELLING'), await section('PERSONAL_DEVELOPMENT')];
+      const body = { summaryGroupCode: 'SELLING', summaryGroupLabel: 'Sales' };
+      await wired.changes.apply(owner(), [
+        { op: 'category.update', id: selling.id, expectedVersion: selling.version, body },
+        { op: 'category.update', id: personal.id, expectedVersion: personal.version, body },
+      ]);
+      const team = await section('TEAM_DEVELOPMENT');
+      const moved = await section('SELLING');
+      const refused = await refusalOf(wired.changes.apply(owner(), [
+        { op: 'category.update', id: team.id, expectedVersion: team.version, body },
+        {
+          op: 'category.update', id: moved.id, expectedVersion: moved.version,
+          body: { summaryGroupCode: null, summaryGroupLabel: null },
+        },
+      ]));
+      expect(refused).toMatchObject({ code: 'CONFIG_SUMMARY_GROUP_CODE_TAKEN', details: { summaryGroupCode: 'SELLING' } });
+      expect(refused.message).toMatch(/^Change 2 \(category\.update\): /);
     });
 
     it('refuses half a pair before anything is written', async () => {
@@ -451,6 +519,17 @@ describe('the summary tile a section counts toward (ADR-0064)', () => {
       });
     });
 
+    it('refuses a draft whose shared tile carries the code of a section outside it — 422', async () => {
+      const refused = await refusalOf(wired.templateService.saveDraft(sa, COMPANY, 'activity_taxonomy', taxonomy([
+        { code: 'SELLING', label: 'Selling', displayOrder: 1, summaryGroupCode: 'CORE', summaryGroupLabel: 'Core' },
+        { code: 'RECRUITMENT', label: 'Recruitment', displayOrder: 2, summaryGroupCode: 'CORE', summaryGroupLabel: 'Core' },
+        { code: 'CORE', label: 'Core skills', displayOrder: 3 },
+      ])));
+      expect(refused).toMatchObject({
+        code: 'CONFIG_SUMMARY_GROUP_CODE_TAKEN', status: 422, details: { summaryGroupCode: 'CORE', label: 'Core' },
+      });
+    });
+
     it('refuses half a pair, a code nothing could store and a blank label, naming each section', async () => {
       const refused = await refusalOf(wired.templateService.saveDraft(sa, COMPANY, 'activity_taxonomy', taxonomy([
         { code: 'SELLING', label: 'Selling', displayOrder: 1, summaryGroupCode: 'CORE' },
@@ -515,6 +594,20 @@ describe('the summary tile a section counts toward (ADR-0064)', () => {
 
       await expect(wired.provisioning.seedActivityTaxonomy('66f0000000000000000000d1', COMPANY))
         .rejects.toThrow(/labels the summary tile CORE as Core and Inti/);
+    });
+
+    it('refuses to build an office from a published template whose tile code a section outside it carries', async () => {
+      await (wired.templates as unknown as mongoose.Model<never>).create({
+        companyId: COMPANY, kind: 'activity_taxonomy', status: 'published', version: 1, deletedAt: null,
+        payload: taxonomy([
+          { code: 'SELLING', label: 'Selling', displayOrder: 1, summaryGroupCode: 'CORE', summaryGroupLabel: 'Core' },
+          { code: 'RECRUITMENT', label: 'Recruitment', displayOrder: 2, summaryGroupCode: 'CORE', summaryGroupLabel: 'Core' },
+          { code: 'CORE', label: 'Core skills', displayOrder: 3 },
+        ]),
+      } as never);
+
+      await expect(wired.provisioning.seedActivityTaxonomy('66f0000000000000000000d1', COMPANY))
+        .rejects.toThrow(/gives the summary tile CORE the code of a section outside it/);
     });
   });
 });

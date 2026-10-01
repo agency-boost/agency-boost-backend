@@ -1,5 +1,7 @@
+import { CASCADE_ACTIVITY_CODES, SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES } from '@/domain/constants';
 import {
   activityTargets, madeFigures, monthlyApeTarget, paceFor, periodFigures, sectionChips, totalLogged, ytdBeforeThisMonth,
+  type ShownSection,
 } from './summary-figures';
 
 const RP = 100; // minor units per rupiah
@@ -189,6 +191,92 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
     it('totals every code logged, in any section or none', () => {
       expect(totalLogged(new Map([['A', 3], ['B', 0], ['C', 4]]))).toBe(7);
       expect(totalLogged(new Map())).toBe(0);
+    });
+  });
+
+  describe('P10.1-T6 AC-5 — one chip per summary tile (ADR-0064)', () => {
+    const cascade = Object.values(CASCADE_ACTIVITY_CODES);
+    const type = (code: string, status: 'active' | 'archived' = 'active') => ({ code, label: code, status });
+    /** The seed's sections, as `ActivityReadings.sectionsShown` hands them over. */
+    const seed: ShownSection[] = [...SEED_ACTIVITY_CATEGORIES]
+      .sort((a, b) => a.displayOrder - b.displayOrder)
+      .map((c) => ({
+        code: c.code,
+        label: c.label,
+        summaryGroupCode: c.summaryGroupCode,
+        summaryGroupLabel: c.summaryGroupLabel,
+        types: SEED_ACTIVITY_TYPES.filter((t) => t.categoryCode === c.code)
+          .map((t) => ({ code: t.code, label: t.label, status: 'active' as const })),
+      }));
+
+    it('the seed gives the prototype’s two: Recruitment and Development (`Overall.html:3164-3183`)', () => {
+      const chips = sectionChips(seed, new Map(), cascade);
+      expect(chips.map((c) => [c.code, c.label])).toEqual([
+        ['RECRUITMENT', 'Recruitment'],
+        ['DEVELOPMENT', 'Development'],
+      ]);
+    });
+
+    it('a group’s rows are its sections’ rows, in the office’s order, and its total is theirs', () => {
+      const counts = new Map([['DEV_TRAINING_ATTEND', 2], ['DEV_COACHING_RECEIVED', 1], ['DEV_TEAM_ACTIVITY', 4]]);
+      const development = sectionChips(seed, counts, cascade).find((c) => c.code === 'DEVELOPMENT');
+      expect(development?.rows.map((r) => [r.code, r.count])).toEqual([
+        ['DEV_TRAINING_ATTEND', 2], ['DEV_COACHING_RECEIVED', 1], ['DEV_TEAM_ACTIVITY', 4],
+      ]);
+      expect(development?.total).toBe(7);
+    });
+
+    it('a section with neither field is a chip of its own, under its own code and label', () => {
+      const sections: ShownSection[] = [
+        { code: 'COMMUNITY', label: 'Community', summaryGroupCode: null, summaryGroupLabel: null, types: [type('COMMUNITY_EVENT')] },
+        { code: 'MENTORING', label: 'Mentoring', types: [type('MENTOR_SESSION')] },
+      ];
+      expect(sectionChips(sections, new Map([['COMMUNITY_EVENT', 3]]), cascade)).toEqual([
+        { code: 'COMMUNITY', label: 'Community', total: 3, rows: [{ code: 'COMMUNITY_EVENT', label: 'COMMUNITY_EVENT', count: 3 }] },
+        { code: 'MENTORING', label: 'Mentoring', total: 0, rows: [{ code: 'MENTOR_SESSION', label: 'MENTOR_SESSION', count: 0 }] },
+      ]);
+    });
+
+    it('reads a blank group code as none, and a group with no label takes its first section’s', () => {
+      const sections: ShownSection[] = [
+        { code: 'COMMUNITY', label: 'Community', summaryGroupCode: '  ', summaryGroupLabel: null, types: [type('C1')] },
+        { code: 'A', label: 'Alpha', summaryGroupCode: 'PAIR', summaryGroupLabel: ' ', types: [type('A1')] },
+        { code: 'B', label: 'Beta', summaryGroupCode: 'PAIR', summaryGroupLabel: ' ', types: [type('B1')] },
+      ];
+      expect(sectionChips(sections, new Map(), cascade).map((c) => [c.code, c.label])).toEqual([
+        ['COMMUNITY', 'Community'],
+        ['PAIR', 'Alpha'],
+      ]);
+    });
+
+    it('a tile sits where its first section sits, and a group never absorbs a section whose own code it shares', () => {
+      const sections: ShownSection[] = [
+        { code: 'A', label: 'Alpha', summaryGroupCode: 'PAIR', summaryGroupLabel: 'Pair', types: [type('A1')] },
+        { code: 'PAIR', label: 'Loner', types: [type('P1')] },
+        { code: 'B', label: 'Beta', summaryGroupCode: 'PAIR', summaryGroupLabel: 'Pair', types: [type('B1')] },
+      ];
+      const chips = sectionChips(sections, new Map([['A1', 1], ['P1', 5], ['B1', 2]]), cascade);
+      expect(chips.map((c) => [c.label, c.total, c.rows.map((r) => r.code)])).toEqual([
+        ['Pair', 3, ['A1', 'B1']],
+        ['Loner', 5, ['P1']],
+      ]);
+    });
+
+    it('the cascade exclusion is unchanged: a tile holding a cascade code is not a chip — archived ones too', () => {
+      const sections: ShownSection[] = [
+        { code: 'SELLING', label: 'Selling', summaryGroupCode: 'FIELD', summaryGroupLabel: 'Field work', types: [type('SELL_SUBMISSION', 'archived')] },
+        { code: 'RECRUITMENT', label: 'Recruitment', summaryGroupCode: 'FIELD', summaryGroupLabel: 'Field work', types: [type('RECRUIT_PRESENTATION')] },
+        { code: 'COMMUNITY', label: 'Community', types: [type('COMMUNITY_EVENT')] },
+      ];
+      expect(sectionChips(sections, new Map(), cascade).map((c) => c.code)).toEqual(['COMMUNITY']);
+    });
+
+    it('regrouping moves a count between chips and never changes one', () => {
+      const counts = new Map([['RECRUIT_PRESENTATION', 3], ['DEV_TRAINING_ATTEND', 2], ['DEV_TEAM_ACTIVITY', 4]]);
+      const ungrouped = seed.map((s) => ({ ...s, summaryGroupCode: null, summaryGroupLabel: null }));
+      const sum = (chips: ReturnType<typeof sectionChips>) => chips.reduce((n, c) => n + c.total, 0);
+      expect(sectionChips(ungrouped, counts, cascade)).toHaveLength(3);
+      expect(sum(sectionChips(ungrouped, counts, cascade))).toBe(sum(sectionChips(seed, counts, cascade)));
     });
   });
 });

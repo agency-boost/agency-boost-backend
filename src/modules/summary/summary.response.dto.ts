@@ -68,9 +68,10 @@ class SectionRowDto {
 }
 
 export class SectionChipDto implements SectionChip {
-  @ApiProperty({ example: 'RECRUITMENT' }) code!: string;
-  @ApiProperty({ example: 'Recruitment' }) label!: string;
-  @ApiProperty({ description: '`ACTIVITY_TOTAL_BY_CATEGORY` over the period; the rows add up to it.' }) total!: number;
+  @ApiProperty({ example: 'DEVELOPMENT', description: 'The summary tile\'s group code (ADR-0064), or the section\'s own code when it has a tile of its own.' })
+  code!: string;
+  @ApiProperty({ example: 'Development', description: 'The group\'s label, or the section\'s own.' }) label!: string;
+  @ApiProperty({ description: '`ACTIVITY_TOTAL_BY_CATEGORY` over the period, summed over the tile\'s sections; the rows add up to it.' }) total!: number;
   @ApiProperty({ type: [SectionRowDto] }) rows!: SectionRowDto[];
 }
 
@@ -79,7 +80,7 @@ export class SummaryActivityDto implements SummaryActivity {
   @ApiProperty({ example: '2026-09-28' }) to!: string;
   @ApiProperty({ type: [ActivityTargetDto], description: 'Leads contacted, appointments, closings — in that order.' }) targets!: ActivityTargetDto[];
   @ApiProperty({ description: 'Every activity logged over the period, across all categories.' }) total!: number;
-  @ApiProperty({ type: [SectionChipDto], description: 'One per section the reader is shown that holds none of the three codes above.' })
+  @ApiProperty({ type: [SectionChipDto], description: 'One per summary tile the reader is shown (ADR-0064) whose sections hold none of the three codes above.' })
   sections!: SectionChipDto[];
 }
 

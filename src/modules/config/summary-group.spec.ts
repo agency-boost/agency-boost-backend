@@ -1,5 +1,5 @@
 import {
-  checkTemplateSummaryGroups, refuseSummaryGroupConflict, summaryGroupConflict,
+  checkTemplateSummaryGroups, refuseSummaryGroupConflict, summaryGroupCodeTaken, summaryGroupConflict,
 } from './summary-group';
 
 /**
@@ -35,6 +35,38 @@ describe('one summary tile, one label (ADR-0064)', () => {
       code: 'CONFIG_SUMMARY_GROUP_LABEL_MISMATCH',
       details: { summaryGroupCode: 'A_TILE', labels: ['A', 'Ay'] },
     }));
+  });
+
+  describe('one shared tile, one code (P10.1-T6)', () => {
+    it('takes no part for a row with no code, and lets a section carry its own tile’s code', () => {
+      expect(summaryGroupCodeTaken([
+        { summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development' },
+        { code: 'DEVELOPMENT', summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development' },
+        { code: 'SELLING', summaryGroupCode: null, summaryGroupLabel: null },
+      ])).toBeNull();
+    });
+
+    it('names a tile whose code a section outside it carries, with or without a tile of its own', () => {
+      const tile = { code: 'PERSONAL', summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development' };
+      expect(summaryGroupCodeTaken([tile, { code: 'DEVELOPMENT' }]))
+        .toEqual({ summaryGroupCode: 'DEVELOPMENT', label: 'Development' });
+      expect(summaryGroupCodeTaken([{ code: 'DEVELOPMENT', summaryGroupCode: 'CORE', summaryGroupLabel: 'Core' }, tile]))
+        .toEqual({ summaryGroupCode: 'DEVELOPMENT', label: 'Development' });
+    });
+
+    it('is refused after the label rule, so a tile both split and taken is named for its labels', () => {
+      const rows = [
+        { code: 'A', summaryGroupCode: 'CORE', summaryGroupLabel: 'Core' },
+        { code: 'B', summaryGroupCode: 'CORE', summaryGroupLabel: 'Inti' },
+        { code: 'CORE' },
+      ];
+      expect(() => refuseSummaryGroupConflict(rows)).toThrow(expect.objectContaining({ code: 'CONFIG_SUMMARY_GROUP_LABEL_MISMATCH' }));
+      expect(() => refuseSummaryGroupConflict([rows[0], rows[2]])).toThrow(expect.objectContaining({
+        code: 'CONFIG_SUMMARY_GROUP_CODE_TAKEN',
+        details: { summaryGroupCode: 'CORE', label: 'Core' },
+        message: expect.stringMatching(/^CORE is the code of the summary tile “Core”/),
+      }));
+    });
   });
 
   describe('a Company template’s categories', () => {

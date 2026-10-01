@@ -413,23 +413,26 @@ export class ActivityConfigService {
   }
 
   /**
-   * ADR-0064's one-label rule, over every section this office holds **once this write lands** —
-   * archived ones included, because an archived section still renders the days it holds.
+   * ADR-0064's tile rules — one label, and a shared tile's code no section outside it carries —
+   * over every section this office holds **once this write lands**, archived ones included,
+   * because an archived section still renders the days it holds.
    *
-   * `replacing` is the row being edited, or `null` for a new one.
+   * `replacing` is the row being edited, or `null` for a new one, whose `code` the group carries.
    */
   private async refuseSummaryGroupConflict(
     ctx: RequestContext,
     replacing: string | null,
-    group: { summaryGroupCode: string | null; summaryGroupLabel: string | null },
+    group: { code?: string; summaryGroupCode: string | null; summaryGroupLabel: string | null },
   ): Promise<void> {
-    if (!group.summaryGroupCode) return; // Leaving a tile, or never in one, disagrees with nobody.
+    // Leaving a tile disagrees with nobody, and an edit never changes a code. A new section is
+    // checked even outside every tile: its code may be a shared tile's.
+    if (!group.summaryGroupCode && replacing !== null) return;
     // In display order, the edited row in its own place and a new one last — the order the batch's
     // projection holds, so a refusal lists the labels alike on either path.
     const rows = (await this.categories.find(ctx, {}, { sort: { displayOrder: 1 } }))
       .map((c) => (String(c._id) === replacing
-        ? group
-        : { summaryGroupCode: c.summaryGroupCode, summaryGroupLabel: c.summaryGroupLabel }));
+        ? { ...group, code: c.code }
+        : { code: c.code, summaryGroupCode: c.summaryGroupCode, summaryGroupLabel: c.summaryGroupLabel }));
     refuseSummaryGroupConflict(replacing === null ? [...rows, group] : rows);
   }
 

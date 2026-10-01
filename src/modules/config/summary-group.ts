@@ -8,7 +8,7 @@ import {
 
 /**
  * One summary tile, one label (ADR-0064) — the rule across rows, where `config-input.ts` holds
- * the rule within one.
+ * the rule within one. And one code: a shared tile's is no section's outside it (P10.1-T6).
  *
  * `summaryGroupLabel` is held on every section in a group rather than on a group record, so that
  * the tile is configuration the office already edits and no new collection exists to drift from
@@ -23,6 +23,8 @@ import {
 
 /** What the rule needs of a section, however it arrived — a row, a view or a template entry. */
 export interface SummaryGrouped {
+  /** The section's own code. Absent, the row takes no part in the code rule. */
+  code?: string | null;
   summaryGroupCode?: string | null;
   summaryGroupLabel?: string | null;
 }
@@ -49,21 +51,61 @@ export function summaryGroupConflict(rows: readonly SummaryGrouped[]): SummaryGr
   return null;
 }
 
+export interface SummaryGroupCodeTaken {
+  summaryGroupCode: string;
+  /** The shared tile's label, as its first section carries it. */
+  label: string;
+}
+
 /**
- * Refuse a set of sections whose groups disagree on a label — `422`, because every field is
- * well-formed and it is the combination that cannot stand.
+ * The first shared tile whose code is also the code of a section **outside** it, or `null`.
+ *
+ * A section with a tile of its own is a tile under its own code, so the two would be two tiles with
+ * one code (P10.1-T6). A section in another shared tile collides with nothing today, and is refused
+ * all the same: the day it leaves that tile, it would, and the refusal would land on an edit that
+ * never touched the code. A section whose code is its own tile's code is inside it — no collision.
+ */
+export function summaryGroupCodeTaken(rows: readonly SummaryGrouped[]): SummaryGroupCodeTaken | null {
+  const groups = new Map<string, string>();
+  for (const row of rows) {
+    const group = row.summaryGroupCode?.trim();
+    if (group && !groups.has(group)) groups.set(group, row.summaryGroupLabel?.trim() ?? '');
+  }
+  for (const row of rows) {
+    const code = row.code?.trim();
+    if (!code || !groups.has(code) || row.summaryGroupCode?.trim() === code) continue;
+    return { summaryGroupCode: code, label: groups.get(code)! };
+  }
+  return null;
+}
+
+/**
+ * Refuse a set of sections that cannot stand as tiles — `422`, because every field is well-formed
+ * and it is the combination that cannot: a shared tile under two labels, or a shared tile under
+ * the code of a section outside it.
  */
 export function refuseSummaryGroupConflict(rows: readonly SummaryGrouped[]): void {
   const conflict = summaryGroupConflict(rows);
-  if (!conflict) return;
-  throw new DomainException(
-    ErrorCode.CONFIG_SUMMARY_GROUP_LABEL_MISMATCH,
-    `The sections in the summary tile ${conflict.summaryGroupCode} would be labelled `
-      + `${conflict.labels.map((l) => `“${l}”`).join(' and ')}. One tile has one label: give `
-      + 'every section in it the same one.',
-    HttpStatus.UNPROCESSABLE_ENTITY,
-    { summaryGroupCode: conflict.summaryGroupCode, labels: conflict.labels },
-  );
+  if (conflict) {
+    throw new DomainException(
+      ErrorCode.CONFIG_SUMMARY_GROUP_LABEL_MISMATCH,
+      `The sections in the summary tile ${conflict.summaryGroupCode} would be labelled `
+        + `${conflict.labels.map((l) => `“${l}”`).join(' and ')}. One tile has one label: give `
+        + 'every section in it the same one.',
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      { summaryGroupCode: conflict.summaryGroupCode, labels: conflict.labels },
+    );
+  }
+  const taken = summaryGroupCodeTaken(rows);
+  if (taken) {
+    throw new DomainException(
+      ErrorCode.CONFIG_SUMMARY_GROUP_CODE_TAKEN,
+      `${taken.summaryGroupCode} is the code of the summary tile “${taken.label}”, so a section `
+        + 'outside that tile cannot carry it as well. Give the section another code.',
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      { summaryGroupCode: taken.summaryGroupCode, label: taken.label },
+    );
+  }
 }
 
 /**
@@ -73,7 +115,7 @@ export function refuseSummaryGroupConflict(rows: readonly SummaryGrouped[]): voi
  * Hands back the categories with the two fields normalised — the code upper-cased, the label
  * trimmed, absent read as `null` — so the office provisioning copies them into receives what its
  * own settings screen would have written. Refuses with `VALIDATION_FAILED` and every violation at
- * once; the one-label rule is `refuseSummaryGroupConflict`, run by the caller over the result.
+ * once; the one-label and code rules are `refuseSummaryGroupConflict`, run by the caller over the result.
  */
 export function checkTemplateSummaryGroups(categories: unknown): Record<string, unknown>[] {
   if (!Array.isArray(categories)) return [];

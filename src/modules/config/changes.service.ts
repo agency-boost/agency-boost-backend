@@ -144,7 +144,7 @@ export class ConfigChangeService {
 
     for (const c of await this.activity.list(ctx, true)) {
       categories.set(c.id, { id: c.id, code: c.code, version: c.version, status: c.status });
-      groups.set(c.id, { summaryGroupCode: c.summaryGroupCode, summaryGroupLabel: c.summaryGroupLabel });
+      groups.set(c.id, { code: c.code, summaryGroupCode: c.summaryGroupCode, summaryGroupLabel: c.summaryGroupLabel });
       for (const t of c.types) {
         types.set(t.id, { id: t.id, code: t.code, version: t.version, status: t.status });
       }
@@ -259,13 +259,17 @@ export class ConfigChangeService {
       if (op.op === 'category.create' || op.op === 'category.update') {
         const key = op.op === 'category.create' ? `pending:${index}` : op.id!;
         // A checked update carries both or neither, so `undefined` means the tile is untouched.
+        // A create always lands here — its fields are null when unset — so its code is checked too.
         if (checked.summaryGroupCode !== undefined) {
-          const before = groups.get(key)?.summaryGroupCode;
+          const before = groups.get(key);
           groups.set(key, {
+            code: checked.code ?? before?.code,
             summaryGroupCode: checked.summaryGroupCode,
             summaryGroupLabel: checked.summaryGroupLabel ?? null,
           });
-          for (const code of [before, checked.summaryGroupCode]) if (code) groupTouchedBy.set(code, index);
+          for (const code of [before?.summaryGroupCode, checked.summaryGroupCode, checked.code]) {
+            if (code) groupTouchedBy.set(code, index);
+          }
         }
       }
 
@@ -309,8 +313,9 @@ export class ConfigChangeService {
     }
 
     /*
-     * One tile, one label — over the state the whole batch leaves, before anything is written.
-     * Named for the last op that touched the tile, since that is the edit that left it split.
+     * One tile, one label, one code — over the state the whole batch leaves, before anything is
+     * written. Named for the last op that touched the tile, or created a section under its code,
+     * since that is the edit that left it standing wrong.
      */
     try {
       refuseSummaryGroupConflict([...groups.values()]);

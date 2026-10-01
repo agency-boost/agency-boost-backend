@@ -190,6 +190,14 @@ export const ErrorCode = {
    * archived section still renders the days it was logged against.
    */
   CONFIG_SUMMARY_GROUP_LABEL_MISMATCH: 'CONFIG_SUMMARY_GROUP_LABEL_MISMATCH',
+  /**
+   * A shared summary tile's code is also the code of a section outside it (ADR-0064, P10.1-T6).
+   * `422`, with `details: { summaryGroupCode, label }`.
+   *
+   * A section with a tile of its own is a tile under its own code, so the two would be two tiles
+   * with one code — two chips one reader cannot tell apart by it. Archived sections count.
+   */
+  CONFIG_SUMMARY_GROUP_CODE_TAKEN: 'CONFIG_SUMMARY_GROUP_CODE_TAKEN',
 
   /*
    * Production import (P9-T3, P9-T4). The catalog has carried seven `UPLOAD_*` codes since Phase 0;

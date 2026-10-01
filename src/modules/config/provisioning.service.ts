@@ -41,7 +41,7 @@ import {
   defaultActivationChecklist, type ActivationChecklistPayload,
 } from '@/modules/activation/activation-payload';
 import { TenantConfigService } from './tenant-config.service';
-import { summaryGroupConflict } from './summary-group';
+import { summaryGroupCodeTaken, summaryGroupConflict } from './summary-group';
 import {
   TrainingCategory, TrainingCategoryDocument,
 } from '@/modules/training/training-category.schema';
@@ -250,15 +250,22 @@ export class ProvisioningService {
     }
 
     /*
-     * One tile, one label (ADR-0064). Publishing refuses a template that breaks it, so this is a
-     * template older than that check — and an office built from it would refuse its Owner's first
-     * edit to the section for a disagreement they never made.
+     * One tile, one label, one code (ADR-0064). Publishing refuses a template that breaks either,
+     * so this is a template older than that check — and an office built from it would refuse its
+     * Owner's first edit to the section for a disagreement they never made.
      */
     const conflict = summaryGroupConflict(categories);
     if (conflict) {
       throw new Error(
         `The published activity taxonomy for company ${companyId} labels the summary tile `
           + `${conflict.summaryGroupCode} as ${conflict.labels.join(' and ')}. One tile has one label.`,
+      );
+    }
+    const taken = summaryGroupCodeTaken(categories);
+    if (taken) {
+      throw new Error(
+        `The published activity taxonomy for company ${companyId} gives the summary tile `
+          + `${taken.summaryGroupCode} the code of a section outside it. One code is one tile.`,
       );
     }
 

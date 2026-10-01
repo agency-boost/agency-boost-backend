@@ -319,8 +319,9 @@ export class AdminController {
       + 'predict. Creates the draft if this is the first edit since publishing. An '
       + '`activity_taxonomy` draft has its summary tiles checked here (ADR-0064): '
       + '`summaryGroupCode` and `summaryGroupLabel` on a category together or not at all '
-      + '(`400 VALIDATION_FAILED`), and one label per tile '
-      + '(`422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`).',
+      + '(`400 VALIDATION_FAILED`), one label per tile '
+      + '(`422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`), and no shared tile under the code of a '
+      + 'category outside it (`422 CONFIG_SUMMARY_GROUP_CODE_TAKEN`).',
   })
   async saveTemplateDraft(
     @Ctx() ctx: RequestContext,

@@ -958,106 +958,6 @@
         "x-required-permission": "goal:update"
       }
     },
-    "/api/v1/goals/{period}/history": {
-      "get": {
-        "description": "Newest first, the current one included. **Whole states, not diffs**: what changed is derived from two of them by whoever renders it, and a reader who wants only *what did we agree in January* gets it without reconstructing anything (ADR-0042). Empty when there is no plan for the period.\n\n**Requires `goal:read`.** See `docs/00-product/roles-and-permissions.md`.",
-        "operationId": "GoalController_history_v1",
-        "parameters": [
-          {
-            "name": "period",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "for",
-            "required": false,
-            "in": "query",
-            "description": "Somebody your grant reaches (§3.6).",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/GoalHistoryEntryDto"
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `goal:read`. `details.permission` names it.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Every plan agreed for a period",
-        "tags": [
-          "goals"
-        ],
-        "x-required-permission": "goal:read"
-      }
-    },
     "/api/v1/kpm/data-upload/template": {
       "get": {
         "description": "The header that is the contract — code, name, six metrics monthly, the same six YTD, in the prototype’s own order — and one row per active agent with twelve empty fields. A name is one quoted field: a quote inside it is doubled, a line break becomes a space, and a name that starts like a formula is written as text. The agent code is written exactly as stored. **The header is the version**: there is no version line, and an importer identifies a file by its header cells.\n\n**Requires `data_upload:download_template`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -3890,7 +3790,7 @@
         "x-required-permission": "company_template:read"
       },
       "put": {
-        "description": "The whole payload, not a patch: a template is edited and copied as one document, and merging two versions of an ordered list of codes has no answer anybody would predict. Creates the draft if this is the first edit since publishing. An `activity_taxonomy` draft has its summary tiles checked here (ADR-0064): `summaryGroupCode` and `summaryGroupLabel` on a category together or not at all (`400 VALIDATION_FAILED`), and one label per tile (`422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`).\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The whole payload, not a patch: a template is edited and copied as one document, and merging two versions of an ordered list of codes has no answer anybody would predict. Creates the draft if this is the first edit since publishing. An `activity_taxonomy` draft has its summary tiles checked here (ADR-0064): `summaryGroupCode` and `summaryGroupLabel` on a category together or not at all (`400 VALIDATION_FAILED`), one label per tile (`422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`), and no shared tile under the code of a category outside it (`422 CONFIG_SUMMARY_GROUP_CODE_TAKEN`).\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_saveTemplateDraft_v1",
         "parameters": [
           {
@@ -7995,7 +7895,7 @@
     },
     "/api/v1/kpm/settings/changes": {
       "post": {
-        "description": "The settings screens stage every edit and send one request. **Validated entirely before anything is written**, so a refusal leaves the office exactly as it was, and so a `type.create` can name a section a `category.create` makes earlier in the same batch. Every change to an existing row carries the `version` the screen read: a row that moved on refuses the whole batch with `409 VERSION_CONFLICT`, naming what changed, rather than letting the second of two admins erase the first. Returns the working copy as it now stands — publishing is still a separate act. The summary tiles (ADR-0064) are checked against the state the **whole batch** leaves, so a tile of two sections is renamed in one request: two sections of one tile left with different labels is `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The settings screens stage every edit and send one request. **Validated entirely before anything is written**, so a refusal leaves the office exactly as it was, and so a `type.create` can name a section a `category.create` makes earlier in the same batch. Every change to an existing row carries the `version` the screen read: a row that moved on refuses the whole batch with `409 VERSION_CONFLICT`, naming what changed, rather than letting the second of two admins erase the first. Returns the working copy as it now stands — publishing is still a separate act. The summary tiles (ADR-0064) are checked against the state the **whole batch** leaves, so a tile of two sections is renamed in one request: two sections of one tile left with different labels is `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`, and a shared tile whose code a section outside it carries is `422 CONFIG_SUMMARY_GROUP_CODE_TAKEN`.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TenantConfigController_applyChanges_v1",
         "parameters": [],
         "requestBody": {
@@ -8074,7 +7974,7 @@
     },
     "/api/v1/kpm/settings/activity-categories": {
       "post": {
-        "description": "Appended, never inserted. `summaryGroupCode` and `summaryGroupLabel` put it in a summary tile (ADR-0064) — both or neither; neither is a tile of its own. Joining a tile under a label its sections do not carry is `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Appended, never inserted. `summaryGroupCode` and `summaryGroupLabel` put it in a summary tile (ADR-0064) — both or neither; neither is a tile of its own. Joining a tile under a label its sections do not carry is `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`; a code that is already a shared tile's, outside that tile, is `422 CONFIG_SUMMARY_GROUP_CODE_TAKEN`.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TenantConfigController_createCategory_v1",
         "parameters": [],
         "requestBody": {
@@ -8235,7 +8135,7 @@
     },
     "/api/v1/kpm/settings/activity-categories/{id}": {
       "patch": {
-        "description": "Label, description, the rungs it applies to, and the summary tile it counts toward. **Never the code** — that is the identity every type under it holds. Narrowing the rungs is refused when a ratio counting this section still applies to a rung the section would lose. `summaryGroupCode` and `summaryGroupLabel` travel together, and `null` on both gives the section a tile of its own (ADR-0064); a label its tile's other sections do not carry is `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH` — rename a shared tile through `POST /kpm/settings/changes`, in one batch.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Label, description, the rungs it applies to, and the summary tile it counts toward. **Never the code** — that is the identity every type under it holds. Narrowing the rungs is refused when a ratio counting this section still applies to a rung the section would lose. `summaryGroupCode` and `summaryGroupLabel` travel together, and `null` on both gives the section a tile of its own (ADR-0064); a label its tile's other sections do not carry is `422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH` — rename a shared tile through `POST /kpm/settings/changes`, in one batch — and joining a tile whose code another section carries is `422 CONFIG_SUMMARY_GROUP_CODE_TAKEN`.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TenantConfigController_updateCategory_v1",
         "parameters": [
           {
@@ -15299,15 +15199,17 @@
         "properties": {
           "code": {
             "type": "string",
-            "example": "RECRUITMENT"
+            "example": "DEVELOPMENT",
+            "description": "The summary tile's group code (ADR-0064), or the section's own code when it has a tile of its own."
           },
           "label": {
             "type": "string",
-            "example": "Recruitment"
+            "example": "Development",
+            "description": "The group's label, or the section's own."
           },
           "total": {
             "type": "number",
-            "description": "`ACTIVITY_TOTAL_BY_CATEGORY` over the period; the rows add up to it."
+            "description": "`ACTIVITY_TOTAL_BY_CATEGORY` over the period, summed over the tile's sections; the rows add up to it."
           },
           "rows": {
             "type": "array",
@@ -15346,7 +15248,7 @@
             "description": "Every activity logged over the period, across all categories."
           },
           "sections": {
-            "description": "One per section the reader is shown that holds none of the three codes above.",
+            "description": "One per summary tile the reader is shown (ADR-0064) whose sections hold none of the three codes above.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SectionChipDto"
@@ -16262,86 +16164,6 @@
           "measured",
           "savedAt",
           "savedByMembershipId"
-        ]
-      },
-      "GoalHistoryEntryDto": {
-        "type": "object",
-        "properties": {
-          "version": {
-            "type": "number",
-            "description": "The version this plan was."
-          },
-          "at": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "byMembershipId": {
-            "type": "string",
-            "nullable": true
-          },
-          "byName": {
-            "type": "string",
-            "nullable": true,
-            "description": "`null` when the membership resolves to nobody — somebody who has left the office."
-          },
-          "mode": {
-            "type": "string",
-            "enum": [
-              "direct",
-              "from_savings"
-            ]
-          },
-          "annualApeTargetMinor": {
-            "type": "number"
-          },
-          "savingsTargetMinor": {
-            "type": "number"
-          },
-          "commissionRatePct": {
-            "type": "number"
-          },
-          "monthsLeftOverride": {
-            "type": "number",
-            "nullable": true,
-            "description": "The agent’s own figure, or `null`."
-          },
-          "apeAchievedMinor": {
-            "type": "number"
-          },
-          "caseSizeMinor": {
-            "type": "number"
-          },
-          "leadsToApptPct": {
-            "type": "number"
-          },
-          "closingRatePct": {
-            "type": "number"
-          },
-          "snapshot": {
-            "description": "What that plan was agreed to mean.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/GoalSnapshotDto"
-              }
-            ]
-          }
-        },
-        "required": [
-          "version",
-          "at",
-          "byMembershipId",
-          "byName",
-          "mode",
-          "annualApeTargetMinor",
-          "savingsTargetMinor",
-          "commissionRatePct",
-          "monthsLeftOverride",
-          "apeAchievedMinor",
-          "caseSizeMinor",
-          "leadsToApptPct",
-          "closingRatePct",
-          "snapshot"
         ]
       },
       "SaveGoalDto": {
