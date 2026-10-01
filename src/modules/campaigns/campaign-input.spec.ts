@@ -110,15 +110,23 @@ describe('reading one campaign (P5-T7)', () => {
       expect(said).toMatch(new RegExp(METRIC_REGISTRY[0].key));
     });
 
-    it('refuses a metric that arrives in a later phase, saying which', () => {
+    it('refuses a metric nothing measures yet, naming it and no phase', () => {
       const later = METRIC_REGISTRY.find((m) => m.phase > CAMPAIGN_EVALUATION_PHASE);
       // If every metric is computed by now the rule has nothing to guard, and the test should
       // say so rather than quietly pass on an empty search.
       expect(later).toBeTruthy();
 
-      expect(refusal(whole({
+      const said = refusal(whole({
         requirements: [{ metricKey: later!.key, comparator: 'gte', value: 1 }],
-      }))).toMatch(/could never\s+qualify anybody/);
+      }));
+      expect(said).toContain(`${later!.name} is not measured yet`);
+      expect(said).toMatch(/could never\s+qualify anybody/);
+      // An Owner reads this. It said *"not computed until phase 14, and campaigns are evaluated
+      // from phase 12"*: our schedule, which the reader can do nothing with — and wrong the day
+      // the roadmap moved (P10.1-T2 AC-3, ADR-0062 §3).
+      expect(said).not.toMatch(/phase/i);
+      // Nor a bare number after the metric's name. The *Requirement 1* before it is the row.
+      expect(said.slice(said.indexOf(later!.name) + later!.name.length)).not.toMatch(/\d/);
     });
 
     it('collects every violation rather than stopping at the first', () => {

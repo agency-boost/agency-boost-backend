@@ -52,8 +52,8 @@ export class CampaignController {
     summary: 'Add a campaign',
     description:
       'A requirement is a **metric, a comparator and a number**. A metric this product does not '
-      + 'measure is refused by name; one that arrives in a later phase is refused saying which '
-      + 'phase brings it, because a campaign asking for it could never qualify anybody.',
+      + 'measure is refused by name; one it does not measure yet is refused saying so, because a '
+      + 'campaign asking for it could never qualify anybody.',
   })
   @ApiResponse({ status: 201, type: CampaignDto })
   async create(@Ctx() ctx: RequestContext, @Body() dto: SaveCampaignDto) {

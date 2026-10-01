@@ -395,8 +395,8 @@ export class AdminController {
     summary: 'Assign or transfer the KPM Owner',
     description:
       'Name the person by email or by user id. The account must already exist — this ' +
-      'promotes an existing platform user; inviting a new one arrives with invitations ' +
-      'in Phase 3. Audited with both the outgoing and incoming user.',
+      'promotes an existing platform user, and inviting a new one is not this route\'s. ' +
+      'Audited with both the outgoing and incoming user.',
   })
   async assignOwner(
     @Ctx() ctx: RequestContext,

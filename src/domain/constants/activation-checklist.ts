@@ -37,8 +37,12 @@ export interface ActivationLinkKind {
    * tick is recorded as manual; once it is live, no role may tick it (ADR-0031).
    */
   readonly live: boolean;
-  /** The phase that makes it live, for the sentence a screen shows while it is not. */
-  readonly livePhase: number;
+  /*
+   * No `livePhase`. It carried the phase that would make a kind live, for a screen to print — and a
+   * phase number is our schedule, which a customer can do nothing with (ADR-0062 §3). The re-plan of
+   * 2026-09-29 left it naming the wrong phases, which is the argument: a number nothing renders is a
+   * number nothing keeps true (P10.1-T2 AC-13). The roadmap says when; `live` says whether.
+   */
 }
 
 /**
@@ -53,21 +57,18 @@ export const ACTIVATION_LINK_KINDS: Readonly<Record<ActivationFeatureLink, Activ
     route: '/goals',
     completesWhen: 'the hire has saved any goal since joining this office',
     live: false,
-    livePhase: 11,
   },
   'feature:leads': {
     label: 'Leads Management',
     route: '/leads',
     completesWhen: 'the hire has added at least one prospect',
     live: false,
-    livePhase: 11,
   },
   'feature:activity': {
     label: 'Activity Management',
     route: '/activity/log',
     completesWhen: 'the hire has logged activity in four consecutive weeks',
     live: false,
-    livePhase: 11,
   },
 } as const;
 
@@ -77,7 +78,6 @@ export const ACTIVATION_TRAINING_LINK: ActivationLinkKind = {
   route: '/training',
   completesWhen: 'the hire has completed that training module',
   live: false,
-  livePhase: 12,
 };
 
 /**

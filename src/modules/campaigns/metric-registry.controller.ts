@@ -24,10 +24,11 @@ export class MetricRegistryController {
   @ApiOperation({
     summary: 'Every metric this product defines',
     description:
-      'The key, the name a screen shows, the unit its number is in, and the phase that computes '
-      + 'it. A rule or a campaign requirement naming a metric whose phase has not shipped is '
-      + 'recorded as waiting on it rather than silently never qualifying anybody (ADR-0035) — '
-      + `campaigns are evaluated in phase ${CAMPAIGN_EVALUATION_PHASE}.`,
+      'The key, the name a screen shows, the unit its number is in, and `computed`: whether it '
+      + 'is measured by the time campaigns are evaluated. A screen says so from `computed` and '
+      + 'never from `phase`, which is the roadmap\'s. A carrier rule naming a metric that is not '
+      + 'is recorded as waiting on it, and a campaign requirement naming one is refused, rather '
+      + 'than either silently never qualifying anybody (ADR-0035).',
   })
   @ApiResponse({ status: 200, type: MetricDefinitionDto, isArray: true })
   list(): MetricDefinitionDto[] {
@@ -36,7 +37,10 @@ export class MetricRegistryController {
       name: metric.name,
       unit: metric.unit,
       phase: metric.phase,
-      /** Whether anything computes it yet, so a screen can say so rather than imply it does. */
+      /**
+       * Whether it is measured by the time campaigns are evaluated, so a screen can say so rather
+       * than imply it is.
+       */
       computed: metric.phase <= CAMPAIGN_EVALUATION_PHASE,
     }));
   }

@@ -3,7 +3,7 @@
   "paths": {
     "/api/v1/summary": {
       "get": {
-        "description": "Your goal against what you produced, this month and this year, the gap, and the pace — read from your goal, the office’s production and your own log. **Your own, only**: there is no `membershipId`, and a leader’s view of a downline’s is Phase 13’s coaching copy.\n\n**Requires `personal_summary:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Your goal against what you produced, this month and this year, the gap, and the pace — read from your goal, the office’s production and your own log. **Your own, only**: there is no `membershipId`, and a leader’s view of a downline’s is coaching’s copy.\n\n**Requires `personal_summary:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "SummaryController_read_v1",
         "parameters": [],
         "responses": {
@@ -2139,7 +2139,7 @@
     },
     "/api/v1/auth/resend-verification": {
       "post": {
-        "description": "Always `202`, whether or not the address exists or is already verified — anything else is an account-enumeration oracle, the same reason `forgot-password` answers this way. `agent/01-getting-started.md` has told readers to request another since Phase 2, against a route that did not exist.",
+        "description": "Always `202`, whether or not the address exists or is already verified — anything else is an account-enumeration oracle, the same reason `forgot-password` answers this way. `agent/01-getting-started.md` told readers to request another before this route existed.",
         "operationId": "AuthController_resendVerification_v1",
         "parameters": [],
         "requestBody": {
@@ -4240,7 +4240,7 @@
     },
     "/api/v1/admin/tenants/{id}/owner": {
       "patch": {
-        "description": "Name the person by email or by user id. The account must already exist — this promotes an existing platform user; inviting a new one arrives with invitations in Phase 3. Audited with both the outgoing and incoming user.\n\n**Requires `kpm:assign_owner`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Name the person by email or by user id. The account must already exist — this promotes an existing platform user, and inviting a new one is not this route's. Audited with both the outgoing and incoming user.\n\n**Requires `kpm:assign_owner`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_assignOwner_v1",
         "parameters": [
           {
@@ -5977,7 +5977,7 @@
         "description": "**Requires `member:tag_group`.** See `docs/00-product/roles-and-permissions.md`."
       },
       "put": {
-        "description": "Core Leader gates Strategic Leader Forum co-editing (Phase 14) and nothing else — no hierarchy, no data scope. A group is the same: a label, not a rule.\n\n**Requires `member:tag_group`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Core Leader is for Strategic Leader Forum co-editing, which is not built yet, and nothing else — no hierarchy, no data scope. A group is the same: a label, not a rule.\n\n**Requires `member:tag_group`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "OrgController_tagMember_v1",
         "parameters": [
           {
@@ -12491,7 +12491,7 @@
     },
     "/api/v1/kpm/settings/products/{productId}/script/effective": {
       "get": {
-        "description": "The office’s own words **only when approved**; otherwise the company’s, which the company published and is therefore already the company’s word. Phase 12 reads this and nothing else, which is what stops it rendering an override nobody approved.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The office’s own words **only when approved**; otherwise the company’s, which the company published and is therefore already the company’s word. This is the one read an agent’s screen may use, which is what stops one rendering an override nobody approved.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "KpmProductController_effectiveScript_v1",
         "parameters": [
           {
@@ -13749,7 +13749,7 @@
     },
     "/api/v1/activity/dashboard": {
       "get": {
-        "description": "*Last 7 days* (the default), *Last 30 days*, or a custom range of up to 366 days, ending today in the office’s timezone. Seven days is a column a day; thirty days is 7-day blocks counted back from today and a remainder; a custom range is daily up to 31 days and blocks above.\n\n**There is no `membershipId` parameter.** The screen is first-person; a leader’s view of a downline is Phase 13’s, where the read audit `roles-and-permissions.md` §3.5 requires is built.\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "*Last 7 days* (the default), *Last 30 days*, or a custom range of up to 366 days, ending today in the office’s timezone. Seven days is a column a day; thirty days is 7-day blocks counted back from today and a remainder; a custom range is daily up to 31 days and blocks above.\n\n**There is no `membershipId` parameter.** The screen is first-person; a leader’s view of a downline belongs to coaching, where the read audit `roles-and-permissions.md` §3.5 requires is built.\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ActivityController_dashboard_v1",
         "parameters": [
           {
@@ -13853,7 +13853,7 @@
     },
     "/api/v1/activity/ratios": {
       "get": {
-        "description": "Every active ratio of the office **that applies to the subject’s rung** (ADR-0020), computed over `ROLLING_30D` — fixed, ending today in the office’s timezone — with the office’s own formula and benchmark. A zero denominator is `null` and `neutral`: *not enough data*, never 0.\n\n**Your own, only** — there is no `membershipId` parameter. A leader’s view of a downline’s ratios is Phase 13’s coaching copy.\n\n**Requires `activity_ratios:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every active ratio of the office **that applies to the subject’s rung** (ADR-0020), computed over `ROLLING_30D` — fixed, ending today in the office’s timezone — with the office’s own formula and benchmark. A zero denominator is `null` and `neutral`: *not enough data*, never 0.\n\n**Your own, only** — there is no `membershipId` parameter. A leader’s view of a downline’s ratios is coaching’s copy.\n\n**Requires `activity_ratios:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ActivityController_ratios_v1",
         "parameters": [],
         "responses": {
@@ -14151,7 +14151,7 @@
         "x-required-permission": "tenant_config:read"
       },
       "post": {
-        "description": "A requirement is a **metric, a comparator and a number**. A metric this product does not measure is refused by name; one that arrives in a later phase is refused saying which phase brings it, because a campaign asking for it could never qualify anybody.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "A requirement is a **metric, a comparator and a number**. A metric this product does not measure is refused by name; one it does not measure yet is refused saying so, because a campaign asking for it could never qualify anybody.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "CampaignController_create_v1",
         "parameters": [],
         "requestBody": {
@@ -14484,7 +14484,7 @@
     },
     "/api/v1/metrics": {
       "get": {
-        "description": "The key, the name a screen shows, the unit its number is in, and the phase that computes it. A rule or a campaign requirement naming a metric whose phase has not shipped is recorded as waiting on it rather than silently never qualifying anybody (ADR-0035) — campaigns are evaluated in phase 12.\n\n**Requires `metric_registry:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The key, the name a screen shows, the unit its number is in, and `computed`: whether it is measured by the time campaigns are evaluated. A screen says so from `computed` and never from `phase`, which is the roadmap's. A carrier rule naming a metric that is not is recorded as waiting on it, and a campaign requirement naming one is refused, rather than either silently never qualifying anybody (ADR-0035).\n\n**Requires `metric_registry:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "MetricRegistryController_list_v1",
         "parameters": [],
         "responses": {
@@ -16200,7 +16200,7 @@
           "apeAchievedMinor": {
             "type": "number",
             "example": 0,
-            "description": "IDR sen. Typed by the agent until Phase 9 imports production."
+            "description": "IDR sen. The agent’s own typed figure, the answer only while the office holds no year-to-date figure for the year."
           },
           "caseSizeMinor": {
             "type": "number",
@@ -17550,7 +17550,7 @@
           },
           "isCoreLeader": {
             "type": "boolean",
-            "description": "Gates Strategic Leader Forum co-editing (Phase 14) and nothing else. It grants no hierarchy and no data scope."
+            "description": "For Strategic Leader Forum co-editing, which is not built yet, and nothing else. It grants no hierarchy and no data scope."
           }
         },
         "required": [
@@ -18091,7 +18091,7 @@
             "example": 1,
             "minimum": 1,
             "maximum": 12,
-            "description": "The month the financial year starts. Read by Phase 14, stored now."
+            "description": "The month the financial year starts. Stored now; no computation reads it yet."
           }
         }
       },
@@ -20196,11 +20196,11 @@
           },
           "phase": {
             "type": "number",
-            "description": "The phase that computes it."
+            "description": "The roadmap phase that computes it. No screen shows it: `computed` says whether it is measured by the time campaigns are evaluated, and a phase number is a schedule a customer can do nothing with."
           },
           "computed": {
             "type": "boolean",
-            "description": "Whether anything computes it by the phase campaigns are evaluated in. A rule naming one that nothing computes is recorded as waiting on it rather than never passing in silence."
+            "description": "Whether it is measured by the time campaigns are evaluated. A rule naming one that is not is recorded as waiting on it rather than never passing in silence."
           }
         },
         "required": [
@@ -21625,7 +21625,7 @@
           "label": {
             "type": "string",
             "example": "Goal Settings",
-            "description": "Phase 11's \"Go to {label} →\"."
+            "description": "What the new hire's \"Go to {label} →\" names."
           },
           "route": {
             "type": "string",
@@ -21638,10 +21638,6 @@
           "live": {
             "type": "boolean",
             "description": "Whether an evaluator exists yet. While it does not, a leader ticks the item by hand and the tick is recorded as manual; once it is live, no role may tick it."
-          },
-          "livePhase": {
-            "type": "number",
-            "example": 11
           }
         },
         "required": [
@@ -21649,8 +21645,7 @@
           "label",
           "route",
           "completesWhen",
-          "live",
-          "livePhase"
+          "live"
         ]
       },
       "ActivationItemDto": {
@@ -22053,7 +22048,7 @@
           "fiscalYearStartMonth": {
             "type": "number",
             "example": 1,
-            "description": "The month the office's financial year starts, 1–12 (P4-T5). Stored and shown now; read by the period computations in Phase 14."
+            "description": "The month the office's financial year starts, 1–12 (P4-T5). Stored and shown now; no period computation reads it yet."
           },
           "settings": {
             "type": "object",
@@ -22125,7 +22120,7 @@
           "windowDays": {
             "type": "number",
             "example": 90,
-            "description": "The office's activation window. Shown beside the checklist; changed in Branch info."
+            "description": "The office's activation window, as provisioning seeded it. Shown beside the checklist; no route changes it."
           }
         },
         "required": [

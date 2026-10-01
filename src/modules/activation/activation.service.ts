@@ -25,9 +25,11 @@ export interface ActivationLinkView {
   label: string;
   route: string;
   completesWhen: string;
-  /** Whether an evaluator exists yet. While it does not, a leader ticks the item by hand. */
+  /**
+   * Whether an evaluator exists yet. While it does not, a leader ticks the item by hand. **Whether,
+   * never when**: the phase that makes it live is not served (P10.1-T2 AC-13, ADR-0062 §3).
+   */
   live: boolean;
-  livePhase: number;
 }
 
 export interface ActivationItemView {
@@ -58,7 +60,10 @@ export interface ActivationChecklistView {
   published: ActivationVersionView | null;
   /** The office's working copy, or `null` when nothing has been edited since publishing. */
   draft: ActivationVersionView | null;
-  /** `kpms.settings.activationWindowDays`. Shown beside the checklist; changed in Branch info. */
+  /**
+   * `kpms.settings.activationWindowDays`, as provisioning seeded it. Shown beside the checklist.
+   * No route writes it: Branch info has no such field, although this once said it did (X-45).
+   */
   windowDays: number;
 }
 

@@ -9,7 +9,7 @@ export class ActivationLinkDto implements ActivationLinkView {
   @ApiProperty({ type: String, example: 'feature:goals' })
   kind!: string;
 
-  @ApiProperty({ type: String, example: 'Goal Settings', description: 'Phase 11\'s "Go to {label} →".' })
+  @ApiProperty({ type: String, example: 'Goal Settings', description: 'What the new hire\'s "Go to {label} →" names.' })
   label!: string;
 
   @ApiProperty({ type: String, example: '/goals' })
@@ -25,9 +25,6 @@ export class ActivationLinkDto implements ActivationLinkView {
       + 'tick is recorded as manual; once it is live, no role may tick it.',
   })
   live!: boolean;
-
-  @ApiProperty({ type: Number, example: 11 })
-  livePhase!: number;
 }
 
 export class ActivationItemDto implements ActivationItemView {
@@ -96,7 +93,7 @@ export class ActivationChecklistDto implements ActivationChecklistView {
   @ApiProperty({
     type: Number,
     example: 90,
-    description: 'The office\'s activation window. Shown beside the checklist; changed in Branch info.',
+    description: 'The office\'s activation window, as provisioning seeded it. Shown beside the checklist; no route changes it.',
   })
   windowDays!: number;
 }

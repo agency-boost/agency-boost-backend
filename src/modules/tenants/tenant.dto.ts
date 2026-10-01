@@ -352,7 +352,7 @@ export class UpdateBranchInfoDto {
     example: 1,
     minimum: 1,
     maximum: 12,
-    description: 'The month the financial year starts. Read by Phase 14, stored now.',
+    description: 'The month the financial year starts. Stored now; no computation reads it yet.',
   })
   @IsOptional()
   @IsInt()

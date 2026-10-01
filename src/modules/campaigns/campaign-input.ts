@@ -108,10 +108,11 @@ function readRequirements(
         + `${METRIC_REGISTRY.map((m) => m.key).join(', ')}.`,
       );
     } else if (metric.phase > CAMPAIGN_EVALUATION_PHASE) {
-      // Accepting it would be a campaign nobody can ever qualify for, failing silently.
+      // Accepting it would be a campaign nobody can ever qualify for, failing silently. The Owner
+      // reads this, so it says what is true now and names no phase: a phase number is our
+      // schedule, and an Owner can do nothing with it (P10.1-T2 AC-3, ADR-0062 §3).
       violations.push(
-        `${where}: ${metric.name} is not computed until phase ${metric.phase}, and campaigns are `
-        + `evaluated from phase ${CAMPAIGN_EVALUATION_PHASE}. A campaign asking for it could never `
+        `${where}: ${metric.name} is not measured yet, so a campaign asking for it could never `
         + 'qualify anybody.',
       );
     }

@@ -97,7 +97,7 @@ export class ActivityController {
       + 'the office’s timezone. Seven days is a column a day; thirty days is 7-day blocks counted back '
       + 'from today and a remainder; a custom range is daily up to 31 days and blocks above.\n\n'
       + '**There is no `membershipId` parameter.** The screen is first-person; a leader’s view of a '
-      + 'downline is Phase 13’s, where the read audit `roles-and-permissions.md` §3.5 requires is built.',
+      + 'downline belongs to coaching, where the read audit `roles-and-permissions.md` §3.5 requires is built.',
   })
   @ApiResponse({ status: 200, type: ActivityDashboardDto })
   async dashboard(@Ctx() ctx: RequestContext, @Query() query: ActivityDashboardQueryDto) {
@@ -113,7 +113,7 @@ export class ActivityController {
       + '`ROLLING_30D` — fixed, ending today in the office’s timezone — with the office’s own formula and '
       + 'benchmark. A zero denominator is `null` and `neutral`: *not enough data*, never 0.\n\n'
       + '**Your own, only** — there is no `membershipId` parameter. A leader’s view of a downline’s '
-      + 'ratios is Phase 13’s coaching copy.',
+      + 'ratios is coaching’s copy.',
   })
   @ApiResponse({ status: 200, type: ActivityRatiosDto })
   // The query is validated, and empty: anything sent is refused by name (`ActivityRatiosQueryDto`).

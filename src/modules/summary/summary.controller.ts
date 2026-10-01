@@ -25,7 +25,7 @@ export class SummaryController {
     description:
       'Your goal against what you produced, this month and this year, the gap, and the pace — read from '
       + 'your goal, the office’s production and your own log. **Your own, only**: there is no '
-      + '`membershipId`, and a leader’s view of a downline’s is Phase 13’s coaching copy.',
+      + '`membershipId`, and a leader’s view of a downline’s is coaching’s copy.',
   })
   @ApiResponse({ status: 200, type: SummaryDto })
   // The query is validated, and empty: anything sent is refused by name.

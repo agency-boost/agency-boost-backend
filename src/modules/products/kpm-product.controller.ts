@@ -200,8 +200,8 @@ export class KpmProductController {
     summary: 'The script an agent is actually served',
     description:
       'The office’s own words **only when approved**; otherwise the company’s, which the company '
-      + 'published and is therefore already the company’s word. Phase 12 reads this and nothing '
-      + 'else, which is what stops it rendering an override nobody approved.',
+      + 'published and is therefore already the company’s word. This is the one read an agent’s '
+      + 'screen may use, which is what stops one rendering an override nobody approved.',
   })
   @ApiResponse({ status: 200, type: EffectiveScriptDto })
   async effectiveScript(

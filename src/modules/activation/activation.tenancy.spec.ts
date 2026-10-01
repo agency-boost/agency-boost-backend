@@ -65,8 +65,14 @@ describe('the office activation checklist (P5-T3)', () => {
       const items = view.published!.aspects.flatMap((a) => a.items);
 
       const goal = items.find((i) => i.code === 'GOAL_SETTING')!;
-      expect(goal.link).toMatchObject({
-        kind: 'feature:goals', label: 'Goal Settings', route: '/goals', live: false, livePhase: 11,
+      // The whole link, not a subset: it says whether the link works, and never which phase makes
+      // it work — a phase number is our schedule, not the Owner's (P10.1-T2 AC-13, ADR-0062 §3).
+      expect(goal.link).toEqual({
+        kind: 'feature:goals',
+        label: 'Goal Settings',
+        route: '/goals',
+        completesWhen: 'the hire has saved any goal since joining this office',
+        live: false,
       });
       expect(items.find((i) => i.code === 'CRM_SETUP')!.link).toBeNull();
     });
@@ -232,8 +238,12 @@ describe('the office activation checklist (P5-T3)', () => {
 
       expect(item.autoLink).toBe('training:PROSPECT_LIST');
       // The link reads as the module's own title, not its code.
-      expect(item.link).toMatchObject({
-        label: 'Building Your Prospect List', route: '/training', live: false, livePhase: 12,
+      expect(item.link).toEqual({
+        kind: 'training:PROSPECT_LIST',
+        label: 'Building Your Prospect List',
+        route: '/training',
+        completesWhen: 'the hire has completed that training module',
+        live: false,
       });
     });
 

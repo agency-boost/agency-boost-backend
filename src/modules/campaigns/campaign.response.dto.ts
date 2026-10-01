@@ -115,14 +115,20 @@ export class MetricDefinitionDto {
   })
   unit!: string;
 
-  @ApiProperty({ type: Number, description: 'The phase that computes it.' })
+  @ApiProperty({
+    type: Number,
+    description:
+      'The roadmap phase that computes it. No screen shows it: `computed` says whether it is '
+      + 'measured by the time campaigns are evaluated, and a phase number is a schedule a customer '
+      + 'can do nothing with.',
+  })
   phase!: number;
 
   @ApiProperty({
     type: Boolean,
     description:
-      'Whether anything computes it by the phase campaigns are evaluated in. A rule naming one '
-      + 'that nothing computes is recorded as waiting on it rather than never passing in silence.',
+      'Whether it is measured by the time campaigns are evaluated. A rule naming one that is not '
+      + 'is recorded as waiting on it rather than never passing in silence.',
   })
   computed!: boolean;
 }

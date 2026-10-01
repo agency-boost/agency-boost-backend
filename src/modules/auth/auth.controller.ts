@@ -288,8 +288,8 @@ export class AuthController {
     description:
       'Always `202`, whether or not the address exists or is already verified — anything '
       + 'else is an account-enumeration oracle, the same reason `forgot-password` answers '
-      + 'this way. `agent/01-getting-started.md` has told readers to request another since '
-      + 'Phase 2, against a route that did not exist.',
+      + 'this way. `agent/01-getting-started.md` told readers to request another before this '
+      + 'route existed.',
   })
   async resendVerification(@Body() dto: ForgotPasswordDto) {
     const email = dto.email.toLowerCase().trim();

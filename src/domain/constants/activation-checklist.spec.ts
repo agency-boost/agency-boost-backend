@@ -119,13 +119,13 @@ describe('the link registry (P5-T3 AC-7)', () => {
 
   it('gives every feature kind a label, a route and the sentence it is waiting for', () => {
     expect(ACTIVATION_LINK_KINDS['feature:goals']).toMatchObject({
-      label: 'Goal Settings', route: '/goals', livePhase: 11,
+      label: 'Goal Settings', route: '/goals',
     });
     expect(ACTIVATION_LINK_KINDS['feature:leads']).toMatchObject({
-      label: 'Leads Management', route: '/leads', livePhase: 11,
+      label: 'Leads Management', route: '/leads',
     });
     expect(ACTIVATION_LINK_KINDS['feature:activity']).toMatchObject({
-      label: 'Activity Management', route: '/activity/log', livePhase: 11,
+      label: 'Activity Management', route: '/activity/log',
     });
     for (const kind of Object.values(ACTIVATION_LINK_KINDS)) {
       expect(kind.completesWhen.length).toBeGreaterThan(10);
@@ -168,10 +168,21 @@ describe('the link registry (P5-T3 AC-7)', () => {
     expect(mayTickByHand(null)).toBe(true);
   });
 
-  it('declares no kind live yet, and says which phase makes each one live', () => {
+  it('declares no kind live yet', () => {
     for (const kind of [...Object.values(ACTIVATION_LINK_KINDS), ACTIVATION_TRAINING_LINK]) {
       expect(kind.live).toBe(false);
     }
-    expect(ACTIVATION_TRAINING_LINK.livePhase).toBe(12);
+  });
+
+  /*
+   * P10.1-T2 AC-13. Each kind carried `livePhase` — 11 or 12, the old plan's — for a screen to print
+   * *"starts working in phase {n}"*. A phase number is our schedule (ADR-0062 §3), and the re-plan
+   * made these wrong without a test noticing. Pinned by the whole shape, so a schedule field added
+   * back under any name fails here, not on a customer's screen.
+   */
+  it('says whether a kind is live and never when: no phase number is carried', () => {
+    for (const kind of [...Object.values(ACTIVATION_LINK_KINDS), ACTIVATION_TRAINING_LINK]) {
+      expect(Object.keys(kind).sort()).toEqual(['completesWhen', 'label', 'live', 'route']);
+    }
   });
 });

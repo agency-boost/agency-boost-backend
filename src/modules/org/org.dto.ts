@@ -220,8 +220,8 @@ export class TagMemberDto {
 
   @ApiProperty({
     description:
-      'Gates Strategic Leader Forum co-editing (Phase 14) and nothing else. It grants ' +
-      'no hierarchy and no data scope.',
+      'For Strategic Leader Forum co-editing, which is not built yet, and nothing else. It ' +
+      'grants no hierarchy and no data scope.',
   })
   @IsBoolean()
   isCoreLeader!: boolean;

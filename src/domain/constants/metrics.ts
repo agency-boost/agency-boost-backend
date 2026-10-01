@@ -93,8 +93,9 @@ export const metricByKey = (key: string): MetricDefinition | undefined =>
 /**
  * The phase that evaluates a campaign, which is what a requirement has to be computable by.
  *
- * A requirement naming a metric that arrives later is refused **saying which phase brings it**,
- * rather than being accepted and silently never qualifying anybody.
+ * A requirement naming a metric computed after this is refused, saying the metric is not measured
+ * yet and naming no phase (P10.1-T2 AC-3, ADR-0062 §3), rather than being accepted and silently
+ * never qualifying anybody.
  */
 export const CAMPAIGN_EVALUATION_PHASE = 12;
 

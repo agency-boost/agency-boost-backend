@@ -61,7 +61,7 @@ export class KpmViewDto implements KpmView {
     example: 1,
     description:
       'The month the office\'s financial year starts, 1–12 (P4-T5). Stored and shown now; '
-      + 'read by the period computations in Phase 14.',
+      + 'no period computation reads it yet.',
   })
   fiscalYearStartMonth!: number;
 

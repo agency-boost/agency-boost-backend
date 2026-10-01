@@ -73,11 +73,12 @@ describe('campaigns and carrier rules (P5-T7)', () => {
       }))).rejects.toThrow(/"NET_APE" is not a metric this product measures/);
     });
 
-    it('refuses a metric that arrives in a later phase, saying which', async () => {
-      // Accepting it would be a campaign nobody could ever qualify for, failing silently.
+    it('refuses a metric nothing measures yet, saying so and naming no phase', async () => {
+      // Accepting it would be a campaign nobody could ever qualify for, failing silently. The
+      // Owner reads the refusal, so it says what is true now, not our schedule (P10.1-T2 AC-3).
       await expect(wired.campaigns.create(member(KPM_A), aCampaign({
         requirements: [{ metricKey: 'EVENT_NPS', comparator: 'gte', value: 50 }],
-      }))).rejects.toThrow(/not computed until phase 14/);
+      }))).rejects.toThrow(/Event NPS is not measured yet, so a campaign asking for it could never qualify anybody/);
     });
 
     it('refuses money that is not whole sen (AC-2)', async () => {

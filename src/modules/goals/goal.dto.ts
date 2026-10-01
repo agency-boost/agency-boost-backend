@@ -32,7 +32,7 @@ export class SaveGoalDto {
   @Allow()
   monthsLeft!: number;
 
-  @ApiProperty({ type: Number, example: 0, description: 'IDR sen. Typed by the agent until Phase 9 imports production.' })
+  @ApiProperty({ type: Number, example: 0, description: 'IDR sen. The agent’s own typed figure, the answer only while the office holds no year-to-date figure for the year.' })
   @Allow()
   apeAchievedMinor!: number;
 
