@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { FilterQuery, Model, UpdateQuery } from 'mongoose';
+import { RequestContext } from '@/common/context/request-context';
 import { TenantScopedRepository } from '@/common/tenancy/tenant-scoped.repository';
 import { Lead, LeadDocument } from './lead.schema';
 
@@ -18,5 +19,27 @@ import { Lead, LeadDocument } from './lead.schema';
 export class LeadRepository extends TenantScopedRepository<LeadDocument> {
   constructor(@InjectModel(Lead.name) model: Model<LeadDocument>) {
     super(model, 'leads');
+  }
+
+  /**
+   * **Update a lead only if it is still at `version`** — the check and the write in one operation
+   * (P11-T4 AC-3).
+   *
+   * The service compares the pinned version with the row it read, and then writes. Between the two, a
+   * second writer — the agent on a phone and the leader on a laptop in one 1-on-1 — could land, and a
+   * write filtered on `_id` alone would overwrite what they did. With the version in the filter the
+   * write finds nothing instead, and `null` lets the service answer `VERSION_CONFLICT`. Scoped like
+   * every other write here: the tenant is injected into the filter, and `updatedBy` is the caller.
+   */
+  async updateAtVersion(
+    ctx: RequestContext, id: string, version: number, update: UpdateQuery<LeadDocument>,
+  ): Promise<LeadDocument | null> {
+    return this.model
+      .findOneAndUpdate(
+        this.scope(ctx, 'updateAtVersion', { _id: id, version } as FilterQuery<LeadDocument>),
+        { ...update, $set: { ...(update.$set ?? {}), updatedBy: ctx.membershipId } },
+        { new: true },
+      )
+      .exec();
   }
 }

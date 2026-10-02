@@ -10,7 +10,12 @@ export type NotificationChannel = 'in_app' | 'email';
 
 export const NOTIFICATION_CHANNELS: readonly NotificationChannel[] = ['in_app', 'email'] as const;
 
-export type DeliveryStatus = 'pending' | 'sent' | 'failed' | 'suppressed';
+/**
+ * Where one channel's delivery stands. **`held`** is a coalesced notice's email, kept back until the
+ * coaching session it belongs to is finalized and then sent once (`functional/coaching.md`, *One notice
+ * per session*); `pending` is that email claimed for sending, between the claim and the adapter's answer.
+ */
+export type DeliveryStatus = 'pending' | 'held' | 'sent' | 'failed' | 'suppressed';
 
 /**
  * Every template the product sends. Adding one here forces a decision about which

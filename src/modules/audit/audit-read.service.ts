@@ -12,6 +12,15 @@ function isObjectId(value: string): boolean {
   return /^[0-9a-fA-F]{24}$/.test(value);
 }
 
+/** `leader_note.read` and `leader_note.saved` (ADR-0073): the rows that say a note about somebody exists. */
+const LEADER_NOTE_ACTION = /^leader_note\./;
+
+/** The member a leader-note row is about, or `null` for any other row. */
+function leaderNoteSubject(row: { action: string; after?: Record<string, unknown> | null }): string | null {
+  if (!LEADER_NOTE_ACTION.test(row.action)) return null;
+  return String(row.after?.coacheeMembershipId ?? '');
+}
+
 /** One audit row, with the people and the target named where they can be. */
 export interface ResolvedAuditRow {
   _id: string;
@@ -62,8 +71,8 @@ export class AuditReadService {
    * this about renders as the id it was, because a blank cell reads as *nothing happened*
    * rather than *this is all we know*.
    */
-  async findForTenant(kpmId: string | null, limit = 100): Promise<ResolvedAuditRow[]> {
-    const rows = await this.audit.findForTenant(kpmId, limit);
+  async findForTenant(kpmId: string | null, limit: number, readerUserId: string): Promise<ResolvedAuditRow[]> {
+    const rows = await this.withoutNotesAboutTheReader(await this.audit.findForTenant(kpmId, limit), readerUserId);
 
     const userIds = new Set<string>();
     const byCollection = new Map<string, Set<string>>();
@@ -123,6 +132,28 @@ export class AuditReadService {
       before: row.before ?? null,
       after: row.after ?? null,
     }));
+  }
+
+  /**
+   * **A note's audit rows are never served to the person it is about** (ADR-0073; Phase 11 exit review,
+   * N1). `leader_note.read` and `leader_note.saved` carry no text, but each says that a note about
+   * `after.coacheeMembershipId` exists — and a subject never learns that from anything, a refusal
+   * included. An Owner or an Admin holds `audit_log:read` and may be coached by somebody above them, so
+   * the rows about them are dropped here, on the server, before the page is named.
+   *
+   * **Matched by the person, not the membership**: every membership a row names is resolved to its user,
+   * through the repository's named cross-tenant method, and a row about any membership of the reader's —
+   * one they hold now, one from before they left and rejoined — is the reader's own. Rows about anybody
+   * else are served as they were. The page may then hold fewer rows than the limit asked for.
+   */
+  private async withoutNotesAboutTheReader<T extends { action: string; after?: Record<string, unknown> | null }>(
+    rows: T[], readerUserId: string,
+  ): Promise<T[]> {
+    const subjects = [...new Set(rows.map(leaderNoteSubject).filter((id): id is string => id !== null && isObjectId(id)))];
+    if (subjects.length === 0) return rows;
+    const members = await this.memberships.byIdsAnywhereForAudit(subjects);
+    const theirs = new Set(members.filter((m) => m.userId === readerUserId).map((m) => m._id));
+    return rows.filter((row) => !theirs.has(leaderNoteSubject(row) ?? ''));
   }
 
   /**

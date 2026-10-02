@@ -455,9 +455,14 @@ describe('the summary tile a section counts toward (ADR-0064)', () => {
         source: 'self', version: 1, frozenAt: null, corrections: [], deletedAt: null,
       } as never);
 
-    /** Every figure the activity module computes for one member. */
+    /**
+     * Every figure the activity module computes for one member. The summary's `sections` are left out:
+     * since P11-T4 they are the tiles themselves — the grouping this test changes — and a regrouping is
+     * meant to move a count between them. `sectionChips`' own spec holds them to the same rows.
+     */
     const metrics = async () => ({
-      summary: await wired.activityLogs.summary(agent(), { period: 'ROLLING_30D' }),
+      summary: await wired.activityLogs.summary(agent(), { period: 'ROLLING_30D' })
+        .then(({ sections: _tiles, ...figures }) => figures),
       dashboard7: await wired.activityLogs.dashboard(agent(), {}),
       dashboard30: await wired.activityLogs.dashboard(agent(), { range: 'ROLLING_30D' }),
       ratios: await wired.activityLogs.ratios(agent()),

@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HierarchyRole, RequestContext } from '@/common/context/request-context';
-import { can, isOwnerReserved, PERMISSIONS, Permission, Scope, scopeFor } from './permissions';
+import {
+  AAB, AB, can, isBlockedWhileImpersonating, isOwnerReserved, isReadLike, PERMISSIONS, Permission, Scope, scopeFor,
+} from './permissions';
 
 function ctx(opts: {
   superAdmin?: boolean;
@@ -66,6 +68,16 @@ describe('permission matrix', () => {
     it('leaves an ordinary session alone', () => {
       expect(can(ctx({ role: 'ab' }), 'notification:mark_read')).toBe(true);
     });
+
+    it('N7 a permission with no verb is a write: refused to a read-only session, and never read-like', () => {
+      // Every registered permission is `resource:action`; one that is not has no action to read, and
+      // the classifier answers on the empty string rather than throwing — a write, fail-closed.
+      const verbless = 'notification' as Permission;
+      expect(isReadLike(verbless)).toBe(false);
+      expect(can(session(), verbless)).toBe(false);
+      expect(isReadLike('goal:read')).toBe(true);
+      expect(isReadLike('goal:update')).toBe(false);
+    });
   });
 
   describe('code and documentation agree', () => {
@@ -76,8 +88,29 @@ describe('permission matrix', () => {
       'utf8',
     );
 
+    /**
+     * Every row of the matrix: the permissions it names, and its six cells.
+     *
+     * A row may name several permissions — `leader_request:approve` / `decline` — and the second is
+     * written as a bare suffix sharing the first one's namespace.
+     */
+    const ROWS = doc.split('\n').flatMap((line) => {
+      if (!line.startsWith('| `')) return [];
+      const parts = line.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+      if (parts.length !== 7) return [];
+      const names = [...parts[0].matchAll(/`([a-z_]+:?[a-z_]*)`/g)].map((m) => m[1]);
+      if (names.length === 0) return [];
+      const namespace = names[0].split(':')[0];
+      return [{
+        names: names.map((n) => (n.includes(':') ? n : `${namespace}:${n}`)),
+        cells: parts.slice(1),
+      }];
+    });
+
     it.each(Object.keys(PERMISSIONS))('%s appears in roles-and-permissions.md', (permission) => {
-      expect(doc).toContain(permission);
+      // Spelled out, or as a matrix row's bare suffix: `coaching_session:create` / `edit` (P11-T3).
+      const named = doc.includes(permission) || ROWS.some((row) => row.names.includes(permission));
+      expect([permission, named]).toEqual([permission, true]);
     });
 
     /**
@@ -132,42 +165,37 @@ describe('permission matrix', () => {
       'commission_rates:read/AGENT': 'as KPM_OWNER',
     };
 
-    /** The widest scope the matrix gives this permission in this column, or null. */
-    function documented(permission: string): Array<Scope | null> {
-      const cells: Array<Scope | null> = [null, null, null, null, null, null];
-      for (const line of doc.split('\n')) {
-        if (!line.startsWith('| `')) continue;
-        const parts = line.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
-        if (parts.length !== 7) continue;
+    /**
+     * **Every token in a cell, not only the widest** (P11-T3).
+     *
+     * This compared the widest scope per cell until coaching brought cells that hold two —
+     * `own` · `own-downline`, an AB who coaches and is coached. §3 says a wider token never silently
+     * includes the reader's own records, so a registry granting `own-downline` alone would have
+     * passed while dropping the `own` the matrix states. A cell is compared as the whole set, in
+     * widening order, and `—` as null.
+     */
+    function spelled(scopes: Set<Scope>): string | null {
+      if (scopes.size === 0) return null;
+      return WIDENING.filter((scope) => scopes.has(scope)).join(' · ');
+    }
 
-        // A row may name several permissions — `leader_request:approve` / `decline` — and
-        // the second is written as a bare suffix sharing the first one's namespace.
-        const names = [...parts[0].matchAll(/`([a-z_]+:?[a-z_]*)`/g)].map((m) => m[1]);
-        if (names.length === 0) continue;
-        const namespace = names[0].split(':')[0];
-        const full = names.map((n) => (n.includes(':') ? n : `${namespace}:${n}`));
-        if (!full.includes(permission)) continue;
-
-        // A permission can appear in several rows under different conditions — change_role
-        // is split Agent↔AAB from to/from AB. The grant list holds their union.
-        parts.slice(1).forEach((cell, i) => {
-          const scopes = [...cell.matchAll(/`([a-z-]+)`/g)]
-            .map((m) => m[1] as Scope)
-            .filter((v) => WIDENING.includes(v));
-          if (scopes.length === 0) return;
-          const widest = scopes.reduce((a, b) =>
-            WIDENING.indexOf(b) > WIDENING.indexOf(a) ? b : a);
-          const held = cells[i];
-          if (held === null || WIDENING.indexOf(widest) > WIDENING.indexOf(held)) {
-            cells[i] = widest;
+    /** The scopes the matrix gives this permission in each column. */
+    function documented(permission: string): Array<string | null> {
+      const cells = COLUMNS.map(() => new Set<Scope>());
+      // A permission can appear in several rows under different conditions — change_role is split
+      // Agent↔AAB from to/from AB. The grant list holds their union.
+      for (const row of ROWS.filter((r) => r.names.includes(permission))) {
+        row.cells.forEach((cell, i) => {
+          for (const [, token] of cell.matchAll(/`([a-z-]+)`/g)) {
+            if (WIDENING.includes(token as Scope)) cells[i].add(token as Scope);
           }
         });
       }
-      return cells;
+      return cells.map(spelled);
     }
 
     /** What the grant list gives this permission, in the matrix's column order. */
-    function implemented(permission: Permission): Array<Scope | null> {
+    function implemented(permission: Permission): Array<string | null> {
       return COLUMNS.map((column) => {
         const grants = PERMISSIONS[permission] as ReadonlyArray<{
           grantee: { kind: string; role?: string; orgLevelCode?: string };
@@ -182,10 +210,7 @@ describe('permission matrix', () => {
           // codes, which is why this comparison got simpler rather than harder.
           return g.grantee.kind === 'hierarchy' && g.grantee.orgLevelCode === column;
         });
-        if (held.length === 0) return null;
-        return held
-          .map((g) => g.scope)
-          .reduce((a, b) => (WIDENING.indexOf(b) > WIDENING.indexOf(a) ? b : a));
+        return spelled(new Set(held.map((g) => g.scope)));
       });
     }
 
@@ -484,6 +509,161 @@ describe('permission matrix', () => {
       // Dual attribution is what makes impersonation auditable; a Super Admin acting
       // as another Super Admin erases exactly that.
       expect(can(ctx({ superAdmin: true }), 'impersonation:target_super_admin')).toBe(false);
+    });
+  });
+
+  /*
+   * **Coaching's permissions, a positive and a negative for each of the six roles** (P11-T3 AC-4,
+   * §7.2), at the level `can()` decides them — the API refusing what a screen hides.
+   *
+   * The routes arrive in P11-T5 to T10, each with its own per-role HTTP test; these pin the matrix
+   * they will declare. Who is inside a grant's scope — `COACH`, and 404 outside it — is
+   * `coach-resolver.tenancy.spec.ts`'s question.
+   */
+  describe('P11-T3 — coaching (roles §3.8, functional/coaching.md *The permissions*)', () => {
+    const COACHING = [
+      'coaching_session:create', 'coaching_session:edit', 'coaching_session:read',
+      'coaching_session:finalize', 'coaching_session:reopen', 'coaching_session:export_pdf',
+      'coaching_profile:read', 'coaching_profile:update', 'leader_notes:read', 'leader_notes:write',
+    ] as const satisfies readonly Permission[];
+
+    /** The six columns, each as nothing more than that role: the Owner and the Admin stand on the agent rung. */
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: ctx({ owner: true }),
+      KPM_ADMIN: ctx({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+
+    /** The widest scope each role holds, or null for `—`, read from the coaching spec's table. */
+    const LEADERS: Record<string, Scope | null> = {
+      SUPER_ADMIN: null, KPM_OWNER: null, KPM_ADMIN: null, AB: 'own-downline', AAB: 'own-downline', AGENT: null,
+    };
+    const EXPECTED: Record<(typeof COACHING)[number], Record<string, Scope | null>> = {
+      'coaching_session:create': LEADERS,
+      'coaching_session:edit': LEADERS,
+      'coaching_session:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm',
+        AB: 'own-downline', AAB: 'own-downline', AGENT: 'own',
+      },
+      'coaching_session:finalize': LEADERS,
+      'coaching_session:reopen': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm',
+        AB: 'own-downline', AAB: 'own-downline', AGENT: null,
+      },
+      'coaching_session:export_pdf': {
+        SUPER_ADMIN: null, KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm',
+        AB: 'own-downline', AAB: 'own-downline', AGENT: 'own',
+      },
+      'coaching_profile:read': LEADERS,
+      'coaching_profile:update': LEADERS,
+      'leader_notes:read': LEADERS,
+      'leader_notes:write': LEADERS,
+    };
+
+    const cells = COACHING.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P11-T3 AC-4 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P11-T3 AC-4 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it.each(COACHING)('P11-T3 AC-4 negative: %s is refused to a removed or pending leader', (permission) => {
+      // The other negative for a role that holds the grant: a hierarchy right is an active member's.
+      for (const status of ['removed', 'pending'] as const) {
+        expect(can(ctx({ role: 'ab', status }), permission)).toBe(false);
+        expect(can(ctx({ role: 'aab', status }), permission)).toBe(false);
+      }
+    });
+
+    it('P11-T3 AC-1: the AAB holds what the AB holds on every coaching row (ADR-0074)', () => {
+      for (const permission of COACHING) {
+        expect([permission, scopeFor(ROLES.AAB, permission)])
+          .toEqual([permission, scopeFor(ROLES.AB, permission)]);
+      }
+    });
+
+    it('P11-T3 AC-1: a leader who is coached holds `own` beside `own-downline`, as two grants', () => {
+      // §3: a wider token never silently includes the reader's own records.
+      const ownToo = (permission: Permission, grantee: typeof AB) =>
+        (PERMISSIONS[permission] as readonly { grantee: unknown; scope: Scope }[])
+          .some((g) => g.grantee === grantee && g.scope === 'own');
+      for (const permission of ['coaching_session:read', 'coaching_session:export_pdf', 'leader_notes:read'] as const) {
+        expect([permission, ownToo(permission, AB), ownToo(permission, AAB)]).toEqual([permission, true, true]);
+      }
+      // …and nowhere a session is written or a profile kept: `COACH` never reaches oneself.
+      for (const permission of ['coaching_session:create', 'coaching_profile:read', 'leader_notes:write'] as const) {
+        expect([permission, ownToo(permission, AB)]).toEqual([permission, false]);
+      }
+    });
+
+    it('P11-T3 AC-1: coaching_session:share is struck, and never in the registry (ADR-0077, ADR-0083)', () => {
+      expect(Object.keys(PERMISSIONS)).not.toContain('coaching_session:share');
+    });
+
+    it('P11-T3 AC-7 office_roles_cannot_read_leader_notes: the Owner, the Admin and the Super Admin as such', () => {
+      for (const office of [ROLES.KPM_OWNER, ROLES.KPM_ADMIN, ROLES.SUPER_ADMIN, ctx({ superAdmin: true })]) {
+        expect(can(office, 'leader_notes:read')).toBe(false);
+        expect(can(office, 'coaching_profile:read')).toBe(false);
+      }
+      // One who is also an AB holds the AB's grant, which is the hierarchy, not the office (§1.1).
+      // Whether they reach a given note is the reader predicate's: an ancestor of its author.
+      expect(can(ctx({ role: 'ab', owner: true }), 'leader_notes:read')).toBe(true);
+      expect(can(ctx({ role: 'aab', admin: true }), 'leader_notes:read')).toBe(true);
+    });
+
+    it('P11-T3 AC-7 support_session_cannot_read_leader_notes: read-only or elevated (§3.13)', () => {
+      expect(isBlockedWhileImpersonating('leader_notes:read')).toBe(true);
+      const readOnly = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: true });
+      const elevated = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: false });
+      expect(can(readOnly, 'leader_notes:read')).toBe(false);
+      expect(can(elevated, 'leader_notes:read')).toBe(false);
+      // The same leader outside a session reads them.
+      expect(can(ctx({ role: 'ab' }), 'leader_notes:read')).toBe(true);
+    });
+
+    it('OD-108 support_session_cannot_write_leader_notes: an elevated session cannot save a note in the leader’s name', () => {
+      expect(isBlockedWhileImpersonating('leader_notes:write')).toBe(true);
+      const readOnly = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: true });
+      const elevated = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: false });
+      const elevatedAab = ctx({ role: 'aab', impersonatedBy: 'sa-1', readOnly: false });
+      expect(can(readOnly, 'leader_notes:write')).toBe(false);
+      expect(can(elevated, 'leader_notes:write')).toBe(false);
+      expect(can(elevatedAab, 'leader_notes:write')).toBe(false);
+      // Only the note is blocked: the same elevated session keeps the leader's other coaching writes.
+      expect(can(elevated, 'coaching_session:edit')).toBe(true);
+      // P11-T9 AC-9: the ladder and the grids are not notes, so `coaching_profile:update` is not blocked.
+      expect(isBlockedWhileImpersonating('coaching_profile:update')).toBe(false);
+      expect(can(elevated, 'coaching_profile:update')).toBe(true);
+      // The same leaders outside a session write their own.
+      expect(can(ctx({ role: 'ab' }), 'leader_notes:write')).toBe(true);
+      expect(can(ctx({ role: 'aab' }), 'leader_notes:write')).toBe(true);
+    });
+
+    it('P11-T3 AC-4: a read-only support session reads a session and its print, and writes nothing', () => {
+      const readOnly = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: true });
+      expect(can(readOnly, 'coaching_session:read')).toBe(true);
+      expect(can(readOnly, 'coaching_session:export_pdf')).toBe(true);
+      expect(can(readOnly, 'coaching_profile:read')).toBe(true);
+      for (const write of [
+        'coaching_session:create', 'coaching_session:edit', 'coaching_session:finalize',
+        'coaching_session:reopen', 'coaching_profile:update', 'leader_notes:write',
+      ] as const) {
+        expect([write, can(readOnly, write)]).toEqual([write, false]);
+      }
     });
   });
 });

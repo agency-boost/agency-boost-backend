@@ -165,4 +165,15 @@ describe('the OpenAPI document describes the API', () => {
       expect([label, notFound.description?.includes('another office')]).toEqual([label, true]);
     }
   });
+
+  /*
+   * `openapi.ts` derives a 400 from a documented body or query parameter. The roster's query DTO is
+   * empty on purpose, so nothing derives one, and the document said the read could not be refused
+   * while the server refused `?membershipId=` and `?page=` by name. The handler writes it instead.
+   */
+  it('P11-T6 AC-2 the roster documents the 400 its empty query answers, which no parameter derives', () => {
+    const roster = document.paths['/api/v1/coaching/coachees'].get;
+    expect(roster.responses).toHaveProperty('400');
+    expect((roster.responses['400'] as { description?: string }).description).toMatch(/^`VALIDATION_FAILED`/);
+  });
 });

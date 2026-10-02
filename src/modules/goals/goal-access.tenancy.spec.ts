@@ -165,8 +165,8 @@ describe('who may set whose goal (P8-T4)', () => {
     it('keeps an Owner out of a real membership in another office', async () => {
       // The sharper version of the test above, and the one that proves the *scope* of the lookup
       // rather than its existence: this id resolves, so an unscoped `findById` would accept it.
-      // An Owner holds `own-kpm`, which means `subjectsInScope` answers "anybody" — and anybody
-      // means anybody **here**.
+      // An Owner holds `own-kpm`, which means `CoachResolver.subject` answers "anybody" — and
+      // anybody means anybody **here**.
       const FOREIGN = '66f000000000000000000106';
       await mongoose.connection.db!.collection('memberships').insertOne({
         ...person(FOREIGN, 'AGENT', null, []),
@@ -208,6 +208,67 @@ describe('who may set whose goal (P8-T4)', () => {
       const nobody = ctxFor('66f000000000000000000199', 'UNKNOWN_RUNG');
 
       await expect(save(nobody, AGENT)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+  });
+
+  /*
+   * **One reach for a member's data, through `COACH`** (P11-T3, ADR-0074).
+   *
+   * Until P11-T3 the AAB's `own-unit` resolved here as `{ leaderId: me }` — direct reports only —
+   * and no status was read, so a nested AAB's agent was out of reach while a member who had left was
+   * still in it. Both now resolve through `CoachResolver`, which leads, activity and coaching read
+   * too. Phase 10's carry-forward #2 is the first test: no goal test named a peer AAB.
+   */
+  describe('P11-T3 — goals reach what COACH reaches', () => {
+    const PEER_AAB = '66f000000000000000000107';
+    const PEER_AGENT = '66f000000000000000000108';
+    const NESTED_AAB = '66f000000000000000000109';
+    const NESTED_AGENT = '66f00000000000000000010a';
+    const LEFT = '66f00000000000000000010b';
+
+    beforeEach(async () => {
+      await mongoose.connection.db!.collection('memberships').insertMany([
+        person(PEER_AAB, 'AAB', AB, [AB]),
+        person(PEER_AGENT, 'AGENT', PEER_AAB, [AB, PEER_AAB]),
+        // An AAB leading an AAB: nothing forbids it, and a promotion keeps its edge (ADR-0014).
+        person(NESTED_AAB, 'AAB', AAB, [AB, AAB]),
+        person(NESTED_AGENT, 'AGENT', NESTED_AAB, [AB, AAB, NESTED_AAB]),
+        // Removed: the cache still names their leaders (map finding 3), and the status is the answer.
+        { ...person(LEFT, 'AGENT', AAB, [AB, AAB]), status: 'removed' },
+      ] as never);
+    });
+
+    it('P11-T3 AC-5 aab_cannot_coach_peer_unit: an AAB cannot reach a peer AAB’s unit through goals', async () => {
+      for (const peer of [PEER_AAB, PEER_AGENT]) {
+        await expect(save(aab(), peer)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+        await expect(wired.goals.read(aab(), '2026', peer))
+          .rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+        await expect(wired.goals.readOrDefaults(aab(), '2026', peer))
+          .rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      }
+      // Nor the other way round.
+      await expect(save(ctxFor(PEER_AAB, 'AAB'), AGENT)).rejects.toMatchObject({ status: 404 });
+      expect(wired.sentNotifications).toHaveLength(0);
+    });
+
+    it('P11-T3 ADR-0074: an AAB sets a nested AAB’s agent’s goal — `own-unit` is the subtree for a member’s data', async () => {
+      const saved = await save(aab(), NESTED_AGENT);
+
+      expect(saved).toMatchObject({ membershipId: NESTED_AGENT, savedByMembershipId: AAB });
+      await expect(wired.goals.read(aab(), '2026', NESTED_AGENT))
+        .resolves.toMatchObject({ membershipId: NESTED_AGENT });
+      // The nested AAB keeps their own unit, and reaches nothing above it.
+      await expect(wired.goals.read(ctxFor(NESTED_AAB, 'AAB'), '2026', NESTED_AGENT))
+        .resolves.toMatchObject({ membershipId: NESTED_AGENT });
+      await expect(save(ctxFor(NESTED_AAB, 'AAB'), AGENT)).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('P11-T3 AC-2: no leader reaches the goal of a member who has left — the office does (§6.7)', async () => {
+      await expect(save(aab(), LEFT)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      await expect(wired.goals.readOrDefaults(ab(), '2026', LEFT))
+        .rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      await expect(wired.goals.readOrDefaults(owner(), '2026', LEFT))
+        .resolves.toMatchObject({ savedAt: null });
     });
   });
 

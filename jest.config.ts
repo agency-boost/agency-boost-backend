@@ -42,6 +42,14 @@ const config: Config = {
     // all. Both were near enough already that pinning them cost two test files.
     './src/common/tenancy/': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/rbac/': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    // P11-T3: `COACH(actor, subject)` and the subject reads that go through it. It decides who may
+    // read whose data, so it is permissions code held to the permissions floor, although it lives in
+    // `modules/org` beside the tree — whose own floor is lower, and says why.
+    './src/modules/org/coach-resolver.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    // P11-T3: the §3.5 seam every coach read of a coachee's data calls — who read whose data, and
+    // the self-read it skips. It decides what the record of disclosures holds, so it is held where
+    // the resolver is, although `modules/audit` around it runs under the global floor.
+    './src/modules/audit/subject-read-audit.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/common/auth/': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/common/context/': { lines: 100, branches: 100, functions: 100, statements: 100 },
     /*
@@ -159,6 +167,9 @@ const config: Config = {
     // P10-T4: the Personal Summary is arithmetic over three modules' readings — every branch is a
     // figure somebody reads as their standing, so it carries the domain floor whole.
     './src/modules/summary/': { lines: 95, branches: 95, functions: 95, statements: 95 },
+    // P11-T5, P11-T6: coaching — the sessions, the metrics read over them and the roster's verdicts.
+    // Business rules from the first task, so the domain floor from the first day, as production's was.
+    './src/modules/coaching/': { lines: 95, branches: 95, functions: 95, statements: 95 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],

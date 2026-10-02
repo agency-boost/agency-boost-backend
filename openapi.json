@@ -3,9 +3,20 @@
   "paths": {
     "/api/v1/summary": {
       "get": {
-        "description": "Your goal against what you produced, this month and this year, the gap, and the pace — read from your goal, the office’s production and your own log. **Your own, only**: there is no `membershipId`, and a leader’s view of a downline’s is coaching’s copy.\n\n**Requires `personal_summary:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Your goal against what you produced, this month and this year, the gap, and the pace — read from your goal, the office’s production and your own log. With `for`, the same page **computed for that person**: their goal, their production and whose figure it is, their log, their leads, their compliance, and their rung for the sections and the ratios. A read of somebody else’s writes one entry to the audit log; your own writes none.\n\n**Requires `personal_summary:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "SummaryController_read_v1",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "for",
+            "required": false,
+            "in": "query",
+            "description": "The **membership** whose Summary to read. Omitted, or your own, it is yours. Anybody else is read as far as your grant reaches: the people you coach, or the whole agency for its owner and its administrators. Every read of somebody else’s is recorded.",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -13,6 +24,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SummaryDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
                 }
               }
             }
@@ -37,6 +58,16 @@
               }
             }
           },
+          "404": {
+            "description": "`NOT_FOUND` — `for` names nobody you may read, **or** somebody in another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "500": {
             "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
             "content": {
@@ -53,7 +84,7 @@
             "bearer": []
           }
         ],
-        "summary": "Your Personal Summary",
+        "summary": "A Personal Summary: yours, or somebody’s you may read",
         "tags": [
           "summary"
         ],
@@ -62,7 +93,7 @@
     },
     "/api/v1/leads": {
       "get": {
-        "description": "Search over the name and the remarks, filter by ladder, stage, outcome and attention state, sort on one key, and page. The Leads table sorts on name, type, status and registration, and asks for every page in turn. **Scoped to what your grant reaches**: your own, plus your unit or your downline. A lead outside it is a 404, never a 403.\n\n**Requires `lead:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Search over the name and the remarks, filter by ladder, stage, outcome and attention state, sort on one key, and page. The Leads table sorts on name, type, status and registration, and asks for every page in turn. **Scoped to what your grant reaches**: your own, plus your unit or your downline. A lead outside it is a 404, never a 403. A page holding somebody else’s leads writes one entry to the audit log for each person whose leads it shows; your own write none.\n\n`owner` narrows it to one member’s leads — yours, or somebody you coach, for the coaching session’s Leads card — beside every other filter. Somebody your grant does not reach is a 404. Another member’s list writes one audit entry, whatever it holds.\n\n**Requires `lead:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "LeadController_list_v1",
         "parameters": [
           {
@@ -72,6 +103,16 @@
             "description": "Over the name and the remarks.",
             "schema": {
               "maxLength": 120,
+              "type": "string"
+            }
+          },
+          {
+            "name": "owner",
+            "required": false,
+            "in": "query",
+            "description": "Whose leads: a membership id. Yours, or somebody your grant reaches; 404 outside it.",
+            "schema": {
+              "maxLength": 64,
               "type": "string"
             }
           },
@@ -214,6 +255,16 @@
               }
             }
           },
+          "404": {
+            "description": "`NOT_FOUND` — `owner` names nobody whose leads you may reach, **or** somebody in another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "500": {
             "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
             "content": {
@@ -237,9 +288,20 @@
         "x-required-permission": "lead:read"
       },
       "post": {
-        "description": "A name is enough. **Contact details need a recorded lawful basis** (UU 27/2022) — `LEAD_CONSENT_REQUIRED`. The lead starts on no stage: the first one is a move.\n\n**Requires `lead:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "A name is enough. **Contact details need a recorded lawful basis** (UU 27/2022) — `LEAD_CONSENT_REQUIRED`. The lead starts on no stage: the first one is a move.\n\nYours, or — with `owner` — in the pipeline of somebody you coach: the lead is theirs, and its creation and `lastEditedBy` name you. Anybody you do not coach, yourself included, is a 404. No notification is sent.\n\n**Requires `lead:create`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "LeadController_create_v1",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "owner",
+            "required": false,
+            "in": "query",
+            "description": "Whose pipeline: somebody you coach. The lead is theirs, and its creation is attributed to you. 404 outside `COACH`, yourself included.",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -291,6 +353,16 @@
               }
             }
           },
+          "404": {
+            "description": "`NOT_FOUND` — `owner` names nobody whose leads you may reach, **or** somebody in another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "500": {
             "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
             "content": {
@@ -316,7 +388,7 @@
     },
     "/api/v1/leads/{id}": {
       "get": {
-        "description": "**404, not 403**, for another office’s.\n\n**Requires `lead:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "**404, not 403**, for another office’s. A lead you do not own — one of somebody you coach — writes one entry to the audit log; your own writes none.\n\n**Requires `lead:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "LeadController_read_v1",
         "parameters": [
           {
@@ -392,7 +464,7 @@
         "x-required-permission": "lead:read"
       },
       "patch": {
-        "description": "Any of the fields creation takes, one or several. **Not the stage** — that is its own route. Clearing the lawful basis on a lead that still holds contact details is refused, because it is the same act as adding them without one.\n\n**Requires `lead:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Any of the fields creation takes, one or several. **Not the stage** — that is its own route. Clearing the lawful basis on a lead that still holds contact details is refused, because it is the same act as adding them without one.\n\n`version` is the version the write was read at: a stale one is `VERSION_CONFLICT` (409), and nothing is written. **Optional for the lead’s owner, required of anybody else** — a leader’s write without one is `VALIDATION_FAILED` (400). Another office’s lead, or one you cannot reach, is a 404 first.\n\n**Requires `lead:update`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "LeadController_update_v1",
         "parameters": [
           {
@@ -457,6 +529,16 @@
           },
           "404": {
             "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VERSION_CONFLICT` — the lead changed since `version`: re-read it. Nothing was written.",
             "content": {
               "application/json": {
                 "schema": {
@@ -566,7 +648,7 @@
     },
     "/api/v1/leads/{id}/status": {
       "patch": {
-        "description": "Any **active** stage of its own pipeline, at any time (ADR-0045): `rank` is presentation and reorderable, so a forward-only rule would let a drag on the Owner’s settings screen change which moves their agents may make. Refused for the other ladder (`LEAD_STATUS_WRONG_PIPELINE`), for a retired stage (`CONFIG_ARCHIVED`), and for a lead that is already closed (`LEAD_ALREADY_CLOSED`). Every move is appended to the history.\n\n**Requires `lead:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Any **active** stage of its own pipeline, at any time (ADR-0045): `rank` is presentation and reorderable, so a forward-only rule would let a drag on the Owner’s settings screen change which moves their agents may make. Refused for the other ladder (`LEAD_STATUS_WRONG_PIPELINE`), for a retired stage (`CONFIG_ARCHIVED`), and for a lead that is already closed (`LEAD_ALREADY_CLOSED`). Every move is appended to the history.\n\n`version` is the version the write was read at: a stale one is `VERSION_CONFLICT` (409), and nothing is written. **Optional for the lead’s owner, required of anybody else** — a leader’s write without one is `VALIDATION_FAILED` (400). Another office’s lead, or one you cannot reach, is a 404 first.\n\n**Requires `lead:update`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "LeadController_setStatus_v1",
         "parameters": [
           {
@@ -639,6 +721,16 @@
               }
             }
           },
+          "409": {
+            "description": "`VERSION_CONFLICT` — the lead changed since `version`: re-read it. Nothing was written. `LEAD_ALREADY_CLOSED` — reopen it first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "500": {
             "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
             "content": {
@@ -664,7 +756,7 @@
     },
     "/api/v1/leads/{id}/outcome": {
       "patch": {
-        "description": "`won` needs the stage that closes the pipeline (`LEAD_STATUS_NOT_FINAL` otherwise); `lost` is allowed at any stage; `null` reopens. The two prototype screens disagree about the second and the stricter reading of each half is taken (§3.7).\n\n**Requires `lead:mark_outcome`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "`won` needs the stage that closes the pipeline (`LEAD_STATUS_NOT_FINAL` otherwise); `lost` is allowed at any stage; `null` reopens. The two prototype screens disagree about the second and the stricter reading of each half is taken (§3.7).\n\n`version` is the version the write was read at: a stale one is `VERSION_CONFLICT` (409), and nothing is written. **Optional for the lead’s owner, required of anybody else** — a leader’s write without one is `VALIDATION_FAILED` (400). Another office’s lead, or one you cannot reach, is a 404 first.\n\n**Requires `lead:mark_outcome`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "LeadController_setOutcome_v1",
         "parameters": [
           {
@@ -737,6 +829,16 @@
               }
             }
           },
+          "409": {
+            "description": "`VERSION_CONFLICT` — the lead changed since `version`: re-read it. Nothing was written. `LEAD_ALREADY_CLOSED` — reopen it first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "500": {
             "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
             "content": {
@@ -762,7 +864,7 @@
     },
     "/api/v1/goals/{period}": {
       "get": {
-        "description": "The goal, or **the office’s defaults** when there is none — so the screen opens on five filled cards rather than on empty ones, and a first-time reader sees what a plan looks like. `projected` is recomputed on every read; `snapshot` is what was agreed.\n\n**Requires `goal:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The goal, or **the office’s defaults** when there is none — so the screen opens on five filled cards rather than on empty ones, and a first-time reader sees what a plan looks like. `projected` is recomputed on every read; `snapshot` is what was agreed. Somebody else’s plan, named by `for`, comes back without their measured rates.\n\n**Requires `goal:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "GoalController_read_v1",
         "parameters": [
           {
@@ -777,8 +879,9 @@
             "name": "for",
             "required": false,
             "in": "query",
-            "description": "A **membership** in your downline, unit or office, as your grant allows (§3.6). Omitted, it is your own. Somebody outside it is a **404, never a 403**: a refusal that confirmed the person exists would answer a question nobody was entitled to ask.",
+            "description": "A **membership** you may read the plan of, as your grant allows (§3.6). Omitted, or your own, it is your own. Somebody outside it is a **404, never a 403**: a refusal that confirmed the person exists would answer a question nobody was entitled to ask. Anybody else’s plan comes back with `measured: null`.",
             "schema": {
+              "maxLength": 64,
               "type": "string"
             }
           }
@@ -872,8 +975,19 @@
             "name": "for",
             "required": false,
             "in": "query",
-            "description": "Save **somebody else’s** goal, as §3.6 allows a leader, an Owner and an Admin to. It becomes their goal immediately — there is no acceptance step (ADR-0046) — the record names who saved it, and **they are notified**.",
+            "description": "Save **somebody else’s** goal, as §3.6 allows a leader, an Owner and an Admin to. It becomes their goal immediately — there is no acceptance step (ADR-0046) — the record names who saved it, and **they are notified**. Somebody outside your grant is a **404, never a 403**.",
             "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "name": "session",
+            "required": false,
+            "in": "query",
+            "description": "The coaching session the save is made in: **your own open session with that person**, a draft or one reopened — anything else is a 404, and a finalized one `COACHING_SESSION_FINALIZED` (409). Every save through one session reaches them as **one notice**: in the app at the first save, kept to the latest value by the later ones, and emailed once, when the session is finalized. Without it, each save is its own notice, in the app and by email.",
+            "schema": {
+              "maxLength": 64,
               "type": "string"
             }
           }
@@ -931,6 +1045,16 @@
           },
           "404": {
             "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`COACHING_SESSION_FINALIZED` — `session` names your session with them, and it is finalized: reopen it first. `GOAL_PERIOD_LOCKED` — the period has ended.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13642,7 +13766,7 @@
     },
     "/api/v1/activity/summary": {
       "get": {
-        "description": "Periods are the **named** ones (ADR-0022), resolved in the office’s timezone: a rolling window is never labelled *this month*. `from`/`to` override `period` for a custom range. **Another member’s totals are audited**: the read writes `activity_log.read_raw` with the subject, the range and the surface (§3.5).\n\n**Requires `activity_ratios:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Periods are the **named** ones (ADR-0022), resolved in the office’s timezone: a rolling window is never labelled *this month*. `from`/`to` override `period` for a custom range.\n\n`targets` are the goal’s three cascade codes against `SUB_PERIOD_ACTIVITY_TARGET`: this month’s activity targets, as the Personal Summary sets them, **pro-rated** to the last 7 days — for `ROLLING_7D` only, and `null` without an APE target. `sections` are the subject’s summary tiles over the window, grouped as the Summary’s are, on the subject’s rung.\n\n**Another member’s totals are audited**: the read writes `activity_log.read_raw` with the subject, the range and the surface (§3.5). Outside your scope it is a 404, never a 403.\n\n**Requires `activity_ratios:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ActivityController_summary_v1",
         "parameters": [
           {
@@ -13720,6 +13844,16 @@
           },
           "403": {
             "description": "`PERM_DENIED` — the caller does not hold `activity_ratios:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — `membershipId` names nobody you may read, **or** somebody in another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13857,9 +13991,20 @@
     },
     "/api/v1/activity/ratios": {
       "get": {
-        "description": "Every active ratio of the office **that applies to the subject’s rung** (ADR-0020), computed over `ROLLING_30D` — fixed, ending today in the office’s timezone — with the office’s own formula and benchmark. A zero denominator is `null` and `neutral`: *not enough data*, never 0.\n\n**Your own, only** — there is no `membershipId` parameter. A leader’s view of a downline’s ratios is coaching’s copy.\n\n**Requires `activity_ratios:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every active ratio of the office **that applies to the subject’s rung** (ADR-0020), computed over `ROLLING_30D` — fixed, ending today in the office’s timezone — with the office’s own formula and benchmark. A ratio that does not apply is absent, never shown as failed. A zero denominator is `null` and `neutral`: *not enough data*, never 0.\n\n**Yours, or a coachee’s**: `for` names whose, on the subject’s own rung. Outside your scope it is a 404, never a 403. **Another member’s ratios are audited**: the read writes `activity_log.read_raw` with the subject, the 30 days and the surface `ratios` (§3.5). Your own writes nothing.\n\n**Requires `activity_ratios:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ActivityController_ratios_v1",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "for",
+            "required": false,
+            "in": "query",
+            "description": "Whose ratios: a membership id. Defaults to your own; another member’s needs the scope to read them, is a 404 outside it, and is audited.",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -13867,6 +14012,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ActivityRatiosDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
                 }
               }
             }
@@ -13883,6 +14038,16 @@
           },
           "403": {
             "description": "`PERM_DENIED` — the caller does not hold `activity_ratios:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — `for` names nobody you may read, **or** somebody in another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13912,85 +14077,6 @@
           "activity"
         ],
         "x-required-permission": "activity_ratios:read"
-      }
-    },
-    "/api/v1/activity/compliance": {
-      "get": {
-        "description": "`ACTIVITY_COMPLIANCE_7D` and `ACTIVITY_COMPLIANCE_MONTH`. **Existence, not a total**: an all-zero entry is a statement that nothing happened and counts as reporting, where no entry is silence and does not (ADR-0042). There is no partial state — Logged or Missed. **Another member’s is audited**: the read writes `activity_log.read_raw`, with no start to its range, because `lastLoggedOn` discloses the latest day logged whenever it was (§3.5).\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
-        "operationId": "ActivityController_compliance_v1",
-        "parameters": [
-          {
-            "name": "membershipId",
-            "required": false,
-            "in": "query",
-            "description": "Whose compliance. Defaults to your own; another member’s read is audited.",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ActivityComplianceDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `activity_log:read_raw`. `details.permission` names it.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Whether this member is reporting",
-        "tags": [
-          "activity"
-        ],
-        "x-required-permission": "activity_log:read_raw"
       }
     },
     "/api/v1/kpm/settings/campaigns/rules": {
@@ -14922,6 +15008,1262 @@
         ],
         "x-required-permission": "tenant_config:write"
       }
+    },
+    "/api/v1/coaching/coachees": {
+      "get": {
+        "description": "The coaching roster: everybody below you on the current leader edges, at any depth, and nobody else — the agents who answer to you directly, then each leader who does, with their whole team beneath them. Each person’s last 1:1 and who led it, and their status for the calendar month. **Verdicts and dates only**: no count of any activity is in the answer. Somebody who coaches nobody gets an empty roster, not an error. Not paginated.\n\n**Requires `coaching_session:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingController_coachees_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachingRosterDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — this read takes no query parameter. One sent, of any name, is refused, and `details` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `coaching_session:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Everyone you coach",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "coaching_session:read"
+      }
+    },
+    "/api/v1/coaching/coachees/{membershipId}": {
+      "get": {
+        "description": "The person a coaching page opens on: their name and pronoun, their rung, the leader they answer to directly and whether that is you, and how many people are below them and how many of those lead — with today in the office’s calendar. **Directory facts, and no figure of theirs**, so the read is not recorded. Only somebody you coach is answered: anybody else, a member who has left and yourself included, is not found.\n\n**Requires `coaching_session:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingController_coachee_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoacheeDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — this read takes no query parameter. One sent, of any name, is refused, and `details` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `coaching_session:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Somebody you coach",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "coaching_session:read"
+      }
+    },
+    "/api/v1/coaching/coachees/{membershipId}/sessions": {
+      "get": {
+        "description": "Their finalized sessions, newest first — each with its day, who led it, how many action items it agreed and how many of them the next session ticked done — and what the session workspace opens on: your open draft with them, else the session you are correcting, else the one you finalized today. Somebody you coach: every finalized session about them, whoever led it. The Owner and the Admin: every finalized one. A leader who no longer coaches them: the sessions they led, and no other. Dates, coaches and counts, so the read is not recorded. Not paginated.\n\n**Requires `coaching_session:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingController_history_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionHistoryDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `coaching_session:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Somebody’s coaching sessions",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "coaching_session:read"
+      },
+      "post": {
+        "description": "*▶ Start coaching session*. Opens a draft with somebody you coach, or — when you already have one open with them — answers that one, so a second start resumes it from any device. A new draft opens on their latest finalized session, whoever led it: its action items under *Last week’s action items*, none ticked, and every one not done carried into *Other action items* with its date cleared — except one whose lead has a next action date now, which *From leads* lists — and every tip, as written. The answer is the session, as reading it answers it, and is recorded as a read of their data.\n\n**Requires `coaching_session:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingController_start_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The draft you already had open with them.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachingSessionDto"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "A new draft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachingSessionDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `coaching_session:create`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Start a coaching session",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "coaching_session:create"
+      }
+    },
+    "/api/v1/coaching/sessions/{sessionId}": {
+      "get": {
+        "description": "One session, as you may see it. Its coach, while they coach the person, reads all of it, the draft included, with *From leads* read from the person’s leads now. Everybody else reads its latest finalized version, read-only: any leader who coaches the person now, the leader who led it after they stopped, the Owner and the Admin, and the person it is about. A draft is its coach’s alone. With the snapshot of what the 1:1 looked at, and every earlier version with who reopened it, when and why. A read by anybody but the person it is about is recorded.\n\n**Requires `coaching_session:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingController_read_v1",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachingSessionDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `coaching_session:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A coaching session",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "coaching_session:read"
+      },
+      "put": {
+        "description": "The whole editable state, pinned to the version you read: last week’s ticks and dates, *Other action items* and the tips, each list whole. A tick on last week’s item is written on this session; the session it came from never changes. A blank row may be saved while editing. Only its coach saves it, while they coach the person. At most 50 items and 50 tips, each at most 500 characters.\n\n**Requires `coaching_session:edit`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingController_save_v1",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveCoachingSessionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDraftSavedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `coaching_session:edit`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`COACHING_SESSION_FINALIZED` — it is finalized; reopen it first. `VERSION_CONFLICT` — it changed since you read it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save a coaching session",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "coaching_session:edit"
+      }
+    },
+    "/api/v1/coaching/sessions/{sessionId}/finalize": {
+      "post": {
+        "description": "*✓ Finalize this session*. Refused, with the prototype’s own sentence and `details.rule`, when there is no action item at all, a tip or an action item is blank, an action item has no date, or a lead of theirs promised for this month has no next action date — the first of these that fails. Then it is locked: who finalized it and when, the actions from their leads as they stand, and — the first time only — its date and the snapshot of what the 1:1 looked at. The person is told, and an email about a goal you set during the session goes out once.\n\n**Requires `coaching_session:finalize`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingController_finalize_v1",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PinnedSessionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachingSessionDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `coaching_session:finalize`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`COACHING_SESSION_FINALIZED` — already finalized. `VERSION_CONFLICT` — it changed since you read it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`COACHING_SESSION_INCOMPLETE` — `details.rule` names the check; `details.leadId` and `details.leadName` the lead, for `LEAD_THIS_MONTH_UNDATED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Finalize a coaching session",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "coaching_session:finalize"
+      }
+    },
+    "/api/v1/coaching/sessions/{sessionId}/reopen": {
+      "post": {
+        "description": "*Edit again*, with a reason. Its coach, while they coach the person, and the Owner and the Admin while its coach still does, until 7 days after the day it was first finalized. The finalized version is kept whole, with who reopened it, when and why, and stays the one that counts until the correction is finalized. Everybody who reads the session, the person included, reads the reason.\n\n**Requires `coaching_session:reopen`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingController_reopen_v1",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReopenCoachingSessionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachingSessionDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `coaching_session:reopen`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`COACHING_SESSION_NOT_FINALIZED` — a draft, or already reopened (`details.status`). `COACHING_REOPEN_WINDOW_CLOSED` — past its last day (`details.date`, `details.reopenableUntil`, `details.windowDays`). `COACHING_REOPEN_COACH_NOT_CURRENT` — its coach no longer coaches the person, so nobody could finalize the correction. `VERSION_CONFLICT` — it changed since you read it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reopen a finalized coaching session",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "coaching_session:reopen"
+      }
+    },
+    "/api/v1/coaching/coachees/{membershipId}/profile": {
+      "get": {
+        "description": "*Capability mapping* and *Skill tracker*: the milestones and skill items ticked for somebody you coach, the stage those milestones give, and the office’s whole capability catalog to draw them against — archived items included, with their status, so an item the office retired still shows on a profile that ticked it. One profile per person, shared by everybody who coaches them now. Anybody else, the person themselves included, is not found. Not recorded: only their coaches read it.\n\n**Requires `coaching_profile:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingProfileController_profile_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachingProfileDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `coaching_profile:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Somebody’s capability ladder and skill tracker",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "coaching_profile:read"
+      },
+      "put": {
+        "description": "The whole tick set, pinned to the version you read: every milestone and skill item ticked, by the catalog’s code. A code not sent is unticked. The tick set it replaces is kept. Anybody who coaches the person now may save it.\n\n**Requires `coaching_profile:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingProfileController_saveProfile_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveCoachingProfileDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachingProfileSavedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing or malformed, or a code is not in the office’s catalog (`details.unknown.milestoneCodes`, `details.unknown.skillCodes`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `coaching_profile:update`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VERSION_CONFLICT` — another coach saved it since you read it. Read it again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`CONFIG_ARCHIVED` — the office retired an item this save ticks for the first time (`details.codes`). A profile that already had it keeps it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save somebody’s capability ladder and skill tracker",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "coaching_profile:update"
+      }
+    },
+    "/api/v1/coaching/coachees/{membershipId}/leader-notes": {
+      "get": {
+        "description": "*Personal notes*: your own note about the person, and the notes leaders below you wrote about them, read-only. A note is read by the leader who wrote it and by the leaders above that leader, and by nobody else: **never the person it is about**, never the Owner or the Admin as such, and never in a support session. Somebody you coach with no note yet answers both empty; anybody else with nothing to read is not found. Every note somebody else wrote that you read is recorded.\n\n**Requires `leader_notes:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingProfileController_leaderNotes_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderNotesDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `leader_notes:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The private notes about somebody",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "leader_notes:read"
+      },
+      "put": {
+        "description": "*Save notes*: your own note about somebody you coach now, whole, pinned to the version you read — 0 for your first. Blank is allowed, and the text it replaces is kept. At most 4,000 characters. Only you write your note; the save is recorded, never its text. Saving the text it already has changes nothing and records nothing: it answers the note as it stands. Refused in a support session.\n\n**Requires `leader_notes:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingProfileController_saveLeaderNote_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveLeaderNoteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderNoteSavedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `leader_notes:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VERSION_CONFLICT` — you saved this note somewhere else since you read it. Read it again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save your private note about somebody",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "leader_notes:write"
+      }
+    },
+    "/api/v1/coaching/me/sessions": {
+      "get": {
+        "description": "The finalized sessions about you, newest first, each with who led it, how many action items it agreed and how many of them the next session ticked done — a session being corrected as its latest finalized version, and never a draft. Read-only. Beside them, the finalized sessions you led with somebody you no longer coach, each with who it was about: yours to read, never to change. Your own record, so the read is not recorded. Not paginated.\n\n**Requires `coaching_session:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingRecordController_mine_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MySessionsDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `coaching_session:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Your own coaching",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "coaching_session:read"
+      }
+    },
+    "/api/v1/coaching/sessions/{sessionId}/print": {
+      "get": {
+        "description": "*⬇ Download as PDF*: the latest finalized version of a session, as the print holds it — last week’s items with their ticks, the goal as the 1:1 saw it, the coaching tips and the next actions with their leads. From what was frozen when it was finalized, so a goal, a lead or a day changed since does not reach it, and dated the day it was held. Nothing a leader keeps to themselves is in it. Read by the same people who read the session; a session being corrected prints the version the correction will replace. Every print is recorded, and a print by anybody but the person it is about is recorded as a read of their data as well.\n\n**Requires `coaching_session:export_pdf`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingRecordController_print_v1",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPrintDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `coaching_session:export_pdf`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`COACHING_SESSION_NOT_FINALIZED` — your draft has not been finalized yet, so there is nothing to print (`details.status`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Print a coaching session",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "coaching_session:export_pdf"
+      }
     }
   },
   "info": {
@@ -15501,6 +16843,50 @@
           "insights"
         ]
       },
+      "ApiErrorBody": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "PERM_DENIED",
+            "description": "A stable code from `docs/02-specs/api/error-catalog.md`. Branch on this, never on the message."
+          },
+          "message": {
+            "type": "string",
+            "example": "You do not have permission to do that.",
+            "description": "Written for a person. Wording may change; the code will not."
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "What is specific to this failure — the permission that was missing, the field that was wrong, the code already taken.",
+            "example": {
+              "permission": "kpm:create"
+            }
+          },
+          "requestId": {
+            "type": "string",
+            "example": "9f2c1a8e-4b7d-4f21-9a3e-6c5d2b1f0a44",
+            "description": "On every response and in every log line. Quote it to support."
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "requestId"
+        ]
+      },
+      "ApiErrorEnvelope": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ApiErrorBody"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
       "LeadContactDto": {
         "type": "object",
         "properties": {
@@ -15828,7 +17214,7 @@
           "version": {
             "type": "number",
             "example": 3,
-            "description": "The `version` this patch was written against. Refused with `409 VERSION_CONFLICT` if the lead has moved on — two people in one 1-on-1 on two devices is the realistic case."
+            "description": "The `version` this patch was written against. Refused with `409 VERSION_CONFLICT` if the lead has moved on — two people in one 1-on-1 on two devices is the realistic case. Optional for the lead’s owner; **required of anybody else**, `400 VALIDATION_FAILED` without it."
           }
         }
       },
@@ -15837,8 +17223,9 @@
         "properties": {
           "version": {
             "type": "number",
+            "minimum": 1,
             "example": 3,
-            "description": "The version this write was read at."
+            "description": "The version this write was read at. Optional for the lead’s owner; required of anybody else."
           },
           "statusCode": {
             "type": "string",
@@ -15855,8 +17242,9 @@
         "properties": {
           "version": {
             "type": "number",
+            "minimum": 1,
             "example": 3,
-            "description": "The version this write was read at."
+            "description": "The version this write was read at. Optional for the lead’s owner; required of anybody else."
           },
           "outcome": {
             "type": "string",
@@ -16131,7 +17519,8 @@
             ]
           },
           "measured": {
-            "description": "The subject’s own conversion rates over the last 30 days, over **this goal’s** cascade codes — printed under the assumptions they measure. Read only: nothing is filled in (ADR-0048, ADR-0055).",
+            "nullable": true,
+            "description": "Your own conversion rates over the last 30 days, over **this goal’s** cascade codes — printed under the assumptions they measure. Read only: nothing is filled in (ADR-0048, ADR-0055). **`null` on anybody else’s plan**: reading or saving somebody else’s goal answers no rate from their log.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/GoalMeasuredDto"
@@ -16204,7 +17593,7 @@
           "apeAchievedMinor": {
             "type": "number",
             "example": 0,
-            "description": "IDR sen. The agent’s own typed figure, the answer only while the office holds no year-to-date figure for the year."
+            "description": "IDR sen. The agent’s own typed figure, the answer only while the office holds no year-to-date figure for the year. Ignored on a save of somebody else’s plan (`for`): their stored figure is kept (ADR-0075)."
           },
           "caseSizeMinor": {
             "type": "number",
@@ -19397,6 +20786,41 @@
           "count"
         ]
       },
+      "ActivityWindowTargetDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "leads",
+              "appointments",
+              "closings"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "example": "LEADS_CONTACTED",
+            "description": "The goal’s own code for this count, never an item number."
+          },
+          "logged": {
+            "type": "number",
+            "example": 14,
+            "description": "Every entry against the code in the window, archived types included."
+          },
+          "target": {
+            "type": "number",
+            "nullable": true,
+            "example": 16,
+            "description": "`SUB_PERIOD_ACTIVITY_TARGET`: this month’s activity target pro-rated to the last 7 days (7 ÷ 30.44, rounded; closings at least 1 when the month asks for any), and labelled *pro-rated* wherever it is shown. `null` without an APE target, and for any period but `ROLLING_7D` or a custom range. 0 is a month that needs nothing more."
+          }
+        },
+        "required": [
+          "key",
+          "code",
+          "logged",
+          "target"
+        ]
+      },
       "ActivitySummaryDto": {
         "type": "object",
         "properties": {
@@ -19423,6 +20847,20 @@
           "totalCount": {
             "type": "number",
             "example": 31
+          },
+          "targets": {
+            "description": "The goal’s three cascade codes — leads contacted, appointments, closings, in that order — logged in the window against their pro-rated targets.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityWindowTargetDto"
+            }
+          },
+          "sections": {
+            "description": "The subject’s summary tiles over the window, grouped as `GET /summary`’s `activity.sections` are (ADR-0064): the tiles holding none of the three cascade codes, on the subject’s rung. The drill’s category breakdown.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SectionChipDto"
+            }
           }
         },
         "required": [
@@ -19430,7 +20868,9 @@
           "to",
           "totals",
           "daysLogged",
-          "totalCount"
+          "totalCount",
+          "targets",
+          "sections"
         ]
       },
       "DashboardBucketDto": {
@@ -19842,39 +21282,6 @@
           "ratios"
         ]
       },
-      "ActivityComplianceDto": {
-        "type": "object",
-        "properties": {
-          "membershipId": {
-            "type": "string"
-          },
-          "compliant7d": {
-            "type": "boolean",
-            "description": "`ACTIVITY_COMPLIANCE_7D`. Logged or Missed, with no partial state."
-          },
-          "compliantMonth": {
-            "type": "boolean",
-            "description": "`ACTIVITY_COMPLIANCE_MONTH`, over the calendar month."
-          },
-          "lastLoggedOn": {
-            "type": "object",
-            "nullable": true,
-            "example": "2026-03-09",
-            "description": "Null when they have never logged — *Never logged*, not *0 days ago*."
-          },
-          "windowDays": {
-            "type": "number",
-            "example": 7,
-            "description": "The office’s own compliance window."
-          }
-        },
-        "required": [
-          "membershipId",
-          "compliant7d",
-          "compliantMonth",
-          "windowDays"
-        ]
-      },
       "RequirementViewDto": {
         "type": "object",
         "properties": {
@@ -20099,6 +21506,7 @@
               "CLOSINGS_NEEDED_PER_WEEK",
               "SUMMARY_ACTIVITY_TARGET",
               "ACTIVITY_TARGET_ATTAINMENT_PCT",
+              "SUB_PERIOD_ACTIVITY_TARGET",
               "ACTIVATION_COMPLETION_PCT",
               "ACTIVATION_DAY_INDEX",
               "TRAINING_COMPLETION_PCT",
@@ -20469,48 +21877,1794 @@
           "codes"
         ]
       },
-      "ApiErrorBody": {
+      "RosterRungDto": {
         "type": "object",
         "properties": {
           "code": {
             "type": "string",
-            "example": "PERM_DENIED",
-            "description": "A stable code from `docs/02-specs/api/error-catalog.md`. Branch on this, never on the message."
+            "example": "AGENT",
+            "description": "The rung’s stable code on the company’s ladder."
           },
-          "message": {
+          "label": {
             "type": "string",
-            "example": "You do not have permission to do that.",
-            "description": "Written for a person. Wording may change; the code will not."
-          },
-          "details": {
-            "type": "object",
-            "additionalProperties": true,
-            "description": "What is specific to this failure — the permission that was missing, the field that was wrong, the code already taken.",
-            "example": {
-              "permission": "kpm:create"
-            }
-          },
-          "requestId": {
-            "type": "string",
-            "example": "9f2c1a8e-4b7d-4f21-9a3e-6c5d2b1f0a44",
-            "description": "On every response and in every log line. Quote it to support."
+            "example": "Agent",
+            "description": "The ladder’s own label for it."
           }
         },
         "required": [
           "code",
-          "message",
-          "requestId"
+          "label"
         ]
       },
-      "ApiErrorEnvelope": {
+      "RosterPersonDto": {
         "type": "object",
         "properties": {
-          "error": {
-            "$ref": "#/components/schemas/ApiErrorBody"
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Rina Wijaya"
           }
         },
         "required": [
-          "error"
+          "membershipId",
+          "name"
+        ]
+      },
+      "RosterLastOneOnOneDto": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "number",
+            "example": 4,
+            "description": "`DAYS_SINCE_LAST_COACHING`: whole calendar days since the latest finalized session, 0 being today."
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-09-28",
+            "description": "That session’s day: the day it was first finalized. A correction never moves it."
+          },
+          "overdue": {
+            "type": "boolean",
+            "description": "`days` is above `overdueAfterDays`. Decided here, never in the browser."
+          },
+          "coach": {
+            "nullable": true,
+            "description": "Who led that session, whoever it was; `null` when their membership can no longer be named.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RosterPersonDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "days",
+          "date",
+          "overdue",
+          "coach"
+        ]
+      },
+      "RosterRowDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Rina Wijaya"
+          },
+          "rung": {
+            "$ref": "#/components/schemas/RosterRungDto"
+          },
+          "depth": {
+            "type": "number",
+            "example": 1,
+            "description": "Levels below the reader: 1 is somebody who answers to the reader directly."
+          },
+          "lastOneOnOne": {
+            "nullable": true,
+            "description": "The latest finalized session about them; `null` until there is one (*No 1:1 yet*). A draft never counts.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RosterLastOneOnOneDto"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "on_track",
+              "watch_closely",
+              "needs_attention",
+              "no_goal_set"
+            ],
+            "description": "`GOAL_PACE_STATUS` for the calendar month: `no_goal_set` with no goal for the year; else `needs_attention` when not pacing to at least one policy submission this month; else `on_track` at or above the on-track share of this month’s APE target, and `watch_closely` below it. A year already met needs nothing more this month and reads `on_track` once the policy gate passes. Until this month’s production file is uploaded, the share is the closings logged, projected to the month’s end, over this month’s closing target — from the 7th; before it, `watch_closely`."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "rung",
+          "depth",
+          "lastOneOnOne",
+          "status"
+        ]
+      },
+      "RosterUnitDto": {
+        "type": "object",
+        "properties": {
+          "head": {
+            "description": "Somebody who answers to the reader directly and leads others.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RosterRowDto"
+              }
+            ]
+          },
+          "members": {
+            "description": "Their whole subtree in tree order: a nested head is followed by their own members. A to Z within a level.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RosterRowDto"
+            }
+          }
+        },
+        "required": [
+          "head",
+          "members"
+        ]
+      },
+      "CoachingRosterDto": {
+        "type": "object",
+        "properties": {
+          "today": {
+            "type": "string",
+            "example": "2026-10-02",
+            "description": "Today where you work: the day every figure here is as of."
+          },
+          "overdueAfterDays": {
+            "type": "number",
+            "example": 7,
+            "description": "How many days a last 1:1 may be before it reads overdue, as set for your agency."
+          },
+          "directAgents": {
+            "description": "The agents who answer to you directly, A to Z.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RosterRowDto"
+            }
+          },
+          "units": {
+            "description": "Each leader who answers to you directly, A to Z, with everybody below them.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RosterUnitDto"
+            }
+          }
+        },
+        "required": [
+          "today",
+          "overdueAfterDays",
+          "directAgents",
+          "units"
+        ]
+      },
+      "CoacheeDownlineDto": {
+        "type": "object",
+        "properties": {
+          "members": {
+            "type": "number",
+            "example": 2,
+            "description": "Everybody below them on the current leader edges, at any depth. 0 when nobody is."
+          },
+          "leaders": {
+            "type": "number",
+            "example": 0,
+            "description": "Those of them who lead somebody themselves. 0 when nobody below them leads anybody."
+          }
+        },
+        "required": [
+          "members",
+          "leaders"
+        ]
+      },
+      "CoacheeDto": {
+        "type": "object",
+        "properties": {
+          "today": {
+            "type": "string",
+            "example": "2026-10-02",
+            "description": "Today where you work (`YYYY-MM-DD`), in the office’s own time zone: the day the page dates from, never the browser’s."
+          },
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Rina Wijaya"
+          },
+          "pronoun": {
+            "type": "string",
+            "enum": [
+              "she",
+              "he",
+              "they"
+            ],
+            "example": "she",
+            "description": "Their own pronoun, which every sentence about them is written in. `they` unless they chose one."
+          },
+          "rung": {
+            "$ref": "#/components/schemas/RosterRungDto"
+          },
+          "leader": {
+            "nullable": true,
+            "description": "The leader they answer to directly; `null` only when that membership can no longer be named.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RosterPersonDto"
+              }
+            ]
+          },
+          "direct": {
+            "type": "boolean",
+            "example": true,
+            "description": "You are that leader: they are in your own unit."
+          },
+          "downline": {
+            "$ref": "#/components/schemas/CoacheeDownlineDto"
+          }
+        },
+        "required": [
+          "today",
+          "membershipId",
+          "name",
+          "pronoun",
+          "rung",
+          "leader",
+          "direct",
+          "downline"
+        ]
+      },
+      "SessionCurrentDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "finalized",
+              "reopened"
+            ]
+          }
+        },
+        "required": [
+          "sessionId",
+          "status"
+        ]
+      },
+      "SessionPersonDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Sari Puspita",
+            "description": "Empty when the membership can no longer be named."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name"
+        ]
+      },
+      "SessionHistoryRowDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-09-28"
+          },
+          "coach": {
+            "$ref": "#/components/schemas/SessionPersonDto"
+          },
+          "actionItemCount": {
+            "type": "number",
+            "example": 3,
+            "description": "Its action items, from leads and typed: *{N} action items*."
+          },
+          "completedCount": {
+            "type": "number",
+            "example": 1,
+            "description": "How many of them the next session ticked done: *{M} completed*. 0 until one reviews them."
+          }
+        },
+        "required": [
+          "sessionId",
+          "date",
+          "coach",
+          "actionItemCount",
+          "completedCount"
+        ]
+      },
+      "SessionHistoryDto": {
+        "type": "object",
+        "properties": {
+          "today": {
+            "type": "string",
+            "example": "2026-10-02",
+            "description": "Today where you work."
+          },
+          "current": {
+            "nullable": true,
+            "description": "What the workspace opens on: your open draft with this person; else the session you are correcting; else the one you finalized today; else `null`, and the workspace opens before *Start*.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SessionCurrentDto"
+              }
+            ]
+          },
+          "sessions": {
+            "description": "Finalized sessions, newest first. Not paginated.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionHistoryRowDto"
+            }
+          }
+        },
+        "required": [
+          "today",
+          "current",
+          "sessions"
+        ]
+      },
+      "LastWeekRefDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "The finalized session these items were carried from."
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-09-25",
+            "description": "Its date: *From {date} session*."
+          }
+        },
+        "required": [
+          "sessionId",
+          "date"
+        ]
+      },
+      "SessionLeadTagDto": {
+        "type": "object",
+        "properties": {
+          "leadId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Pak Hendro Gunawan",
+            "description": "The lead’s name as it read that day: *Leads · {name}*."
+          }
+        },
+        "required": [
+          "leadId",
+          "name"
+        ]
+      },
+      "LastWeekItemDto": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "example": "Book three presentations"
+          },
+          "dueDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-28"
+          },
+          "lead": {
+            "nullable": true,
+            "description": "The lead it came from; `null` for a typed item.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SessionLeadTagDto"
+              }
+            ]
+          },
+          "done": {
+            "type": "boolean",
+            "description": "Ticked done by this session. The session it came from never changes."
+          }
+        },
+        "required": [
+          "itemId",
+          "text",
+          "dueDate",
+          "lead",
+          "done"
+        ]
+      },
+      "LeadActionDto": {
+        "type": "object",
+        "properties": {
+          "leadId": {
+            "type": "string"
+          },
+          "leadName": {
+            "type": "string",
+            "example": "Pak Hendro Gunawan"
+          },
+          "dueDate": {
+            "type": "string",
+            "example": "2026-10-03",
+            "description": "The lead’s next action date."
+          },
+          "text": {
+            "type": "string",
+            "example": "Collect the signed SPAJ.",
+            "description": "The lead’s note, or *Follow up with {name}*."
+          }
+        },
+        "required": [
+          "leadId",
+          "leadName",
+          "dueDate",
+          "text"
+        ]
+      },
+      "ActionItemDto": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "example": "Shadow Sari on one presentation"
+          },
+          "dueDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-07",
+            "description": "`null` until a date is set."
+          }
+        },
+        "required": [
+          "itemId",
+          "text",
+          "dueDate"
+        ]
+      },
+      "TipDto": {
+        "type": "object",
+        "properties": {
+          "tipId": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "example": "Confirm the next meeting before you leave the current one."
+          }
+        },
+        "required": [
+          "tipId",
+          "text"
+        ]
+      },
+      "SnapshotPeriodDto": {
+        "type": "object",
+        "properties": {
+          "targetMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR sen; `null` with no goal to measure against."
+          },
+          "actualMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR sen; `null` when nothing was held yet — never a 0 in its place."
+          },
+          "attainmentPct": {
+            "type": "number",
+            "nullable": true
+          },
+          "gapMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR sen, never negative."
+          },
+          "targetMet": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "targetMinor",
+          "actualMinor",
+          "attainmentPct",
+          "gapMinor",
+          "targetMet"
+        ]
+      },
+      "SnapshotSourceDto": {
+        "type": "object",
+        "properties": {
+          "provenance": {
+            "type": "string",
+            "enum": [
+              "imported",
+              "corrected",
+              "self_reported"
+            ],
+            "description": "Whose APE figure it was."
+          },
+          "month": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-08",
+            "description": "Whose year to date it was; `null` for the member’s own."
+          }
+        },
+        "required": [
+          "provenance",
+          "month"
+        ]
+      },
+      "SnapshotGoalDto": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "example": "2026"
+          },
+          "month": {
+            "type": "string",
+            "example": "2026-09"
+          },
+          "currency": {
+            "type": "string",
+            "example": "IDR"
+          },
+          "monthly": {
+            "description": "This month, as the Summary showed it that day.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SnapshotPeriodDto"
+              }
+            ]
+          },
+          "yearly": {
+            "description": "This year, as the Summary showed it that day.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SnapshotPeriodDto"
+              }
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/SnapshotSourceDto"
+          },
+          "savedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "When the goal looked at was saved; `null` with no goal."
+          },
+          "savedByMembershipId": {
+            "type": "string",
+            "nullable": true
+          },
+          "goalVersion": {
+            "type": "number",
+            "nullable": true,
+            "description": "Which version of the goal; `null` with no goal."
+          }
+        },
+        "required": [
+          "period",
+          "month",
+          "currency",
+          "monthly",
+          "yearly",
+          "source",
+          "savedAt",
+          "savedByMembershipId",
+          "goalVersion"
+        ]
+      },
+      "SnapshotRatioSidesDto": {
+        "type": "object",
+        "properties": {
+          "numerator": {
+            "type": "string",
+            "nullable": true,
+            "example": "Selling",
+            "description": "The section the numerator counts; `null` when its codes span sections."
+          },
+          "denominator": {
+            "type": "string",
+            "nullable": true,
+            "example": "Recruitment",
+            "description": "The section the denominator counts; `null` when its codes span sections."
+          }
+        },
+        "required": [
+          "numerator",
+          "denominator"
+        ]
+      },
+      "SnapshotRatioRowDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "description": "The label it read that day."
+          },
+          "comparison": {
+            "type": "string"
+          },
+          "displayUnit": {
+            "type": "string"
+          },
+          "benchmark": {
+            "type": "number",
+            "nullable": true
+          },
+          "value": {
+            "type": "number",
+            "nullable": true
+          },
+          "share": {
+            "type": "number",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "sides": {
+            "nullable": true,
+            "description": "The balance’s two ends as the Ratios card named them that day — `value` leans toward the numerator when positive. `null` for a rate. **Absent** from a snapshot taken before the field existed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SnapshotRatioSidesDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "comparison",
+          "displayUnit",
+          "benchmark",
+          "value",
+          "share",
+          "status"
+        ]
+      },
+      "SnapshotRatiosDto": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "days": {
+            "type": "number",
+            "example": 30
+          },
+          "rows": {
+            "description": "The ratios on the coachee’s rung.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SnapshotRatioRowDto"
+            }
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "days",
+          "rows"
+        ]
+      },
+      "SnapshotTargetDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "example": "closings"
+          },
+          "code": {
+            "type": "string",
+            "example": "SELL_SUBMISSION"
+          },
+          "logged": {
+            "type": "number"
+          },
+          "target": {
+            "type": "number",
+            "nullable": true,
+            "description": "Pro-rated to the 7 days; `null` with no APE target."
+          }
+        },
+        "required": [
+          "key",
+          "code",
+          "logged",
+          "target"
+        ]
+      },
+      "SnapshotSectionRowDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "count"
+        ]
+      },
+      "SnapshotSectionDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "total": {
+            "type": "number"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SnapshotSectionRowDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "total",
+          "rows"
+        ]
+      },
+      "SnapshotActivityDto": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SnapshotTargetDto"
+            }
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SnapshotSectionDto"
+            }
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "targets",
+          "sections"
+        ]
+      },
+      "SessionSnapshotDto": {
+        "type": "object",
+        "properties": {
+          "takenAt": {
+            "type": "string",
+            "description": "When it was taken: the session’s first finalize."
+          },
+          "goal": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SnapshotGoalDto"
+              }
+            ]
+          },
+          "ratios": {
+            "nullable": true,
+            "description": "The last 30 days.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SnapshotRatiosDto"
+              }
+            ]
+          },
+          "activity": {
+            "nullable": true,
+            "description": "The last 7 days.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SnapshotActivityDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "takenAt",
+          "goal",
+          "ratios",
+          "activity"
+        ]
+      },
+      "EarlierVersionDto": {
+        "type": "object",
+        "properties": {
+          "finalizedAt": {
+            "type": "string"
+          },
+          "finalizedBy": {
+            "$ref": "#/components/schemas/SessionPersonDto"
+          },
+          "reopenedAt": {
+            "type": "string"
+          },
+          "reopenedBy": {
+            "$ref": "#/components/schemas/SessionPersonDto"
+          },
+          "reason": {
+            "type": "string",
+            "example": "Two action items had the wrong dates.",
+            "description": "Why it was reopened."
+          },
+          "lastWeekItems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LastWeekItemDto"
+            }
+          },
+          "leadActions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeadActionDto"
+            }
+          },
+          "actionItems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionItemDto"
+            }
+          },
+          "tips": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TipDto"
+            }
+          }
+        },
+        "required": [
+          "finalizedAt",
+          "finalizedBy",
+          "reopenedAt",
+          "reopenedBy",
+          "reason",
+          "lastWeekItems",
+          "leadActions",
+          "actionItems",
+          "tips"
+        ]
+      },
+      "CoachingSessionDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "coachee": {
+            "$ref": "#/components/schemas/SessionPersonDto"
+          },
+          "coach": {
+            "description": "Who leads it, and the only member who edits or finalizes it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SessionPersonDto"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "finalized",
+              "reopened"
+            ],
+            "description": "As you may see it: a session under correction reads `finalized`, as its latest finalized version, to everybody but its coach while they coach the person."
+          },
+          "version": {
+            "type": "number",
+            "example": 3,
+            "description": "What a save, a finalize or a reopen pins."
+          },
+          "date": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-28",
+            "description": "The day it was first finalized, in your agency’s calendar; `null` until then. A correction never moves it."
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finalizedAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "The latest finalize."
+          },
+          "finalizedBy": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SessionPersonDto"
+              }
+            ]
+          },
+          "reopenableUntil": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-05",
+            "description": "The last day it may be reopened, for a reader who may reopen it — given after that day too, so the screen can say until when — else `null`."
+          },
+          "lastWeek": {
+            "nullable": true,
+            "description": "The finalized session *last week* is; `null` for a first session.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LastWeekRefDto"
+              }
+            ]
+          },
+          "lastWeekItems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LastWeekItemDto"
+            }
+          },
+          "leadActions": {
+            "description": "*From leads (automatic)*: read from the person’s leads now while the session is open and you coach them; otherwise the list its last finalize took.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeadActionDto"
+            }
+          },
+          "actionItems": {
+            "description": "*Other action items*.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionItemDto"
+            }
+          },
+          "tips": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TipDto"
+            }
+          },
+          "snapshot": {
+            "nullable": true,
+            "description": "What the 1:1 looked at, taken once at the first finalize. `null` until then. Never a live figure.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SessionSnapshotDto"
+              }
+            ]
+          },
+          "earlier": {
+            "description": "Every finalized version a reopen replaced, oldest first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EarlierVersionDto"
+            }
+          }
+        },
+        "required": [
+          "sessionId",
+          "coachee",
+          "coach",
+          "status",
+          "version",
+          "date",
+          "startedAt",
+          "finalizedAt",
+          "finalizedBy",
+          "reopenableUntil",
+          "lastWeek",
+          "lastWeekItems",
+          "leadActions",
+          "actionItems",
+          "tips",
+          "snapshot",
+          "earlier"
+        ]
+      },
+      "LastWeekItemChangeDto": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "description": "One of the session’s own *Last week’s action items*."
+          },
+          "done": {
+            "type": "boolean",
+            "description": "Ticked done in this session. The session it came from never changes."
+          },
+          "dueDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-09",
+            "description": "Its date, moved here; omitted keeps it."
+          }
+        },
+        "required": [
+          "itemId",
+          "done"
+        ]
+      },
+      "ActionItemDraftDto": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "description": "The row’s id, as the session answered it. Omitted for a new row."
+          },
+          "text": {
+            "type": "string",
+            "example": "Book two presentations",
+            "description": "Blank is kept while editing; finalize refuses it."
+          },
+          "dueDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-09",
+            "description": "Its date, or `null` until one is set."
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "TipDraftDto": {
+        "type": "object",
+        "properties": {
+          "tipId": {
+            "type": "string",
+            "description": "The tip’s id, as the session answered it. Omitted for a new tip."
+          },
+          "text": {
+            "type": "string",
+            "example": "Confirm the next meeting before you leave the current one."
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "SaveCoachingSessionDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number",
+            "example": 3,
+            "description": "The `version` this write was read at. Refused with `409 VERSION_CONFLICT` when the session has moved on — the same session open on a second device is the realistic case."
+          },
+          "lastWeekItems": {
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LastWeekItemChangeDto"
+            }
+          },
+          "actionItems": {
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionItemDraftDto"
+            }
+          },
+          "tips": {
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TipDraftDto"
+            }
+          }
+        },
+        "required": [
+          "version",
+          "lastWeekItems",
+          "actionItems",
+          "tips"
+        ]
+      },
+      "SessionDraftSavedDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "number",
+            "example": 4,
+            "description": "The version the next write pins."
+          },
+          "actionItems": {
+            "description": "With the ids new rows were given.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionItemDto"
+            }
+          },
+          "tips": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TipDto"
+            }
+          }
+        },
+        "required": [
+          "sessionId",
+          "version",
+          "actionItems",
+          "tips"
+        ]
+      },
+      "PinnedSessionDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number",
+            "example": 3,
+            "description": "The `version` this write was read at. Refused with `409 VERSION_CONFLICT` when the session has moved on — the same session open on a second device is the realistic case."
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "ReopenCoachingSessionDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number",
+            "example": 3,
+            "description": "The `version` this write was read at. Refused with `409 VERSION_CONFLICT` when the session has moved on — the same session open on a second device is the realistic case."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "example": "Two action items had the wrong dates.",
+            "description": "Why it is reopened. Required, and kept with the session: everybody who reads the session, the coachee included, reads it."
+          }
+        },
+        "required": [
+          "version",
+          "reason"
+        ]
+      },
+      "ProfileCatalogDto": {
+        "type": "object",
+        "properties": {
+          "stages": {
+            "description": "The ladder, with what each stage requires and how senior it is. Archived stages included, with their status.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CapabilityStageDto"
+            }
+          },
+          "milestones": {
+            "description": "Every milestone, archived ones included, with their status.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CapabilityEntryDto"
+            }
+          },
+          "grids": {
+            "description": "The skill tracker’s grids and their items, archived ones included, with their status.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CapabilityGridDto"
+            }
+          }
+        },
+        "required": [
+          "stages",
+          "milestones",
+          "grids"
+        ]
+      },
+      "ProfilePersonDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Sari Puspita",
+            "description": "Empty when the membership can no longer be named."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name"
+        ]
+      },
+      "CoachingProfileDto": {
+        "type": "object",
+        "properties": {
+          "catalog": {
+            "description": "The office’s capability catalog. An item the office archived still renders on a profile that ticked it, and is offered to no new tick.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProfileCatalogDto"
+              }
+            ]
+          },
+          "milestoneCodes": {
+            "example": [
+              "SELLS_INDEPENDENTLY"
+            ],
+            "description": "The milestones ticked, by code.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "skillCodes": {
+            "example": [
+              "LEADS_GEN",
+              "APPROACH"
+            ],
+            "description": "The skill items ticked, by code.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stageCode": {
+            "type": "string",
+            "nullable": true,
+            "example": "COMPETENT_PRODUCER",
+            "description": "The highest stage whose required milestones are all ticked; `null` below the first. Worked out on every read."
+          },
+          "version": {
+            "type": "number",
+            "example": 2,
+            "description": "The version the next save pins: 0 before the first save."
+          },
+          "updatedAt": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-02T03:00:00.000Z",
+            "description": "`null` before the first save."
+          },
+          "updatedBy": {
+            "nullable": true,
+            "description": "The coach who saved it last; `null` before the first save.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProfilePersonDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "catalog",
+          "milestoneCodes",
+          "skillCodes",
+          "stageCode",
+          "version",
+          "updatedAt",
+          "updatedBy"
+        ]
+      },
+      "SaveCoachingProfileDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number",
+            "example": 2,
+            "description": "The `version` this tick set was read at: 0 for a profile never saved. Refused with `409 VERSION_CONFLICT` when another coach saved it since."
+          },
+          "milestoneCodes": {
+            "maxItems": 200,
+            "example": [
+              "SELLS_INDEPENDENTLY"
+            ],
+            "description": "Every capability milestone ticked, by the catalog’s code. A code sent twice is one tick.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "skillCodes": {
+            "maxItems": 200,
+            "example": [
+              "LEADS_GEN",
+              "APPROACH"
+            ],
+            "description": "Every skill-tracker item ticked, across the four grids, by the catalog’s code.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "version",
+          "milestoneCodes",
+          "skillCodes"
+        ]
+      },
+      "CoachingProfileSavedDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number",
+            "example": 3,
+            "description": "The version the next save pins."
+          },
+          "stageCode": {
+            "type": "string",
+            "nullable": true,
+            "example": "INDEPENDENT_PRODUCER",
+            "description": "The stage the saved ticks give."
+          },
+          "updatedAt": {
+            "type": "string",
+            "example": "2026-10-02T03:00:00.000Z"
+          }
+        },
+        "required": [
+          "version",
+          "stageCode",
+          "updatedAt"
+        ]
+      },
+      "LeaderNoteMineDto": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "example": "Ready for a bigger book."
+          },
+          "version": {
+            "type": "number",
+            "example": 1,
+            "description": "The version your next save pins."
+          },
+          "updatedAt": {
+            "type": "string",
+            "example": "2026-10-02T03:00:00.000Z"
+          }
+        },
+        "required": [
+          "noteId",
+          "text",
+          "version",
+          "updatedAt"
+        ]
+      },
+      "LeaderNoteOtherDto": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string"
+          },
+          "author": {
+            "description": "The leader below you who wrote it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProfilePersonDto"
+              }
+            ]
+          },
+          "text": {
+            "type": "string",
+            "example": "Strong on first meetings."
+          },
+          "updatedAt": {
+            "type": "string",
+            "example": "2026-10-02T03:00:00.000Z"
+          }
+        },
+        "required": [
+          "noteId",
+          "author",
+          "text",
+          "updatedAt"
+        ]
+      },
+      "LeaderNotesDto": {
+        "type": "object",
+        "properties": {
+          "mine": {
+            "nullable": true,
+            "description": "Your own note about the person; `null` until you save one.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LeaderNoteMineDto"
+              }
+            ]
+          },
+          "others": {
+            "description": "The notes leaders below you wrote about the person, newest first, read-only. Each one read is recorded.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaderNoteOtherDto"
+            }
+          }
+        },
+        "required": [
+          "mine",
+          "others"
+        ]
+      },
+      "SaveLeaderNoteDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number",
+            "example": 1,
+            "description": "The `version` of your note this text replaces: 0 for your first note about the person. Refused with `409 VERSION_CONFLICT` when you saved it from somewhere else since."
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 4000,
+            "example": "Strong on first meetings; loses momentum after the illustration.",
+            "description": "The whole note. Blank is allowed. The text it replaces is kept."
+          }
+        },
+        "required": [
+          "version",
+          "text"
+        ]
+      },
+      "LeaderNoteSavedDto": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "number",
+            "example": 2,
+            "description": "The version your next save pins."
+          },
+          "updatedAt": {
+            "type": "string",
+            "example": "2026-10-02T03:00:00.000Z"
+          }
+        },
+        "required": [
+          "noteId",
+          "version",
+          "updatedAt"
+        ]
+      },
+      "LedSessionRowDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-09-28"
+          },
+          "coachee": {
+            "description": "Who it was about: somebody you no longer coach.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SessionPersonDto"
+              }
+            ]
+          },
+          "actionItemCount": {
+            "type": "number",
+            "example": 3,
+            "description": "Its action items, from leads and typed."
+          },
+          "completedCount": {
+            "type": "number",
+            "example": 1,
+            "description": "How many of them the next session you led with them ticked done."
+          }
+        },
+        "required": [
+          "sessionId",
+          "date",
+          "coachee",
+          "actionItemCount",
+          "completedCount"
+        ]
+      },
+      "MySessionsDto": {
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "description": "Your own coaching: the finalized sessions about you, newest first, each with who led it. Not paginated.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionHistoryRowDto"
+            }
+          },
+          "ledFormerly": {
+            "description": "The finalized sessions you led with somebody you no longer coach, newest first: yours to read, never to change. Empty for somebody who has led nobody. Not paginated.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LedSessionRowDto"
+            }
+          }
+        },
+        "required": [
+          "sessions",
+          "ledFormerly"
+        ]
+      },
+      "PrintPersonDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Indah Permatasari",
+            "description": "Empty when the membership can no longer be named."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "PrintLastWeekItemDto": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "example": "Book two presentations"
+          },
+          "done": {
+            "type": "boolean",
+            "description": "Ticked done by this session: printed `[x]`, else `[ ]`."
+          }
+        },
+        "required": [
+          "text",
+          "done"
+        ]
+      },
+      "PrintPeriodDto": {
+        "type": "object",
+        "properties": {
+          "targetMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR sen; `null` for somebody with no goal."
+          },
+          "actualMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR sen; `null` when nothing was held yet — never a 0 in its place."
+          }
+        },
+        "required": [
+          "targetMinor",
+          "actualMinor"
+        ]
+      },
+      "PrintGoalDto": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string",
+            "example": "IDR"
+          },
+          "monthly": {
+            "description": "*This month*, as the 1:1 saw it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PrintPeriodDto"
+              }
+            ]
+          },
+          "yearly": {
+            "description": "*This year*, as the 1:1 saw it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PrintPeriodDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "currency",
+          "monthly",
+          "yearly"
+        ]
+      },
+      "PrintTipDto": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "example": "Confirm the next meeting before you leave the current one."
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "PrintLeadActionDto": {
+        "type": "object",
+        "properties": {
+          "dueDate": {
+            "type": "string",
+            "example": "2026-10-03",
+            "description": "The lead’s next action date, as the session took it."
+          },
+          "text": {
+            "type": "string",
+            "example": "Collect the signed SPAJ.",
+            "description": "The lead’s note, or *Follow up with {name}*."
+          },
+          "leadName": {
+            "type": "string",
+            "example": "Pak Hendro Gunawan",
+            "description": "Printed *(Leads: {name})*."
+          }
+        },
+        "required": [
+          "dueDate",
+          "text",
+          "leadName"
+        ]
+      },
+      "PrintActionItemDto": {
+        "type": "object",
+        "properties": {
+          "dueDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-07"
+          },
+          "text": {
+            "type": "string",
+            "example": "Shadow Sari on one presentation"
+          }
+        },
+        "required": [
+          "dueDate",
+          "text"
+        ]
+      },
+      "SessionPrintDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "number",
+            "example": 3,
+            "description": "The finalized version printed: the latest, so a session being corrected prints the version the correction will replace."
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-09-28",
+            "description": "The day the session was held — its first finalize, in your agency’s calendar — never today’s."
+          },
+          "coachee": {
+            "description": "Who it is about.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PrintPersonDto"
+              }
+            ]
+          },
+          "coach": {
+            "description": "Who led it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PrintPersonDto"
+              }
+            ]
+          },
+          "lastWeekItems": {
+            "description": "*Last week’s action items*, with their ticks.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintLastWeekItemDto"
+            }
+          },
+          "goal": {
+            "nullable": true,
+            "description": "The goal the 1:1 looked at, frozen when it was first finalized. `null` for a session that holds no snapshot.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PrintGoalDto"
+              }
+            ]
+          },
+          "tips": {
+            "description": "*Coaching tips*.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintTipDto"
+            }
+          },
+          "leadActions": {
+            "description": "*Next action items — from leads*.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintLeadActionDto"
+            }
+          },
+          "actionItems": {
+            "description": "*Next action items — other*.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrintActionItemDto"
+            }
+          }
+        },
+        "required": [
+          "sessionId",
+          "version",
+          "date",
+          "coachee",
+          "coach",
+          "lastWeekItems",
+          "goal",
+          "tips",
+          "leadActions",
+          "actionItems"
         ]
       },
       "StatusAckDto": {
@@ -22660,6 +25814,12 @@
             "type": "string",
             "nullable": true
           },
+          "href": {
+            "type": "string",
+            "nullable": true,
+            "example": "/coaching/me?session=66f0000000000000000000d1",
+            "description": "Where the item opens, in the app: a finalized coaching session opens on that session. `null` for every other item."
+          },
           "kpmId": {
             "type": "string",
             "nullable": true
@@ -22677,6 +25837,7 @@
           "templateId",
           "title",
           "detail",
+          "href",
           "kpmId",
           "createdAt",
           "readAt"

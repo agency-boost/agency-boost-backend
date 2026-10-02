@@ -8,7 +8,10 @@ import { RequestContext } from '@/common/context/request-context';
  * documentation does not describe is as much a defect as the reverse.
  */
 
-/** What a grant is scoped to. Reaching further than this is `PERM_OUT_OF_SCOPE`. */
+/**
+ * What a grant is scoped to. Reaching further than this is **404**, `NOT_FOUND`, on every subject
+ * read and write: a 403 would confirm that the person exists (P11-T3 AC-3, `conventions.md`).
+ */
 export type Scope = 'own' | 'own-unit' | 'own-downline' | 'own-kpm' | 'all';
 
 /**
@@ -337,8 +340,8 @@ export const PERMISSIONS = {
     { grantee: AGENT, scope: 'own' },
   ],
   /*
-   * The Personal Summary (P10-T4). The matrix's grant, whole; the route is first-person today, and a
-   * leader's view of a downline's is Phase 11's coaching copy.
+   * The Personal Summary (P10-T4). The matrix's grant, whole: without `for` the route is the caller's
+   * own, and with it the grant reaches the subject through `CoachResolver.subject` (P11-T4).
    */
   'personal_summary:read': [
     { grantee: SUPER_ADMIN, scope: 'all' },
@@ -473,6 +476,98 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+  ],
+
+  /*
+   * ---- Coaching (P11-T3, `roles-and-permissions.md` §3.8 as ADR-0073, ADR-0074 and ADR-0078 amend
+   * it, and `functional/coaching.md`, *The permissions*). ----
+   *
+   * **On a session or a profile a token names the coachee**: `own` is a session about the reader,
+   * `own-downline` one about somebody below them, which is `COACH` (`CoachResolver`, in the org
+   * module). The AAB's cells are the AB's: a leader coaches their whole downline, never sideways and
+   * never themselves (ADR-0074).
+   *
+   * **`own` · `own-downline` is two grants, written as two.** A wider token never silently includes
+   * the reader's own records (§3), so an AB who is also a coachee holds both, and the matrix spec
+   * compares the whole set of tokens in each cell, not only the widest.
+   *
+   * **The Super Admin's `all` on `read` and `reopen` is not access.** The routes resolve the office
+   * from the caller's membership, as `lead:*`'s do, and a Super Admin has none; they reach coaching
+   * only by impersonation, and a leader note not even then.
+   *
+   * **`coaching_session:share` is not here, and never will be**: nothing in the product shares a
+   * session (ADR-0077, ADR-0083), and §3.8 strikes the row.
+   */
+  'coaching_session:create': [
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-downline' },
+  ],
+  'coaching_session:edit': [
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-downline' },
+  ],
+  'coaching_session:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  'coaching_session:finalize': [
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-downline' },
+  ],
+  /** A correction, inside ADR-0079's window. The Owner and the Admin correct; they never coach. */
+  'coaching_session:reopen': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-downline' },
+  ],
+  /** The print of a finalized session (ADR-0077). A read, so a read-only support session may. */
+  'coaching_session:export_pdf': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /*
+   * The capability ladder and the skill tracker: one profile per coachee, the shared assessment of
+   * their current coaches. Not `own` for anybody — the coachee never reads it — and nothing for the
+   * office layer, which never sits on the leader-only tab.
+   */
+  'coaching_profile:read': [
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-downline' },
+  ],
+  'coaching_profile:update': [
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-downline' },
+  ],
+  /*
+   * **A note's owner is its author, not its subject** (ADR-0073): `own` is what the reader wrote,
+   * `own-downline` what anybody below them wrote. The token alone cannot say *never the subject*,
+   * so the reader rule is its own predicate, `CoachResolver.readsLeaderNote`, which tests the
+   * subject before anything else. Never the Owner, the Admin or the Super Admin as such, and never
+   * in a support session (`BLOCKED_WHILE_IMPERSONATING`, below).
+   */
+  'leader_notes:read': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AAB, scope: 'own-downline' },
+  ],
+  /** Written only by its author, about somebody they coach now: the `COACH` grant. */
+  'leader_notes:write': [
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-downline' },
   ],
 
   // ---- Membership. ----
@@ -792,6 +887,18 @@ export const BLOCKED_WHILE_IMPERSONATING: readonly Permission[] = [
   'kpm_admin:grant',
   'kpm_admin:revoke',
   'notification_preference:manage',
+  /*
+   * ADR-0073, roles §3.13: a leader's candid note about a person is not support data. A session
+   * acts as the user it impersonates, and a note read is refused inside one, read-only or elevated.
+   */
+  'leader_notes:read',
+  /*
+   * OD-108, option 1 (decided 2026-10-02): **the write as well.** A read-only session refuses it by
+   * its verb already; an elevated one would hold it through the leader's `COACH` grant and could save
+   * a note in the leader's name — a blank one included — over a note it may not read. A support
+   * session neither reads nor writes a note: the operator reproduces a failing save on a test office.
+   */
+  'leader_notes:write',
 ];
 
 const BLOCKED = new Set<string>(BLOCKED_WHILE_IMPERSONATING);
@@ -827,7 +934,13 @@ export function can(ctx: RequestContext, permission: Permission): boolean {
 /** Actions that only read. Everything else is treated as a write. */
 const READ_LIKE = /^(read|list|search|preview|view|export)/;
 
-function isReadLike(permission: Permission): boolean {
+/**
+ * Does this permission only read? By its own verb, a prefix of the short closed list above; anything
+ * else — a permission with no verb at all included — is a write. Exported for `CoachResolver.subject`,
+ * which resolves a write's subject more narrowly than a read's (a member who has left is history to
+ * read, never somebody to write for).
+ */
+export function isReadLike(permission: Permission): boolean {
   const action = permission.split(':')[1] ?? '';
   /*
    * Prefix only. An `endsWith('_read')` clause used to sit here, and the one permission

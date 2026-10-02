@@ -5,6 +5,12 @@ const CO = '66f0000000000000000000c1';
 const ROOT = '66f0000000000000000000e1';
 const OWNER = '66f0000000000000000000e2';
 const MEM = '66f0000000000000000000d1';
+/** The person reading the log: an Owner, say, who is also an AB somebody above them coaches. */
+const READER = '66f0000000000000000000e3';
+/** Two of the reader's memberships — one now, one from before they left and rejoined — and somebody else's. */
+const READER_NOW = '66f0000000000000000000d2';
+const READER_BEFORE = '66f0000000000000000000d3';
+const SOMEBODY = '66f0000000000000000000d4';
 
 /** A row as `findForTenant` hands it back: a Mongoose document, read by field. */
 const row = (over: Record<string, unknown> = {}) => ({
@@ -58,7 +64,7 @@ describe('AuditReadService', () => {
   it('names the actor and the office', async () => {
     const { service } = make([row()]);
 
-    const [entry] = await service.findForTenant(null);
+    const [entry] = await service.findForTenant(null, 100, READER);
 
     expect(entry).toMatchObject({
       actorName: 'Root Operator',
@@ -72,7 +78,7 @@ describe('AuditReadService', () => {
     // the wrong person.
     const { service } = make([row({ effectiveUserId: OWNER })]);
 
-    const [entry] = await service.findForTenant(null);
+    const [entry] = await service.findForTenant(null, 100, READER);
 
     expect(entry).toMatchObject({ actorName: 'Root Operator', effectiveName: 'Rangga Wibisono' });
   });
@@ -80,7 +86,7 @@ describe('AuditReadService', () => {
   it('names a company', async () => {
     const { service } = make([row({ targetCollection: 'companies', targetId: CO })]);
 
-    expect((await service.findForTenant(null))[0].targetLabel).toBe('Prudential');
+    expect((await service.findForTenant(null, 100, READER))[0].targetLabel).toBe('Prudential');
   });
 
   it('names a membership through the person it belongs to', async () => {
@@ -89,7 +95,7 @@ describe('AuditReadService', () => {
       [{ _id: MEM, userId: OWNER, agentCode: 'AG-1' }],
     );
 
-    expect((await service.findForTenant(null))[0].targetLabel).toBe('Rangga Wibisono · AG-1');
+    expect((await service.findForTenant(null, 100, READER))[0].targetLabel).toBe('Rangga Wibisono · AG-1');
   });
 
   it('reads memberships through the repository’s named cross-tenant method', async () => {
@@ -100,7 +106,7 @@ describe('AuditReadService', () => {
       [{ _id: MEM, userId: OWNER, agentCode: null }],
     );
 
-    await service.findForTenant(null);
+    await service.findForTenant(null, 100, READER);
 
     expect(members.byIdsAnywhereForAudit).toHaveBeenCalledWith([MEM]);
   });
@@ -110,7 +116,7 @@ describe('AuditReadService', () => {
     // *nothing happened* — so the screen is given the id rather than a blank.
     const { service } = make([row({ targetCollection: 'goals', targetId: 'g-9' })]);
 
-    const [entry] = await service.findForTenant(null);
+    const [entry] = await service.findForTenant(null, 100, READER);
 
     expect(entry).toMatchObject({ targetLabel: null, targetId: 'g-9' });
   });
@@ -119,7 +125,7 @@ describe('AuditReadService', () => {
     // `$in` throws a CastError on a malformed id, which would take every row down with it.
     const { service } = make([row({ targetCollection: 'kpms', targetId: 'not-an-id' })]);
 
-    const [entry] = await service.findForTenant(null);
+    const [entry] = await service.findForTenant(null, 100, READER);
 
     expect(entry).toMatchObject({ targetLabel: null, targetId: 'not-an-id' });
   });
@@ -127,10 +133,62 @@ describe('AuditReadService', () => {
   it('carries the mutation through unchanged', async () => {
     const { service } = make([row({ before: { status: 'active' }, after: { status: 'suspended' } })]);
 
-    const [entry] = await service.findForTenant(null);
+    const [entry] = await service.findForTenant(null, 100, READER);
 
     expect(entry).toMatchObject({
       before: { status: 'active' }, after: { status: 'suspended' },
+    });
+  });
+
+  describe('N1 a leader note’s rows are never served to the person it is about (ADR-0073)', () => {
+    const noteRow = (id: string, action: string, coachee: string) => row({
+      _id: id, action, targetCollection: 'leaderNotes', targetId: 'n-1', targetMembershipId: null,
+      after: { authorMembershipId: 'm-coach', coacheeMembershipId: coachee },
+    });
+    const memberships = [
+      { _id: READER_NOW, userId: READER, agentCode: 'AG-2' },
+      { _id: READER_BEFORE, userId: READER, agentCode: 'AG-3' },
+      { _id: SOMEBODY, userId: OWNER, agentCode: 'AG-4' },
+    ];
+
+    it('N1 drops leader_note.read and leader_note.saved about any membership of the reader’s, and serves the rest', async () => {
+      const { service, members } = make([
+        noteRow('n-read', 'leader_note.read', READER_NOW),
+        noteRow('n-saved', 'leader_note.saved', READER_BEFORE),
+        noteRow('n-other', 'leader_note.saved', SOMEBODY),
+        row({ _id: 'kpm-row' }),
+      ], memberships);
+
+      const rows = await service.findForTenant('kpm-a', 100, READER);
+
+      expect(rows.map((r) => r._id)).toEqual(['n-other', 'kpm-row']);
+      // Matched by the person: the memberships the rows name are resolved to their users, once.
+      expect(members.byIdsAnywhereForAudit).toHaveBeenCalledWith([READER_NOW, READER_BEFORE, SOMEBODY]);
+    });
+
+    it('N1 serves every note row to somebody they are not about', async () => {
+      const { service } = make([
+        noteRow('n-read', 'leader_note.read', READER_NOW), noteRow('n-other', 'leader_note.saved', SOMEBODY),
+      ], memberships);
+
+      expect((await service.findForTenant('kpm-a', 100, OWNER)).map((r) => r._id)).toEqual(['n-read']);
+      expect((await service.findForTenant('kpm-a', 100, ROOT)).map((r) => r._id)).toEqual(['n-read', 'n-other']);
+    });
+
+    it('N1 a row about a membership nobody can resolve, or naming none, is served; a log with no note row asks nothing more', async () => {
+      const { service, members } = make([
+        noteRow('n-unknown', 'leader_note.read', '66f0000000000000000000dd'),
+        noteRow('n-blank', 'leader_note.read', 'not-an-id'),
+        row({ _id: 'n-none', action: 'leader_note.saved', after: null }),
+      ], memberships);
+      expect((await service.findForTenant('kpm-a', 100, READER)).map((r) => r._id)).toEqual(['n-unknown', 'n-blank', 'n-none']);
+      expect(members.byIdsAnywhereForAudit).toHaveBeenCalledWith(['66f0000000000000000000dd']);
+
+      const plain = make([row()], memberships);
+      await plain.service.findForTenant(null, 100, READER);
+      // The office's own label lookups only: no membership is resolved for a page with no note row.
+      expect(plain.members.byIdsAnywhereForAudit).toHaveBeenCalledTimes(1);
+      expect(plain.members.byIdsAnywhereForAudit).toHaveBeenCalledWith([]);
     });
   });
 
@@ -138,7 +196,7 @@ describe('AuditReadService', () => {
     // A hundred rows cost a handful of reads, not two hundred.
     const { service, audit } = make([row(), row({ _id: 'a-2' }), row({ _id: 'a-3' })]);
 
-    const rows = await service.findForTenant(null);
+    const rows = await service.findForTenant(null, 100, READER);
 
     expect(rows).toHaveLength(3);
     expect(audit.findForTenant).toHaveBeenCalledTimes(1);

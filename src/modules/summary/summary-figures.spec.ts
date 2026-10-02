@@ -1,7 +1,7 @@
 import { CASCADE_ACTIVITY_CODES, SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES } from '@/domain/constants';
 import {
-  activityTargets, madeFigures, monthlyApeTarget, paceFor, periodFigures, sectionChips, totalLogged, ytdBeforeThisMonth,
-  type ShownSection,
+  activityTargets, madeFigures, monthlyApeTarget, paceFor, periodFigures, sectionChips, summaryPlan, totalLogged,
+  ytdBeforeThisMonth, type PlannedGoal, type ShownSection,
 } from './summary-figures';
 
 const RP = 100; // minor units per rupiah
@@ -277,6 +277,65 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
       const sum = (chips: ReturnType<typeof sectionChips>) => chips.reduce((n, c) => n + c.total, 0);
       expect(sectionChips(ungrouped, counts, cascade)).toHaveLength(3);
       expect(sum(sectionChips(ungrouped, counts, cascade))).toBe(sum(sectionChips(seed, counts, cascade)));
+    });
+  });
+
+  /*
+   * The month's and the year's targets, computed once (P11-T4): `GET /summary` and `GET /activity/summary`'s
+   * 7-day targets read the same function, so the session's Activity card and the Summary tab agree.
+   */
+  describe('P11-T4 AC-4 — summaryPlan, the one place the month’s targets are set', () => {
+    /** Rp 500 M for the year at Rp 18 M a case, 30% and 30%, saved; the office holds the year to date. */
+    const goal = (over: Partial<PlannedGoal> = {}): PlannedGoal => ({
+      savedAt: '2026-01-05T02:00:00.000Z',
+      projected: { annualApeTargetMinor: 500 * M },
+      achieved: { minor: 240 * M, month: '2026-09', provenance: 'imported' },
+      caseSizeMinor: 18 * M, leadsToApptPct: 30, closingRatePct: 30,
+      ...over,
+    });
+
+    it('sets September’s target from the year to date through August, and runs the cascade on it', () => {
+      // (500 − 160) ÷ 4 months left = 85 M; 85 ÷ 18 → 5 closings, ÷ 0.3 → 17 appointments, ÷ 0.3 → 57 leads.
+      expect(summaryPlan({ goal: goal(), month: '2026-09', throughLastMonthMinor: 160 * M, thisMonthMinor: 80 * M }))
+        .toEqual({
+          annualTargetMinor: 500 * M,
+          monthlyTargetMinor: 85 * M,
+          monthlyCounts: { policies: 5, appointments: 17, leads: 57 },
+          yearlyCounts: { policies: 28, appointments: 94, leads: 314 },
+        });
+    });
+
+    it('never moves with this month’s own figure: the month’s file alone stands in for last month', () => {
+      // Nothing held through August, September's year to date 240 M of which 80 M is September's own.
+      const plan = summaryPlan({ goal: goal(), month: '2026-09', throughLastMonthMinor: null, thisMonthMinor: 80 * M });
+      expect(plan.monthlyTargetMinor).toBe(85 * M);
+    });
+
+    it('reads the agent’s own figure only while the office holds none (P9-T6)', () => {
+      const own = goal({ achieved: { minor: 160 * M, month: null, provenance: 'self_reported' } });
+      expect(summaryPlan({ goal: own, month: '2026-09', throughLastMonthMinor: null, thisMonthMinor: null })
+        .monthlyTargetMinor).toBe(85 * M);
+    });
+
+    it('is no target for an unsaved default, a target of zero, or a plan that cannot be made', () => {
+      const none = { annualTargetMinor: null, monthlyTargetMinor: null, monthlyCounts: null, yearlyCounts: null };
+      const args = { month: '2026-09', throughLastMonthMinor: 160 * M, thisMonthMinor: null };
+      expect(summaryPlan({ goal: goal({ savedAt: null }), ...args })).toEqual(none);
+      expect(summaryPlan({ goal: goal({ projected: { annualApeTargetMinor: 0 } }), ...args })).toEqual(none);
+      expect(summaryPlan({ goal: goal({ projected: null }), ...args })).toEqual(none);
+    });
+
+    it('a year made before the month began asks this month for nothing — zero, not no target (ADR-0047)', () => {
+      const plan = summaryPlan({ goal: goal(), month: '2026-09', throughLastMonthMinor: 600 * M, thisMonthMinor: null });
+      expect(plan.monthlyTargetMinor).toBe(0);
+      expect(plan.monthlyCounts).toEqual({ policies: 0, appointments: 0, leads: 0 });
+    });
+
+    it('has a target and no plan for it without a case size to divide by', () => {
+      const plan = summaryPlan({
+        goal: goal({ caseSizeMinor: 0 }), month: '2026-09', throughLastMonthMinor: 160 * M, thisMonthMinor: null,
+      });
+      expect(plan).toMatchObject({ monthlyTargetMinor: 85 * M, monthlyCounts: null, yearlyCounts: null });
     });
   });
 });

@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import {
@@ -9,9 +9,11 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import { CoachResolver } from '@/modules/org/coach-resolver';
+import { CoachingSessionGate } from '@/modules/coaching/coaching-session.gate';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
-import { scopeFor, type Permission } from '@/modules/rbac/permissions';
+import type { Permission } from '@/modules/rbac/permissions';
 import { CASCADE_ACTIVITY_CODES, GOAL_DEFAULTS, PERIOD } from '@/domain/constants';
 import { ProductionReadings } from '@/modules/production/production-readings';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
@@ -172,8 +174,15 @@ export interface GoalView {
   projected: CascadeResult | null;
   /** The three activity **codes** the cascade counts against — never the prototype's #3, #4, #6. */
   cascadeMapping: { leadsCode: string; appointmentsCode: string; closingsCode: string };
-  /** The subject's own rates over the last 30 days, beside the assumptions they measure (ADR-0055). */
-  measured: GoalMeasured;
+  /**
+   * The subject's own rates over the last 30 days, beside the assumptions they measure (ADR-0055) —
+   * **for the subject's own read only.** `null` whenever the caller is not the goal's member (the
+   * phase file's D-rates, P11-T7 AC-10): a leader's, an Owner's or an Admin's read of somebody else's
+   * plan, and the answer to their save of it. Two rates from another member's log, served by a read
+   * that writes no §3.5 entry, are retired from it; if they return to a subject read, they return
+   * audited.
+   */
+  measured: GoalMeasured | null;
   savedAt: string | null;
   savedByMembershipId: string | null;
   version: number;
@@ -194,6 +203,8 @@ export interface GoalView {
  */
 @Injectable()
 export class GoalService {
+  private readonly logger = new Logger(GoalService.name);
+
   constructor(
     private readonly goals: GoalRepository,
     private readonly audit: AuditService,
@@ -204,6 +215,13 @@ export class GoalService {
     private readonly notifications: NotificationService,
     private readonly production: ProductionReadings,
     private readonly activity: ActivityReadings,
+    private readonly coach: CoachResolver,
+    /*
+     * `PUT /goals/:period?for=&session=` (P11-T8): whether the session is the caller's own open one with
+     * the subject, and the key its notice coalesces under. The coaching module's, which reads only
+     * sessions and `COACH`, so nothing it depends on depends on goals.
+     */
+    private readonly sessions: CoachingSessionGate,
   ) {}
 
   /**
@@ -216,7 +234,17 @@ export class GoalService {
     return { ...window, counts: await this.activity.countsOver(ctx, membershipId, window) };
   }
 
-  private measured(window: ActivityWindow, mapping: GoalView['cascadeMapping']): GoalMeasured {
+  /**
+   * **The window `measured` is read from, for the member's own read, and nothing for anybody else's**
+   * (D-rates, P11-T7 AC-10). A subject's log is not read at all, so no rate of theirs can reach a
+   * reader who is not them by this route — and the read costs one query less.
+   */
+  private async measuring(ctx: RequestContext, membershipId: string, day: OfficeDay): Promise<ActivityWindow | null> {
+    return membershipId === ctx.membershipId ? this.activityFor(ctx, membershipId, day) : null;
+  }
+
+  private measured(window: ActivityWindow | null, mapping: GoalView['cascadeMapping']): GoalMeasured | null {
+    if (!window) return null;
     return {
       from: window.from, to: window.to, days: PERIOD.ROLLING_30D_DAYS, ...measuredRates(window.counts, mapping),
     };
@@ -237,53 +265,23 @@ export class GoalService {
   }
 
   /**
-   * Whose goal this caller may touch, for the permission the **route** declares (P8-T4).
+   * The membership this request is about, or a 404 (P8-T4 AC-3, P11-T3).
    *
-   * **Their own, always — plus whoever the grant reaches.** §3.6 is wider than §3.7's leads: an
-   * office's Owner and Admin hold `own-kpm` here, because a goal carries an agent's own intentions
-   * about their own production rather than a third party's personal data.
+   * **Their own, always — plus whoever the grant on the route's permission reaches**, resolved by
+   * `CoachResolver.subject`, the one answer every subject read in the product gives. §3.6 is wider
+   * than §3.7's leads: an office's Owner and Admin hold `own-kpm` here, because a goal carries an
+   * agent's own intentions about their own production rather than a third party's personal data. A
+   * leader reaches everybody they coach, an AAB's nested units included (ADR-0074) — and nobody who
+   * has left, nobody beside them and nobody in another office.
    *
-   * `null` means *anybody in the office*. A leader gets the set of memberships below them; an agent
-   * gets themselves; somebody holding neither grant gets **nobody**, which is fail-closed and is
-   * what the first version of the equivalent for leads got wrong.
-   */
-  private async subjectsInScope(
-    ctx: RequestContext, permission: Permission,
-  ): Promise<string[] | null> {
-    const me = this.me(ctx);
-    const scope = scopeFor(ctx, permission);
-    if (scope === 'own-kpm' || scope === 'all') return null;
-    if (scope === null) return [];
-    if (scope !== 'own-unit' && scope !== 'own-downline') return [me];
-
-    const reports = await this.memberships.find(
-      ctx,
-      scope === 'own-unit' ? { leaderId: me } : { ancestorIds: me },
-      { select: '_id' },
-    );
-    return [me, ...reports.map((r) => String(r._id))];
-  }
-
-  /**
-   * The membership this request is about, or a 404.
-   *
-   * **404 and never 403** (AC-3), the same sentence that has been true of another office's data
-   * since Phase 2: a leader asking after somebody outside their downline should not learn from the
-   * shape of the refusal that the person exists.
+   * **404 and never 403**, the same sentence that has been true of another office's data since
+   * Phase 2: a leader asking after somebody outside their downline should not learn from the shape
+   * of the refusal that the person exists.
    */
   private async subject(
     ctx: RequestContext, asked: string | undefined, permission: Permission,
   ): Promise<string> {
-    const me = this.me(ctx);
-    if (!asked || asked === me) return me;
-
-    const reach = await this.subjectsInScope(ctx, permission);
-    if (reach !== null && !reach.includes(asked)) throw new NotFoundException('Goal');
-    // Resolve the membership even at `own-kpm`: without it an Owner could probe another office's
-    // ids and tell a real one from an invented one by nothing at all. The leads module learned
-    // this the same way, one phase earlier.
-    if (!(await this.memberships.findById(ctx, asked))) throw new NotFoundException('Goal');
-    return asked;
+    return (await this.coach.subject(ctx, asked, permission, 'Goal')).membershipId;
   }
 
   /** The caller's own membership, or a refusal that says what to do about it. */
@@ -308,27 +306,40 @@ export class GoalService {
    * smuggled into this one — a check can be forgotten, a parameter that does not exist cannot be
    * passed.
    */
-  async save(ctx: RequestContext, body: unknown, forMembershipId?: string): Promise<GoalView> {
+  async save(
+    ctx: RequestContext, body: unknown, forMembershipId?: string, sessionId?: string,
+  ): Promise<GoalView> {
     const savedBy = this.me(ctx);
     const membershipId = await this.subject(ctx, forMembershipId, 'goal:update');
     const input = checkGoal(body);
+    /*
+     * **Through a coaching session** (P11-T8, ADR-0075): the caller's own open session with this member,
+     * or 404; a finalized one, 409. Checked before anything is written, so a refused save saves nothing.
+     */
+    const session = sessionId === undefined ? null : await this.sessions.openFor(ctx, sessionId, membershipId);
     const now = this.clock.now();
     const day = await this.days.for(ctx);
     this.requireOpenPeriod(input.period!, day);
     // The figure in force at the moment of agreement: the agent's own, or the office's calendar.
     const monthsLeft = input.monthsLeft
       ?? defaultMonthsLeft(input.period!, this.clock.now(), day.timezone);
-    // What is agreed is measured against the figure the screen showed — the carrier's, once there is
-    // one — and the typed figure is stored as the agent's own either way (P9-T6).
-    const achieved = await this.achievedFor(ctx, membershipId, input.period!, input.apeAchievedMinor!);
-    // Refuses an unusable assumption before anything is written (AC-7).
-    const agreed = computeCascade({ ...input, monthsLeft, apeAchievedMinor: achieved.minor } as never);
-
     /*
      * The plan this one replaces, kept whole (ADR-0042). Read before the write rather than derived
      * after it: once the upsert lands, the previous state is gone from the row it lived on.
      */
     const previous = await this.goals.findOne(ctx, { membershipId, period: input.period! });
+    /*
+     * **The APE achieved so far is the member's own figure, and only theirs to type** (ADR-0075,
+     * ADR-0058). A leader's save — through a session or from Goal Settings — keeps the figure the
+     * member stored, and whatever the body says is ignored: the carrier's file, or the member, says
+     * what they produced, never somebody saving a plan for them. The member's own save is unchanged.
+     */
+    const typed = membershipId === savedBy ? input.apeAchievedMinor! : (previous?.apeAchievedMinor ?? 0);
+    // What is agreed is measured against the figure the screen showed — the carrier's, once there is
+    // one — and the typed figure is stored as the agent's own either way (P9-T6).
+    const achieved = await this.achievedFor(ctx, membershipId, input.period!, typed);
+    // Refuses an unusable assumption before anything is written (AC-7).
+    const agreed = computeCascade({ ...input, monthsLeft, apeAchievedMinor: achieved.minor } as never);
 
     const saved = await this.goals.upsertOne(
       ctx,
@@ -342,7 +353,7 @@ export class GoalService {
           // `null` means *use the office's calendar*, and is what the screen sends unless the
           // agent typed over the figure.
           monthsLeftOverride: input.monthsLeft ?? null,
-          apeAchievedMinor: input.apeAchievedMinor!,
+          apeAchievedMinor: typed,
           caseSizeMinor: input.caseSizeMinor!,
           leadsToApptPct: input.leadsToApptPct!,
           closingRatePct: input.closingRatePct!,
@@ -384,8 +395,10 @@ export class GoalService {
       { period: saved.period, version: saved.version, savedByMembershipId: savedBy },
     );
     // §3.6 (AC-7): an agent finding their target changed should not have to notice it.
-    if (membershipId !== savedBy) await this.announce(ctx, membershipId, savedBy, saved.period);
-    return this.view(saved, day, achieved, await this.activityFor(ctx, membershipId, day));
+    if (membershipId !== savedBy) {
+      await this.announce(ctx, membershipId, savedBy, saved, session?.coalesceKey ?? null);
+    }
+    return this.view(saved, day, achieved, await this.measuring(ctx, membershipId, day));
   }
 
   /**
@@ -398,13 +411,25 @@ export class GoalService {
   async readOrDefaults(
     ctx: RequestContext, period: string, forMembershipId?: string,
   ): Promise<Omit<GoalView, 'id' | 'membershipId' | 'version'>> {
-    const membershipId = await this.subject(ctx, forMembershipId, 'goal:read');
+    return this.planOf(ctx, period, await this.subject(ctx, forMembershipId, 'goal:read'));
+  }
+
+  /**
+   * **`readOrDefaults` for a member the caller has already been resolved to** — the subject-taking
+   * internal a read with its own permission composes (P11-T4 AC-1): `GET /summary?for=` resolves its
+   * subject on `personal_summary:read`, and reads the plan through here rather than resolving the same
+   * person a second time on `goal:read`. It checks nobody's reach, so it is never handed an id a
+   * request named before that request's own resolver has answered for it.
+   */
+  async planOf(
+    ctx: RequestContext, period: string, membershipId: string,
+  ): Promise<Omit<GoalView, 'id' | 'membershipId' | 'version'>> {
     const goal = await this.goals.findOne(ctx, { membershipId, period });
     if (!goal) return this.defaults(ctx, period, membershipId);
     const day = await this.days.for(ctx);
     return this.view(
       goal, day, await this.achievedFor(ctx, membershipId, period, goal.apeAchievedMinor),
-      await this.activityFor(ctx, membershipId, day),
+      await this.measuring(ctx, membershipId, day),
     );
   }
 
@@ -416,7 +441,7 @@ export class GoalService {
     const day = await this.days.for(ctx);
     return this.view(
       goal, day, await this.achievedFor(ctx, membershipId, period, goal.apeAchievedMinor),
-      await this.activityFor(ctx, membershipId, day),
+      await this.measuring(ctx, membershipId, day),
     );
   }
 
@@ -493,13 +518,15 @@ export class GoalService {
       snapshot: { ...EMPTY_SNAPSHOT },
       projected: computeCascade({ ...inputs, apeAchievedMinor: achieved.minor }),
       cascadeMapping: { ...CASCADE_ACTIVITY_CODES },
-      measured: this.measured(await this.activityFor(ctx, membershipId, day), CASCADE_ACTIVITY_CODES),
+      measured: this.measured(await this.measuring(ctx, membershipId, day), CASCADE_ACTIVITY_CODES),
       savedAt: null,
       savedByMembershipId: null,
     };
   }
 
-  private view(doc: GoalDocument, day: OfficeDay, achieved: GoalAchieved, activity: ActivityWindow): GoalView {
+  private view(
+    doc: GoalDocument, day: OfficeDay, achieved: GoalAchieved, activity: ActivityWindow | null,
+  ): GoalView {
     /*
      * **Every read recomputes** (AC-1b). The stored snapshot is the agreement; this is what it
      * means today, and it is what every screen renders.
@@ -562,24 +589,48 @@ export class GoalService {
    * opens the screen, and the person most likely not to open it is the one who did not know there
    * was anything new on it.
    *
-   * A failure here does not fail the save. The goal is agreed either way, and losing a plan because
-   * an SMTP host was slow would be the worse outcome — the notification service logs its own
-   * failures.
+   * **One notice per save, or one per coaching session** (P11-T8; `functional/coaching.md`, *One notice
+   * per session*). A save from Goal Settings is its own notice, on both channels at once: a whole plan
+   * saved deliberately is news each time. A save through a session coalesces under the session's key —
+   * the first in the round is delivered in-app with its email held, each later one updates that notice to
+   * the last value and marks it unread again, and finalize sends the email once.
+   *
+   * **A failure here never fails the save** (P11-T8 AC-4). The goal is agreed either way, and losing a
+   * plan because the preferences read, the notifications write or an SMTP host failed would be the worse
+   * outcome — so anything thrown is logged at error level and the save answers 200.
    */
   private async announce(
-    ctx: RequestContext, subjectMembershipId: string, byMembershipId: string, period: string,
+    ctx: RequestContext, subjectMembershipId: string, byMembershipId: string, saved: GoalDocument,
+    coalesceKey: string | null,
   ): Promise<void> {
-    const member = await this.memberships.findById(ctx, subjectMembershipId);
-    if (!member) return;
-    const named = await this.names.byMembershipId(ctx, [byMembershipId]);
+    try {
+      const member = await this.memberships.findById(ctx, subjectMembershipId);
+      if (!member) return;
+      const named = await this.names.byMembershipId(ctx, [byMembershipId]);
+      const byName = named.get(byMembershipId) ?? null;
 
-    await this.notifications.send({
-      userId: String(member.userId),
-      kpmId: ctx.kpmId,
-      membershipId: subjectMembershipId,
-      templateId: NotificationTemplate.GOAL_SET_BY_LEADER,
-      payload: { byName: named.get(byMembershipId) ?? null, period },
-    });
+      if (coalesceKey === null) {
+        await this.notifications.send({
+          userId: String(member.userId),
+          kpmId: ctx.kpmId,
+          membershipId: subjectMembershipId,
+          templateId: NotificationTemplate.GOAL_SET_BY_LEADER,
+          payload: { byName, period: saved.period },
+        });
+        return;
+      }
+      await this.notifications.sendCoalesced({
+        userId: String(member.userId),
+        kpmId: ctx.kpmId as string,
+        membershipId: subjectMembershipId,
+        templateId: NotificationTemplate.GOAL_SET_BY_LEADER,
+        coalesceKey,
+        // The last value: what the notice — and the email finalize sends — says.
+        payload: { byName, period: saved.period, annualApeTargetMinor: saved.annualApeTargetMinor },
+      });
+    } catch (err) {
+      this.logger.error({ err, goalId: String(saved._id), coalesceKey }, 'failed to notify the member of a goal set for them');
+    }
   }
 
   private async record(

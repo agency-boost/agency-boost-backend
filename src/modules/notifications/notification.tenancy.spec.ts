@@ -4,6 +4,7 @@ import { RequestContext } from '@/common/context/request-context';
 import {
   Notification, NotificationPreferences, NotificationPreferencesSchema, NotificationSchema,
 } from './notification.schema';
+import { NotificationRepository } from './notification.repository';
 import { NotificationService } from './notification.service';
 import { TemplateRenderer } from './notification.service';
 import { RenderedMessage } from './notification.types';
@@ -50,8 +51,10 @@ describe('notifications — one inbox per person (P3.5-T10)', () => {
 
   beforeAll(async () => {
     await startMongo();
+    const model = mongoose.model(Notification.name, NotificationSchema);
     service = new NotificationService(
-      mongoose.model(Notification.name, NotificationSchema) as never,
+      model as never,
+      new NotificationRepository(model as never),
       mongoose.model(NotificationPreferences.name, NotificationPreferencesSchema) as never,
       new StubRenderer(),
       new FixedClock(NOW),
@@ -123,6 +126,27 @@ describe('notifications — one inbox per person (P3.5-T10)', () => {
     const [item] = (await service.inbox(person('u-a', KPM_A))).items;
     expect(item.title).toBe('You are in');
     expect(item.detail).toBe('Your request was approved. You now have a leader.');
+    // No address: only a finalized coaching session opens somewhere (P11-T10 AC-8).
+    expect(item.href).toBeNull();
+  });
+
+  it('P11-T10 AC-8 the finalize notice opens /coaching/me on its session, composed on the server', async () => {
+    // ADR-0078: the notice an Agent reaches `/coaching/me` through. Its payload is `{ sessionId }` alone.
+    const sessionId = new mongoose.Types.ObjectId().toString();
+    await mongoose.model(Notification.name).create({
+      userId: 'u-a', kpmId: KPM_A, membershipId: 'mem-u-a', templateId: 'coaching.session_finalized',
+      payload: { sessionId }, delivery: {}, readAt: null,
+    });
+    await seed('u-a', KPM_A);
+
+    const items = (await service.inbox(person('u-a', KPM_A))).items;
+    expect(items.map((i) => [i.templateId, i.href])).toEqual(expect.arrayContaining([
+      ['coaching.session_finalized', `/coaching/me?session=${sessionId}`],
+      ['join_request.approved', null],
+    ]));
+    expect(items.find((i) => i.href !== null)).toMatchObject({
+      title: 'A coaching session was finalized', detail: 'What was agreed is now on the record.',
+    });
   });
 
   it('AC-2: marking one read drops the unread count', async () => {

@@ -197,8 +197,8 @@ export class CapabilityService {
   /**
    * Which stage somebody is at, from what a leader has ticked (AC-6).
    *
-   * No route reads it: Phase 11's Leader Notes calls it when it renders an assessment, and an
-   * endpoint nothing calls is the defect `backend-then-frontend.md` exists to prevent.
+   * No route of its own: the coaching profile's read and save call it (P11-T9,
+   * `CoachingProfileService`), so the stage a leader sees is derived here and never stored.
    */
   async stageFor(ctx: RequestContext, ticked: string[]): Promise<CapabilityStageView | null> {
     const { stages } = await this.read(ctx);

@@ -77,12 +77,28 @@ describe('the metric registry (P4-T4)', () => {
         .toBe(PERFORMANCE.ON_TRACK_PACE_THRESHOLD);
       expect(metric('COACHED_7D').threshold).toBe(PERFORMANCE.COACHING_OVERDUE_DAYS);
       expect(metric('ACTIVATION_DAY_INDEX').threshold).toBe(ACTIVATION.WINDOW_DAYS);
+      expect(metric('PACING_TO_MAA').threshold).toBe(PERFORMANCE.MAA_PROJECTED_SUBMISSIONS_MIN);
+    });
+
+    it('P11-T6 AC-4 evaluates GOAL_PACE_STATUS and PACING_TO_MAA on the calendar month (ADR-0080)', () => {
+      // `CALENDAR_YEAR` until the first task to compute it: the stale half `metrics-and-definitions.md`
+      // §A.4 named. The document and the prototype's tooltip both say the calendar month.
+      expect(metric('GOAL_PACE_STATUS').period).toBe('CALENDAR_MONTH');
+      expect(metric('PACING_TO_MAA').period).toBe('CALENDAR_MONTH');
     });
 
     it('declares no threshold where there is nothing to compare against', () => {
       // A count has no benchmark. A zero would read as one, and a screen would draw a bar.
       expect(metric('MAA_COUNT_IN_UNIT').threshold).toBeNull();
       expect(metric('EVENT_NPS').threshold).toBeNull();
+      // The closing floor is part of the formula, not a benchmark the target is judged against.
+      expect(metric('SUB_PERIOD_ACTIVITY_TARGET').threshold).toBeNull();
+    });
+
+    it('P11-T4 AC-6 registers SUB_PERIOD_ACTIVITY_TARGET before it is served: the last 7 days, a count, Phase 11', () => {
+      expect(metric('SUB_PERIOD_ACTIVITY_TARGET')).toMatchObject({
+        period: 'ROLLING_7D', unit: 'count', phase: 11, label: 'Activity target for the last 7 days, pro-rated',
+      });
     });
 
     it('restates no number as a literal', () => {
@@ -170,6 +186,16 @@ describe('the metric registry (P4-T4)', () => {
       'COACHED_7D', 'COACHED_30D', 'DAYS_SINCE_LAST_COACHING', 'COACHING_COVERAGE', 'GOAL_PACE_STATUS', 'PACING_TO_MAA',
     ];
 
+    /**
+     * Metrics registered after the re-plan, each with the phase of the task that first computes it. The
+     * crosswalk never moved them and the old plan never had them, so the comparisons below leave them out.
+     */
+    const REGISTERED_SINCE: Record<string, number> = {
+      // P11-T4: the coaching session's Activity card.
+      SUB_PERIOD_ACTIVITY_TARGET: 11,
+    };
+    const existedBefore = (id: string) => !(id in REGISTERED_SINCE);
+
     /** The metrics measured by the time a campaign is evaluated, under a given plan. */
     const computableAt = (evaluationPhase: number, phaseOf: (id: string) => number): string[] =>
       METRIC_IDS.filter((id) => phaseOf(id) <= evaluationPhase).sort();
@@ -179,8 +205,12 @@ describe('the metric registry (P4-T4)', () => {
         expect({ id, phase: metric(id).phase }).toEqual({ id, phase: to });
       }
       // Nothing that shipped reopens: what Phases 4–10 computed keeps its number.
-      for (const id of METRIC_IDS.filter((id) => !(id in MOVED))) {
+      for (const id of METRIC_IDS.filter((id) => !(id in MOVED) && existedBefore(id))) {
         expect({ id, shipped: metric(id).phase <= 10 }).toEqual({ id, shipped: true });
+      }
+      // And a metric registered since sits in the phase that computes it.
+      for (const [id, phase] of Object.entries(REGISTERED_SINCE)) {
+        expect({ id, phase: metric(id).phase }).toEqual({ id, phase });
       }
       // And no phase the plan gives no metric to: an old-plan 12 left behind would now read as
       // Calendar's, 16 is Billing, 17 Recruitment tools, 19 go-live.
@@ -207,7 +237,8 @@ describe('the metric registry (P4-T4)', () => {
         'MONTHLY_ACTIVE_AGENT', 'MONTHLY_APE_TARGET', 'MONTHS_LEFT_IN_YEAR', 'NEW_ACTIVE_AGENTS',
         'PACING_TO_MAA', 'POLICIES_NEEDED', 'POLICY_COUNT_TARGET', 'PROJECTED_CLOSINGS_THIS_MONTH',
         'RECRUITMENT_EXPECTED_TO_CLOSE', 'RECRUITMENT_PIPELINE_NOW', 'RECRUITMENT_SUCCESS_RATE', 'ROLLING_PERSISTENCY',
-        'SELLING_RECRUITMENT_BALANCE', 'SELLING_SUCCESS_RATE', 'SUMMARY_ACTIVITY_TARGET', 'TRAINING_COMPLETION_PCT',
+        'SELLING_RECRUITMENT_BALANCE', 'SELLING_SUCCESS_RATE', 'SUB_PERIOD_ACTIVITY_TARGET', 'SUMMARY_ACTIVITY_TARGET',
+        'TRAINING_COMPLETION_PCT',
       ].sort());
     });
 
@@ -227,8 +258,9 @@ describe('the metric registry (P4-T4)', () => {
        * 14, and the six pass. Nothing else changes sides. A renumbering that moved anything else
        * across the line — or that put the six back — fails here by name.
        */
-      const before = computableAt(OLD_CAMPAIGN_EVALUATION_PHASE, (id) => MOVED[id]?.from ?? metric(id).phase);
-      const after = computableAt(CAMPAIGN_EVALUATION_PHASE, (id) => metric(id).phase);
+      const before = computableAt(OLD_CAMPAIGN_EVALUATION_PHASE, (id) => MOVED[id]?.from ?? metric(id).phase)
+        .filter(existedBefore);
+      const after = computableAt(CAMPAIGN_EVALUATION_PHASE, (id) => metric(id).phase).filter(existedBefore);
 
       expect(after.filter((id) => !before.includes(id))).toEqual([...COACHING_SIX].sort());
       expect(before.filter((id) => !after.includes(id))).toEqual([]);

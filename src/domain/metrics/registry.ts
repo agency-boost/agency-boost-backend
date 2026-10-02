@@ -124,7 +124,8 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
    */
   MONTHLY_ACTIVE_AGENT: { period: 'CALENDAR_MONTH', threshold: null },
   MAA_COUNT_IN_UNIT: { period: 'CALENDAR_MONTH', threshold: null },
-  PACING_TO_MAA: { period: 'CALENDAR_MONTH', threshold: null },
+  // The gate is a policy count, fixed (§B.4): computed in `domain/metrics/pacing-to-maa.ts` (P11-T6).
+  PACING_TO_MAA: { period: 'CALENDAR_MONTH', threshold: PERFORMANCE.MAA_PROJECTED_SUBMISSIONS_MIN },
   ACTIVITY_COMPLIANCE_7D: { period: 'ROLLING_7D', threshold: PERFORMANCE.COMPLIANCE_WINDOW_DAYS },
   ACTIVITY_COMPLIANCE_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
   ACTIVITY_COMPLIANCE_RATE: { period: 'ROLLING_7D', threshold: null },
@@ -159,7 +160,13 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   LEAD_TARGET: { period: 'POINT_IN_TIME', threshold: null },
   // Clamped, so the cascade never divides by ~0 in the last days of December.
   MONTHS_LEFT_IN_YEAR: { period: 'CALENDAR_YEAR', threshold: TIME.MONTHS_PER_YEAR },
-  GOAL_PACE_STATUS: { period: 'CALENDAR_YEAR', threshold: PERFORMANCE.ON_TRACK_PACE_THRESHOLD },
+  /*
+   * **The calendar month, as the definition and the prototype's tooltip say** (ADR-0080): this month's
+   * APE against this month's target, after the MAA gate. It read `CALENDAR_YEAR` until P11-T6, the
+   * first task to compute it — the stale half the document named. Computed in
+   * `domain/metrics/goal-pace-status.ts`.
+   */
+  GOAL_PACE_STATUS: { period: 'CALENDAR_MONTH', threshold: PERFORMANCE.ON_TRACK_PACE_THRESHOLD },
 
   /*
    * ---- The two conversion assumptions, measured (ADR-0055, P10-T9) ----
@@ -188,6 +195,13 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   SUMMARY_ACTIVITY_TARGET: { period: 'CALENDAR_MONTH', threshold: null },
   // Capped like APE_ATTAINMENT_PCT, and `null` on a zero target — never `NaN%` (F-25).
   ACTIVITY_TARGET_ATTAINMENT_PCT: { period: 'CALENDAR_MONTH', threshold: PERFORMANCE.ATTAINMENT_PCT_CAP },
+  /*
+   * The coaching session's Activity card (P11-T4): this month's `SUMMARY_ACTIVITY_TARGET` pro-rated to
+   * `ROLLING_7D` by `SUB_PERIOD.TARGET_SCALING`, closings floored. Computed in
+   * `domain/metrics/sub-period-activity-target.ts`. No threshold: a count, and the floor is part of the
+   * formula, not a benchmark it is judged against.
+   */
+  SUB_PERIOD_ACTIVITY_TARGET: { period: 'ROLLING_7D', threshold: null },
 
   // ---- Ratios. The benchmarks are the office's own; these are the platform defaults. ----
   SELLING_SUCCESS_RATE: { period: 'ROLLING_30D', threshold: RATIO_BENCHMARKS.SELLING_SUCCESS_RATE },

@@ -124,11 +124,15 @@ describe('who may touch whose lead (P7-T7)', () => {
     });
   });
 
+  /*
+   * A leader's write pins the version it read: required of anybody but the owner since P11-T4 AC-3, so
+   * every leader write below carries one, as the coaching card's and `/leads`' do.
+   */
   describe('AC-1 — a leader writes a downline’s lead, and the write carries their name', () => {
     it('lets an AAB reach their own unit', async () => {
       const theirs = await leadOf(agent());
 
-      const edited = await wired.leadRecords.update(aab(), theirs.id, { remarks: 'Coached today.' });
+      const edited = await wired.leadRecords.update(aab(), theirs.id, { remarks: 'Coached today.', version: theirs.version });
 
       expect(edited.remarks).toBe('Coached today.');
       expect(edited.ownerMembershipId).toBe(AGENT);
@@ -137,7 +141,7 @@ describe('who may touch whose lead (P7-T7)', () => {
     it('lets an AB reach anybody below them, not only their directs', async () => {
       const theirs = await leadOf(agent());
 
-      const edited = await wired.leadRecords.update(ab(), theirs.id, { remarks: 'Reviewed.' });
+      const edited = await wired.leadRecords.update(ab(), theirs.id, { remarks: 'Reviewed.', version: theirs.version });
 
       expect(edited.ownerMembershipId).toBe(AGENT);
       expect(edited.remarks).toBe('Reviewed.');
@@ -145,9 +149,9 @@ describe('who may touch whose lead (P7-T7)', () => {
 
     it('records who moved it, which is not whose lead it is', async () => {
       const theirs = await leadOf(agent());
-      await wired.leadRecords.update(aab(), theirs.id, { type: 'sales' });
+      const typed = await wired.leadRecords.update(aab(), theirs.id, { type: 'sales', version: theirs.version });
 
-      await wired.leadRecords.setStatus(aab(), theirs.id, 'FOLLOW_UP');
+      await wired.leadRecords.setStatus(aab(), theirs.id, 'FOLLOW_UP', typed.version);
 
       const stored = await mongoose.connection.db!.collection('leads')
         .findOne({ _id: new mongoose.Types.ObjectId(theirs.id) });
@@ -159,7 +163,7 @@ describe('who may touch whose lead (P7-T7)', () => {
 
     it('AC-2: names the leader on the lead, so the agent can tell whose change it was', async () => {
       const theirs = await leadOf(agent());
-      await wired.leadRecords.update(aab(), theirs.id, { remarks: 'Coached today.' });
+      await wired.leadRecords.update(aab(), theirs.id, { remarks: 'Coached today.', version: theirs.version });
 
       // Read by the **agent**, on their own screen. That is where the exit criterion is checked.
       const asTheAgent = await wired.leadRecords.read(agent(), theirs.id);
@@ -169,7 +173,7 @@ describe('who may touch whose lead (P7-T7)', () => {
 
     it('AC-2: says nothing when the last change was the agent’s own', async () => {
       const theirs = await leadOf(agent());
-      await wired.leadRecords.update(aab(), theirs.id, { remarks: 'Coached today.' });
+      await wired.leadRecords.update(aab(), theirs.id, { remarks: 'Coached today.', version: theirs.version });
 
       const afterTheirOwnEdit = await wired.leadRecords.update(agent(), theirs.id, { remarks: 'Mine.' });
 
@@ -225,6 +229,166 @@ describe('who may touch whose lead (P7-T7)', () => {
         const mine = await leadOf(who, `${who.membershipId}'s`);
         await expect(wired.leadRecords.remove(who, mine.id)).resolves.toMatchObject({ id: mine.id });
       }
+    });
+  });
+
+  /*
+   * **One reach for a member's data, through `COACH`** (P11-T3, ADR-0074).
+   *
+   * `ownersInScope` read the AAB's `own-unit` as `{ leaderId: me }` and read no status, so a nested
+   * AAB's agent's leads were out of reach while those of a member who had left were still in it. It
+   * resolves through `CoachResolver.reach` now, as goals and activity do.
+   */
+  describe('P11-T3 — leads reach what COACH reaches', () => {
+    const PEER_AAB = '66f000000000000000000107';
+    const PEER_AGENT = '66f000000000000000000108';
+    const NESTED_AAB = '66f000000000000000000109';
+    const NESTED_AGENT = '66f00000000000000000010a';
+    const LEFT = '66f00000000000000000010b';
+
+    beforeEach(async () => {
+      await mongoose.connection.db!.collection('memberships').insertMany([
+        person(PEER_AAB, 'AAB', AB, [AB], 'Peer'),
+        person(PEER_AGENT, 'AGENT', PEER_AAB, [AB, PEER_AAB], 'Peer agent'),
+        person(NESTED_AAB, 'AAB', AAB, [AB, AAB], 'Nested'),
+        person(NESTED_AGENT, 'AGENT', NESTED_AAB, [AB, AAB, NESTED_AAB], 'Nested agent'),
+        person(LEFT, 'AGENT', AAB, [AB, AAB], 'Left'),
+      ] as never);
+    });
+
+    it('P11-T3 AC-5 aab_cannot_coach_peer_unit: an AAB cannot reach a peer AAB’s leads', async () => {
+      const theirs = await leadOf(ctxFor(PEER_AGENT, 'AGENT'), 'Peer’s lead');
+
+      await expect(wired.leadRecords.read(aab(), theirs.id)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      await expect(wired.leadRecords.update(aab(), theirs.id, { remarks: 'Taken' }))
+        .rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      expect((await wired.leadRecords.list(aab())).rows.map((r) => r.name)).not.toContain('Peer’s lead');
+    });
+
+    it('P11-T3 ADR-0074: an AAB reaches a nested AAB’s agent’s lead — `own-unit` is the subtree for a member’s data', async () => {
+      const theirs = await leadOf(ctxFor(NESTED_AGENT, 'AGENT'), 'Nested agent’s lead');
+
+      const edited = await wired.leadRecords.update(aab(), theirs.id, { remarks: 'Coached.', version: theirs.version });
+
+      expect(edited).toMatchObject({ ownerMembershipId: NESTED_AGENT, remarks: 'Coached.' });
+      expect((await wired.leadRecords.list(aab())).rows.map((r) => r.name)).toContain('Nested agent’s lead');
+    });
+
+    it('P11-T3 AC-2: a leader no longer reaches the leads of a member who has left (§6.1, §6.7)', async () => {
+      const theirs = await leadOf(ctxFor(LEFT, 'AGENT'), 'Left’s lead');
+      await mongoose.connection.db!.collection('memberships').updateOne(
+        { _id: new mongoose.Types.ObjectId(LEFT), kpmId: KPM }, { $set: { status: 'removed' } },
+      );
+
+      await expect(wired.leadRecords.read(aab(), theirs.id)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      expect((await wired.leadRecords.list(ab())).rows.map((r) => r.name)).not.toContain('Left’s lead');
+    });
+  });
+
+  /*
+   * **OD-107, option 1 (decided 2026-10-02): a leader's list of a downline's rows is a subject read.**
+   * One §3.5 entry per owner other than the caller whose rows the answer holds, surface `leads`, and
+   * none for the caller's own: the same record `GET /leads?owner=` leaves, so neither route steps round it.
+   */
+  describe('OD-107 — the list writes the §3.5 entry per other owner shown', () => {
+    const reads = async () => mongoose.connection.db!.collection('auditLog')
+      .find({ action: 'activity_log.read_raw' }).toArray();
+
+    it('OD-107 a leader’s list writes one leads entry per downline owner shown, and none for their own rows', async () => {
+      await leadOf(ab(), 'Agus’ own');
+      await leadOf(aab(), 'Sari’s own');
+      await leadOf(agent(), 'Rina’s first');
+      await leadOf(agent(), 'Rina’s second');
+      await leadOf(sibling(), 'Budi’s');
+      await leadOf(outsider(), 'Lina’s');
+
+      await wired.leadRecords.list(ab());
+
+      const entries = await reads();
+      // Rina's two rows are one disclosure of Rina: one entry, not one per row.
+      expect(entries.map((e) => e.targetMembershipId).sort()).toEqual([AAB, AGENT, SIBLING].sort());
+      for (const entry of entries) {
+        expect(entry).toMatchObject({
+          kpmId: KPM, actorMembershipId: AB, targetCollection: 'memberships',
+          after: { surface: 'leads', from: null, to: '2026-09-25' },
+        });
+        expect(entry.targetId).toBe(entry.targetMembershipId);
+      }
+    });
+
+    it('OD-107 an agent’s own list, and a leader’s list holding only their own rows, write nothing', async () => {
+      await leadOf(agent(), 'Rina’s');
+      await leadOf(aab(), 'Sari’s own');
+
+      await wired.leadRecords.list(agent());
+      await wired.leadRecords.list(aab(), { search: 'Sari' });
+
+      expect(await reads()).toEqual([]);
+    });
+
+    it('OD-107 only the owners on the page answered are recorded, not every owner the filter matched', async () => {
+      await leadOf(agent(), 'Rina’s');
+      await leadOf(sibling(), 'Budi’s');
+
+      const page = await wired.leadRecords.list(aab(), { pageSize: 1 });
+
+      expect(page.total).toBe(2);
+      expect((await reads()).map((e) => e.targetMembershipId)).toEqual([page.rows[0].ownerMembershipId]);
+    });
+
+    it('OD-107 an empty answer records nobody', async () => {
+      await leadOf(agent(), 'Rina’s');
+
+      await wired.leadRecords.list(ab(), { search: 'nobody by this name' });
+
+      expect(await reads()).toEqual([]);
+    });
+
+    /*
+     * ADR-0089's propagation, P11-T10 AC-11: **the list's own tests** for the two halves of *written last*
+     * — a refused read records nothing, and a failed record does not refuse the read (D-failopen). The
+     * seam's own fail-open is `subject-read-audit.spec.ts`'s; these hold the list to it.
+     */
+    it('P11-T10 AC-11 a refused read writes nothing: a caller with no office, and an owner outside the leader’s reach', async () => {
+      await leadOf(agent(), 'Rina’s');
+      await leadOf(outsider(), 'Lina’s');
+
+      await expect(wired.leadRecords.list(RequestContext.platform('root')))
+        .rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
+      await expect(wired.leadRecords.list(aab(), { owner: OUTSIDER })).rejects.toMatchObject({ status: 404 });
+
+      expect(await reads()).toEqual([]);
+    });
+
+    it('P11-T10 AC-11 a read that fails after its rows were found writes nothing: the entry follows the answer', async () => {
+      await leadOf(agent(), 'Rina’s');
+      await leadOf(sibling(), 'Budi’s');
+      // The *Status* sort reads the published ladders once the rows are in hand; that read fails here.
+      const failing = jest.spyOn(wired.config, 'readPublished').mockRejectedValue(new Error('the config store is down'));
+      try {
+        await expect(wired.leadRecords.list(ab(), { sort: 'status' })).rejects.toThrow('the config store is down');
+      } finally {
+        failing.mockRestore();
+      }
+
+      expect(await reads()).toEqual([]);
+    });
+
+    it('P11-T10 AC-11 the list fails open: an entry that fails to write still answers the leader’s list', async () => {
+      await leadOf(agent(), 'Rina’s');
+      await leadOf(sibling(), 'Budi’s');
+      const failing = jest.spyOn(wired.audit, 'record').mockRejectedValue(new Error('the audit store is down'));
+      let page;
+      try {
+        page = await wired.leadRecords.list(ab());
+        // One attempt per downline owner shown, each refused by the store.
+        expect(failing).toHaveBeenCalledTimes(2);
+      } finally {
+        failing.mockRestore();
+      }
+
+      expect(page.rows.map((row) => row.ownerMembershipId).sort()).toEqual([AGENT, SIBLING].sort());
+      expect(await reads()).toEqual([]);
     });
   });
 

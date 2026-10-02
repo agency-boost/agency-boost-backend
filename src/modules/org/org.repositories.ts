@@ -5,7 +5,9 @@ import { RequestContext } from '@/common/context/request-context';
 import { TenantScopedRepository } from '@/common/tenancy/tenant-scoped.repository';
 import { Group, GroupDocument } from './group.schema';
 import { JoinRequest, JoinRequestDocument } from './join-request.schema';
-import { MembershipHistory, MembershipHistoryDocument } from './membership-history.schema';
+import {
+  EDGE_EVENTS, EdgeEvent, MembershipHistory, MembershipHistoryDocument,
+} from './membership-history.schema';
 
 /**
  * The tenant-scoped collections that were still reached with `@InjectModel` and a
@@ -75,5 +77,41 @@ export class MembershipHistoryRepository
     membershipId: string,
   ): Promise<MembershipHistoryDocument[]> {
     return this.find(ctx, { membershipId }, { sort: { createdAt: -1 } });
+  }
+
+  /**
+   * **Open a membership's next edge, and close every edge still open, whichever event opened it**
+   * (P11-T3).
+   *
+   * The one way an edge after the first is written. Each writer used to close only rows of its
+   * own kind: `HierarchyService.reparent` the `re_parented` rows, the role change the
+   * `role_changed` rows, an approval the `joined` row. So a member's first re-parent left the edge
+   * they joined on open beside the new one, a promotion left both open, and an orphan picked up
+   * from the pool kept the re-parent that orphaned them. Roles §6.1 says a switch never makes two
+   * open edges, and invariant §5 makes the open one the current state. One filter, here, is how
+   * three writers stop choosing their own.
+   *
+   * **One instant** closes the old edge and opens the new (roles §6.1); the caller's clock gives
+   * it. Append-only: closing writes `validTo`, and nothing is deleted or overwritten. The admin
+   * chain is left alone (`ADMIN_EVENTS`). A removal closes both chains and writes its own row
+   * (`RemovalService`).
+   */
+  async openEdge(
+    ctx: RequestContext,
+    at: Date,
+    edge: Partial<MembershipHistory> & { membershipId: string; eventType: EdgeEvent },
+  ): Promise<MembershipHistoryDocument> {
+    await this.updateMany(
+      ctx,
+      { membershipId: edge.membershipId, eventType: { $in: [...EDGE_EVENTS] }, validTo: null },
+      { $set: { validTo: at } },
+    );
+    return this.create(ctx, {
+      actorMembershipId: ctx.membershipId,
+      actorUserId: ctx.auditActors.actorUserId,
+      ...edge,
+      validFrom: at,
+      validTo: null,
+    });
   }
 }

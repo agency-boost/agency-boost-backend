@@ -7,7 +7,7 @@ import { DomainException, NotFoundException } from '@/common/errors/domain.excep
 import { ErrorCode } from '@/common/errors/error-codes';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
-import { MembershipEvent, MembershipHistory } from './membership-history.schema';
+import { EdgeEvent, MembershipHistory } from './membership-history.schema';
 import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
@@ -118,42 +118,25 @@ export class HierarchyService {
     return user.agentCode;
   }
 
-  private async record(
+  /**
+   * The first edge. A membership that did not exist a moment ago has nothing open to close, so
+   * this is the one edge written without `MembershipHistoryRepository.openEdge`; every later one
+   * goes through it, and it closes whatever is open first (P11-T3).
+   */
+  private async recordJoined(
     ctx: RequestContext,
     membershipId: string,
-    eventType: MembershipEvent,
-    fields: Partial<MembershipHistory> = {},
+    fields: Partial<MembershipHistory>,
   ): Promise<void> {
     await this.history.create(ctx, {
       membershipId,
-      eventType,
+      eventType: 'joined',
       validFrom: this.clock.now(),
       validTo: null,
       actorMembershipId: ctx.membershipId,
       actorUserId: ctx.auditActors.actorUserId,
       ...fields,
     });
-  }
-
-  /**
-   * Close the open edge of a kind, so a change never overwrites what came before.
-   *
-   * The tenant comes from the repository now rather than from an argument. It still leads
-   * the filter — it leads every index on `membershipHistory` — and it is still invariant
-   * §1: a query is scoped because the *collection* is scoped, not because the id it
-   * happens to use is unique enough to get away with it. What changed is that it can no
-   * longer be left out by hand.
-   */
-  private async closeEdge(
-    ctx: RequestContext,
-    membershipId: string,
-    eventType: MembershipEvent,
-  ): Promise<void> {
-    await this.history.updateMany(
-      ctx,
-      { membershipId, eventType, validTo: null },
-      { $set: { validTo: this.clock.now() } },
-    );
   }
 
   /**
@@ -254,7 +237,7 @@ export class HierarchyService {
       sourceLeadId: input.sourceLeadId ?? null,
     });
 
-    await this.record(ctx, String(membership._id), 'joined', {
+    await this.recordJoined(ctx, String(membership._id), {
       toRole: role,
       toOrgLevelId: String(level._id),
       toLeaderId: membership.leaderId,
@@ -391,12 +374,17 @@ export class HierarchyService {
     if (!member) throw new NotFoundException('Membership');
     if (!moved) return member;
 
-    // The membership's own tenant, not the context's: it was just read through the
-    // tenant repository so the two agree, and this one is typed non-null.
-    await this.closeEdge(ctx, membershipId, 're_parented');
-    await this.record(ctx, membershipId, 're_parented', {
+    // Every open edge closes, not only an earlier re-parent: this closed `re_parented` rows
+    // alone, so a member's first move left the edge they joined on open beside the new one
+    // (P11-T3). The row carries the rung they keep, so the open edge says all of where they
+    // stand.
+    await this.history.openEdge(ctx, this.clock.now(), {
+      membershipId,
+      eventType: 're_parented',
       fromLeaderId: previousLeaderId,
       toLeaderId: member.leaderId,
+      toRole: member.role,
+      toOrgLevelId: member.orgLevelId,
       reason: reason ?? null,
     });
     return member;
@@ -459,20 +447,25 @@ export class HierarchyService {
    * The hierarchy as it stood on a date (P3-T2 AC-5).
    *
    * Read from history, not from the current rows: the point is to answer what was true
-   * then, which the current `leaderId` cannot. An edge counts if it had opened by the
-   * date and had not yet closed.
+   * then, which the current `leaderId` cannot.
+   *
+   * **The latest event by that date that set the leader**, rather than the edge still open
+   * then (P11-T3). Every edge now closes when the next one opens, a promotion included, so the
+   * edge open on a date can be a role change. One written since carries the leader it kept; one
+   * written before does not, and sits beside the edge it should have closed. Joining, a
+   * re-parent, a removal and a reinstatement are the events that set the leader, and each
+   * names the one it leaves them with: a removal and a reinstatement, none.
    */
   async leaderAsOf(ctx: RequestContext, membershipId: string, at: Date): Promise<string | null> {
-    const edges = await this.history.find(
+    const latest = await this.history.find(
       ctx,
-      {
-        membershipId,
-        eventType: { $in: ['joined', 're_parented'] },
-        validFrom: { $lte: at },
-        $or: [{ validTo: null }, { validTo: { $gt: at } }],
-      },
-      { sort: { validFrom: -1 }, limit: 1 },
+      { membershipId, eventType: { $in: LEADER_EVENTS }, validFrom: { $lte: at } },
+      // Two events in one instant are told apart by the order they were written in.
+      { sort: { validFrom: -1, _id: -1 }, limit: 1 },
     );
-    return edges[0]?.toLeaderId ?? null;
+    return latest[0]?.toLeaderId ?? null;
   }
 }
+
+/** The edge events that set who the member reports to. A role change keeps the leader it found. */
+const LEADER_EVENTS: EdgeEvent[] = ['joined', 're_parented', 'removed', 'reinstated'];

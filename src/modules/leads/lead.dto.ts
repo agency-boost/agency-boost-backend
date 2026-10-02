@@ -68,16 +68,31 @@ export class UpdateLeadDto extends CreateLeadDto {
     example: 3,
     description:
       'The `version` this patch was written against. Refused with `409 VERSION_CONFLICT` if the '
-      + 'lead has moved on — two people in one 1-on-1 on two devices is the realistic case.',
+      + 'lead has moved on — two people in one 1-on-1 on two devices is the realistic case. Optional '
+      + 'for the lead’s owner; **required of anybody else**, `400 VALIDATION_FAILED` without it.',
   })
   @Allow()
   version?: number;
 }
 
-/** What every pinning route takes beside its own field. */
+/**
+ * What every pinning route takes beside its own field.
+ *
+ * **Required of anybody but the lead's owner** (P11-T4 AC-3): a leader's write from the coaching card,
+ * or from their own `/leads`, without one is `VALIDATION_FAILED` — the service's rule, because only the
+ * stored row says whose lead it is. Validated here as the whole number it is, so a string or an object is
+ * refused by the pipe rather than compared.
+ */
 class PinnedVersion {
-  @ApiPropertyOptional({ type: Number, example: 3, description: 'The version this write was read at.' })
-  @Allow()
+  @ApiPropertyOptional({
+    type: Number,
+    minimum: 1,
+    example: 3,
+    description: 'The version this write was read at. Optional for the lead’s owner; required of anybody else.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
   version?: number;
 }
 
@@ -122,6 +137,21 @@ export class ListLeadsQueryDto {
   @IsString()
   @MaxLength(120)
   search?: string;
+
+  /**
+   * **One member's leads** (P11-T4 AC-3): the coaching session's Leads card. Resolved against the
+   * caller's grant on `lead:read` — a coachee, or the caller themselves — and a 404 outside it. Every
+   * other filter applies beside it.
+   */
+  @ApiPropertyOptional({
+    type: String,
+    maxLength: 64,
+    description: 'Whose leads: a membership id. Yours, or somebody your grant reaches; 404 outside it.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  owner?: string;
 
   @ApiPropertyOptional({ enum: [...LEAD_TYPES, 'unassigned'] })
   @IsOptional()
@@ -182,4 +212,22 @@ export class ListLeadsQueryDto {
   @IsInt()
   @Min(1)
   pageSize?: number;
+}
+
+/**
+ * `POST /leads?owner=` (P11-T4): a leader's *+ Add lead* on the coaching card creates the lead in the
+ * coachee's pipeline. Absent, the lead is the caller's own, as it always was.
+ */
+export class CreateLeadQueryDto {
+  @ApiPropertyOptional({
+    type: String,
+    maxLength: 64,
+    description:
+      'Whose pipeline: somebody you coach. The lead is theirs, and its creation is attributed to you. '
+      + '404 outside `COACH`, yourself included.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  owner?: string;
 }

@@ -471,7 +471,8 @@ export class AdminController {
   })
   async readAudit(@Ctx() ctx: RequestContext, @Query() query: AuditQueryDto) {
     const scope = ctx.isSuperAdmin ? (query.kpmId ?? null) : ctx.kpmId;
-    return this.auditRead.findForTenant(scope, 100);
+    // The reader, so a leader note's rows about them are never served to them (ADR-0073).
+    return this.auditRead.findForTenant(scope, 100, ctx.userId);
   }
 
   /**

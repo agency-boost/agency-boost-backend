@@ -43,6 +43,7 @@ import { SummaryService } from '@/modules/summary/summary.service';
 import { ProductionService } from '@/modules/production/production.service';
 import { ProductionController } from '@/modules/production/production.controller';
 import { AuditService } from '@/modules/audit/audit.service';
+import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import {
   Notification, NotificationPreferences, NotificationPreferencesSchema, NotificationSchema,
 } from '@/modules/notifications/notification.schema';
@@ -50,6 +51,7 @@ import {
   NOTIFICATION_ADAPTERS, NotificationService, TemplateRenderer,
 } from '@/modules/notifications/notification.service';
 import { NotificationController } from '@/modules/notifications/notification.controller';
+import { NotificationRepository } from '@/modules/notifications/notification.repository';
 import { EmailTemplateRenderer } from '@/modules/notifications/email-renderer';
 import { RecipientAddressBook, SmtpChannelAdapter } from '@/modules/notifications/smtp.adapter';
 import { UserAddressBook } from '@/modules/notifications/user-address-book';
@@ -181,6 +183,26 @@ import { Group, GroupSchema } from '@/modules/org/group.schema';
 import { AdminDelegationService } from '@/modules/org/admin-delegation.service';
 import { GroupService } from '@/modules/org/group.service';
 import { OrgTreeService } from '@/modules/org/org-tree.service';
+import { CoachResolver } from '@/modules/org/coach-resolver';
+import { CoachingSession, CoachingSessionSchema } from '@/modules/coaching/coaching-session.schema';
+import { CoachingSessionRepository } from '@/modules/coaching/coaching-session.repository';
+import { CoachingReadings } from '@/modules/coaching/coaching-readings';
+import { PaceStatusReadings } from '@/modules/coaching/pace-status';
+import { CoachingRosterService } from '@/modules/coaching/coaching-roster.service';
+import { CoacheeService } from '@/modules/coaching/coachee.service';
+import { CoachingSessionService } from '@/modules/coaching/coaching-session.service';
+import { CoachingSessionGate } from '@/modules/coaching/coaching-session.gate';
+import { CoachingSnapshotBuilder } from '@/modules/coaching/coaching-snapshot';
+import { CoachingController } from '@/modules/coaching/coaching.controller';
+import { CoachingProfile, CoachingProfileSchema } from '@/modules/coaching/coaching-profile.schema';
+import { LeaderNote, LeaderNoteSchema } from '@/modules/coaching/leader-note.schema';
+import { CoachingProfileRepository } from '@/modules/coaching/coaching-profile.repository';
+import { LeaderNoteRepository } from '@/modules/coaching/leader-note.repository';
+import { CoachingProfileService } from '@/modules/coaching/coaching-profile.service';
+import { LeaderNoteService } from '@/modules/coaching/leader-note.service';
+import { CoachingProfileController } from '@/modules/coaching/coaching-profile.controller';
+import { CoachingRecordService } from '@/modules/coaching/coaching-record.service';
+import { CoachingRecordController } from '@/modules/coaching/coaching-record.controller';
 import { RemovalService } from '@/modules/org/removal.service';
 import { RoleChangeService } from '@/modules/org/role-change.service';
 
@@ -245,6 +267,11 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: Campaign.name, schema: CampaignSchema },
       { name: QualificationRule.name, schema: QualificationRuleSchema },
       { name: CapabilityCatalog.name, schema: CapabilityCatalogSchema },
+      // P11-T5: a 1:1 between a coach and a coachee.
+      { name: CoachingSession.name, schema: CoachingSessionSchema },
+      // P11-T9: one coachee's capability ticks, and a leader's private note about them.
+      { name: CoachingProfile.name, schema: CoachingProfileSchema },
+      { name: LeaderNote.name, schema: LeaderNoteSchema },
     ]),
   ],
   controllers: [
@@ -270,6 +297,10 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     CampaignController,
     MetricRegistryController,
     CapabilityController,
+    CoachingController,
+    CoachingProfileController,
+    // P11-T10: the print of a finalized session, and the reader's own coaching.
+    CoachingRecordController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -359,6 +390,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     { provide: CampaignKindsApplier, useExisting: ProvisioningService },
     AuditService,
     AuditReadService,
+    // P11-T3: the §3.5 read audit, one seam every module that reads a member's data calls.
+    SubjectReadAudit,
     LeadRepository,
     LeadService,
     LeadReadings,
@@ -375,6 +408,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ProductionCorrections,
     ProductionReadings,
     TenantDay,
+    NotificationRepository,
     NotificationService,
     PasswordService,
     RateLimiter,
@@ -398,6 +432,26 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     RoleChangeService,
     RemovalService,
     OrgTreeService,
+    // P11-T3: `COACH(actor, subject)`, and every read of a member's data that goes through it.
+    CoachResolver,
+    // P11-T5 and P11-T6: the sessions, the coaching metrics read over them, and the roster.
+    CoachingSessionRepository,
+    CoachingReadings,
+    PaceStatusReadings,
+    CoachingRosterService,
+    // P11-T7: the person a coaching page opens on.
+    CoacheeService,
+    // P11-T5: the session lifecycle, the snapshot finalize takes, and the goal save's session check (P11-T8).
+    CoachingSessionService,
+    CoachingSnapshotBuilder,
+    CoachingSessionGate,
+    // P11-T9: the Leader Notes tab — the capability profile and the leader notes.
+    CoachingProfileRepository,
+    LeaderNoteRepository,
+    CoachingProfileService,
+    LeaderNoteService,
+    // P11-T10: the print, `/coaching/me`'s sessions, and a former coach's (ADR-0077, ADR-0078, ADR-0088).
+    CoachingRecordService,
     GroupService,
     AdminDelegationService,
   ],

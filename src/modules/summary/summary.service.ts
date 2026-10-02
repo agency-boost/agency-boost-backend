@@ -1,19 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
-import { NoMembershipException } from '@/common/errors/domain.exception';
 import { SUMMARY } from '@/domain/constants';
 import { endOfMonth, type LocalDate } from '@/common/time/local-day';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { ActivityService } from '@/modules/activity/activity.service';
-import { cascadeCounts } from '@/modules/goals/goal-cascade';
+import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { GoalService } from '@/modules/goals/goal.service';
 import { LeadReadings, type OpenLead } from '@/modules/leads/lead-readings';
+import { CoachResolver, type Subject } from '@/modules/org/coach-resolver';
 import { ProductionReadings } from '@/modules/production/production-readings';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { insightsFor, type Insight } from './insights';
 import {
-  activityTargets, madeFigures, monthlyApeTarget, paceFor, periodFigures, sectionChips, totalLogged,
-  ytdBeforeThisMonth, type ActivityTarget, type Pace, type PeriodFigures, type SectionChip,
+  activityTargets, madeFigures, paceFor, periodFigures, sectionChips, summaryPlan, totalLogged,
+  type ActivityTarget, type Pace, type PeriodFigures, type SectionChip,
 } from './summary-figures';
 
 /** Where a production figure came from, said with it (ADR-0008, P9-T6). */
@@ -32,7 +32,7 @@ export interface SummaryActivity {
   targets: ActivityTarget[];
   /** *N total activities logged … across all categories.* */
   total: number;
-  /** One per other section the reader is shown. */
+  /** One per other section the member's rung is shown — the subject's, on a leader's copy. */
   sections: SectionChip[];
 }
 
@@ -50,11 +50,12 @@ export interface SummaryView {
   yearly: PeriodFigures & { source: FigureSource };
   /** The pace sentence (ADR-0057); `null` without a goal. */
   pace: Pace | null;
-  /** What was logged against the plan, and the rest of the reader's sections (P10-T5). */
+  /** What was logged against the plan, and the rest of the member's sections (P10-T5). */
   activity: { monthly: SummaryActivity; yearly: SummaryActivity };
   /**
-   * *Leads that need you* (P10-T6): the reader's own open leads, nearest next action first and undated
-   * last — the first `SUMMARY.LEADS_SHOWN` of them — and how many there are.
+   * *Leads that need you* (P10-T6): the member's own open leads — the reader's, or on a leader's copy
+   * the subject's (*Leads that need her*) — nearest next action first and undated last, the first
+   * `SUMMARY.LEADS_SHOWN` of them, and how many there are.
    */
   leads: { rows: OpenLead[]; total: number };
   /**
@@ -65,11 +66,24 @@ export interface SummaryView {
 }
 
 /**
- * The Personal Summary (P10-T4): one page, first-person, read from what other modules hold — the goal,
- * the office's production, the member's own log. Nothing is written here, and nothing is stored.
+ * The Personal Summary (P10-T4): one page, read from what other modules hold — the goal, the office's
+ * production, the member's own log. Nothing of the member's is written here, and nothing is stored.
  *
- * **Your own, only.** `personal_summary:read` reaches further on the matrix, and a leader's view of a
- * downline's Summary is Phase 11's coaching copy; this route takes no subject.
+ * **Yours, or a subject's** (P11-T4 AC-1). Without `for`, or naming the caller, it is the caller's own
+ * read, unchanged and unaudited. Naming somebody else, it is the same Summary **computed for them** —
+ * their goal, their production and whose figure it is, their log, their leads, their compliance, and
+ * **their rung** for the sections and the ratios (ADR-0020): the leader's copy of the coachee's own
+ * page, which the person shell's *Personal Summary* tab draws.
+ *
+ * - **Whose is decided by `CoachResolver.subject`** on `personal_summary:read`, as every subject read
+ *   is: `own` reaches only the caller, so an Agent naming somebody else is 404; a hierarchy token
+ *   reaches `COACH`; `own-kpm` the office. Outside it, 404, never 403.
+ * - **One §3.5 entry per read of somebody else's**, `personal_summary`, **from no date to today**,
+ *   written last, once the answer exists (P11-T4 AC-5). Not from the office's year: the answer
+ *   discloses their open leads whatever their age, and compliance's `lastLoggedOn` in the
+ *   `NOTHING_LOGGED` insight, either of which may fall in an earlier year, so a range starting on
+ *   1 January would understate what was read. The `leads` surface records `from: null` for the same reason. The compliance and the ratios are read through
+ *   their subject-taking internals, which write nothing of their own: one read, one record.
  */
 @Injectable()
 export class SummaryService {
@@ -84,48 +98,71 @@ export class SummaryService {
      * ratio screen and the log screen give, not a second calculation of either.
      */
     private readonly activityLog: ActivityService,
+    // Whose Summary it is, and the record a read of somebody else's leaves (P11-T4).
+    private readonly coach: CoachResolver,
+    private readonly subjectReads: SubjectReadAudit,
   ) {}
 
-  async read(ctx: RequestContext): Promise<SummaryView> {
-    const me = ctx.membershipId;
-    if (!me) throw new NoMembershipException();
+  async read(ctx: RequestContext, forMembershipId?: string): Promise<SummaryView> {
+    const subject = await this.coach.subject(ctx, forMembershipId, 'personal_summary:read');
+    const view = await this.of(ctx, subject);
+    // Last, once the answer exists; nothing for the caller's own read (`SubjectReadAudit`). Open-ended at
+    // the start: open leads of any age and the last day logged are in the answer (see the class comment).
+    await this.subjectReads.record(ctx, subject, 'personal_summary', { from: null, to: view.today });
+    return view;
+  }
+
+  /**
+   * **The Summary of a subject the caller already resolved, and no audit entry** (P11-T5): the
+   * subject-taking internal of `read`, as `ActivityService.ratiosOf` is of `ratios`. A coaching session's
+   * snapshot takes its goal figures from here at finalize — the figures the coachee's Summary tab shows
+   * that day — and finalize writes its own entry for what it disclosed, rather than one per figure.
+   */
+  async of(ctx: RequestContext, subject: Subject): Promise<SummaryView> {
+    const member = subject.membershipId;
     const day = await this.days.for(ctx);
     const year = day.today.slice(0, 4);
     const monthNumber = Number(day.month.slice(5, 7));
     const previous = monthNumber === 1 ? null : `${year}-${String(monthNumber - 1).padStart(2, '0')}`;
 
-    const goal = await this.goals.readOrDefaults(ctx, year);
+    // Resolved once, above, on this route's own permission: the plan is read for that member.
+    const goal = await this.goals.planOf(ctx, year, member);
     // An unsaved default is an offer, not a goal: the Summary measures nobody against a plan they never made.
     const set = goal.savedAt !== null;
+
     /*
-     * **No target is no target**: a saved goal of zero — which the goal form allows — or one whose stored
-     * assumptions cannot produce a plan measures nothing, and gets no pace against *a target of 0*.
+     * **Lead rows only to a reader who may read that member's leads** (roles §3.7: lead records are not
+     * admin-readable, "never the lead rows"). `personal_summary:read` reaches the office for the Owner
+     * and the Admin, `lead:read` does not, so an Owner or Admin who is not above the member reads the
+     * count of open leads and none of the rows, nor the two insights that name a lead.
      */
-    const planned = goal.projected?.annualApeTargetMinor ?? 0;
-    const annual = set && planned > 0 ? planned : null;
+    const leadReach = subject.self ? null : await this.coach.reach(ctx, 'lead:read');
+    const showsLeads = subject.self || leadReach === null || leadReach.includes(member);
 
     const monthWindow = { from: `${day.month}-01` as LocalDate, to: day.today };
     const yearWindow = { from: `${year}-01-01` as LocalDate, to: day.today };
     const [through, thisMonth, counts, yearCounts, sections, openLeads, compliance, ratios] = await Promise.all([
-      previous ? this.production.apeYearToDateThrough(ctx, me, previous) : Promise.resolve(null),
-      this.production.apeForMonth(ctx, me, day.month),
-      this.activity.countsOver(ctx, me, monthWindow),
-      this.activity.countsOver(ctx, me, yearWindow),
-      this.activity.sectionsShown(ctx, ctx.membership?.orgLevelCode ?? ''),
-      this.leadReadings.openOf(ctx, me, day),
-      this.activityLog.compliance(ctx, {}),
-      this.activityLog.ratios(ctx),
+      previous ? this.production.apeYearToDateThrough(ctx, member, previous) : Promise.resolve(null),
+      this.production.apeForMonth(ctx, member, day.month),
+      this.activity.countsOver(ctx, member, monthWindow),
+      this.activity.countsOver(ctx, member, yearWindow),
+      // The subject's rung, not the reader's (ADR-0020): a leader reads the coachee's own page.
+      this.activity.sectionsShown(ctx, subject.orgLevelCode),
+      this.leadReadings.openOf(ctx, member, day),
+      this.activityLog.complianceOf(ctx, member),
+      this.activityLog.ratiosOf(ctx, subject),
     ]);
 
-    const before = ytdBeforeThisMonth({
-      month: monthNumber,
-      throughLastMonthMinor: through?.minor ?? null,
-      // This month's own year to date is what the goal already reads when it is the latest the office holds.
-      thisMonth: thisMonth && goal.achieved.month === day.month
-        ? { ytdMinor: goal.achieved.minor, monthlyMinor: thisMonth.minor } : null,
-      ownFigureMinor: goal.achieved.provenance === 'self_reported' ? goal.achieved.minor : null,
+    /*
+     * **No target is no target**: a saved goal of zero — which the goal form allows — or one whose stored
+     * assumptions cannot produce a plan measures nothing, and gets no pace against *a target of 0*. The
+     * targets are `summaryPlan`'s, which `GET /activity/summary` pro-rates to the last 7 days (P11-T4).
+     */
+    const plan = summaryPlan({
+      goal, month: day.month, throughLastMonthMinor: through?.minor ?? null, thisMonthMinor: thisMonth?.minor ?? null,
     });
-    const monthlyTarget = annual !== null ? monthlyApeTarget(annual, before, monthNumber) : null;
+    const annual = plan.annualTargetMinor;
+    const monthlyTarget = plan.monthlyTargetMinor;
     // A year made before this month began: the month needs nothing more (ADR-0047), which is not *no target*.
     const monthly = monthlyTarget === 0
       ? madeFigures(thisMonth?.minor ?? null)
@@ -141,9 +178,7 @@ export class SummaryService {
      * twelve, run through the cascade and multiplied back — **rounded once, at the end**, which is the
      * cascade on the year's target. Ceiling each month first would ask for up to twelve extra policies.
      */
-    const rates = goal.caseSizeMinor > 0 ? goal : null;
-    const monthlyCounts = monthlyTarget !== null && rates ? cascadeCounts(monthlyTarget, rates) : null;
-    const yearlyCounts = annual !== null && rates ? cascadeCounts(annual, rates) : null;
+    const { monthlyCounts, yearlyCounts } = plan;
     const closingTarget = monthlyCounts?.policies ?? null;
 
     const mapping = goal.cascadeMapping;
@@ -165,7 +200,7 @@ export class SummaryService {
       apeTargetMet: monthly.targetMet || yearly.targetMet,
     });
 
-    return {
+    const view: SummaryView = {
       year,
       month: day.month,
       today: day.today,
@@ -178,13 +213,15 @@ export class SummaryService {
         monthly: activityFor(monthWindow, counts, monthlyCounts),
         yearly: activityFor(yearWindow, yearCounts, yearlyCounts),
       },
-      leads: { rows: openLeads.slice(0, SUMMARY.LEADS_SHOWN), total: openLeads.length },
+      leads: { rows: showsLeads ? openLeads.slice(0, SUMMARY.LEADS_SHOWN) : [], total: openLeads.length },
       insights: insightsFor({
         compliance: { compliant: compliance.compliant7d, windowDays: compliance.windowDays, lastLoggedOn: compliance.lastLoggedOn },
         pace,
         leads: openLeads,
         ratios: ratios.ratios,
-      }),
+      }).filter((i) => showsLeads || (i.rule !== 'LEAD_OVERDUE' && i.rule !== 'LEAD_NEGLECTED')),
     };
+
+    return view;
   }
 }

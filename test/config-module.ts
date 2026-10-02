@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { Clock, FixedClock } from '@/common/clock/clock.port';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
+import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import {
   ActivityCategory, ActivityCategorySchema,
 } from '@/modules/config/activity-category.schema';
@@ -70,6 +71,7 @@ import { CapabilityCatalogRepository } from '@/modules/capability/capability.rep
 import { CapabilityService } from '@/modules/capability/capability.service';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import { CoachResolver } from '@/modules/org/coach-resolver';
 import { AssetSchema } from '@/modules/assets/asset.schema';
 import { AssetRepository } from '@/modules/assets/asset.repository';
 import { AssetService } from '@/modules/assets/asset.service';
@@ -99,6 +101,22 @@ import { UserSchema } from '@/modules/users/user.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
+import { CoachingSession, CoachingSessionSchema } from '@/modules/coaching/coaching-session.schema';
+import { CoachingSessionRepository } from '@/modules/coaching/coaching-session.repository';
+import { CoachingReadings } from '@/modules/coaching/coaching-readings';
+import { PaceStatusReadings } from '@/modules/coaching/pace-status';
+import { CoachingRosterService } from '@/modules/coaching/coaching-roster.service';
+import { CoacheeService } from '@/modules/coaching/coachee.service';
+import { CoachingSessionGate } from '@/modules/coaching/coaching-session.gate';
+import { CoachingSessionService } from '@/modules/coaching/coaching-session.service';
+import { CoachingSnapshotBuilder } from '@/modules/coaching/coaching-snapshot';
+import { CoachingRecordService } from '@/modules/coaching/coaching-record.service';
+import { CoachingProfile, CoachingProfileSchema } from '@/modules/coaching/coaching-profile.schema';
+import { CoachingProfileRepository } from '@/modules/coaching/coaching-profile.repository';
+import { CoachingProfileService } from '@/modules/coaching/coaching-profile.service';
+import { LeaderNote, LeaderNoteSchema } from '@/modules/coaching/leader-note.schema';
+import { LeaderNoteRepository } from '@/modules/coaching/leader-note.repository';
+import { LeaderNoteService } from '@/modules/coaching/leader-note.service';
 
 /**
  * The configuration module, wired the way the app wires it.
@@ -112,7 +130,14 @@ import { OrgLevelService } from '@/modules/tenants/org-level.service';
  * the caller has already started. A double here would be a second implementation of the
  * thing under test.
  */
-export function configModule(now: Date) {
+export function configModule(
+  now: Date,
+  /**
+   * P11-T8: the real `NotificationService`, for a spec asking what reached a person's inbox and email
+   * rather than whether a write announced itself — one notice per coaching session is the first.
+   */
+  overrides: { notifications?: NotificationService } = {},
+) {
   const model = <T>(name: string, schema: unknown) =>
     mongoose.model(name, schema as never) as unknown as T;
 
@@ -131,6 +156,8 @@ export function configModule(now: Date) {
   const clock: Clock = new FixedClock(now);
   const storage = new StubStorage();
   const audit = new AuditService(model('AuditLogModel', AuditLogSchema) as never);
+  // P11-T3: the §3.5 read audit, one seam for every subject read.
+  const subjectReads = new SubjectReadAudit(audit);
 
   const leads = new LeadStatusService(
     new LeadStatusRepository(leadStatuses as never), audit, clock,
@@ -139,6 +166,8 @@ export function configModule(now: Date) {
   // Shared, because the lead service resolves a leader's downline from the same rows the org
   // module reads — two handles on one collection is two caches and one of them stale.
   const memberships = new MembershipRepository(model(Membership.name, MembershipSchema) as never);
+  // P11-T3: `COACH(actor, subject)`, which goals, leads and activity resolve a subject through.
+  const coach = new CoachResolver(memberships);
   const users = model('UserModelForConfig', UserSchema);
   const companyOrgLevels = model('CompanyOrgLevelModelForConfig', CompanyOrgLevelSchema);
   const orgLevels = new OrgLevelService(
@@ -213,17 +242,6 @@ export function configModule(now: Date) {
     audit,
     clock,
   );
-  // P6: what an agent did, day by day. The first module holding what people *did*.
-  const activityLogs = new ActivityService(
-    new ActivityLogRepository(model(ActivityLog.name, ActivityLogSchema) as never),
-    new ActivityTypeRepository(types as never),
-    new ActivityCategoryRepository(categories as never),
-    new MembershipRepository(model(Membership.name, MembershipSchema) as never),
-    kpms as never,
-    clock,
-    audit,
-    new RatioDefinitionRepository(ratioDefinitions as never),
-  );
   /*
    * **A recorder, not a second implementation.** `NotificationService` needs a preferences model,
    * a renderer and its channel adapters, and none of that is what a goal test is asking about —
@@ -231,8 +249,17 @@ export function configModule(now: Date) {
    * own specs; this captures the request so a caller's test can read it.
    */
   const sentNotifications: Record<string, unknown>[] = [];
-  const notifier = {
+  /*
+   * P11-T8: a save through a coaching session coalesces into one notice (`sendCoalesced`, recorded with
+   * its `coalesceKey` in the same list), and finalize releases the round's held email (recorded here).
+   */
+  const releasedNotifications: Record<string, unknown>[] = [];
+  const notifier = overrides.notifications ?? {
     send: async (request: Record<string, unknown>) => { sentNotifications.push(request); },
+    sendCoalesced: async (request: Record<string, unknown>) => { sentNotifications.push(request); },
+    releaseHeld: async (kpmId: string, coalesceKey: string, templateId: string) => {
+      releasedNotifications.push({ kpmId, coalesceKey, templateId });
+    },
   } as unknown as NotificationService;
 
   // P9-T1: the office's production, month by month — the authoritative APE source. Built before
@@ -257,6 +284,28 @@ export function configModule(now: Date) {
     notifier,
     productionReadings,
     activityReadings,
+    coach,
+    // P11-T8: `PUT /goals/:period?for=&session=` asks whether the session is the caller's open one.
+    new CoachingSessionGate(
+      new CoachingSessionRepository(model(CoachingSession.name, CoachingSessionSchema) as never), coach,
+    ),
+  );
+  // P6: what an agent did, day by day. The first module holding what people *did*. After `goals` since
+  // P11-T4, whose plan the 7-day targets read.
+  const activityLogs = new ActivityService(
+    new ActivityLogRepository(model(ActivityLog.name, ActivityLogSchema) as never),
+    new ActivityTypeRepository(types as never),
+    new ActivityCategoryRepository(categories as never),
+    coach,
+    kpms as never,
+    clock,
+    audit,
+    new RatioDefinitionRepository(ratioDefinitions as never),
+    subjectReads,
+    // P11-T4: the month's plan its 7-day targets are pro-rated from, and the sections a rung is shown.
+    goals,
+    productionReadings,
+    activityReadings,
   );
   // P10-T4: the Personal Summary, read from the goal, the office's production and the member's log.
   const summary = new SummaryService(
@@ -270,6 +319,50 @@ export function configModule(now: Date) {
       clock,
     ),
     activityLogs,
+    // P11-T4: `GET /summary?for=` resolves its subject through `COACH`, and records a read of somebody else's.
+    coach,
+    subjectReads,
+  );
+  // P11-T5: the coaching sessions, and the coaching metrics read over them.
+  const coachingSessions = new CoachingSessionRepository(
+    model(CoachingSession.name, CoachingSessionSchema) as never,
+  );
+  const coachingReadings = new CoachingReadings(coachingSessions, clock);
+  // P11-T6: `GOAL_PACE_STATUS` over `PACING_TO_MAA`, and the roster that serves them.
+  const paceStatus = new PaceStatusReadings(
+    new GoalRepository(model(Goal.name, GoalSchema) as never), productionReadings, activityReadings,
+  );
+  const coachingRoster = new CoachingRosterService(
+    coach,
+    coachingReadings,
+    paceStatus,
+    new MemberNames(memberships, users as never),
+    orgLevels,
+    new TenantDay(kpms as never, clock),
+  );
+  // P11-T7: the person a coaching page opens on.
+  const coachee = new CoacheeService(
+    coach, new MemberNames(memberships, users as never), orgLevels, new TenantDay(kpms as never, clock),
+  );
+  // P11-T5: the session lifecycle, and the snapshot finalize takes through the live cards' own internals.
+  const coachingSnapshots = new CoachingSnapshotBuilder(
+    summary, activityLogs, new GoalRepository(model(Goal.name, GoalSchema) as never), clock,
+  );
+  const coachingSession = new CoachingSessionService(
+    coachingSessions,
+    coach,
+    new MemberNames(memberships, users as never),
+    new TenantDay(kpms as never, clock),
+    new LeadRepository(model(Lead.name, LeadSchema) as never),
+    coachingSnapshots,
+    audit,
+    subjectReads,
+    notifier,
+    clock,
+  );
+  // P11-T10: a finalized session's print, and the reader's own coaching.
+  const coachingRecord = new CoachingRecordService(
+    coachingSessions, coach, new MemberNames(memberships, users as never), audit, subjectReads,
   );
   const productionNames = new MemberNames(memberships, users as never);
   // P9-T4: a month's lock and revision, and the imports that write it.
@@ -335,9 +428,10 @@ export function configModule(now: Date) {
     audit,
     clock,
     new TenantDay(kpms as never, clock),
-    memberships,
+    coach,
     new MemberNames(memberships, users as never),
     config,
+    subjectReads,
   );
   const provisioning = new ProvisioningService(
     categories as never,
@@ -375,6 +469,15 @@ export function configModule(now: Date) {
     new KpmOfficeCounter(kpms as never),
     provisioning,
   );
+  // P11-T9: the Leader Notes tab — one coachee's capability ticks, and the leaders' notes about them.
+  const coachingProfiles = new CoachingProfileRepository(model(CoachingProfile.name, CoachingProfileSchema) as never);
+  const coachingProfile = new CoachingProfileService(
+    coachingProfiles, coach, capability, new MemberNames(memberships, users as never), clock,
+  );
+  const leaderNoteRows = new LeaderNoteRepository(model(LeaderNote.name, LeaderNoteSchema) as never);
+  const leaderNotes = new LeaderNoteService(
+    leaderNoteRows, coach, memberships, new MemberNames(memberships, users as never), audit, clock,
+  );
 
   return {
     activity, ratios, leads, config, provisioning, templates, templateService, audit, clock, changes,
@@ -382,7 +485,11 @@ export function configModule(now: Date) {
     products, assets, storage, kpmProducts, events, campaigns, capability, activityLogs,
     leadRecords,
     goals, production, productionMonths, productionImport, productionCorrections, productionReadings, summary,
-    sentNotifications,
+    sentNotifications, coach, subjectReads,
+    coachingSessions, coachingReadings, paceStatus, coachingRoster, activityReadings, coachee,
+    coachingSnapshots, coachingSession, releasedNotifications,
+    coachingProfiles, coachingProfile, leaderNoteRows, leaderNotes,
+    coachingRecord,
   };
 }
 

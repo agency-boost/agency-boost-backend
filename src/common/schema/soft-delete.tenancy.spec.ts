@@ -69,6 +69,12 @@ import {
   CapabilityCatalogSchema, CapabilityEntrySchema, CapabilityGridRowSchema,
   CapabilityStageRowSchema,
 } from '@/modules/capability/capability.schema';
+import {
+  CoachingActionItemSchema, CoachingLastWeekItemSchema, CoachingLastWeekSchema, CoachingLeadActionSchema,
+  CoachingSessionCorrectionSchema, CoachingSessionSchema, CoachingSnapshotSchema, CoachingTipSchema,
+} from '@/modules/coaching/coaching-session.schema';
+import { CoachingProfileRevisionSchema, CoachingProfileSchema } from '@/modules/coaching/coaching-profile.schema';
+import { LeaderNoteRevisionSchema, LeaderNoteSchema } from '@/modules/coaching/leader-note.schema';
 
 /**
  * P2-T8: soft delete everywhere.
@@ -118,6 +124,11 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['capabilityCatalogs', CapabilityCatalogSchema],
   // Company-partitioned carrier rules (ADR-0035), soft-deleted like every other row.
   ['qualificationRules', QualificationRuleSchema],
+  // P11-T5. A finalized session is a dated record of the office; nothing hard-deletes one (AC-9).
+  ['coachingSessions', CoachingSessionSchema],
+  // P11-T9. A note is cleared by a save and never deleted by a route; P19-T1's erasure reaches both.
+  ['coachingProfiles', CoachingProfileSchema],
+  ['leaderNotes', LeaderNoteSchema],
 ];
 
 /**
@@ -253,6 +264,61 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     'a subdocument of products, for the same reason',
   ],
   ['authTokens', AuthTokenSchema, 'self-expiring: revokedAt and expiresAt already model the lifecycle'],
+  // P11-T5: the parts of a coaching session, each deleted with the session that holds it.
+  [
+    'coachingLastWeek (subdocument)',
+    CoachingLastWeekSchema,
+    'which finalized session a draft carried from, fixed at Start and deleted with the session holding it',
+  ],
+  [
+    'coachingLastWeekItem (subdocument)',
+    CoachingLastWeekItemSchema,
+    'a copy of last week\'s item inside the session reviewing it: the draft\'s whole editable state is '
+      + 'saved at once, and a finalized session keeps it in corrections[] when it is reopened (ADR-0042)',
+  ],
+  [
+    'coachingActionItem (subdocument)',
+    CoachingActionItemSchema,
+    'one of the session\'s other action items: removed with the ✕ while the draft is edited, and kept '
+      + 'whole in corrections[] once a finalized version is reopened (ADR-0042)',
+  ],
+  [
+    'coachingTip (subdocument)',
+    CoachingTipSchema,
+    'one coaching tip: removed with the ✕ while the draft is edited, and kept whole in corrections[] '
+      + 'once a finalized version is reopened (ADR-0042)',
+  ],
+  [
+    'coachingLeadAction (subdocument)',
+    CoachingLeadActionSchema,
+    'taken whole at every finalize from the coachee\'s leads as they stand; the list it replaced stays '
+      + 'in corrections[] (ADR-0042)',
+  ],
+  [
+    'coachingSessionCorrection (subdocument)',
+    CoachingSessionCorrectionSchema,
+    'a finalized state a reopen replaced. **Append-only and never removed**: the earlier agreement '
+      + 'stays readable to everybody who reads the session (ADR-0042, ADR-0079)',
+  ],
+  [
+    'coachingSnapshot (subdocument)',
+    CoachingSnapshotSchema,
+    'taken once, at the first finalize, and carried unchanged by every later version: never rewritten '
+      + 'and never removed apart from the session',
+  ],
+  // P11-T9: what a profile save or a note save replaced, kept whole inside the record it belongs to.
+  [
+    'coachingProfileRevision (subdocument)',
+    CoachingProfileRevisionSchema,
+    'a tick set a profile save replaced. **Append-only and never removed**: it is the attribution a '
+      + 'profile save writes instead of an audit entry',
+  ],
+  [
+    'leaderNoteRevision (subdocument)',
+    LeaderNoteRevisionSchema,
+    'a text a note save replaced. **Append-only and never removed** apart from the note, which P19-T1\'s '
+      + 'erasure cascade reaches whole',
+  ],
 ];
 
 const EXPORT_NAMES = new Map<Schema, string>([
@@ -319,6 +385,18 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [GroupSchema, 'GroupSchema'],
   [AuditLogSchema, 'AuditLogSchema'],
   [AuthTokenSchema, 'AuthTokenSchema'],
+  [CoachingSessionSchema, 'CoachingSessionSchema'],
+  [CoachingLastWeekSchema, 'CoachingLastWeekSchema'],
+  [CoachingLastWeekItemSchema, 'CoachingLastWeekItemSchema'],
+  [CoachingActionItemSchema, 'CoachingActionItemSchema'],
+  [CoachingTipSchema, 'CoachingTipSchema'],
+  [CoachingLeadActionSchema, 'CoachingLeadActionSchema'],
+  [CoachingSessionCorrectionSchema, 'CoachingSessionCorrectionSchema'],
+  [CoachingSnapshotSchema, 'CoachingSnapshotSchema'],
+  [CoachingProfileSchema, 'CoachingProfileSchema'],
+  [CoachingProfileRevisionSchema, 'CoachingProfileRevisionSchema'],
+  [LeaderNoteSchema, 'LeaderNoteSchema'],
+  [LeaderNoteRevisionSchema, 'LeaderNoteRevisionSchema'],
 ]);
 
 describe('soft delete', () => {

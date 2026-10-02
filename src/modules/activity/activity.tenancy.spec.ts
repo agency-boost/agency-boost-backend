@@ -376,11 +376,16 @@ describe('an agent’s activity log (P6)', () => {
       return String(row._id);
     };
 
-    it('lets an agent read only their own', async () => {
+    it('lets an agent read only their own — P11-T3 AC-3: 404 for anybody else, never 403', async () => {
+      /*
+       * **Rewritten 2026-10-02 (P11-T3).** This asserted 403 `PERM_OUT_OF_SCOPE`, which confirms
+       * that the person named exists. Every subject read answers 404 outside its scope, as goals
+       * and leads always did (`conventions.md`, *Errors*; P11-T3 AC-3).
+       */
       const other = await downline(null);
 
       await expect(wired.activityLogs.readDay(member(KPM_A), { membershipId: other }))
-        .rejects.toMatchObject({ status: 403, code: 'PERM_OUT_OF_SCOPE' });
+        .rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
     });
 
     it('lets a leader read somebody in their downline, and not somebody outside it', async () => {
@@ -394,21 +399,29 @@ describe('an agent’s activity log (P6)', () => {
         .rejects.toMatchObject({ status: 404 });
     });
 
-    it('lets an AAB read a direct report, and nobody else’s', async () => {
+    it('P11-T3 lets an AAB read their whole subtree, a nested unit included, and nobody else’s', async () => {
       /*
-       * **The arm with zero executions.** Istanbul's branch map showed `member.leaderId === me` —
-       * the AAB's whole scope — never taken: every scoped-read test used an AB, so only the
-       * `ancestorIds` arm ran. Correct by inspection is exactly what the `own-kpm` bug looked
-       * like before the tenancy spec caught it, so it is a test now.
+       * **Rewritten 2026-10-02 (P11-T3, ADR-0074).** This read *"a direct report, and nobody
+       * else's"*: `own-unit` resolved to `member.leaderId === me`, so an AAB leading an AAB could not
+       * read their grandchildren's days while setting their goals. For a member's data `own-unit` is
+       * the subtree (roles §2, rule 2), through the one resolver goals and leads read too. Its
+       * grandchild was also written with `ancestorIds: [mine]` alone, a cache no hierarchy write
+       * produces, so its 404 proved nothing about the unit.
        */
       const aab = member(KPM_A, { orgLevelCode: 'AAB', hierarchyRole: 'aab', directCount: 1 });
       const mine = await downline(`mem-${KPM_A}`);
-      // A peer's agent: two levels under, so in the *downline* but not in the unit.
+      // A nested AAB's agent, two levels under, as `HierarchyService` writes one.
       const grandchild = await downline(mine);
+      await mongoose.model('Membership').updateOne(
+        { _id: grandchild, kpmId: KPM_A }, { $set: { ancestorIds: [`mem-${KPM_A}`, mine] } },
+      );
+      const stranger = await downline(null);
 
       await expect(wired.activityLogs.readDay(aab, { membershipId: mine }))
         .resolves.toMatchObject({ membershipId: mine });
       await expect(wired.activityLogs.readDay(aab, { membershipId: grandchild }))
+        .resolves.toMatchObject({ membershipId: grandchild });
+      await expect(wired.activityLogs.readDay(aab, { membershipId: stranger }))
         .rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
     });
 

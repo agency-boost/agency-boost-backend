@@ -4,6 +4,7 @@ import { SMTPServer } from 'smtp-server';
 import { RecipientAddressBook, SmtpChannelAdapter } from './smtp.adapter';
 import { FixedClock } from '@/common/clock/clock.port';
 import { EmailTemplateRenderer } from './email-renderer';
+import { NotificationRepository } from './notification.repository';
 import { NotificationService } from './notification.service';
 import { NotificationTemplate } from './notification.types';
 
@@ -124,8 +125,10 @@ describe('SMTP, end to end (P4-T14 AC-7)', () => {
      */
     const { adapter: smtp, config } = adapter('newcomer@kpm.test');
     const rows: Record<string, unknown>[] = [];
+    const model = { create: async (d: Record<string, unknown>) => { rows.push(d); return d; } };
     const service = new NotificationService(
-      { create: async (d: Record<string, unknown>) => { rows.push(d); return d; } } as never,
+      model as never,
+      new NotificationRepository(model as never),
       { findOne: () => ({ exec: async () => null }) } as never,
       new EmailTemplateRenderer(config),
       new FixedClock(new Date('2026-09-11T00:00:00Z')),

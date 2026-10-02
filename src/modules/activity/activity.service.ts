@@ -11,7 +11,7 @@ import { RequestContext } from '@/common/context/request-context';
  * this module, reporting itself as a server fault. Found at the Phase 6 exit review.
  */
 import {
-  DomainException, NoMembershipException, NotFoundException, OutOfScopeException,
+  DomainException, NoMembershipException, NotFoundException,
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import {
@@ -22,15 +22,22 @@ import {
   ACTIVITY, DEFAULT_TENANT_TIMEZONE, PERFORMANCE, PERIOD, SEED_RATIO_PURPOSES,
 } from '@/domain/constants';
 import type { RatioDisplayUnit } from '@/domain/constants/ratio-display';
+import { subPeriodActivityTarget, type CascadeTargets } from '@/domain/metrics/sub-period-activity-target';
 import { AuditService } from '@/modules/audit/audit.service';
+import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import {
   ActivityCategoryRepository, ActivityTypeRepository, RatioDefinitionRepository,
 } from '@/modules/config/activity.repository';
 import { diverges } from '@/modules/config/ratio.service';
-import { MembershipRepository } from '@/modules/org/membership.repository';
+import { GoalService } from '@/modules/goals/goal.service';
+import { CoachResolver } from '@/modules/org/coach-resolver';
+import { ProductionReadings } from '@/modules/production/production-readings';
+import {
+  sectionChips, summaryPlan, type ActivityTargetKey, type SectionChip,
+} from '@/modules/summary/summary-figures';
 import { Kpm } from '@/modules/tenants/kpm.schema';
-import { scopeFor } from '@/modules/rbac/permissions';
 import { ActivityLogRepository } from './activity-log.repository';
+import { ActivityReadings } from './activity-readings';
 import type { ActivityLogDocument } from './activity-log.schema';
 import {
   bucketIndex, bucketsFor, dashboardRange, type DashboardBucket, type DashboardRange,
@@ -58,12 +65,33 @@ export interface ActivityDayView {
   correctionCount: number;
 }
 
+/**
+ * One of the goal's three cascade codes over the window, against its target (P11-T4): the coaching
+ * session's Activity card, *{logged} / {target}*, labelled *pro-rated*.
+ */
+export interface ActivityWindowTargetView {
+  key: ActivityTargetKey;
+  /** The goal's own code for this count — `cascadeMapping`, never an item number (invariant §4). */
+  code: string;
+  /** Every stored entry against the code in the window, archived types included. */
+  logged: number;
+  /**
+   * `SUB_PERIOD_ACTIVITY_TARGET` for `ROLLING_7D`: this month's `SUMMARY_ACTIVITY_TARGET` pro-rated.
+   * `null` without an APE target, and `null` for every other period and for a custom range.
+   */
+  target: number | null;
+}
+
 export interface ActivitySummaryView {
   from: LocalDate;
   to: LocalDate;
   totals: { activityTypeCode: string; label: string; count: number }[];
   daysLogged: number;
   totalCount: number;
+  /** The three cascade codes, in the prototype's order: leads contacted, appointments, closings. */
+  targets: ActivityWindowTargetView[];
+  /** The subject's summary tiles over the window, grouped as `GET /summary`'s `activity.sections` (ADR-0064). */
+  sections: SectionChip[];
 }
 
 /**
@@ -172,12 +200,6 @@ export interface ActivityComplianceView {
 }
 
 /**
- * The three reads that take a subject, as `activity_log.read_raw` names them. The Dashboard, the
- * ratios and the Summary take none, so they have no surface here.
- */
-export type RawActivitySurface = 'log' | 'summary' | 'compliance';
-
-/**
  * What an agent did, day by day (P6-T1, P6-T3, P6-T4, P6-T5, P6-T6).
  *
  * **Only the person themselves writes their own log.** `roles-and-permissions.md` §3.5 grants
@@ -189,6 +211,10 @@ export type RawActivitySurface = 'log' | 'summary' | 'compliance';
  *
  * **Reading is wide and writing is narrow, and the asymmetry is the design.** A leader reads a
  * downline's rows because coaching depends on it — and every such read is audited (P10.1-T7).
+ *
+ * **Whose days a read is about is not decided here** (P11-T3). `CoachResolver.subject` resolves the
+ * subject the way every subject read in the product does, and `SubjectReadAudit` writes the entry
+ * the way every one of them does. The three reads below name the permission and the surface.
  */
 @Injectable()
 export class ActivityService {
@@ -196,7 +222,7 @@ export class ActivityService {
     private readonly logs: ActivityLogRepository,
     private readonly types: ActivityTypeRepository,
     private readonly categories: ActivityCategoryRepository,
-    private readonly memberships: MembershipRepository,
+    private readonly coach: CoachResolver,
     /*
      * The office's own row, read by `_id: ctx.kpmId` in `office()` and nowhere else. `Kpm` is the
      * tenant record itself, not a tenant-scoped collection — it has no `kpmId` to scope by — and
@@ -207,6 +233,14 @@ export class ActivityService {
     private readonly clock: Clock,
     private readonly audit: AuditService,
     private readonly ratioDefinitions: RatioDefinitionRepository,
+    private readonly subjectReads: SubjectReadAudit,
+    /*
+     * The month's plan the 7-day targets are pro-rated from (P11-T4): the goal and the office's
+     * production, read as `GET /summary` reads them, and the sections a rung is shown.
+     */
+    private readonly goals: GoalService,
+    private readonly production: ProductionReadings,
+    private readonly readings: ActivityReadings,
   ) {}
 
   // ------------------------------------------------------------------ reading
@@ -217,32 +251,79 @@ export class ActivityService {
   ): Promise<ActivityDayView> {
     const office = await this.office(ctx);
     const today = localDayOf(this.clock.now(), office.timezone);
-    const subject = await this.subjectFor(ctx, input.membershipId);
+    const subject = await this.coach.subject(ctx, input.membershipId, 'activity_log:read_raw');
     const date = this.requireDay(input.date ?? today);
 
     const row = await this.logs.findOne(ctx, {
       membershipId: subject.membershipId, localDate: date,
     });
-    await this.auditRawRead(ctx, subject, 'log', { from: date, to: date });
+    await this.subjectReads.record(ctx, subject, 'log', { from: date, to: date });
     return this.view(row, subject, date, today, office, ctx);
   }
 
-  /** Totals per activity code over a window. The read Phase 10's dashboard will use (P6-T4). */
+  /**
+   * Totals per activity code over a window (P6-T4) — and, for the coaching session's Activity card and its
+   * drill (P11-T4 AC-4), the goal's three cascade codes against their pro-rated targets and the summary
+   * tiles the subject is shown.
+   *
+   * - **`targets`**: `SUB_PERIOD_ACTIVITY_TARGET` for `ROLLING_7D` only — this month's
+   *   `SUMMARY_ACTIVITY_TARGET`, computed by the Summary's own `summaryPlan` and pro-rated, so the
+   *   session's card and the coachee's Summary tab cannot disagree about the month. Any other period, or
+   *   a custom range, keeps the counts and has no target: `null`.
+   * - **`sections`**: the subject's tiles, by the Summary's own `sectionChips`, on **the subject's rung**
+   *   (ADR-0020): the cascade tiles left to the targets, a tile per `summaryGroupCode` (ADR-0064).
+   * - **Whose** is `CoachResolver.subject` on `activity_ratios:read`, and another member's read writes the
+   *   §3.5 entry, surface `summary`, last, once the answer exists. A self-read writes none.
+   */
   async summary(
     ctx: RequestContext,
     input: { membershipId?: string; period?: string; from?: string; to?: string },
   ): Promise<ActivitySummaryView> {
     const office = await this.office(ctx);
     const today = localDayOf(this.clock.now(), office.timezone);
-    const subject = await this.subjectFor(ctx, input.membershipId, 'activity_ratios:read');
+    const subject = await this.coach.subject(ctx, input.membershipId, 'activity_ratios:read');
+    const view = await this.summaryOver(ctx, subject, input, today);
+
+    // Last, once the answer exists; nothing for the caller's own read (`SubjectReadAudit`).
+    await this.subjectReads.record(ctx, subject, 'summary', { from: view.from, to: view.to });
+    return view;
+  }
+
+  /**
+   * **The last 7 days of a subject the caller already resolved, and no audit entry** (P11-T4): the
+   * subject-taking internal of `summary` for `ROLLING_7D`, as `ratiosOf` is of `ratios` — the counts, the
+   * three cascade codes against their pro-rated targets, and the tiles. The coaching session's snapshot
+   * reads it at finalize, which writes its own entry for what it disclosed.
+   */
+  async weekOf(
+    ctx: RequestContext, subject: { membershipId: string; orgLevelCode: string },
+  ): Promise<ActivitySummaryView> {
+    const office = await this.office(ctx);
+    const today = localDayOf(this.clock.now(), office.timezone);
+    return this.summaryOver(ctx, subject, { period: 'ROLLING_7D' }, today);
+  }
+
+  private async summaryOver(
+    ctx: RequestContext,
+    subject: { membershipId: string; orgLevelCode: string },
+    input: { period?: string; from?: string; to?: string },
+    today: LocalDate,
+  ): Promise<ActivitySummaryView> {
     const window = this.windowFor(input, today);
+    // *Last 7 days* by name is the only window a month's targets are pro-rated to: a custom range is not.
+    const weekly = !input.from && !input.to && (input.period ?? 'ROLLING_7D') === 'ROLLING_7D';
 
-    const rows = await this.logs.find(ctx, {
-      membershipId: subject.membershipId,
-      localDate: { $gte: window.from, $lte: window.to },
-    });
+    const [rows, labels, shown, plan] = await Promise.all([
+      this.logs.find(ctx, {
+        membershipId: subject.membershipId,
+        localDate: { $gte: window.from, $lte: window.to },
+      }),
+      this.labelsByCode(ctx, subject.orgLevelCode),
+      // The subject's rung, not the reader's (ADR-0020): a leader reads the coachee's own tiles.
+      this.readings.sectionsShown(ctx, subject.orgLevelCode),
+      this.monthPlan(ctx, subject.membershipId, today, weekly),
+    ]);
 
-    const labels = await this.labelsByCode(ctx, subject.orgLevelCode);
     const totals = new Map<string, number>();
     let totalCount = 0;
     for (const row of rows) {
@@ -252,7 +333,12 @@ export class ActivityService {
       }
     }
 
-    await this.auditRawRead(ctx, subject, 'summary', window);
+    const week = weekly ? subPeriodActivityTarget(plan.monthly) : null;
+    const { leadsCode, appointmentsCode, closingsCode } = plan.mapping;
+    const target = (key: ActivityTargetKey, code: string, of: number | undefined): ActivityWindowTargetView => ({
+      key, code, logged: totals.get(code) ?? 0, target: of ?? null,
+    });
+
     return {
       ...window,
       // Every active code, including the ones with no activity: a screen showing only what was
@@ -262,6 +348,12 @@ export class ActivityService {
       })),
       daysLogged: rows.length,
       totalCount,
+      targets: [
+        target('leads', leadsCode, week?.leads),
+        target('appointments', appointmentsCode, week?.appointments),
+        target('closings', closingsCode, week?.policies),
+      ],
+      sections: sectionChips(shown, totals, [leadsCode, appointmentsCode, closingsCode]),
     };
   }
 
@@ -270,7 +362,7 @@ export class ActivityService {
    *
    * **No subject.** The screen is first-person and the route takes nobody else's id: a leader reading a
    * downline's day-by-day is Phase 11's coaching copy, and §3.5 owes every such read the audit entry
-   * `auditRawRead` writes, which this route would otherwise have to write too.
+   * `SubjectReadAudit` writes, which this route would otherwise have to write too.
    *
    * **Summed from what is stored, not from the summary's `totals`.** Those keep only the codes this
    * rung is shown today, while `totalCount` counts everything; reusing them would make a section's
@@ -386,12 +478,29 @@ export class ActivityService {
    * apply is left out of the answer altogether — hidden, never shown as failed. The subject's rung,
    * not the reader's: a leader reading a downline reads the downline's ratios.
    *
-   * **Your own, only**, as the Dashboard is. A leader reading a downline's ratios is Phase 11's coaching
-   * copy; Goal Settings' measured line (P10-T9) is two metrics of its own over the goal's cascade codes
-   * (ADR-0055), not these — so a subject parameter here would be one nothing calls.
+   * **Yours, or a coachee's** (P11-T4 AC-2): `for` names the subject, resolved by `CoachResolver.subject`
+   * on `activity_ratios:read` as every subject read is — `own` reaches only the caller, a hierarchy token
+   * `COACH`, `own-kpm` the office; outside it, 404. The session's Ratios card reads it. Another member's
+   * ratios write the §3.5 entry, surface `ratios`, over the 30 days, once the answer exists; a self-read
+   * writes none.
    */
-  async ratios(ctx: RequestContext): Promise<ActivityRatiosView> {
-    const subject = { membershipId: this.requireMembership(ctx), orgLevelCode: ctx.membership?.orgLevelCode ?? '' };
+  async ratios(ctx: RequestContext, forMembershipId?: string): Promise<ActivityRatiosView> {
+    const subject = await this.coach.subject(ctx, forMembershipId, 'activity_ratios:read');
+    const view = await this.ratiosOf(ctx, subject);
+    await this.subjectReads.record(ctx, subject, 'ratios', { from: view.from, to: view.to });
+    return view;
+  }
+
+  /**
+   * **The ratios of a subject the caller already resolved**, on the subject's rung, and **no audit
+   * entry** (P11-T4 AC-1): the subject-taking internal of `ratios`, for a read that resolved the
+   * subject on its own permission and writes its own §3.5 entry. `GET /summary?for=` is one, and its
+   * one entry covers the ratios its insight cards read — a second entry here would record one
+   * disclosure twice.
+   */
+  async ratiosOf(
+    ctx: RequestContext, subject: { membershipId: string; orgLevelCode: string },
+  ): Promise<ActivityRatiosView> {
     const office = await this.office(ctx);
     const today = localDayOf(this.clock.now(), office.timezone);
     const window = rollingWindow(today, PERIOD.ROLLING_30D_DAYS);
@@ -467,28 +576,44 @@ export class ActivityService {
   ): Promise<ActivityComplianceView> {
     const office = await this.office(ctx);
     const today = localDayOf(this.clock.now(), office.timezone);
-    const subject = await this.subjectFor(ctx, input.membershipId);
-    const windowDays = office.settings.complianceWindowDays;
+    const subject = await this.coach.subject(ctx, input.membershipId, 'activity_log:read_raw');
+    const view = await this.complianceOn(ctx, subject.membershipId, today, office.settings.complianceWindowDays);
 
+    // `from: null`, because `lastLoggedOn` discloses the latest day logged, whenever it was.
+    await this.subjectReads.record(ctx, subject, 'compliance', { from: null, to: today });
+    return view;
+  }
+
+  /**
+   * **The compliance metrics of a subject the caller already resolved, and no audit entry** (P11-T4
+   * AC-1): the subject-taking internal of `compliance`, as `ratiosOf` is of `ratios`. `GET /summary?for=`
+   * resolves its subject on `personal_summary:read` and writes the one entry its read discloses; the
+   * `compliance` surface's entry would be a second record of the same read.
+   */
+  async complianceOf(ctx: RequestContext, membershipId: string): Promise<ActivityComplianceView> {
+    const office = await this.office(ctx);
+    const today = localDayOf(this.clock.now(), office.timezone);
+    return this.complianceOn(ctx, membershipId, today, office.settings.complianceWindowDays);
+  }
+
+  private async complianceOn(
+    ctx: RequestContext, membershipId: string, today: LocalDate, windowDays: number,
+  ): Promise<ActivityComplianceView> {
     const rolling = rollingWindow(today, windowDays);
     const month = calendarMonth(today);
 
     const [inWindow, inMonth, latest] = await Promise.all([
       this.logs.count(ctx, {
-        membershipId: subject.membershipId, localDate: { $gte: rolling.from, $lte: rolling.to },
+        membershipId, localDate: { $gte: rolling.from, $lte: rolling.to },
       }),
       this.logs.count(ctx, {
-        membershipId: subject.membershipId, localDate: { $gte: month.from, $lte: month.to },
+        membershipId, localDate: { $gte: month.from, $lte: month.to },
       }),
-      this.logs.find(
-        ctx, { membershipId: subject.membershipId }, { sort: { localDate: -1 }, limit: 1 },
-      ),
+      this.logs.find(ctx, { membershipId }, { sort: { localDate: -1 }, limit: 1 }),
     ]);
 
-    // `from: null`, because `lastLoggedOn` discloses the latest day logged, whenever it was.
-    await this.auditRawRead(ctx, subject, 'compliance', { from: null, to: today });
     return {
-      membershipId: subject.membershipId,
+      membershipId,
       compliant7d: inWindow > 0,
       compliantMonth: inMonth > 0,
       lastLoggedOn: latest[0]?.localDate ?? null,
@@ -670,6 +795,33 @@ export class ActivityService {
     };
   }
 
+  /**
+   * The goal's cascade codes, and — for a 7-day read — this month's `SUMMARY_ACTIVITY_TARGET`, read and
+   * computed exactly as `GET /summary` computes its *Monthly* targets (`summaryPlan`): the plan through
+   * `GoalService.planOf`, the year to date through last month and this month's own APE. Another window
+   * needs only the codes, so it reads no production.
+   */
+  private async monthPlan(
+    ctx: RequestContext, membershipId: string, today: LocalDate, weekly: boolean,
+  ): Promise<{
+    mapping: { leadsCode: string; appointmentsCode: string; closingsCode: string };
+    monthly: CascadeTargets | null;
+  }> {
+    const year = today.slice(0, 4);
+    const month = today.slice(0, 7);
+    const monthNumber = Number(today.slice(5, 7));
+    const previous = monthNumber === 1 ? null : `${year}-${String(monthNumber - 1).padStart(2, '0')}`;
+    const [goal, through, thisMonth] = await Promise.all([
+      this.goals.planOf(ctx, year, membershipId),
+      weekly && previous ? this.production.apeYearToDateThrough(ctx, membershipId, previous) : null,
+      weekly ? this.production.apeForMonth(ctx, membershipId, month) : null,
+    ]);
+    const plan = weekly
+      ? summaryPlan({ goal, month, throughLastMonthMinor: through?.minor ?? null, thisMonthMinor: thisMonth?.minor ?? null })
+      : null;
+    return { mapping: goal.cascadeMapping, monthly: plan?.monthlyCounts ?? null };
+  }
+
   private requireMembership(ctx: RequestContext): string {
     if (!ctx.membershipId) {
       // `TENANT_NO_MEMBERSHIP` — the code the rest of the product already uses for exactly this.
@@ -683,103 +835,6 @@ export class ActivityService {
       throw new BadRequestException(`${value} is not a date. Days are written YYYY-MM-DD.`);
     }
     return value;
-  }
-
-  /**
-   * Whose log is being asked about, refused unless this caller's scope reaches them.
-   *
-   * `own` is always allowed for the caller themselves. Beyond that the scope comes from the grant
-   * list, so widening who may read is a matrix change rather than a code change.
-   */
-  private async subjectFor(
-    ctx: RequestContext,
-    asked: string | undefined,
-    /*
-     * The permission the **route** declares, not a hardcoded one.
-     *
-     * `summary` is gated on `activity_ratios:read` and this resolved `activity_log:read_raw`. The
-     * two grant lists are identical today, so nothing differed — but the matrix keeps them apart
-     * because they are expected to diverge, and a narrowed `activity_ratios:read` would have left
-     * this enforcing the old, wider scope. Found at the Phase 6 exit review.
-     */
-    permission: 'activity_log:read_raw' | 'activity_ratios:read' = 'activity_log:read_raw',
-  ): Promise<{ membershipId: string; orgLevelCode: string }> {
-    const me = ctx.membershipId;
-    const subject = asked ?? me;
-    if (!subject) {
-      throw new NoMembershipException();
-    }
-    /*
-     * The **subject's** rung, not the reader's. A section an office shows only to leaders is not
-     * on an agent's day, and a leader opening that agent's day should see the agent's screen —
-     * otherwise the row a leader reads and the row the agent filled in are different shapes.
-     */
-    if (subject === me) return { membershipId: subject, orgLevelCode: ctx.membership?.orgLevelCode ?? '' };
-
-    const scope = scopeFor(ctx, permission);
-    if (scope === null || scope === 'own') {
-      throw new OutOfScopeException({ subject });
-    }
-
-    /*
-     * **Resolve the membership before applying the scope, always.**
-     *
-     * The first version returned early for `own-kpm` and `all` on the reasoning that the log
-     * repository already filters by office — which is true and is not enough. The *log* would
-     * have been empty, but the answer was a 200 with a blank day for a membership belonging to
-     * another office, so an Owner could probe another office's membership ids and tell a real
-     * one from an invented one by nothing at all. The tenancy spec caught it.
-     *
-     * A 404 rather than a 403 throughout: a leader asking about somebody outside their downline
-     * should not learn whether that membership exists from the shape of the refusal.
-     */
-    const member = await this.memberships.findById(ctx, subject);
-    if (!member) throw new NotFoundException('Membership');
-    const resolved = { membershipId: subject, orgLevelCode: member.orgLevelCode ?? '' };
-    if (scope === 'own-kpm' || scope === 'all') return resolved;
-
-    const reaches = scope === 'own-unit'
-      ? member.leaderId === me
-      : (member.ancestorIds ?? []).includes(me!);
-    if (!reaches) throw new NotFoundException('Membership');
-    return resolved;
-  }
-
-  /**
-   * **Every read of another member's raw activity is audited** — `roles-and-permissions.md` §3.5,
-   * obligation 1, which Phase 6 granted the reads on and never built (P10.1-T7).
-   *
-   * The Owner, the Admin and a leader read a member's days because §3.5 dropped a restriction three
-   * other grants already routed around; the price of that honesty was that every such read leaves a
-   * record of who read whose days, over which range, from which surface. This is that record.
-   *
-   * **Called last, once the answer exists.** A refused read — out of scope, another office, a date
-   * that is not a date, a range that ends before it starts — has thrown before this line, so it
-   * writes nothing: the log says what was *disclosed*, not what was asked for.
-   *
-   * **Reading yourself writes nothing.** Under impersonation the session is the record
-   * (`impersonation.started`); a read of a third member there writes this entry naming both actors,
-   * as `AuditService.record` always does.
-   *
-   * **The target is the membership**, so the Super Admin's audit screen names the person, and the
-   * member's own *who viewed my activity* view (§3.5 obligation 2, not built yet) is one query on
-   * `targetMembershipId`. A failed write never fails the read — `AuditService.record` logs it at
-   * error level, the convention every audited write follows.
-   */
-  private async auditRawRead(
-    ctx: RequestContext,
-    subject: { membershipId: string },
-    surface: RawActivitySurface,
-    range: { from: LocalDate | null; to: LocalDate },
-  ): Promise<void> {
-    if (subject.membershipId === ctx.membershipId) return;
-    await this.audit.record(ctx, {
-      action: 'activity_log.read_raw',
-      targetCollection: 'memberships',
-      targetId: subject.membershipId,
-      targetMembershipId: subject.membershipId,
-      after: { surface, from: range.from, to: range.to },
-    });
   }
 
   /**

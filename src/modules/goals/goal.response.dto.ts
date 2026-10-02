@@ -171,10 +171,13 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
 
   @ApiProperty({
     type: GoalMeasuredDto,
-    description: 'The subject’s own conversion rates over the last 30 days, over **this goal’s** cascade codes — '
-      + 'printed under the assumptions they measure. Read only: nothing is filled in (ADR-0048, ADR-0055).',
+    nullable: true,
+    description: 'Your own conversion rates over the last 30 days, over **this goal’s** cascade codes — '
+      + 'printed under the assumptions they measure. Read only: nothing is filled in (ADR-0048, ADR-0055). '
+      + '**`null` on anybody else’s plan**: reading or saving somebody else’s goal answers no rate from '
+      + 'their log.',
   })
-  measured!: GoalMeasured;
+  measured!: GoalMeasured | null;
 
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   savedAt!: string | null;

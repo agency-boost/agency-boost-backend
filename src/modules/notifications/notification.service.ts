@@ -3,18 +3,37 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { can } from '@/modules/rbac/permissions';
-import { describeNotification, IN_APP_TEMPLATES } from './inbox-copy';
+import { describeNotification, IN_APP_TEMPLATES, inboxAddress } from './inbox-copy';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
+import { NotificationRepository } from './notification.repository';
 import {
   Notification, NotificationDocument,
   NotificationPreferences, NotificationPreferencesDocument,
 } from './notification.schema';
 import {
   DeliveryStatus, NotificationChannel, NotificationChannelAdapter,
-  RenderedMessage, SendRequest, TEMPLATE_CHANNELS,
+  NotificationTemplateId, RenderedMessage, SendRequest, TEMPLATE_CHANNELS,
 } from './notification.types';
+
+/** One channel's delivery record, as `notifications.delivery` holds it. */
+type Delivery = { status: DeliveryStatus; at?: Date; error?: string };
+
+/** The recipient's choices, as `send` reads them. `null` when they have made none. */
+type Preferences = { optedOutChannels?: NotificationChannel[]; mutedTemplates?: string[] } | null;
+
+/** A coalesced notice (P11-T8): one notification for several writes carrying the same key. */
+export interface CoalescedSendRequest extends SendRequest {
+  readonly userId: string;
+  /** A coalesced notice always concerns an office. */
+  readonly kpmId: string;
+  /** `{sessionId}:{round}` — see `Notification.coalesceKey`. */
+  readonly coalesceKey: string;
+}
+
+/** The channel whose delivery a coalesced notice holds until its session is finalized. */
+const HELD_CHANNEL: NotificationChannel = 'email';
 
 /**
  * The registered channel adapters. An injection token rather than a default parameter,
@@ -22,6 +41,18 @@ import {
  * than a constructor edit here (ADR-0010).
  */
 export const NOTIFICATION_ADAPTERS = 'NOTIFICATION_ADAPTERS';
+
+/** MongoDB's duplicate-key error: a unique index refused an insert. */
+const DUPLICATE_KEY = 11000;
+
+/**
+ * **The office a coalesced notice belongs to, as a context the tenant repository scopes by.** Its callers
+ * name the office rather than hand over a request: `releaseHeld` runs after the finalize has answered, as a
+ * background job on that one office would.
+ */
+function officeOf(kpmId: string): RequestContext {
+  return RequestContext.forJob(kpmId, 'coalesced-notice');
+}
 
 /** Renders a template id + payload into a subject and body. */
 export abstract class TemplateRenderer {
@@ -43,6 +74,11 @@ export interface InboxItem {
   /** What it says, composed on the server — see `inbox-copy.ts` for why. */
   title: string;
   detail: string | null;
+  /**
+   * Where it opens, composed on the server beside its words (`inboxAddress`): `/coaching/me?session=…`
+   * for a finalized coaching session (ADR-0078), `null` for every other item.
+   */
+  href: string | null;
   /** The office it concerns, or null — auth notifications predate any office. */
   kpmId: string | null;
   createdAt: string;
@@ -62,6 +98,12 @@ export class NotificationService {
   constructor(
     @InjectModel(Notification.name)
     private readonly notifications: Model<NotificationDocument>,
+    /*
+     * **A coalesced notice's writes go through the tenant repository** (invariant §1; Phase 11 exit
+     * review, N3): it always concerns an office, and the office is injected rather than written into each
+     * filter. The model above stays for the person's own inbox, which is read by `userId` across offices.
+     */
+    private readonly coalesced: NotificationRepository,
     @InjectModel(NotificationPreferences.name)
     private readonly preferences: Model<NotificationPreferencesDocument>,
     private readonly renderer: TemplateRenderer,
@@ -72,8 +114,7 @@ export class NotificationService {
   }
 
   async send(request: SendRequest & { userId: string; kpmId?: string | null }): Promise<void> {
-    const channels = TEMPLATE_CHANNELS[request.templateId] ?? [];
-    const prefs = await this.preferences.findOne({ userId: request.userId }).exec();
+    const prefs = await this.preferencesOf(request.userId);
 
     // Guard the arrays, not just the document: a preferences row written before a
     // field existed, or a partial upsert, leaves them undefined — and a crash here
@@ -83,31 +124,7 @@ export class NotificationService {
       return;
     }
 
-    const rendered = this.renderer.render(request.templateId, request.payload);
-    const delivery: Record<string, { status: DeliveryStatus; at?: Date; error?: string }> = {};
-
-    for (const channel of channels) {
-      if (prefs?.optedOutChannels?.includes(channel)) {
-        delivery[channel] = { status: 'suppressed', at: this.clock.now() };
-        continue;
-      }
-      const adapter = this.adapters.get(channel);
-      if (!adapter) {
-        delivery[channel] = { status: 'failed', at: this.clock.now(), error: 'no adapter' };
-        continue;
-      }
-      try {
-        await adapter.send(request, rendered);
-        delivery[channel] = { status: 'sent', at: this.clock.now() };
-      } catch (err) {
-        delivery[channel] = {
-          status: 'failed',
-          at: this.clock.now(),
-          error: err instanceof Error ? err.message : String(err),
-        };
-        this.logger.error({ err, channel, templateId: request.templateId }, 'delivery failed');
-      }
-    }
+    const delivery = await this.deliver(request, prefs, null);
 
     await this.notifications.create({
       kpmId: request.kpmId ?? null,
@@ -132,8 +149,116 @@ export class NotificationService {
     });
   }
 
+  /**
+   * **One notice for several writes, emailed once** (P11-T8; `functional/coaching.md`, *One notice per
+   * session*).
+   *
+   * - **The first write for a key** creates the notification, delivers it in-app at once, and **holds**
+   *   its email (`delivery.email.status: 'held'`), which `releaseHeld` sends when the session is
+   *   finalized. A draft never finalized never sends it; the coachee was told in-app.
+   * - **Each later write** creates nothing. The same notification takes the new payload — the last
+   *   value — and is marked unread again, so somebody who read the first value sees the change.
+   * - **The recipient's choices apply as `send` applies them**: a muted template writes nothing, and an
+   *   opted-out channel is `suppressed` rather than held.
+   *
+   * Two first writes racing are settled by the unique index on `(kpmId, coalesceKey, templateId)`: the
+   * second insert fails, and that write becomes a later one. Anything else that fails is the caller's to
+   * contain — the goal save that calls this catches it, because a notice must never fail a save.
+   */
+  async sendCoalesced(request: CoalescedSendRequest): Promise<void> {
+    const prefs = await this.preferencesOf(request.userId);
+    if (prefs?.mutedTemplates?.includes(request.templateId)) {
+      this.logger.debug({ templateId: request.templateId }, 'template muted by recipient');
+      return;
+    }
+
+    const office = officeOf(request.kpmId);
+    const notice = { userId: request.userId, coalesceKey: request.coalesceKey, templateId: request.templateId };
+    if (await this.coalesced.refreshCoalesced(office, notice, request.payload)) return;
+
+    const delivery = await this.deliver(request, prefs, HELD_CHANNEL);
+    try {
+      await this.coalesced.create(office, {
+        ...notice,
+        membershipId: request.membershipId ?? null,
+        // A coalesced template has an inbox row, so its payload is one somebody reads (`send`, above).
+        payload: request.payload,
+        delivery,
+        readAt: null,
+      } as Partial<NotificationDocument>);
+    } catch (err) {
+      if ((err as { code?: unknown }).code !== DUPLICATE_KEY) throw err;
+      // Another first write got there between the read and the insert: this one is a later write.
+      await this.coalesced.refreshCoalesced(office, notice, request.payload);
+    }
+  }
+
+  /**
+   * **Send a coalesced notice's held email, once** (P11-T8): what finalize calls for the session's round.
+   *
+   * The held state is **claimed** before anything is sent — `held` becomes `pending` in one conditional
+   * write — so two finalizes, or a retry, cannot send it twice; a key with nothing held is a no-op. The
+   * email is rendered from the notice's payload, which is the last value saved, and its outcome is
+   * recorded on the delivery map as `send` records one. The recipient's choices are read again here,
+   * since they may have changed while the session was open.
+   */
+  async releaseHeld(kpmId: string, coalesceKey: string, templateId: NotificationTemplateId): Promise<void> {
+    const office = officeOf(kpmId);
+    const claimed = await this.coalesced.claimHeld(office, { coalesceKey, templateId }, HELD_CHANNEL, this.clock.now());
+    if (!claimed) return;
+
+    const prefs = await this.preferencesOf(claimed.userId);
+    const request: SendRequest = {
+      userId: claimed.userId,
+      membershipId: claimed.membershipId ?? undefined,
+      templateId,
+      payload: claimed.payload,
+    };
+    const outcome = prefs?.mutedTemplates?.includes(templateId)
+      ? { status: 'suppressed' as const, at: this.clock.now() }
+      : await this.deliverOne(HELD_CHANNEL, request, prefs, this.renderer.render(templateId, claimed.payload));
+    await this.coalesced.recordDelivery(office, String(claimed._id), HELD_CHANNEL, outcome);
+  }
+
   registerAdapter(adapter: NotificationChannelAdapter): void {
     this.adapters.set(adapter.channel, adapter);
+  }
+
+  private async preferencesOf(userId: string): Promise<Preferences> {
+    return this.preferences.findOne({ userId }).exec();
+  }
+
+  /**
+   * Every channel the template declares, delivered or recorded as not: opted out is `suppressed`, the
+   * `held` channel is kept back for `releaseHeld`, and the rest go through their adapters now.
+   */
+  private async deliver(
+    request: SendRequest, prefs: Preferences, held: NotificationChannel | null,
+  ): Promise<Record<string, Delivery>> {
+    const rendered = this.renderer.render(request.templateId, request.payload);
+    const delivery: Record<string, Delivery> = {};
+    for (const channel of TEMPLATE_CHANNELS[request.templateId] ?? []) {
+      delivery[channel] = channel === held && !prefs?.optedOutChannels?.includes(channel)
+        ? { status: 'held', at: this.clock.now() }
+        : await this.deliverOne(channel, request, prefs, rendered);
+    }
+    return delivery;
+  }
+
+  /** One channel, through its adapter. A failing adapter is recorded and logged, and never thrown. */
+  private async deliverOne(
+    channel: NotificationChannel, request: SendRequest, prefs: Preferences, rendered: RenderedMessage,
+  ): Promise<Delivery> {
+    if (prefs?.optedOutChannels?.includes(channel)) return { status: 'suppressed', at: this.clock.now() };
+    const adapter = this.adapters.get(channel);
+    if (!adapter) return { status: 'failed', at: this.clock.now(), error: 'no adapter' };
+    try {
+      await adapter.send(request, rendered);
+      return { status: 'sent', at: this.clock.now() };
+    } catch (err) {
+      this.logger.error({ err, channel, templateId: request.templateId }, 'delivery failed');
+      return { status: 'failed', at: this.clock.now(), error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   /**
@@ -176,6 +301,7 @@ export class NotificationService {
         notificationId: String(n._id),
         templateId: n.templateId,
         ...describeNotification(n.templateId, n.payload),
+        href: inboxAddress(n.templateId, n.payload),
         kpmId: n.kpmId,
         createdAt: n.get('createdAt')?.toISOString() ?? '',
         readAt: n.readAt?.toISOString() ?? null,

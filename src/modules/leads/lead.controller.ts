@@ -2,8 +2,9 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestj
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
+import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import {
-  CreateLeadDto, ListLeadsQueryDto, SetLeadOutcomeDto, SetLeadStatusDto, UpdateLeadDto,
+  CreateLeadDto, CreateLeadQueryDto, ListLeadsQueryDto, SetLeadOutcomeDto, SetLeadStatusDto, UpdateLeadDto,
 } from './lead.dto';
 import { DeletedLeadDto, LeadPageDto, LeadResponseDto } from './lead.response.dto';
 import { LeadService } from './lead.service';
@@ -21,6 +22,20 @@ import { LeadService } from './lead.service';
  * prototype puts them side by side as a dropdown and two buttons, which is the same distinction
  * drawn in pixels.
  */
+/** A named owner outside the caller's reach, worded as every 404 in the document is. */
+const NOT_REACHED =
+  '`NOT_FOUND` — `owner` names nobody whose leads you may reach, **or** somebody in another office. The '
+  + 'two are deliberately indistinguishable: a `403` here would confirm the id exists.';
+
+/** A write pinned to a version the lead has moved past. */
+const STALE = '`VERSION_CONFLICT` — the lead changed since `version`: re-read it. Nothing was written.';
+
+/** What the three write routes say about the version they pin. */
+const PINNED =
+  '`version` is the version the write was read at: a stale one is `VERSION_CONFLICT` (409), and nothing '
+  + 'is written. **Optional for the lead’s owner, required of anybody else** — a leader’s write without '
+  + 'one is `VALIDATION_FAILED` (400). Another office’s lead, or one you cannot reach, is a 404 first.';
+
 @ApiTags('leads')
 @ApiBearerAuth()
 @Controller('leads')
@@ -35,9 +50,16 @@ export class LeadController {
       'Search over the name and the remarks, filter by ladder, stage, outcome and attention '
       + 'state, sort on one key, and page. The Leads table sorts on name, type, status and '
       + 'registration, and asks for every page in turn. **Scoped to what your grant reaches**: '
-      + 'your own, plus your unit or your downline. A lead outside it is a 404, never a 403.',
+      + 'your own, plus your unit or your downline. A lead outside it is a 404, never a 403. '
+      + 'A page holding somebody else’s leads writes one entry to the audit log for each person '
+      + 'whose leads it shows; your own write none.\n\n'
+      + '`owner` narrows it to one member’s leads — yours, or somebody you coach, for the coaching '
+      + 'session’s Leads card — beside every other filter. Somebody your grant does not reach is a '
+      + '404. Another member’s list writes one audit entry, whatever it holds.',
   })
   @ApiResponse({ status: 200, type: LeadPageDto })
+  // `owner` is a query field, so `openapi.ts` derives no 404 for it: written here.
+  @ApiResponse({ status: 404, description: NOT_REACHED, type: ApiErrorEnvelope })
   async list(@Ctx() ctx: RequestContext, @Query() query: ListLeadsQueryDto) {
     return this.leads.list(ctx, query);
   }
@@ -50,7 +72,12 @@ export class LeadController {
    */
   @Get(':id')
   @RequirePermission('lead:read')
-  @ApiOperation({ summary: 'One lead', description: '**404, not 403**, for another office’s.' })
+  @ApiOperation({
+    summary: 'One lead',
+    description:
+      '**404, not 403**, for another office’s. A lead you do not own — one of somebody you coach — '
+      + 'writes one entry to the audit log; your own writes none.',
+  })
   @ApiResponse({ status: 200, type: LeadResponseDto })
   async read(@Ctx() ctx: RequestContext, @Param('id') id: string) {
     return this.leads.read(ctx, id);
@@ -62,11 +89,17 @@ export class LeadController {
     summary: 'Add a lead',
     description:
       'A name is enough. **Contact details need a recorded lawful basis** (UU 27/2022) — '
-      + '`LEAD_CONSENT_REQUIRED`. The lead starts on no stage: the first one is a move.',
+      + '`LEAD_CONSENT_REQUIRED`. The lead starts on no stage: the first one is a move.\n\n'
+      + 'Yours, or — with `owner` — in the pipeline of somebody you coach: the lead is theirs, and its '
+      + 'creation and `lastEditedBy` name you. Anybody you do not coach, yourself included, is a 404. '
+      + 'No notification is sent.',
   })
   @ApiResponse({ status: 201, type: LeadResponseDto })
-  async create(@Ctx() ctx: RequestContext, @Body() body: CreateLeadDto) {
-    return this.leads.create(ctx, body);
+  @ApiResponse({ status: 404, description: NOT_REACHED, type: ApiErrorEnvelope })
+  async create(
+    @Ctx() ctx: RequestContext, @Body() body: CreateLeadDto, @Query() query: CreateLeadQueryDto,
+  ) {
+    return this.leads.create(ctx, body, query.owner);
   }
 
   @Patch(':id')
@@ -76,9 +109,11 @@ export class LeadController {
     description:
       'Any of the fields creation takes, one or several. **Not the stage** — that is its own '
       + 'route. Clearing the lawful basis on a lead that still holds contact details is refused, '
-      + 'because it is the same act as adding them without one.',
+      + 'because it is the same act as adding them without one.\n\n'
+      + PINNED,
   })
   @ApiResponse({ status: 200, type: LeadResponseDto })
+  @ApiResponse({ status: 409, description: STALE, type: ApiErrorEnvelope })
   async update(@Ctx() ctx: RequestContext, @Param('id') id: string, @Body() body: UpdateLeadDto) {
     return this.leads.update(ctx, id, body);
   }
@@ -92,9 +127,11 @@ export class LeadController {
       + 'and reorderable, so a forward-only rule would let a drag on the Owner’s settings screen '
       + 'change which moves their agents may make. Refused for the other ladder '
       + '(`LEAD_STATUS_WRONG_PIPELINE`), for a retired stage (`CONFIG_ARCHIVED`), and for a lead '
-      + 'that is already closed (`LEAD_ALREADY_CLOSED`). Every move is appended to the history.',
+      + 'that is already closed (`LEAD_ALREADY_CLOSED`). Every move is appended to the history.\n\n'
+      + PINNED,
   })
   @ApiResponse({ status: 200, type: LeadResponseDto })
+  @ApiResponse({ status: 409, description: `${STALE} \`LEAD_ALREADY_CLOSED\` — reopen it first.`, type: ApiErrorEnvelope })
   async setStatus(
     @Ctx() ctx: RequestContext, @Param('id') id: string, @Body() body: SetLeadStatusDto,
   ) {
@@ -108,9 +145,11 @@ export class LeadController {
     description:
       '`won` needs the stage that closes the pipeline (`LEAD_STATUS_NOT_FINAL` otherwise); '
       + '`lost` is allowed at any stage; `null` reopens. The two prototype screens disagree about '
-      + 'the second and the stricter reading of each half is taken (§3.7).',
+      + 'the second and the stricter reading of each half is taken (§3.7).\n\n'
+      + PINNED,
   })
   @ApiResponse({ status: 200, type: LeadResponseDto })
+  @ApiResponse({ status: 409, description: `${STALE} \`LEAD_ALREADY_CLOSED\` — reopen it first.`, type: ApiErrorEnvelope })
   async setOutcome(
     @Ctx() ctx: RequestContext, @Param('id') id: string, @Body() body: SetLeadOutcomeDto,
   ) {

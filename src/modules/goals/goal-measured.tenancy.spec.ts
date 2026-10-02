@@ -99,15 +99,44 @@ describe('the measured rates beside the conversion assumptions (P10-T9)', () => 
       .toMatchObject({ leadToAppointmentRate: null, closingRate: null });
   });
 
-  it('AC-3: gives a leader reading a downline’s plan the downline’s rates, not their own', async () => {
+  /*
+   * **Rewritten 2026-10-02 (P11-T7 AC-10, the phase file's D-rates).** This was P10-T9's AC-3, *gives a
+   * leader reading a downline's plan the downline's rates, not their own* — the opposite of the decision:
+   * two rates from another member's log, served by a read that writes no §3.5 entry, are retired from the
+   * subject read. The member's own read keeps them.
+   */
+  it('P11-T7 AC-10 D-rates: a leader reading a downline’s plan gets measured null, and their own read keeps theirs', async () => {
     await day('2026-09-20', { LEADS_CONTACTED: 10, SELL_PRESENTATION: 1 });
     await day('2026-09-20', { LEADS_CONTACTED: 10, SELL_PRESENTATION: 9 }, { membershipId: AAB });
+    const counted = jest.spyOn(wired.activityReadings, 'countsOver');
 
     const theirs = await wired.goals.readOrDefaults(aab(), '2026', AGENT);
+    // Their log is not read at all for somebody else's plan: nothing of it can leave by this route.
+    expect(counted).not.toHaveBeenCalled();
     const mine = await wired.goals.readOrDefaults(aab(), '2026');
+    const own = await wired.goals.readOrDefaults(agent(), '2026');
 
-    expect(theirs.measured.leadToAppointmentRate).toBe(0.1);
-    expect(mine.measured.leadToAppointmentRate).toBe(0.9);
+    expect(theirs.measured).toBeNull();
+    expect(mine.measured?.leadToAppointmentRate).toBe(0.9);
+    expect(own.measured?.leadToAppointmentRate).toBe(0.1);
+    // The rest of the plan is the subject's, as it was.
+    expect(theirs).toMatchObject({ period: '2026', cascadeMapping: { leadsCode: 'LEADS_CONTACTED' } });
+    counted.mockRestore();
+  });
+
+  it('P11-T7 AC-10 D-rates: a saved plan read by a leader, and the answer to their save of it, carry no rate either', async () => {
+    await day('2026-09-20', { LEADS_CONTACTED: 10, SELL_PRESENTATION: 4, SELL_SUBMISSION: 1 });
+    await wired.goals.save(agent(), plan);
+
+    const read = await wired.goals.readOrDefaults(aab(), '2026', AGENT);
+    const viaRead = await wired.goals.read(aab(), '2026', AGENT);
+    const saved = await wired.goals.save(aab(), { ...plan, annualApeTargetMinor: 600_000_000_00 }, AGENT);
+    const own = await wired.goals.readOrDefaults(agent(), '2026');
+
+    expect([read.measured, viaRead.measured, saved.measured]).toEqual([null, null, null]);
+    // The leader's save is the agent's plan now (ADR-0046), and the agent still reads their own rates.
+    expect(own).toMatchObject({ annualApeTargetMinor: 600_000_000_00, savedByMembershipId: AAB });
+    expect(own.measured).toMatchObject({ leadToAppointmentRate: 0.4, closingRate: 0.25 });
   });
 
   it('counts nobody else’s days, and no other office’s under the same member id', async () => {
@@ -115,7 +144,7 @@ describe('the measured rates beside the conversion assumptions (P10-T9)', () => 
     await day('2026-09-20', { LEADS_CONTACTED: 10, SELL_PRESENTATION: 10 }, { membershipId: AB });
     await day('2026-09-20', { LEADS_CONTACTED: 90, SELL_PRESENTATION: 0 }, { kpmId: OTHER_KPM });
 
-    expect((await wired.goals.readOrDefaults(agent(), '2026')).measured.leadToAppointmentRate).toBe(0.2);
+    expect((await wired.goals.readOrDefaults(agent(), '2026')).measured?.leadToAppointmentRate).toBe(0.2);
   });
 
   it('AC-4: fills nothing in — the assumptions stay what the agent typed', async () => {
@@ -135,6 +164,6 @@ describe('the measured rates beside the conversion assumptions (P10-T9)', () => 
 
     const goals = await wired.goals.list(agent());
     expect(goals.length).toBeGreaterThan(0);
-    for (const goal of goals) expect(goal.measured.leadToAppointmentRate).toBe(0.25);
+    for (const goal of goals) expect(goal.measured?.leadToAppointmentRate).toBe(0.25);
   });
 });

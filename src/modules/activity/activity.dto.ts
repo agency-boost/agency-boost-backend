@@ -96,14 +96,19 @@ export class ActivityDashboardQueryDto {
 }
 
 /**
- * **Empty on purpose.** The ratios are your own, and a class with no fields is how the validation
- * pipe's `forbidNonWhitelisted` refuses a `membershipId` by name — with no DTO at all it would be
- * ignored, and a caller who sent one would read their own ratios believing they were somebody else's.
+ * **One field, `for`** (P11-T4 AC-2): whose ratios — yours, or a coachee's, the session's Ratios card.
+ * The subject keeps this route's name for it, as the Summary's and the goals' do (`functional/coaching.md`,
+ * the Data contract). Every other field is refused by name by `forbidNonWhitelisted` — `membershipId`
+ * included, which is the activity reads' name and not this one's, so a caller who sent it is told rather
+ * than answered with their own ratios.
  */
-export class ActivityRatiosQueryDto {}
-
-export class ActivityComplianceQueryDto {
-  @ApiPropertyOptional({ description: 'Whose compliance. Defaults to your own; another member’s read is audited.' })
+export class ActivityRatiosQueryDto {
+  @ApiPropertyOptional({
+    name: 'for',
+    maxLength: 64,
+    description: 'Whose ratios: a membership id. Defaults to your own; another member’s needs the scope '
+      + 'to read them, is a 404 outside it, and is audited.',
+  })
   @IsOptional() @IsString() @MaxLength(64)
-  membershipId?: string;
+  for?: string;
 }

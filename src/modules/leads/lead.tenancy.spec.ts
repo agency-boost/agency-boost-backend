@@ -3,6 +3,7 @@ import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
+import type { LeadRepository } from './lead.repository';
 
 const NOW = new Date('2026-09-25T02:00:00Z');
 const KPM_A = '66f0000000000000000000a1';
@@ -100,6 +101,35 @@ describe('the lead record (P7-T1)', () => {
       await wired.leadRecords.update(A(), theirs.id, { name: 'Ours now' }).catch(() => undefined);
 
       expect((await wired.leadRecords.read(B(), theirs.id)).name).toBe('Theirs');
+    });
+
+    /*
+     * P11-T4 AC-3: the write that carries its own version check. Scoped like every write on the
+     * repository — the tenant in the filter, the caller as `updatedBy` — so a version that matches is
+     * still nothing found in another office.
+     */
+    describe('P11-T4 — `updateAtVersion`, the version check and the write in one', () => {
+      const repository = () => (wired.leadRecords as unknown as { leads: LeadRepository }).leads;
+
+      it('writes at the version it names, and stamps the caller', async () => {
+        const ours = await create(A());
+        const written = await repository().updateAtVersion(A(), ours.id, ours.version, { $inc: { version: 1 } });
+        expect(written).toMatchObject({ version: ours.version + 1, updatedBy: 'mem-a1' });
+      });
+
+      it('finds nothing at a version the lead has moved past', async () => {
+        const ours = await create(A());
+        await wired.leadRecords.update(A(), ours.id, { remarks: 'Moved on.' });
+        expect(await repository().updateAtVersion(A(), ours.id, ours.version, { $set: { remarks: 'Stale.' } }))
+          .toBeNull();
+      });
+
+      it('finds nothing in another office, the right version notwithstanding', async () => {
+        const theirs = await create(B(), { name: 'Theirs' });
+        expect(await repository().updateAtVersion(A(), theirs.id, theirs.version, { $set: { name: 'Ours now' } }))
+          .toBeNull();
+        expect((await wired.leadRecords.read(B(), theirs.id)).name).toBe('Theirs');
+      });
     });
   });
 

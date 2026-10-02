@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { globSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Logger } from '@nestjs/common';
 import mongoose from 'mongoose';
@@ -136,11 +136,33 @@ describe('reading another member’s activity is audited (P10.1-T7, §3.5)', () 
       });
     });
 
-    it('is written by one function the three reads call, not three copies', () => {
-      const source = readFileSync(join(__dirname, 'activity.service.ts'), 'utf8');
+    it('P11-T3 AC-8: is written by the one shared seam the three reads call, not by copies', async () => {
+      /*
+       * **Rewritten 2026-10-02 (P11-T3 AC-8).** This counted one literal and three
+       * `this.auditRawRead(` calls in `activity.service.ts`. The writer is `SubjectReadAudit` now —
+       * the injectable every module that reads a member's data shares, so coaching reuses the seam
+       * rather than copying it — and the assertion follows it there: each read hands the seam what
+       * it disclosed, once, and the action is spelled in the seam and in no module that reads.
+       */
+      const agent = await membership(KPM_A, ME);
+      const seam = jest.spyOn(wired.subjectReads, 'record');
 
-      expect(source.match(/'activity_log\.read_raw'/g)).toHaveLength(1);
-      expect(source.match(/this\.auditRawRead\(/g)).toHaveLength(3);
+      for (const read of Object.values(SURFACES)) await read(ab(), agent);
+
+      expect(seam.mock.calls.map(([who, subject, surface, range]) => [
+        who.membershipId, subject.membershipId, surface, range.from, range.to,
+      ])).toEqual([
+        [ME, agent, 'log', TODAY, TODAY],
+        [ME, agent, 'summary', '2026-03-05', TODAY],
+        [ME, agent, 'compliance', null, TODAY],
+      ]);
+      expect(await reads()).toHaveLength(3);
+
+      const src = join(__dirname, '../..');
+      const spelling = globSync('**/*.ts', { cwd: src })
+        .filter((file) => !file.includes('.spec.') && !file.startsWith('seed/'))
+        .filter((file) => readFileSync(join(src, file), 'utf8').includes("'activity_log.read_raw'"));
+      expect(spelling).toEqual(['modules/audit/subject-read-audit.ts']);
     });
   });
 
@@ -155,11 +177,13 @@ describe('reading another member’s activity is audited (P10.1-T7, §3.5)', () 
   });
 
   describe('a refused read writes nothing (AC-3)', () => {
-    it('an Agent naming anybody else', async () => {
+    it('P11-T3 AC-3: an Agent naming anybody else, as not found', async () => {
+      // 403 `PERM_OUT_OF_SCOPE` until 2026-10-02, which told the Agent the person existed. Every
+      // subject read answers 404 outside its scope (P11-T3 AC-3), as goals and leads always did.
       const other = await membership(KPM_A, null);
 
       for (const read of Object.values(SURFACES)) {
-        await expect(read(member(KPM_A), other)).rejects.toMatchObject({ status: 403 });
+        await expect(read(member(KPM_A), other)).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
       }
       expect(await reads()).toHaveLength(0);
     });

@@ -221,25 +221,42 @@ describe('the office’s production, month by month (P9-T1)', () => {
       expect(await active()).toEqual({ 'Rina Wijaya': true, 'Budi Santoso': null });
     });
 
-    it('conflict regression: an agent who logged activity and sold nothing is compliant, and not active', async () => {
+    it('P11-T6 AC-4 conflict regression: an agent pacing to MAA who logged activity and sold nothing is compliant, and not active', async () => {
       /*
        * `metrics-and-definitions.md`, testing obligation 3: the definitions of *active* the prototypes
        * mixed up must give different answers on one fixture, on purpose. `ACTIVITY_COMPLIANCE_MONTH`
-       * asks whether they reported; this asks whether they produced. `PACING_TO_MAA`, the third, joins
-       * this fixture in the phase that computes it — nothing does yet.
+       * asks whether they reported; this asks whether they produced. `PACING_TO_MAA`, the third, joined
+       * this fixture in P11-T6, the task that computes it (ADR-0054): a forward-looking signal, so an
+       * agent can be pacing to MAA and still have produced nothing.
        */
       const agent = new RequestContext('u-agent-a1', 'none', {
         membershipId: A1, kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
         status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       } as never);
+      // Sixteen on the cascade codes against September's 7 closings, 24 appointments and 80 leads — the
+      // cascade on Rp 125 M, what is left of Rp 500 M over the four months left — projects 7 × 16 / 111 ≈ 1.01.
       await mongoose.connection.db!.collection('activityLogs').insertOne({
-        kpmId: KPM_A, membershipId: A1, localDate: '2026-09-20', entries: [], totalCount: 6,
-        source: 'self', deletedAt: null,
+        kpmId: KPM_A, membershipId: A1, localDate: '2026-09-20', totalCount: 16, source: 'self', deletedAt: null,
+        entries: [
+          { activityTypeId: 't-leads', activityTypeCode: 'LEADS_CONTACTED', count: 10 },
+          { activityTypeId: 't-pres', activityTypeCode: 'SELL_PRESENTATION', count: 6 },
+        ],
+      } as never);
+      await mongoose.connection.db!.collection('goals').insertOne({
+        kpmId: KPM_A, membershipId: A1, period: '2026', mode: 'direct', annualApeTargetMinor: 500_000_000_00,
+        savingsTargetMinor: 0, commissionRatePct: 0, monthsLeftOverride: null, apeAchievedMinor: 0,
+        caseSizeMinor: 18_000_000_00, leadsToApptPct: 30, closingRatePct: 30,
+        cascadeMapping: { leadsCode: 'LEADS_CONTACTED', appointmentsCode: 'SELL_PRESENTATION', closingsCode: 'SELL_SUBMISSION' },
+        savedAt: NOW, savedByMembershipId: A1, version: 1, deletedAt: null,
       } as never);
       await insert(row(KPM_A, A1, '2026-09', { apeMonthly: 0, policyCountMonthly: 0 }));
 
+      const pace = (await wired.paceStatus.paceOf(agent, [A1], { today: '2026-09-27', month: '2026-09', onTrackRatio: 0.9 })).get(A1);
+      expect(pace).toMatchObject({ pacingToMaa: true, monthlyTargetMinor: 125_000_000_00 });
       expect((await wired.activityLogs.compliance(agent, {})).compliantMonth).toBe(true);
       expect((await active())['Rina Wijaya']).toBe(false);
+      // Pacing, and nothing produced: the triage says *Watch closely*, never *On track*.
+      expect(pace?.status).toBe('watch_closely');
     });
 
     it('is never made true by another office’s row, even one filed against the same membership', async () => {

@@ -1,7 +1,8 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { Kpm, KpmSchema } from './kpm.schema';
+import { PERFORMANCE } from '@/domain/constants';
+import { DEFAULT_KPM_SETTINGS, Kpm, KpmSchema } from './kpm.schema';
 import { TenantDay } from './tenant-day.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 
@@ -85,5 +86,55 @@ describe('the office’s day (P7-T4)', () => {
     const day = await days.for(new RequestContext('u9', 'none', null));
 
     expect(day.timezone).toBe('Asia/Jakarta');
+  });
+
+  describe('the office’s day and its settings, in one read (P11-T6)', () => {
+    it('P11-T6 AC-3 answers the office’s own knobs beside its day and its company', async () => {
+      const kpmId = await office({
+        settings: { ...DEFAULT_KPM_SETTINGS, coachingOverdueDays: 10, onTrackPaceThreshold: 0.8 },
+      });
+
+      const answer = await days.office(member(kpmId));
+
+      expect(answer).toMatchObject({
+        today: '2026-09-26', month: '2026-09', timezone: 'Asia/Jakarta', companyId: 'c1',
+      });
+      expect(answer.settings).toEqual({ ...DEFAULT_KPM_SETTINGS, coachingOverdueDays: 10, onTrackPaceThreshold: 0.8 });
+    });
+
+    it('P11-T6 AC-3 falls back knob by knob to the platform default an older row never stored', async () => {
+      const kpmId = await office();
+      await mongoose.connection.db!.collection('kpms').updateOne(
+        { _id: new mongoose.Types.ObjectId(kpmId) },
+        { $unset: { 'settings.coachingOverdueDays': '', 'settings.onTrackPaceThreshold': '' } },
+      );
+
+      const { settings } = await days.office(member(kpmId));
+
+      expect(settings.coachingOverdueDays).toBe(PERFORMANCE.COACHING_OVERDUE_DAYS);
+      expect(settings.onTrackPaceThreshold).toBe(PERFORMANCE.ON_TRACK_PACE_THRESHOLD);
+      expect(settings.complianceWindowDays).toBe(DEFAULT_KPM_SETTINGS.complianceWindowDays);
+    });
+
+    it('P11-T6 AC-3 falls back whole for a row with no settings, a zone in another office included', async () => {
+      const kpmId = await office({ code: '0555', timezone: 'America/New_York' });
+      await mongoose.connection.db!.collection('kpms')
+        .updateOne({ _id: new mongoose.Types.ObjectId(kpmId) }, { $unset: { settings: '' } });
+
+      const answer = await days.office(member(kpmId));
+
+      expect(answer).toMatchObject({ today: '2026-09-25', timezone: 'America/New_York' });
+      expect(answer.settings).toEqual(DEFAULT_KPM_SETTINGS);
+    });
+
+    it('P11-T6 AC-3 degrades for an office that is not there, and for somebody in none', async () => {
+      for (const ctx of [member('66f0000000000000000000ff'), new RequestContext('u9', 'none', null)]) {
+        const answer = await days.office(ctx);
+        expect(answer).toEqual({
+          today: '2026-09-26', month: '2026-09', timezone: 'Asia/Jakarta',
+          settings: DEFAULT_KPM_SETTINGS, companyId: null,
+        });
+      }
+    });
   });
 });

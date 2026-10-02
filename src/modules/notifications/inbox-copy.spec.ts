@@ -1,4 +1,4 @@
-import { describeNotification, IN_APP_TEMPLATES } from './inbox-copy';
+import { describeNotification, IN_APP_TEMPLATES, inboxAddress } from './inbox-copy';
 import { NotificationTemplate, TEMPLATE_CHANNELS } from './notification.types';
 
 /**
@@ -64,7 +64,7 @@ describe('inbox copy', () => {
       [NotificationTemplate.MEMBER_TAGGED_BY_LEADER, 'A leader added you to their unit'],
       [NotificationTemplate.MEMBER_REMOVED, 'You were removed from your unit'],
       [NotificationTemplate.ROLE_CHANGED, 'Your role changed'],
-      [NotificationTemplate.COACHING_SESSION_FINALIZED, 'A coaching session was finalised'],
+      [NotificationTemplate.COACHING_SESSION_FINALIZED, 'A coaching session was finalized'],
     ];
     for (const [id, title] of cases) expect(describeNotification(id, {}).title).toBe(title);
 
@@ -88,5 +88,31 @@ describe('inbox copy', () => {
       .toBe('Left the company.');
     expect(describeNotification(NotificationTemplate.ROLE_CHANGED, { reason: 'Ready to lead.' }).detail)
       .toBe('Ready to lead.');
+  });
+
+  /*
+   * **ADR-0078, P11-T10 AC-8: the finalize notice opens the session.** Composed here, beside the words,
+   * so the inbox and the manual books read one address. No other item has one.
+   */
+  describe('where an item opens', () => {
+    const SESSION = '66f0000000000000000000d1';
+
+    it('P11-T10 AC-8 a finalized coaching session opens /coaching/me on the session it names', () => {
+      expect(inboxAddress(NotificationTemplate.COACHING_SESSION_FINALIZED, { sessionId: SESSION }))
+        .toBe(`/coaching/me?session=${SESSION}`);
+    });
+
+    it('P11-T10 AC-8 a payload with no well-formed session id opens /coaching/me, never a broken address', () => {
+      for (const payload of [{}, { sessionId: 42 }, { sessionId: '' }, { sessionId: '../admin' }, { sessionId: `${SESSION}&x=1` }]) {
+        expect(inboxAddress(NotificationTemplate.COACHING_SESSION_FINALIZED, payload)).toBe('/coaching/me');
+      }
+    });
+
+    it('P11-T10 AC-8 no other inbox item changes: every other template opens nowhere', () => {
+      for (const id of IN_APP_TEMPLATES.filter((t) => t !== NotificationTemplate.COACHING_SESSION_FINALIZED)) {
+        expect([id, inboxAddress(id, { sessionId: SESSION })]).toEqual([id, null]);
+      }
+      expect(inboxAddress('something.new', { sessionId: SESSION })).toBeNull();
+    });
   });
 });

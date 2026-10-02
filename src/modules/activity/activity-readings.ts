@@ -37,6 +37,40 @@ export class ActivityReadings {
   }
 
   /**
+   * **`countsOver` for many members at once** (P11-T6): the same counts, archived types included, summed
+   * in one aggregate for the whole list — a roster of five hundred costs one query rather than five
+   * hundred. A member with no day in the window is absent from the map, as an empty `countsOver` is empty.
+   */
+  async countsOverMany(
+    ctx: RequestContext, membershipIds: readonly string[], window: { from: LocalDate; to: LocalDate },
+  ): Promise<Map<string, Map<string, number>>> {
+    const out = new Map<string, Map<string, number>>();
+    if (membershipIds.length === 0) return out;
+    const rows = await this.logs.aggregate(ctx, [
+      {
+        $match: {
+          membershipId: { $in: [...new Set(membershipIds)] },
+          localDate: { $gte: window.from, $lte: window.to },
+        },
+      },
+      { $unwind: '$entries' },
+      {
+        $group: {
+          _id: { membershipId: '$membershipId', code: '$entries.activityTypeCode' },
+          count: { $sum: '$entries.count' },
+        },
+      },
+    ]);
+    for (const row of rows) {
+      const { membershipId, code } = row._id as { membershipId: string; code: string };
+      const counts = out.get(membershipId) ?? new Map<string, number>();
+      counts.set(code, row.count as number);
+      out.set(membershipId, counts);
+    }
+    return out;
+  }
+
+  /**
    * **The sections a rung is shown**, in the office's order, each with every type it holds — archived ones
    * included, so a reader can keep what was logged against them (P10-T5).
    *

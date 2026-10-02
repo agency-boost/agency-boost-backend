@@ -33,6 +33,7 @@ import {
   NOTIFICATION_ADAPTERS, NotificationService, TemplateRenderer,
 } from '@/modules/notifications/notification.service';
 import { EmailTemplateRenderer } from '@/modules/notifications/email-renderer';
+import { NotificationRepository } from '@/modules/notifications/notification.repository';
 import { User, UserDocument, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanyDocument, CompanySchema } from '@/modules/tenants/company.schema';
 import { DEFAULT_ORG_LADDER } from '@/domain/constants';
@@ -263,7 +264,7 @@ describe('auth and admin over HTTP', () => {
         CampaignRepository,
         CampaignService,
         { provide: StoragePort, useClass: StubStorage },
-        AuditService, AuditReadService, NotificationService, PasswordService, RateLimiter,
+        AuditService, AuditReadService, NotificationRepository, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService, OrgLevelService,
         RosterImportService,
         MembershipRepository, GroupRepository, JoinRequestRepository,

@@ -73,7 +73,7 @@ export function describeNotification(
         detail: 'Open Goal settings to see it — you can change it, it is your plan.',
       };
     case NotificationTemplate.COACHING_SESSION_FINALIZED:
-      return { title: 'A coaching session was finalised', detail: 'What was agreed is now on the record.' };
+      return { title: 'A coaching session was finalized', detail: 'What was agreed is now on the record.' };
     case NotificationTemplate.IMPERSONATION_STARTED:
       return payload.isSubject === true
         ? {
@@ -100,6 +100,28 @@ export function describeNotification(
       // reached — so this is genuinely for a template nobody has written copy for yet.
       return { title: 'Something happened', detail: null };
   }
+}
+
+/** A session id as the finalize notice carries one: a MongoDB ObjectId, 24 hex characters. */
+const SESSION_ID = /^[0-9a-f]{24}$/i;
+
+/**
+ * **Where a notification opens**, composed on the server beside its words, for the same reason they are
+ * (ADR-0010): what a row does is product behaviour, not something a client improvises.
+ *
+ * **One template has an address** (ADR-0078, P11-T10 AC-8): `COACHING_SESSION_FINALIZED` opens the
+ * session it announces, at `/coaching/me?session={sessionId}` — the coachee's own read-only page, which
+ * opens on the session it names. Its payload is `{ sessionId }` and nothing a leader typed, so the address
+ * carries nothing else either. A payload without a well-formed id opens `/coaching/me` on its latest
+ * session rather than on an address that would fail. **Every other item is `null`**: no other inbox item
+ * changes.
+ */
+export function inboxAddress(templateId: string, payload: Record<string, unknown>): string | null {
+  if (templateId !== NotificationTemplate.COACHING_SESSION_FINALIZED) return null;
+  const sessionId = payload.sessionId;
+  return typeof sessionId === 'string' && SESSION_ID.test(sessionId)
+    ? `/coaching/me?session=${sessionId}`
+    : '/coaching/me';
 }
 
 export type { NotificationTemplateId };

@@ -1,4 +1,5 @@
 import { FixedClock } from '@/common/clock/clock.port';
+import { NotificationRepository } from './notification.repository';
 import { NotificationService, TemplateRenderer } from './notification.service';
 import {
   NotificationChannel, NotificationChannelAdapter, NotificationTemplate,
@@ -31,6 +32,7 @@ function makeService(opts: {
   const preferences = { findOne: () => ({ exec: async () => opts.prefs ?? null }) };
   const service = new NotificationService(
     notifications as never,
+    new NotificationRepository(notifications as never),
     preferences as never,
     new StubRenderer(),
     new FixedClock(new Date('2026-09-04T00:00:00Z')),

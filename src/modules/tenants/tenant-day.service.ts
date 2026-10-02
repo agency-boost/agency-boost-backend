@@ -5,7 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { localDayOf, type LocalDate } from '@/common/time/local-day';
 import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
-import { Kpm } from './kpm.schema';
+import { DEFAULT_KPM_SETTINGS, Kpm, type KpmSettings } from './kpm.schema';
 
 /**
  * What day it is **in the office**, for services that need only that.
@@ -24,6 +24,10 @@ import { Kpm } from './kpm.schema';
  * methods needs both; routing it through here would cost it a second round trip per request to
  * remove a duplication that is two lines. If a third reader wants the settings too, that is the
  * moment to make this return them.
+ *
+ * *2026-10-02 (P11-T6):* the coaching roster is that third reader — its *overdue* is the office's
+ * `coachingOverdueDays` and its *On track* the office's `onTrackPaceThreshold` — so `office()` returns
+ * the day and the settings from one read. `ActivityService.office()` keeps its own, for the reason above.
  */
 /** What day it is where the work happens, and the zone that decided it. */
 export interface OfficeDay {
@@ -31,6 +35,14 @@ export interface OfficeDay {
   /** `YYYY-MM` — the office's calendar month, which is the first seven characters of its day. */
   readonly month: string;
   readonly timezone: string;
+}
+
+/** The office's day, its knobs, and the company whose ladder names its rungs. */
+export interface Office extends OfficeDay {
+  /** Every knob, each falling back to the platform default where the office's row holds none. */
+  readonly settings: KpmSettings;
+  /** `null` only for an office that is not there. */
+  readonly companyId: string | null;
 }
 
 @Injectable()
@@ -69,5 +81,29 @@ export class TenantDay {
     // The month is the day's first seven characters rather than a second computation: two ways to
     // answer *which month is it in Jakarta* is one way too many, and they drift at the boundary.
     return { today, month: today.slice(0, 7), timezone };
+  }
+
+  /**
+   * The office's day **and its settings**, from one read (P11-T6).
+   *
+   * Each knob falls back to the platform default, `DEFAULT_KPM_SETTINGS`, where the office's row holds
+   * none — an office provisioned before the knob existed — exactly as `ActivityService.office()` falls
+   * back, from the same constants (invariant §7). Degrades like `for` rather than throwing: the caller
+   * has resolved the office from the caller's membership, so a missing row is a row that predates a
+   * column, not a tenant that is gone.
+   */
+  async office(ctx: RequestContext): Promise<Office> {
+    const row = ctx.kpmId
+      ? await this.kpms.findById(ctx.kpmId).select('timezone settings companyId').lean().exec()
+      : null;
+    const kpm = row as { timezone?: string; settings?: Partial<Record<keyof KpmSettings, number>>; companyId?: string } | null;
+    const timezone = kpm?.timezone ?? DEFAULT_TENANT_TIMEZONE;
+    const today = localDayOf(this.clock.now(), timezone);
+    const stored = kpm?.settings ?? {};
+    const settings = Object.fromEntries(
+      (Object.keys(DEFAULT_KPM_SETTINGS) as (keyof KpmSettings)[])
+        .map((key) => [key, stored[key] ?? DEFAULT_KPM_SETTINGS[key]]),
+    ) as unknown as KpmSettings;
+    return { today, month: today.slice(0, 7), timezone, settings, companyId: kpm?.companyId ?? null };
   }
 }

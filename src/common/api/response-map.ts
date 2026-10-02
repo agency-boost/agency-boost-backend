@@ -59,8 +59,16 @@ export interface ResponseShape {
  * their interfaces, so the *shape* cannot drift either. This table only says which one.
  */
 import {
-  ActivityComplianceDto, ActivityDashboardDto, ActivityDayDto, ActivityRatiosDto, ActivitySummaryDto,
+  ActivityDashboardDto, ActivityDayDto, ActivityRatiosDto, ActivitySummaryDto,
 } from '@/modules/activity/activity.response.dto';
+import { CoacheeDto, CoachingRosterDto } from '@/modules/coaching/coaching.response.dto';
+import {
+  CoachingSessionDto, SessionDraftSavedDto, SessionHistoryDto,
+} from '@/modules/coaching/coaching-session.response.dto';
+import {
+  CoachingProfileDto, CoachingProfileSavedDto, LeaderNoteSavedDto, LeaderNotesDto,
+} from '@/modules/coaching/coaching-profile.response.dto';
+import { MySessionsDto, SessionPrintDto } from '@/modules/coaching/coaching-record.response.dto';
 
 export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // P6: what an agent did, day by day.
@@ -71,7 +79,24 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   ActivityController_dashboard: { type: ActivityDashboardDto },
   ActivityController_ratios: { type: ActivityRatiosDto },
   SummaryController_read: { type: SummaryDto },
-  ActivityController_compliance: { type: ActivityComplianceDto },
+  // P11-T6: the coaching roster. P11-T7: the person a coaching page opens on.
+  CoachingController_coachees: { type: CoachingRosterDto },
+  CoachingController_coachee: { type: CoacheeDto },
+  // P11-T5: the session lifecycle.
+  CoachingController_history: { type: SessionHistoryDto },
+  CoachingController_start: { type: CoachingSessionDto },
+  CoachingController_read: { type: CoachingSessionDto },
+  CoachingController_save: { type: SessionDraftSavedDto },
+  CoachingController_finalize: { type: CoachingSessionDto },
+  CoachingController_reopen: { type: CoachingSessionDto },
+  // P11-T9: the Leader Notes tab — the capability profile and the leader notes.
+  CoachingProfileController_profile: { type: CoachingProfileDto },
+  CoachingProfileController_saveProfile: { type: CoachingProfileSavedDto },
+  CoachingProfileController_leaderNotes: { type: LeaderNotesDto },
+  CoachingProfileController_saveLeaderNote: { type: LeaderNoteSavedDto },
+  // P11-T10: a finalized session's print, and the reader's own coaching.
+  CoachingRecordController_mine: { type: MySessionsDto },
+  CoachingRecordController_print: { type: SessionPrintDto },
   AuthController_resendVerification: { type: StatusAckDto },
   AuthController_sessions: { type: SessionDto, isArray: true },
   HealthController_live: { type: StatusAckDto },

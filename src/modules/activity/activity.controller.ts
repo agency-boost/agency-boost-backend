@@ -2,13 +2,14 @@ import { Body, Controller, Get, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
+import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import {
-  ActivityComplianceQueryDto, ActivityDashboardQueryDto, ActivityRatiosQueryDto, ActivitySummaryQueryDto,
+  ActivityDashboardQueryDto, ActivityRatiosQueryDto, ActivitySummaryQueryDto,
   CorrectActivityDayDto,
   ReadActivityDayQueryDto, SaveActivityDayDto,
 } from './activity.dto';
 import {
-  ActivityComplianceDto, ActivityDashboardDto, ActivityDayDto, ActivityRatiosDto, ActivitySummaryDto,
+  ActivityDashboardDto, ActivityDayDto, ActivityRatiosDto, ActivitySummaryDto,
 } from './activity.response.dto';
 import { ActivityService } from './activity.service';
 
@@ -19,6 +20,11 @@ import { ActivityService } from './activity.service';
  * depends on it; nobody writes anybody else's, and the write routes carry no subject to pass
  * (`roles-and-permissions.md` §3.5).
  */
+/** The refusal a subject outside the caller's reach gets, worded as every 404 in the document is. */
+const NOT_YOURS = (field: string) =>
+  `\`NOT_FOUND\` — \`${field}\` names nobody you may read, **or** somebody in another office. The two are `
+  + 'deliberately indistinguishable: a `403` here would confirm the id exists.';
+
 @ApiTags('activity')
 @ApiBearerAuth()
 @Controller('activity')
@@ -79,11 +85,17 @@ export class ActivityController {
     summary: 'Totals per activity code over a period',
     description:
       'Periods are the **named** ones (ADR-0022), resolved in the office’s timezone: a rolling '
-      + 'window is never labelled *this month*. `from`/`to` override `period` for a custom range. '
+      + 'window is never labelled *this month*. `from`/`to` override `period` for a custom range.\n\n'
+      + '`targets` are the goal’s three cascade codes against `SUB_PERIOD_ACTIVITY_TARGET`: this month’s '
+      + 'activity targets, as the Personal Summary sets them, **pro-rated** to the last 7 days — for '
+      + '`ROLLING_7D` only, and `null` without an APE target. `sections` are the subject’s summary tiles '
+      + 'over the window, grouped as the Summary’s are, on the subject’s rung.\n\n'
       + '**Another member’s totals are audited**: the read writes `activity_log.read_raw` with the '
-      + 'subject, the range and the surface (§3.5).',
+      + 'subject, the range and the surface (§3.5). Outside your scope it is a 404, never a 403.',
   })
   @ApiResponse({ status: 200, type: ActivitySummaryDto })
+  // The subject is a query field, so `openapi.ts` derives no 404 for it: written here, as the Summary's is.
+  @ApiResponse({ status: 404, description: NOT_YOURS('membershipId'), type: ApiErrorEnvelope })
   async summary(@Ctx() ctx: RequestContext, @Query() query: ActivitySummaryQueryDto) {
     return this.activity.summary(ctx, query);
   }
@@ -111,29 +123,25 @@ export class ActivityController {
     description:
       'Every active ratio of the office **that applies to the subject’s rung** (ADR-0020), computed over '
       + '`ROLLING_30D` — fixed, ending today in the office’s timezone — with the office’s own formula and '
-      + 'benchmark. A zero denominator is `null` and `neutral`: *not enough data*, never 0.\n\n'
-      + '**Your own, only** — there is no `membershipId` parameter. A leader’s view of a downline’s '
-      + 'ratios is coaching’s copy.',
+      + 'benchmark. A ratio that does not apply is absent, never shown as failed. A zero denominator is '
+      + '`null` and `neutral`: *not enough data*, never 0.\n\n'
+      + '**Yours, or a coachee’s**: `for` names whose, on the subject’s own rung. Outside your scope it is '
+      + 'a 404, never a 403. **Another member’s ratios are audited**: the read writes '
+      + '`activity_log.read_raw` with the subject, the 30 days and the surface `ratios` (§3.5). Your own '
+      + 'writes nothing.',
   })
   @ApiResponse({ status: 200, type: ActivityRatiosDto })
-  // The query is validated, and empty: anything sent is refused by name (`ActivityRatiosQueryDto`).
-  async ratios(@Ctx() ctx: RequestContext, @Query() _query: ActivityRatiosQueryDto) {
-    return this.activity.ratios(ctx);
+  @ApiResponse({ status: 404, description: NOT_YOURS('for'), type: ApiErrorEnvelope })
+  // `for` and nothing else: any other field is refused by name (`ActivityRatiosQueryDto`).
+  async ratios(@Ctx() ctx: RequestContext, @Query() query: ActivityRatiosQueryDto) {
+    return this.activity.ratios(ctx, query.for);
   }
 
-  @Get('compliance')
-  @RequirePermission('activity_log:read_raw')
-  @ApiOperation({
-    summary: 'Whether this member is reporting',
-    description:
-      '`ACTIVITY_COMPLIANCE_7D` and `ACTIVITY_COMPLIANCE_MONTH`. **Existence, not a total**: an '
-      + 'all-zero entry is a statement that nothing happened and counts as reporting, where no '
-      + 'entry is silence and does not (ADR-0042). There is no partial state — Logged or Missed. '
-      + '**Another member’s is audited**: the read writes `activity_log.read_raw`, with no start to '
-      + 'its range, because `lastLoggedOn` discloses the latest day logged whenever it was (§3.5).',
-  })
-  @ApiResponse({ status: 200, type: ActivityComplianceDto })
-  async compliance(@Ctx() ctx: RequestContext, @Query() query: ActivityComplianceQueryDto) {
-    return this.activity.compliance(ctx, query);
-  }
+  /*
+   * `GET /activity/compliance` was retired on 2026-10-02 (P11-T6 AC-10; `functional/coaching.md`, the
+   * Data contract), as P10.1-T4 retired `GET /leads/summary`. Its only caller, Log Activity's *Logged /
+   * Missed* card, went in P10.1-T5, and the coaching roster it was kept for draws no compliance: its four
+   * columns are the prototype's, and P11-T6 AC-6 forbids a row-level activity figure. The computation
+   * stays, `ActivityService.compliance`, because `GET /summary` reads it.
+   */
 }

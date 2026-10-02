@@ -119,6 +119,24 @@ export const SUMMARY = {
 } as const;
 
 /**
+ * A monthly activity target pro-rated to the last 7 days (P11-T4): `SUB_PERIOD_ACTIVITY_TARGET`, the
+ * coaching session's Activity card (`Overall.html:7023`, `:7055-7061`). Both **Fixed**
+ * (`metrics-and-definitions.md` §B.3, §B.4).
+ */
+export const SUB_PERIOD = {
+  /**
+   * `SUB_PERIOD_TARGET_SCALING`: the prototype's `PERIOD_MULT['7'] = 7 / 30.44`. Derived, not restated —
+   * the 7-day window over `DAYS_PER_MONTH_AVG` — so neither number has a second home (invariant §7).
+   */
+  TARGET_SCALING: PERIOD.ROLLING_7D_DAYS / TIME.AVG_DAYS_PER_MONTH,
+  /**
+   * `SUB_PERIOD_CLOSING_TARGET_FLOOR`: a week of a month that needs any closing at all asks for at least
+   * one (`Overall.html:7061`). A month that needs none asks for none.
+   */
+  CLOSING_TARGET_FLOOR: 1,
+} as const;
+
+/**
  * The Personal Summary's insight cards (P10-T7, ADR-0060): named rules over registered metrics, computed
  * on read. Every threshold a rule reads is here, once (invariant §7).
  */
@@ -144,8 +162,19 @@ export const ACTIVATION = {
 
 /** Leader and owner surfaces. Overall.html:7040, KPM_Owner.html:1006-1048. */
 export const PERFORMANCE = {
-  /** At or above this share of expected goal pace reads as On track. Overall.html:7043. */
+  /**
+   * At or above this share of expected goal pace reads as On track. Overall.html:7043. The document's
+   * `PACE_ON_TRACK_RATIO`: one constant under two names, and the office's `onTrackPaceThreshold`
+   * falls back to it (ADR-0080).
+   */
   ON_TRACK_PACE_THRESHOLD: 0.9,
+  /**
+   * `PACING_TO_MAA`'s gate (P11-T6): a month whose logged activity projects at least this many policy
+   * submissions is pacing to MAA. Overall.html:7038, :3932. **Fixed**, not an office setting: it encodes
+   * *at least one policy*, which is what active means, and a setting would let an office redefine it
+   * (`metrics-and-definitions.md` §B.4).
+   */
+  MAA_PROJECTED_SUBMISSIONS_MIN: 1,
   /** A 1:1 older than this is rendered overdue. Overall.html:7359. */
   COACHING_OVERDUE_DAYS: 7,
   /** Activity-logging compliance window. KPM_Owner.html:964. */
@@ -154,6 +183,24 @@ export const PERFORMANCE = {
   RATIO_WINDOW_DAYS: PERIOD.ROLLING_30D_DAYS,
   /** Attainment percentages are displayed capped at this. Overall.html:6303. */
   ATTAINMENT_PCT_CAP: 999,
+} as const;
+
+/** Coaching sessions (P11-T5; `functional/coaching.md`, *The session*). */
+export const COACHING = {
+  /**
+   * `COACHING_REOPEN_WINDOW_DAYS` (§B.8, ADR-0079): a finalized session may be reopened, with a reason,
+   * until this many days after its `date` — the office's day of its **first** finalize — inclusive.
+   * Finalizing a correction does not restart it. **Fixed**, not an office setting: coverage, promotion
+   * cases and MOC evidence rely on these records, and the window binds the coach, the Owner and the
+   * Admin alike.
+   */
+  REOPEN_WINDOW_DAYS: 7,
+  /**
+   * `COACHING_COVERAGE_WINDOWS` (§B.4, P11-T10 AC-5): the two windows `COACHING_COVERAGE` is read over,
+   * the primary first — `COACHED_7D`'s and `COACHED_30D`'s, the named periods' own lengths
+   * (`KPM_Owner.html:1014`, `:1018`). **Fixed**: the window is part of the label, always.
+   */
+  COVERAGE_WINDOWS: [PERIOD.ROLLING_7D_DAYS, PERIOD.ROLLING_30D_DAYS] as readonly number[],
 } as const;
 
 /**

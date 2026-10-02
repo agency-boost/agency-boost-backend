@@ -1,4 +1,5 @@
 import { PERFORMANCE, SUMMARY, TIME } from '@/domain/constants';
+import { cascadeCounts, type CascadeCounts } from '@/modules/goals/goal-cascade';
 
 /**
  * The Personal Summary's arithmetic (P10-T4). Pure: figures in, figures out, so every rule is a unit
@@ -90,6 +91,76 @@ export function ytdBeforeThisMonth(input: {
 export function monthlyApeTarget(annualTargetMinor: number, ytdThroughLastMonthMinor: number, month: number): number {
   const monthsLeft = TIME.MONTHS_PER_YEAR - month + 1;
   return Math.round(Math.max(0, annualTargetMinor - ytdThroughLastMonthMinor) / monthsLeft);
+}
+
+/** What the plan for this month reads of a member's goal: `GoalService.planOf`'s answer. */
+export interface PlannedGoal {
+  /** `null` for the defaults a first-time reader sees: an offer, not a goal. */
+  savedAt: string | null;
+  /** The cascade's resolved plan, or `null` when the goal's stored assumptions cannot make one. */
+  projected: { annualApeTargetMinor: number } | null;
+  /** The year to date the goal reads, and whose figure it is (P9-T6). */
+  achieved: { minor: number; month: string | null; provenance: string };
+  caseSizeMinor: number;
+  leadsToApptPct: number;
+  closingRatePct: number;
+}
+
+/** The Summary's targets for the month and the year, before anything is measured against them. */
+export interface SummaryPlan {
+  /** The year's APE target: `null` without a saved goal, or with a plan that targets nothing. */
+  annualTargetMinor: number | null;
+  /** `MONTHLY_APE_TARGET`: `null` without an annual target; 0 when the year was made before the month. */
+  monthlyTargetMinor: number | null;
+  /** `SUMMARY_ACTIVITY_TARGET` for the month: the cascade on `monthlyTargetMinor` at the goal's own rates. */
+  monthlyCounts: CascadeCounts | null;
+  /** `SUMMARY_ACTIVITY_TARGET` for the year: the cascade on the annual target, rounded once (ADR-0056). */
+  yearlyCounts: CascadeCounts | null;
+}
+
+/**
+ * **The month's and the year's targets, as the Personal Summary sets them** (ADR-0056, P10-T4, P10-T5) —
+ * the one place they are computed, so every reader of *this month's activity targets* reads one number.
+ * `GET /summary` reads it, and so does `GET /activity/summary`, whose 7-day targets are this month's
+ * pro-rated (`SUB_PERIOD_ACTIVITY_TARGET`, P11-T4): the session's Activity card and the coachee's Summary
+ * tab cannot disagree about the month.
+ *
+ * - **No target is no target**: an unsaved default, a saved goal of zero, or one whose stored assumptions
+ *   cannot produce a plan measures nothing.
+ * - **This month's target never moves with this month's own figure**: it is taken from the year to date
+ *   before the month (`ytdBeforeThisMonth`, `monthlyApeTarget`).
+ * - **The counts need a case size** to divide by; without one there is a target and no plan for it.
+ */
+export function summaryPlan(input: {
+  goal: PlannedGoal;
+  /** The office's calendar month, `YYYY-MM`. */
+  month: string;
+  /** The office's year to date through last month; `null` when nothing is held, and in January. */
+  throughLastMonthMinor: number | null;
+  /** This month's own APE; `null` until the month's file arrives. */
+  thisMonthMinor: number | null;
+}): SummaryPlan {
+  const { goal, month } = input;
+  const monthNumber = Number(month.slice(5, 7));
+  const planned = goal.projected?.annualApeTargetMinor ?? 0;
+  const annual = goal.savedAt !== null && planned > 0 ? planned : null;
+
+  const before = ytdBeforeThisMonth({
+    month: monthNumber,
+    throughLastMonthMinor: input.throughLastMonthMinor,
+    // This month's own year to date is what the goal already reads when it is the latest the office holds.
+    thisMonth: input.thisMonthMinor !== null && goal.achieved.month === month
+      ? { ytdMinor: goal.achieved.minor, monthlyMinor: input.thisMonthMinor } : null,
+    ownFigureMinor: goal.achieved.provenance === 'self_reported' ? goal.achieved.minor : null,
+  });
+  const monthly = annual !== null ? monthlyApeTarget(annual, before, monthNumber) : null;
+  const rates = goal.caseSizeMinor > 0 ? goal : null;
+  return {
+    annualTargetMinor: annual,
+    monthlyTargetMinor: monthly,
+    monthlyCounts: monthly !== null && rates ? cascadeCounts(monthly, rates) : null,
+    yearlyCounts: annual !== null && rates ? cascadeCounts(annual, rates) : null,
+  };
 }
 
 /** The pace sentence's figures (ADR-0057). */

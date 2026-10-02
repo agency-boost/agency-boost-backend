@@ -562,21 +562,17 @@ export class ApprovalsService {
 
     // The joined edge was opened when they registered; this closes it and opens the one
     // that names their leader. Nothing is overwritten.
-    await this.history.updateMany(
-      ctx,
-      { membershipId: String(member._id), eventType: 'joined', validTo: null },
-      { $set: { validTo: this.clock.now() } },
-    );
-    await this.history.create(ctx, {
+    //
+    // **Every open edge, not only the joined one** (P11-T3). An orphan picked up from the
+    // pool is open on the re-parent that orphaned them, and closing `joined` rows alone left
+    // that one open beside the new edge.
+    await this.history.openEdge(ctx, this.clock.now(), {
       membershipId: String(member._id),
       eventType: wasPending ? 'joined' : 're_parented',
       toRole: member.role,
+      toOrgLevelId: member.orgLevelId,
       fromLeaderId: member.leaderId,
       toLeaderId: leaderId,
-      validFrom: this.clock.now(),
-      validTo: null,
-      actorMembershipId: ctx.membershipId,
-      actorUserId: ctx.auditActors.actorUserId,
     });
 
     await this.audit.record(ctx, {

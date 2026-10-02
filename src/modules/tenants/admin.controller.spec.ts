@@ -36,19 +36,19 @@ describe('AdminController', () => {
   it('reads the platform log for a Super Admin who names no tenant', async () => {
     const { controller, audit } = make();
     await controller.readAudit(RequestContext.platform('root'), {});
-    expect(audit.findForTenant).toHaveBeenCalledWith(null, 100);
+    expect(audit.findForTenant).toHaveBeenCalledWith(null, 100, 'root');
   });
 
   it('narrows to the named tenant for a Super Admin', async () => {
     const { controller, audit } = make();
     await controller.readAudit(RequestContext.platform('root'), { kpmId: 'kpm-b' });
-    expect(audit.findForTenant).toHaveBeenCalledWith('kpm-b', 100);
+    expect(audit.findForTenant).toHaveBeenCalledWith('kpm-b', 100, 'root');
   });
 
   it('pins a tenant admin to their own office whatever they pass', async () => {
     const { controller, audit } = make();
     await controller.readAudit(owner, { kpmId: 'kpm-b' });
-    expect(audit.findForTenant).toHaveBeenCalledWith('kpm-a', 100);
+    expect(audit.findForTenant).toHaveBeenCalledWith('kpm-a', 100, 'u-owner');
   });
 
   // Creating a company used to happen *here*, against an injected Mongoose model — the

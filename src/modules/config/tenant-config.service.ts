@@ -77,10 +77,16 @@ export interface TenantConfigView {
    */
   eventTypes: SnapshotEventTypeView[];
   /**
-   * The capability catalog a leader assesses against (P5-T8), active rows only.
+   * The capability catalog a leader assesses against (P5-T8): **every row, archived ones
+   * included, each with its `status`** — `CapabilityService.own` whole, unfiltered.
    *
    * Office-owned and identical for every member, so it is snapshot material by ADR-0039's own
    * test. `null` only for an office provisioned before P5-T8.
+   *
+   * *Corrected 2026-10-02 (P11-T9 AC-3): this read "active rows only", which the code never did
+   * — unlike `eventTypes` above, nothing filters it. A screen ticking against it offers an
+   * archived item to no new tick by its `status`; the Leader Notes tab reads the catalog with
+   * its profile instead (`GET /coaching/coachees/:membershipId/profile`).*
    */
   capability: CapabilityCatalogView | null;
   /**
@@ -324,6 +330,7 @@ export class TenantConfigService {
         this.training.offered(ctx),
         this.activation.read(ctx),
         this.events.listTypes(ctx),
+        // Whole: archived rows included, each with its status (P11-T9 AC-3).
         this.capability.own(ctx),
       ]);
 
@@ -375,6 +382,7 @@ export class TenantConfigService {
           displayOrder: type.displayOrder,
           version: type.version,
         })),
+      // Unfiltered, unlike `eventTypes`: the catalog's archived rows travel with their status.
       capability,
       version: versions.length ? Math.max(...versions) : 0,
     };

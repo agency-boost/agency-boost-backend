@@ -36,6 +36,8 @@ const TENANT_SCOPED_MODELS = [
   'Event',
   'Campaign',
   'CapabilityCatalog',
+  // P11-T5: listed from the day the collection exists, rather than a phase later.
+  'CoachingSession',
 ];
 
 /**
@@ -76,6 +78,7 @@ const ALLOWED = new Map<string, string>([
   ['events/event.repository.ts', 'the repositories for those models'],
   ['campaigns/campaign.repository.ts', 'the repository for that model'],
   ['capability/capability.repository.ts', 'the repository for that model'],
+  ['coaching/coaching-session.repository.ts', 'the repository for that model'],
   [
     'config/provisioning.service.ts',
     'writes into an office being created, before any context is scoped to it',

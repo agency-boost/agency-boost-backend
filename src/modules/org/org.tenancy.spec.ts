@@ -625,6 +625,8 @@ describe('organisation', () => {
       // Nothing is overwritten: the joined edge is closed, not changed.
       expect(rows.map((r) => r.get('eventType'))).toEqual(['joined', 're_parented']);
       expect(rows[0].get('toLeaderId')).toBe(first);
+      // Closed in the instant the new one opened. Unasserted until P11-T3, which found it open.
+      expect(rows[0].get('validTo')).toEqual(rows[1].get('validFrom'));
       expect(rows[1].get('fromLeaderId')).toBe(first);
       expect(rows[1].get('toLeaderId')).toBe(second);
       expect(rows[1].get('validTo')).toBeNull();

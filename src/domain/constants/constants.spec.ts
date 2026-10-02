@@ -1,5 +1,6 @@
 import {
   ACTIVATION,
+  COACHING,
   CASCADE_ACTIVITY_CODES,
   ASSET_LIMITS,
   PRODUCTION,
@@ -10,6 +11,7 @@ import {
   PERIOD,
   RATIO_BENCHMARKS,
   INSIGHTS,
+  SUB_PERIOD,
   SUMMARY,
   TIME,
   DEFAULT_CURRENCY,
@@ -90,6 +92,16 @@ describe('domain constants', () => {
     it('keeps the two month constants mutually consistent to within a day', () => {
       expect(TIME.AVG_DAYS_PER_MONTH / 7).toBeCloseTo(TIME.WEEKS_PER_MONTH, 1);
     });
+    it('P11-T4 AC-4 pins SUB_PERIOD_TARGET_SCALING at 7 / 30.44 (§B.3, Overall.html:7023)', () => {
+      // The document's value, written out: the prototype's `PERIOD_MULT['7']`.
+      expect(SUB_PERIOD.TARGET_SCALING).toBe(7 / 30.44);
+      expect(SUB_PERIOD.TARGET_SCALING).toBeCloseTo(0.22996, 5);
+      // Derived from the 7-day window and the average month, never restated beside them.
+      expect(SUB_PERIOD.TARGET_SCALING).toBe(PERIOD.ROLLING_7D_DAYS / TIME.AVG_DAYS_PER_MONTH);
+    });
+    it('P11-T4 AC-4 pins SUB_PERIOD_CLOSING_TARGET_FLOOR at one policy (§B.4, Overall.html:7061)', () => {
+      expect(SUB_PERIOD.CLOSING_TARGET_FLOOR).toBe(1);
+    });
   });
 
   describe('activity and activation', () => {
@@ -127,8 +139,19 @@ describe('domain constants', () => {
     it('pins the on-track pace threshold at 90%', () => {
       expect(PERFORMANCE.ON_TRACK_PACE_THRESHOLD).toBe(0.9);
     });
+    it('P11-T6 AC-4 pins the MAA gate at one projected policy submission (§B.4, Fixed)', () => {
+      expect(PERFORMANCE.MAA_PROJECTED_SUBMISSIONS_MIN).toBe(1);
+    });
     it('pins the coaching overdue threshold at 7 days', () => {
       expect(PERFORMANCE.COACHING_OVERDUE_DAYS).toBe(7);
+    });
+    it('P11-T5 AC-6 pins COACHING_REOPEN_WINDOW_DAYS at 7 days after the first finalize (§B.8, ADR-0079)', () => {
+      expect(COACHING.REOPEN_WINDOW_DAYS).toBe(7);
+    });
+    it('P11-T10 AC-5 pins COACHING_COVERAGE_WINDOWS at [7, 30] days, the primary first (§B.4, Fixed)', () => {
+      expect(COACHING.COVERAGE_WINDOWS).toEqual([7, 30]);
+      // `COACHED_7D`'s and `COACHED_30D`'s windows: the named periods, never a second copy of them.
+      expect(COACHING.COVERAGE_WINDOWS).toEqual([PERIOD.ROLLING_7D_DAYS, PERIOD.ROLLING_30D_DAYS]);
     });
     it('pins the ratio window at 30 days', () => {
       expect(PERFORMANCE.RATIO_WINDOW_DAYS).toBe(30);

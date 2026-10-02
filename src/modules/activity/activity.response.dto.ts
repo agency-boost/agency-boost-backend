@@ -1,4 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { SectionChipDto } from '@/modules/summary/summary.response.dto';
+import type { ActivityWindowTargetView } from './activity.service';
 
 /** Declared for OpenAPI. The wire shapes live on `ActivityService`'s view types. */
 
@@ -47,6 +49,28 @@ export class ActivitySummaryTotalDto {
   @ApiProperty() count!: number;
 }
 
+export class ActivityWindowTargetDto implements ActivityWindowTargetView {
+  @ApiProperty({ enum: ['leads', 'appointments', 'closings'] }) key!: 'leads' | 'appointments' | 'closings';
+
+  @ApiProperty({ example: 'LEADS_CONTACTED', description: 'The goal’s own code for this count, never an item number.' })
+  code!: string;
+
+  @ApiProperty({ example: 14, description: 'Every entry against the code in the window, archived types included.' })
+  logged!: number;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 16,
+    description:
+      '`SUB_PERIOD_ACTIVITY_TARGET`: this month’s activity target pro-rated to the last 7 days (7 ÷ 30.44, '
+      + 'rounded; closings at least 1 when the month asks for any), and labelled *pro-rated* wherever it is '
+      + 'shown. `null` without an APE target, and for any period but `ROLLING_7D` or a custom range. 0 is a '
+      + 'month that needs nothing more.',
+  })
+  target!: number | null;
+}
+
 export class ActivitySummaryDto {
   @ApiProperty({ example: '2026-03-05' }) from!: string;
   @ApiProperty({ example: '2026-03-11' }) to!: string;
@@ -58,6 +82,21 @@ export class ActivitySummaryDto {
   daysLogged!: number;
 
   @ApiProperty({ example: 31 }) totalCount!: number;
+
+  @ApiProperty({
+    type: [ActivityWindowTargetDto],
+    description: 'The goal’s three cascade codes — leads contacted, appointments, closings, in that order — '
+      + 'logged in the window against their pro-rated targets.',
+  })
+  targets!: ActivityWindowTargetDto[];
+
+  @ApiProperty({
+    type: [SectionChipDto],
+    description: 'The subject’s summary tiles over the window, grouped as `GET /summary`’s '
+      + '`activity.sections` are (ADR-0064): the tiles holding none of the three cascade codes, on the '
+      + 'subject’s rung. The drill’s category breakdown.',
+  })
+  sections!: SectionChipDto[];
 }
 
 const STANDINGS = ['shown', 'archived', 'not_shown'];
@@ -202,24 +241,4 @@ export class ActivityRatiosDto {
     description: 'The office’s active ratios **that apply to the subject’s rung** (ADR-0020), in its order. One that does not apply is absent, never failed.',
   })
   ratios!: ActivityRatioDto[];
-}
-
-export class ActivityComplianceDto {
-  @ApiProperty() membershipId!: string;
-
-  @ApiProperty({ description: '`ACTIVITY_COMPLIANCE_7D`. Logged or Missed, with no partial state.' })
-  compliant7d!: boolean;
-
-  @ApiProperty({ description: '`ACTIVITY_COMPLIANCE_MONTH`, over the calendar month.' })
-  compliantMonth!: boolean;
-
-  @ApiPropertyOptional({
-    nullable: true,
-    example: '2026-03-09',
-    description: 'Null when they have never logged — *Never logged*, not *0 days ago*.',
-  })
-  lastLoggedOn!: string | null;
-
-  @ApiProperty({ example: 7, description: 'The office’s own compliance window.' })
-  windowDays!: number;
 }

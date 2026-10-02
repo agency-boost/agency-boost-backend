@@ -6,9 +6,10 @@ import {
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
+import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { MemberNames } from '@/modules/org/member-names.service';
-import { MembershipRepository } from '@/modules/org/membership.repository';
-import { scopeFor, type Permission } from '@/modules/rbac/permissions';
+import { CoachResolver } from '@/modules/org/coach-resolver';
+import type { Permission } from '@/modules/rbac/permissions';
 import { LeadStatusRepository } from '@/modules/config/activity.repository';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
 import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
@@ -26,6 +27,8 @@ export const LEAD_PAGE_SIZE = 50;
 
 /** The screen's search, filter and sort, as the service reads them. */
 export interface LeadQuery {
+  /** One member's leads: the caller's own, or a coachee's (P11-T4 AC-3). */
+  owner?: string;
   search?: string;
   type?: 'sales' | 'recruitment' | 'unassigned';
   statusCode?: string;
@@ -95,6 +98,12 @@ export interface LeadView {
    * reason this is a name rather than a flag: *two columns, so no flag is needed*. An id that
    * resolves to nobody leaves `name` null and keeps the membership, because a blank reads as
    * *nothing happened* rather than as *this is all we know*.
+   *
+   * **Kept narrower than ADR-0063 §1's wording, on `GET /leads?owner=` too** (decided by P11-T4, under
+   * its phase-file note): a leader is not told that an agent changed their own lead last. The ✎ exists
+   * to tell the *owner* whose hand moved their record; a leader reading a coachee's card already sees
+   * every field as it stands, and widening the field would also change what `/leads` shows on every row
+   * the owner touched.
    */
   lastEditedBy: { membershipId: string; name: string | null } | null;
   remarks: string | null;
@@ -120,11 +129,15 @@ export interface LeadView {
 /**
  * The lead record (P7-T1).
  *
- * **Writes take no subject.** A lead is created for the person creating it, exactly as an activity
- * day is logged for the person logging it (§3.5's shape, applied to a different record). A leader
- * may write a **downline's** lead — ADR-0044, built in P7-T7 — but only by naming the lead, never
- * by naming a subject on a *create*. A check can be forgotten; a parameter that does not exist
- * cannot be passed.
+ * **Whose lead a write is.** Without `owner`, a create is the caller's own lead, as an activity day is
+ * logged for the person logging it. **With `owner`, `POST /leads?owner=` creates in a coachee's
+ * pipeline** (ADR-0076, P11-T4): a leader's *+ Add lead* in a coaching session. The owner is resolved by
+ * `CoachResolver.subject` on `lead:create` — `COACH(caller, owner)` and nothing wider — so a peer AAB's
+ * agent, another office's member, a member who has left and the caller naming themselves are each a 404,
+ * and nothing is written (`coachedOwner`). The lead is the owner's and the act is the leader's:
+ * `createdBy`, a commitment's `byMembershipId`, the `lead.created` entry and `lastEditedBy` name the leader
+ * (ADR-0044). A leader's write to an **existing** lead of a downline's — ADR-0044, built in P7-T7 —
+ * names the lead, and reaches it exactly when the leader reaches its owner (`reachable`).
  *
  * **No status is written here, and that is the line between this task and P7-T3.** Setting a lead's
  * first status is a *move* — `{ fromStatusCode: null, toStatusCode, at, byMembershipId }` — and
@@ -138,48 +151,35 @@ export class LeadService {
     private readonly audit: AuditService,
     private readonly clock: Clock,
     private readonly days: TenantDay,
-    private readonly memberships: MembershipRepository,
+    private readonly coach: CoachResolver,
     private readonly names: MemberNames,
     private readonly config: TenantConfigService,
+    // OD-107: a leader's list of their downline's leads leaves the §3.5 record, per owner shown.
+    private readonly subjectReads: SubjectReadAudit,
   ) {}
 
   /**
-   * Whose leads this caller may touch, for the permission the **route** declares (P7-T7).
+   * Whose leads this caller may touch, for the permission the **route** declares (P7-T7, P11-T3).
    *
-   * **Their own, always — plus whoever the grant reaches.** A lead belongs to a membership, so a
-   * leader reaches a lead exactly when they reach its owner. The grant is read from the matrix
-   * rather than from the caller's rung, because those two have already drifted once: `summary` was
-   * gated on one permission and resolved another, and the narrower of the pair would have gone on
-   * enforcing the wider one's scope (found at the Phase 6 exit review).
+   * **Their own, always — plus whoever the grant reaches**, which is `CoachResolver.reach`: the one
+   * answer to *whose data does this grant reach* that goals and activity read too. A lead belongs to
+   * a membership, so a leader reaches a lead exactly when they reach its owner — everybody they
+   * coach, an AAB's nested units included (ADR-0074), and nobody who has left their unit or the
+   * office (§6.1, §6.7). The grant is read from the matrix rather than from the caller's rung,
+   * because those two have already drifted once: `summary` was gated on one permission and resolved
+   * another, and the narrower of the pair would have gone on enforcing the wider one's scope (found
+   * at the Phase 6 exit review).
    *
    * `null` means *the whole office* and is reachable only by `lead:read_aggregate_counts`. No
    * row-reading permission grants `own-kpm` to anybody: the Owner and the Admin get counts, never
    * rows, because these are third-party personal data typed by an agent about somebody who never
-   * interacted with the platform, and minimisation applies inside the tenant too (§3.7).
+   * interacted with the platform, and minimisation applies inside the tenant too (§3.7). **No grant
+   * reaches nobody's leads**, rather than falling through to the caller's own.
    */
   private async ownersInScope(
     ctx: RequestContext, permission: Permission,
   ): Promise<string[] | null> {
-    const me = this.me(ctx);
-    const scope = scopeFor(ctx, permission);
-    if (scope === 'own-kpm' || scope === 'all') return null;
-    /*
-     * **No grant reaches nobody's leads**, rather than falling through to the caller's own.
-     *
-     * The guard has already refused anybody holding none of these, so this is the second lock on
-     * the same door — but the first version returned `[me]` here, which quietly *granted* on the
-     * strength of an absent permission. Fail-closed costs one line and cannot be wrong.
-     */
-    if (scope === null) return [];
-    if (scope !== 'own-unit' && scope !== 'own-downline') return [me];
-
-    // Indexed both ways: `{kpmId, leaderId, status}` and `{kpmId, ancestorIds, status}`.
-    const reports = await this.memberships.find(
-      ctx,
-      scope === 'own-unit' ? { leaderId: me } : { ancestorIds: me },
-      { select: '_id' },
-    );
-    return [me, ...reports.map((r) => String(r._id))];
+    return this.coach.reach(ctx, permission);
   }
 
   /**
@@ -193,13 +193,29 @@ export class LeadService {
    * spec only ever crossed offices.
    */
   private async reachable(
-    ctx: RequestContext, id: string, permission: Permission, pinned?: number,
+    ctx: RequestContext, id: string, permission: Permission, pinned?: number, writing = false,
   ): Promise<LeadDocument> {
     const lead = await this.leads.findById(ctx, id);
     if (!lead) throw new NotFoundException('Lead');
     const owners = await this.ownersInScope(ctx, permission);
     if (owners !== null && !owners.includes(lead.ownerMembershipId)) {
       throw new NotFoundException('Lead');
+    }
+    /*
+     * **A writer who is not the lead's owner must pin** (P11-T4 AC-3; `functional/coaching.md`, *The
+     * Leads card*). There is a second writer now — the leader in the coaching session, editing the
+     * coachee's lead while the coachee may be editing it on their phone — and a write that forgets the
+     * pin is a write that can silently discard the other's. The owner's own writes keep it optional, as
+     * P7-T7 built them. After the scope check, so it confirms nothing about a lead out of reach.
+     */
+    if (writing && pinned === undefined && lead.ownerMembershipId !== ctx.membershipId) {
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED,
+        'Send the version you read this lead at. A change to somebody else’s lead has to say which '
+        + 'version it was written against.',
+        HttpStatus.BAD_REQUEST,
+        { violations: ['version is required when the lead is not yours'] },
+      );
     }
     /*
      * **The version the writer read, checked before anything is written** (P7-T7 AC-3).
@@ -211,9 +227,8 @@ export class LeadService {
      * **After the scope check, deliberately.** A stale version on a lead the caller may not reach
      * would otherwise answer 409 where the answer is 404 — and 409 confirms the lead exists.
      *
-     * Optional, and honoured whenever it is sent. The screen always sends it; a second writer
-     * that forgets is unprotected, which is an argument for making it required once there is a
-     * second writer — the coaching session, in Phase 11.
+     * Optional for the owner, and honoured whenever it is sent; required of anybody else, above. The
+     * check here is the early answer, and `writeAt` repeats it atomically in the write itself.
      */
     if (pinned !== undefined && pinned !== lead.version) {
       throw new VersionConflictException(pinned, lead.version);
@@ -228,10 +243,52 @@ export class LeadService {
     return membershipId;
   }
 
-  async create(ctx: RequestContext, body: unknown): Promise<LeadView> {
+  /**
+   * **Write the lead only if it is still the version that was read** (P11-T4 AC-3): the version check
+   * and the write in one operation (`LeadRepository.updateAtVersion`).
+   *
+   * `reachable` compares the pin with the row it read; between that read and this write a second
+   * writer can land, and a write filtered on the id alone would overwrite them. Filtered on the version
+   * too, it finds nothing instead — and that is a conflict, `VERSION_CONFLICT`, or a 404 when the lead
+   * has gone. Every write here is computed from the row it read — a commitment pushed or pulled, a
+   * basis stamped — so an owner's unpinned write is held to the version it read as well.
+   */
+  private async writeAt(
+    ctx: RequestContext, lead: LeadDocument, update: Record<string, unknown>,
+  ): Promise<LeadDocument> {
+    const id = String(lead._id);
+    const written = await this.leads.updateAtVersion(ctx, id, lead.version, update);
+    if (written) return written;
+    const now = await this.leads.findById(ctx, id);
+    if (!now) throw new NotFoundException('Lead');
+    throw new VersionConflictException(lead.version, now.version);
+  }
+
+  /**
+   * **Whose pipeline a leader's *+ Add lead* writes to** (P11-T4; `functional/coaching.md`, *The Leads
+   * card*): somebody the caller coaches, resolved on `lead:create` as every subject is — `own` reaches
+   * nobody else, a hierarchy token reaches `COACH`. **Naming yourself, or nobody, is a 404** like anybody
+   * outside it: your own lead is `POST /leads` without `owner`, and a leader never coaches themselves
+   * (ADR-0074).
+   */
+  private async coachedOwner(ctx: RequestContext, owner: string): Promise<string> {
+    if (!owner || owner === ctx.membershipId) throw new NotFoundException('Membership');
+    return (await this.coach.subject(ctx, owner, 'lead:create', 'Membership')).membershipId;
+  }
+
+  /**
+   * Add a lead: the caller's own, or — with `owner` (P11-T4) — in the pipeline of somebody the caller
+   * coaches. **The lead is the owner's and the act is the caller's** (ADR-0044): `createdBy`, a
+   * commitment's `byMembershipId`, the `lead.created` entry and `lastEditedBy` name the caller, so the
+   * owner's ✎ says who added it. A lead starts on no stage, so its first transition names whoever first
+   * moves it. **No notification**: the coachee is in the 1-on-1 where it was added.
+   */
+  async create(ctx: RequestContext, body: unknown, owner?: string): Promise<LeadView> {
     const membershipId = this.me(ctx);
-    const day = await this.days.for(ctx);
+    // The body first, then whose it is: a refusal of the shape (400) comes before one of reach (404).
     const input = checkLead(body);
+    const ownerMembershipId = owner === undefined ? membershipId : await this.coachedOwner(ctx, owner);
+    const day = await this.days.for(ctx);
     const contact = input.contact ?? { phone: null, email: null };
 
     // Against the lead as it will be, not as it arrived — see `requireLawfulBasis`.
@@ -239,7 +296,7 @@ export class LeadService {
 
     const now = this.clock.now();
     const created = await this.leads.create(ctx, {
-      ownerMembershipId: membershipId,
+      ownerMembershipId,
       name: input.name!,
       type: input.type ?? null,
       contact,
@@ -271,14 +328,18 @@ export class LeadService {
       // right to the lead's rows (§3.7); recording them here would route around that.
       hasContact: Boolean(contact.phone || contact.email),
       lawfulBasis: created.lawfulBasis,
+      // Whose pipeline, when it is not the caller's: the entry's actor is the leader who added it.
+      ...(ownerMembershipId !== membershipId ? { ownerMembershipId } : {}),
     });
-    return this.view(created, day, new Map());
+    return this.view(
+      created, day, ownerMembershipId === membershipId ? new Map() : await this.attribution(ctx, [created]),
+    );
   }
 
   async update(ctx: RequestContext, id: string, body: unknown): Promise<LeadView> {
     const membershipId = this.me(ctx);
     const input = checkLead(body, { partial: true });
-    const lead = await this.reachable(ctx, id, 'lead:update', input.version);
+    const lead = await this.reachable(ctx, id, 'lead:update', input.version, true);
     const next = this.merge(lead, input);
     requireLawfulBasis(next);
 
@@ -336,8 +397,7 @@ export class LeadService {
       write.$pull = { commitments: { month: day.month } };
     }
 
-    const updated = await this.leads.updateById(ctx, id, write);
-    if (!updated) throw new NotFoundException('Lead');
+    const updated = await this.writeAt(ctx, lead, write);
 
     await this.record(ctx, 'lead.updated', id, {
       fields: Object.keys(this.writable(input)),
@@ -359,7 +419,7 @@ export class LeadService {
     ctx: RequestContext, id: string, statusCode: string, pinned?: number,
   ): Promise<LeadView> {
     const membershipId = this.me(ctx);
-    const lead = await this.reachable(ctx, id, 'lead:update', pinned);
+    const lead = await this.reachable(ctx, id, 'lead:update', pinned, true);
 
     if (lead.outcome) {
       throw new DomainException(
@@ -406,7 +466,7 @@ export class LeadService {
     }
 
     const at = this.clock.now();
-    const updated = await this.leads.updateById(ctx, id, {
+    const updated = await this.writeAt(ctx, lead, {
       $set: { statusCode: wanted, statusId: String(status._id), updatedBy: membershipId },
       // Append-only. The lead's current status is the last row's destination, and this is what
       // makes a jump legible and a leader's edit attributable (ADR-0044, ADR-0045).
@@ -417,7 +477,6 @@ export class LeadService {
       },
       $inc: { version: 1 },
     });
-    if (!updated) throw new NotFoundException('Lead');
 
     await this.record(ctx, 'lead.status_changed', id, {
       from: lead.statusCode ?? null, to: wanted, byMembershipId: membershipId,
@@ -439,7 +498,7 @@ export class LeadService {
     ctx: RequestContext, id: string, outcome: 'won' | 'lost' | null, pinned?: number,
   ): Promise<LeadView> {
     const membershipId = this.me(ctx);
-    const lead = await this.reachable(ctx, id, 'lead:mark_outcome', pinned);
+    const lead = await this.reachable(ctx, id, 'lead:mark_outcome', pinned, true);
 
     if (outcome && lead.outcome) {
       throw new DomainException(
@@ -464,7 +523,7 @@ export class LeadService {
       }
     }
 
-    const updated = await this.leads.updateById(ctx, id, {
+    const updated = await this.writeAt(ctx, lead, {
       $set: {
         outcome,
         outcomeAt: outcome ? this.clock.now() : null,
@@ -472,7 +531,6 @@ export class LeadService {
       },
       $inc: { version: 1 },
     });
-    if (!updated) throw new NotFoundException('Lead');
 
     await this.record(ctx, outcome ? 'lead.closed' : 'lead.reopened', id, {
       outcome, from: lead.outcome ?? null, statusCode: lead.statusCode ?? null,
@@ -497,13 +555,25 @@ export class LeadService {
     return { id, deletedAt: removed.deletedAt!.toISOString() };
   }
 
-  /** One lead of this office. 404 for another office's, never 403. */
+  /**
+   * One lead of this office. 404 for another office's, never 403.
+   *
+   * **A lead the caller does not own is another member's data**, read through the leader's reach, so the
+   * read writes the §3.5 entry (roles §3.5, obligation 1): surface `leads`, the lead's owner as the
+   * subject, from no date to the office's today — what `GET /leads?owner=` writes for the same rows. Once,
+   * after the answer exists; the owner's own read writes none (`SubjectReadAudit`).
+   */
   async read(ctx: RequestContext, id: string): Promise<LeadView> {
     // Before the repository, so a caller with no office is refused by name rather than by a
     // `MissingTenantContextError` surfacing as 500 — which is what a Super Admin's `all` grant
     // would otherwise produce here (ADR-0044).
     const lead = await this.reachable(ctx, id, 'lead:read');
-    return this.view(lead, await this.days.for(ctx), await this.attribution(ctx, [lead]));
+    const day = await this.days.for(ctx);
+    const view = this.view(lead, day, await this.attribution(ctx, [lead]));
+    await this.subjectReads.record(
+      ctx, { membershipId: String(lead.ownerMembershipId) }, 'leads', { from: null, to: day.today },
+    );
+    return view;
   }
 
   /**
@@ -524,7 +594,15 @@ export class LeadService {
    * question.
    */
   async list(ctx: RequestContext, query: LeadQuery = {}): Promise<LeadPage> {
-    const owners = await this.ownersInScope(ctx, 'lead:read');
+    /*
+     * **`owner`: one member's leads** (P11-T4 AC-3), the coaching session's Leads card. Resolved by
+     * `CoachResolver.subject` on `lead:read` — the caller, or somebody they coach; a 404 outside it,
+     * never a 403 — and the list is then that owner's alone, with every other filter beside it.
+     */
+    const named = query.owner === undefined
+      ? null
+      : await this.coach.subject(ctx, query.owner, 'lead:read', 'Membership');
+    const owners = named ? [named.membershipId] : await this.ownersInScope(ctx, 'lead:read');
 
     const filter: Record<string, unknown> = { deletedAt: null };
     // `null` is the whole office, which no row-reading grant produces — see `ownersInScope`.
@@ -582,12 +660,36 @@ export class LeadService {
     // Names for this page only: the rows nobody is looking at cost nothing to attribute.
     const names = await this.attribution(ctx, shown);
 
-    return {
+    const answer = {
       rows: shown.map((row) => this.view(row, day, names)),
       total: attended.length,
       page,
       pageSize: size,
     };
+
+    /*
+     * **OD-107, option 1 (decided 2026-10-02): the list is a subject read too.** One §3.5 entry,
+     * surface `leads`, for each owner other than the caller whose rows this answer holds — the page
+     * shown, not the set filtered — and none for the caller's own rows. Written last, once the answer
+     * exists, so a refused read records nothing; `from: null`, because a lead list discloses rows of
+     * any age. Without it the same rows were audited through `owner=` and not through the list, and a
+     * record one route can step round records nothing reliable.
+     */
+    if (named) {
+      /*
+       * **One entry for `owner=`, whatever the page holds** (P11-T4 AC-5): the answer is about that
+       * member even when it is empty — *no leads*, and how many match, are disclosures too. None for the
+       * caller's own (`SubjectReadAudit`).
+       */
+      await this.subjectReads.record(ctx, named, 'leads', { from: null, to: day.today });
+      return answer;
+    }
+    const others = [...new Set(shown.map((row) => String(row.ownerMembershipId)))]
+      .filter((owner) => owner !== ctx.membershipId);
+    await Promise.all(others.map((owner) => this.subjectReads.record(
+      ctx, { membershipId: owner }, 'leads', { from: null, to: day.today },
+    )));
+    return answer;
   }
 
   /**

@@ -11,6 +11,7 @@ const COMPANY = '66f0000000000000000000c1';
 const M = 1_000_000 * 100;
 
 const AGENTS = 20;
+const LEADER = '66f0000000000000000001ff';
 const MONTHS = ['01', '02', '03', '04', '05', '06', '07', '08', '09'].map((m) => `2026-${m}`);
 
 const member = (kpmId: string, membershipId: string) => new RequestContext('u1', 'none', {
@@ -89,6 +90,15 @@ describe('the Personal Summary, measured (P10-T4)', () => {
     await db.collection('goals').insertMany(goals as never);
     await db.collection('monthlyAgentData').insertMany(production as never);
     await db.collection('activityLogs').insertMany(logs as never);
+    // P11-T4 AC-7: office A's twenty agents under one AB, so a leader's `for=` read has somebody to reach.
+    await db.collection('memberships').insertMany([
+      { _id: new mongoose.Types.ObjectId(LEADER), kpmId: KPM_A, userId: 'u-leader', leaderCode: 'LC-LEAD',
+        orgLevelCode: 'AB', leaderId: null, ancestorIds: [], status: 'active', deletedAt: null },
+      ...agents.map((id, i) => ({
+        _id: new mongoose.Types.ObjectId(id), kpmId: KPM_A, userId: `u-${i}`, leaderCode: `LC-${i}`,
+        orgLevelCode: 'AGENT', leaderId: LEADER, ancestorIds: [LEADER], status: 'active', deletedAt: null,
+      })),
+    ] as never);
     await Promise.all(['Goal', 'MonthlyAgentData', 'ActivityLog', 'Lead']
       .filter((name) => mongoose.modelNames().includes(name))
       .map((name) => mongoose.model(name).syncIndexes()));
@@ -142,5 +152,32 @@ describe('the Personal Summary, measured (P10-T4)', () => {
     // eslint-disable-next-line no-console
     console.log(`  summary.read   p95 of 20: ${p95.toFixed(1)} ms`);
     expect(p95).toBeLessThan(300);
+  });
+
+  it('P11-T4 AC-7: a leader’s read of an agent’s Summary, resolved and audited, answers inside the budget at p95', async () => {
+    const leader = new RequestContext('u-leader', 'none', {
+      membershipId: LEADER, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab',
+      status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: AGENTS,
+    } as never);
+    const theirs = await wired.summary.read(leader, agents[0]);
+    // The agent's own figures, and office A's: office B's are ten times these.
+    expect(theirs).toEqual(await wired.summary.read(member(KPM_A, agents[0])));
+    expect(theirs.monthly).toMatchObject({ targetMinor: 85 * M, actualMinor: 20 * M });
+
+    const times: number[] = [];
+    for (let i = 0; i < 20; i += 1) {
+      const started = process.hrtime.bigint();
+      await wired.summary.read(leader, agents[i]);
+      times.push(Number(process.hrtime.bigint() - started) / 1e6);
+    }
+    times.sort((a, b) => a - b);
+    const p95 = times[Math.ceil(0.95 * times.length) - 1];
+
+    // eslint-disable-next-line no-console
+    console.log(`  summary.read for= p95 of 20: ${p95.toFixed(1)} ms`);
+    expect(p95).toBeLessThan(300);
+    // Every one of those reads left its record, as did the one before them.
+    expect(await mongoose.connection.db!.collection('auditLog')
+      .countDocuments({ action: 'activity_log.read_raw', 'after.surface': 'personal_summary' })).toBe(21);
   });
 });

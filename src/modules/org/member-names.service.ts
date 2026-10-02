@@ -6,6 +6,16 @@ import { User, UserDocument } from '@/modules/users/user.schema';
 import { MembershipRepository } from './membership.repository';
 
 /**
+ * A person as a sentence about them names them: the name, and the pronoun the copy is written in.
+ * The pronoun is the user's own (`users.pronoun`, `they` unless they said otherwise), never guessed
+ * from the name.
+ */
+export interface NamedPerson {
+  name: string;
+  pronoun: 'she' | 'he' | 'they';
+}
+
+/**
  * A person's name, from the **membership** that identifies them.
  *
  * Invariant §2: the membership `_id` is the foreign key on every per-user document, and `users` is
@@ -38,6 +48,18 @@ export class MemberNames {
   async byMembershipId(
     ctx: RequestContext, membershipIds: readonly string[],
   ): Promise<Map<string, string>> {
+    const people = await this.people(ctx, membershipIds);
+    return new Map([...people].map(([membershipId, person]) => [membershipId, person.name]));
+  }
+
+  /**
+   * `membershipId → { name, pronoun }`, by the same two reads and the same rules as `byMembershipId`
+   * — which is this, with the pronoun dropped (P11-T7). Coaching writes about the person it opens in
+   * their own pronoun (*Leads that need her*), so it needs both, and asks once.
+   */
+  async people(
+    ctx: RequestContext, membershipIds: readonly string[],
+  ): Promise<Map<string, NamedPerson>> {
     /*
      * **A malformed id is nobody, not a server fault.** `$in` over a list holding one throws a
      * `CastError`, which is neither a `DomainException` nor an `HttpException` and renders as a
@@ -52,16 +74,17 @@ export class MemberNames {
     const userIds = [...new Set(members.map((m) => String(m.userId)))];
     if (userIds.length === 0) return new Map();
 
-    const people = await this.users.find({ _id: { $in: userIds } }).select('fullName').lean().exec();
+    const users = await this.users.find({ _id: { $in: userIds } }).select('fullName pronoun').lean().exec();
     const named = new Map(
-      (people as unknown as { _id: unknown; fullName?: string }[])
-        .map((u) => [String(u._id), u.fullName ?? '']),
+      (users as unknown as { _id: unknown; fullName?: string; pronoun?: NamedPerson['pronoun'] }[])
+        // A row older than the field reads as the schema's default, which `lean()` does not apply.
+        .map((u) => [String(u._id), { name: u.fullName ?? '', pronoun: u.pronoun ?? 'they' }]),
     );
 
-    const out = new Map<string, string>();
+    const out = new Map<string, NamedPerson>();
     for (const member of members) {
-      const name = named.get(String(member.userId));
-      if (name) out.set(String(member._id), name);
+      const person = named.get(String(member.userId));
+      if (person?.name) out.set(String(member._id), person);
     }
     return out;
   }

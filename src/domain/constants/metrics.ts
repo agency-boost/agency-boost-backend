@@ -79,6 +79,8 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'CLOSINGS_NEEDED_PER_WEEK', name: 'Closings needed per week', unit: 'count', phase: 10 },
   { key: 'SUMMARY_ACTIVITY_TARGET', name: 'Activity target for the period', unit: 'count', phase: 10 },
   { key: 'ACTIVITY_TARGET_ATTAINMENT_PCT', name: 'Logged against the activity target', unit: 'percentage', phase: 10 },
+  // The coaching session's Activity card: this month's activity targets pro-rated to the last 7 days (P11-T4).
+  { key: 'SUB_PERIOD_ACTIVITY_TARGET', name: 'Activity target for the last 7 days, pro-rated', unit: 'count', phase: 11 },
   { key: 'ACTIVATION_COMPLETION_PCT', name: 'Activation completion', unit: 'percentage', phase: 13 },
   { key: 'ACTIVATION_DAY_INDEX', name: 'Activation day', unit: 'days', phase: 13 },
   { key: 'TRAINING_COMPLETION_PCT', name: 'Training completion', unit: 'percentage', phase: 14 },

@@ -70,6 +70,12 @@ import {
   CapabilityCatalogSchema, CapabilityEntrySchema, CapabilityGridRowSchema,
   CapabilityStageRowSchema,
 } from '@/modules/capability/capability.schema';
+import {
+  CoachingActionItemSchema, CoachingLastWeekItemSchema, CoachingLastWeekSchema, CoachingLeadActionSchema,
+  CoachingSessionCorrectionSchema, CoachingSessionSchema, CoachingSnapshotSchema, CoachingTipSchema,
+} from '@/modules/coaching/coaching-session.schema';
+import { CoachingProfileRevisionSchema, CoachingProfileSchema } from '@/modules/coaching/coaching-profile.schema';
+import { LeaderNoteRevisionSchema, LeaderNoteSchema } from '@/modules/coaching/leader-note.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -110,6 +116,9 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['dataUploadRows', DataUploadRowSchema],
   ['campaigns', CampaignSchema],
   ['capabilityCatalogs', CapabilityCatalogSchema],
+  ['coachingSessions', CoachingSessionSchema],
+  ['coachingProfiles', CoachingProfileSchema],
+  ['leaderNotes', LeaderNoteSchema],
 ];
 
 /**
@@ -294,6 +303,53 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'issued against a global identity before any office is chosen: refresh, email ' +
       'verification and password reset all predate membership',
   ],
+  // P11-T5: the parts of a coaching session. Each lives inside the session it belongs to.
+  [
+    'coachingLastWeek (subdocument)',
+    CoachingLastWeekSchema,
+    'which finalized session a draft carried last week from, inside the session: no collection and no _id of its own',
+  ],
+  [
+    'coachingLastWeekItem (subdocument)',
+    CoachingLastWeekItemSchema,
+    'a copy of one of last week\'s items, ticked inside the session reviewing it: no collection and no _id of its own',
+  ],
+  [
+    'coachingActionItem (subdocument)',
+    CoachingActionItemSchema,
+    'one of the session\'s other action items, inside the session: no collection and no _id of its own',
+  ],
+  [
+    'coachingTip (subdocument)',
+    CoachingTipSchema,
+    'one coaching tip, inside the session: no collection and no _id of its own',
+  ],
+  [
+    'coachingLeadAction (subdocument)',
+    CoachingLeadActionSchema,
+    'one lead-derived action taken at finalize, inside the session: no collection and no _id of its own',
+  ],
+  [
+    'coachingSessionCorrection (subdocument)',
+    CoachingSessionCorrectionSchema,
+    'a finalized state a reopen replaced, held whole inside the session it belongs to',
+  ],
+  [
+    'coachingSnapshot (subdocument)',
+    CoachingSnapshotSchema,
+    'what the 1:1 was held over, frozen inside the session at its first finalize',
+  ],
+  // P11-T9: what a save replaced, inside the profile or the note it belongs to.
+  [
+    'coachingProfileRevision (subdocument)',
+    CoachingProfileRevisionSchema,
+    'a tick set a profile save replaced, held inside the profile: no collection and no _id of its own',
+  ],
+  [
+    'leaderNoteRevision (subdocument)',
+    LeaderNoteRevisionSchema,
+    'a text a note save replaced, held inside the note: no collection and no _id of its own',
+  ],
 ];
 
 /**
@@ -388,6 +444,18 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [MembershipSchema, 'MembershipSchema'],
   [KpmRequestSchema, 'KpmRequestSchema'],
+  [CoachingSessionSchema, 'CoachingSessionSchema'],
+  [CoachingLastWeekSchema, 'CoachingLastWeekSchema'],
+  [CoachingLastWeekItemSchema, 'CoachingLastWeekItemSchema'],
+  [CoachingActionItemSchema, 'CoachingActionItemSchema'],
+  [CoachingTipSchema, 'CoachingTipSchema'],
+  [CoachingLeadActionSchema, 'CoachingLeadActionSchema'],
+  [CoachingSessionCorrectionSchema, 'CoachingSessionCorrectionSchema'],
+  [CoachingSnapshotSchema, 'CoachingSnapshotSchema'],
+  [CoachingProfileSchema, 'CoachingProfileSchema'],
+  [CoachingProfileRevisionSchema, 'CoachingProfileRevisionSchema'],
+  [LeaderNoteSchema, 'LeaderNoteSchema'],
+  [LeaderNoteRevisionSchema, 'LeaderNoteRevisionSchema'],
 ]);
 
 function schemaExportName(schema: Schema): string {

@@ -26,7 +26,6 @@ const ROUTES: Record<string, string> = {
   summary: 'activity_ratios:read',
   dashboard: 'activity_log:read_raw',
   ratios: 'activity_ratios:read',
-  compliance: 'activity_log:read_raw',
 };
 
 /**
@@ -194,23 +193,18 @@ describe('logging a day over HTTP (P6)', () => {
         .query({ period: 'LAST_FORTNIGHT' }).expect(400);
     });
 
-    it('answers compliance as Logged or Missed, with no partial state', async () => {
-      const before = await request(app.getHttpServer()).get(`${url}/compliance`).expect(200);
-      expect(before).toMatchObject({ body: { compliant7d: false, lastLoggedOn: null } });
-
-      // An all-zero day counts: the metric asks whether they reported (ADR-0042, OD-30).
-      await request(app.getHttpServer()).put(`${url}/log`).send({ counts: {} }).expect(200);
-
-      const after = await request(app.getHttpServer()).get(`${url}/compliance`).expect(200);
-      expect(after.body).toMatchObject({
-        compliant7d: true, compliantMonth: true, lastLoggedOn: TODAY, windowDays: 7,
-      });
-    });
-
-    it.each(EVERY_MEMBER)('lets %s read their own compliance', async (_name, who) => {
-      session.current = who;
-
-      await request(app.getHttpServer()).get(`${url}/compliance`).expect(200);
+    it('P11-T6 AC-10: GET /activity/compliance is retired — no route answers it, for anybody', async () => {
+      // Its only caller went with Log Activity's *Logged / Missed* card (P10.1-T5), and the roster it
+      // was kept for draws no compliance (`functional/coaching.md`, the Data contract). The computation
+      // stays for `GET /summary`, whose insight cards read it — `activity.tenancy.spec.ts` covers it.
+      for (const [, who] of EVERY_MEMBER) {
+        session.current = who;
+        // The router's own 404: nothing under `/activity` takes a parameter that could read the word.
+        const res = await request(app.getHttpServer()).get(`${url}/compliance`).expect(404);
+        expect(res.body.error.message).toBe('Cannot GET /activity/compliance');
+        expect(res.body).not.toHaveProperty('compliant7d');
+      }
+      expect(Object.keys(declaredPermissions(ActivityController))).not.toContain('compliance');
     });
   });
 
@@ -233,7 +227,7 @@ describe('logging a day over HTTP (P6)', () => {
       await request(app.getHttpServer()).get(`${url}/ratios`).expect(403);
     });
 
-    it('has no way to name whose ratios are read — a leader’s view of a downline is Phase 11’s', async () => {
+    it('names whose ratios as `for` (P11-T4), and refuses the activity reads’ `membershipId` by name', async () => {
       const res = await request(app.getHttpServer()).get(`${url}/ratios`)
         .query({ membershipId: 'somebody-else' }).expect(400);
       expect(res.body.error.details.violations)

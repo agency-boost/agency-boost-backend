@@ -226,6 +226,21 @@ export const ErrorCode = {
   /** A later import of the month is still standing; it is reverted first, so each revert is exact. */
   UPLOAD_BATCH_NOT_LATEST: 'UPLOAD_BATCH_NOT_LATEST',
 
+  /*
+   * Coaching sessions (P11-T5; `functional/coaching.md`, *Errors*). Outside `COACH` is `NOT_FOUND`, never
+   * a coaching code (P11-T3 AC-3): `COACHING_NOT_COACH_OF` and `COACHING_NOTES_PRIVATE` are not here.
+   */
+  /** A write to a finalized session — a draft save, a finalize, a goal save through it. `409`. */
+  COACHING_SESSION_FINALIZED: 'COACHING_SESSION_FINALIZED',
+  /** Finalize refused by one of the prototype's five checks; `details.rule` names the first. `422`. */
+  COACHING_SESSION_INCOMPLETE: 'COACHING_SESSION_INCOMPLETE',
+  /** A reopen of a draft or of a session already reopened. `409`, with `details.status`. */
+  COACHING_SESSION_NOT_FINALIZED: 'COACHING_SESSION_NOT_FINALIZED',
+  /** A reopen past `COACHING_REOPEN_WINDOW_DAYS` after the session's date (ADR-0079). `409`. */
+  COACHING_REOPEN_WINDOW_CLOSED: 'COACHING_REOPEN_WINDOW_CLOSED',
+  /** An Owner's or Admin's reopen of a session whose coach no longer coaches the coachee. `409`. */
+  COACHING_REOPEN_COACH_NOT_CURRENT: 'COACHING_REOPEN_COACH_NOT_CURRENT',
+
   // Validation
   VALIDATION_FAILED: 'VALIDATION_FAILED',
   VALIDATION_UNKNOWN_FIELD: 'VALIDATION_UNKNOWN_FIELD',

@@ -1,13 +1,14 @@
 import { INestApplication } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
+import mongoose from 'mongoose';
 import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import {
-  AGENT, declaredPermissions, EVERY_MEMBER, FIXTURE_KPM, productionPipe, session, StubAuth,
+  AB, AGENT, declaredPermissions, EVERY_MEMBER, FIXTURE_KPM, OWNER, productionPipe, session, StubAuth,
   SUPER_ADMIN,
 } from '../../../test/http-permissions';
 import { GoalController } from './goal.controller';
@@ -150,6 +151,59 @@ describe('goals over HTTP (P8-T3)', () => {
       expect(res.body.snapshot.leadsPerMonth).toBe(67);
       expect(res.body.projected.leadsPerMonth).toBe(67);
       expect(res.body.savedByMembershipId).toBe('mem-a');
+    });
+  });
+
+  /*
+   * **`for` is validated as every query field is** (P11-T7; `functional/coaching.md`, the Data contract):
+   * it was a raw `@Query('for')`, the one subject parameter the pipe never saw. And a plan read for
+   * somebody else carries no measured rates (AC-10, D-rates).
+   */
+  describe('whose plan: for (P11-T7)', () => {
+    const SUBJECT = '66f0000000000000000000d1';
+
+    beforeEach(async () => {
+      await mongoose.connection.db!.collection('memberships').insertOne({
+        _id: new mongoose.Types.ObjectId(SUBJECT), kpmId: FIXTURE_KPM, userId: 'u-subject', leaderCode: 'LC-D1',
+        orgLevelCode: 'AGENT', hierarchyRole: 'agent', leaderId: 'mem-a', ancestorIds: ['mem-a'],
+        status: 'active', deletedAt: null,
+      } as never);
+    });
+
+    it('P11-T7 AC-10 the caller’s own plan, named or not, keeps their measured rates', async () => {
+      const absent = await http().get(url).expect(200);
+      const named = await http().get(url).query({ for: 'mem-a' }).expect(200);
+
+      expect(named.body).toEqual(absent.body);
+      expect(named.body.measured).toMatchObject({ days: 30 });
+    });
+
+    it('P11-T7 AC-10 somebody else’s plan answers measured: null, a leader’s read and the Owner’s alike', async () => {
+      for (const who of [AB, OWNER]) {
+        session.current = who;
+        const res = await http().get(url).query({ for: SUBJECT }).expect(200);
+        expect(res.body).toHaveProperty('measured', null);
+        expect(res.body.annualApeTargetMinor).toBe(500_000_000_00);
+      }
+    });
+
+    it('P11-T7 any other query parameter is refused by name', async () => {
+      const res = await http().get(url).query({ membershipId: SUBJECT }).expect(400);
+
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      expect(res.body.error.details.violations).toEqual(expect.arrayContaining([expect.stringContaining('membershipId')]));
+    });
+
+    it('P11-T7 for is a string of at most 64 characters', async () => {
+      const long = await http().get(url).query({ for: 'a'.repeat(65) }).expect(400);
+      expect(long.body.error.details.violations).toEqual(expect.arrayContaining([expect.stringContaining('for')]));
+      await http().get(`${url}?for=${SUBJECT}&for=mem-a`).expect(400);
+    });
+
+    it('P11-T7 an Agent naming anybody else is not found, as is an id that is nobody’s', async () => {
+      expect((await http().get(url).query({ for: SUBJECT }).expect(404)).body.error.code).toBe('NOT_FOUND');
+      session.current = AB;
+      await http().get(url).query({ for: new mongoose.Types.ObjectId().toString() }).expect(404);
     });
   });
 

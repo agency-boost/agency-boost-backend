@@ -183,14 +183,14 @@ export class RoleChangeService {
     // A `$set: { role }` here would leave `orgLevelId` on the rung they left.
     const moved = await this.hierarchy.setLevel(ctx, membershipId, toRole);
 
-    // Append-only: the open role edge is closed, and a new one opened. The Role change
-    // log reads exactly these rows, and nothing else could reconstruct them.
-    await this.history.updateMany(
-      ctx,
-      { membershipId, eventType: 'role_changed', validTo: null },
-      { $set: { validTo: this.clock.now() } },
-    );
-    await this.history.create(ctx, {
+    // Append-only: the open edge is closed, and a new one opened. The Role change log
+    // reads exactly these rows, and nothing else could reconstruct them.
+    //
+    // **Every open edge, not only an earlier role change** (P11-T3). This closed
+    // `role_changed` rows alone, so a promotion left the edge they joined or moved on open
+    // beside it: two current edges. The row carries the leader they keep, since a role
+    // change moves nobody (ADR-0014), so the one open edge says all of where they stand.
+    await this.history.openEdge(ctx, this.clock.now(), {
       membershipId,
       eventType: 'role_changed',
       fromRole,
@@ -199,10 +199,8 @@ export class RoleChangeService {
       // level leaves this row still legible.
       fromOrgLevelId,
       toOrgLevelId: moved.orgLevelId,
-      validFrom: this.clock.now(),
-      validTo: null,
+      toLeaderId: target.leaderId,
       actorMembershipId: me,
-      actorUserId: ctx.auditActors.actorUserId,
       reason: reason?.trim() || null,
     });
 
