@@ -570,6 +570,67 @@ export const PERMISSIONS = {
     { grantee: AAB, scope: 'own-downline' },
   ],
 
+  /*
+   * ---- Calendar (P12-T1, `roles-and-permissions.md` §3.15; `functional/calendar.md`, *The
+   * permissions*). ----
+   *
+   * **On an entry, `own` is two per-entry grants**: an entry the reader organises, and — as §3.14's
+   * co-editor is — an entry whose attendee list holds the reader. Neither is a hierarchy scope; the
+   * calendar service narrows *theirs* to the organiser or to the list, route by route, and answers 404
+   * outside it. Hence *attendee (`own`)* on the answer's row.
+   *
+   * **`own-downline` is `COACH`** (§1.3, ADR-0074): on the read, the compare read
+   * (`GET /calendar/entries?for=`) and the compare list; on the block, *Block time*'s reach. Written as a
+   * second grant beside `own`, as coaching's are: a wider token never silently includes the reader's own.
+   * **An Agent compares and blocks nobody**, as an Agent coaches nobody.
+   *
+   * **`calendar_invitee:search` is the people picker** (D-picker, ADR-0094): the office's active field
+   * members, in four fields — §2 rule 4's exception (a).
+   *
+   * **The Owner, the Admin and the Super Admin have no calendar** (ADR-0094): one who also stands on a
+   * rung reads and writes as that member (§1.1). `read` and `search` are reads; `create`, `update`,
+   * `delete`, `answer` and `block` are writes, refused to a read-only support session by their verb. None
+   * is on `BLOCKED_WHILE_IMPERSONATING`: an elevated session writes as the member (§3.13).
+   */
+  'calendar_entry:read': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  'calendar_entry:create': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  'calendar_entry:update': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  'calendar_entry:delete': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /** An invitee's own answer (ADR-0097): the attendee grant, at `own`. */
+  'calendar_entry:answer': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /** *Block time* on a member the leader coaches (ADR-0098): their own entry, placed on the member. */
+  'calendar_entry:block': [
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-downline' },
+  ],
+  'calendar_invitee:search': [
+    { grantee: AB, scope: 'own-kpm' },
+    { grantee: AAB, scope: 'own-kpm' },
+    { grantee: AGENT, scope: 'own-kpm' },
+  ],
+
   // ---- Membership. ----
   'member:read_profile': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },

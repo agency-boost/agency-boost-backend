@@ -69,6 +69,9 @@ import {
   CoachingProfileDto, CoachingProfileSavedDto, LeaderNoteSavedDto, LeaderNotesDto,
 } from '@/modules/coaching/coaching-profile.response.dto';
 import { MySessionsDto, SessionPrintDto } from '@/modules/coaching/coaching-record.response.dto';
+import {
+  CalendarDeletedDto, CalendarDownlineDto, CalendarEntryDto, CalendarPeoplePageDto, CalendarPeriodDto,
+} from '@/modules/calendar/calendar.response.dto';
 
 export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // P6: what an agent did, day by day.
@@ -97,6 +100,16 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // P11-T10: a finalized session's print, and the reader's own coaching.
   CoachingRecordController_mine: { type: MySessionsDto },
   CoachingRecordController_print: { type: SessionPrintDto },
+  // Phase 12: the calendar — a period of one calendar, one entry, its writes, the picker and the compare list.
+  CalendarController_read: { type: CalendarPeriodDto },
+  CalendarController_readOne: { type: CalendarEntryDto },
+  CalendarController_create: { type: CalendarEntryDto },
+  CalendarController_update: { type: CalendarEntryDto },
+  CalendarController_remove: { type: CalendarDeletedDto },
+  CalendarController_answer: { type: CalendarEntryDto },
+  CalendarController_block: { type: CalendarEntryDto },
+  CalendarController_searchPeople: { type: CalendarPeoplePageDto },
+  CalendarController_downline: { type: CalendarDownlineDto },
   AuthController_resendVerification: { type: StatusAckDto },
   AuthController_sessions: { type: SessionDto, isArray: true },
   HealthController_live: { type: StatusAckDto },

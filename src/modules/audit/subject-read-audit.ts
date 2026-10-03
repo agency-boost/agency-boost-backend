@@ -13,12 +13,14 @@ import { AuditService } from './audit.service';
  * `ratios`: `GET /activity/ratios?for=`, the session's Ratios card (P11-T4 AC-5); `coaching_session`:
  * `GET /coaching/sessions/:sessionId` and the answers of *Start*, finalize and reopen (P11-T5);
  * `coaching_session_print`: `GET /coaching/sessions/:sessionId/print`, the version printed (P11-T10,
- * ADR-0077; `functional/coaching.md`, *Audit and privacy*). The action keeps its name on every one, so
- * a single query on `targetMembershipId` lists every disclosure of a member's data.
+ * ADR-0077; `functional/coaching.md`, *Audit and privacy*); `calendar`: `GET /calendar/entries?for=`, a
+ * leader's compared pane of a downline's week, one per read (P12-T5 AC-5, D-audit, ADR-0093). The action
+ * keeps its name on every one, so a single query on `targetMembershipId` lists every disclosure of a
+ * member's data.
  */
 export type SubjectReadSurface =
   | 'log' | 'summary' | 'compliance' | 'personal_summary' | 'leads' | 'ratios' | 'coaching_session'
-  | 'coaching_session_print';
+  | 'coaching_session_print' | 'calendar';
 
 /** The action every subject read writes, whichever surface it came from. */
 export const SUBJECT_READ_ACTION = 'activity_log.read_raw';

@@ -170,6 +170,18 @@ const config: Config = {
     // P11-T5, P11-T6: coaching — the sessions, the metrics read over them and the roster's verdicts.
     // Business rules from the first task, so the domain floor from the first day, as production's was.
     './src/modules/coaching/': { lines: 95, branches: 95, functions: 95, statements: 95 },
+    // Phase 12: the calendar — who reads whose entry, the office's week and month, and the notices. Rules
+    // from the first task (the read's projection, the version pin, the busy block), so the domain floor
+    // from the first day, as coaching's was.
+    './src/modules/calendar/': { lines: 95, branches: 95, functions: 95, statements: 95 },
+    // N5, the Phase 12 exit permission review: the three calendar files that decide who reads and writes
+    // whose entry are permissions code, held to the floor `coach-resolver.ts` is. `calendar-view.ts` is the
+    // projection a reader is answered (an entry in full, or a busy block with nothing of it); the service
+    // decides reach, the organiser-only write, who must be invitable and what each write records; the
+    // repository pins every write to its office, organiser and version. All three were at 100 when pinned.
+    './src/modules/calendar/calendar-view.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/calendar/calendar.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/calendar/calendar-event.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],

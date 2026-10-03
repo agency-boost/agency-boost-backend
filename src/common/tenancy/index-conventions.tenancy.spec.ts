@@ -76,6 +76,7 @@ import {
 } from '@/modules/coaching/coaching-session.schema';
 import { CoachingProfileRevisionSchema, CoachingProfileSchema } from '@/modules/coaching/coaching-profile.schema';
 import { LeaderNoteRevisionSchema, LeaderNoteSchema } from '@/modules/coaching/leader-note.schema';
+import { CalendarAttendeeSchema, CalendarEventSchema } from '@/modules/calendar/calendar-event.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -119,6 +120,8 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['coachingSessions', CoachingSessionSchema],
   ['coachingProfiles', CoachingProfileSchema],
   ['leaderNotes', LeaderNoteSchema],
+  // P12-T2: one per entry; the organiser's range and an attendee's, both `kpmId`-led.
+  ['calendarEvents', CalendarEventSchema],
 ];
 
 /**
@@ -350,6 +353,11 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     LeaderNoteRevisionSchema,
     'a text a note save replaced, held inside the note: no collection and no _id of its own',
   ],
+  [
+    'calendarAttendee (subdocument)',
+    CalendarAttendeeSchema,
+    'one member on a calendar entry, inside the entry: no collection and no _id of its own',
+  ],
 ];
 
 /**
@@ -456,6 +464,8 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [CoachingProfileRevisionSchema, 'CoachingProfileRevisionSchema'],
   [LeaderNoteSchema, 'LeaderNoteSchema'],
   [LeaderNoteRevisionSchema, 'LeaderNoteRevisionSchema'],
+  [CalendarEventSchema, 'CalendarEventSchema'],
+  [CalendarAttendeeSchema, 'CalendarAttendeeSchema'],
 ]);
 
 function schemaExportName(schema: Schema): string {

@@ -342,3 +342,10 @@ export {
   SEED_CAPABILITY_GRIDS,
   capabilityStageFor,
 } from './capability';
+
+export {
+  CALENDAR,
+  CALENDAR_ENTRY_TYPES,
+  type CalendarEntryType,
+  CALENDAR_ALL_DAY_TYPE,
+} from './calendar';

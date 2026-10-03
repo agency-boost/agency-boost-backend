@@ -44,6 +44,14 @@ export const NotificationTemplate = {
    */
   GOAL_SET_BY_LEADER: 'goal.set_by_leader',
   COACHING_SESSION_FINALIZED: 'coaching.session_finalized',
+  /*
+   * The calendar's three (ADR-0095; `functional/calendar.md`, *Notifications*): an invitation to each
+   * invitee added, a block to the member it was placed on, and a change — moved or cancelled — to each
+   * attendee of a future entry. The payload is ids and the entry's office date, never anything typed.
+   */
+  CALENDAR_INVITATION: 'calendar.invitation',
+  CALENDAR_BLOCK_PLACED: 'calendar.block_placed',
+  CALENDAR_ENTRY_CHANGED: 'calendar.entry_changed',
   EVENT_REMINDER: 'event.reminder',
   /*
    * A support session, announced to the person and their Owner (§3.13, P4-T10).
@@ -79,6 +87,10 @@ export const TEMPLATE_CHANNELS: Record<NotificationTemplateId, readonly Notifica
   [NotificationTemplate.ADMIN_ACCESS_CHANGED]: ['in_app', 'email'],
   [NotificationTemplate.GOAL_SET_BY_LEADER]: ['in_app', 'email'],
   [NotificationTemplate.COACHING_SESSION_FINALIZED]: ['in_app'],
+  // The inbox always, as ADR-0010's authoritative channel; email by the member's preferences.
+  [NotificationTemplate.CALENDAR_INVITATION]: ['in_app', 'email'],
+  [NotificationTemplate.CALENDAR_BLOCK_PLACED]: ['in_app', 'email'],
+  [NotificationTemplate.CALENDAR_ENTRY_CHANGED]: ['in_app', 'email'],
   [NotificationTemplate.EVENT_REMINDER]: ['in_app', 'email'],
   [NotificationTemplate.IMPERSONATION_STARTED]: ['in_app', 'email'],
   [NotificationTemplate.IMPERSONATION_ELEVATED]: ['in_app', 'email'],

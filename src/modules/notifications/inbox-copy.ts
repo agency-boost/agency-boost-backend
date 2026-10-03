@@ -74,6 +74,18 @@ export function describeNotification(
       };
     case NotificationTemplate.COACHING_SESSION_FINALIZED:
       return { title: 'A coaching session was finalized', detail: 'What was agreed is now on the record.' };
+    /*
+     * The calendar's (ADR-0095, in ADR-0096's words): general, because the payload carries ids and a date
+     * and nothing anybody typed — the entry says the rest.
+     */
+    case NotificationTemplate.CALENDAR_INVITATION:
+      return { title: 'You have a new invitation', detail: 'Open it on your calendar to accept or decline.' };
+    case NotificationTemplate.CALENDAR_BLOCK_PLACED:
+      return { title: 'Time was blocked on your calendar', detail: 'A leader above you placed it. Open it to see when.' };
+    case NotificationTemplate.CALENDAR_ENTRY_CHANGED:
+      return payload.change === 'cancelled'
+        ? { title: 'An entry on your calendar was cancelled', detail: 'It is no longer on your calendar.' }
+        : { title: 'An entry on your calendar has moved', detail: 'Open it to see the new time.' };
     case NotificationTemplate.IMPERSONATION_STARTED:
       return payload.isSubject === true
         ? {
@@ -102,26 +114,49 @@ export function describeNotification(
   }
 }
 
-/** A session id as the finalize notice carries one: a MongoDB ObjectId, 24 hex characters. */
-const SESSION_ID = /^[0-9a-f]{24}$/i;
+/** An id as a notice carries one: a MongoDB ObjectId, 24 hex characters. */
+const OBJECT_ID = /^[0-9a-f]{24}$/i;
+
+/** An office date as a calendar notice carries one. Whether it is a real day the page decides, never failing. */
+const OFFICE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+const wellFormed = (value: unknown, shape: RegExp): value is string => typeof value === 'string' && shape.test(value);
 
 /**
  * **Where a notification opens**, composed on the server beside its words, for the same reason they are
  * (ADR-0010): what a row does is product behaviour, not something a client improvises.
  *
- * **One template has an address** (ADR-0078, P11-T10 AC-8): `COACHING_SESSION_FINALIZED` opens the
- * session it announces, at `/coaching/me?session={sessionId}` — the coachee's own read-only page, which
- * opens on the session it names. Its payload is `{ sessionId }` and nothing a leader typed, so the address
- * carries nothing else either. A payload without a well-formed id opens `/coaching/me` on its latest
- * session rather than on an address that would fail. **Every other item is `null`**: no other inbox item
- * changes.
+ * - `COACHING_SESSION_FINALIZED` opens the session it announces, at `/coaching/me?session={sessionId}` —
+ *   the coachee's own read-only page (ADR-0078, P11-T10 AC-8). A payload without a well-formed id opens
+ *   `/coaching/me` on its latest session rather than on an address that would fail.
+ * - **The calendar's three** (ADR-0095; `functional/calendar.md`, *The address*) open the entry at its
+ *   week, `/calendar?entry={entryId}&date={date}`; a cancellation opens the week it was in,
+ *   `/calendar?date={date}`, since the entry no longer reads. A payload without a well-formed id or date
+ *   opens `/calendar`.
+ * - **Every other item is `null`**.
  */
 export function inboxAddress(templateId: string, payload: Record<string, unknown>): string | null {
-  if (templateId !== NotificationTemplate.COACHING_SESSION_FINALIZED) return null;
-  const sessionId = payload.sessionId;
-  return typeof sessionId === 'string' && SESSION_ID.test(sessionId)
-    ? `/coaching/me?session=${sessionId}`
-    : '/coaching/me';
+  switch (templateId) {
+    case NotificationTemplate.COACHING_SESSION_FINALIZED:
+      return wellFormed(payload.sessionId, OBJECT_ID) ? `/coaching/me?session=${payload.sessionId}` : '/coaching/me';
+    case NotificationTemplate.CALENDAR_ENTRY_CHANGED:
+      if (payload.change === 'cancelled') {
+        return wellFormed(payload.date, OFFICE_DATE) ? `/calendar?date=${payload.date}` : '/calendar';
+      }
+      return calendarEntryAddress(payload);
+    case NotificationTemplate.CALENDAR_INVITATION:
+    case NotificationTemplate.CALENDAR_BLOCK_PLACED:
+      return calendarEntryAddress(payload);
+    default:
+      return null;
+  }
+}
+
+/** An entry at its week, its detail open — or the calendar, when the payload names neither well. */
+function calendarEntryAddress(payload: Record<string, unknown>): string {
+  return wellFormed(payload.entryId, OBJECT_ID) && wellFormed(payload.date, OFFICE_DATE)
+    ? `/calendar?entry=${payload.entryId}&date=${payload.date}`
+    : '/calendar';
 }
 
 export type { NotificationTemplateId };

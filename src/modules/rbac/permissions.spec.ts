@@ -666,4 +666,105 @@ describe('permission matrix', () => {
       }
     });
   });
+  /*
+   * **The calendar's permissions, a positive and a negative for each of the six roles** (P12-T1 AC-5,
+   * roles §3.15, §7.2), at the level `can()` decides them — the API refusing what a screen hides. Who is
+   * inside a grant's per-entry scope — the organiser, an attendee, `COACH` — and 404 outside it is the
+   * calendar's own suites' question.
+   *
+   * **An Owner or Admin with no field role** stands on no rung the matrix names: one who also holds a rung
+   * holds that rung's grants (§1.1), which the `ab` and `aab` rows already prove.
+   */
+  describe('P12-T1 — calendar (roles §3.15, functional/calendar.md *The permissions*)', () => {
+    const CALENDAR = [
+      'calendar_entry:read', 'calendar_entry:create', 'calendar_entry:update', 'calendar_entry:delete',
+      'calendar_entry:answer', 'calendar_entry:block', 'calendar_invitee:search',
+    ] as const satisfies readonly Permission[];
+
+    const officeOnly = (over: Parameters<typeof ctx>[0]) => {
+      const base = ctx(over);
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: 'agent' });
+    };
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: officeOnly({ owner: true }),
+      KPM_ADMIN: officeOnly({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+
+    const FIELD_OWN: Record<string, Scope | null> = {
+      SUPER_ADMIN: null, KPM_OWNER: null, KPM_ADMIN: null, AB: 'own', AAB: 'own', AGENT: 'own',
+    };
+    const EXPECTED: Record<(typeof CALENDAR)[number], Record<string, Scope | null>> = {
+      // The widest: `own` · attendee · `own-downline` for a leader, `own` · attendee for an Agent.
+      'calendar_entry:read': { ...FIELD_OWN, AB: 'own-downline', AAB: 'own-downline' },
+      'calendar_entry:create': FIELD_OWN,
+      'calendar_entry:update': FIELD_OWN,
+      'calendar_entry:delete': FIELD_OWN,
+      'calendar_entry:answer': FIELD_OWN,
+      'calendar_entry:block': { ...FIELD_OWN, AB: 'own-downline', AAB: 'own-downline', AGENT: null },
+      'calendar_invitee:search': { ...FIELD_OWN, AB: 'own-kpm', AAB: 'own-kpm', AGENT: 'own-kpm' },
+    };
+
+    const cells = CALENDAR.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P12-T1 AC-5 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P12-T1 AC-5 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it.each(CALENDAR)('P12-T1 AC-5 negative: %s is refused to a removed or pending member', (permission) => {
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role, status }), permission)).toBe(false);
+      }
+    });
+
+    it('P12-T1 AC-5 a leader holds `own` beside `own-downline` on the read, as two grants; the block is COACH alone', () => {
+      const has = (permission: Permission, grantee: typeof AB, scope: Scope) =>
+        (PERMISSIONS[permission] as readonly { grantee: unknown; scope: Scope }[])
+          .some((g) => g.grantee === grantee && g.scope === scope);
+      for (const grantee of [AB, AAB]) {
+        expect([has('calendar_entry:read', grantee, 'own'), has('calendar_entry:read', grantee, 'own-downline')]).toEqual([true, true]);
+        // `COACH` never reaches oneself: a block on yourself is not a grant anybody holds.
+        expect(has('calendar_entry:block', grantee, 'own')).toBe(false);
+      }
+    });
+
+    it('P12-T1 AC-5 the reads are read-like and every write is not, so a read-only support session reads and writes nothing', () => {
+      expect(CALENDAR.filter((p) => isReadLike(p))).toEqual(['calendar_entry:read', 'calendar_invitee:search']);
+      const readOnly = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: true });
+      expect(can(readOnly, 'calendar_entry:read')).toBe(true);
+      expect(can(readOnly, 'calendar_invitee:search')).toBe(true);
+      for (const write of [
+        'calendar_entry:create', 'calendar_entry:update', 'calendar_entry:delete', 'calendar_entry:answer', 'calendar_entry:block',
+      ] as const) {
+        expect([write, can(readOnly, write)]).toEqual([write, false]);
+      }
+    });
+
+    it('P12-T1 AC-5 no calendar permission is blocked outright in a support session: an elevated one writes as the member', () => {
+      const elevated = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: false });
+      for (const permission of CALENDAR) {
+        expect([permission, isBlockedWhileImpersonating(permission), can(elevated, permission)]).toEqual([permission, false, true]);
+      }
+    });
+
+    it('P12-T1 AC-5 an Owner or Admin who also stands on a rung holds that rung’s calendar (§1.1)', () => {
+      expect(scopeFor(ctx({ role: 'ab', owner: true }), 'calendar_entry:block')).toBe('own-downline');
+      expect(scopeFor(ctx({ role: 'agent', admin: true }), 'calendar_entry:read')).toBe('own');
+    });
+  });
 });

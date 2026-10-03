@@ -57,6 +57,8 @@ import { CoachingSession, CoachingSessionSchema } from '@/modules/coaching/coach
 import { CoachingProfile, CoachingProfileSchema } from '@/modules/coaching/coaching-profile.schema';
 import { LeaderNote, LeaderNoteSchema } from '@/modules/coaching/leader-note.schema';
 import { backfillCoachingSnapshots } from './coaching-snapshots';
+import { buildCalendarFixture, type CalendarFixture } from './calendar-fixture';
+import { CalendarEvent, CalendarEventSchema } from '@/modules/calendar/calendar-event.schema';
 import {
   CompanyOrgLevel, CompanyOrgLevelSchema,
 } from '@/modules/tenants/company-org-level.schema';
@@ -187,6 +189,8 @@ const OWNED_COLLECTIONS = [
   'coachingSessions',
   // P11-T9 AC-8, with the writer that fills them: the fixture's capability ticks and leader notes.
   'coachingProfiles', 'leaderNotes',
+  // Phase 12, with the writer that fills it: the calendar fixture's entries (`calendar-fixture.ts`).
+  'calendarEvents',
 ] as const;
 
 /**
@@ -215,6 +219,8 @@ export interface SeedResult {
   pronounsSet: number;
   /** The coaching rows P11-T5 and P11-T9 insert with their collections (`coaching-fixture.ts`). */
   coaching: CoachingFixture;
+  /** The calendar's week and month, inserted with their collection (`calendar-fixture.ts`). */
+  calendar: CalendarFixture;
 }
 
 async function countRows(): Promise<Record<string, number>> {
@@ -2223,7 +2229,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     to: { userId: string; membershipId: string | null },
     templateId: string,
     payload: Record<string, unknown>,
-    opts: { readDaysAgo?: number } & ({ sentDaysAgo: number } | { sentAt: Date }),
+    opts: { readDaysAgo?: number; readAt?: Date } & ({ sentDaysAgo: number } | { sentAt: Date }),
   ) {
     /*
      * **Keyed on what the notice says, never on when** (P11-T2 AC-6). The key was `createdAt`, which is
@@ -2247,7 +2253,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       delivery: Object.fromEntries(
         (TEMPLATE_CHANNELS[templateId as NotificationTemplateId] ?? []).map((channel) => [channel, { status: 'sent', at }]),
       ),
-      readAt: opts.readDaysAgo === undefined ? null : daysAgo(opts.readDaysAgo),
+      readAt: opts.readAt ?? (opts.readDaysAgo === undefined ? null : daysAgo(opts.readDaysAgo)),
       createdAt: at,
     });
   }
@@ -2780,6 +2786,49 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     coaching.notes,
   );
 
+  /*
+   * **The calendar's week and month** (Phase 12, *Seed*; `calendar-fixture.ts`, whose header says which
+   * account shows what): the entries Agus, Sari, Rina, Indah and the Owner organise, the invitations in every
+   * state, Agus's block on Indah and the 1:1s — inserted as the coaching rows are, each under its derived
+   * `_id` and only when that id is absent, validated strictly by `calendarEvents`' own schema. Then the
+   * notices those writes sent: Sari's invitation to the goal review, Rina's to the huddle she declined —
+   * read when she answered — and Indah's block.
+   */
+  const calendar = buildCalendarFixture({
+    kpmId: id0417,
+    clock,
+    timezone: DEFAULT_TENANT_TIMEZONE,
+    members: {
+      owner: owner.id, agus: ab.id, sari: sari.id, rina: rina.id, budi: budi.id,
+      indah: cast.indah.id, dimas: cast.dimas.id, siti: cast.siti.id, arief: cast.arief.id,
+    },
+    sariRinaSessionDays: coaching.sessions
+      .filter((x) => x.coachMembershipId === sari.id && x.coacheeMembershipId === rina.id && x.status === 'finalized')
+      .map((x) => x.date as string),
+  });
+  const CalendarEvents = mongoose.model(CalendarEvent.name, CalendarEventSchema, undefined, RECOMPILE);
+  await insertFixtureRows(CalendarEvents as unknown as mongoose.Model<object>, calendar.entries);
+  /*
+   * Each notice names its entry as the office holds it: an entry an earlier run stored keeps that run's
+   * date, and so does its notice, which is keyed on its payload — so a re-run writes none.
+   */
+  const calendarPeople = { owner, agus: ab, sari, rina, budi, indah: cast.indah, dimas: cast.dimas, siti: cast.siti, arief: cast.arief };
+  for (const notice of calendar.notices) {
+    const member = await Memberships.findOne({ _id: calendarPeople[notice.to].id, kpmId: id0417 }).lean().exec();
+    const entry = await CalendarEvents.findOne({ _id: notice.payload.entryId, kpmId: id0417, deletedAt: null }).lean().exec();
+    if (!member || !entry) continue;
+    const answeredAt = notice.readOnAnswer
+      ? entry.attendees.find((a) => a.membershipId === calendarPeople[notice.to].id)?.answeredAt ?? undefined
+      : undefined;
+    await notify(
+      { userId: String(member.userId), membershipId: calendarPeople[notice.to].id },
+      notice.templateId,
+      { entryId: notice.payload.entryId, date: clock.localDateFor(DEFAULT_TENANT_TIMEZONE, entry.startsAt) },
+      { sentAt: entry.createdAt, readAt: answeredAt },
+    );
+  }
+  const storedCalendar = await mongoose.connection.collection('calendarEvents').countDocuments({ kpmId: id0417, deletedAt: null });
+
   const rosterLine = (status: string) => (Object.entries(ROSTER_PLAN) as [CoacheeKey, (typeof ROSTER_PLAN)[CoacheeKey]][])
     .filter(([, row]) => row.status === status)
     .map(([key, row]) => `${key[0].toUpperCase()}${key.slice(1)}${row.monthDependent ? '*' : ''}`)
@@ -2933,6 +2982,30 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     Snapshots taken this run     ${snapshotsTaken}: each finalized session's, as of its own finalize, by
                                  finalize's own builder. A session that has one keeps it
 
+  CALENDAR at /calendar  (the entries are in calendarEvents, from src/seed/calendar-fixture.ts;
+             this week is ${calendar.monday} to the Sunday after, the office's today ${calendar.today})
+    agus@kpm0417.test            his week: Weekly unit standup Monday and Thursday 9:00, the
+                                 Goal review, a Prospecting call block, Client trip — Surabaya
+                                 (Friday and Saturday, Travel), and Client review — Hartono family
+                                 with an address in its notes. Monday has four lines: Month draws
+                                 "+1 more…", or "+2 more…" when seeded on a Monday, his 1:1 with
+                                 Indah today being a fifth. That 1:1 is the day his draft is open
+    Compare (Agus)               + Compare with downline → Sari: her Client visit — Tanjung family
+                                 in full, address included; the Owner's Branch leaders review she
+                                 attends is Busy. Every compared week is recorded in the audit log
+    Block time (Agus)            his block on Indah on Wednesday, 15:00 — placed, not asked;
+                                 Indah has "Time was blocked on your calendar" in the bell
+    sari@kpm0417.test            Leads follow-up block; the Goal review invitation pending, with
+                                 "You have a new invitation" in the bell; the standups accepted;
+                                 her weekly 1:1 coaching with Rina on her sessions' days; the
+                                 Unit huddle, which Rina declined
+    rina@kpm0417.test            Client meeting — Pak Gunadi and a task; Sari's 1:1s, whose chip
+                                 links nowhere for her; the declined huddle is off her grid, and
+                                 its "You have a new invitation" in the bell, read, still opens it
+    indah@kpm0417.test           a task, the standups accepted, Agus's block (Close alone)
+    The month                    four lighter weeks before this one and the week after
+    Entries stored               ${storedCalendar} in KPM 0417 (${calendar.entries.length} in this run's fixture)
+
   AUDIT LOG at /admin/audit  (Super Admin)
     Platform-level and tenant-level rows, so the scope toggle has both sides.
     Includes an impersonation.started / .ended pair on Rina.
@@ -2965,7 +3038,7 @@ Sign in at POST /api/v1/auth/login, then send the access token as
     ? 'This run wrote 0 rows: everything it seeds was already there.'
     : `This run wrote ${total} rows: ${Object.entries(written).map(([name, added]) => `${name} +${added}`).join(', ')}`);
 
-  return { written, pronounsSet, coaching };
+  return { written, pronounsSet, coaching, calendar };
 }
 
 async function main(): Promise<void> {

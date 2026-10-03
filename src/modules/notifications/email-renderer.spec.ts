@@ -64,6 +64,19 @@ describe('what the transactional mail says (P4-T14)', () => {
       expect(body).toContain('https://app.agencyboost.test/notifications');
     });
 
+    it('P12-T4 AC-7 a calendar notice’s email links to the address its row opens, built from APP_ORIGIN', () => {
+      const entryId = '66f0000000000000000000e1';
+      const invited = renderer.render(NotificationTemplate.CALENDAR_INVITATION, { entryId, date: '2026-10-05' });
+      expect(invited.subject).toBe('[AgencyBoost] You have a new invitation');
+      expect(invited.body).toContain(`https://app.agencyboost.test/calendar?entry=${entryId}&date=2026-10-05`);
+      const cancelled = renderer.render(NotificationTemplate.CALENDAR_ENTRY_CHANGED, {
+        entryId, date: '2026-10-05', change: 'cancelled',
+      });
+      expect(cancelled.subject).toBe('[AgencyBoost] An entry on your calendar was cancelled');
+      expect(cancelled.body).toContain('https://app.agencyboost.test/calendar?date=2026-10-05');
+      expect(cancelled.body).not.toContain('/notifications');
+    });
+
     it('renders every template that declares an email channel, with no empty body', () => {
       // A template added without copy would otherwise ship an email saying nothing.
       const emailTemplates = Object.entries(TEMPLATE_CHANNELS)

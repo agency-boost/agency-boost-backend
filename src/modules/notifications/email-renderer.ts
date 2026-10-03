@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { describeNotification } from './inbox-copy';
+import { describeNotification, inboxAddress } from './inbox-copy';
 import { NotificationTemplate, RenderedMessage } from './notification.types';
 import { TemplateRenderer } from './notification.service';
 
@@ -68,12 +68,14 @@ export class EmailTemplateRenderer extends TemplateRenderer {
 
       default: {
         // Everything else already has words, written once for the inbox. Repeating them
-        // here is how the two channels would come to disagree.
+        // here is how the two channels would come to disagree. The link is the row's own
+        // address where it has one — a calendar notice opens its entry (ADR-0095) — and the
+        // inbox otherwise.
         const { title, detail } = describeNotification(templateId, payload);
         return compose(title, [
           detail ?? 'Open AgencyBoost to see what changed.',
           '',
-          `${origin}/notifications`,
+          `${origin}${inboxAddress(templateId, payload) ?? '/notifications'}`,
         ]);
       }
     }

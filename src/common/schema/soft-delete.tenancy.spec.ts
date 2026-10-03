@@ -75,6 +75,7 @@ import {
 } from '@/modules/coaching/coaching-session.schema';
 import { CoachingProfileRevisionSchema, CoachingProfileSchema } from '@/modules/coaching/coaching-profile.schema';
 import { LeaderNoteRevisionSchema, LeaderNoteSchema } from '@/modules/coaching/leader-note.schema';
+import { CalendarAttendeeSchema, CalendarEventSchema } from '@/modules/calendar/calendar-event.schema';
 
 /**
  * P2-T8: soft delete everywhere.
@@ -129,6 +130,8 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   // P11-T9. A note is cleared by a save and never deleted by a route; P19-T1's erasure reaches both.
   ['coachingProfiles', CoachingProfileSchema],
   ['leaderNotes', LeaderNoteSchema],
+  // P12-T2. A delete sets `deletedAt` and the entry leaves every calendar; P19-T1's erasure reaches it.
+  ['calendarEvents', CalendarEventSchema],
 ];
 
 /**
@@ -319,6 +322,13 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     'a text a note save replaced. **Append-only and never removed** apart from the note, which P19-T1\'s '
       + 'erasure cascade reaches whole',
   ],
+  // P12-T2: one member on a calendar entry, held inside the entry it belongs to.
+  [
+    'calendarAttendee (subdocument)',
+    CalendarAttendeeSchema,
+    'one member on a calendar entry: taken off by its organiser\'s edit or by leaving the office, while the '
+      + 'entry itself is soft-deleted whole',
+  ],
 ];
 
 const EXPORT_NAMES = new Map<Schema, string>([
@@ -397,6 +407,8 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [CoachingProfileRevisionSchema, 'CoachingProfileRevisionSchema'],
   [LeaderNoteSchema, 'LeaderNoteSchema'],
   [LeaderNoteRevisionSchema, 'LeaderNoteRevisionSchema'],
+  [CalendarEventSchema, 'CalendarEventSchema'],
+  [CalendarAttendeeSchema, 'CalendarAttendeeSchema'],
 ]);
 
 describe('soft delete', () => {

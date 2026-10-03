@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
@@ -9,6 +9,7 @@ import { NotificationTemplate } from '@/modules/notifications/notification.types
 import { HierarchyService } from './hierarchy.service';
 import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
+import { MemberDeparture } from './member-departure.port';
 import { visibleTo } from './directory.service';
 import { RoleChangeService, TeamMember } from './role-change.service';
 
@@ -44,6 +45,8 @@ export const REMOVAL_CONFIRMATION = 'REMOVE';
  */
 @Injectable()
 export class RemovalService {
+  private readonly logger = new Logger(RemovalService.name);
+
   constructor(
     private readonly members: MembershipRepository,
     private readonly hierarchy: HierarchyService,
@@ -52,6 +55,11 @@ export class RemovalService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationService,
     private readonly clock: Clock,
+    /**
+     * What the rest of the product does when somebody leaves (D-leave): the calendar's future entries.
+     * Optional so a spec of removal alone builds it without the calendar.
+     */
+    @Optional() private readonly departures: MemberDeparture | null = null,
   ) {}
 
   async remove(
@@ -255,6 +263,15 @@ export class RemovalService {
         reportsMoved: reports.length,
       },
     });
+
+    // D-leave: the modules that keep per-member records, after the removal is written. Never its failure.
+    if (this.departures) {
+      try {
+        await this.departures.left(ctx, membershipId);
+      } catch (err) {
+        this.logger.error({ err, membershipId }, 'failed to settle a departing member’s records');
+      }
+    }
 
     return this.roles.team(ctx);
   }

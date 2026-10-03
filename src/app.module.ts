@@ -204,6 +204,14 @@ import { CoachingProfileController } from '@/modules/coaching/coaching-profile.c
 import { CoachingRecordService } from '@/modules/coaching/coaching-record.service';
 import { CoachingRecordController } from '@/modules/coaching/coaching-record.controller';
 import { RemovalService } from '@/modules/org/removal.service';
+import { MemberDeparture } from '@/modules/org/member-departure.port';
+import { CalendarEvent, CalendarEventSchema } from '@/modules/calendar/calendar-event.schema';
+import { CalendarEventRepository } from '@/modules/calendar/calendar-event.repository';
+import { CalendarNotices } from '@/modules/calendar/calendar-notices';
+import { CalendarService } from '@/modules/calendar/calendar.service';
+import { CalendarPeopleService } from '@/modules/calendar/calendar-people.service';
+import { CalendarLeave } from '@/modules/calendar/calendar-leave';
+import { CalendarController } from '@/modules/calendar/calendar.controller';
 import { RoleChangeService } from '@/modules/org/role-change.service';
 
 @Module({
@@ -272,6 +280,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       // P11-T9: one coachee's capability ticks, and a leader's private note about them.
       { name: CoachingProfile.name, schema: CoachingProfileSchema },
       { name: LeaderNote.name, schema: LeaderNoteSchema },
+      // Phase 12: one calendar entry, however many people are on it.
+      { name: CalendarEvent.name, schema: CalendarEventSchema },
     ]),
   ],
   controllers: [
@@ -301,6 +311,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     CoachingProfileController,
     // P11-T10: the print of a finalized session, and the reader's own coaching.
     CoachingRecordController,
+    // Phase 12: the calendar.
+    CalendarController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -452,6 +464,14 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     LeaderNoteService,
     // P11-T10: the print, `/coaching/me`'s sessions, and a former coach's (ADR-0077, ADR-0078, ADR-0088).
     CoachingRecordService,
+    // Phase 12: the calendar — its entries, the picker and the compare list, its notices, and what
+    // leaving does to a member's future entries (D-leave), which `RemovalService` calls through the port.
+    CalendarEventRepository,
+    CalendarNotices,
+    CalendarService,
+    CalendarPeopleService,
+    CalendarLeave,
+    { provide: MemberDeparture, useExisting: CalendarLeave },
     GroupService,
     AdminDelegationService,
   ],

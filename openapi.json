@@ -16264,6 +16264,865 @@
         ],
         "x-required-permission": "coaching_session:export_pdf"
       }
+    },
+    "/api/v1/calendar/entries": {
+      "get": {
+        "description": "Your own calendar — every entry you organise, and every one you are on and have not declined — for the week or the month holding `date`, with the period’s days, the dates ‹ and › ask for, and the office’s today and now: nothing is worked out in the browser. Weeks run Monday to Sunday in the office’s zone; a month is padded to whole weeks, and its padding days carry their entries too.\n\nWith `for`, the week of somebody you coach, beside your own: everything they organised in full, and an entry they only attend in full only when you could read it yourself — otherwise as a busy block. Each such read is recorded.\n\n**Requires `calendar_entry:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CalendarController_read_v1",
+        "parameters": [
+          {
+            "name": "view",
+            "required": false,
+            "in": "query",
+            "description": "The period to answer.",
+            "schema": {
+              "default": "week",
+              "enum": [
+                "week",
+                "month"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "date",
+            "required": false,
+            "in": "query",
+            "description": "An office date in the week or month to answer; the office’s today when omitted.",
+            "schema": {
+              "example": "2026-09-28",
+              "type": "string"
+            }
+          },
+          {
+            "name": "for",
+            "required": false,
+            "in": "query",
+            "description": "A member you coach, whose week to compare beside your own. `view=week` only. Anybody else — yourself included — is not found; sent empty, it is refused rather than read as your own.",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarPeriodDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `calendar_entry:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — `for` names nobody you coach: a peer, somebody in another team, a member who has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A week or a month of a calendar",
+        "tags": [
+          "calendar"
+        ],
+        "x-required-permission": "calendar_entry:read"
+      },
+      "post": {
+        "description": "An entry on your own calendar, of one of the five types: Travel with two office dates, every other type with an office date and two times, the end after the start on that date. Each invitee is asked to accept or decline, and told.\n\n**Requires `calendar_entry:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CalendarController_create_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCalendarEntryDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarEntryDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `calendar_entry:create`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — `details.inviteeIds` names each invitee who is not an active member of your office, deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create an entry",
+        "tags": [
+          "calendar"
+        ],
+        "x-required-permission": "calendar_entry:create"
+      }
+    },
+    "/api/v1/calendar/people": {
+      "get": {
+        "description": "The active field members of your office, never you, searched by a part of their full name: each person’s name, rung, leader’s name, and where they sit relative to you — your direct unit, your group, other units, or your leadership — in that order, then down the tree. Paged by a cursor.\n\n**Requires `calendar_invitee:search`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CalendarController_searchPeople_v1",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Part of a full name, any case. Empty lists everybody.",
+            "schema": {
+              "maxLength": 100,
+              "example": "rina",
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "The `nextCursor` of the page before.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 50,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarPeoplePageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `calendar_invitee:search`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "People you can invite",
+        "tags": [
+          "calendar"
+        ],
+        "x-required-permission": "calendar_invitee:search"
+      }
+    },
+    "/api/v1/calendar/downline": {
+      "get": {
+        "description": "Everybody you coach now, at any depth: your direct agents, then each leader who answers to you with their whole team after them. Nobody when you lead nobody. Not paginated.\n\n**Requires `calendar_entry:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CalendarController_downline_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarDownlineDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — this read takes no query parameter. One sent, of any name, is refused, and `details` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `calendar_entry:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "People whose calendar you can compare",
+        "tags": [
+          "calendar"
+        ],
+        "x-required-permission": "calendar_entry:read"
+      }
+    },
+    "/api/v1/calendar/blocks": {
+      "post": {
+        "description": "Your own entry, placed straight onto their calendar with no approval needed: they are on it as placed, read it and cannot answer it, and are told once. Others may be invited beside them. You edit and delete it as any entry of yours.\n\n**Requires `calendar_entry:block`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CalendarController_block_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCalendarBlockDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarEntryDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `calendar_entry:block`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — `membershipId` names nobody you coach (a peer, somebody in another team, a member who has left, yourself, nobody’s id), or `details.inviteeIds` names invitees who are not active members — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Block time on somebody you coach",
+        "tags": [
+          "calendar"
+        ],
+        "x-required-permission": "calendar_entry:block"
+      }
+    },
+    "/api/v1/calendar/entries/{entryId}": {
+      "get": {
+        "description": "An entry you organise, or one you are on — whatever your answer, a declined one included, or placed. Anybody else is not found.\n\n**Requires `calendar_entry:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CalendarController_readOne_v1",
+        "parameters": [
+          {
+            "name": "entryId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarEntryDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `calendar_entry:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One entry",
+        "tags": [
+          "calendar"
+        ],
+        "x-required-permission": "calendar_entry:read"
+      },
+      "patch": {
+        "description": "Yours alone, pinned to the version you read. A field sent replaces the stored one; `inviteeIds`, when sent, is the whole invitation list — somebody added is invited, somebody dropped leaves it, and somebody kept keeps their answer. Everybody on it is told when its date or time moves.\n\n**Requires `calendar_entry:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CalendarController_update_v1",
+        "parameters": [
+          {
+            "name": "entryId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCalendarEntryDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarEntryDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `calendar_entry:update`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VERSION_CONFLICT` — it changed since you read it. Read it again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Edit an entry",
+        "tags": [
+          "calendar"
+        ],
+        "x-required-permission": "calendar_entry:update"
+      },
+      "delete": {
+        "description": "Yours alone, pinned to the version you read. It leaves every calendar it was on, and everybody on it who had not declined is told.\n\n**Requires `calendar_entry:delete`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CalendarController_remove_v1",
+        "parameters": [
+          {
+            "name": "entryId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "required": true,
+            "in": "query",
+            "description": "The `version` you read.",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarDeletedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `calendar_entry:delete`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VERSION_CONFLICT` — it changed since you read it. Read it again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete an entry",
+        "tags": [
+          "calendar"
+        ],
+        "x-required-permission": "calendar_entry:delete"
+      }
+    },
+    "/api/v1/calendar/entries/{entryId}/answer": {
+      "post": {
+        "description": "Your own answer to an entry you are invited to, and nothing else; you can change it later. A declined entry leaves your calendar and stays readable from its notice.\n\n**Requires `calendar_entry:answer`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CalendarController_answer_v1",
+        "parameters": [
+          {
+            "name": "entryId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerCalendarEntryDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarEntryDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `calendar_entry:answer`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CALENDAR_BLOCK_NOT_ANSWERABLE` — the time was placed on you by a leader above you: there is nothing to accept or decline.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Accept or decline an invitation",
+        "tags": [
+          "calendar"
+        ],
+        "x-required-permission": "calendar_entry:answer"
+      }
     }
   },
   "info": {
@@ -23665,6 +24524,833 @@
           "tips",
           "leadActions",
           "actionItems"
+        ]
+      },
+      "CalendarBusyBlockDto": {
+        "type": "object",
+        "properties": {
+          "allDay": {
+            "type": "boolean",
+            "description": "Travel: two dates and no times."
+          },
+          "date": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-28",
+            "description": "A timed entry’s office date; `null` on Travel."
+          },
+          "start": {
+            "type": "string",
+            "nullable": true,
+            "example": "09:00",
+            "description": "A timed entry’s start, `HH:mm`; `null` on Travel."
+          },
+          "end": {
+            "type": "string",
+            "nullable": true,
+            "example": "09:30",
+            "description": "A timed entry’s end, `HH:mm`, `00:00` being midnight at the end of its date; `null` on Travel."
+          },
+          "startsOn": {
+            "type": "string",
+            "nullable": true,
+            "example": null,
+            "description": "Travel’s departure date; `null` otherwise."
+          },
+          "endsOn": {
+            "type": "string",
+            "nullable": true,
+            "example": null,
+            "description": "Travel’s return date, inclusive; `null` otherwise."
+          },
+          "startsAt": {
+            "type": "string",
+            "example": "2026-09-28T02:00:00.000Z",
+            "description": "The start, a UTC instant."
+          },
+          "endsAt": {
+            "type": "string",
+            "example": "2026-09-28T02:30:00.000Z",
+            "description": "The end, a UTC instant, exclusive."
+          },
+          "busy": {
+            "type": "boolean",
+            "example": true,
+            "description": "Always `true`. An entry a compared member attends that you could not read in your own right, by its time and nothing else: no id, no type, no title, no notes, no people."
+          }
+        },
+        "required": [
+          "allDay",
+          "date",
+          "start",
+          "end",
+          "startsOn",
+          "endsOn",
+          "startsAt",
+          "endsAt",
+          "busy"
+        ]
+      },
+      "CalendarDayDto": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "example": "2026-09-28"
+          },
+          "inPeriod": {
+            "type": "boolean",
+            "description": "The period’s own day; `false` for a month’s padding days before the 1st and after its last."
+          }
+        },
+        "required": [
+          "date",
+          "inPeriod"
+        ]
+      },
+      "CalendarNowDto": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "string",
+            "example": "2026-09-28T02:45:00.000Z",
+            "description": "Now, a UTC instant."
+          },
+          "minute": {
+            "type": "number",
+            "example": 585,
+            "description": "Now as the office’s minute of the day, 0 to 1439: where the now-line is drawn."
+          }
+        },
+        "required": [
+          "at",
+          "minute"
+        ]
+      },
+      "CalendarRungDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "AAB",
+            "description": "The rung’s stable code on the company’s ladder."
+          },
+          "label": {
+            "type": "string",
+            "example": "Associate Agency Builder",
+            "description": "The ladder’s own label for it."
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
+      "CalendarSubjectDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Sari Puspita",
+            "description": "Their full name. A member who has left keeps theirs."
+          },
+          "rung": {
+            "$ref": "#/components/schemas/CalendarRungDto"
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "rung"
+        ]
+      },
+      "CalendarPeriodDto": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "type": "string",
+            "enum": [
+              "week",
+              "month"
+            ]
+          },
+          "from": {
+            "type": "string",
+            "example": "2026-09-28",
+            "description": "The first office date drawn: a week’s Monday, or a month’s first padded Monday."
+          },
+          "to": {
+            "type": "string",
+            "example": "2026-10-04",
+            "description": "The last office date drawn, inclusive: a Sunday."
+          },
+          "month": {
+            "type": "string",
+            "nullable": true,
+            "example": null,
+            "description": "`YYYY-MM` in Month; `null` in Week."
+          },
+          "days": {
+            "description": "Every day from `from` to `to`, Monday first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CalendarDayDto"
+            }
+          },
+          "previous": {
+            "type": "string",
+            "example": "2026-09-21",
+            "description": "The `date` ‹ asks for: the Monday of the week before, or the first of the month before."
+          },
+          "next": {
+            "type": "string",
+            "example": "2026-10-05",
+            "description": "The `date` › asks for."
+          },
+          "today": {
+            "type": "string",
+            "example": "2026-09-28",
+            "description": "The office’s today, in its own zone — never the browser’s."
+          },
+          "now": {
+            "$ref": "#/components/schemas/CalendarNowDto"
+          },
+          "subject": {
+            "description": "Whose calendar this is: yours, or the member you compared.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CalendarSubjectDto"
+              }
+            ]
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CalendarEntryDto"
+                },
+                {
+                  "$ref": "#/components/schemas/CalendarBusyBlockDto"
+                }
+              ]
+            },
+            "description": "By start, then id: each an entry, or — in a compared read, for an entry the member only attends that you could not read in your own right — a busy block. Everything overlapping the period."
+          }
+        },
+        "required": [
+          "view",
+          "from",
+          "to",
+          "month",
+          "days",
+          "previous",
+          "next",
+          "today",
+          "now",
+          "subject",
+          "entries"
+        ]
+      },
+      "CalendarDownlineRowDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Rina Wijaya"
+          },
+          "rung": {
+            "$ref": "#/components/schemas/CalendarRungDto"
+          },
+          "leaderName": {
+            "type": "string",
+            "nullable": true,
+            "example": "Sari Puspita",
+            "description": "Their leader’s full name."
+          },
+          "direct": {
+            "type": "boolean",
+            "description": "Their current leader is you: depth 1."
+          },
+          "depth": {
+            "type": "number",
+            "example": 1,
+            "description": "Levels below you: 1 answers to you directly."
+          },
+          "group": {
+            "type": "string",
+            "enum": [
+              "direct_unit",
+              "group"
+            ],
+            "description": "`direct_unit` *Direct unit*; `group` *AAB & their teams (group)*, each team after its head."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "rung",
+          "leaderName",
+          "direct",
+          "depth",
+          "group"
+        ]
+      },
+      "CalendarDownlineDto": {
+        "type": "object",
+        "properties": {
+          "people": {
+            "description": "Everybody you coach now; nobody when you lead nobody.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CalendarDownlineRowDto"
+            }
+          }
+        },
+        "required": [
+          "people"
+        ]
+      },
+      "CreateCalendarBlockDto": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 120,
+            "example": "Weekly unit standup",
+            "description": "Optional; trimmed. An entry with none is drawn *(untitled event)*."
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 1000,
+            "example": "Zoom — zoom.us/j/91827364",
+            "description": "*Notes / location*. Optional; trimmed."
+          },
+          "date": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-28",
+            "description": "A timed entry’s office date."
+          },
+          "start": {
+            "type": "string",
+            "nullable": true,
+            "example": "09:00",
+            "description": "A timed entry’s start, the office’s wall clock."
+          },
+          "end": {
+            "type": "string",
+            "nullable": true,
+            "example": "09:30",
+            "description": "A timed entry’s end, after its start on the same date; `00:00` is midnight at the end of it."
+          },
+          "startsOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-01",
+            "description": "Travel’s *Departure date*, an office date."
+          },
+          "endsOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-02",
+            "description": "Travel’s *Return date*: on or after the departure, at most 31 days inclusive."
+          },
+          "inviteeIds": {
+            "maxItems": 50,
+            "uniqueItems": true,
+            "description": "Members of your office to invite, by membership: active field members only, never yourself. An id that is not one is named in the 404’s `details.inviteeIds`.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "meeting",
+              "coaching",
+              "client",
+              "task",
+              "travel"
+            ],
+            "description": "Travel takes two dates; every other type a date and two times."
+          },
+          "membershipId": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "The member the time is placed on: somebody you coach. They are on it as placed, with no answer to give."
+          }
+        },
+        "required": [
+          "type",
+          "membershipId"
+        ]
+      },
+      "CalendarPersonDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Sari Puspita",
+            "description": "Their full name. A member who has left keeps theirs."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name"
+        ]
+      },
+      "CalendarInviteeDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Sari Puspita",
+            "description": "Their full name. A member who has left keeps theirs."
+          },
+          "placed": {
+            "type": "boolean",
+            "description": "The member a block was placed on: on it with no answer to give."
+          },
+          "answer": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "accepted",
+              "declined"
+            ],
+            "description": "Their answer — **to the organiser alone**, and never on a placed member. Absent for anybody else."
+          },
+          "readerCoaches": {
+            "type": "boolean",
+            "description": "A *1:1 coaching* entry, and you coach this person now: their chip opens their coaching session. `false` everywhere else."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "placed",
+          "readerCoaches"
+        ]
+      },
+      "CalendarEntryDto": {
+        "type": "object",
+        "properties": {
+          "allDay": {
+            "type": "boolean",
+            "description": "Travel: two dates and no times."
+          },
+          "date": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-28",
+            "description": "A timed entry’s office date; `null` on Travel."
+          },
+          "start": {
+            "type": "string",
+            "nullable": true,
+            "example": "09:00",
+            "description": "A timed entry’s start, `HH:mm`; `null` on Travel."
+          },
+          "end": {
+            "type": "string",
+            "nullable": true,
+            "example": "09:30",
+            "description": "A timed entry’s end, `HH:mm`, `00:00` being midnight at the end of its date; `null` on Travel."
+          },
+          "startsOn": {
+            "type": "string",
+            "nullable": true,
+            "example": null,
+            "description": "Travel’s departure date; `null` otherwise."
+          },
+          "endsOn": {
+            "type": "string",
+            "nullable": true,
+            "example": null,
+            "description": "Travel’s return date, inclusive; `null` otherwise."
+          },
+          "startsAt": {
+            "type": "string",
+            "example": "2026-09-28T02:00:00.000Z",
+            "description": "The start, a UTC instant."
+          },
+          "endsAt": {
+            "type": "string",
+            "example": "2026-09-28T02:30:00.000Z",
+            "description": "The end, a UTC instant, exclusive."
+          },
+          "entryId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "number",
+            "example": 1,
+            "description": "What an edit or a delete sends back. An answer does not move it."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "meeting",
+              "coaching",
+              "client",
+              "task",
+              "travel"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "example": "Weekly unit standup",
+            "description": "`''` when none: drawn *(untitled event)*."
+          },
+          "notes": {
+            "type": "string",
+            "example": "Zoom — zoom.us/j/91827364",
+            "description": "*Notes / location*; `''` when none."
+          },
+          "organiser": {
+            "description": "Whose entry it is, and the only member who edits or deletes it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CalendarPersonDto"
+              }
+            ]
+          },
+          "invitees": {
+            "description": "Everybody else on it, the placed member included.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CalendarInviteeDto"
+            }
+          },
+          "readerIs": {
+            "type": "string",
+            "enum": [
+              "organiser",
+              "invitee",
+              "placed",
+              "ancestor"
+            ],
+            "description": "How you stand to it: its `organiser` (*Delete* and *Edit*); an `invitee` (*Decline* and *Accept*); the member a block was `placed` on, or an `ancestor` reading a compared calendar (*Close* alone)."
+          },
+          "myAnswer": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "accepted",
+              "declined"
+            ],
+            "nullable": true,
+            "description": "Your own answer as an invitee; `null` otherwise."
+          }
+        },
+        "required": [
+          "allDay",
+          "date",
+          "start",
+          "end",
+          "startsOn",
+          "endsOn",
+          "startsAt",
+          "endsAt",
+          "entryId",
+          "version",
+          "type",
+          "title",
+          "notes",
+          "organiser",
+          "invitees",
+          "readerIs",
+          "myAnswer"
+        ]
+      },
+      "CreateCalendarEntryDto": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 120,
+            "example": "Weekly unit standup",
+            "description": "Optional; trimmed. An entry with none is drawn *(untitled event)*."
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 1000,
+            "example": "Zoom — zoom.us/j/91827364",
+            "description": "*Notes / location*. Optional; trimmed."
+          },
+          "date": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-28",
+            "description": "A timed entry’s office date."
+          },
+          "start": {
+            "type": "string",
+            "nullable": true,
+            "example": "09:00",
+            "description": "A timed entry’s start, the office’s wall clock."
+          },
+          "end": {
+            "type": "string",
+            "nullable": true,
+            "example": "09:30",
+            "description": "A timed entry’s end, after its start on the same date; `00:00` is midnight at the end of it."
+          },
+          "startsOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-01",
+            "description": "Travel’s *Departure date*, an office date."
+          },
+          "endsOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-02",
+            "description": "Travel’s *Return date*: on or after the departure, at most 31 days inclusive."
+          },
+          "inviteeIds": {
+            "maxItems": 50,
+            "uniqueItems": true,
+            "description": "Members of your office to invite, by membership: active field members only, never yourself. An id that is not one is named in the 404’s `details.inviteeIds`.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "meeting",
+              "coaching",
+              "client",
+              "task",
+              "travel"
+            ],
+            "description": "Travel takes two dates; every other type a date and two times."
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "UpdateCalendarEntryDto": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 120,
+            "example": "Weekly unit standup",
+            "description": "Optional; trimmed. An entry with none is drawn *(untitled event)*."
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 1000,
+            "example": "Zoom — zoom.us/j/91827364",
+            "description": "*Notes / location*. Optional; trimmed."
+          },
+          "date": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-28",
+            "description": "A timed entry’s office date."
+          },
+          "start": {
+            "type": "string",
+            "nullable": true,
+            "example": "09:00",
+            "description": "A timed entry’s start, the office’s wall clock."
+          },
+          "end": {
+            "type": "string",
+            "nullable": true,
+            "example": "09:30",
+            "description": "A timed entry’s end, after its start on the same date; `00:00` is midnight at the end of it."
+          },
+          "startsOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-01",
+            "description": "Travel’s *Departure date*, an office date."
+          },
+          "endsOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-02",
+            "description": "Travel’s *Return date*: on or after the departure, at most 31 days inclusive."
+          },
+          "inviteeIds": {
+            "maxItems": 50,
+            "uniqueItems": true,
+            "description": "Members of your office to invite, by membership: active field members only, never yourself. An id that is not one is named in the 404’s `details.inviteeIds`.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "version": {
+            "type": "number",
+            "example": 1,
+            "description": "The `version` you read. Refused with `409 VERSION_CONFLICT` when the entry has moved on."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "meeting",
+              "coaching",
+              "client",
+              "task",
+              "travel"
+            ],
+            "description": "A change between Travel and a timed type sends the other kind’s fields."
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "CalendarDeletedDto": {
+        "type": "object",
+        "properties": {
+          "entryId": {
+            "type": "string"
+          },
+          "deletedAt": {
+            "type": "string",
+            "example": "2026-09-28T03:00:00.000Z",
+            "description": "When it was deleted. It leaves every calendar it was on."
+          }
+        },
+        "required": [
+          "entryId",
+          "deletedAt"
+        ]
+      },
+      "AnswerCalendarEntryDto": {
+        "type": "object",
+        "properties": {
+          "answer": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "declined"
+            ],
+            "description": "Your own answer. You can change it later."
+          }
+        },
+        "required": [
+          "answer"
+        ]
+      },
+      "CalendarPersonRowDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Rina Wijaya"
+          },
+          "rung": {
+            "$ref": "#/components/schemas/CalendarRungDto"
+          },
+          "leaderName": {
+            "type": "string",
+            "nullable": true,
+            "example": "Sari Puspita",
+            "description": "Their leader’s full name; `null` for somebody with none."
+          },
+          "direct": {
+            "type": "boolean",
+            "description": "Their current leader is you: a direct report, whose tag is the rung alone. Everybody else’s adds *· under* their leader’s name."
+          },
+          "group": {
+            "type": "string",
+            "enum": [
+              "direct_unit",
+              "group",
+              "other",
+              "leadership"
+            ],
+            "description": "Where they sit relative to you: `direct_unit` *Your direct unit*; `group` *Your group (AAB teams)*; `other` *Other units in your KPM*; `leadership` *KPM leadership*, your upline."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "rung",
+          "leaderName",
+          "direct",
+          "group"
+        ]
+      },
+      "CalendarPageDto": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "nullable": true
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "The next page’s `cursor`; `null` on the last."
+          },
+          "limit": {
+            "type": "number",
+            "example": 50
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cursor",
+          "nextCursor",
+          "limit",
+          "hasMore"
+        ]
+      },
+      "CalendarPeoplePageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "In the picker’s group order, then tree order, names A to Z within a level.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CalendarPersonRowDto"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/CalendarPageDto"
+          }
+        },
+        "required": [
+          "items",
+          "page"
         ]
       },
       "StatusAckDto": {

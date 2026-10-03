@@ -117,6 +117,12 @@ import { CoachingProfileService } from '@/modules/coaching/coaching-profile.serv
 import { LeaderNote, LeaderNoteSchema } from '@/modules/coaching/leader-note.schema';
 import { LeaderNoteRepository } from '@/modules/coaching/leader-note.repository';
 import { LeaderNoteService } from '@/modules/coaching/leader-note.service';
+import { CalendarEvent, CalendarEventSchema } from '@/modules/calendar/calendar-event.schema';
+import { CalendarEventRepository } from '@/modules/calendar/calendar-event.repository';
+import { CalendarNotices } from '@/modules/calendar/calendar-notices';
+import { CalendarService } from '@/modules/calendar/calendar.service';
+import { CalendarPeopleService } from '@/modules/calendar/calendar-people.service';
+import { CalendarLeave } from '@/modules/calendar/calendar-leave';
 
 /**
  * The configuration module, wired the way the app wires it.
@@ -479,6 +485,22 @@ export function configModule(
     leaderNoteRows, coach, memberships, new MemberNames(memberships, users as never), audit, clock,
   );
 
+  /*
+   * P12: the calendar — its entries, the people picker and the compare list, its notices through the same
+   * recorder (or the real service, when a spec passes one), and D-leave's hook for a removal spec to hand
+   * `RemovalService`.
+   */
+  const calendarEntries = new CalendarEventRepository(model(CalendarEvent.name, CalendarEventSchema) as never);
+  const calendarNotices = new CalendarNotices(notifier, memberships);
+  const calendar = new CalendarService(
+    calendarEntries, memberships, coach, new MemberNames(memberships, users as never), orgLevels,
+    new TenantDay(kpms as never, clock), calendarNotices, subjectReads, audit, clock,
+  );
+  const calendarPeople = new CalendarPeopleService(
+    memberships, coach, new MemberNames(memberships, users as never), orgLevels, new TenantDay(kpms as never, clock),
+  );
+  const calendarLeave = new CalendarLeave(calendarEntries, calendarNotices, new TenantDay(kpms as never, clock), clock);
+
   return {
     activity, ratios, leads, config, provisioning, templates, templateService, audit, clock, changes,
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
@@ -490,6 +512,7 @@ export function configModule(
     coachingSnapshots, coachingSession, releasedNotifications,
     coachingProfiles, coachingProfile, leaderNoteRows, leaderNotes,
     coachingRecord,
+    calendarEntries, calendarNotices, calendar, calendarPeople, calendarLeave,
   };
 }
 

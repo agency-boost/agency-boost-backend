@@ -241,6 +241,14 @@ export const ErrorCode = {
   /** An Owner's or Admin's reopen of a session whose coach no longer coaches the coachee. `409`. */
   COACHING_REOPEN_COACH_NOT_CURRENT: 'COACHING_REOPEN_COACH_NOT_CURRENT',
 
+  /*
+   * Calendar (P12-T4; `functional/calendar.md`, *Errors*). Everything outside a reader's reach is
+   * `NOT_FOUND`, never a calendar code: an entry the reader is not on, a write by anybody but its
+   * organiser, a compare or a block outside `COACH`.
+   */
+  /** An answer from the member a block was placed on: a placement, not a request (ADR-0098). `409`. */
+  CALENDAR_BLOCK_NOT_ANSWERABLE: 'CALENDAR_BLOCK_NOT_ANSWERABLE',
+
   // Validation
   VALIDATION_FAILED: 'VALIDATION_FAILED',
   VALIDATION_UNKNOWN_FIELD: 'VALIDATION_UNKNOWN_FIELD',

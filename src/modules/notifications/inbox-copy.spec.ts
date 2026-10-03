@@ -108,11 +108,83 @@ describe('inbox copy', () => {
       }
     });
 
-    it('P11-T10 AC-8 no other inbox item changes: every other template opens nowhere', () => {
-      for (const id of IN_APP_TEMPLATES.filter((t) => t !== NotificationTemplate.COACHING_SESSION_FINALIZED)) {
-        expect([id, inboxAddress(id, { sessionId: SESSION })]).toEqual([id, null]);
+    it('P11-T10 AC-8 no other inbox item changes: every template but the session’s and the calendar’s opens nowhere', () => {
+      const ADDRESSED: string[] = [
+        NotificationTemplate.COACHING_SESSION_FINALIZED, NotificationTemplate.CALENDAR_INVITATION,
+        NotificationTemplate.CALENDAR_BLOCK_PLACED, NotificationTemplate.CALENDAR_ENTRY_CHANGED,
+      ];
+      for (const id of IN_APP_TEMPLATES.filter((t) => !ADDRESSED.includes(t))) {
+        expect([id, inboxAddress(id, { sessionId: SESSION, entryId: SESSION, date: '2026-10-05' })]).toEqual([id, null]);
       }
       expect(inboxAddress('something.new', { sessionId: SESSION })).toBeNull();
+    });
+  });
+
+  /*
+   * **ADR-0095: the calendar's three notices** (P12-T4 AC-7; `functional/calendar.md`, *Notifications*).
+   * General words in ADR-0096's terms — the payload carries ids and a date and nothing anybody typed —
+   * and an address that opens the entry at its week, or the week a cancelled entry was in.
+   */
+  describe('the calendar’s notices', () => {
+    const ENTRY = '66f0000000000000000000e1';
+    const DATE = '2026-10-05';
+
+    it('P12-T4 AC-7 an invitation, a block and a change each say their own words, a cancellation its second wording', () => {
+      expect(describeNotification(NotificationTemplate.CALENDAR_INVITATION, { entryId: ENTRY, date: DATE })).toEqual({
+        title: 'You have a new invitation', detail: 'Open it on your calendar to accept or decline.',
+      });
+      expect(describeNotification(NotificationTemplate.CALENDAR_BLOCK_PLACED, { entryId: ENTRY, date: DATE })).toEqual({
+        title: 'Time was blocked on your calendar', detail: 'A leader above you placed it. Open it to see when.',
+      });
+      expect(describeNotification(NotificationTemplate.CALENDAR_ENTRY_CHANGED, { entryId: ENTRY, date: DATE, change: 'moved' }))
+        .toEqual({ title: 'An entry on your calendar has moved', detail: 'Open it to see the new time.' });
+      expect(describeNotification(NotificationTemplate.CALENDAR_ENTRY_CHANGED, { entryId: ENTRY, date: DATE, change: 'cancelled' }))
+        .toEqual({ title: 'An entry on your calendar was cancelled', detail: 'It is no longer on your calendar.' });
+    });
+
+    it('P12-T4 AC-7 the words use none of the six words, and name nothing anybody typed (ADR-0096)', () => {
+      const SIX = /\b(office|KPM|reports to|tagged to|untagged|unassigned)\b/i;
+      const payloads = [{}, { change: 'moved' }, { change: 'cancelled' }];
+      for (const id of [
+        NotificationTemplate.CALENDAR_INVITATION, NotificationTemplate.CALENDAR_BLOCK_PLACED, NotificationTemplate.CALENDAR_ENTRY_CHANGED,
+      ]) {
+        for (const payload of payloads) {
+          const { title, detail } = describeNotification(id, { ...payload, title: 'Client visit — Kusuma' });
+          expect([id, SIX.test(`${title} ${detail}`), `${title} ${detail}`.includes('Kusuma')]).toEqual([id, false, false]);
+        }
+      }
+    });
+
+    it('P12-T4 AC-7 each row opens its entry at its week; a cancellation opens the week it was in', () => {
+      for (const id of [NotificationTemplate.CALENDAR_INVITATION, NotificationTemplate.CALENDAR_BLOCK_PLACED]) {
+        expect(inboxAddress(id, { entryId: ENTRY, date: DATE })).toBe(`/calendar?entry=${ENTRY}&date=${DATE}`);
+      }
+      expect(inboxAddress(NotificationTemplate.CALENDAR_ENTRY_CHANGED, { entryId: ENTRY, date: DATE, change: 'moved' }))
+        .toBe(`/calendar?entry=${ENTRY}&date=${DATE}`);
+      expect(inboxAddress(NotificationTemplate.CALENDAR_ENTRY_CHANGED, { entryId: ENTRY, date: DATE, change: 'cancelled' }))
+        .toBe(`/calendar?date=${DATE}`);
+    });
+
+    it('P12-T4 AC-7 a payload without a well-formed id or date opens /calendar, never a broken address', () => {
+      const broken = [{}, { entryId: ENTRY }, { date: DATE }, { entryId: '../admin', date: DATE }, { entryId: ENTRY, date: '5 Oct' },
+        { entryId: 42, date: DATE }, { entryId: `${ENTRY}&x=1`, date: DATE }];
+      for (const payload of broken) {
+        for (const id of [NotificationTemplate.CALENDAR_INVITATION, NotificationTemplate.CALENDAR_BLOCK_PLACED]) {
+          expect(inboxAddress(id, payload)).toBe('/calendar');
+        }
+        expect(inboxAddress(NotificationTemplate.CALENDAR_ENTRY_CHANGED, { ...payload, change: 'moved' })).toBe('/calendar');
+      }
+      expect(inboxAddress(NotificationTemplate.CALENDAR_ENTRY_CHANGED, { change: 'cancelled' })).toBe('/calendar');
+      expect(inboxAddress(NotificationTemplate.CALENDAR_ENTRY_CHANGED, { change: 'cancelled', date: '2026/10/05' })).toBe('/calendar');
+    });
+
+    it('P12-T4 AC-7 all three reach the inbox and the email (ADR-0010)', () => {
+      for (const id of [
+        NotificationTemplate.CALENDAR_INVITATION, NotificationTemplate.CALENDAR_BLOCK_PLACED, NotificationTemplate.CALENDAR_ENTRY_CHANGED,
+      ]) {
+        expect([id, TEMPLATE_CHANNELS[id]]).toEqual([id, ['in_app', 'email']]);
+        expect(IN_APP_TEMPLATES).toContain(id);
+      }
     });
   });
 });
