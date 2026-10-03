@@ -55,6 +55,15 @@ describe('a coalesced notice (P11-T8)', () => {
     payload: { byName: 'Agus Salim', period: '2026', annualApeTargetMinor },
   });
   const release = (coalesceKey = KEY) => service.releaseHeld(KPM, coalesceKey, NotificationTemplate.GOAL_SET_BY_LEADER);
+  /** The one row, once its email is no longer `pending`: `send` records the outcome after it has answered. */
+  const emailSettles = async () => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const [row] = await rows();
+      if ((row?.delivery as Record<string, { status: string }> | undefined)?.email?.status !== 'pending') return row;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('The email never settled');
+  };
 
   beforeAll(async () => {
     await startMongo();
@@ -75,6 +84,7 @@ describe('a coalesced notice (P11-T8)', () => {
       mongoose.model(NotificationPreferences.name) as never,
       new PayloadRenderer(),
       clock,
+      { record: async () => undefined } as never,
       [inApp, email],
     );
   });
@@ -178,7 +188,7 @@ describe('a coalesced notice (P11-T8)', () => {
       await clearCollections();
       service = new NotificationService(
         mongoose.model(Notification.name) as never, new NotificationRepository(mongoose.model(Notification.name) as never),
-        mongoose.model(NotificationPreferences.name) as never, new PayloadRenderer(), clock, [inApp],
+        mongoose.model(NotificationPreferences.name) as never, new PayloadRenderer(), clock, { record: async () => undefined } as never, [inApp],
       );
       await goalSet(500);
       await release();
@@ -203,9 +213,11 @@ describe('a coalesced notice (P11-T8)', () => {
       userId: 'u-coachee', kpmId: KPM, membershipId: 'm-coachee',
       templateId: NotificationTemplate.GOAL_SET_BY_LEADER, payload: { byName: 'Agus Salim', period: '2026' },
     });
-    const [row] = await rows();
-    expect(row).toMatchObject({ coalesceKey: null, delivery: { in_app: { status: 'sent' }, email: { status: 'sent' } } });
+    // Started at once, and recorded when it settles — after `send` has answered (P12.1-T1).
     expect(email.sent).toHaveLength(1);
+    expect(await emailSettles()).toMatchObject({
+      coalesceKey: null, delivery: { in_app: { status: 'sent' }, email: { status: 'sent' } },
+    });
   });
 
   /*

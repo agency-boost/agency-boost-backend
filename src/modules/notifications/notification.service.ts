@@ -5,8 +5,10 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { can } from '@/modules/rbac/permissions';
 import { describeNotification, IN_APP_TEMPLATES, inboxAddress } from './inbox-copy';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { isValidObjectId, Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
+import { INBOX_PAGE } from '@/domain/constants';
+import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationRepository } from './notification.repository';
 import {
   Notification, NotificationDocument,
@@ -22,6 +24,26 @@ type Delivery = { status: DeliveryStatus; at?: Date; error?: string };
 
 /** The recipient's choices, as `send` reads them. `null` when they have made none. */
 type Preferences = { optedOutChannels?: NotificationChannel[]; mutedTemplates?: string[] } | null;
+
+/**
+ * **The channels delivered inside the request** (P12.1-T1): the in-app channel, whose delivery *is* the
+ * row `send` writes. Every other channel (email today, WhatsApp later) goes to a server this product does
+ * not run, so it is dispatched without being awaited: recorded `pending` on the row, and its outcome
+ * recorded when it settles.
+ */
+const INLINE_CHANNELS: readonly NotificationChannel[] = ['in_app'];
+
+/** An external channel's delivery, started and not awaited, whose outcome is recorded when it settles. */
+interface Dispatch {
+  channel: NotificationChannel;
+  outcome: Promise<Delivery>;
+}
+
+/** What `deliver` decided: the delivery map to write, and the deliveries still in flight. */
+interface Delivered {
+  delivery: Record<string, Delivery>;
+  dispatched: Dispatch[];
+}
 
 /** A coalesced notice (P11-T8): one notification for several writes carrying the same key. */
 export interface CoalescedSendRequest extends SendRequest {
@@ -85,10 +107,36 @@ export interface InboxItem {
   readAt: string | null;
 }
 
+/**
+ * One page of somebody's own inbox, newest first (P12.1-T4). `unread` counts the whole inbox, not the
+ * page, so the bell and the list can never disagree; `total` is how many items the inbox holds.
+ */
 export interface Inbox {
   items: InboxItem[];
   unread: number;
+  total: number;
+  page: number;
+  pageSize: number;
 }
+
+/** One notification's read state after it was marked, with the inbox's unread count beside it. */
+export interface NotificationReadState {
+  notificationId: string;
+  readAt: string | null;
+  unread: number;
+}
+
+/** The inbox's unread count after *Mark all read*. */
+export interface UnreadCount {
+  unread: number;
+}
+
+/**
+ * The furthest a page may skip, as an int32 so the driver sends it as one. A page past the last is an
+ * empty page however far past it is, and a `page` near `Number.MAX_SAFE_INTEGER` must not reach the
+ * database as a skip it refuses.
+ */
+const MAX_SKIP = 2_147_483_647;
 
 @Injectable()
 export class NotificationService {
@@ -108,11 +156,29 @@ export class NotificationService {
     private readonly preferences: Model<NotificationPreferencesDocument>,
     private readonly renderer: TemplateRenderer,
     private readonly clock: Clock,
+    private readonly audit: AuditService,
     @Inject(NOTIFICATION_ADAPTERS) adapters: NotificationChannelAdapter[] = [],
   ) {
     for (const adapter of adapters) this.adapters.set(adapter.channel, adapter);
   }
 
+  /**
+   * **One notification, written now; its email sent after** (P12.1-T1).
+   *
+   * The inbox row — the in-app channel's whole delivery — is written inside the caller's request. Each
+   * external channel is started at once and **not awaited**: the row records it `pending`, and its
+   * outcome (`sent`, or `failed` with the error's text) is written onto the delivery map when it settles.
+   * Measured on the dev server before this: an invitation's save took 10–11 s, because it waited for an
+   * SMTP relay to time out; the same save without an invitee took under a second.
+   *
+   * The recipient's choices apply exactly as before: a muted template writes nothing and sends nothing,
+   * and an opted-out channel is `suppressed` without its adapter being asked. A failure of the adapter or
+   * of the recording is logged at error level and never reaches the caller.
+   *
+   * *A host that freezes a function once its response is sent* (Vercel, ADR-0041) may pause the email
+   * until its next invocation, or end it — as coaching's held email already accepts. It then stays
+   * `pending` on its row: visible on the delivery map, rather than lost silently.
+   */
   async send(request: SendRequest & { userId: string; kpmId?: string | null }): Promise<void> {
     const prefs = await this.preferencesOf(request.userId);
 
@@ -124,9 +190,9 @@ export class NotificationService {
       return;
     }
 
-    const delivery = await this.deliver(request, prefs, null);
+    const { delivery, dispatched } = await this.deliver(request, prefs, null);
 
-    await this.notifications.create({
+    const created = await this.notifications.create({
       kpmId: request.kpmId ?? null,
       membershipId: request.membershipId ?? null,
       userId: request.userId,
@@ -147,6 +213,14 @@ export class NotificationService {
       delivery,
       readAt: null,
     });
+
+    this.settle(dispatched, request.templateId, (channel, outcome) => this.notifications
+      .updateOne(
+        // Only over the `pending` this call wrote: an outcome never overwrites one recorded since.
+        { _id: created._id, [`delivery.${channel}.status`]: 'pending' },
+        { $set: { [`delivery.${channel}`]: outcome } },
+      )
+      .exec());
   }
 
   /**
@@ -176,9 +250,11 @@ export class NotificationService {
     const notice = { userId: request.userId, coalesceKey: request.coalesceKey, templateId: request.templateId };
     if (await this.coalesced.refreshCoalesced(office, notice, request.payload)) return;
 
-    const delivery = await this.deliver(request, prefs, HELD_CHANNEL);
+    // Email is the held channel, so nothing is dispatched here today; a later external channel (WhatsApp)
+    // would be, and its outcome is recorded on the notice as `send` records one.
+    const { delivery, dispatched } = await this.deliver(request, prefs, HELD_CHANNEL);
     try {
-      await this.coalesced.create(office, {
+      const created = await this.coalesced.create(office, {
         ...notice,
         membershipId: request.membershipId ?? null,
         // A coalesced template has an inbox row, so its payload is one somebody reads (`send`, above).
@@ -186,6 +262,8 @@ export class NotificationService {
         delivery,
         readAt: null,
       } as Partial<NotificationDocument>);
+      this.settle(dispatched, request.templateId, (channel, outcome) =>
+        this.coalesced.recordDelivery(office, String(created._id), channel, outcome));
     } catch (err) {
       if ((err as { code?: unknown }).code !== DUPLICATE_KEY) throw err;
       // Another first write got there between the read and the insert: this one is a later write.
@@ -241,28 +319,69 @@ export class NotificationService {
 
   /**
    * Every channel the template declares, delivered or recorded as not: opted out is `suppressed`, the
-   * `held` channel is kept back for `releaseHeld`, and the rest go through their adapters now.
+   * `held` channel is kept back for `releaseHeld`, a channel with no adapter is `failed`, the in-app
+   * channel is delivered now, and every other channel is **started now and not awaited** — `pending` on
+   * the map, with its delivery handed back to be recorded when it settles (P12.1-T1).
    */
   private async deliver(
     request: SendRequest, prefs: Preferences, held: NotificationChannel | null,
-  ): Promise<Record<string, Delivery>> {
+  ): Promise<Delivered> {
     const rendered = this.renderer.render(request.templateId, request.payload);
     const delivery: Record<string, Delivery> = {};
+    const dispatched: Dispatch[] = [];
     for (const channel of TEMPLATE_CHANNELS[request.templateId] ?? []) {
-      delivery[channel] = channel === held && !prefs?.optedOutChannels?.includes(channel)
-        ? { status: 'held', at: this.clock.now() }
-        : await this.deliverOne(channel, request, prefs, rendered);
+      // Held before the adapter is looked for, as it always was: whether one exists is `releaseHeld`'s question.
+      const settled = channel === held && !prefs?.optedOutChannels?.includes(channel)
+        ? { status: 'held' as const, at: this.clock.now() }
+        : this.undeliverable(channel, prefs);
+      if (settled) {
+        delivery[channel] = settled;
+      } else if (INLINE_CHANNELS.includes(channel)) {
+        delivery[channel] = await this.deliverOne(channel, request, prefs, rendered);
+      } else {
+        delivery[channel] = { status: 'pending', at: this.clock.now() };
+        dispatched.push({ channel, outcome: this.deliverOne(channel, request, prefs, rendered) });
+      }
     }
-    return delivery;
+    return { delivery, dispatched };
   }
 
-  /** One channel, through its adapter. A failing adapter is recorded and logged, and never thrown. */
+  /**
+   * **Record each dispatched delivery's outcome when it settles, without waiting for it.** Caught whole,
+   * so a failed recording is a log line at error level, never an unhandled rejection and never the
+   * caller's failure. The adapter's own failures, a rejection or a synchronous throw, are `deliverOne`'s
+   * and arrive here as a `failed` outcome; `record` runs inside the `then`, so a synchronous throw of its
+   * own is a rejection the `catch` sees.
+   */
+  private settle(
+    dispatched: readonly Dispatch[],
+    templateId: string,
+    record: (channel: NotificationChannel, outcome: Delivery) => Promise<unknown>,
+  ): void {
+    for (const { channel, outcome } of dispatched) {
+      void outcome
+        .then((settled) => record(channel, settled))
+        .catch((err: unknown) => this.logger.error({ err, channel, templateId }, 'failed to record a delivery'));
+    }
+  }
+
+  /** A channel settled without asking its adapter: opted out is `suppressed`, no adapter is `failed`. */
+  private undeliverable(channel: NotificationChannel, prefs: Preferences): Delivery | null {
+    if (prefs?.optedOutChannels?.includes(channel)) return { status: 'suppressed', at: this.clock.now() };
+    if (!this.adapters.has(channel)) return { status: 'failed', at: this.clock.now(), error: 'no adapter' };
+    return null;
+  }
+
+  /**
+   * One channel, through its adapter. A failing adapter — a rejection or a synchronous throw — is recorded
+   * and logged at error level, and never thrown.
+   */
   private async deliverOne(
     channel: NotificationChannel, request: SendRequest, prefs: Preferences, rendered: RenderedMessage,
   ): Promise<Delivery> {
-    if (prefs?.optedOutChannels?.includes(channel)) return { status: 'suppressed', at: this.clock.now() };
-    const adapter = this.adapters.get(channel);
-    if (!adapter) return { status: 'failed', at: this.clock.now(), error: 'no adapter' };
+    const settled = this.undeliverable(channel, prefs);
+    if (settled) return settled;
+    const adapter = this.adapters.get(channel) as NotificationChannelAdapter;
     try {
       await adapter.send(request, rendered);
       return { status: 'sent', at: this.clock.now() };
@@ -273,38 +392,40 @@ export class NotificationService {
   }
 
   /**
-   * Somebody's own inbox, newest first.
+   * One page of somebody's own inbox, newest first (P12.1-T4).
    *
    * **Read by `userId`, on the model, and deliberately not through the tenant-scoped
    * repository.** `notifications.kpmId` is nullable by design: email verification and
    * password reset are sent before anybody has joined an office, so a tenant filter would
    * hide exactly the notifications a newcomer needs. The codebase already records this —
    * `CROSS_TENANT_INDEXES` in `index-conventions.tenancy.spec.ts` justifies the
-   * `{ userId, readAt, createdAt }` index in the same words.
+   * `{ userId, readAt, createdAt }` and `{ userId, deletedAt, createdAt, _id }` indexes in the
+   * same words.
    *
    * That is not a hole in the isolation rule; it is the rule applied to a collection that
    * belongs to a **person**, not to a tenant. The filter is the reader's own `userId`,
    * taken from the request context and never from a parameter — there is no id a caller
    * could supply to read somebody else's, and a test proves it.
+   *
+   * **Newest first, ties broken by id**, so two notices written in one millisecond keep their places
+   * from one page to the next. The page and its size are clamped as well as validated: a page past the
+   * last is an empty page, never an error.
    */
-  async inbox(ctx: RequestContext, limit = 50): Promise<Inbox> {
+  async inbox(ctx: RequestContext, page = 1, pageSize: number = INBOX_PAGE.DEFAULT_SIZE): Promise<Inbox> {
     this.require(ctx, 'notification:read_inbox');
+    const at = Math.max(Math.trunc(page) || 1, 1);
+    const size = Math.min(Math.max(Math.trunc(pageSize) || 1, 1), INBOX_PAGE.MAX_SIZE);
+    const mine = this.inboxFilter(ctx);
 
-    const [items, unread] = await Promise.all([
+    const [items, total, unread] = await Promise.all([
       this.notifications
-        // Only what belongs in an inbox. Email verification and password reset are
-        // `email` only (`TEMPLATE_CHANNELS`), and a row saying "we emailed you a reset
-        // link" is noise at best — at worst it is somewhere a token could surface.
-        .find({ userId: ctx.userId, deletedAt: null, templateId: { $in: IN_APP_TEMPLATES } })
-        .sort({ createdAt: -1 })
-        .limit(Math.min(Math.max(limit, 1), 100))
+        .find(mine)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(Math.min((at - 1) * size, MAX_SKIP))
+        .limit(size)
         .exec(),
-      this.notifications.countDocuments({
-        userId: ctx.userId,
-        readAt: null,
-        deletedAt: null,
-        templateId: { $in: IN_APP_TEMPLATES },
-      }),
+      this.notifications.countDocuments(mine).exec(),
+      this.unreadOf(ctx),
     ]);
 
     return {
@@ -318,50 +439,116 @@ export class NotificationService {
         readAt: n.readAt?.toISOString() ?? null,
       })),
       unread,
+      total,
+      page: at,
+      pageSize: size,
     };
   }
 
   /**
-   * Mark one read.
+   * Mark one read. **Idempotent**: one already read keeps the moment it was first read.
    *
    * The `userId` is part of the filter, not checked after the fact: a row that is not
    * yours does not match, so it is a `404` rather than a `403`. A `403` would confirm the
-   * notification exists — the same reasoning as a member in another office.
+   * notification exists — the same reasoning as a member in another office. So is a row
+   * that is yours but never in your inbox (an email-only auth notice), and a malformed id.
    */
-  async markRead(ctx: RequestContext, notificationId: string): Promise<Inbox> {
+  async markRead(ctx: RequestContext, notificationId: string): Promise<NotificationReadState> {
     this.require(ctx, 'notification:mark_read');
-
-    const result = await this.notifications
-      .updateOne(
-        { _id: notificationId, userId: ctx.userId, deletedAt: null, readAt: null },
-        { $set: { readAt: this.clock.now() } },
-      )
+    const mine = this.oneOfMine(ctx, notificationId);
+    const row = await this.notifications
+      .findOneAndUpdate({ ...mine, readAt: null }, { $set: { readAt: this.clock.now() } }, { new: true })
       .exec()
-      // A malformed id is "not here", not a 500.
-      .catch(() => ({ matchedCount: 0 }));
-
-    if (result.matchedCount === 0) {
-      // Already read is not an error — pressing twice should settle, not complain. Only
-      // an id that is not this reader's is refused.
-      const exists = await this.notifications
-        .exists({ _id: notificationId, userId: ctx.userId, deletedAt: null })
-        .catch(() => null);
-      if (!exists) throw new NotFoundException('Notification');
-    }
-
-    return this.inbox(ctx);
+      // Already read is not an error: pressing twice settles, and answers when it was first read.
+      ?? await this.notifications.findOne(mine).exec();
+    const state = await this.readState(ctx, row);
+    await this.recordSupportMark(ctx, 'notification.marked_read', state.notificationId);
+    return state;
   }
 
-  /** Everything at once, which is what somebody does after a week away. */
-  async markAllRead(ctx: RequestContext): Promise<Inbox> {
+  /**
+   * Mark one unread again (P12.1-T4), so it counts on the bell until it is dealt with. **Idempotent**,
+   * and refused exactly as `markRead` refuses: a `404` for anything that is not an item of the reader's
+   * own inbox.
+   */
+  async markUnread(ctx: RequestContext, notificationId: string): Promise<NotificationReadState> {
+    this.require(ctx, 'notification:mark_read');
+    const row = await this.notifications
+      .findOneAndUpdate(this.oneOfMine(ctx, notificationId), { $set: { readAt: null } }, { new: true })
+      .exec();
+    const state = await this.readState(ctx, row);
+    await this.recordSupportMark(ctx, 'notification.marked_unread', state.notificationId);
+    return state;
+  }
+
+  /**
+   * Everything at once, which is what somebody does after a week away. Answers the count it leaves:
+   * none, unless a notice arrived between the write and the count.
+   *
+   * **Only what the inbox shows** (Phase 12.1 exit review, N3): the same filter as the reads and the
+   * single marks, so an email-only auth row, which `markRead` answers 404, is not marked here either.
+   */
+  async markAllRead(ctx: RequestContext): Promise<UnreadCount> {
     this.require(ctx, 'notification:mark_read');
     await this.notifications
-      .updateMany(
-        { userId: ctx.userId, readAt: null, deletedAt: null },
-        { $set: { readAt: this.clock.now() } },
-      )
+      .updateMany({ ...this.inboxFilter(ctx), readAt: null }, { $set: { readAt: this.clock.now() } })
       .exec();
-    return this.inbox(ctx);
+    await this.recordSupportMark(ctx, 'notification.marked_all_read', null);
+    return { unread: await this.unreadOf(ctx) };
+  }
+
+  /**
+   * **A mark made in a support session, recorded** (Phase 12.1 exit review, B1; `roles-and-permissions.md`
+   * §7.4): the Super Admin as the actor and the member as the effective user, which `AuditService.record`
+   * adds, and the notification's id — never its words. A member marking their own inbox is not recorded:
+   * it is their own reading, and a row per click would bury the audit log. A support session is the one
+   * case where somebody else changes what the member's bell counts, so it is the one case written down.
+   * The audit write fails open, as everywhere: the mark stands.
+   */
+  private async recordSupportMark(
+    ctx: RequestContext,
+    action: 'notification.marked_read' | 'notification.marked_unread' | 'notification.marked_all_read',
+    notificationId: string | null,
+  ): Promise<void> {
+    if (!ctx.isImpersonating) return;
+    await this.audit.record(ctx, {
+      action,
+      targetCollection: 'notifications',
+      targetId: notificationId,
+      targetMembershipId: ctx.membershipId,
+    });
+  }
+
+  /**
+   * What belongs in the reader's inbox: their own, not deleted, and only what an inbox shows. Email
+   * verification and password reset are `email` only (`TEMPLATE_CHANNELS`), and a row saying "we emailed
+   * you a reset link" is noise at best — at worst it is somewhere a token could surface.
+   */
+  private inboxFilter(ctx: RequestContext) {
+    return { userId: ctx.userId, deletedAt: null, templateId: { $in: IN_APP_TEMPLATES } };
+  }
+
+  /**
+   * One item of the reader's inbox, by id. A malformed id is "not here", a `404`, rather than a cast the
+   * database fails with a 500.
+   */
+  private oneOfMine(ctx: RequestContext, notificationId: string) {
+    if (!isValidObjectId(notificationId)) throw new NotFoundException('Notification');
+    return { ...this.inboxFilter(ctx), _id: notificationId };
+  }
+
+  private async unreadOf(ctx: RequestContext): Promise<number> {
+    return this.notifications.countDocuments({ ...this.inboxFilter(ctx), readAt: null }).exec();
+  }
+
+  /** What a mark answers: the row's read state, and the inbox's unread count after it. */
+  private async readState(ctx: RequestContext, row: NotificationDocument | null): Promise<NotificationReadState> {
+    if (!row) throw new NotFoundException('Notification');
+    return {
+      notificationId: String(row._id),
+      readAt: row.readAt?.toISOString() ?? null,
+      unread: await this.unreadOf(ctx),
+    };
   }
 
   private require(ctx: RequestContext, permission: Parameters<typeof can>[1]): void {

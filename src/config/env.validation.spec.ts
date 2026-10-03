@@ -13,6 +13,20 @@ const valid = {
 };
 
 describe('environment validation', () => {
+  describe('SMTP_TIMEOUT_MS (P12.1-T1)', () => {
+    it('P12.1-T1 defaults to 5 s, so a configuration written before the key existed still boots', () => {
+      expect(validateEnv(valid).SMTP_TIMEOUT_MS).toBe(5_000);
+    });
+
+    it('P12.1-T1 reads a configured value, as the environment spells it', () => {
+      expect(validateEnv({ ...valid, SMTP_TIMEOUT_MS: '8000' }).SMTP_TIMEOUT_MS).toBe(8_000);
+    });
+
+    it.each(['999', '60001', '2.5', 'soon'])('P12.1-T1 refuses %s: bounded, whole milliseconds', (value) => {
+      expect(() => validateEnv({ ...valid, SMTP_TIMEOUT_MS: value })).toThrow(/SMTP_TIMEOUT_MS/);
+    });
+  });
+
   describe('mail transport (P4-T14, ADR-0019)', () => {
     it('defaults to SMTP, so the safe thing is what you get by not deciding', () => {
       expect(validateEnv(valid).MAIL_TRANSPORT).toBe('smtp');

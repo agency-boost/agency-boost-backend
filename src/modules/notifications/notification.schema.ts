@@ -48,6 +48,13 @@ export const NotificationSchema = SchemaFactory.createForClass(Notification);
 NotificationSchema.index({ kpmId: 1, membershipId: 1, createdAt: -1 });
 NotificationSchema.index({ userId: 1, readAt: 1, createdAt: -1 });
 /**
+ * **One page of a person's inbox** (P12.1-T4): their own, not deleted, newest first with the id breaking
+ * a tie — the order `inbox` sorts by, so a page is read off the index rather than sorted in memory, and
+ * the total is counted from it. Per-user and cross-office like the index above, for the same reason
+ * (`CROSS_TENANT_INDEXES`).
+ */
+NotificationSchema.index({ userId: 1, deletedAt: 1, createdAt: -1, _id: -1 });
+/**
  * **At most one notice per key and template in an office**, held by the database rather than a
  * read-then-write, so two saves racing in one session write one notice. Partial: only a coalesced notice
  * carries a key. A coalesced notice always concerns an office, so `kpmId` leads (invariant §1).

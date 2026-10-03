@@ -2,6 +2,16 @@ import { z } from 'zod';
 import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
 
 /**
+ * **How long a mail relay may take to answer a dial, or to greet once dialled** (P12.1-T1), unless
+ * `SMTP_TIMEOUT_MS` says otherwise. nodemailer's own default is two minutes. Email is no longer awaited
+ * inside a request, so this bounds how long a delivery stays `pending` and how long a start-up check
+ * waits, not how long anybody waits for a save.
+ */
+export const SMTP_TIMEOUT_MS_DEFAULT = 5_000;
+/** The range `SMTP_TIMEOUT_MS` may take: long enough for a slow relay, never nodemailer's two minutes. */
+export const SMTP_TIMEOUT_MS_RANGE = { MIN: 1_000, MAX: 60_000 } as const;
+
+/**
  * Configuration is validated at boot. A missing or malformed key stops the process
  * with a named error rather than letting the app start and connect somewhere
  * unexpected — see docs/03-engineering/environments-and-configuration.md.
@@ -29,6 +39,10 @@ export const envSchema = z.object({
   SMTP_USER: z.string().default(''),
   SMTP_PASSWORD: z.string().default(''),
   MAIL_FROM: z.string().min(1),
+  /** Connection and greeting timeout for SMTP, in milliseconds — see `SMTP_TIMEOUT_MS_DEFAULT`. */
+  SMTP_TIMEOUT_MS: z.coerce.number().int()
+    .min(SMTP_TIMEOUT_MS_RANGE.MIN).max(SMTP_TIMEOUT_MS_RANGE.MAX)
+    .default(SMTP_TIMEOUT_MS_DEFAULT),
   /**
    * How mail leaves: over SMTP, or into the log.
    *

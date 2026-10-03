@@ -9,6 +9,7 @@ jest.mock('nodemailer', () => ({
 /* eslint-disable @typescript-eslint/no-var-requires */
 // Imported after `jest.mock`, deliberately: the adapter builds its transport in the
 // constructor, so the mock has to be in place before the module is evaluated.
+import { createTransport } from 'nodemailer';
 import { RecipientAddressBook, SmtpChannelAdapter } from './smtp.adapter';
 import { NotificationTemplate } from './notification.types';
 
@@ -54,6 +55,21 @@ describe('SMTP delivery (P4-T14)', () => {
       { subject: 'S', body: 'B' },
     )).rejects.toThrow('no email address for user u1');
     expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  describe('timeouts (P12.1-T1)', () => {
+    const transportOptions = () => (createTransport as jest.Mock).mock.calls.at(-1)?.[0] as Record<string, unknown>;
+
+    it('P12.1-T1 bounds the dial and the greeting at 5 s when the configuration does not name SMTP_TIMEOUT_MS', () => {
+      // A test's configuration, or one written before the key existed: the default, never nodemailer's two minutes.
+      make();
+      expect(transportOptions()).toMatchObject({ connectionTimeout: 5_000, greetingTimeout: 5_000, socketTimeout: 30_000 });
+    });
+
+    it('P12.1-T1 takes SMTP_TIMEOUT_MS when it is configured', () => {
+      make({ SMTP_TIMEOUT_MS: 2_500 });
+      expect(transportOptions()).toMatchObject({ connectionTimeout: 2_500, greetingTimeout: 2_500 });
+    });
   });
 
   describe('start-up', () => {

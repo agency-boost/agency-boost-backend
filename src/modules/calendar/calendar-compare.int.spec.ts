@@ -33,6 +33,14 @@ describe('compare and Block time (P12-T5)', () => {
   const userOf = async (who: Who) =>
     (await h.col('memberships').findOne({ _id: new mongoose.Types.ObjectId(h.id(who)) }))!.userId as string;
   const inbox = async (who: Who) => h.col('notifications').find({ userId: await userOf(who) }).toArray();
+  /** A notice's email is sent after the write has answered (P12.1-T1): read its outcome once it has one. */
+  const emailsSettle = async () => {
+    for (let i = 0; i < 100; i += 1) {
+      if (await h.col('notifications').countDocuments({ 'delivery.email.status': { $in: ['held', 'pending'] } }) === 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('An email never settled');
+  };
 
   beforeAll(async () => { h = await startCalendar({ realNotifications: true }); }, 120_000);
   afterAll(() => stopCalendar(h));
@@ -228,6 +236,7 @@ describe('compare and Block time (P12-T5)', () => {
 
     it('exit criterion 3: a block writes exactly one inbox row to the member, opening the entry, and an email; none to the leader', async () => {
       const placed = (await block('AGUS', h.id('INDAH')).expect(201)).body;
+      await emailsSettle();
       const rows = await inbox('INDAH');
       expect(rows.map((r) => [r.templateId, r.payload])).toEqual([
         [NotificationTemplate.CALENDAR_BLOCK_PLACED, { entryId: placed.entryId, date: '2026-09-16' }],

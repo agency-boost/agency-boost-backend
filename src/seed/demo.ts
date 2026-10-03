@@ -52,7 +52,9 @@ import {
   CASCADE_CODES, COACHING_ACTIVITY, COACHING_CAST, COACHING_GOALS, COACHING_LEADS, COACHING_PRODUCTION,
   pacingFloor, type ActivityPlan, type CastKey, type CoacheeKey, type DayCounts,
 } from './coaching-cast';
-import { buildCoachingFixture, ROSTER_PLAN, type CoachingFixture, type FixtureLead } from './coaching-fixture';
+import {
+  buildCoachingFixture, ROSTER_PLAN, seedObjectId, type CoachingFixture, type FixtureLead,
+} from './coaching-fixture';
 import { CoachingSession, CoachingSessionSchema } from '@/modules/coaching/coaching-session.schema';
 import { CoachingProfile, CoachingProfileSchema } from '@/modules/coaching/coaching-profile.schema';
 import { LeaderNote, LeaderNoteSchema } from '@/modules/coaching/leader-note.schema';
@@ -73,6 +75,7 @@ import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schem
 import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { Notification, NotificationSchema } from '@/modules/notifications/notification.schema';
+import { IN_APP_TEMPLATES } from '@/modules/notifications/inbox-copy';
 import {
   SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_EVENT_TYPES, SEED_LEAD_STATUSES,
   SEED_MOC_RULES, SEED_PRODUCTION_CLUB_TIERS, SEED_PRODUCTS, SEED_RATIO_DEFINITIONS,
@@ -2827,6 +2830,111 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       { sentAt: entry.createdAt, readAt: answeredAt },
     );
   }
+  /*
+   * **An inbox longer than two pages, for Agus, Sari and Rina** (P12.1-T4): the bell's list is paged twenty at a
+   * time, and a pager with one page cannot be reviewed. Each of the three gets 45 more notices, spread from two
+   * days ago back to the day they joined the office, read and unread, with and without a link:
+   *
+   * - **What really happened first.** Each earlier finalize of a session they were coached in sent its notice,
+   *   as the latest one's above (`/coaching/me?session=`, read since). Sari received Rina's request on the day
+   *   Rina joined and Yanti's on the day she came back; Agus received Sari's and Dewi's on the days they joined.
+   * - **Then the run of an ordinary office**, to make up the 45: their leader setting their goal again
+   *   (no link), entries they were on being cancelled (`/calendar?date=`, the week it was in — the entry is
+   *   gone, which is what a cancellation says) and the office's event reminders (no link). Payloads are ids,
+   *   names and dates, never anything typed, as every notice's is.
+   *
+   * Every row is written under an `_id` derived from its account and position, only when that id is absent,
+   * so a re-run writes none, and a notice somebody read or unread in a walk keeps that state.
+   */
+  const HISTORY_SIZE = 45;
+  const hour = 60 * 60 * 1000;
+  const officeDate = (at: Date) => clock.localDateFor(DEFAULT_TENANT_TIMEZONE, at);
+  /** When the office's seeded events start, in days from the run (the `Events` rows above): a reminder precedes its event. */
+  const EVENT_STARTS_IN_DAYS: Record<string, number> = { 'PRULink briefing': -21, 'Leaders’ huddle': 0, 'Kickoff 2026': 14 };
+  const historyCast = [
+    {
+      key: 'agus', user: abUser, membership: ab, joinedDaysAgo: 106, leader: ownerUser.fullName,
+      requests: [{ fullName: sariUser.fullName, daysAgo: 103 }, { fullName: dewiUser.fullName, daysAgo: 100 }],
+      reminders: ['Leaders’ huddle', 'PRULink briefing', 'Kickoff 2026'],
+    },
+    {
+      key: 'sari', user: sariUser, membership: sari, joinedDaysAgo: 103, leader: abUser.fullName,
+      requests: [{ fullName: rinaUser.fullName, daysAgo: RINA_JOINED_DAYS_AGO }, { fullName: removedUser.fullName, daysAgo: 28 }],
+      reminders: ['Leaders’ huddle', 'PRULink briefing', 'Kickoff 2026'],
+    },
+    {
+      key: 'rina', user: rinaUser, membership: rina, joinedDaysAgo: RINA_JOINED_DAYS_AGO, leader: sariUser.fullName,
+      requests: [], reminders: ['PRULink briefing', 'Kickoff 2026'],
+    },
+  ] as const;
+  const reminderFor = (titles: readonly string[], at: Date, i: number) => {
+    const upcoming = titles.filter((title) => daysAgo(-EVENT_STARTS_IN_DAYS[title]).getTime() > at.getTime());
+    return upcoming[i % upcoming.length];
+  };
+  const historyRows: Record<string, unknown>[] = [];
+  for (const person of historyCast) {
+    const to = { userId: String(person.user._id), membershipId: person.membership.id };
+
+    // Each earlier finalize's notice, as `announceFinalized` sent it, read a few hours later.
+    const latest = latestFinalized.get(person.membership.id);
+    const earlier = coaching.sessions.filter((s) =>
+      s.status === 'finalized' && s.coacheeMembershipId === person.membership.id && s._id !== latest?._id);
+    for (const session of earlier) {
+      const stored = await CoachingSessions.findOne({ _id: session._id }).select('frozenAt').lean().exec();
+      const sentAt = stored?.frozenAt ?? session.finalizedAt!;
+      await notify(to, NotificationTemplate.COACHING_SESSION_FINALIZED, { sessionId: session._id }, {
+        sentAt, readAt: new Date(Math.min(sentAt.getTime() + 3 * hour, clock.now().getTime())),
+      });
+    }
+    for (const asked of person.requests) {
+      await notify(to, NotificationTemplate.JOIN_REQUEST_RECEIVED, { fullName: asked.fullName }, {
+        sentDaysAgo: asked.daysAgo, readDaysAgo: asked.daysAgo,
+      });
+    }
+
+    // The ordinary run, from two days ago back to the day they joined.
+    const made = earlier.length + person.requests.length;
+    const span = person.joinedDaysAgo - 3;
+    for (let i = 0; i < HISTORY_SIZE - made; i += 1) {
+      const at = new Date(daysAgo(2 + (span * i) / (HISTORY_SIZE - made)).getTime() - (i % 5) * hour);
+      const kind = (['goal', 'cancelled', 'reminder', 'cancelled', 'goal'] as const)[i % 5];
+      const [templateId, payload] = kind === 'goal'
+        ? [NotificationTemplate.GOAL_SET_BY_LEADER, { byName: person.leader, period: officeDate(at).slice(0, 4) }]
+        : kind === 'cancelled'
+          ? [NotificationTemplate.CALENDAR_ENTRY_CHANGED, {
+            entryId: seedObjectId('inbox-history', person.key, 'entry', String(i)),
+            date: officeDate(new Date(at.getTime() + 2 * 24 * hour)), change: 'cancelled',
+          }]
+          : [NotificationTemplate.EVENT_REMINDER, { title: reminderFor(person.reminders, at, i) }];
+      // The newest few are unread, and every fourth after them: an inbox somebody keeps up with, mostly.
+      const unread = i < 3 || i % 4 === 0;
+      historyRows.push({
+        _id: new mongoose.Types.ObjectId(seedObjectId('inbox-history', person.key, String(i))),
+        kpmId: id0417, membershipId: to.membershipId, userId: to.userId, templateId, payload,
+        delivery: Object.fromEntries(
+          (TEMPLATE_CHANNELS[templateId] ?? []).map((channel) => [channel, { status: 'sent', at }]),
+        ),
+        readAt: unread ? null : new Date(at.getTime() + 2 * hour),
+        coalesceKey: null, deletedAt: null, createdAt: at, updatedAt: at,
+      });
+    }
+  }
+  for (const row of historyRows) {
+    if (await Notifications.exists({ _id: row._id })) continue;
+    await Notifications.collection.insertOne(row);
+  }
+  /** What each long inbox holds now, as the bell counts it, for the summary below. */
+  const inboxLine = async (user: { _id: unknown }) => {
+    const mine = { userId: String(user._id), deletedAt: null, templateId: { $in: IN_APP_TEMPLATES } };
+    const [total, unread] = await Promise.all([
+      Notifications.countDocuments(mine).exec(), Notifications.countDocuments({ ...mine, readAt: null }).exec(),
+    ]);
+    return `${total} notices, ${unread} unread`;
+  };
+  const longInboxes = {
+    agus: await inboxLine(abUser), sari: await inboxLine(sariUser), rina: await inboxLine(rinaUser),
+  };
+
   const storedCalendar = await mongoose.connection.collection('calendarEvents').countDocuments({ kpmId: id0417, deletedAt: null });
 
   const rosterLine = (status: string) => (Object.entries(ROSTER_PLAN) as [CoacheeKey, (typeof ROSTER_PLAN)[CoacheeKey]][])
@@ -2882,12 +2990,18 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     Medan Selatan Branch         declined, with the reason on the row
     Kelapa Gading Branch         approved — this is where KPM 0555 came from
 
-  NOTIFICATIONS at /notifications  (the bell on every screen)
-    sari@kpm0417.test            1 unread: Putri's request. Plus her own promotion, read
+  NOTIFICATIONS at /notifications  (the bell on every screen; twenty to a page)
+    agus@kpm0417.test            ${longInboxes.agus}: three pages and more
+    sari@kpm0417.test            ${longInboxes.sari}: Putri's request on top, her promotion read
+    rina@kpm0417.test            ${longInboxes.rina}
+                                 Each of the three: what the fixture sent them first, then a
+                                 history, read and unread — finalized sessions opening at
+                                 /coaching/me, cancellations opening their week, goal and event
+                                 notices opening nothing
     budi@kpm0417.test            1 unread: tagged by a leader
     untagged@kpm0417.test        1 unread: declined, with the leader's reason
     removed@kpm0417.test         1 unread: back in. Plus the removal, read
-    rina / dewi / admin          read-only inboxes — the "nothing new" state
+    dewi / admin                 read-only inboxes — the "nothing new" state
     owner@kpm0417.test           empty, deliberately: nothing in this fixture is
                                  addressed to the Owner, and an empty inbox is a
                                  state worth seeing too

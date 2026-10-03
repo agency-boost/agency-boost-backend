@@ -382,6 +382,10 @@ const CROSS_TENANT_INDEXES: Record<string, string> = {
     "the recipient's own inbox. kpmId is nullable here because email verification and " +
     'password reset are sent before a user has joined any KPM, so the inbox query is ' +
     'per-user by design and reads only that user’s own rows.',
+  'notifications:userId,deletedAt,createdAt,_id':
+    "one page of the recipient's own inbox (P12.1-T4), newest first with the id breaking a tie, and " +
+    'its total. Per-user and cross-office for the reason the index above gives: the inbox is read by ' +
+    'the reader’s own userId, and kpmId is nullable on the notices a newcomer needs first.',
 };
 
 /**

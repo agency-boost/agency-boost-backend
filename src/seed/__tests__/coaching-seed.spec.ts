@@ -663,8 +663,22 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     // Rina's, Indah's and Sari's: the latest finalized session of each live coachee membership.
     const latest = (membershipId: string) => finalized.filter((s) => s.coacheeMembershipId === membershipId)
       .sort((a, b) => a.finalizedAt!.getTime() - b.finalizedAt!.getTime()).at(-1)!;
-    expect(notices.map((n) => n.membershipId).sort()).toEqual([ids.rina, ids.indah, ids.sari].sort());
-    for (const notice of notices) {
+    const isLatest = (n: (typeof notices)[number]) => n.payload.sessionId === latest(String(n.membershipId))._id;
+    expect(notices.filter(isLatest).map((n) => n.membershipId).sort()).toEqual([ids.rina, ids.indah, ids.sari].sort());
+    /*
+     * P12.1-T4: Rina's and Sari's earlier finalizes sent theirs too, for the long inboxes the pager is reviewed
+     * with — each its own session's, dated by its finalize and read since. Indah's inbox is not one of them.
+     */
+    const earlier = notices.filter((n) => !isLatest(n));
+    expect(earlier.map((n) => n.payload.sessionId).sort()).toEqual(finalized
+      .filter((s) => [ids.rina, ids.sari].includes(s.coacheeMembershipId) && s._id !== latest(s.coacheeMembershipId)._id)
+      .map((s) => s._id).sort());
+    for (const notice of earlier) {
+      const session = finalized.find((s) => s._id === notice.payload.sessionId)!;
+      expect(notice).toMatchObject({ createdAt: session.finalizedAt, readAt: expect.any(Date) });
+      expect(Object.keys(notice.delivery)).toEqual(['in_app']);
+    }
+    for (const notice of notices.filter(isLatest)) {
       const session = latest(notice.membershipId);
       const coachee = (await col('memberships').findOne({ _id: new mongoose.Types.ObjectId(String(notice.membershipId)) }))!;
       // What `announceFinalized` writes: in-app only, `{ sessionId }` and nothing a leader typed, unread.
@@ -689,7 +703,7 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
       notificationModel as never,
       new NotificationRepository(notificationModel as never),
       mongoose.model(NotificationPreferences.name, NotificationPreferencesSchema) as never,
-      new NoRenderer(), clock, [],
+      new NoRenderer(), clock, { record: async () => undefined } as never, [],
     );
     await Promise.all(mongoose.modelNames().map((name) => mongoose.model(name).init()));
     for (const key of ['rina', 'indah', 'sari'] as const) {
@@ -708,6 +722,43 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
       });
       expect((await wired.coachingRecord.mine(as)).sessions.map((s) => s.sessionId)).toContain(sessionId);
       expect(await wired.coachingSession.read(as, sessionId)).toMatchObject({ sessionId, status: 'finalized' });
+    }
+  });
+
+  it('P12.1-T4 Agus, Sari and Rina each have an inbox of more than two pages, read and unread, some opening a session or a week', async () => {
+    const kpmId = await office();
+    const notificationModel = mongoose.model(Notification.name, NotificationSchema);
+    const inboxes = new NotificationService(
+      notificationModel as never,
+      new NotificationRepository(notificationModel as never),
+      mongoose.model(NotificationPreferences.name, NotificationPreferencesSchema) as never,
+      new NoRenderer(), clock, { record: async () => undefined } as never, [],
+    );
+    for (const email of ['agus@kpm0417.test', 'sari@kpm0417.test', 'rina@kpm0417.test']) {
+      const member = await memberOf(email);
+      const as = new RequestContext(String(member.userId), 'none', {
+        membershipId: String(member._id), kpmId, orgLevelCode: member.orgLevelCode, hierarchyRole: member.role,
+        status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      } as never);
+      const pages = await Promise.all([1, 2, 3].map((page) => inboxes.inbox(as, page)));
+      const items = pages.flatMap((page) => page.items);
+      expect({ email, total: pages[0].total > 40, third: pages[2].items.length > 0 }).toEqual({ email, total: true, third: true });
+      expect({ email, unread: pages[0].unread > 0, read: items.some((i) => i.readAt !== null) })
+        .toEqual({ email, unread: true, read: true });
+      const hrefs = items.map((i) => i.href);
+      expect({ email, linked: hrefs.some((h) => h?.startsWith('/calendar')), plain: hrefs.includes(null) })
+        .toEqual({ email, linked: true, plain: true });
+      // Every row is the account's own and in its own office, and no two say the same thing at the same moment.
+      const rows = await col('notifications').find({ userId: String(member.userId) }).toArray();
+      expect(rows.every((r) => r.kpmId === kpmId && r.membershipId === String(member._id))).toBe(true);
+      expect(new Set(rows.map((r) => `${r.templateId}|${JSON.stringify(r.payload)}|${r.createdAt.toISOString()}`)).size).toBe(rows.length);
+    }
+    // Rina and Sari were coached: their earlier sessions open from the bell too.
+    for (const email of ['sari@kpm0417.test', 'rina@kpm0417.test']) {
+      const member = await memberOf(email);
+      const finalizes = await col('notifications')
+        .countDocuments({ userId: String(member.userId), templateId: NotificationTemplate.COACHING_SESSION_FINALIZED });
+      expect({ email, finalizes: finalizes > 1 }).toEqual({ email, finalizes: true });
     }
   });
 

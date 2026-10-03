@@ -137,6 +137,7 @@ describe('a goal saved through a coaching session (P11-T8)', () => {
       mongoose.model(NotificationPreferences.name, NotificationPreferencesSchema) as never,
       new PayloadRenderer(),
       new FixedClock(ROSTER_NOW),
+      { record: async () => undefined } as never,
       [inApp, email],
     );
     wired = configModule(ROSTER_NOW, { notifications });
@@ -240,7 +241,12 @@ describe('a goal saved through a coaching session (P11-T8)', () => {
     await put(`for=${id('INDAH')}`, 600 * M).expect(200);
     await put(`for=${id('INDAH')}`, 700 * M).expect(200);
 
-    const notices = await goalNotices('INDAH');
+    // Each email is sent after its save has answered (P12.1-T1): read the notices once neither is pending.
+    let notices = await goalNotices('INDAH');
+    for (let attempt = 0; attempt < 250 && notices.some((n) => n.delivery.email.status === 'pending'); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      notices = await goalNotices('INDAH');
+    }
     expect(notices.map((n) => [n.coalesceKey, n.payload, n.delivery.email.status])).toEqual([
       [null, { byName: 'Agus Salim', period: '2026' }, 'sent'],
       [null, { byName: 'Agus Salim', period: '2026' }, 'sent'],

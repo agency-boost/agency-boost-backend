@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createTransport, type Transporter } from 'nodemailer';
+import { SMTP_TIMEOUT_MS_DEFAULT } from '@/config/env.validation';
 import {
   NotificationChannel, NotificationChannelAdapter, RenderedMessage, SendRequest,
 } from './notification.types';
@@ -36,10 +37,14 @@ export abstract class RecipientAddressBook {
  * stalls `pnpm dev` behind an unreachable relay, and on Vercel it spends the whole
  * invocation budget before the first request is looked at. Measured on a network that
  * blocks outbound 587, `verify()` took 75s to reach ETIMEDOUT.
+ *
+ * **The dial and the greeting are bounded by `SMTP_TIMEOUT_MS`**, 5 s unless configured (P12.1-T1;
+ * they were a fixed 10 s, which is what an invitation's save waited for on the dev server before
+ * email left the request). A configuration that does not name it (a test's, or one written before
+ * the key existed) gets the default.
+ *
+ * This one is inactivity during an exchange, which covers sending as well as verifying.
  */
-const SMTP_CONNECTION_TIMEOUT_MS = 10_000;
-const SMTP_GREETING_TIMEOUT_MS = 10_000;
-/** Inactivity during an exchange, which covers sending as well as verifying. */
 const SMTP_SOCKET_TIMEOUT_MS = 30_000;
 
 @Injectable()
@@ -57,6 +62,7 @@ export class SmtpChannelAdapter extends NotificationChannelAdapter implements On
     const port = config.getOrThrow<number>('SMTP_PORT');
     const user = config.get<string>('SMTP_USER') ?? '';
     this.from = config.getOrThrow<string>('MAIL_FROM');
+    const timeout = config.get<number>('SMTP_TIMEOUT_MS') ?? SMTP_TIMEOUT_MS_DEFAULT;
     // Captured here because `config` is read again in onModuleInit, and a provider that
     // is constructed but not chosen must not open a connection to prove it.
     this.transport = createTransport({
@@ -71,8 +77,8 @@ export class SmtpChannelAdapter extends NotificationChannelAdapter implements On
       // network that blocks outbound 587: verify() sat for 75s before ETIMEDOUT, which on
       // a serverless platform is the whole invocation budget spent before the first
       // request is looked at.
-      connectionTimeout: SMTP_CONNECTION_TIMEOUT_MS,
-      greetingTimeout: SMTP_GREETING_TIMEOUT_MS,
+      connectionTimeout: timeout,
+      greetingTimeout: timeout,
       socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
     });
   }

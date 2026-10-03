@@ -124,14 +124,28 @@ describe('SMTP, end to end (P4-T14 AC-7)', () => {
      * row does not.
      */
     const { adapter: smtp, config } = adapter('newcomer@kpm.test');
-    const rows: Record<string, unknown>[] = [];
-    const model = { create: async (d: Record<string, unknown>) => { rows.push(d); return d; } };
+    const rows: (Record<string, unknown> & { delivery: Record<string, { status: string }> })[] = [];
+    const model = {
+      create: async (d: Record<string, unknown>) => {
+        const row = { ...d, _id: `n${rows.length + 1}` } as unknown as (typeof rows)[number];
+        rows.push(row);
+        return row;
+      },
+      // The email's outcome is recorded after `send` has answered (P12.1-T1), onto the row it wrote.
+      updateOne: (filter: { _id: string }, update: { $set: Record<string, { status: string }> }) => ({
+        exec: async () => {
+          const row = rows.find((r) => r._id === filter._id)!;
+          row.delivery = { ...row.delivery, email: update.$set['delivery.email'] };
+        },
+      }),
+    };
     const service = new NotificationService(
       model as never,
       new NotificationRepository(model as never),
       { findOne: () => ({ exec: async () => null }) } as never,
       new EmailTemplateRenderer(config),
       new FixedClock(new Date('2026-09-11T00:00:00Z')),
+      { record: async () => undefined } as never,
       [smtp],
     );
 
@@ -141,9 +155,14 @@ describe('SMTP, end to end (P4-T14 AC-7)', () => {
       payload: { token: 'journey-token-xyz', fullName: 'Newcomer' },
     });
 
+    // The row is written before the relay has answered; the mail is on its way, and pending on it.
+    expect(rows[0].delivery.email.status).toBe('pending');
+    for (let attempt = 0; attempt < 250 && rows[0].delivery.email.status === 'pending'; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     const body = decodeQuotedPrintable(delivered.at(-1)!.raw);
     expect(body).toContain('https://app.agencyboost.test/verify-email/journey-token-xyz');
-    expect((rows[0].delivery as Record<string, { status: string }>).email.status).toBe('sent');
+    expect(rows[0].delivery.email.status).toBe('sent');
     expect(rows[0].payload).toEqual({});
   });
 
@@ -173,7 +192,7 @@ describe('SMTP, end to end (P4-T14 AC-7)', () => {
       try {
         const started = Date.now();
         await smtp.onModuleInit();
-        // Well under the 10s connection timeout, so this cannot have waited for the dial.
+        // Well under the 5s connection timeout (SMTP_TIMEOUT_MS), so this cannot have waited for the dial.
         expect(Date.now() - started).toBeLessThan(1_000);
       } finally {
         restore();

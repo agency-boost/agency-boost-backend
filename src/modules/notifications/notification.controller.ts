@@ -4,16 +4,31 @@ import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
+import { INBOX_PAGE } from '@/domain/constants';
 import { NotificationService } from './notification.service';
 
+/**
+ * `GET /notifications?page=&pageSize=` (P12.1-T4). Both optional; any other parameter is refused by
+ * name, by the global pipe's `forbidNonWhitelisted`.
+ */
 export class InboxQueryDto {
-  @ApiPropertyOptional({ example: 50, minimum: 1, maximum: 100, default: 50 })
+  @ApiPropertyOptional({ type: Number, minimum: 1, default: 1, description: 'Which page, from 1.' })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(100)
-  limit?: number;
+  page?: number;
+
+  @ApiPropertyOptional({
+    type: Number, minimum: 1, maximum: INBOX_PAGE.MAX_SIZE, default: INBOX_PAGE.DEFAULT_SIZE,
+    description: 'Items per page.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(INBOX_PAGE.MAX_SIZE)
+  pageSize?: number;
 }
 
 /**
@@ -34,19 +49,19 @@ export class NotificationController {
   @Get()
   @RequirePermission('notification:read_inbox')
   @ApiOperation({
-    summary: 'Your notifications, newest first',
+    summary: 'One page of your notifications, newest first',
     description:
-      'With the unread count, so the nav badge and the list can never disagree — they come from one ' +
-      'read rather than two.',
+      'With the unread count of the whole inbox, so the nav badge and the list can never disagree — ' +
+      'they come from one read rather than two — and the total, for the pager.',
   })
   async inbox(@Ctx() ctx: RequestContext, @Query() query: InboxQueryDto) {
-    return this.notifications.inbox(ctx, query.limit);
+    return this.notifications.inbox(ctx, query.page, query.pageSize);
   }
 
   @Post('read-all')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('notification:mark_read')
-  @ApiOperation({ summary: 'Mark everything read' })
+  @ApiOperation({ summary: 'Mark everything read', description: 'Answers the unread count it leaves.' })
   async readAll(@Ctx() ctx: RequestContext) {
     return this.notifications.markAllRead(ctx);
   }
@@ -58,9 +73,22 @@ export class NotificationController {
     summary: 'Mark one read',
     description:
       'A notification that is not yours is a 404, never a 403 — a 403 would confirm it exists. ' +
-      'Marking one that is already read settles rather than complains.',
+      'Marking one that is already read settles rather than complains, and keeps when it was first read.',
   })
   async read(@Ctx() ctx: RequestContext, @Param('notificationId') notificationId: string) {
     return this.notifications.markRead(ctx, notificationId);
+  }
+
+  @Post(':notificationId/unread')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('notification:mark_read')
+  @ApiOperation({
+    summary: 'Mark one unread',
+    description:
+      'It counts on the badge again until it is read. A notification that is not yours is a 404, never ' +
+      'a 403; marking one that is already unread settles rather than complains.',
+  })
+  async unread(@Ctx() ctx: RequestContext, @Param('notificationId') notificationId: string) {
+    return this.notifications.markUnread(ctx, notificationId);
   }
 }

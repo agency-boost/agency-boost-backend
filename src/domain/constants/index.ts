@@ -349,3 +349,5 @@ export {
   type CalendarEntryType,
   CALENDAR_ALL_DAY_TYPE,
 } from './calendar';
+
+export { INBOX_PAGE } from './notifications';

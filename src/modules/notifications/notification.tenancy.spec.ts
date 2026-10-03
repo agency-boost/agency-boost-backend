@@ -8,7 +8,7 @@ import { NotificationRepository } from './notification.repository';
 import { NotificationService } from './notification.service';
 import { TemplateRenderer } from './notification.service';
 import { RenderedMessage } from './notification.types';
-import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
+import { clearCollections, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
 
 const NOW = new Date('2026-09-06T02:00:00Z');
 const KPM_A = new mongoose.Types.ObjectId().toString();
@@ -48,21 +48,28 @@ class StubRenderer extends TemplateRenderer {
 
 describe('notifications — one inbox per person (P3.5-T10)', () => {
   let service: NotificationService;
+  let clock: FixedClock;
 
   beforeAll(async () => {
     await startMongo();
     const model = mongoose.model(Notification.name, NotificationSchema);
+    await syncIndexes();
+    clock = new FixedClock(NOW);
     service = new NotificationService(
       model as never,
       new NotificationRepository(model as never),
       mongoose.model(NotificationPreferences.name, NotificationPreferencesSchema) as never,
       new StubRenderer(),
-      new FixedClock(NOW),
+      clock,
+      { record: async () => undefined } as never,
       [],
     );
   });
   afterAll(stopMongo);
-  beforeEach(clearCollections);
+  beforeEach(async () => {
+    clock.set(NOW);
+    await clearCollections();
+  });
 
   const seed = (
     userId: string,
@@ -83,6 +90,8 @@ describe('notifications — one inbox per person (P3.5-T10)', () => {
     const inbox = await service.inbox(person('u-a', KPM_A));
     expect(inbox.items).toHaveLength(2);
     expect(inbox.unread).toBe(1);
+    // P12.1-T4: the first page, of twenty, unless asked otherwise.
+    expect(inbox).toMatchObject({ total: 2, page: 1, pageSize: 20 });
   });
 
   it('AC-3: never returns another person’s, even in the same office', async () => {
@@ -151,17 +160,19 @@ describe('notifications — one inbox per person (P3.5-T10)', () => {
 
   it('AC-2: marking one read drops the unread count', async () => {
     const n = await seed('u-a', KPM_A);
+    await seed('u-a', KPM_A);
     const after = await service.markRead(person('u-a', KPM_A), String(n._id));
 
-    expect(after.unread).toBe(0);
-    expect(after.items[0].readAt).toBe(NOW.toISOString());
+    // P12.1-T4: the row's own state and the inbox's count, never the page.
+    expect(after).toEqual({ notificationId: String(n._id), readAt: NOW.toISOString(), unread: 1 });
   });
 
-  it('AC-2: marking one twice settles rather than complaining', async () => {
+  it('AC-2: marking one twice settles rather than complaining, and keeps when it was first read', async () => {
     const n = await seed('u-a', KPM_A);
     await service.markRead(person('u-a', KPM_A), String(n._id));
-    await expect(service.markRead(person('u-a', KPM_A), String(n._id))).resolves.toMatchObject({
-      unread: 0,
+    clock.advance(60_000);
+    await expect(service.markRead(person('u-a', KPM_A), String(n._id))).resolves.toEqual({
+      notificationId: String(n._id), readAt: NOW.toISOString(), unread: 0,
     });
   });
 
@@ -187,16 +198,150 @@ describe('notifications — one inbox per person (P3.5-T10)', () => {
     await seed('u-a', KPM_A);
     await seed('u-b', KPM_A);
 
-    expect((await service.markAllRead(person('u-a', KPM_A))).unread).toBe(0);
+    // P12.1-T4: it answers the count it leaves, and nothing else.
+    expect(await service.markAllRead(person('u-a', KPM_A))).toEqual({ unread: 0 });
     expect((await service.inbox(person('u-b', KPM_A))).unread).toBe(1);
   });
 
-  it('clamps the page size rather than trusting it', async () => {
-    for (let i = 0; i < 3; i += 1) await seed("u-a", KPM_A);
-    // A caller asking for a million rows gets a hundred; asking for none gets one. The
-    // ceiling is the reader's own inbox either way, so this is about the response size,
-    // not about what they may see.
-    expect((await service.inbox(person('u-a', KPM_A), 10_000)).items).toHaveLength(3);
-    expect((await service.inbox(person('u-a', KPM_A), 0)).items).toHaveLength(1);
+  it('P12.1-T4 clamps the page and its size rather than trusting them', async () => {
+    for (let i = 0; i < 3; i += 1) await seed('u-a', KPM_A);
+    // The HTTP query refuses these with a 400; a caller in code is clamped. A caller asking for a
+    // million rows gets fifty; asking for none gets one; page zero is page one.
+    expect(await service.inbox(person('u-a', KPM_A), 1, 10_000)).toMatchObject({ pageSize: 50, total: 3 });
+    expect((await service.inbox(person('u-a', KPM_A), 1, 10_000)).items).toHaveLength(3);
+    expect(await service.inbox(person('u-a', KPM_A), 0, 0)).toMatchObject({ page: 1, pageSize: 1, total: 3 });
+    expect((await service.inbox(person('u-a', KPM_A), 0, 0)).items).toHaveLength(1);
+  });
+
+  // ------------------------------------------------------------------ P12.1-T4: pages and unread
+
+  describe('P12.1-T4 the inbox in pages, and an item marked unread again', () => {
+    /** `count` rows for `userId`, the newest last, each a minute after the one before; every third read. */
+    const many = async (userId: string, count: number, at = (i: number) => new Date(NOW.getTime() + i * 60_000)) => {
+      const rows = Array.from({ length: count }, (_, i) => ({
+        _id: new mongoose.Types.ObjectId(), userId, kpmId: KPM_A, membershipId: null, templateId: 'join_request.approved',
+        payload: {}, delivery: {}, coalesceKey: null, deletedAt: null,
+        readAt: i % 3 === 0 ? NOW : null, createdAt: at(i), updatedAt: at(i),
+      }));
+      // Straight into the collection, so each row keeps the `createdAt` it is given.
+      await mongoose.model(Notification.name).collection.insertMany(rows);
+      return rows;
+    };
+    const ids = (items: { notificationId: string }[]) => items.map((i) => i.notificationId);
+
+    it('P12.1-T4 pages of twenty, newest first; a page past the last is empty with the true total; unread counts the whole inbox', async () => {
+      const rows = await many('u-a', 45);
+      await many('u-b', 5);
+      const newestFirst = rows.map((r) => String(r._id)).reverse();
+      const unreadInAll = rows.filter((r) => r.readAt === null).length;
+
+      const pages = await Promise.all([1, 2, 3, 4].map((page) => service.inbox(person('u-a', KPM_A), page)));
+      expect(pages.map((p) => [p.page, p.pageSize, p.items.length, p.total, p.unread])).toEqual([
+        [1, 20, 20, 45, unreadInAll], [2, 20, 20, 45, unreadInAll], [3, 20, 5, 45, unreadInAll], [4, 20, 0, 45, unreadInAll],
+      ]);
+      // Every item once, in order, across the pages: nothing skipped or repeated at a boundary.
+      expect(pages.flatMap((p) => ids(p.items))).toEqual(newestFirst);
+      // The default is page one of twenty.
+      expect(ids((await service.inbox(person('u-a', KPM_A))).items)).toEqual(newestFirst.slice(0, 20));
+      // A page far past the last is empty, never an error, whatever its number.
+      await expect(service.inbox(person('u-a', KPM_A), Number.MAX_SAFE_INTEGER, 50))
+        .resolves.toMatchObject({ items: [], total: 45, unread: unreadInAll });
+    });
+
+    it('P12.1-T4 notices written in one millisecond keep their places: ties are broken by id, newest first', async () => {
+      const rows = await many('u-a', 7, () => NOW);
+      const byIdDesc = rows.map((r) => String(r._id)).sort().reverse();
+      const [first, second] = await Promise.all([1, 2].map((page) => service.inbox(person('u-a', KPM_A), page, 4)));
+      expect([...ids(first.items), ...ids(second.items)]).toEqual(byIdDesc);
+    });
+
+    it('P12.1-T4 the total counts only the reader’s inbox: not another person’s, not email-only, not deleted', async () => {
+      await many('u-a', 3);
+      await seed('u-b', KPM_A);
+      await seed('u-a', KPM_A, null, 'auth.password_reset');
+      await mongoose.model(Notification.name).create({
+        userId: 'u-a', kpmId: KPM_A, membershipId: null, templateId: 'join_request.approved',
+        payload: {}, delivery: {}, readAt: null, deletedAt: NOW,
+      });
+      expect(await service.inbox(person('u-a', KPM_A))).toMatchObject({ total: 3, unread: 2 });
+    });
+
+    it('P12.1-T4 a page is read off the inbox index, newest first, with no sort in memory', async () => {
+      await many('u-a', 45);
+      await many('u-b', 45);
+      const plan = await mongoose.model(Notification.name)
+        .find({ userId: 'u-a', deletedAt: null, templateId: { $in: ['join_request.approved'] } })
+        .sort({ createdAt: -1, _id: -1 }).skip(20).limit(20)
+        .explain('queryPlanner');
+      const winning = JSON.stringify((plan as unknown as { queryPlanner: { winningPlan: unknown } }).queryPlanner.winningPlan);
+      expect(winning).toContain('userId_1_deletedAt_1_createdAt_-1__id_-1');
+      expect(winning).not.toContain('"stage":"SORT"');
+    });
+
+    it('P12.1-T4 marking one unread counts it again; pressing twice settles', async () => {
+      const n = await seed('u-a', KPM_A, NOW);
+      await seed('u-a', KPM_A);
+
+      const after = await service.markUnread(person('u-a', KPM_A), String(n._id));
+      expect(after).toEqual({ notificationId: String(n._id), readAt: null, unread: 2 });
+      await expect(service.markUnread(person('u-a', KPM_A), String(n._id))).resolves.toEqual(after);
+      expect((await service.inbox(person('u-a', KPM_A))).items.find((i) => i.notificationId === String(n._id))?.readAt)
+        .toBeNull();
+
+      // And read again, at the moment it is read this time.
+      clock.advance(60_000);
+      await expect(service.markRead(person('u-a', KPM_A), String(n._id))).resolves.toEqual({
+        notificationId: String(n._id), readAt: new Date(NOW.getTime() + 60_000).toISOString(), unread: 1,
+      });
+    });
+
+    it('P12.1-T4 marking unread 404s somebody else’s, in the same office or another, and leaves it as it was', async () => {
+      const sameOffice = await seed('u-b', KPM_A, NOW);
+      const otherOffice = await seed('u-c', KPM_B, NOW);
+      for (const theirs of [sameOffice, otherOffice]) {
+        await expect(service.markUnread(person('u-a', KPM_A), String(theirs._id))).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(service.markRead(person('u-a', KPM_A), String(theirs._id))).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      }
+      expect((await service.inbox(person('u-b', KPM_A))).unread).toBe(0);
+      expect((await service.inbox(person('u-c', KPM_B))).unread).toBe(0);
+    });
+
+    it('P12.1-T4 marking 404s what is not an item of the reader’s inbox: malformed, email-only, deleted, nobody’s', async () => {
+      const emailOnly = await seed('u-a', KPM_A, null, 'auth.email_verification');
+      const deleted = await mongoose.model(Notification.name).create({
+        userId: 'u-a', kpmId: KPM_A, membershipId: null, templateId: 'join_request.approved',
+        payload: {}, delivery: {}, readAt: NOW, deletedAt: NOW,
+      });
+      const nobodys = new mongoose.Types.ObjectId().toString();
+      for (const id of ['not-an-id', String(emailOnly._id), String(deleted._id), nobodys]) {
+        await expect(service.markUnread(person('u-a', KPM_A), id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(service.markRead(person('u-a', KPM_A), id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      }
+    });
+
+    it('P12.1-T4 a read-only support session reads the inbox but marks nothing, read or unread', async () => {
+      const n = await seed('u-a', KPM_A);
+      const supporting = new RequestContext(
+        'u-a', 'none', person('u-a', KPM_A).membership, 'u-support', null, false, true,
+      );
+      await expect(service.inbox(supporting)).resolves.toMatchObject({ total: 1, unread: 1 });
+      for (const mark of [
+        () => service.markRead(supporting, String(n._id)),
+        () => service.markUnread(supporting, String(n._id)),
+        () => service.markAllRead(supporting),
+      ]) {
+        await expect(mark()).rejects.toMatchObject({ code: 'PERM_DENIED' });
+      }
+      expect((await service.inbox(person('u-a', KPM_A))).unread).toBe(1);
+    });
+
+    it('P12.1-T4 a person in no office pages, marks and unmarks their own', async () => {
+      const n = await seed('u-new', null);
+      const nobody = person('u-new', null);
+      await expect(service.inbox(nobody)).resolves.toMatchObject({ total: 1, unread: 1, page: 1, pageSize: 20 });
+      await expect(service.markRead(nobody, String(n._id))).resolves.toMatchObject({ unread: 0 });
+      await expect(service.markUnread(nobody, String(n._id))).resolves.toMatchObject({ readAt: null, unread: 1 });
+      await expect(service.markAllRead(nobody)).resolves.toEqual({ unread: 0 });
+    });
   });
 });

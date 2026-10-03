@@ -4,7 +4,9 @@ import {
   AccessTokenDto, ImpersonationSessionDto, MeDto, MyKpmRequestDto, ReadinessDto,
   RedeemedInviteDto, SessionDto, StatusAckDto,
 } from '@/modules/auth/session.response.dto';
-import { InboxDto, InboxItemDto } from '@/modules/notifications/notification.response.dto';
+import {
+  InboxDto, NotificationReadStateDto, UnreadCountDto,
+} from '@/modules/notifications/notification.response.dto';
 import { DeletedLeadDto, LeadPageDto, LeadResponseDto } from '@/modules/leads/lead.response.dto';
 import { GoalResponseDto } from '@/modules/goals/goal.response.dto';
 import {
@@ -285,9 +287,11 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   OrgController_read: { type: DirectoryMemberDto },
   OrgController_reports: { type: DirectoryMemberDto, isArray: true },
 
+  // P12.1-T4: a page of the inbox; a mark answers that one row's state and the count, not the page.
   NotificationController_inbox: { type: InboxDto },
-  NotificationController_readAll: { type: InboxDto },
-  NotificationController_read: { type: InboxItemDto },
+  NotificationController_readAll: { type: UnreadCountDto },
+  NotificationController_read: { type: NotificationReadStateDto },
+  NotificationController_unread: { type: NotificationReadStateDto },
 
   AdminController_overview: { type: PlatformOverviewDto },
   AdminController_tenantAdmins: { type: PlatformAdminRowDto, isArray: true },

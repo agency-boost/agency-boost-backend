@@ -105,6 +105,7 @@ export async function startCalendar(options: { realNotifications?: boolean } = {
       mongoose.model(NotificationPreferences.name, NotificationPreferencesSchema) as never,
       new LinkRenderer(),
       new FixedClock(ROSTER_NOW),
+      { record: async () => undefined } as never,
       [inApp, email],
     );
   }

@@ -7646,18 +7646,29 @@
     },
     "/api/v1/notifications": {
       "get": {
-        "description": "With the unread count, so the nav badge and the list can never disagree — they come from one read rather than two.\n\n**Requires `notification:read_inbox`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "With the unread count of the whole inbox, so the nav badge and the list can never disagree — they come from one read rather than two — and the total, for the pager.\n\n**Requires `notification:read_inbox`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "NotificationController_inbox_v1",
         "parameters": [
           {
-            "name": "limit",
+            "name": "page",
             "required": false,
             "in": "query",
+            "description": "Which page, from 1.",
             "schema": {
               "minimum": 1,
-              "maximum": 100,
-              "default": 50,
-              "example": 50,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "description": "Items per page.",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
               "type": "number"
             }
           }
@@ -7719,7 +7730,7 @@
             "bearer": []
           }
         ],
-        "summary": "Your notifications, newest first",
+        "summary": "One page of your notifications, newest first",
         "tags": [
           "notifications"
         ],
@@ -7728,6 +7739,7 @@
     },
     "/api/v1/notifications/read-all": {
       "post": {
+        "description": "Answers the unread count it leaves.\n\n**Requires `notification:mark_read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "NotificationController_readAll_v1",
         "parameters": [],
         "responses": {
@@ -7736,7 +7748,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InboxDto"
+                  "$ref": "#/components/schemas/UnreadCountDto"
                 }
               }
             }
@@ -7781,13 +7793,12 @@
         "tags": [
           "notifications"
         ],
-        "x-required-permission": "notification:mark_read",
-        "description": "**Requires `notification:mark_read`.** See `docs/00-product/roles-and-permissions.md`."
+        "x-required-permission": "notification:mark_read"
       }
     },
     "/api/v1/notifications/{notificationId}/read": {
       "post": {
-        "description": "A notification that is not yours is a 404, never a 403 — a 403 would confirm it exists. Marking one that is already read settles rather than complains.\n\n**Requires `notification:mark_read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "A notification that is not yours is a 404, never a 403 — a 403 would confirm it exists. Marking one that is already read settles rather than complains, and keeps when it was first read.\n\n**Requires `notification:mark_read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "NotificationController_read_v1",
         "parameters": [
           {
@@ -7805,7 +7816,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InboxItemDto"
+                  "$ref": "#/components/schemas/NotificationReadStateDto"
                 }
               }
             }
@@ -7857,6 +7868,84 @@
           }
         ],
         "summary": "Mark one read",
+        "tags": [
+          "notifications"
+        ],
+        "x-required-permission": "notification:mark_read"
+      }
+    },
+    "/api/v1/notifications/{notificationId}/unread": {
+      "post": {
+        "description": "It counts on the badge again until it is read. A notification that is not yours is a 404, never a 403; marking one that is already unread settles rather than complains.\n\n**Requires `notification:mark_read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NotificationController_unread_v1",
+        "parameters": [
+          {
+            "name": "notificationId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationReadStateDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `notification:mark_read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark one unread",
         "tags": [
           "notifications"
         ],
@@ -27504,7 +27593,7 @@
             "type": "string",
             "nullable": true,
             "example": "/coaching/me?session=66f0000000000000000000d1",
-            "description": "Where the item opens, in the app: a finalized coaching session opens on that session. `null` for every other item."
+            "description": "Where the item opens, in the app: a finalized coaching session on that session, a calendar notice on its entry or its week. `null` for an item with nowhere to go, which opens in a box on the screen."
           },
           "kpmId": {
             "type": "string",
@@ -27533,17 +27622,73 @@
         "type": "object",
         "properties": {
           "items": {
+            "description": "This page, newest first.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/InboxItemDto"
             }
           },
           "unread": {
-            "type": "number"
+            "type": "number",
+            "description": "Unread in the whole inbox, not on this page."
+          },
+          "total": {
+            "type": "number",
+            "description": "Items in the whole inbox."
+          },
+          "page": {
+            "type": "number",
+            "minimum": 1,
+            "description": "The page answered, from 1."
+          },
+          "pageSize": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Items per page."
           }
         },
         "required": [
           "items",
+          "unread",
+          "total",
+          "page",
+          "pageSize"
+        ]
+      },
+      "UnreadCountDto": {
+        "type": "object",
+        "properties": {
+          "unread": {
+            "type": "number",
+            "example": 0,
+            "description": "`0`, unless a notification arrived between the write and the count."
+          }
+        },
+        "required": [
+          "unread"
+        ]
+      },
+      "NotificationReadStateDto": {
+        "type": "object",
+        "properties": {
+          "notificationId": {
+            "type": "string"
+          },
+          "readAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "When it was first read; `null` when it is unread."
+          },
+          "unread": {
+            "type": "number",
+            "description": "Unread in the whole inbox, after this mark."
+          }
+        },
+        "required": [
+          "notificationId",
+          "readAt",
           "unread"
         ]
       },
