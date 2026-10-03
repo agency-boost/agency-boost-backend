@@ -1,4 +1,4 @@
-import { BadRequestException, HttpStatus, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpStatus, Injectable, Optional, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -38,6 +38,7 @@ import {
 import { Kpm } from '@/modules/tenants/kpm.schema';
 import { ActivityLogRepository } from './activity-log.repository';
 import { ActivityReadings } from './activity-readings';
+import { ActivationEvents, signalActivation } from '@/modules/activation/activation-events.port';
 import type { ActivityLogDocument } from './activity-log.schema';
 import {
   bucketIndex, bucketsFor, dashboardRange, type DashboardBucket, type DashboardRange,
@@ -241,6 +242,11 @@ export class ActivityService {
     private readonly goals: GoalService,
     private readonly production: ProductionReadings,
     private readonly readings: ActivityReadings,
+    /*
+     * P13-T3 AC-5: a day saved or corrected may complete a hire's four weeks of activity. A port the
+     * activation module answers, so activity does not depend on it; optional, failing open.
+     */
+    @Optional() @Inject(ActivationEvents) private readonly activation: ActivationEvents | null = null,
   ) {}
 
   // ------------------------------------------------------------------ reading
@@ -692,6 +698,8 @@ export class ActivityService {
       targetId: String(row!._id),
       after: { localDate: date, totalCount },
     });
+    // P13-T3 AC-4: a day logged above zero may make the hire's fourth consecutive week.
+    await signalActivation(this.activation, ctx, me, 'feature:activity');
 
     return this.view(row, { membershipId: me, orgLevelCode: mine }, date, today, office, ctx);
   }
@@ -771,6 +779,8 @@ export class ActivityService {
       before: { totalCount: existing.totalCount },
       after: { totalCount, reason },
     });
+    // A corrected day counts as corrected (ADR-0042): it may make the fourth week, and never unmakes one.
+    await signalActivation(this.activation, ctx, me, 'feature:activity');
 
     return this.view(row, { membershipId: me, orgLevelCode: mine }, date, today, office, ctx);
   }

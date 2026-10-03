@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import {
@@ -11,6 +11,7 @@ import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import { CoachingSessionGate } from '@/modules/coaching/coaching-session.gate';
+import { ActivationEvents, signalActivation } from '@/modules/activation/activation-events.port';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import type { Permission } from '@/modules/rbac/permissions';
@@ -222,6 +223,11 @@ export class GoalService {
      * sessions and `COACH`, so nothing it depends on depends on goals.
      */
     private readonly sessions: CoachingSessionGate,
+    /*
+     * P13-T3 AC-5: a goal saved on a hire's membership completes their activation's `feature:goals` item.
+     * A port the activation module answers, so goals does not depend on it; optional, failing open.
+     */
+    @Optional() @Inject(ActivationEvents) private readonly activation: ActivationEvents | null = null,
   ) {}
 
   /**
@@ -398,6 +404,8 @@ export class GoalService {
     if (membershipId !== savedBy) {
       await this.announce(ctx, membershipId, savedBy, saved, session?.coalesceKey ?? null);
     }
+    // P13-T3 AC-2: the hire's goal, saved by them or by a leader with `?for=`, attributed to whoever saved it.
+    await signalActivation(this.activation, ctx, membershipId, 'feature:goals');
     return this.view(saved, day, achieved, await this.measuring(ctx, membershipId, day));
   }
 

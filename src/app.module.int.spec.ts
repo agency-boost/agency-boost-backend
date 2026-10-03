@@ -6,6 +6,19 @@ import mongoose from 'mongoose';
 import { AppModule } from './app.module';
 import { startMongo, stopMongo } from '../test/mongo';
 import { listenOnLoopback } from '../test/listen';
+import { ActivationEvents } from './modules/activation/activation-events.port';
+import { ActivationNav } from './modules/activation/activation-nav.port';
+import { ActivationProgressService } from './modules/activation/activation-progress.service';
+import { ActivityService } from './modules/activity/activity.service';
+import { AuthController } from './modules/auth/auth.controller';
+import { CalendarLeave } from './modules/calendar/calendar-leave';
+import { GoalService } from './modules/goals/goal.service';
+import { LeadService } from './modules/leads/lead.service';
+import { ApprovalsService } from './modules/org/approvals.service';
+import { ActivationStarter } from './modules/org/activation-starter.port';
+import { LeaderCodeService } from './modules/org/leader-code.service';
+import { MemberDeparture } from './modules/org/member-departure.port';
+import { RemovalService } from './modules/org/removal.service';
 
 /**
  * Boots the real AppModule.
@@ -54,6 +67,38 @@ describe('AppModule boots', () => {
 
   it('resolves every provider in the real module graph', () => {
     expect(app).toBeDefined();
+  });
+
+  /*
+   * **An optional port resolves to nothing, silently, unless it is injected by its token** (found
+   * 2026-10-03). A parameter typed `Port | null` reaches the container as `Object`, and `@Optional()`
+   * then hands it `undefined`: D-leave's `MemberDeparture` never ran in the app, while every spec — each
+   * building `RemovalService` by hand — passed. So each consumer's port is read off the real graph here.
+   */
+  it('P13-T3 AC-5 wires every optional port to the module that answers it, in the real graph', () => {
+    const port = (consumer: unknown, field: string) => (app.get(consumer as never, { strict: false }) as Record<string, unknown>)[field];
+    const activation = app.get(ActivationProgressService, { strict: false });
+    expect(port(GoalService, 'activation')).toBe(activation);
+    expect(port(LeadService, 'activation')).toBe(activation);
+    expect(port(ActivityService, 'activation')).toBe(activation);
+    expect(port(ApprovalsService, 'activations')).toBe(activation);
+    expect(port(LeaderCodeService, 'activations')).toBe(activation);
+    expect(port(AuthController, 'activationNav')).toBe(activation);
+    expect(port(RemovalService, 'departures')).toBe(app.get(CalendarLeave, { strict: false }));
+  });
+
+  /*
+   * The Phase 13 exit review, N9: the three ports themselves, by token, resolve to the one service that
+   * answers them — not to three instances, and not to nothing. The test above reads each consumer's field;
+   * this one reads the container's own answer for the token, which a consumer added later injects.
+   */
+  it('Phase 13 exit review N9 resolves ActivationStarter, ActivationEvents and ActivationNav, by token, to the one ActivationProgressService', () => {
+    const activation = app.get(ActivationProgressService, { strict: false });
+    expect(activation).toBeInstanceOf(ActivationProgressService);
+    for (const token of [ActivationStarter, ActivationEvents, ActivationNav]) {
+      expect([token.name, app.get(token as never, { strict: false }) === activation]).toEqual([token.name, true]);
+    }
+    expect(app.get(MemberDeparture as never, { strict: false })).toBe(app.get(CalendarLeave, { strict: false }));
   });
 
   it('serves health without a token', async () => {

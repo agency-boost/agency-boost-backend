@@ -17212,6 +17212,741 @@
         ],
         "x-required-permission": "calendar_entry:answer"
       }
+    },
+    "/api/v1/activation/me": {
+      "get": {
+        "description": "Your checklist as it was published when you started, with what is done, when and by whom, your own note and date on each item, your start date, the office’s today, your day and window, each aspect’s status and the percentage — computed by the server, never in the browser — and your leader’s coaching note. Answered in any state: open, complete, or past its six months.\n\n**Requires `activation:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivationProgressController_mine_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivationViewDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activation:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — you have no activation: one starts when you join an office as an Agent under a leader. Answered exactly as a record in another office is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Your 90-day activation",
+        "tags": [
+          "activation"
+        ],
+        "x-required-permission": "activation:read"
+      }
+    },
+    "/api/v1/activation/me/items/{code}": {
+      "put": {
+        "description": "Sets one manual item done or not, with your optional note and date. An item that completes on its own — a goal, a lead, four weeks of activity — is never ticked by hand.\n\n**Requires `activation:update_manual_item`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivationProgressController_tick_v1",
+        "parameters": [
+          {
+            "name": "code",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TickOwnActivationItemDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivationViewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activation:update_manual_item`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — you have no activation, or your checklist has no item with that code. Answered exactly as a record in another office is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ACTIVATION_ITEM_AUTOMATIC` — the item completes on its own. `ACTIVATION_CLOSED` — your activation is complete, or its six months are over: nothing on it changes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Tick or untick one of your items",
+        "tags": [
+          "activation"
+        ],
+        "x-required-permission": "activation:update_manual_item"
+      }
+    },
+    "/api/v1/activation/me/graduate": {
+      "post": {
+        "description": "At 100% — every item done, the ones that complete on their own included. Who and when are kept. Your own declaration, so refused in a support session.\n\n**Requires `activation:graduate`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivationProgressController_graduate_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivationViewDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activation:graduate`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — you have no activation: one starts when you join an office as an Agent under a leader. Answered exactly as a record in another office is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ACTIVATION_INCOMPLETE` — not every item is done yet; `details` says how many are. `ACTIVATION_CLOSED` — it is complete already, or its six months are over. `VERSION_CONFLICT` — an item was unticked and ticked again while it was being marked complete: read it again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark your activation complete",
+        "tags": [
+          "activation"
+        ],
+        "x-required-permission": "activation:graduate"
+      }
+    },
+    "/api/v1/new-hires": {
+      "get": {
+        "description": "The open activations of everybody you coach, at any depth: your direct unit first, then a card per leader below you, each hire under the nearest AAB above them. Rows by day, highest first, with the start date, the percentage, the day against the office’s window, and whether the first case is closed. Each hire shown is a recorded read.\n\n**Requires `new_hires:read_roster`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NewHiresController_roster_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewHiresRosterDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `new_hires:read_roster`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — you coach nobody with an open activation, so there is no roster to show. Answered exactly as a record in another office is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Your new hires",
+        "tags": [
+          "activation"
+        ],
+        "x-required-permission": "new_hires:read_roster"
+      }
+    },
+    "/api/v1/new-hires/{membershipId}": {
+      "get": {
+        "description": "As the hire reads it, in any state — without their own note and date on each item. The detail page, and a coaching page’s Activation tab. A recorded read.\n\n**Requires `activation:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NewHiresController_detail_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivationViewDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activation:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One hire’s activation",
+        "tags": [
+          "activation"
+        ],
+        "x-required-permission": "activation:read"
+      }
+    },
+    "/api/v1/new-hires/{membershipId}/items/{code}": {
+      "put": {
+        "description": "Sets one manual item of a hire you coach done or not, in your name. An item that completes on its own is never ticked by hand.\n\n**Requires `activation:update_manual_item`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NewHiresController_tick_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TickHireActivationItemDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivationViewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activation:update_manual_item`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists. Or their checklist has no item with that code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ACTIVATION_ITEM_AUTOMATIC` — the item completes on its own. `ACTIVATION_CLOSED` — the activation is complete, or its six months are over: nothing on it changes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Tick or untick a hire’s item",
+        "tags": [
+          "activation"
+        ],
+        "x-required-permission": "activation:update_manual_item"
+      }
+    },
+    "/api/v1/new-hires/{membershipId}/start-date": {
+      "put": {
+        "description": "The day their activation started, when it was not the day they joined here. The day and the end are recomputed; who corrected it and when are kept, and the old and new dates recorded.\n\n**Requires `activation:set_start_date`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NewHiresController_correctStart_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectActivationStartDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivationViewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — not a day, a day after the office’s today, or more than 365 days before it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activation:set_start_date`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ACTIVATION_CLOSED` — the activation is complete, or its six months are over: nothing on it changes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Correct a hire’s start date",
+        "tags": [
+          "activation"
+        ],
+        "x-required-permission": "activation:set_start_date"
+      }
+    },
+    "/api/v1/new-hires/{membershipId}/note": {
+      "put": {
+        "description": "One note per hire, replacing the one before it, kept with who wrote it and when — and read by the hire on their own activation page.\n\n**Requires `activation_note:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NewHiresController_saveNote_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveActivationNoteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivationNoteSavedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — empty once trimmed, or longer than 1,000 characters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activation_note:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ACTIVATION_CLOSED` — the activation is complete, or its six months are over: nothing on it changes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save your coaching note to a hire",
+        "tags": [
+          "activation"
+        ],
+        "x-required-permission": "activation_note:write"
+      }
     }
   },
   "info": {
@@ -25353,6 +26088,492 @@
           "answer"
         ]
       },
+      "ActivationPersonDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Sari Puspita",
+            "description": "The full name."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name"
+        ]
+      },
+      "ActivationStartCorrectedDto": {
+        "type": "object",
+        "properties": {
+          "by": {
+            "$ref": "#/components/schemas/ActivationPersonDto"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "by",
+          "at"
+        ]
+      },
+      "ActivationLinkDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "example": "feature:goals"
+          },
+          "label": {
+            "type": "string",
+            "example": "Goal Settings",
+            "description": "What the new hire's \"Go to {label} →\" names."
+          },
+          "route": {
+            "type": "string",
+            "example": "/goals"
+          },
+          "completesWhen": {
+            "type": "string",
+            "example": "the hire has saved any goal since joining"
+          },
+          "live": {
+            "type": "boolean",
+            "description": "Whether an evaluator exists yet. While it does not, a leader ticks the item by hand and the tick is recorded as manual; once it is live, no role may tick it."
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "route",
+          "completesWhen",
+          "live"
+        ]
+      },
+      "ActivationItemProgressDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "FIRST_CASE_CLOSED",
+            "description": "The pinned version’s code."
+          },
+          "label": {
+            "type": "string",
+            "example": "Close first case independently"
+          },
+          "link": {
+            "nullable": true,
+            "description": "The link, resolved; `null` for a manual item. While `live`, nobody ticks it by hand.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationLinkDto"
+              }
+            ]
+          },
+          "done": {
+            "type": "boolean"
+          },
+          "doneAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "hire",
+              "leader",
+              "link"
+            ],
+            "nullable": true,
+            "description": "Who or what completed it."
+          },
+          "doneBy": {
+            "nullable": true,
+            "description": "Who ticked it — or, for a link, whoever wrote the record that completed it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationPersonDto"
+              }
+            ]
+          },
+          "note": {
+            "type": "string",
+            "nullable": true,
+            "description": "The hire’s own note: only in their own read; `null` in a leader’s."
+          },
+          "date": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-29",
+            "description": "The hire’s own date, an office date: only in their own read."
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "link",
+          "done",
+          "doneAt",
+          "source",
+          "doneBy",
+          "note",
+          "date"
+        ]
+      },
+      "ActivationAspectProgressDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "FIRST_SALE"
+          },
+          "label": {
+            "type": "string",
+            "example": "4. First Sale"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "done",
+              "in_progress",
+              "not_started"
+            ]
+          },
+          "done": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivationItemProgressDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "status",
+          "done",
+          "total",
+          "items"
+        ]
+      },
+      "ActivationNoteDto": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "by": {
+            "$ref": "#/components/schemas/ActivationPersonDto"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "text",
+          "by",
+          "at"
+        ]
+      },
+      "ActivationViewDto": {
+        "type": "object",
+        "properties": {
+          "hire": {
+            "$ref": "#/components/schemas/ActivationPersonDto"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "graduated",
+              "expired"
+            ],
+            "description": "Open until the hire marks it complete, or until six calendar months after its start date."
+          },
+          "startDate": {
+            "type": "string",
+            "example": "2026-08-06",
+            "description": "Day 1, an office date."
+          },
+          "startCorrected": {
+            "nullable": true,
+            "description": "A leader’s correction of the start date: who, and when. `null` while it is the join date.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationStartCorrectedDto"
+              }
+            ]
+          },
+          "today": {
+            "type": "string",
+            "example": "2026-10-03",
+            "description": "The office’s today: nothing is worked out in the browser."
+          },
+          "day": {
+            "type": "number",
+            "example": 59,
+            "description": "Whole office days since the start date, plus one; never below 1."
+          },
+          "window": {
+            "type": "number",
+            "example": 90,
+            "description": "The office’s activation window, in days."
+          },
+          "overdue": {
+            "type": "boolean",
+            "description": "Past the window, below 100%, and still open."
+          },
+          "endsOn": {
+            "type": "string",
+            "example": "2027-02-06",
+            "description": "Six calendar months after the start date, an office date."
+          },
+          "done": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number",
+            "description": "The pinned version’s item count."
+          },
+          "pct": {
+            "type": "number",
+            "example": 56,
+            "description": "`round(done / total × 100)`."
+          },
+          "aspects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivationAspectProgressDto"
+            }
+          },
+          "firstCaseClosed": {
+            "type": "boolean",
+            "description": "The item coded `FIRST_CASE_CLOSED` is done."
+          },
+          "graduatedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "graduatedBy": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationPersonDto"
+              }
+            ]
+          },
+          "note": {
+            "nullable": true,
+            "description": "The leader’s coaching note, which the hire reads.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationNoteDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "hire",
+          "state",
+          "startDate",
+          "startCorrected",
+          "today",
+          "day",
+          "window",
+          "overdue",
+          "endsOn",
+          "done",
+          "total",
+          "pct",
+          "aspects",
+          "firstCaseClosed",
+          "graduatedAt",
+          "graduatedBy",
+          "note"
+        ]
+      },
+      "TickOwnActivationItemDto": {
+        "type": "object",
+        "properties": {
+          "done": {
+            "type": "boolean",
+            "description": "Done or not. Sets the item rather than toggling it."
+          },
+          "note": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 500,
+            "example": "Did it with Sari on Tuesday.",
+            "description": "*Note (optional)*: the hire’s own, trimmed; empty or `null` clears it, absent leaves it. No leader reads it."
+          },
+          "date": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-29",
+            "description": "The hire’s own date for the item, an office date; `null` clears it, absent leaves it. No leader reads it."
+          }
+        },
+        "required": [
+          "done"
+        ]
+      },
+      "NewHireRowDto": {
+        "type": "object",
+        "properties": {
+          "hire": {
+            "$ref": "#/components/schemas/ActivationPersonDto"
+          },
+          "startDate": {
+            "type": "string",
+            "example": "2026-08-06",
+            "description": "What *Joined* prints."
+          },
+          "day": {
+            "type": "number"
+          },
+          "window": {
+            "type": "number"
+          },
+          "overdue": {
+            "type": "boolean"
+          },
+          "pct": {
+            "type": "number"
+          },
+          "firstCaseClosed": {
+            "type": "boolean",
+            "description": "*Active Agent*: the item coded `FIRST_CASE_CLOSED` is done."
+          }
+        },
+        "required": [
+          "hire",
+          "startDate",
+          "day",
+          "window",
+          "overdue",
+          "pct",
+          "firstCaseClosed"
+        ]
+      },
+      "NewHireGroupDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "aab",
+              "ab"
+            ],
+            "description": "*Direct Unit*, or the nearest leader below you: an AAB, or an AB under an AB — the card names the rung."
+          },
+          "leader": {
+            "nullable": true,
+            "description": "`null` for *Direct Unit*.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationPersonDto"
+              }
+            ]
+          },
+          "hires": {
+            "description": "By day, highest first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NewHireRowDto"
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "leader",
+          "hires"
+        ]
+      },
+      "NewHiresRosterDto": {
+        "type": "object",
+        "properties": {
+          "groups": {
+            "description": "Empty groups are omitted.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NewHireGroupDto"
+            }
+          },
+          "today": {
+            "type": "string",
+            "example": "2026-10-03"
+          }
+        },
+        "required": [
+          "groups",
+          "today"
+        ]
+      },
+      "TickHireActivationItemDto": {
+        "type": "object",
+        "properties": {
+          "done": {
+            "type": "boolean",
+            "description": "Done or not. Sets the item rather than toggling it."
+          }
+        },
+        "required": [
+          "done"
+        ]
+      },
+      "CorrectActivationStartDto": {
+        "type": "object",
+        "properties": {
+          "startDate": {
+            "type": "string",
+            "example": "2026-07-01",
+            "description": "The day the activation started, an office date: the office’s today at the latest, and at most 365 days before it."
+          }
+        },
+        "required": [
+          "startDate"
+        ]
+      },
+      "SaveActivationNoteDto": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "example": "Great pace on prospecting — let’s focus on booking your first JFW this week.",
+            "description": "The coaching note, trimmed: 1 to the limit once trimmed. Replaces the one before it."
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "ActivationNoteSavedDto": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "$ref": "#/components/schemas/ActivationNoteDto"
+          }
+        },
+        "required": [
+          "note"
+        ]
+      },
       "CalendarPersonRowDto": {
         "type": "object",
         "properties": {
@@ -25638,6 +26859,23 @@
           "directCount"
         ]
       },
+      "MeActivationDto": {
+        "type": "object",
+        "properties": {
+          "open": {
+            "type": "boolean",
+            "description": "False once it is complete, or its six months are over."
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "Every item done: the amber check beside the menu item."
+          }
+        },
+        "required": [
+          "open",
+          "complete"
+        ]
+      },
       "MeDto": {
         "type": "object",
         "properties": {
@@ -25674,6 +26912,19 @@
             "items": {
               "type": "string"
             }
+          },
+          "activation": {
+            "nullable": true,
+            "description": "Your 90-day activation, for the *New agent* section: `null` when you have none.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MeActivationDto"
+              }
+            ]
+          },
+          "newHires": {
+            "type": "boolean",
+            "description": "You coach somebody whose activation is open: the *New hires* menu item."
           }
         },
         "required": [
@@ -25683,7 +26934,9 @@
           "impersonationReadOnly",
           "impersonatedBy",
           "mustChangePassword",
-          "permissions"
+          "permissions",
+          "activation",
+          "newHires"
         ]
       },
       "JoinStateDto": {
@@ -26546,39 +27799,6 @@
           "version",
           "status",
           "skills"
-        ]
-      },
-      "ActivationLinkDto": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "example": "feature:goals"
-          },
-          "label": {
-            "type": "string",
-            "example": "Goal Settings",
-            "description": "What the new hire's \"Go to {label} →\" names."
-          },
-          "route": {
-            "type": "string",
-            "example": "/goals"
-          },
-          "completesWhen": {
-            "type": "string",
-            "example": "the hire has saved any goal since joining this office"
-          },
-          "live": {
-            "type": "boolean",
-            "description": "Whether an evaluator exists yet. While it does not, a leader ticks the item by hand and the tick is recorded as manual; once it is live, no role may tick it."
-          }
-        },
-        "required": [
-          "kind",
-          "label",
-          "route",
-          "completesWhen",
-          "live"
         ]
       },
       "ActivationItemDto": {

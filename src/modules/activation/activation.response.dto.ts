@@ -15,7 +15,7 @@ export class ActivationLinkDto implements ActivationLinkView {
   @ApiProperty({ type: String, example: '/goals' })
   route!: string;
 
-  @ApiProperty({ type: String, example: 'the hire has saved any goal since joining this office' })
+  @ApiProperty({ type: String, example: 'the hire has saved any goal since joining' })
   completesWhen!: string;
 
   @ApiProperty({

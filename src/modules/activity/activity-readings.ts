@@ -71,6 +71,30 @@ export class ActivityReadings {
   }
 
   /**
+   * **The days each member logged above zero, from a day on, for many members at once** (P13-T3 AC-4,
+   * AC-7): what an activation's `feature:activity` item reads its four weeks from. An all-zero saved day
+   * is not among them (ADR-0042: it says *nothing happened*), and a corrected day reads as corrected. One
+   * query for the whole list, within the office, oldest first.
+   */
+  async activeDaysOfMany(
+    ctx: RequestContext, membershipIds: readonly string[], from: LocalDate,
+  ): Promise<Map<string, { date: LocalDate; id: string; byMembershipId: string }[]>> {
+    const out = new Map<string, { date: LocalDate; id: string; byMembershipId: string }[]>();
+    if (membershipIds.length === 0) return out;
+    const rows = await this.logs.find(
+      ctx,
+      { membershipId: { $in: [...new Set(membershipIds)] }, localDate: { $gte: from }, totalCount: { $gt: 0 } },
+      { sort: { localDate: 1 }, projection: { membershipId: 1, localDate: 1, enteredByMembershipId: 1 } },
+    );
+    for (const row of rows) {
+      const days = out.get(row.membershipId) ?? [];
+      days.push({ date: row.localDate, id: String(row._id), byMembershipId: row.enteredByMembershipId });
+      out.set(row.membershipId, days);
+    }
+    return out;
+  }
+
+  /**
    * **The sections a rung is shown**, in the office's order, each with every type it holds — archived ones
    * included, so a reader can keep what was logged against them (P10-T5).
    *

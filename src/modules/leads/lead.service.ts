@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional, Inject } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import {
@@ -13,6 +13,7 @@ import type { Permission } from '@/modules/rbac/permissions';
 import { LeadStatusRepository } from '@/modules/config/activity.repository';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
 import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
+import { ActivationEvents, signalActivation } from '@/modules/activation/activation-events.port';
 import { leadFlags, type LeadFlag } from './lead-attention';
 import { checkLead, requireLawfulBasis, type CheckedLead } from './lead-input';
 import { isInMemorySort, ladderRanks, leadOrder, type LeadSortKey } from './lead-order';
@@ -156,6 +157,11 @@ export class LeadService {
     private readonly config: TenantConfigService,
     // OD-107: a leader's list of their downline's leads leaves the §3.5 record, per owner shown.
     private readonly subjectReads: SubjectReadAudit,
+    /*
+     * P13-T3 AC-5: a lead in a hire's pipeline completes their activation's `feature:leads` item. A port
+     * the activation module answers, so leads does not depend on it; optional, failing open.
+     */
+    @Optional() @Inject(ActivationEvents) private readonly activation: ActivationEvents | null = null,
   ) {}
 
   /**
@@ -331,6 +337,8 @@ export class LeadService {
       // Whose pipeline, when it is not the caller's: the entry's actor is the leader who added it.
       ...(ownerMembershipId !== membershipId ? { ownerMembershipId } : {}),
     });
+    // P13-T3 AC-3: a lead of either type, added by the hire or by a leader in a session.
+    await signalActivation(this.activation, ctx, ownerMembershipId, 'feature:leads');
     return this.view(
       created, day, ownerMembershipId === membershipId ? new Map() : await this.attribution(ctx, [created]),
     );

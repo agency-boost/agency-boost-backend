@@ -283,7 +283,7 @@ describe('the configuration controllers', () => {
       const items = res.body.published.aspects.flatMap((a: { items: unknown[] }) => a.items);
       expect(items).toHaveLength(16);
       expect(items.find((i: { code: string }) => i.code === 'GOAL_SETTING').link)
-        .toMatchObject({ label: 'Goal Settings', route: '/goals', live: false });
+        .toMatchObject({ label: 'Goal Settings', route: '/goals', live: true });
     });
 
     it('saves a draft and publishes it as the next version', async () => {

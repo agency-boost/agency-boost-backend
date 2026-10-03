@@ -34,6 +34,9 @@ import {
   ModuleContentDto, SignedUploadDto, SignedUrlDto, TrainingCategoryDto,
 } from '@/modules/training/training.response.dto';
 import { ActivationChecklistDto } from '@/modules/activation/activation.response.dto';
+import {
+  ActivationNoteSavedDto, ActivationViewDto, NewHiresRosterDto,
+} from '@/modules/activation/activation-progress.response.dto';
 import { ProductResponseDto } from '@/modules/products/product.response.dto';
 import {
   EffectiveScriptDto, KpmProductDto, SignedUrlDto as ProductSignedUrlDto,
@@ -112,6 +115,15 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   CalendarController_block: { type: CalendarEntryDto },
   CalendarController_searchPeople: { type: CalendarPeoplePageDto },
   CalendarController_downline: { type: CalendarDownlineDto },
+  // Phase 13: the hire's own activation, and a leader's new hires.
+  ActivationProgressController_mine: { type: ActivationViewDto },
+  ActivationProgressController_tick: { type: ActivationViewDto },
+  ActivationProgressController_graduate: { type: ActivationViewDto },
+  NewHiresController_roster: { type: NewHiresRosterDto },
+  NewHiresController_detail: { type: ActivationViewDto },
+  NewHiresController_tick: { type: ActivationViewDto },
+  NewHiresController_correctStart: { type: ActivationViewDto },
+  NewHiresController_saveNote: { type: ActivationNoteSavedDto },
   AuthController_resendVerification: { type: StatusAckDto },
   AuthController_sessions: { type: SessionDto, isArray: true },
   HealthController_live: { type: StatusAckDto },

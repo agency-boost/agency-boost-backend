@@ -77,6 +77,9 @@ import {
 import { CoachingProfileRevisionSchema, CoachingProfileSchema } from '@/modules/coaching/coaching-profile.schema';
 import { LeaderNoteRevisionSchema, LeaderNoteSchema } from '@/modules/coaching/leader-note.schema';
 import { CalendarAttendeeSchema, CalendarEventSchema } from '@/modules/calendar/calendar-event.schema';
+import {
+  ActivationItemStateSchema, ActivationNoteSchema, ActivationProgressSchema,
+} from '@/modules/activation/activation-progress.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -122,6 +125,8 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['leaderNotes', LeaderNoteSchema],
   // P12-T2: one per entry; the organiser's range and an attendee's, both `kpmId`-led.
   ['calendarEvents', CalendarEventSchema],
+  // P13-T1 AC-8: one per hire; the open one unique per membership, and the reads, both `kpmId`-led.
+  ['activationProgress', ActivationProgressSchema],
 ];
 
 /**
@@ -358,6 +363,16 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     CalendarAttendeeSchema,
     'one member on a calendar entry, inside the entry: no collection and no _id of its own',
   ],
+  [
+    'activationItemState (subdocument)',
+    ActivationItemStateSchema,
+    'one item of a hire\'s activation, keyed by its code inside the activation: no collection and no _id of its own',
+  ],
+  [
+    'activationNote (subdocument)',
+    ActivationNoteSchema,
+    'the leader\'s coaching note inside a hire\'s activation: no collection and no _id of its own',
+  ],
 ];
 
 /**
@@ -470,6 +485,9 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [LeaderNoteRevisionSchema, 'LeaderNoteRevisionSchema'],
   [CalendarEventSchema, 'CalendarEventSchema'],
   [CalendarAttendeeSchema, 'CalendarAttendeeSchema'],
+  [ActivationProgressSchema, 'ActivationProgressSchema'],
+  [ActivationItemStateSchema, 'ActivationItemStateSchema'],
+  [ActivationNoteSchema, 'ActivationNoteSchema'],
 ]);
 
 function schemaExportName(schema: Schema): string {

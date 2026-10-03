@@ -631,6 +631,70 @@ export const PERMISSIONS = {
     { grantee: AGENT, scope: 'own-kpm' },
   ],
 
+  /*
+   * ---- 90-day activation and new hires (Phase 13, `roles-and-permissions.md` §3.8;
+   * `functional/activation.md`, *The permissions*). ----
+   *
+   * **`own` is the hire's own activation; `own-downline` is `COACH`** (ADR-0074): a hire the reader
+   * coaches now, at any depth, never themselves. Written as two grants, as coaching's are: a wider token
+   * never silently includes the reader's own. **The Agent holds the downline grants** because an Agent
+   * with a direct report is a leader (ADR-0087, OD-122) — `COACH` narrows it to nobody for one who leads
+   * nobody. Outside the reach is 404, never 403.
+   *
+   * **The Owner, the Admin and the Super Admin have none** (D-owner): no prototype draws them an
+   * activation screen, and one who also stands on a rung reads and writes as that member (§1.1).
+   * `activation:read` and `new_hires:read_roster` are reads; every other is a write, refused to a
+   * read-only support session by its verb. An elevated session writes as the member, both actors on the
+   * audit row (§3.13) — **except graduation**, which is on `BLOCKED_WHILE_IMPERSONATING`: it is the hire's
+   * own declaration (ADR-0100), and nobody makes it for them. A linked item is ticked by nobody — not a
+   * grant but a link's liveness (`mayTickByHand`), so there is no `activation:auto_complete` here.
+   */
+  'activation:read': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
+  ],
+  /** The hire's own manual items, with their note and date; a leader's, on a hire they coach (OD-121). */
+  'activation:update_manual_item': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
+  ],
+  /** A leader's correction of a hire's start date (OD-118). The hire's own is read-only. */
+  'activation:set_start_date': [
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own-downline' },
+  ],
+  /** The hire's own *Mark activation complete →*, at 100% (OD-28). Nobody graduates anybody else. */
+  'activation:graduate': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /** *Your New Hires*: the open activations the reader reaches through `COACH` (OD-122, D-group). */
+  'new_hires:read_roster': [
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own-downline' },
+  ],
+  /**
+   * The detail's *Coaching note* (OD-117): one per hire, written by a leader who coaches them, **read by
+   * the hire** on their own page. Not a Leader Note, which its subject never reads (ADR-0073), and not
+   * read through `leader_notes:read`: it rides the activation the hire reads.
+   */
+  'activation_note:write': [
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own-downline' },
+  ],
+
   // ---- Membership. ----
   'member:read_profile': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
@@ -960,6 +1024,12 @@ export const BLOCKED_WHILE_IMPERSONATING: readonly Permission[] = [
    * session neither reads nor writes a note: the operator reproduces a failing save on a test office.
    */
   'leader_notes:write',
+  /*
+   * ADR-0100 (the Phase 13 exit review, N4): **graduation is the hire's own declaration** — *I have done
+   * all of it* — and an elevated session would make it in their name. A read-only one refuses it by its
+   * verb already. The operator reproduces a failing graduation on a test office, as a note's save is.
+   */
+  'activation:graduate',
 ];
 
 const BLOCKED = new Set<string>(BLOCKED_WHILE_IMPERSONATING);

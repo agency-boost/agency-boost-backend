@@ -71,8 +71,8 @@ describe('the office activation checklist (P5-T3)', () => {
         kind: 'feature:goals',
         label: 'Goal Settings',
         route: '/goals',
-        completesWhen: 'the hire has saved any goal since joining this office',
-        live: false,
+        completesWhen: 'the hire has saved any goal since joining',
+        live: true,
       });
       expect(items.find((i) => i.code === 'CRM_SETUP')!.link).toBeNull();
     });
@@ -105,7 +105,7 @@ describe('the office activation checklist (P5-T3)', () => {
       expect(view.draft!.aspects.flatMap((a) => a.items)).toHaveLength(16);
       // Its links resolve like any other, so the screen can say what each one waits for.
       expect(view.draft!.aspects.flatMap((a) => a.items).find((i) => i.code === 'GOAL_SETTING')!.link)
-        .toMatchObject({ label: 'Goal Settings', live: false });
+        .toMatchObject({ label: 'Goal Settings', live: true });
     });
 
     it('writes nothing until somebody saves it', async () => {
@@ -138,7 +138,9 @@ describe('the office activation checklist (P5-T3)', () => {
 
     it('publishes only the caller’s office, leaving the other’s version where it was', async () => {
       await provisionOffice(wired, KPM_B, OTHER_COMPANY);
-      await activation.saveDraft(ctx(KPM_A), asDraft(await activation.read(ctx(KPM_A))));
+      const next = asDraft(await activation.read(ctx(KPM_A)));
+      next.aspects[0].label = '1. Welcome';
+      await activation.saveDraft(ctx(KPM_A), next);
       await activation.publish(ctx(KPM_A));
 
       expect((await activation.read(ctx(KPM_A))).published!.version).toBe(2);
@@ -199,6 +201,22 @@ describe('the office activation checklist (P5-T3)', () => {
     it('refuses to publish when there is nothing to publish', async () => {
       await expect(activation.publish(ctx(KPM_A)))
         .rejects.toThrow(/nothing to publish/i);
+    });
+
+    /*
+     * P13-T1 AC-2 (`functional/activation.md`, *Publishing*): a version number is what a hire's activation
+     * pins, so a draft identical to the newest published version is refused rather than minted as one that
+     * means nothing. Its order counts: a reorder alone is a change.
+     */
+    it('P13-T1 AC-2 refuses to publish a draft that is the same as the newest published version', async () => {
+      const same = asDraft(await activation.read(ctx(KPM_A)));
+      await activation.saveDraft(ctx(KPM_A), same);
+      await expect(activation.publish(ctx(KPM_A))).rejects.toThrow(/same as version 1/);
+      expect((await activation.read(ctx(KPM_A))).published!.version).toBe(1);
+
+      same.aspects[0].items.reverse();
+      await activation.saveDraft(ctx(KPM_A), same);
+      expect((await activation.publish(ctx(KPM_A))).published!.version).toBe(2);
     });
 
     it('keeps codes across a rename and a reorder, which is what a hire’s progress points at', async () => {

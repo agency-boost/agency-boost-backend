@@ -100,6 +100,18 @@ import {
 import { ActivationTemplateRepository } from '@/modules/activation/activation.repository';
 import { ActivationService } from '@/modules/activation/activation.service';
 import { ActivationController } from '@/modules/activation/activation.controller';
+import {
+  ActivationProgress, ActivationProgressSchema,
+} from '@/modules/activation/activation-progress.schema';
+import { ActivationProgressRepository } from '@/modules/activation/activation-progress.repository';
+import { ActivationLinkEngine } from '@/modules/activation/activation-links';
+import { ActivationProgressService } from '@/modules/activation/activation-progress.service';
+import { NewHiresService } from '@/modules/activation/new-hires.service';
+import { ActivationProgressController } from '@/modules/activation/activation-progress.controller';
+import { NewHiresController } from '@/modules/activation/new-hires.controller';
+import { ActivationEvents } from '@/modules/activation/activation-events.port';
+import { ActivationNav } from '@/modules/activation/activation-nav.port';
+import { ActivationStarter } from '@/modules/org/activation-starter.port';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
 import { ProductService } from '@/modules/products/product.service';
 import { ProductController } from '@/modules/products/product.controller';
@@ -282,6 +294,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: LeaderNote.name, schema: LeaderNoteSchema },
       // Phase 12: one calendar entry, however many people are on it.
       { name: CalendarEvent.name, schema: CalendarEventSchema },
+      // Phase 13: one hire's 90-day activation.
+      { name: ActivationProgress.name, schema: ActivationProgressSchema },
     ]),
   ],
   controllers: [
@@ -313,6 +327,9 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     CoachingRecordController,
     // Phase 12: the calendar.
     CalendarController,
+    // Phase 13: the hire's own activation, and a leader's new hires.
+    ActivationProgressController,
+    NewHiresController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -472,6 +489,19 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     CalendarPeopleService,
     CalendarLeave,
     { provide: MemberDeparture, useExisting: CalendarLeave },
+    /*
+     * Phase 13: each hire's activation, the engine that completes its linked items, and a leader's new
+     * hires — and the three ports through which other modules reach it without depending on it: joining
+     * (`ActivationStarter`, org), a goal, lead or day written (`ActivationEvents`), and the session's nav
+     * facts (`ActivationNav`, auth).
+     */
+    ActivationProgressRepository,
+    ActivationLinkEngine,
+    ActivationProgressService,
+    NewHiresService,
+    { provide: ActivationStarter, useExisting: ActivationProgressService },
+    { provide: ActivationEvents, useExisting: ActivationProgressService },
+    { provide: ActivationNav, useExisting: ActivationProgressService },
     GroupService,
     AdminDelegationService,
   ],

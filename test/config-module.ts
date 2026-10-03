@@ -72,6 +72,8 @@ import { CapabilityService } from '@/modules/capability/capability.service';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { CoachResolver } from '@/modules/org/coach-resolver';
+import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
+import { MembershipHistory, MembershipHistorySchema } from '@/modules/org/membership-history.schema';
 import { AssetSchema } from '@/modules/assets/asset.schema';
 import { AssetRepository } from '@/modules/assets/asset.repository';
 import { AssetService } from '@/modules/assets/asset.service';
@@ -123,6 +125,13 @@ import { CalendarNotices } from '@/modules/calendar/calendar-notices';
 import { CalendarService } from '@/modules/calendar/calendar.service';
 import { CalendarPeopleService } from '@/modules/calendar/calendar-people.service';
 import { CalendarLeave } from '@/modules/calendar/calendar-leave';
+import {
+  ActivationProgress, ActivationProgressSchema,
+} from '@/modules/activation/activation-progress.schema';
+import { ActivationProgressRepository } from '@/modules/activation/activation-progress.repository';
+import { ActivationLinkEngine } from '@/modules/activation/activation-links';
+import { ActivationProgressService } from '@/modules/activation/activation-progress.service';
+import { NewHiresService } from '@/modules/activation/new-hires.service';
 
 /**
  * The configuration module, wired the way the app wires it.
@@ -280,6 +289,35 @@ export function configModule(
     new ActivityCategoryRepository(categories as never),
     new ActivityTypeRepository(types as never),
   );
+  /*
+   * Phase 13: each hire's activation and the engine that completes its linked items. Before the goals,
+   * leads and activity, whose writes reach it through `ActivationEvents` — the real one, so a spec that
+   * saves a goal for a hire watches the item complete, as the app does.
+   */
+  const activationRows = new ActivationProgressRepository(
+    model(ActivationProgress.name, ActivationProgressSchema) as never,
+  );
+  const activationEngine = new ActivationLinkEngine(
+    activationRows,
+    new GoalRepository(model(Goal.name, GoalSchema) as never),
+    new LeadReadings(
+      new LeadRepository(model(Lead.name, LeadSchema) as never),
+      new LeadStatusRepository(leadStatuses as never),
+      clock,
+    ),
+    activityReadings,
+    clock,
+  );
+  const activationProgress = new ActivationProgressService(
+    activationRows, activation, activationEngine, memberships,
+    new MembershipHistoryRepository(model(MembershipHistory.name, MembershipHistorySchema) as never), coach,
+    new MemberNames(memberships, users as never), new TenantDay(kpms as never, clock), audit, clock,
+  );
+  const newHires = new NewHiresService(
+    activationProgress, activationRows, coach, new MemberNames(memberships, users as never),
+    new TenantDay(kpms as never, clock), subjectReads, audit, clock,
+  );
+
   const goals = new GoalService(
     new GoalRepository(model(Goal.name, GoalSchema) as never),
     audit,
@@ -295,6 +333,8 @@ export function configModule(
     new CoachingSessionGate(
       new CoachingSessionRepository(model(CoachingSession.name, CoachingSessionSchema) as never), coach,
     ),
+    // P13-T3: a goal saved on a hire's membership completes their `feature:goals` item.
+    activationProgress,
   );
   // P6: what an agent did, day by day. The first module holding what people *did*. After `goals` since
   // P11-T4, whose plan the 7-day targets read.
@@ -312,6 +352,8 @@ export function configModule(
     goals,
     productionReadings,
     activityReadings,
+    // P13-T3: a day saved or corrected may make a hire's fourth week of activity.
+    activationProgress,
   );
   // P10-T4: the Personal Summary, read from the goal, the office's production and the member's log.
   const summary = new SummaryService(
@@ -438,6 +480,8 @@ export function configModule(
     new MemberNames(memberships, users as never),
     config,
     subjectReads,
+    // P13-T3: a lead in a hire's pipeline completes their `feature:leads` item.
+    activationProgress,
   );
   const provisioning = new ProvisioningService(
     categories as never,
@@ -513,6 +557,7 @@ export function configModule(
     coachingProfiles, coachingProfile, leaderNoteRows, leaderNotes,
     coachingRecord,
     calendarEntries, calendarNotices, calendar, calendarPeople, calendarLeave,
+    activationRows, activationEngine, activationProgress, newHires,
   };
 }
 

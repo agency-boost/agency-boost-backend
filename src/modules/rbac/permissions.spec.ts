@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HierarchyRole, RequestContext } from '@/common/context/request-context';
 import {
-  AAB, AB, can, isBlockedWhileImpersonating, isOwnerReserved, isReadLike, PERMISSIONS, Permission, Scope, scopeFor,
+  AAB, AB, AGENT, can, isBlockedWhileImpersonating, isOwnerReserved, isReadLike, PERMISSIONS, Permission, Scope, scopeFor,
 } from './permissions';
 
 function ctx(opts: {
@@ -765,6 +765,112 @@ describe('permission matrix', () => {
     it('P12-T1 AC-5 an Owner or Admin who also stands on a rung holds that rung’s calendar (§1.1)', () => {
       expect(scopeFor(ctx({ role: 'ab', owner: true }), 'calendar_entry:block')).toBe('own-downline');
       expect(scopeFor(ctx({ role: 'agent', admin: true }), 'calendar_entry:read')).toBe('own');
+    });
+  });
+
+  describe('Phase 13 — activation and new hires (roles §3.8, functional/activation.md *The permissions*)', () => {
+    const ACTIVATION = [
+      'activation:read', 'activation:update_manual_item', 'activation:set_start_date', 'activation:graduate',
+      'new_hires:read_roster', 'activation_note:write',
+    ] as const satisfies readonly Permission[];
+
+    const officeOnly = (over: Parameters<typeof ctx>[0]) => {
+      const base = ctx(over);
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: 'agent' });
+    };
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: officeOnly({ owner: true }),
+      KPM_ADMIN: officeOnly({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+    const NONE: Record<string, Scope | null> = { SUPER_ADMIN: null, KPM_OWNER: null, KPM_ADMIN: null };
+    const FIELD = (scope: Scope) => ({ ...NONE, AB: scope, AAB: scope, AGENT: scope });
+    /** The widest scope each role holds — the Agent's downline grants included (OD-122, ADR-0087). */
+    const EXPECTED: Record<(typeof ACTIVATION)[number], Record<string, Scope | null>> = {
+      'activation:read': FIELD('own-downline'),
+      'activation:update_manual_item': FIELD('own-downline'),
+      'activation:set_start_date': FIELD('own-downline'),
+      'activation:graduate': FIELD('own'),
+      'new_hires:read_roster': FIELD('own-downline'),
+      'activation_note:write': FIELD('own-downline'),
+    };
+    const cells = ACTIVATION.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P13-T5 AC-8 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P13-T5 AC-8 negative (D-owner): %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it.each(ACTIVATION)('P13-T5 AC-8 negative: %s is refused to a removed or pending member', (permission) => {
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role, status }), permission)).toBe(false);
+      }
+    });
+
+    it('P13-T2 AC-3 the hire’s own and a leader’s are two grants; graduation is the hire’s alone, the start date and the note a leader’s alone', () => {
+      const has = (permission: Permission, grantee: typeof AB, scope: Scope) =>
+        (PERMISSIONS[permission] as readonly { grantee: unknown; scope: Scope }[])
+          .some((g) => g.grantee === grantee && g.scope === scope);
+      for (const grantee of [AB, AAB, AGENT]) {
+        for (const permission of ['activation:read', 'activation:update_manual_item'] as const) {
+          expect([permission, has(permission, grantee, 'own'), has(permission, grantee, 'own-downline')]).toEqual([permission, true, true]);
+        }
+        expect(has('activation:graduate', grantee, 'own-downline')).toBe(false);
+        for (const permission of ['activation:set_start_date', 'activation_note:write', 'new_hires:read_roster'] as const) {
+          expect([permission, has(permission, grantee, 'own')]).toEqual([permission, false]);
+        }
+      }
+      // A linked item is ticked by nobody: not a grant anybody holds, but its link's liveness.
+      expect(Object.keys(PERMISSIONS)).not.toContain('activation:auto_complete');
+    });
+
+    it('P13-T4 AC-9 the reads are read-like and every write is not, so a read-only support session reads and writes nothing', () => {
+      expect(ACTIVATION.filter((p) => isReadLike(p))).toEqual(['activation:read', 'new_hires:read_roster']);
+      const readOnly = ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: true });
+      expect([can(readOnly, 'activation:read'), can(readOnly, 'new_hires:read_roster')]).toEqual([true, true]);
+      for (const write of ['activation:update_manual_item', 'activation:set_start_date', 'activation:graduate', 'activation_note:write'] as const) {
+        expect([write, can(readOnly, write)]).toEqual([write, false]);
+      }
+    });
+
+    it('P13-T6 AC-5 none but graduation is blocked outright: an elevated session writes as the member, both actors on the record', () => {
+      const elevated = ctx({ role: 'aab', impersonatedBy: 'sa-1', readOnly: false });
+      for (const permission of ACTIVATION.filter((p) => p !== 'activation:graduate')) {
+        expect([permission, isBlockedWhileImpersonating(permission), can(elevated, permission)]).toEqual([permission, false, true]);
+      }
+    });
+
+    it('Phase 13 exit review N4 graduation is the hire’s own declaration (ADR-0100): refused to a support session, read-only or elevated', () => {
+      expect(isBlockedWhileImpersonating('activation:graduate')).toBe(true);
+      for (const role of ['ab', 'aab', 'agent'] as const) {
+        for (const readOnly of [true, false]) {
+          const session = ctx({ role, impersonatedBy: 'sa-1', readOnly });
+          expect([role, readOnly, can(session, 'activation:graduate')]).toEqual([role, readOnly, false]);
+        }
+        // The same member outside a session graduates their own.
+        expect([role, can(ctx({ role }), 'activation:graduate')]).toEqual([role, true]);
+      }
+      // Only graduation: the same elevated session still ticks the hire's items as them.
+      expect(can(ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: false }), 'activation:update_manual_item')).toBe(true);
+    });
+
+    it('P13-T5 AC-8 an Owner or Admin who also stands on a rung holds that rung’s grants (§1.1)', () => {
+      expect(scopeFor(ctx({ role: 'ab', owner: true }), 'new_hires:read_roster')).toBe('own-downline');
+      expect(scopeFor(ctx({ role: 'agent', admin: true }), 'activation:graduate')).toBe('own');
     });
   });
 });

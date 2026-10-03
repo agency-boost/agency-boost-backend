@@ -60,6 +60,11 @@ import { CoachingProfile, CoachingProfileSchema } from '@/modules/coaching/coach
 import { LeaderNote, LeaderNoteSchema } from '@/modules/coaching/leader-note.schema';
 import { backfillCoachingSnapshots } from './coaching-snapshots';
 import { buildCalendarFixture, type CalendarFixture } from './calendar-fixture';
+import { buildActivationFixture, type ActivationFixture } from './activation-fixture';
+import {
+  ActivationProgress, ActivationProgressSchema,
+} from '@/modules/activation/activation-progress.schema';
+import { activityWeeksCompletedOn, officeMondayOf } from '@/modules/activation/activation-rules';
 import { CalendarEvent, CalendarEventSchema } from '@/modules/calendar/calendar-event.schema';
 import {
   CompanyOrgLevel, CompanyOrgLevelSchema,
@@ -194,6 +199,8 @@ const OWNED_COLLECTIONS = [
   'coachingProfiles', 'leaderNotes',
   // Phase 12, with the writer that fills it: the calendar fixture's entries (`calendar-fixture.ts`).
   'calendarEvents',
+  // Phase 13, with the writer that fills it: every hire's activation (`activation-fixture.ts`).
+  'activationProgress',
 ] as const;
 
 /**
@@ -224,6 +231,8 @@ export interface SeedResult {
   coaching: CoachingFixture;
   /** The calendar's week and month, inserted with their collection (`calendar-fixture.ts`). */
   calendar: CalendarFixture;
+  /** Every hire's activation, and the audit rows its stored writes left (`activation-fixture.ts`). */
+  activation: ActivationFixture;
 }
 
 async function countRows(): Promise<Record<string, number>> {
@@ -2923,6 +2932,62 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     if (await Notifications.exists({ _id: row._id })) continue;
     await Notifications.collection.insertOne(row);
   }
+  /*
+   * **Every hire's 90-day activation** (Phase 13, *Seed*; `activation-fixture.ts`, whose header says which
+   * account shows what): the activations the backfill would give the demo's Agents, pinned to each office's
+   * published checklist, with the hires' and leaders' ticks, Sari's note to Rina, Wahyu's corrected start
+   * date and Siti's graduation — and the audit rows those writes left. Inserted as the coaching rows are:
+   * each under its derived `_id`, only when absent, validated strictly by its collection's schema. The
+   * linked items of an open activation are left for the first read to complete from the hire's own data.
+   */
+  const ActivationRows = mongoose.model(ActivationProgress.name, ActivationProgressSchema, undefined, RECOMPILE);
+  const pinnedOf = async (kpmId: string) => {
+    const row = await ActivationTemplates.findOne({ kpmId, status: 'published', deletedAt: null }).sort({ version: -1 }).lean().exec();
+    if (!row) throw new Error(`KPM ${kpmId} has no published activation checklist to pin to`);
+    return {
+      id: String(row._id),
+      version: row.version,
+      codes: (row.aspects as { items: { code: string }[] }[]).flatMap((a) => a.items.map((i) => i.code)),
+    };
+  };
+  const userOf = async (membershipId: string) =>
+    String((await Memberships.findOne({ _id: membershipId }).lean().exec())!.userId);
+  const sitiJoined = clock.localDateFor(DEFAULT_TENANT_TIMEZONE, daysAgo(COACHING_CAST.find((p) => p.key === 'siti')!.joinedDaysAgo));
+  const sitiGoal = await Goals.findOne({ kpmId: id0417, membershipId: cast.siti.id, deletedAt: null }).sort({ savedAt: -1 }).lean().exec();
+  const sitiLead = await Leads.findOne({ kpmId: id0417, ownerMembershipId: cast.siti.id, deletedAt: null }).sort({ dateRegistered: 1 }).lean().exec();
+  const sitiDays = await mongoose.connection.collection('activityLogs')
+    .find({ kpmId: id0417, membershipId: cast.siti.id, totalCount: { $gt: 0 }, localDate: { $gte: sitiJoined }, deletedAt: null })
+    .sort({ localDate: 1 }).toArray();
+  const sitiFourthWeek = activityWeeksCompletedOn(
+    sitiDays.map((d) => ({ date: d.localDate as string, id: String(d._id) })),
+    officeMondayOf(clock, DEFAULT_TENANT_TIMEZONE),
+  );
+  const joinedOf = (key: CastKey) => COACHING_CAST.find((p) => p.key === key)!.joinedDaysAgo;
+  const activation = buildActivationFixture({
+    clock,
+    timezone: DEFAULT_TENANT_TIMEZONE,
+    kpm0417: id0417,
+    kpm0555: String(kpm0555._id),
+    versions: { kpm0417: await pinnedOf(id0417), kpm0555: await pinnedOf(String(kpm0555._id)) },
+    members: {
+      rina: rina.id, budi: budi.id, yanti: yanti.id, novi: cast.novi.id, wahyu: cast.wahyu.id, siti: cast.siti.id,
+      dimas: cast.dimas.id, indah: cast.indah.id, lina: agent0555.id, sari: sari.id, arief: cast.arief.id, agus: ab.id,
+    },
+    users: { sari: String(sariUser._id), arief: await userOf(cast.arief.id), siti: await userOf(cast.siti.id) },
+    joinedDaysAgo: {
+      rina: RINA_JOINED_DAYS_AGO, budi: BUDI_JOINED_DAYS_AGO, yanti: 28, novi: joinedOf('novi'), wahyu: joinedOf('wahyu'),
+      siti: joinedOf('siti'), dimas: joinedOf('dimas'), indah: joinedOf('indah'), lina: 0,
+    },
+    sitiRecords: {
+      goal: sitiGoal ? String(sitiGoal._id) : null,
+      lead: sitiLead ? String(sitiLead._id) : null,
+      day: sitiFourthWeek?.id ?? null,
+    },
+  });
+  await insertFixtureRows(ActivationRows as unknown as mongoose.Model<object>, activation.activations);
+  await insertFixtureRows(Audit as unknown as mongoose.Model<object>, activation.audits);
+  const storedActivations = await ActivationRows.countDocuments({ deletedAt: null }).exec();
+
   /** What each long inbox holds now, as the bell counts it, for the summary below. */
   const inboxLine = async (user: { _id: unknown }) => {
     const mine = { userId: String(user._id), deletedAt: null, templateId: { $in: IN_APP_TEMPLATES } };
@@ -3120,6 +3185,33 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     The month                    four lighter weeks before this one and the week after
     Entries stored               ${storedCalendar} in KPM 0417 (${calendar.entries.length} in this run's fixture)
 
+  ACTIVATION at /activation, /new-hires  (the activations are in activationProgress, from
+             src/seed/activation-fixture.ts; days counted from the office's today ${activation.today},
+             against its 90-day window. Linked items complete from each hire's own goal, leads and
+             activity the first time a page reads them)
+    rina@kpm0417.test            day 59, 8 of 16: her three linked items done from her own data;
+                                 three ticks of hers, two with a note and a date; two of Sari's,
+                                 attributed; Sari's coaching note at the top of her page
+    budi@kpm0417.test            day 62, part-way
+    removed@kpm0417.test         Yanti, day 29: the re-join — her current membership starts afresh,
+                                 her first, removed, has none
+    novi@kpm0417.test            day 85: her goal item attributed to Arief, who saved her goal
+    wahyu@kpm0417.test           day 87: a start date Arief corrected to his contract date, audited
+    siti@kpm0417.test            graduated three days ago — every item done, the audit row, and no
+                                 New agent section any more
+    dimas@kpm0417.test           day 95, half done, overdue: his day is red
+    indah@kpm0417.test           day 98, 15 of 16, overdue: one item short; first case closed (✓)
+    agus@kpm0417.test            Your New Hires: Direct Unit (Indah, Dimas), AAB: Arief Hidayat (Wahyu,
+                                 Novi), AAB: Sari Puspita (Budi, Rina, Yanti). Siti has left it;
+                                 Dewi leads nobody and has no card. Every hire shown is a recorded read
+    sari@kpm0417.test            her own Direct Unit; ticks and the note on a hire's detail
+    arief@kpm0417.test           his own Direct Unit; Wahyu's Start date is his correction
+    agent@kpm0555.test           Lina, office 0555, day 1: the other office's hire
+    Sari, Dewi and Arief joined as Agents and were promoted: none of them has an activation.
+    Activations stored           ${storedActivations} (${activation.activations.length} in this run's fixture). A row is
+                                 written only where its id is absent: run with --reset to date
+                                 them from today
+
   AUDIT LOG at /admin/audit  (Super Admin)
     Platform-level and tenant-level rows, so the scope toggle has both sides.
     Includes an impersonation.started / .ended pair on Rina.
@@ -3152,7 +3244,7 @@ Sign in at POST /api/v1/auth/login, then send the access token as
     ? 'This run wrote 0 rows: everything it seeds was already there.'
     : `This run wrote ${total} rows: ${Object.entries(written).map(([name, added]) => `${name} +${added}`).join(', ')}`);
 
-  return { written, pronounsSet, coaching, calendar };
+  return { written, pronounsSet, coaching, calendar, activation };
 }
 
 async function main(): Promise<void> {

@@ -249,6 +249,18 @@ export const ErrorCode = {
   /** An answer from the member a block was placed on: a placement, not a request (ADR-0098). `409`. */
   CALENDAR_BLOCK_NOT_ANSWERABLE: 'CALENDAR_BLOCK_NOT_ANSWERABLE',
 
+  /*
+   * Activation (Phase 13; `functional/activation.md`, *Errors*). Everything outside a reader's reach is
+   * `NOT_FOUND`, never an activation code: a hire nobody may see, an item code the pinned version lacks,
+   * a reader with no activation at all.
+   */
+  /** A tick on an item whose link is live: it completes from the write its words name, never by hand (ADR-0031). `409`. */
+  ACTIVATION_ITEM_AUTOMATIC: 'ACTIVATION_ITEM_AUTOMATIC',
+  /** A write to an activation that is graduated, or past its six months and expired (OD-28, OD-120). `409`. */
+  ACTIVATION_CLOSED: 'ACTIVATION_CLOSED',
+  /** A graduation below 100%: every item, the linked ones included, is done first (OD-28). `409`. */
+  ACTIVATION_INCOMPLETE: 'ACTIVATION_INCOMPLETE',
+
   // Validation
   VALIDATION_FAILED: 'VALIDATION_FAILED',
   VALIDATION_UNKNOWN_FIELD: 'VALIDATION_UNKNOWN_FIELD',

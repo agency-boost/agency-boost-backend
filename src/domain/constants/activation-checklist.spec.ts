@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ACTIVATION_ACTIVITY_WEEKS, ACTIVATION_LINK_KINDS, ACTIVATION_TRAINING_LINK,
-  SEED_ACTIVATION_ASPECTS, SEED_ACTIVATION_ITEMS, activationLinkKind, mayTickByHand,
+  SEED_ACTIVATION_ASPECTS, SEED_ACTIVATION_ITEMS, activationLinkKind, mayTickByHand, ACTIVATION_FIRST_CASE_CODE,
 // Through the barrel, the way every caller reaches them.
 } from '@/domain/constants';
 
@@ -146,32 +146,53 @@ describe('the link registry (P5-T3 AC-7)', () => {
   });
 
   /*
-   * ADR-0031. No evaluator exists in Phase 5, so an item bound to a link must stay tickable —
-   * otherwise nobody bound to one could ever reach 100%. The moment a kind goes live the answer
-   * flips, for every role, and this test is what will catch the flag being set without the rule
-   * being honoured.
+   * ADR-0031. An item bound to a link nobody evaluates must stay tickable — otherwise nobody bound to
+   * one could ever reach 100%. The moment a kind goes live the answer flips, for every role.
    */
-  it('lets a leader tick an item by hand until its evaluator is live', () => {
+  it('P13-T3 AC-1 lets anybody tick a manual item, and a training-linked one until its evaluator exists', () => {
     expect(mayTickByHand(null)).toBe(true);
-    expect(mayTickByHand('feature:goals')).toBe(true);
     expect(mayTickByHand('training:PROSPECT_LIST')).toBe(true);
   });
 
-  it('stops letting anybody tick it the moment that kind goes live', () => {
-    // The flag flips in Phase 13, and this is the rule that has to follow it. Flipped here
-    // rather than asserted in prose, so the day somebody sets `live` the behaviour is proven.
-    jest.replaceProperty(ACTIVATION_LINK_KINDS['feature:goals'] as { live: boolean }, 'live', true);
-
+  it('P13-T3 AC-1 lets nobody tick an item whose link is live: the three feature kinds', () => {
     expect(mayTickByHand('feature:goals')).toBe(false);
-    // Its neighbours are untouched: the rule is per kind, not per product.
-    expect(mayTickByHand('feature:leads')).toBe(true);
+    expect(mayTickByHand('feature:leads')).toBe(false);
+    expect(mayTickByHand('feature:activity')).toBe(false);
+  });
+
+  it('P13-T3 AC-1 the rule is per kind: a kind flipped back to not live is tickable again, its neighbours untouched', () => {
+    jest.replaceProperty(ACTIVATION_LINK_KINDS['feature:goals'] as { live: boolean }, 'live', false);
+
+    expect(mayTickByHand('feature:goals')).toBe(true);
+    expect(mayTickByHand('feature:leads')).toBe(false);
     expect(mayTickByHand(null)).toBe(true);
   });
 
-  it('declares no kind live yet', () => {
+  /*
+   * D-copy (ADR-0084, ADR-0096): a string the module writes itself uses none of the six words, and the
+   * *Auto* badge shows each `completesWhen` to the hire as its tooltip (P13-T4 AC-4).
+   */
+  it('P13-T4 AC-4 no link’s words use any of the six: office, KPM, reports to, tagged to, untagged, unassigned', () => {
+    const SIX = /\boffice\b|\bKPM\b|reports to|tagged to|\buntagged\b|\bunassigned\b/i;
     for (const kind of [...Object.values(ACTIVATION_LINK_KINDS), ACTIVATION_TRAINING_LINK]) {
-      expect(kind.live).toBe(false);
+      expect([kind.completesWhen, SIX.test(kind.completesWhen)]).toEqual([kind.completesWhen, false]);
+      expect([kind.label, SIX.test(kind.label)]).toEqual([kind.label, false]);
     }
+    expect(ACTIVATION_LINK_KINDS['feature:goals'].completesWhen).toBe('the hire has saved any goal since joining');
+  });
+
+  it('P13-T5 AC-2 the Active Agent column’s code is a seeded item: FIRST_CASE_CLOSED, never item 13', () => {
+    expect(ACTIVATION_FIRST_CASE_CODE).toBe('FIRST_CASE_CLOSED');
+    expect(SEED_ACTIVATION_ITEMS.find((i) => i.code === ACTIVATION_FIRST_CASE_CODE)).toMatchObject({
+      aspectCode: 'FIRST_SALE', label: 'Close first case independently', autoLink: null,
+    });
+  });
+
+  it('P13-T3 AC-1 declares the three feature kinds live and the training link not', () => {
+    for (const kind of Object.values(ACTIVATION_LINK_KINDS)) {
+      expect(kind.live).toBe(true);
+    }
+    expect(ACTIVATION_TRAINING_LINK.live).toBe(false);
   });
 
   /*

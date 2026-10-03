@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -10,6 +10,7 @@ import { NotificationService } from '@/modules/notifications/notification.servic
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { can } from '@/modules/rbac/permissions';
 import { User, UserDocument } from '@/modules/users/user.schema';
+import { ActivationStarter, startActivation } from './activation-starter.port';
 import { HierarchyService } from './hierarchy.service';
 import { JoinRequestDocument } from './join-request.schema';
 import { JoinRequestRepository } from './org.repositories';
@@ -93,6 +94,12 @@ export class ApprovalsService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationService,
     private readonly clock: Clock,
+    /*
+     * OD-119, P13-T1 AC-1: a pending member made active under a leader — approved or tagged — is a hire,
+     * and starts their activation in this same call. A port, as `MemberDeparture` is; optional, so a
+     * harness that is not asking about activation builds this without it.
+     */
+    @Optional() @Inject(ActivationStarter) private readonly activations: ActivationStarter | null = null,
   ) {}
 
   private requireLeader(ctx: RequestContext): string {
@@ -582,5 +589,12 @@ export class ApprovalsService {
       targetMembershipId: String(member._id),
       after: { leaderId, requestId: audit.requestId },
     });
+
+    /*
+     * **Joining under a leader starts an activation** (OD-119): only a member who was pending — an
+     * orphan picked up again, or an active member's leader request, is a move, not a join — and only at
+     * the Agent rung, which the activation module decides. It fails open: the placement above stands.
+     */
+    if (wasPending) await startActivation(this.activations, ctx, String(member._id));
   }
 }

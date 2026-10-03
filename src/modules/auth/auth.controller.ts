@@ -1,7 +1,5 @@
 import {
-  Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Req, Res,
-  Delete,
-  Param,
+  Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Req, Res, Delete, Optional, Param, Inject,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
@@ -17,6 +15,7 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { initialsOf, User, UserDocument } from '@/modules/users/user.schema';
 import { refreshCookieOptions } from '@/modules/auth/refresh-cookie';
 import { can, PERMISSIONS, Permission } from '@/modules/rbac/permissions';
+import { ActivationNav, activationNavFor } from '@/modules/activation/activation-nav.port';
 import { AuthService } from './auth.service';
 import { RateLimiter } from './rate-limiter';
 import {
@@ -62,6 +61,11 @@ export class AuthController {
     private readonly limiter: RateLimiter,
     private readonly config: ConfigService,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
+    /*
+     * P13-T7 AC-5: the *New agent* section's two facts, served with the session. A port, so the auth
+     * module does not depend on activation; optional, so a harness without it answers *nothing to show*.
+     */
+    @Optional() @Inject(ActivationNav) private readonly activationNav: ActivationNav | null = null,
   ) {}
 
   /**
@@ -368,6 +372,7 @@ export class AuthController {
   async me(@Ctx() ctx: RequestContext) {
     const user = await this.users.findOne({ _id: ctx.userId }).exec();
     const permissions = (Object.keys(PERMISSIONS) as Permission[]).filter((p) => can(ctx, p));
+    const nav = await activationNavFor(this.activationNav, ctx);
 
     return {
       user: {
@@ -394,6 +399,13 @@ export class AuthController {
        */
       mustChangePassword: ctx.mustChangePassword,
       permissions,
+      /*
+       * The *New agent* section (P13-T7 AC-5): the reader's own activation — `null` when they have none,
+       * `open` false once it is complete or past its six months — and whether they reach anybody's open
+       * one. Read once, here, so no page reads them again; every route still refuses on its own.
+       */
+      activation: nav.activation,
+      newHires: nav.newHires,
     };
   }
 

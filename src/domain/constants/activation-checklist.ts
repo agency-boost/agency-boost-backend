@@ -50,25 +50,29 @@ export interface ActivationLinkKind {
  *
  * The label and the route live here rather than in a switch on the agent's screen, so a kind added
  * later cannot fall through one and render a link to nowhere.
+ *
+ * **The three feature kinds are live** (P13-T3 AC-1): a goal, a lead or an activity day written through
+ * its own module completes the item bound to it, by code (`activation-links.ts`), and nobody ticks it by
+ * hand. The training kind is not, until its evaluator exists; until then its item is ticked by hand.
  */
 export const ACTIVATION_LINK_KINDS: Readonly<Record<ActivationFeatureLink, ActivationLinkKind>> = {
   'feature:goals': {
     label: 'Goal Settings',
     route: '/goals',
-    completesWhen: 'the hire has saved any goal since joining this office',
-    live: false,
+    completesWhen: 'the hire has saved any goal since joining',
+    live: true,
   },
   'feature:leads': {
     label: 'Leads Management',
     route: '/leads',
     completesWhen: 'the hire has added at least one prospect',
-    live: false,
+    live: true,
   },
   'feature:activity': {
     label: 'Activity Management',
     route: '/activity/log',
     completesWhen: 'the hire has logged activity in four consecutive weeks',
-    live: false,
+    live: true,
   },
 } as const;
 
@@ -144,6 +148,13 @@ export const SEED_ACTIVATION_ITEMS: readonly SeedActivationItem[] = [
   { code: 'WEEKLY_CHECK_IN', aspectCode: 'ONGOING_HABITS', label: 'Weekly 1-on-1 check-in (4 weeks)', displayOrder: 2, autoLink: null },
   { code: 'INDEPENDENT_AGENT_MILESTONE', aspectCode: 'ONGOING_HABITS', label: 'Reach Independent Agent milestone (3 independent closings)', displayOrder: 3, autoLink: null },
 ] as const;
+
+/**
+ * **The item the roster's *Active Agent* column and the coaching renderer's *New Active Agent* read**
+ * (D-group, `:6755`, `:6472`): bound to this code, never to item 13 by position (invariant §4). It is not
+ * ADR-0054's *AA* or *MAA*, and no metric (invariant §8): a checklist item is done or it is not.
+ */
+export const ACTIVATION_FIRST_CASE_CODE = 'FIRST_CASE_CLOSED';
 
 /** A link's registry entry, or `undefined` for a kind nothing declares. Training links resolve here. */
 export function activationLinkKind(link: string | null): ActivationLinkKind | undefined {

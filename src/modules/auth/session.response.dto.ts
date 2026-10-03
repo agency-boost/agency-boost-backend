@@ -112,6 +112,15 @@ export class MeMembershipDto {
   directCount!: number;
 }
 
+/** The reader's own activation, as the *New agent* section needs it. */
+export class MeActivationDto {
+  @ApiProperty({ type: Boolean, description: 'False once it is complete, or its six months are over.' })
+  open!: boolean;
+
+  @ApiProperty({ type: Boolean, description: 'Every item done: the amber check beside the menu item.' })
+  complete!: boolean;
+}
+
 /**
  * `GET /auth/me` and `PATCH /auth/me`.
  *
@@ -149,6 +158,18 @@ export class MeDto {
 
   @ApiProperty({ type: String, isArray: true, description: 'Resolved from the database on every request.' })
   permissions!: string[];
+
+  @ApiProperty({
+    type: () => MeActivationDto, nullable: true,
+    description: 'Your 90-day activation, for the *New agent* section: `null` when you have none.',
+  })
+  activation!: MeActivationDto | null;
+
+  @ApiProperty({
+    type: Boolean,
+    description: 'You coach somebody whose activation is open: the *New hires* menu item.',
+  })
+  newHires!: boolean;
 }
 
 /** `GET /api/health/ready`. Read by a load balancer, not by a person. */

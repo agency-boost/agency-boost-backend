@@ -38,6 +38,8 @@ const TENANT_SCOPED_MODELS = [
   'CapabilityCatalog',
   // P11-T5: listed from the day the collection exists, rather than a phase later.
   'CoachingSession',
+  // P13-T1 AC-8: a hire's activation, from the day the collection exists.
+  'ActivationProgress',
 ];
 
 /**
@@ -73,6 +75,7 @@ const ALLOWED = new Map<string, string>([
   ['config/activity.repository.ts', 'the repositories for those models'],
   ['training/training.repository.ts', 'the repositories for those models'],
   ['activation/activation.repository.ts', 'the repository for that model'],
+  ['activation/activation-progress.repository.ts', 'the repository for that model'],
   ['assets/asset.repository.ts', 'the repository for that model'],
   ['products/kpm-product.repository.ts', 'the repository for that model'],
   ['events/event.repository.ts', 'the repositories for those models'],

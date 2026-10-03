@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -11,6 +11,7 @@ import { NotificationTemplate } from '@/modules/notifications/notification.types
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
+import { ActivationStarter, startActivation } from './activation-starter.port';
 import { HierarchyService } from './hierarchy.service';
 import { JoinRequestRepository } from './org.repositories';
 import { leaderCodeUrl } from './leader-code';
@@ -61,6 +62,8 @@ export class LeaderCodeService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationService,
     private readonly clock: Clock,
+    /** OD-119, P13-T1 AC-1: a code places its joiner under a leader, at the Agent rung — a hire. */
+    @Optional() @Inject(ActivationStarter) private readonly activations: ActivationStarter | null = null,
   ) {}
 
   /**
@@ -179,6 +182,9 @@ export class LeaderCodeService {
       targetId: String(membership._id),
       after: { code: leader.leaderCode, leaderMembershipId: String(leader._id) },
     });
+
+    // Their activation starts in the same call that placed them (OD-119), failing open.
+    await startActivation(this.activations, scoped, String(membership._id));
 
     const leaderUser = await this.users.findOne({ _id: leader.userId }).exec();
     return { kpmId: String(kpm._id), leaderName: leaderUser?.fullName ?? 'your leader' };

@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
@@ -58,8 +58,13 @@ export class RemovalService {
     /**
      * What the rest of the product does when somebody leaves (D-leave): the calendar's future entries.
      * Optional so a spec of removal alone builds it without the calendar.
+     *
+     * **Injected by its token, named** (found 2026-10-03, Phase 13): a parameter typed `MemberDeparture |
+     * null` is emitted to the container as `Object`, so `@Optional()` alone resolved nothing in the running
+     * app and the hook never ran there — while every spec, which builds this by hand, passed.
+     * `app.module.int.spec.ts` now asserts each optional port is wired.
      */
-    @Optional() private readonly departures: MemberDeparture | null = null,
+    @Optional() @Inject(MemberDeparture) private readonly departures: MemberDeparture | null = null,
   ) {}
 
   async remove(

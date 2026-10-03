@@ -158,6 +158,23 @@ export const ACTIVATION = {
   WINDOW_DAYS: 90,
   /** The day counter is 1-based: the start date itself is Day 1. Overall.html:6615. */
   DAY_INDEX_BASE: 1,
+  /**
+   * **How long an activation, and its menu, last** (OD-120): until graduation, or this many calendar
+   * months after the start date in the office's timezone, whichever is first — the footer's own rule,
+   * *"Visible only to new agents, for their first 6 months"* (Overall.html:3349). A month-end start
+   * ends on the last day of the shorter month: 31 August ends on the last day of February. Derived on
+   * every read from the start date and the office's today, never by a job.
+   */
+  VISIBLE_MONTHS: 6,
+  /**
+   * **How far back a leader may correct a start date** (OD-118): the office's today at the latest, and
+   * at most this many days before it. A date further back would start an activation that ended long ago.
+   */
+  START_DATE_MAX_DAYS_BACK: 365,
+  /** The hire's own *Note (optional)* on a manual item (`:6603`), in characters. */
+  HIRE_NOTE_MAX: 500,
+  /** The leader's *Coaching note* to a hire (`:3408-3412`, OD-117), in characters, after trimming. */
+  COACHING_NOTE_MAX: 1000,
 } as const;
 
 /** Leader and owner surfaces. Overall.html:7040, KPM_Owner.html:1006-1048. */
@@ -264,6 +281,7 @@ export {
   ACTIVATION_LINK_KINDS,
   ACTIVATION_TRAINING_LINK,
   ACTIVATION_ACTIVITY_WEEKS,
+  ACTIVATION_FIRST_CASE_CODE,
   type ActivationLinkKind,
   SEED_ACTIVATION_ASPECTS,
   SEED_ACTIVATION_ITEMS,

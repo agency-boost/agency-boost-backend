@@ -87,4 +87,32 @@ export class LeadReadings {
         };
       });
   }
+
+  /**
+   * **Each member's newest lead, of either type, for many members at once** (P13-T3 AC-3, AC-7): what
+   * completes an activation's `feature:leads` item, and who added it — the owner, or a leader in a session
+   * (ADR-0076). One aggregate for the whole list, within the office; a deleted lead is not among them.
+   */
+  async latestOfMany(
+    ctx: RequestContext, membershipIds: readonly string[],
+  ): Promise<Map<string, { id: string; at: Date; byMembershipId: string }>> {
+    const out = new Map<string, { id: string; at: Date; byMembershipId: string }>();
+    if (membershipIds.length === 0) return out;
+    const rows = await this.leads.aggregate(ctx, [
+      { $match: { ownerMembershipId: { $in: [...new Set(membershipIds)] } } },
+      { $sort: { dateRegistered: -1, _id: -1 } },
+      {
+        $group: {
+          _id: '$ownerMembershipId',
+          id: { $first: '$_id' },
+          at: { $first: { $ifNull: ['$dateRegistered', '$createdAt'] } },
+          by: { $first: { $ifNull: ['$createdBy', '$ownerMembershipId'] } },
+        },
+      },
+    ]);
+    for (const row of rows) {
+      out.set(String(row._id), { id: String(row.id), at: row.at as Date, byMembershipId: String(row.by) });
+    }
+    return out;
+  }
 }

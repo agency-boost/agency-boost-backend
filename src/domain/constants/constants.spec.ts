@@ -133,6 +133,16 @@ describe('domain constants', () => {
       expect(ACTIVATION.WINDOW_DAYS).toBe(90);
       expect(ACTIVATION.DAY_INDEX_BASE).toBe(1);
     });
+    it('P13-T1 AC-5 pins an activation’s life at six calendar months (OD-120, Overall.html:3349)', () => {
+      expect(ACTIVATION.VISIBLE_MONTHS).toBe(6);
+    });
+    it('P13-T5 AC-5 pins how far back a leader may correct a start date at 365 days (OD-118)', () => {
+      expect(ACTIVATION.START_DATE_MAX_DAYS_BACK).toBe(365);
+    });
+    it('P13-T2 AC-4, P13-T6 AC-2 pins the hire’s note at 500 characters and the coaching note at 1,000', () => {
+      expect(ACTIVATION.HIRE_NOTE_MAX).toBe(500);
+      expect(ACTIVATION.COACHING_NOTE_MAX).toBe(1000);
+    });
   });
 
   describe('performance thresholds', () => {

@@ -183,8 +183,11 @@ export class Membership {
   @Prop({ type: String, default: null })
   sourceLeadId!: string | null;
 
-  @Prop({ type: Date, default: null })
-  activationGraduatedAt!: Date | null;
+  /*
+   * No `activationGraduatedAt`. It sat here unwritten from Phase 3, waiting for Phase 13 — which records
+   * graduation on the hire's `activationProgress` (`graduatedAt`, `graduatedByMembershipId`), with the rest
+   * of the activation, so the fact lives in one place rather than two that could disagree (P13-T0 AC-4).
+   */
 
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;

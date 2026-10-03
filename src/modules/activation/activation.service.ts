@@ -141,13 +141,20 @@ export class ActivationService {
   }
 
   /**
-   * One published version, by number — what a hire's instance pins.
-   *
-   * No route reads it: Phase 13 calls it when it renders somebody's activation, and an endpoint
-   * nothing calls is the defect `backend-then-frontend.md` exists to prevent.
+   * One published version, by number — what a hire's activation pins and every read of it renders
+   * (D-version). No route of its own: the activation's reads call it.
    */
   async findVersion(ctx: RequestContext, version: number): Promise<ActivationVersionView | null> {
     const found = await this.templates.findOne(ctx, { version, status: 'published' });
+    return found ? this.view(ctx, found) : null;
+  }
+
+  /**
+   * **The version a hire starting now is given** (P13-T1 AC-2): the office's newest published one, or
+   * `null` before the first publish. Its id and number are what a new activation pins.
+   */
+  async publishedNow(ctx: RequestContext): Promise<ActivationVersionView | null> {
+    const found = await this.newestPublished(ctx);
     return found ? this.view(ctx, found) : null;
   }
 
@@ -197,6 +204,19 @@ export class ActivationService {
       throw new BadRequestException(
         'There is nothing to publish. Change something first — a published version is immutable, '
           + 'because every hire records which one they started on.',
+      );
+    }
+
+    /*
+     * **An unchanged draft is refused** (P13-T1 AC-2; `functional/activation.md`, *Publishing*): a version
+     * number is what a hire's activation points at, and a version identical to the one before it means
+     * nothing — noise in every audit that follows, and a pin that says the checklist moved when it did not.
+     */
+    const current = await this.newestPublished(ctx);
+    if (current && sameChecklist(current.aspects, draft.aspects)) {
+      throw new BadRequestException(
+        `The draft is the same as version ${current.version}, so there is nothing to publish. Change `
+          + 'something first — every hire records the version they started on.',
       );
     }
 
@@ -328,6 +348,25 @@ export class ActivationService {
     const kind = ACTIVATION_LINK_KINDS[link as ActivationFeatureLink];
     return kind ? { ...kind, kind: link } : null;
   }
+}
+
+/**
+ * Whether two versions say the same thing: the same aspects and items, by code, label, order and link.
+ * Read through the stored shape, so a field Mongoose adds to a subdocument cannot make two equal
+ * checklists differ.
+ */
+function sameChecklist(a: readonly unknown[], b: readonly unknown[]): boolean {
+  const shape = (aspects: readonly unknown[]) => JSON.stringify(
+    (aspects as CheckedActivationAspect[]).map((aspect) => ({
+      code: aspect.code,
+      label: aspect.label,
+      displayOrder: aspect.displayOrder,
+      items: aspect.items.map((item) => ({
+        code: item.code, label: item.label, displayOrder: item.displayOrder, autoLink: item.autoLink ?? null,
+      })),
+    })),
+  );
+  return shape(a) === shape(b);
 }
 
 export { ACTIVATION_TRAINING_LINK_PREFIX };
