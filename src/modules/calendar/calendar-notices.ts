@@ -44,6 +44,23 @@ export class CalendarNotices {
     }), NotificationTemplate.CALENDAR_INVITATION, entryId);
   }
 
+  /**
+   * **An answered invitation's notice is read.** The invitee answering has dealt with *You have a new
+   * invitation*, so it stops counting on their bell. A failure is a log line, never the answer's.
+   */
+  async answered(ctx: RequestContext, entryId: string, membershipId: string): Promise<void> {
+    try {
+      // The account the invitation was sent to, found as `each` finds it: by the membership.
+      const member = await this.memberships.findOne(ctx, { _id: membershipId });
+      if (!member) return;
+      await this.notifications.markEntryNoticesRead(
+        ctx, String(member.userId), NotificationTemplate.CALENDAR_INVITATION, entryId,
+      );
+    } catch (err) {
+      this.logger.error({ err, entryId }, 'failed to mark an answered invitation read');
+    }
+  }
+
   /** `CALENDAR_BLOCK_PLACED`, to the member a block was placed on, once. Nothing to the leader. */
   async placed(ctx: RequestContext, entryId: string, date: LocalDate, memberId: string): Promise<void> {
     await this.each(ctx, [memberId], (person) => this.notifications.send({

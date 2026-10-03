@@ -202,6 +202,25 @@ describe('invitations, the picker and the notices (P12-T4)', () => {
       expect(stored!.updatedBy).toBe(h.id('SARI'));
     });
 
+    it('P12-T4 AC-5 answering reads the invitation’s notice: it stops counting on the invitee’s bell, and nobody else’s changes', async () => {
+      const entry = await create('SARI', timed(1, '13:00', '14:00', { inviteeIds: [h.id('RINA'), h.id('BUDI')] }));
+      const other = await create('SARI', timed(2, '13:00', '14:00', { inviteeIds: [h.id('RINA')] }));
+      const notices = async (who: 'RINA' | 'BUDI', entryId: string) => h.col('notifications').find({
+        userId: await userOf(who), templateId: NotificationTemplate.CALENDAR_INVITATION, 'payload.entryId': entryId,
+      }).toArray();
+      expect((await notices('RINA', entry.entryId)).map((n) => n.readAt)).toEqual([null]);
+
+      await answer('RINA', entry.entryId, 'accepted').expect(200);
+
+      expect((await notices('RINA', entry.entryId)).map((n) => n.readAt)).toEqual([new Date('2026-09-14T03:00:00Z')]);
+      // Her invitation to another entry, and Budi's to this one, are untouched.
+      expect((await notices('RINA', other.entryId)).map((n) => n.readAt)).toEqual([null]);
+      expect((await notices('BUDI', entry.entryId)).map((n) => n.readAt)).toEqual([null]);
+      // Answering again marks nothing more and refuses nothing.
+      await answer('RINA', entry.entryId, 'declined').expect(200);
+      expect(await notices('RINA', entry.entryId)).toHaveLength(1);
+    });
+
     it('calendar_block_is_not_answered P12-T4 AC-5 nobody answers for somebody else: the organiser, a member not on it, and nobody’s entry are 404', async () => {
       const entry = await create('SARI', timed(1, '13:00', '14:00', { inviteeIds: [h.id('RINA')] }));
       for (const who of ['SARI', 'BUDI', 'AGUS'] as const) {

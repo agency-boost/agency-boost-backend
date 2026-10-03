@@ -24,13 +24,20 @@ describe('CalendarNotices', () => {
   });
   afterEach(() => logged.mockRestore());
 
-  function build(over: { send?: jest.Mock; sendCoalesced?: jest.Mock; releaseHeld?: jest.Mock; find?: jest.Mock } = {}) {
+  function build(over: {
+    send?: jest.Mock; sendCoalesced?: jest.Mock; releaseHeld?: jest.Mock; find?: jest.Mock;
+    findOne?: jest.Mock; markEntryNoticesRead?: jest.Mock;
+  } = {}) {
     const notifications = {
       send: over.send ?? jest.fn(async () => undefined),
       sendCoalesced: over.sendCoalesced ?? jest.fn(async () => undefined),
       releaseHeld: over.releaseHeld ?? jest.fn(async () => undefined),
+      markEntryNoticesRead: over.markEntryNoticesRead ?? jest.fn(async () => 1),
     };
-    const memberships = { find: over.find ?? jest.fn(async (_ctx: unknown, filter: { _id: { $in: string[] } }) => filter._id.$in.map(member)) };
+    const memberships = {
+      find: over.find ?? jest.fn(async (_ctx: unknown, filter: { _id: { $in: string[] } }) => filter._id.$in.map(member)),
+      findOne: over.findOne ?? jest.fn(async (_ctx: unknown, filter: { _id: string }) => member(filter._id)),
+    };
     return { notices: new CalendarNotices(notifications as never, memberships as never), notifications, memberships };
   }
 
@@ -58,6 +65,23 @@ describe('CalendarNotices', () => {
       coalesceKey: `calendar:${ENTRY}:${RINA}:moved`, payload: { entryId: ENTRY, date: '2026-09-17', change: 'moved' },
     });
     expect(notifications.releaseHeld).toHaveBeenCalledWith(KPM, `calendar:${ENTRY}:${RINA}:moved`, NotificationTemplate.CALENDAR_ENTRY_CHANGED);
+  });
+
+  it('P12-T4 AC-5 an answer reads the invitation’s notice, on the invitee’s own account', async () => {
+    const { notices, notifications, memberships } = build();
+    await notices.answered(ctx, ENTRY, RINA);
+    expect(memberships.findOne).toHaveBeenCalledWith(ctx, { _id: RINA });
+    expect(notifications.markEntryNoticesRead).toHaveBeenCalledWith(ctx, `u-${RINA}`, NotificationTemplate.CALENDAR_INVITATION, ENTRY);
+  });
+
+  it('P12-T4 AC-5 reads nothing for a membership it cannot find, and a failure is a log line, never the answer’s', async () => {
+    const missing = build({ findOne: jest.fn(async () => null) });
+    await missing.notices.answered(ctx, ENTRY, RINA);
+    expect(missing.notifications.markEntryNoticesRead).not.toHaveBeenCalled();
+
+    const failing = build({ markEntryNoticesRead: jest.fn(async () => { throw new Error('down'); }) });
+    await expect(failing.notices.answered(ctx, ENTRY, RINA)).resolves.toBeUndefined();
+    expect(logged).toHaveBeenCalledWith(expect.objectContaining({ entryId: ENTRY }), 'failed to mark an answered invitation read');
   });
 
   it('sends nothing, and looks nobody up, for nobody', async () => {

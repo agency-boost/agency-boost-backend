@@ -202,6 +202,17 @@ export class NotificationService {
    * recorded on the delivery map as `send` records one. The recipient's choices are read again here,
    * since they may have changed while the session was open.
    */
+  /**
+   * **The notices about one calendar entry that one person has now dealt with, read.** An invitee who answers
+   * an invitation has read the notice that announced it, so the bell stops counting it. Scoped to the
+   * office in `ctx` through the tenant repository. Answers how many it marked.
+   */
+  async markEntryNoticesRead(
+    ctx: RequestContext, userId: string, templateId: NotificationTemplateId, entryId: string,
+  ): Promise<number> {
+    return this.coalesced.markEntryNoticesRead(ctx, userId, templateId, entryId, this.clock.now());
+  }
+
   async releaseHeld(kpmId: string, coalesceKey: string, templateId: NotificationTemplateId): Promise<void> {
     const office = officeOf(kpmId);
     const claimed = await this.coalesced.claimHeld(office, { coalesceKey, templateId }, HELD_CHANNEL, this.clock.now());

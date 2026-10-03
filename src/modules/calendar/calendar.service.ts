@@ -327,6 +327,7 @@ export class CalendarService {
     const updated = await this.entries.answer(ctx, entryId, me, answer, this.clock.now());
     if (!updated) throw new NotFoundException(ENTRY);
     await this.record(ctx, 'calendar_entry.answered', updated);
+    await this.notices.answered(ctx, entryId, me);
     return this.answerAs(ctx, updated, (await this.days.office(ctx)).timezone);
   }
 

@@ -47,6 +47,25 @@ export class NotificationRepository extends TenantScopedRepository<NotificationD
   }
 
   /**
+   * **A notice dealt with is read**: every unread notice of one template, to one account, about one calendar
+   * entry, marked read at `at` — one conditional write. Used when an invitee answers the invitation the notice
+   * announced. Answers how many it marked.
+   */
+  async markEntryNoticesRead(
+    ctx: RequestContext, userId: string, templateId: string, entryId: string, at: Date,
+  ): Promise<number> {
+    const result = await this.model
+      .updateMany(
+        this.scope(ctx, 'markEntryNoticesRead', {
+          userId, templateId, 'payload.entryId': entryId, readAt: null,
+        } as FilterQuery<NotificationDocument>),
+        { $set: { readAt: at } },
+      )
+      .exec();
+    return result.modifiedCount;
+  }
+
+  /**
    * **Claim a held delivery**, `held` → `pending`, in one conditional write, so two releases of the same
    * key send it once. `null` when nothing under the key is held on that channel.
    */
