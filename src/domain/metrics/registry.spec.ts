@@ -95,6 +95,15 @@ describe('the metric registry (P4-T4)', () => {
       expect(metric('SUB_PERIOD_ACTIVITY_TARGET').threshold).toBeNull();
     });
 
+    it('P13.1-T5 AC-2, AC-4 registers the pace sentence’s N over the last 30 days, and no run-rate (ADR-0109)', () => {
+      expect(metric('CLOSINGS_LAST_30_DAYS')).toMatchObject({
+        period: 'ROLLING_30D', unit: 'count', phase: 13.1, threshold: null, label: 'Closings over the last 30 days',
+      });
+      // The needed pace is still this month's: the weeks left are the office's calendar month.
+      expect(metric('CLOSINGS_NEEDED_PER_WEEK').period).toBe('CALENDAR_MONTH');
+      expect(() => metric('PROJECTED_CLOSINGS_THIS_MONTH')).toThrow(/No metric called PROJECTED_CLOSINGS_THIS_MONTH/);
+    });
+
     it('P11-T4 AC-6 registers SUB_PERIOD_ACTIVITY_TARGET before it is served: the last 7 days, a count, Phase 11', () => {
       expect(metric('SUB_PERIOD_ACTIVITY_TARGET')).toMatchObject({
         period: 'ROLLING_7D', unit: 'count', phase: 11, label: 'Activity target for the last 7 days, pro-rated',
@@ -193,6 +202,8 @@ describe('the metric registry (P4-T4)', () => {
     const REGISTERED_SINCE: Record<string, number> = {
       // P11-T4: the coaching session's Activity card.
       SUB_PERIOD_ACTIVITY_TARGET: 11,
+      // P13.1-T5 (ADR-0109): the pace sentence's *N*, replacing `PROJECTED_CLOSINGS_THIS_MONTH`.
+      CLOSINGS_LAST_30_DAYS: 13.1,
     };
     const existedBefore = (id: string) => !(id in REGISTERED_SINCE);
 
@@ -215,7 +226,7 @@ describe('the metric registry (P4-T4)', () => {
       // And no phase the plan gives no metric to: an old-plan 12 left behind would now read as
       // Calendar's, 16 is Billing, 17 Recruitment tools, 19 go-live.
       const phases = [...new Set(METRIC_IDS.map((id) => metric(id).phase))].sort((a, b) => a - b);
-      expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 14, 15, 18]);
+      expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 14, 15, 18]);
     });
 
     it('evaluates campaigns in Phase 14, the old plan’s 12', () => {
@@ -235,7 +246,7 @@ describe('the metric registry (P4-T4)', () => {
         'LEADS_PER_ACTIVITY', 'LEAD_TARGET',
         'MEASURED_CLOSING_RATE', 'MEASURED_LEAD_TO_APPOINTMENT_RATE', 'MEETING_PER_APPROACH',
         'MONTHLY_ACTIVE_AGENT', 'MONTHLY_APE_TARGET', 'MONTHS_LEFT_IN_YEAR', 'NEW_ACTIVE_AGENTS',
-        'PACING_TO_MAA', 'POLICIES_NEEDED', 'POLICY_COUNT_TARGET', 'PROJECTED_CLOSINGS_THIS_MONTH',
+        'PACING_TO_MAA', 'POLICIES_NEEDED', 'POLICY_COUNT_TARGET', 'CLOSINGS_LAST_30_DAYS',
         'RECRUITMENT_EXPECTED_TO_CLOSE', 'RECRUITMENT_PIPELINE_NOW', 'RECRUITMENT_SUCCESS_RATE', 'ROLLING_PERSISTENCY',
         'SELLING_RECRUITMENT_BALANCE', 'SELLING_SUCCESS_RATE', 'SUB_PERIOD_ACTIVITY_TARGET', 'SUMMARY_ACTIVITY_TARGET',
         'TRAINING_COMPLETION_PCT',

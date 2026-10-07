@@ -36,10 +36,10 @@ export class ActivityController {
   @ApiOperation({
     summary: 'One day',
     description:
-      'Defaults to **today in the office’s timezone** and to your own membership. Every active '
-      + 'activity type comes back, zeros included — the screen is the office’s taxonomy, so a type '
-      + 'with no count still has a row to type into. `editable` says whether the Save button is '
-      + 'live for this caller on this day.'
+      'Defaults to **today in the office’s timezone** and to your own membership. Every activity type '
+      + 'of the office’s **published** configuration that the subject’s rung is shown comes back, zeros '
+      + 'included — the rows Log Activity draws from `/kpm/config`, so a type with no count still has a '
+      + 'row to type into. `editable` says whether the Save button is live for this caller on this day.'
       + ' **Another member’s day is audited**: the read writes `activity_log.read_raw` with the '
       + 'subject, the day and the surface (§3.5). Your own writes nothing.',
   })
@@ -56,6 +56,9 @@ export class ActivityController {
       'An upsert: the whole day is sent, and a code left out counts as zero. Free within the '
       + 'current calendar month plus the office’s grace window; **a future day is refused**, and a '
       + 'day past its window is refused with a pointer at the correction route (ADR-0042).\n\n'
+      + '**Codes are checked against the office’s published configuration**, the one the screen shows: '
+      + 'a type archived since the last publish still saves, one created since is refused by name until '
+      + 'it is published, and one in a section your rung is not shown is `ACTIVITY_TYPE_NOT_APPLICABLE`.\n\n'
       + '**There is no `membershipId` parameter.** No role may log on another person’s behalf, and '
       + 'a route with no subject to pass is a stronger guarantee than a check somebody has to '
       + 'remember.',
@@ -103,15 +106,18 @@ export class ActivityController {
   @Get('dashboard')
   @RequirePermission('activity_log:read_raw')
   @ApiOperation({
-    summary: 'Your own activity over a range, per type and per column',
+    summary: 'Your own activity over a range, per type and per column — or a coachee’s',
     description:
       '*Last 7 days* (the default), *Last 30 days*, or a custom range of up to 366 days, ending today in '
       + 'the office’s timezone. Seven days is a column a day; thirty days is 7-day blocks counted back '
       + 'from today and a remainder; a custom range is daily up to 31 days and blocks above.\n\n'
-      + '**There is no `membershipId` parameter.** The screen is first-person; a leader’s view of a '
-      + 'downline belongs to coaching, where the read audit `roles-and-permissions.md` §3.5 requires is built.',
+      + '**Yours, or a coachee’s** (coaching’s *Activity* tab): `for` names whose, drawn on the subject’s '
+      + 'own rung — their sections, not yours. Outside your scope it is a 404, never a 403. **Another '
+      + 'member’s days are audited**: the read writes `activity_log.read_raw` with the subject, the range '
+      + 'and the surface `activity_dashboard` (§3.5). Your own writes nothing.',
   })
   @ApiResponse({ status: 200, type: ActivityDashboardDto })
+  @ApiResponse({ status: 404, description: NOT_YOURS('for'), type: ApiErrorEnvelope })
   async dashboard(@Ctx() ctx: RequestContext, @Query() query: ActivityDashboardQueryDto) {
     return this.activity.dashboard(ctx, query);
   }

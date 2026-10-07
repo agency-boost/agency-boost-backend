@@ -98,6 +98,8 @@ describe('exit criterion 2: the §3.5 entry, per route (P11-T10 AC-7)', () => {
     { route: 'GET /activity/ratios?for=', surface: 'ratios', call: (h, g) => h().get('/activity/ratios').query({ for: g.coachee }) },
     { route: 'GET /activity/summary?membershipId=', surface: 'summary', call: (h, g) => h().get('/activity/summary').query({ membershipId: g.coachee }) },
     { route: 'GET /activity/log?membershipId=', surface: 'log', call: (h, g) => h().get('/activity/log').query({ membershipId: g.coachee }) },
+    // P13.1-T9: the *Activity* tab, a coachee's Dashboard.
+    { route: 'GET /activity/dashboard?for=', surface: 'activity_dashboard', call: (h, g) => h().get('/activity/dashboard').query({ for: g.coachee }) },
     { route: 'GET /leads?owner=', surface: 'leads', call: (h, g) => h().get('/leads').query({ owner: g.coachee }) },
     { route: 'GET /leads, a leader’s list (ADR-0089)', surface: 'leads', call: (h) => h().get('/leads') },
     // Phase 11 exit review, N2: one lead of the coachee's, opened by its id.
@@ -149,6 +151,7 @@ describe('exit criterion 2: the §3.5 entry, per route (P11-T10 AC-7)', () => {
     { route: 'GET /activity/ratios?for= themselves', surface: null, call: (h, g) => h().get('/activity/ratios').query({ for: g.coachee }) },
     { route: 'GET /activity/summary?membershipId= themselves', surface: null, call: (h, g) => h().get('/activity/summary').query({ membershipId: g.coachee }) },
     { route: 'GET /activity/log', surface: null, call: (h) => h().get('/activity/log') },
+    { route: 'GET /activity/dashboard?for= themselves', surface: null, call: (h, g) => h().get('/activity/dashboard').query({ for: g.coachee }) },
     { route: 'GET /leads?owner= themselves', surface: null, call: (h, g) => h().get('/leads').query({ owner: g.coachee }) },
     { route: 'GET /leads', surface: null, call: (h) => h().get('/leads') },
     { route: 'GET /leads/:id (N2), their own', surface: null, call: (h, g) => h().get(`/leads/${g.leadId}`) },

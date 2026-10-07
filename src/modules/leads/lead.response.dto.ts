@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { LAWFUL_BASES, LEAD_OUTCOMES, LEAD_TYPES } from './lead.schema';
+import { LEAD_OUTCOMES, LEAD_TYPES } from './lead.schema';
 import type { LeadFlag, LeadPage, LeadView } from './lead.service';
 
 export class LeadContactDto {
@@ -23,14 +23,11 @@ export class LeadResponseDto implements LeadView {
   @ApiProperty({ type: String })
   name!: string;
 
-  @ApiProperty({ type: LeadContactDto })
+  @ApiProperty({
+    type: LeadContactDto,
+    description: 'No `lawfulBasis` or `consentAt` beside it since 2026-10-07 (ADR-0108 §1).',
+  })
   contact!: { phone: string | null; email: string | null };
-
-  @ApiProperty({ enum: LAWFUL_BASES, nullable: true })
-  lawfulBasis!: string | null;
-
-  @ApiProperty({ type: String, format: 'date-time', nullable: true })
-  consentAt!: string | null;
 
   @ApiProperty({ type: String, nullable: true, description: 'The code, never the label.' })
   statusCode!: string | null;

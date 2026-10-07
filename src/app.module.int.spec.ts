@@ -10,6 +10,7 @@ import { ActivationEvents } from './modules/activation/activation-events.port';
 import { ActivationNav } from './modules/activation/activation-nav.port';
 import { ActivationProgressService } from './modules/activation/activation-progress.service';
 import { ActivityService } from './modules/activity/activity.service';
+import { TenantConfigService } from './modules/config/tenant-config.service';
 import { AuthController } from './modules/auth/auth.controller';
 import { CalendarLeave } from './modules/calendar/calendar-leave';
 import { GoalService } from './modules/goals/goal.service';
@@ -85,6 +86,27 @@ describe('AppModule boots', () => {
     expect(port(LeaderCodeService, 'activations')).toBe(activation);
     expect(port(AuthController, 'activationNav')).toBe(activation);
     expect(port(RemovalService, 'departures')).toBe(app.get(CalendarLeave, { strict: false }));
+  });
+
+  /*
+   * P13.1-T2: Log Activity's day and its save read the published copy through an optional dependency, so
+   * a hand-built instance (the seed's) need not build the renderer. Optional means a graph that failed to
+   * provide it would quietly read the draft again — the client's defect — so the real graph is asserted.
+   */
+  it('P13.1-T2 hands ActivityService the published configuration, in the real graph', () => {
+    const service = app.get(ActivityService, { strict: false }) as unknown as Record<string, unknown>;
+    // Compared, not matched: a failing `toBe` on a service prints its whole graph, configuration included.
+    expect(service.published === app.get(TenantConfigService, { strict: false })).toBe(true);
+  });
+
+  /*
+   * P13.1-T4 AC-10: a lead's move and its close are judged against the same published ladder the table
+   * offers, read through `LeadService.config`. Required rather than optional, so it cannot be null; this
+   * pins that it is the one configuration service, not a second instance reading another copy.
+   */
+  it('P13.1-T4 AC-10 hands LeadService the published configuration, in the real graph', () => {
+    const service = app.get(LeadService, { strict: false }) as unknown as Record<string, unknown>;
+    expect(service.config === app.get(TenantConfigService, { strict: false })).toBe(true);
   });
 
   /*

@@ -88,8 +88,9 @@ export class LeadController {
   @ApiOperation({
     summary: 'Add a lead',
     description:
-      'A name is enough. **Contact details need a recorded lawful basis** (UU 27/2022) — '
-      + '`LEAD_CONSENT_REQUIRED`. The lead starts on no stage: the first one is a move.\n\n'
+      'A name is enough, and a phone number or an email needs nothing beside it: the lawful basis '
+      + 'and its rule were removed on 2026-10-07 (ADR-0108 §1). The lead starts on no stage: the '
+      + 'first one is a move.\n\n'
       + 'Yours, or — with `owner` — in the pipeline of somebody you coach: the lead is theirs, and its '
       + 'creation and `lastEditedBy` name you. Anybody you do not coach, yourself included, is a 404. '
       + 'No notification is sent.',
@@ -108,8 +109,7 @@ export class LeadController {
     summary: 'Change a lead',
     description:
       'Any of the fields creation takes, one or several. **Not the stage** — that is its own '
-      + 'route. Clearing the lawful basis on a lead that still holds contact details is refused, '
-      + 'because it is the same act as adding them without one.\n\n'
+      + 'route. `contact` travels as a pair, so saving the phone never erases the email.\n\n'
       + PINNED,
   })
   @ApiResponse({ status: 200, type: LeadResponseDto })

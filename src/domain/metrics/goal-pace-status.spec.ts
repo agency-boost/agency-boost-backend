@@ -5,7 +5,7 @@ const M = 1_000_000 * 100;
 const RATIO = PERFORMANCE.ON_TRACK_PACE_THRESHOLD;
 const month = (
   apeMinor: number | null, pacing = true, targetMinor = 100 * M,
-  closings: { projected: number | null; target: number } | null = null,
+  closings: { last30Days: number; target: number } | null = null,
 ) => ({ targetMinor, apeMinor, pacing, closings });
 
 /**
@@ -53,55 +53,60 @@ describe('GOAL_PACE_STATUS (§A.4)', () => {
   it('OD-109 a zero target — the year already met — reads met once the gate passes: On track', () => {
     expect(goalPaceStatus({ month: month(10 * M, true, 0), onTrackRatio: RATIO })).toBe('on_track');
     expect(goalPaceStatus({ month: month(null, true, 0), onTrackRatio: RATIO })).toBe('on_track');
-    expect(goalPaceStatus({ month: month(0, true, 0, { projected: 0, target: 0 }), onTrackRatio: RATIO })).toBe('on_track');
+    expect(goalPaceStatus({ month: month(0, true, 0, { last30Days: 0, target: 0 }), onTrackRatio: RATIO })).toBe('on_track');
   });
 
   it('OD-109 a year met is still gated first: not pacing to MAA is Needs attention, full stop', () => {
     expect(goalPaceStatus({ month: month(10 * M, false, 0), onTrackRatio: RATIO })).toBe('needs_attention');
   });
 
+  /*
+   * **Amended 2026-10-07 (ADR-0109).** The activity's pace is the Summary sentence's: the closings of the
+   * last 30 days over this month's closing target, where it was ADR-0057's run-rate, `null` before the 7th.
+   */
   describe('OD-110: until this month’s file lands, the pace is the activity’s', () => {
-    it('OD-110 with no APE, projected closings at the on-track share of the closing target is On track', () => {
-      // 9 of 10 projected is exactly the default 0.90, which is inclusive.
-      expect(goalPaceStatus({ month: month(null, true, 100 * M, { projected: 9, target: 10 }), onTrackRatio: RATIO }))
+    it('OD-110 with no APE, the last 30 days’ closings at the on-track share of the closing target is On track', () => {
+      // 9 of 10 is exactly the default 0.90, which is inclusive.
+      expect(goalPaceStatus({ month: month(null, true, 100 * M, { last30Days: 9, target: 10 }), onTrackRatio: RATIO }))
         .toBe('on_track');
-      expect(goalPaceStatus({ month: month(null, true, 100 * M, { projected: 12, target: 10 }), onTrackRatio: RATIO }))
+      expect(goalPaceStatus({ month: month(null, true, 100 * M, { last30Days: 12, target: 10 }), onTrackRatio: RATIO }))
         .toBe('on_track');
     });
 
-    it('OD-110 with no APE, projected closings below that share is Watch closely', () => {
-      expect(goalPaceStatus({ month: month(null, true, 100 * M, { projected: 8, target: 10 }), onTrackRatio: RATIO }))
+    it('OD-110 with no APE, the last 30 days’ closings below that share is Watch closely', () => {
+      expect(goalPaceStatus({ month: month(null, true, 100 * M, { last30Days: 8, target: 10 }), onTrackRatio: RATIO }))
         .toBe('watch_closely');
-      expect(goalPaceStatus({ month: month(null, true, 100 * M, { projected: 0, target: 10 }), onTrackRatio: RATIO }))
-        .toBe('watch_closely');
-    });
-
-    it('OD-110 before the 7th the projection is null, and the answer stays the pace of 0', () => {
-      expect(goalPaceStatus({ month: month(null, true, 100 * M, { projected: null, target: 10 }), onTrackRatio: RATIO }))
+      expect(goalPaceStatus({ month: month(null, true, 100 * M, { last30Days: 0, target: 10 }), onTrackRatio: RATIO }))
         .toBe('watch_closely');
     });
 
-    it('OD-110 once the file lands APE decides, whatever the activity projects', () => {
-      expect(goalPaceStatus({ month: month(20 * M, true, 100 * M, { projected: 30, target: 10 }), onTrackRatio: RATIO }))
+    it('P13.1-T5 AC-4 there is no first week without an answer: the 30 days answer on the 1st as on the 30th', () => {
+      // The closings argument carries no day: what the window counts is the answer, every day of the month.
+      expect(goalPaceStatus({ month: month(null, true, 100 * M, { last30Days: 10, target: 10 }), onTrackRatio: RATIO }))
+        .toBe('on_track');
+    });
+
+    it('OD-110 once the file lands APE decides, whatever the activity says', () => {
+      expect(goalPaceStatus({ month: month(20 * M, true, 100 * M, { last30Days: 30, target: 10 }), onTrackRatio: RATIO }))
         .toBe('watch_closely');
-      expect(goalPaceStatus({ month: month(95 * M, true, 100 * M, { projected: 0, target: 10 }), onTrackRatio: RATIO }))
+      expect(goalPaceStatus({ month: month(95 * M, true, 100 * M, { last30Days: 0, target: 10 }), onTrackRatio: RATIO }))
         .toBe('on_track');
     });
 
     it('OD-110 reads the office’s own on-track ratio on the activity pace too', () => {
-      expect(goalPaceStatus({ month: month(null, true, 100 * M, { projected: 7, target: 10 }), onTrackRatio: 0.7 }))
+      expect(goalPaceStatus({ month: month(null, true, 100 * M, { last30Days: 7, target: 10 }), onTrackRatio: 0.7 }))
         .toBe('on_track');
-      expect(goalPaceStatus({ month: month(null, true, 100 * M, { projected: 7, target: 10 }), onTrackRatio: RATIO }))
+      expect(goalPaceStatus({ month: month(null, true, 100 * M, { last30Days: 7, target: 10 }), onTrackRatio: RATIO }))
         .toBe('watch_closely');
     });
 
-    it('OD-110 the gate still comes first: not pacing is Needs attention whatever the closings project', () => {
-      expect(goalPaceStatus({ month: month(null, false, 100 * M, { projected: 20, target: 10 }), onTrackRatio: RATIO }))
+    it('OD-110 the gate still comes first: not pacing is Needs attention whatever the closings say', () => {
+      expect(goalPaceStatus({ month: month(null, false, 100 * M, { last30Days: 20, target: 10 }), onTrackRatio: RATIO }))
         .toBe('needs_attention');
     });
 
     it('OD-110 a closing target of zero never divides', () => {
-      expect(goalPaceStatus({ month: month(null, true, 100 * M, { projected: 3, target: 0 }), onTrackRatio: RATIO }))
+      expect(goalPaceStatus({ month: month(null, true, 100 * M, { last30Days: 3, target: 0 }), onTrackRatio: RATIO }))
         .toBe('watch_closely');
     });
   });

@@ -80,7 +80,10 @@ export const SEED_ACTIVITY_CATEGORIES: readonly SeedActivityCategory[] = [
   },
 ];
 
-/** The twelve. Labels verbatim from `KPM_Owner.html`, descriptions included where it has them. */
+/**
+ * The twelve. Labels verbatim from `KPM_Owner.html`, descriptions included where it has them — but
+ * for item 7's label, renamed at the client's request (below; `prototype-parity.md`).
+ */
 export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
   {
     code: 'LEADS_GEN_ACTIVITY',
@@ -127,7 +130,16 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
   {
     code: 'RECRUIT_PRESENTATION',
     categoryCode: 'RECRUITMENT',
-    label: 'Presentasi NBO ke calon agen',
+    /*
+     * **The one label that is not the prototype's** (P13.1-T3, 2026-10-07). `KPM_Owner.html:1396`
+     * reads *"Presentasi NBO ke calon agen"*; the client asked for this wording on `/summary`'s
+     * *Recruitment activities*, and the product owner confirmed it is item 7 that changes, not item 9
+     * (*Proses NPA*), whose meaning it resembles (K3). The description stays the prototype's.
+     *
+     * A default, like every label here: an office provisioned before the change keeps the label it
+     * holds, and an Owner may rename it either way. The code does not move (invariant §3).
+     */
+    label: 'Proses pendaftaran kode agen',
     description: 'secara mandiri atau melalui BOP',
     displayOrder: 7,
   },

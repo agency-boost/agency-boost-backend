@@ -36,15 +36,18 @@ export class YearlyFiguresDto extends PeriodFiguresDto {
   source!: FigureSource;
 }
 
+/** The pace sentence's figures (ADR-0109): *tracking to close N … a target of M … W weeks left … K policies/week*. */
 export class PaceDto implements Pace {
-  @ApiProperty() closingTarget!: number;
-  @ApiProperty() closingsLogged!: number;
+  @ApiProperty({ description: '*M*: this month’s closing target — the closings chip’s.' }) closingTarget!: number;
+  @ApiProperty({ description: '*N*, `CLOSINGS_LAST_30_DAYS`: the goal’s closing code over the last 30 days, today included, in the office’s calendar.' })
+  closingsLast30Days!: number;
   @ApiProperty() dayOfMonth!: number;
   @ApiProperty() daysInMonth!: number;
-  @ApiProperty({ type: Number, nullable: true, description: '`PROJECTED_CLOSINGS_THIS_MONTH`; `null` before the 7th of the month.' }) projected!: number | null;
-  @ApiProperty({ description: 'Days left today included, over 7, rounded up — never zero.' }) weeksLeft!: number;
-  @ApiProperty({ description: '`CLOSINGS_NEEDED_PER_WEEK`; 0 once the target is reached.' }) neededPerWeek!: number;
-  @ApiProperty() targetMet!: boolean;
+  @ApiProperty({ description: '*W*: days left today included, over 7, rounded up — never zero.' }) weeksLeft!: number;
+  @ApiProperty({ description: '`POLICIES_NEEDED` for the month: this month’s APE gap over the case size, rounded up — the whole target’s until the month’s file lands; 0 once the target is reached.' })
+  policiesNeeded!: number;
+  @ApiProperty({ description: '*K*, `CLOSINGS_NEEDED_PER_WEEK`: the policies still needed over the weeks left, rounded up.' }) neededPerWeek!: number;
+  @ApiProperty({ description: 'This month’s APE target, or the year’s, is reached: the green sentence instead of the danger box.' }) targetMet!: boolean;
 }
 
 export class ActivityTargetDto implements ActivityTarget {
@@ -112,7 +115,7 @@ export class InsightDto {
   @ApiProperty({ enum: ['action', 'improve'], description: '*What to do next*, or *How you can improve your performance*.' }) kind!: InsightKind;
   @ApiProperty({
     type: 'object', additionalProperties: true,
-    description: 'What the rule read. NOTHING_LOGGED: `windowDays`, `lastLoggedOn`. BEHIND_PACE: `projected`, `closingTarget`, '
+    description: 'What the rule read. NOTHING_LOGGED: `windowDays`, `lastLoggedOn`. BEHIND_PACE: `closingsLast30Days`, `closingTarget`, '
       + '`neededPerWeek`, `weeksLeft`. LEAD_OVERDUE: `leadId`, `name`, `overdueDays`, `others`. LEAD_NEGLECTED: `leadId`, `name`, '
       + '`others`. RATIO_BELOW, RATIO_STRENGTH: `code`, `label`, `value`, `benchmark`, `displayUnit`.',
   })
@@ -140,7 +143,7 @@ export class SummaryDto implements SummaryView {
   @ApiProperty({ type: YearlyFiguresDto, description: '*Yearly*: the annual target against the year to date.' })
   yearly!: YearlyFiguresDto;
 
-  @ApiProperty({ type: PaceDto, nullable: true, description: 'The pace sentence (ADR-0057); `null` without a goal.' })
+  @ApiProperty({ type: PaceDto, nullable: true, description: 'The pace sentence (ADR-0109); `null` without a goal.' })
   pace!: Pace | null;
 
   @ApiProperty({ type: SummaryActivityPeriodsDto, description: '*Your sales activity targets* and the other sections.' })

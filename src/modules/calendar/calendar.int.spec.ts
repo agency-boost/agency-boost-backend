@@ -18,6 +18,9 @@ const ROUTES: Record<string, string> = {
   update: 'calendar_entry:update',
   remove: 'calendar_entry:delete',
   answer: 'calendar_entry:answer',
+  // P13.1-T8: the reader's own setting, *Hide my personal activities* (ADR-0110).
+  readSettings: 'calendar_entry:read',
+  saveSettings: 'calendar_entry:update',
 };
 
 /** The keys an entry is answered with, in full (`functional/calendar.md`, *An entry*). */

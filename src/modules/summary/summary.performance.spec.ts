@@ -125,7 +125,8 @@ describe('the Personal Summary, measured (P10-T4)', () => {
     // (500 − 160 through August) over the four months left including September.
     expect(view.monthly).toMatchObject({ targetMinor: 85 * M, actualMinor: 20 * M });
     expect(view.yearly).toMatchObject({ actualMinor: 180 * M });
-    expect(view.pace).toMatchObject({ closingsLogged: 14 });
+    // One closing a day: the last 30 days, today included, are 30 of them — office B's ten a day are not (ADR-0109).
+    expect(view.pace).toMatchObject({ closingsLast30Days: 30 });
     // The year's chips: 257 days of one closing each, against ceil(500 / 18) = 28.
     expect(view.activity.yearly.targets[2]).toMatchObject({ logged: 257, target: 28 });
     expect(view.activity.yearly.sections[0]).toMatchObject({ code: 'RECRUITMENT', total: 257 });

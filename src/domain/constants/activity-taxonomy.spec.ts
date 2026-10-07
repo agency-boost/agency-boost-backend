@@ -43,8 +43,19 @@ describe('the seeded activity taxonomy matches the prototype', () => {
     expect(items.map((i) => i.num)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   });
 
-  it('carries the same twelve labels, verbatim', () => {
-    expect(SEED_ACTIVITY_TYPES.map((t) => t.label)).toEqual(items.map((i) => i.title));
+  it('carries the same twelve labels, verbatim but for item 7, renamed at the client’s request', () => {
+    /*
+     * **One named exception** (P13.1-T3, 2026-10-07): the client asked for item 7 to read *"Proses
+     * pendaftaran kode agen"*, registered in `prototype-parity.md`. Pinned by code and by both
+     * wordings, so the prototype still has to say what it said, and a second label drifting from it
+     * fails here rather than joining this one.
+     */
+    const renamed = SEED_ACTIVITY_TYPES.findIndex((t) => t.code === 'RECRUIT_PRESENTATION');
+    expect(items[renamed]).toMatchObject({ num: 7, title: 'Presentasi NBO ke calon agen' });
+    expect(SEED_ACTIVITY_TYPES[renamed].label).toBe('Proses pendaftaran kode agen');
+
+    expect(SEED_ACTIVITY_TYPES.map((t) => t.label))
+      .toEqual(items.map((i, index) => (index === renamed ? 'Proses pendaftaran kode agen' : i.title)));
   });
 
   it('carries the same descriptions, including the four that exist', () => {

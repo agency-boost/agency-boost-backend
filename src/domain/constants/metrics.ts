@@ -75,7 +75,9 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'MEASURED_LEAD_TO_APPOINTMENT_RATE', name: 'Your logged leads-to-appointment rate', unit: 'ratio', phase: 10 },
   { key: 'MEASURED_CLOSING_RATE', name: 'Your logged closing rate', unit: 'ratio', phase: 10 },
   { key: 'MONTHLY_APE_TARGET', name: 'This month’s APE target', unit: 'idr_minor', phase: 10 },
-  { key: 'PROJECTED_CLOSINGS_THIS_MONTH', name: 'Closings at your current pace', unit: 'count', phase: 10 },
+  // P13.1-T5 (ADR-0109): the pace sentence's *tracking to close N*. It replaced ADR-0057's
+  // `PROJECTED_CLOSINGS_THIS_MONTH`, a run-rate, which is no longer measured.
+  { key: 'CLOSINGS_LAST_30_DAYS', name: 'Closings over the last 30 days', unit: 'count', phase: 13.1 },
   { key: 'CLOSINGS_NEEDED_PER_WEEK', name: 'Closings needed per week', unit: 'count', phase: 10 },
   { key: 'SUMMARY_ACTIVITY_TARGET', name: 'Activity target for the period', unit: 'count', phase: 10 },
   { key: 'ACTIVITY_TARGET_ATTAINMENT_PCT', name: 'Logged against the activity target', unit: 'percentage', phase: 10 },

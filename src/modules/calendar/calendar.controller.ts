@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query,
+  Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Put, Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiExtraModels, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
@@ -7,10 +7,12 @@ import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import {
   AnswerCalendarEntryDto, CalendarDownlineQueryDto, CalendarEntriesQueryDto, CalendarPeopleQueryDto,
-  CreateCalendarBlockDto, CreateCalendarEntryDto, DeleteCalendarEntryQueryDto, UpdateCalendarEntryDto,
+  CalendarSettingsQueryDto, CreateCalendarBlockDto, CreateCalendarEntryDto, DeleteCalendarEntryQueryDto,
+  SaveCalendarSettingsDto, UpdateCalendarEntryDto,
 } from './calendar.dto';
 import {
   CalendarBusyBlockDto, CalendarDeletedDto, CalendarDownlineDto, CalendarEntryDto, CalendarPeriodDto,
+  CalendarSettingsDto,
 } from './calendar.response.dto';
 import { CalendarService } from './calendar.service';
 import { CalendarPeopleService } from './calendar-people.service';
@@ -25,8 +27,9 @@ const NOT_FOUND_ANOTHER_OFFICE =
 /**
  * **The calendar** (`functional/calendar.md`, the Data contract; roles §3.15).
  *
- * **Literal paths beside `entries`**: `people`, `downline` and `blocks` are siblings of `entries`, and
- * `entries/:entryId` is declared after `entries`, so no parameter route can shadow a literal one.
+ * **Literal paths beside `entries`**: `people`, `downline`, `blocks` and `settings` are siblings of
+ * `entries`, and `entries/:entryId` is declared after `entries`, so no parameter route can shadow a
+ * literal one.
  */
 @ApiTags('calendar')
 @ApiBearerAuth()
@@ -49,6 +52,7 @@ export class CalendarController {
       + 'office’s zone; a month is padded to whole weeks, and its padding days carry their entries too.\n\n'
       + 'With `for`, the week of somebody you coach, beside your own: everything they organised in full, and '
       + 'an entry they only attend in full only when you could read it yourself — otherwise as a busy block. '
+      + 'An entry organised by somebody who hides their details is a busy block too, unless you are on it. '
       + 'Each such read is recorded.',
   })
   @ApiResponse(refusal(
@@ -89,6 +93,37 @@ export class CalendarController {
   @ApiResponse({ status: 200, type: CalendarDownlineDto })
   async downline(@Ctx() ctx: RequestContext, @Query() _query: CalendarDownlineQueryDto) {
     return this.people.downline(ctx);
+  }
+
+  @Get('settings')
+  @RequirePermission('calendar_entry:read')
+  @ApiOperation({
+    summary: 'Your calendar settings',
+    description:
+      'Your own, and nobody else’s: whether *Hide my personal activities* is on. Off until you turn it on.',
+  })
+  @ApiResponse(refusal(
+    400,
+    '`VALIDATION_FAILED` — this read takes no query parameter. One sent, of any name, is refused, and `details` names it.',
+  ))
+  @ApiResponse({ status: 200, type: CalendarSettingsDto })
+  async readSettings(@Ctx() ctx: RequestContext, @Query() _query: CalendarSettingsQueryDto) {
+    return this.calendar.settings(ctx);
+  }
+
+  @Put('settings')
+  @RequirePermission('calendar_entry:update')
+  @ApiOperation({
+    summary: 'Hide my personal activities',
+    description:
+      'Your own setting, sent whole. On, a leader comparing your week with theirs sees each entry you '
+      + 'organise as *Busy* with its time and nothing else, unless they are on it; the people on an entry '
+      + 'still read it in full, and your own calendar is unchanged. Off, they read what you organise in '
+      + 'full. A change is recorded; sending what is set already changes nothing.',
+  })
+  @ApiResponse({ status: 200, type: CalendarSettingsDto })
+  async saveSettings(@Ctx() ctx: RequestContext, @Body() body: SaveCalendarSettingsDto) {
+    return this.calendar.saveSettings(ctx, body);
   }
 
   @Post('blocks')

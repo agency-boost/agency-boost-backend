@@ -25,6 +25,7 @@ import type { UploadedCsv } from './production-upload.interceptor';
 import { type MonthState, ProductionMonths } from './production-months.service';
 import type { ReadUpload } from './production-preview';
 import { requireMonth, requireOffice } from './production-guards';
+import { orgTreeOrder } from './production-roster-order';
 
 export { requireMonth, requireOffice };
 
@@ -177,7 +178,7 @@ export class ProductionService {
    *
    * **Listed from the roster, not from the month's rows.** The template is for the file that will
    * *create* the month's rows, so it has to name everybody the carrier could report on — which is
-   * the same list the table shows, for the same reason (I-125).
+   * the same list the table shows, for the same reason (I-125), and in the same order (P13.1-T7).
    */
   async template(ctx: RequestContext, month: string): Promise<TemplateFile> {
     requireOffice(ctx);
@@ -286,10 +287,18 @@ export class ProductionService {
   }
 
   /**
-   * Everybody here now, in the order the roster shows them, with the code and the name.
+   * Everybody here now, with the code and the name, **in the order the org tree reads** (P13.1-T7).
    *
    * Pending members have registered and nothing more; a removed one is not here. Both are the
-   * directory's own rule, and both the table and the template follow it.
+   * directory's own rule, and both the table and the template follow it — **in one order**, because
+   * both are built from this list: the file an operator fills in lists the people in the order the
+   * screen shows them.
+   *
+   * **The order is the prototype's walk** (`orgTreeOrder`): each AB, their AABs each followed by
+   * their agents, then the AB's own agents. It reads each member's **current edge** — the membership's
+   * `leaderId`, which the org module writes with the open history row (`validTo: null`) and which the
+   * org tree reads too. The history row itself is not read: rows written before P11-T3 carry only
+   * what changed, so an open role change may not name the leader it kept.
    */
   private async roster(ctx: RequestContext): Promise<RosterEntry[]> {
     const members = await this.memberships.find(
@@ -297,14 +306,18 @@ export class ProductionService {
     );
     const ids = members.map((m) => String(m._id));
     const names = await this.names.byMembershipId(ctx, ids);
-    return members.map((m) => {
+    const placed = orgTreeOrder(members.map((m) => {
       const id = String(m._id);
       return {
         membershipId: id,
         agentCode: (m as { agentCode?: string }).agentCode ?? '',
         name: names.get(id) ?? '',
+        role: m.role ?? null,
+        leaderId: m.leaderId ?? null,
+        agentSeq: m.agentSeq,
       };
-    });
+    }));
+    return placed.map(({ membershipId, agentCode, name }) => ({ membershipId, agentCode, name }));
   }
 }
 

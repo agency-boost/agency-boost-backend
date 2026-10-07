@@ -21,7 +21,11 @@ const owner = (kpmId: string) => new RequestContext('u-owner-' + kpmId.slice(-2)
 } as never);
 const noOffice = () => new RequestContext('u9', 'none', null);
 
-function person(id: string, kpmId: string, seq: number, status = 'active') {
+function person(
+  id: string, kpmId: string, seq: number, status = 'active',
+  place: { role?: 'ab' | 'aab' | 'agent'; leaderId?: string | null } = {},
+) {
+  const role = place.role ?? 'agent';
   return {
     _id: new mongoose.Types.ObjectId(id),
     kpmId,
@@ -29,10 +33,10 @@ function person(id: string, kpmId: string, seq: number, status = 'active') {
     agentCode: `PRU-${seq.toString().padStart(3, '0')}`,
     agentSeq: seq,
     leaderCode: `LC-${id.slice(-3)}`,
-    orgLevelCode: 'AGENT',
-    hierarchyRole: 'agent',
-    leaderId: null,
-    ancestorIds: [],
+    orgLevelCode: role.toUpperCase(),
+    role,
+    leaderId: place.leaderId ?? null,
+    ancestorIds: place.leaderId ? [place.leaderId] : [],
     status,
     deletedAt: null,
   };
@@ -64,10 +68,11 @@ describe('the office’s production, month by month (P9-T1)', () => {
       { _id: new mongoose.Types.ObjectId(KPM_B), code: '0555', branchName: 'B', timezone: 'Asia/Jakarta' },
     ] as never);
     await mongoose.connection.db!.collection('memberships').insertMany([
-      person(A2, KPM_A, 2),
-      person(A1, KPM_A, 1),
-      person(A_PENDING, KPM_A, 3, 'pending'),
-      person(B1, KPM_B, 1),
+      // Rina leads the office and Budi reports to her: the org tree reads Rina, then Budi (P13.1-T7).
+      person(A2, KPM_A, 2, 'active', { leaderId: A1 }),
+      person(A1, KPM_A, 1, 'active', { role: 'ab' }),
+      person(A_PENDING, KPM_A, 3, 'pending', { leaderId: A1 }),
+      person(B1, KPM_B, 1, 'active', { role: 'ab' }),
     ] as never);
     await mongoose.connection.db!.collection('users').insertMany(
       Object.keys(NAMES).map((id) => ({
@@ -133,12 +138,6 @@ describe('the office’s production, month by month (P9-T1)', () => {
     it('does not list somebody who is only pending — they have registered, nothing more', async () => {
       const view = await wired.production.readMonth(owner(KPM_A), '2026-09');
       expect(view.rows.map((r) => r.membershipId)).not.toContain(A_PENDING);
-    });
-
-    it('orders the rows as the roster does, by sequence', async () => {
-      // Inserted A2 before A1; the table still reads 001, 002.
-      const view = await wired.production.readMonth(owner(KPM_A), '2026-09');
-      expect(view.rows.map((r) => r.agentCode)).toEqual(['PRU-001', 'PRU-002']);
     });
 
     it('carries the carrier-issued code on every row — the join key, never a name', async () => {
@@ -296,8 +295,98 @@ describe('the office’s production, month by month (P9-T1)', () => {
     });
   });
 
+  describe('P13.1-T7 — the rows in the order the org tree reads', () => {
+    const WATI = '66f000000000000000000104';
+    const YOGA = '66f000000000000000000105';
+    const AGUS = '66f000000000000000000106';
+    const ANDI = '66f000000000000000000107';
+    const CITRA = '66f000000000000000000108';
+    const B_AGENT = '66f000000000000000000202';
+    const MORE: Record<string, string> = {
+      [WATI]: 'Wati Lestari', [YOGA]: 'Yoga Pratama', [AGUS]: 'Agus Prasetyo', [ANDI]: 'Andi Kurniawan',
+      [CITRA]: 'Citra Ayu', [B_AGENT]: 'Bayu Anggara',
+    };
+
+    beforeEach(async () => {
+      // Joined in an order that is not the tree's: sequence and tree disagree on purpose.
+      await mongoose.connection.db!.collection('memberships').insertMany([
+        person(WATI, KPM_A, 4, 'active', { role: 'ab' }),
+        person(ANDI, KPM_A, 5, 'active', { leaderId: A1 }),
+        person(AGUS, KPM_A, 6, 'active', { leaderId: YOGA }),
+        person(YOGA, KPM_A, 7, 'active', { role: 'aab', leaderId: A1 }),
+        person(CITRA, KPM_A, 8),
+        person(B_AGENT, KPM_B, 2, 'active', { leaderId: B1 }),
+      ] as never);
+      await mongoose.connection.db!.collection('users').insertMany(
+        Object.keys(MORE).map((id) => ({
+          _id: new mongoose.Types.ObjectId('66f000000000000000003' + id.slice(-3)),
+          email: `${id}@kpm.test`, fullName: MORE[id], deletedAt: null,
+        })) as never,
+      );
+    });
+
+    const TREE = [
+      'Rina Wijaya', 'Yoga Pratama', 'Agus Prasetyo', 'Andi Kurniawan', 'Budi Santoso', 'Wati Lestari', 'Citra Ayu',
+    ];
+
+    it('AC-2: each AB, their AABs each with their agents, then their own agents — anybody with no leader last', async () => {
+      const view = await wired.production.readMonth(owner(KPM_A), '2026-09');
+      expect(view.rows.map((r) => r.name)).toEqual(TREE);
+      // Not the order they joined in.
+      expect(view.rows.map((r) => r.agentCode)).toEqual(
+        ['PRU-001', 'PRU-007', 'PRU-006', 'PRU-005', 'PRU-002', 'PRU-004', 'PRU-008'],
+      );
+    });
+
+    it('AC-3: the template lists the same people in the same order as the table', async () => {
+      const view = await wired.production.readMonth(owner(KPM_A), '2026-09');
+      const t = await wired.production.template(owner(KPM_A), '2026-09');
+      const filed = t.file.split('\n').slice(1).map((line) => line.split(',')[0]);
+      expect(filed).toEqual(view.rows.map((r) => r.agentCode));
+      expect(t.rowCount).toBe(TREE.length);
+    });
+
+    it('AC-2: reads the current edge — somebody moved under another leader moves with them', async () => {
+      await mongoose.connection.db!.collection('memberships').updateOne(
+        { _id: new mongoose.Types.ObjectId(A2) }, { $set: { leaderId: YOGA, ancestorIds: [A1, YOGA] } },
+      );
+      const view = await wired.production.readMonth(owner(KPM_A), '2026-09');
+      // Budi now follows Yoga's other agent, ahead of Rina's own Andi.
+      expect(view.rows.map((r) => r.name)).toEqual([
+        'Rina Wijaya', 'Yoga Pratama', 'Agus Prasetyo', 'Budi Santoso', 'Andi Kurniawan', 'Wati Lestari', 'Citra Ayu',
+      ]);
+    });
+
+    it('AC-2: leaves out a leader who is pending, and places their reports as having none here', async () => {
+      await mongoose.connection.db!.collection('memberships').updateOne(
+        { _id: new mongoose.Types.ObjectId(YOGA) }, { $set: { status: 'pending' } },
+      );
+      const view = await wired.production.readMonth(owner(KPM_A), '2026-09');
+      expect(view.rows.map((r) => r.name)).toEqual([
+        'Rina Wijaya', 'Andi Kurniawan', 'Budi Santoso', 'Wati Lestari', 'Agus Prasetyo', 'Citra Ayu',
+      ]);
+    });
+
+    it('AC-2: never places a member under another office’s, and never lists another office’s in the tree', async () => {
+      // An edge that names a membership of KPM B — which nothing writes — is not followed across.
+      await mongoose.connection.db!.collection('memberships').updateOne(
+        { _id: new mongoose.Types.ObjectId(CITRA) }, { $set: { leaderId: B1 } },
+      );
+      await mongoose.connection.db!.collection('memberships').updateOne(
+        { _id: new mongoose.Types.ObjectId(B_AGENT) }, { $set: { leaderId: A1 } },
+      );
+      const a = await wired.production.readMonth(owner(KPM_A), '2026-09');
+      const b = await wired.production.readMonth(owner(KPM_B), '2026-09');
+      expect(a.rows.map((r) => r.name)).toEqual(TREE);
+      expect(b.rows.map((r) => r.name)).toEqual(['Hendra Wijaya', 'Bayu Anggara']);
+      const tb = await wired.production.template(owner(KPM_B), '2026-09');
+      expect(tb.file).not.toContain('Rina Wijaya');
+      expect(tb.file).not.toContain('Citra Ayu');
+    });
+  });
+
   describe('the template (P9-T2)', () => {
-    it('AC-4: lists every active member, in roster order, with twelve empty fields each', async () => {
+    it('AC-4: lists every active member, in the table’s order, with twelve empty fields each', async () => {
       const t = await wired.production.template(owner(KPM_A), '2026-09');
       const lines = t.file.split('\n');
 

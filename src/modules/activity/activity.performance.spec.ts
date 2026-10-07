@@ -231,5 +231,33 @@ describe('the daily loop, measured (P6)', () => {
       expect(last).toBeLessThan(Math.max(first * 5, 50));
       console.log(`  first vs last agent: ${first.toFixed(1)} ms → ${last.toFixed(1)} ms`);
     });
+
+    it('P13.1-T2 AC-5 opens and saves a day inside the budgets reading the published copy, once each', async () => {
+      /*
+       * Last, because it changes the service under every test above: the published read, as the
+       * application wires it, over a copy the office has published. The harness passes none, and
+       * reads the working copy, which is two queries where this is one document.
+       */
+      const owner = new RequestContext('u-owner', 'none', {
+        membershipId: `${KPM_A}-owner`, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab',
+        status: 'active', isKpmOwner: true, isKpmAdmin: false, directCount: 0,
+      } as never);
+      await wired.config.publish(owner);
+      Object.assign(wired.activityLogs, { published: wired.config });
+      const reads = jest.spyOn(wired.config, 'readPublished');
+
+      const read = await slowest(20, () => wired.activityLogs.readDay(member(KPM_A, agents[4]), {}));
+      const write = await slowest(20, () => wired.activityLogs.saveDay(member(KPM_A, agents[5]), {
+        counts: { SELL_SUBMISSION: 2, LEADS_CONTACTED: 4 },
+      }));
+
+      expect(read).toBeLessThan(300);
+      expect(write).toBeLessThan(500);
+      // One snapshot read per request: twenty opens and twenty saves.
+      expect(reads).toHaveBeenCalledTimes(40);
+      console.log(`  readDay pub.   p95 of 20: ${read.toFixed(1)} ms`);
+      console.log(`  saveDay pub.   p95 of 20: ${write.toFixed(1)} ms`);
+      reads.mockRestore();
+    });
   });
 });

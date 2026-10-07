@@ -1,4 +1,4 @@
-import { ACTIVATION, PERFORMANCE, RATIO_BENCHMARKS, SUMMARY, TIME } from '@/domain/constants';
+import { ACTIVATION, PERFORMANCE, RATIO_BENCHMARKS, TIME } from '@/domain/constants';
 import { METRIC_REGISTRY as SERVED, type MetricUnit } from '@/domain/constants/metrics';
 
 /**
@@ -179,13 +179,17 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   MEASURED_CLOSING_RATE: { period: 'ROLLING_30D', threshold: null },
 
   /*
-   * ---- The Personal Summary (P10-T4, ADR-0056, ADR-0057) ----
+   * ---- The Personal Summary (P10-T4, ADR-0056, ADR-0109) ----
    *
    * `MONTHLY_APE_TARGET` is **not** the cascade's `POINT_IN_TIME` monthly figure: it is taken from the
    * year to date before this month, so this month's own upload cannot shrink this month's target.
+   *
+   * The pace sentence (ADR-0109, superseding ADR-0057): *tracking to close N* is the closings of the last
+   * `SUMMARY.PACE_WINDOW_DAYS`, today included — a rolling window, never the calendar month, and with no
+   * first day before which it says nothing. The needed pace is this month's.
    */
   MONTHLY_APE_TARGET: { period: 'CALENDAR_MONTH', threshold: null },
-  PROJECTED_CLOSINGS_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: SUMMARY.PACE_MIN_DAYS },
+  CLOSINGS_LAST_30_DAYS: { period: 'ROLLING_30D', threshold: null },
   CLOSINGS_NEEDED_PER_WEEK: { period: 'CALENDAR_MONTH', threshold: null },
   /*
    * The Summary's activity chips (P10-T5, ADR-0056): the cascade run on `MONTHLY_APE_TARGET` for the

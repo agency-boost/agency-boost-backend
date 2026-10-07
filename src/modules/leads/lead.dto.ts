@@ -3,7 +3,7 @@ import { Type } from 'class-transformer';
 import { Allow, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import { LEAD_FLAGS, type LeadFlag } from './lead-attention';
 import { LEAD_SORT_KEYS, type LeadSortKey } from './lead-order';
-import { LAWFUL_BASES, LEAD_OUTCOMES, LEAD_TYPES } from './lead.schema';
+import { LEAD_OUTCOMES, LEAD_TYPES } from './lead.schema';
 
 /**
  * **`@Allow()`, and the whole body is read by `checkLead` instead.**
@@ -27,14 +27,13 @@ export class CreateLeadDto {
     type: 'object',
     additionalProperties: false,
     properties: { phone: { type: 'string' }, email: { type: 'string' } },
-    description: 'Refused without a lawful basis — LEAD_CONSENT_REQUIRED.',
+    description:
+      'Both optional, both clearable, sent as a pair. **No lawful basis is asked for since 2026-10-07** '
+      + '(ADR-0108 §1): `lawfulBasis` is no longer a field, and a body carrying it is refused with '
+      + '`400 VALIDATION_FAILED` like any other unknown field.',
   })
   @Allow()
   contact?: { phone?: string | null; email?: string | null } | null;
-
-  @ApiPropertyOptional({ enum: LAWFUL_BASES, nullable: true, description: 'Why these details may be held (UU 27/2022).' })
-  @Allow()
-  lawfulBasis?: string | null;
 
   @ApiPropertyOptional({ type: String, nullable: true })
   @Allow()

@@ -11,11 +11,12 @@ import { MemberNames } from '@/modules/org/member-names.service';
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import type { Permission } from '@/modules/rbac/permissions';
 import { LeadStatusRepository } from '@/modules/config/activity.repository';
+import type { LeadStatusView } from '@/modules/config/lead-status.service';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
 import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
 import { ActivationEvents, signalActivation } from '@/modules/activation/activation-events.port';
 import { leadFlags, type LeadFlag } from './lead-attention';
-import { checkLead, requireLawfulBasis, type CheckedLead } from './lead-input';
+import { checkLead, type CheckedLead } from './lead-input';
 import { isInMemorySort, ladderRanks, leadOrder, type LeadSortKey } from './lead-order';
 import { LeadRepository } from './lead.repository';
 import type { LeadDocument, LeadType } from './lead.schema';
@@ -80,9 +81,12 @@ export interface LeadView {
   ownerMembershipId: string;
   type: LeadType | null;
   name: string;
+  /**
+   * Phone and email, as the agent typed them. **No lawful basis beside them since 2026-10-07**
+   * (ADR-0108 §1): `lawfulBasis` and `consentAt` left this shape with the field that asked for them.
+   * The stored columns stay, unread, so nothing written before that day is erased.
+   */
   contact: { phone: string | null; email: string | null };
-  lawfulBasis: string | null;
-  consentAt: string | null;
   statusCode: string | null;
   /**
    * **Derived, not stored** (P7-T5): is there a commitment for the office's current month?
@@ -297,19 +301,14 @@ export class LeadService {
     const day = await this.days.for(ctx);
     const contact = input.contact ?? { phone: null, email: null };
 
-    // Against the lead as it will be, not as it arrived — see `requireLawfulBasis`.
-    requireLawfulBasis({ contact, lawfulBasis: input.lawfulBasis ?? null });
-
     const now = this.clock.now();
     const created = await this.leads.create(ctx, {
       ownerMembershipId,
       name: input.name!,
       type: input.type ?? null,
+      // **No `lawfulBasis` and no `consentAt`** (ADR-0108 §1): the schema's nulls, never a ground
+      // nobody chose.
       contact,
-      lawfulBasis: input.lawfulBasis ?? null,
-      // Stamped when a basis is first recorded, not when the lead is: the date that matters is
-      // when the ground was established.
-      consentAt: input.lawfulBasis ? now : null,
       remarks: input.remarks ?? null,
       nextActionDate: input.nextActionDate ?? null,
       nextActionNote: input.nextActionNote ?? null,
@@ -333,7 +332,6 @@ export class LeadService {
       // **Never the name, never the contact.** An audit row is read by an administrator who has no
       // right to the lead's rows (§3.7); recording them here would route around that.
       hasContact: Boolean(contact.phone || contact.email),
-      lawfulBasis: created.lawfulBasis,
       // Whose pipeline, when it is not the caller's: the entry's actor is the leader who added it.
       ...(ownerMembershipId !== membershipId ? { ownerMembershipId } : {}),
     });
@@ -349,20 +347,19 @@ export class LeadService {
     const input = checkLead(body, { partial: true });
     const lead = await this.reachable(ctx, id, 'lead:update', input.version, true);
     const next = this.merge(lead, input);
-    requireLawfulBasis(next);
 
     const now = this.clock.now();
     const day = await this.days.for(ctx);
+    /*
+     * **`lawfulBasis` and `consentAt` are left as they are** (ADR-0108 §1). A value stored before
+     * 2026-10-07 is kept, unread; nothing writes it, and nothing clears it either — a deploy is not
+     * an erasure.
+     */
     const $set: Record<string, unknown> = {
       ...this.writable(input),
       contact: next.contact,
-      lawfulBasis: next.lawfulBasis,
       updatedBy: membershipId,
     };
-    // Stamped the first time a basis is recorded, and left alone afterwards: it says when the
-    // ground was established, not when the row was last touched.
-    if (next.lawfulBasis && !lead.lawfulBasis) $set.consentAt = now;
-    if (!next.lawfulBasis) $set.consentAt = null;
 
     /*
      * **Changing the ladder clears the rung, and the commitment with it.**
@@ -410,7 +407,6 @@ export class LeadService {
     await this.record(ctx, 'lead.updated', id, {
       fields: Object.keys(this.writable(input)),
       hasContact: Boolean(next.contact.phone || next.contact.email),
-      lawfulBasis: next.lawfulBasis,
     });
     return this.view(updated, day, await this.attribution(ctx, [updated]));
   }
@@ -453,8 +449,14 @@ export class LeadService {
       return this.view(lead, await this.days.for(ctx), await this.attribution(ctx, [lead]));
     }
 
-    const status = await this.statuses.findOne(ctx, { code: wanted });
-    if (!status) throw new NotFoundException('Lead status', { code: wanted });
+    const status = await this.publishedStage(ctx, wanted);
+    if (!status) {
+      // Not on any ladder the office has published. A stage it has since retired keeps its own
+      // refusal, so the reader is told why rather than that the stage does not exist.
+      const live = await this.statuses.findOne(ctx, { code: wanted });
+      if (live?.status === 'archived') throw this.retired(wanted);
+      throw new NotFoundException('Lead status', { code: wanted });
+    }
     if (status.pipeline !== lead.type) {
       throw new DomainException(
         ErrorCode.LEAD_STATUS_WRONG_PIPELINE,
@@ -463,19 +465,12 @@ export class LeadService {
         { code: wanted, pipeline: status.pipeline, leadType: lead.type },
       );
     }
-    if (status.status === 'archived') {
-      // Invariant §3: archived configuration stays readable so history renders, not writable.
-      throw new DomainException(
-        ErrorCode.CONFIG_ARCHIVED,
-        `${wanted} has been retired. Leads already on it keep it; new ones cannot be moved to it.`,
-        HttpStatus.UNPROCESSABLE_ENTITY,
-        { code: wanted },
-      );
-    }
+    // A snapshot carries active stages only; an older one that carried a retired stage still refuses it.
+    if (status.status === 'archived') throw this.retired(wanted);
 
     const at = this.clock.now();
     const updated = await this.writeAt(ctx, lead, {
-      $set: { statusCode: wanted, statusId: String(status._id), updatedBy: membershipId },
+      $set: { statusCode: wanted, statusId: status.id, updatedBy: membershipId },
       // Append-only. The lead's current status is the last row's destination, and this is what
       // makes a jump legible and a leader's edit attributable (ADR-0044, ADR-0045).
       $push: {
@@ -518,9 +513,8 @@ export class LeadService {
     }
 
     if (outcome === 'won') {
-      const status = lead.statusCode
-        ? await this.statuses.findOne(ctx, { code: lead.statusCode })
-        : null;
+      // The terminal flag the screen's ✓ read: the published ladder's (P13.1-T4 AC-10).
+      const status = lead.statusCode ? await this.publishedStage(ctx, lead.statusCode) : null;
       if (!status?.isTerminal) {
         throw new DomainException(
           ErrorCode.LEAD_STATUS_NOT_FINAL,
@@ -544,6 +538,38 @@ export class LeadService {
       outcome, from: lead.outcome ?? null, statusCode: lead.statusCode ?? null,
     });
     return this.view(updated, await this.days.for(ctx), await this.attribution(ctx, [updated]));
+  }
+
+  /**
+   * **A stage as the office has published it** — the ladder `GET /kpm/config` gives the screen — or
+   * `null` when no published ladder holds it (P13.1-T4 AC-10).
+   *
+   * The table's *Status* select and its ✓ gate read the published snapshot, so the move and the close
+   * read it too. Validating against the live rows let the two disagree in both directions, which is
+   * the defect P13.1-T2 fixed for the activity log: a stage the Owner retired in the draft after
+   * publishing was still offered on every agent's screen and refused with `CONFIG_ARCHIVED` when
+   * chosen, and a stage created in the draft was accepted though no agent could see it. Now a retired
+   * stage stays selectable until the Owner publishes again, and a new one is refused until they do.
+   * `readPublished` falls back to the working copy for an office that has never published, as the
+   * screen's own read does.
+   */
+  private async publishedStage(ctx: RequestContext, code: string): Promise<LeadStatusView | null> {
+    const { leadPipelines } = await this.config.readPublished(ctx);
+    for (const pipeline of leadPipelines) {
+      const found = pipeline.statuses.find((s) => s.code === code);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  /** Invariant §3: archived configuration stays readable so history renders, not writable. */
+  private retired(code: string): DomainException {
+    return new DomainException(
+      ErrorCode.CONFIG_ARCHIVED,
+      `${code} has been retired. Leads already on it keep it; new ones cannot be moved to it.`,
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      { code },
+    );
   }
 
   /**
@@ -808,21 +834,20 @@ export class LeadService {
     return this.names.byMembershipId(ctx, editors);
   }
 
-  /** The stored row with the patch applied, for a rule that has to see both. */
+  /** The stored row with the patch applied: the pair travels together, so one never erases the other. */
   private merge(lead: LeadDocument, input: CheckedLead) {
     return {
       contact: input.contact ?? {
         phone: lead.contact?.phone ?? null,
         email: lead.contact?.email ?? null,
       },
-      lawfulBasis: input.lawfulBasis !== undefined ? input.lawfulBasis : (lead.lawfulBasis ?? null),
     };
   }
 
   /**
    * The fields a patch may set directly.
    *
-   * `contact` and `lawfulBasis` are handled together above, and **`thisMonth` is not here at all**:
+   * `contact` is handled as a pair above, and **`thisMonth` is not here at all**:
    * it is derived from `commitments`, so a patch carrying it adds or removes this month's promise
    * rather than writing a column.
    */
@@ -843,8 +868,6 @@ export class LeadService {
       type: doc.type,
       name: doc.name,
       contact: { phone: doc.contact?.phone ?? null, email: doc.contact?.email ?? null },
-      lawfulBasis: doc.lawfulBasis,
-      consentAt: doc.consentAt ? doc.consentAt.toISOString() : null,
       statusCode: doc.statusCode,
       thisMonth: (doc.commitments ?? []).some((c) => c.month === day.month),
       committedMonths: (doc.commitments ?? []).map((c) => c.month),

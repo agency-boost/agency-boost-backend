@@ -467,6 +467,14 @@ export function configModule(
     capability,
   );
   /*
+   * P13.1-T2: the activity log reads and saves in the office's published vocabulary, as Nest wires it
+   * (`@Inject(TenantConfigService)`). `activityLogs` is built before `config` — the checklist and the
+   * capability catalog that `config` carries need the services above it — so the copy is handed over here
+   * rather than through the constructor. Without it the harness would test the draft path production
+   * never takes.
+   */
+  Object.assign(activityLogs, { published: config });
+  /*
    * P7-T1: one person an agent is working. The first record about somebody who is not a user.
    * After `config` since P10.1-T4: the *Status* sort ranks stages by the published ladders.
    */

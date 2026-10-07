@@ -40,7 +40,7 @@ export interface RatioFacts {
 
 export type Insight =
   | { rule: 'NOTHING_LOGGED'; kind: 'action'; facts: { windowDays: number; lastLoggedOn: LocalDate | null } }
-  | { rule: 'BEHIND_PACE'; kind: 'action'; facts: { projected: number; closingTarget: number; neededPerWeek: number; weeksLeft: number } }
+  | { rule: 'BEHIND_PACE'; kind: 'action'; facts: { closingsLast30Days: number; closingTarget: number; neededPerWeek: number; weeksLeft: number } }
   | { rule: 'LEAD_OVERDUE'; kind: 'action'; facts: { leadId: string; name: string; overdueDays: number; others: number } }
   | { rule: 'LEAD_NEGLECTED'; kind: 'action'; facts: { leadId: string; name: string; others: number } }
   | { rule: 'RATIO_BELOW'; kind: 'improve'; facts: RatioFacts }
@@ -92,12 +92,15 @@ const RULES: Record<InsightRule, (input: InsightInputs) => Insight | null> = {
     facts: { windowDays: compliance.windowDays, lastLoggedOn: compliance.lastLoggedOn },
   }),
 
-  // The pace line's own *behind*: a projection short of the target, with the APE target not yet reached.
-  // Before the 7th there is no projection, and no card.
-  BEHIND_PACE: ({ pace }) => (pace && !pace.targetMet && pace.projected !== null && pace.projected < pace.closingTarget
+  // The pace line's *tracking to close N* short of its target of M, with the APE target not yet reached
+  // (ADR-0109). Every day of the month: the last 30 days always have something to say.
+  BEHIND_PACE: ({ pace }) => (pace && !pace.targetMet && pace.closingsLast30Days < pace.closingTarget
     ? {
       rule: 'BEHIND_PACE', kind: 'action',
-      facts: { projected: pace.projected, closingTarget: pace.closingTarget, neededPerWeek: pace.neededPerWeek, weeksLeft: pace.weeksLeft },
+      facts: {
+        closingsLast30Days: pace.closingsLast30Days, closingTarget: pace.closingTarget,
+        neededPerWeek: pace.neededPerWeek, weeksLeft: pace.weeksLeft,
+      },
     }
     : null),
 

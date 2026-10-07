@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import { SUMMARY } from '@/domain/constants';
-import { endOfMonth, type LocalDate } from '@/common/time/local-day';
+import { endOfMonth, rollingWindow, type LocalDate } from '@/common/time/local-day';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { ActivityService } from '@/modules/activity/activity.service';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
@@ -48,7 +48,7 @@ export interface SummaryView {
   monthly: PeriodFigures & { source: FigureSource | null };
   /** *Yearly*: the annual target against the year to date, from whichever writer holds it (P9-T6). */
   yearly: PeriodFigures & { source: FigureSource };
-  /** The pace sentence (ADR-0057); `null` without a goal. */
+  /** The pace sentence (ADR-0109); `null` without a goal. */
   pace: Pace | null;
   /** What was logged against the plan, and the rest of the member's sections (P10-T5). */
   activity: { monthly: SummaryActivity; yearly: SummaryActivity };
@@ -141,11 +141,14 @@ export class SummaryService {
 
     const monthWindow = { from: `${day.month}-01` as LocalDate, to: day.today };
     const yearWindow = { from: `${year}-01-01` as LocalDate, to: day.today };
-    const [through, thisMonth, counts, yearCounts, sections, openLeads, compliance, ratios] = await Promise.all([
+    // The pace sentence's *tracking to close N* (ADR-0109): the office's last 30 days, today included.
+    const paceWindow = rollingWindow(day.today, SUMMARY.PACE_WINDOW_DAYS);
+    const [through, thisMonth, counts, yearCounts, recentCounts, sections, openLeads, compliance, ratios] = await Promise.all([
       previous ? this.production.apeYearToDateThrough(ctx, member, previous) : Promise.resolve(null),
       this.production.apeForMonth(ctx, member, day.month),
       this.activity.countsOver(ctx, member, monthWindow),
       this.activity.countsOver(ctx, member, yearWindow),
+      this.activity.countsOver(ctx, member, paceWindow),
       // The subject's rung, not the reader's (ADR-0020): a leader reads the coachee's own page.
       this.activity.sectionsShown(ctx, subject.orgLevelCode),
       this.leadReadings.openOf(ctx, member, day),
@@ -192,11 +195,19 @@ export class SummaryService {
       sections: sectionChips(sections, logged, cascadeCodes),
     });
 
-    const pace = closingTarget === null ? null : paceFor({
+    /*
+     * **The prototype's sentence, by the prototype's arithmetic** (ADR-0109): *N* the closings of the last
+     * 30 days, *M* the closings chip's target, *K* the policies this month's APE gap still needs over the
+     * weeks left. A closing target exists only with a monthly target and a case size, so both are here.
+     */
+    const pace = closingTarget === null || monthlyTarget === null ? null : paceFor({
       closingTarget,
-      closingsLogged: counts.get(mapping.closingsCode) ?? 0,
+      closingsLast30Days: recentCounts.get(mapping.closingsCode) ?? 0,
       dayOfMonth: Number(day.today.slice(8, 10)),
       daysInMonth: Number(endOfMonth(day.today).slice(8, 10)),
+      apeTargetMinor: monthlyTarget,
+      apeProducedMinor: thisMonth?.minor ?? null,
+      caseSizeMinor: goal.caseSizeMinor,
       apeTargetMet: monthly.targetMet || yearly.targetMet,
     });
 

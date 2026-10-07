@@ -288,7 +288,7 @@
         "x-required-permission": "lead:read"
       },
       "post": {
-        "description": "A name is enough. **Contact details need a recorded lawful basis** (UU 27/2022) — `LEAD_CONSENT_REQUIRED`. The lead starts on no stage: the first one is a move.\n\nYours, or — with `owner` — in the pipeline of somebody you coach: the lead is theirs, and its creation and `lastEditedBy` name you. Anybody you do not coach, yourself included, is a 404. No notification is sent.\n\n**Requires `lead:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "A name is enough, and a phone number or an email needs nothing beside it: the lawful basis and its rule were removed on 2026-10-07 (ADR-0108 §1). The lead starts on no stage: the first one is a move.\n\nYours, or — with `owner` — in the pipeline of somebody you coach: the lead is theirs, and its creation and `lastEditedBy` name you. Anybody you do not coach, yourself included, is a 404. No notification is sent.\n\n**Requires `lead:create`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "LeadController_create_v1",
         "parameters": [
           {
@@ -464,7 +464,7 @@
         "x-required-permission": "lead:read"
       },
       "patch": {
-        "description": "Any of the fields creation takes, one or several. **Not the stage** — that is its own route. Clearing the lawful basis on a lead that still holds contact details is refused, because it is the same act as adding them without one.\n\n`version` is the version the write was read at: a stale one is `VERSION_CONFLICT` (409), and nothing is written. **Optional for the lead’s owner, required of anybody else** — a leader’s write without one is `VALIDATION_FAILED` (400). Another office’s lead, or one you cannot reach, is a 404 first.\n\n**Requires `lead:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Any of the fields creation takes, one or several. **Not the stage** — that is its own route. `contact` travels as a pair, so saving the phone never erases the email.\n\n`version` is the version the write was read at: a stale one is `VERSION_CONFLICT` (409), and nothing is written. **Optional for the lead’s owner, required of anybody else** — a leader’s write without one is `VALIDATION_FAILED` (400). Another office’s lead, or one you cannot reach, is a 404 first.\n\n**Requires `lead:update`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "LeadController_update_v1",
         "parameters": [
           {
@@ -13610,7 +13610,7 @@
     },
     "/api/v1/activity/log": {
       "get": {
-        "description": "Defaults to **today in the office’s timezone** and to your own membership. Every active activity type comes back, zeros included — the screen is the office’s taxonomy, so a type with no count still has a row to type into. `editable` says whether the Save button is live for this caller on this day. **Another member’s day is audited**: the read writes `activity_log.read_raw` with the subject, the day and the surface (§3.5). Your own writes nothing.\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Defaults to **today in the office’s timezone** and to your own membership. Every activity type of the office’s **published** configuration that the subject’s rung is shown comes back, zeros included — the rows Log Activity draws from `/kpm/config`, so a type with no count still has a row to type into. `editable` says whether the Save button is live for this caller on this day. **Another member’s day is audited**: the read writes `activity_log.read_raw` with the subject, the day and the surface (§3.5). Your own writes nothing.\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ActivityController_readDay_v1",
         "parameters": [
           {
@@ -13697,7 +13697,7 @@
         "x-required-permission": "activity_log:read_raw"
       },
       "put": {
-        "description": "An upsert: the whole day is sent, and a code left out counts as zero. Free within the current calendar month plus the office’s grace window; **a future day is refused**, and a day past its window is refused with a pointer at the correction route (ADR-0042).\n\n**There is no `membershipId` parameter.** No role may log on another person’s behalf, and a route with no subject to pass is a stronger guarantee than a check somebody has to remember.\n\n**Requires `activity_log:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "An upsert: the whole day is sent, and a code left out counts as zero. Free within the current calendar month plus the office’s grace window; **a future day is refused**, and a day past its window is refused with a pointer at the correction route (ADR-0042).\n\n**Codes are checked against the office’s published configuration**, the one the screen shows: a type archived since the last publish still saves, one created since is refused by name until it is published, and one in a section your rung is not shown is `ACTIVITY_TYPE_NOT_APPLICABLE`.\n\n**There is no `membershipId` parameter.** No role may log on another person’s behalf, and a route with no subject to pass is a stronger guarantee than a check somebody has to remember.\n\n**Requires `activity_log:create`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ActivityController_saveDay_v1",
         "parameters": [],
         "requestBody": {
@@ -13976,7 +13976,7 @@
     },
     "/api/v1/activity/dashboard": {
       "get": {
-        "description": "*Last 7 days* (the default), *Last 30 days*, or a custom range of up to 366 days, ending today in the office’s timezone. Seven days is a column a day; thirty days is 7-day blocks counted back from today and a remainder; a custom range is daily up to 31 days and blocks above.\n\n**There is no `membershipId` parameter.** The screen is first-person; a leader’s view of a downline belongs to coaching, where the read audit `roles-and-permissions.md` §3.5 requires is built.\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "*Last 7 days* (the default), *Last 30 days*, or a custom range of up to 366 days, ending today in the office’s timezone. Seven days is a column a day; thirty days is 7-day blocks counted back from today and a remainder; a custom range is daily up to 31 days and blocks above.\n\n**Yours, or a coachee’s** (coaching’s *Activity* tab): `for` names whose, drawn on the subject’s own rung — their sections, not yours. Outside your scope it is a 404, never a 403. **Another member’s days are audited**: the read writes `activity_log.read_raw` with the subject, the range and the surface `activity_dashboard` (§3.5). Your own writes nothing.\n\n**Requires `activity_log:read_raw`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ActivityController_dashboard_v1",
         "parameters": [
           {
@@ -14010,6 +14010,16 @@
             "description": "`CUSTOM` only. Not after today.",
             "schema": {
               "example": "2026-09-28",
+              "type": "string"
+            }
+          },
+          {
+            "name": "for",
+            "required": false,
+            "in": "query",
+            "description": "Whose days: a membership id. Defaults to your own; another member’s needs the scope to read them, is a 404 outside it, is drawn on their rung, and is audited.",
+            "schema": {
+              "maxLength": 64,
               "type": "string"
             }
           }
@@ -14055,6 +14065,16 @@
               }
             }
           },
+          "404": {
+            "description": "`NOT_FOUND` — `for` names nobody you may read, **or** somebody in another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "500": {
             "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
             "content": {
@@ -14071,7 +14091,7 @@
             "bearer": []
           }
         ],
-        "summary": "Your own activity over a range, per type and per column",
+        "summary": "Your own activity over a range, per type and per column — or a coachee’s",
         "tags": [
           "activity"
         ],
@@ -16356,7 +16376,7 @@
     },
     "/api/v1/calendar/entries": {
       "get": {
-        "description": "Your own calendar — every entry you organise, and every one you are on and have not declined — for the week or the month holding `date`, with the period’s days, the dates ‹ and › ask for, and the office’s today and now: nothing is worked out in the browser. Weeks run Monday to Sunday in the office’s zone; a month is padded to whole weeks, and its padding days carry their entries too.\n\nWith `for`, the week of somebody you coach, beside your own: everything they organised in full, and an entry they only attend in full only when you could read it yourself — otherwise as a busy block. Each such read is recorded.\n\n**Requires `calendar_entry:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Your own calendar — every entry you organise, and every one you are on and have not declined — for the week or the month holding `date`, with the period’s days, the dates ‹ and › ask for, and the office’s today and now: nothing is worked out in the browser. Weeks run Monday to Sunday in the office’s zone; a month is padded to whole weeks, and its padding days carry their entries too.\n\nWith `for`, the week of somebody you coach, beside your own: everything they organised in full, and an entry they only attend in full only when you could read it yourself — otherwise as a busy block. An entry organised by somebody who hides their details is a busy block too, unless you are on it. Each such read is recorded.\n\n**Requires `calendar_entry:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "CalendarController_read_v1",
         "parameters": [
           {
@@ -16724,6 +16744,152 @@
           "calendar"
         ],
         "x-required-permission": "calendar_entry:read"
+      }
+    },
+    "/api/v1/calendar/settings": {
+      "get": {
+        "description": "Your own, and nobody else’s: whether *Hide my personal activities* is on. Off until you turn it on.\n\n**Requires `calendar_entry:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CalendarController_readSettings_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarSettingsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — this read takes no query parameter. One sent, of any name, is refused, and `details` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `calendar_entry:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Your calendar settings",
+        "tags": [
+          "calendar"
+        ],
+        "x-required-permission": "calendar_entry:read"
+      },
+      "put": {
+        "description": "Your own setting, sent whole. On, a leader comparing your week with theirs sees each entry you organise as *Busy* with its time and nothing else, unless they are on it; the people on an entry still read it in full, and your own calendar is unchanged. Off, they read what you organise in full. A change is recorded; sending what is set already changes nothing.\n\n**Requires `calendar_entry:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CalendarController_saveSettings_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveCalendarSettingsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarSettingsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `calendar_entry:update`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Hide my personal activities",
+        "tags": [
+          "calendar"
+        ],
+        "x-required-permission": "calendar_entry:update"
       }
     },
     "/api/v1/calendar/blocks": {
@@ -18121,10 +18287,12 @@
         "type": "object",
         "properties": {
           "closingTarget": {
-            "type": "number"
+            "type": "number",
+            "description": "*M*: this month’s closing target — the closings chip’s."
           },
-          "closingsLogged": {
-            "type": "number"
+          "closingsLast30Days": {
+            "type": "number",
+            "description": "*N*, `CLOSINGS_LAST_30_DAYS`: the goal’s closing code over the last 30 days, today included, in the office’s calendar."
           },
           "dayOfMonth": {
             "type": "number"
@@ -18132,30 +18300,30 @@
           "daysInMonth": {
             "type": "number"
           },
-          "projected": {
-            "type": "number",
-            "nullable": true,
-            "description": "`PROJECTED_CLOSINGS_THIS_MONTH`; `null` before the 7th of the month."
-          },
           "weeksLeft": {
             "type": "number",
-            "description": "Days left today included, over 7, rounded up — never zero."
+            "description": "*W*: days left today included, over 7, rounded up — never zero."
+          },
+          "policiesNeeded": {
+            "type": "number",
+            "description": "`POLICIES_NEEDED` for the month: this month’s APE gap over the case size, rounded up — the whole target’s until the month’s file lands; 0 once the target is reached."
           },
           "neededPerWeek": {
             "type": "number",
-            "description": "`CLOSINGS_NEEDED_PER_WEEK`; 0 once the target is reached."
+            "description": "*K*, `CLOSINGS_NEEDED_PER_WEEK`: the policies still needed over the weeks left, rounded up."
           },
           "targetMet": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "This month’s APE target, or the year’s, is reached: the green sentence instead of the danger box."
           }
         },
         "required": [
           "closingTarget",
-          "closingsLogged",
+          "closingsLast30Days",
           "dayOfMonth",
           "daysInMonth",
-          "projected",
           "weeksLeft",
+          "policiesNeeded",
           "neededPerWeek",
           "targetMet"
         ]
@@ -18433,7 +18601,7 @@
           "facts": {
             "type": "object",
             "additionalProperties": true,
-            "description": "What the rule read. NOTHING_LOGGED: `windowDays`, `lastLoggedOn`. BEHIND_PACE: `projected`, `closingTarget`, `neededPerWeek`, `weeksLeft`. LEAD_OVERDUE: `leadId`, `name`, `overdueDays`, `others`. LEAD_NEGLECTED: `leadId`, `name`, `others`. RATIO_BELOW, RATIO_STRENGTH: `code`, `label`, `value`, `benchmark`, `displayUnit`."
+            "description": "What the rule read. NOTHING_LOGGED: `windowDays`, `lastLoggedOn`. BEHIND_PACE: `closingsLast30Days`, `closingTarget`, `neededPerWeek`, `weeksLeft`. LEAD_OVERDUE: `leadId`, `name`, `overdueDays`, `others`. LEAD_NEGLECTED: `leadId`, `name`, `others`. RATIO_BELOW, RATIO_STRENGTH: `code`, `label`, `value`, `benchmark`, `displayUnit`."
           }
         },
         "required": [
@@ -18481,7 +18649,7 @@
           },
           "pace": {
             "nullable": true,
-            "description": "The pace sentence (ADR-0057); `null` without a goal.",
+            "description": "The pace sentence (ADR-0109); `null` without a goal.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/PaceDto"
@@ -18609,21 +18777,12 @@
             "type": "string"
           },
           "contact": {
-            "$ref": "#/components/schemas/LeadContactDto"
-          },
-          "lawfulBasis": {
-            "type": "string",
-            "enum": [
-              "consent",
-              "contract",
-              "legitimate_interest"
-            ],
-            "nullable": true
-          },
-          "consentAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
+            "description": "No `lawfulBasis` or `consentAt` beside it since 2026-10-07 (ADR-0108 §1).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LeadContactDto"
+              }
+            ]
           },
           "statusCode": {
             "type": "string",
@@ -18719,8 +18878,6 @@
           "type",
           "name",
           "contact",
-          "lawfulBasis",
-          "consentAt",
           "statusCode",
           "thisMonth",
           "committedMonths",
@@ -18792,17 +18949,7 @@
                 "type": "string"
               }
             },
-            "description": "Refused without a lawful basis — LEAD_CONSENT_REQUIRED."
-          },
-          "lawfulBasis": {
-            "type": "string",
-            "enum": [
-              "consent",
-              "contract",
-              "legitimate_interest"
-            ],
-            "nullable": true,
-            "description": "Why these details may be held (UU 27/2022)."
+            "description": "Both optional, both clearable, sent as a pair. **No lawful basis is asked for since 2026-10-07** (ADR-0108 §1): `lawfulBasis` is no longer a field, and a body carrying it is refused with `400 VALIDATION_FAILED` like any other unknown field."
           },
           "remarks": {
             "type": "string",
@@ -18860,17 +19007,7 @@
                 "type": "string"
               }
             },
-            "description": "Refused without a lawful basis — LEAD_CONSENT_REQUIRED."
-          },
-          "lawfulBasis": {
-            "type": "string",
-            "enum": [
-              "consent",
-              "contract",
-              "legitimate_interest"
-            ],
-            "nullable": true,
-            "description": "Why these details may be held (UU 27/2022)."
+            "description": "Both optional, both clearable, sent as a pair. **No lawful basis is asked for since 2026-10-07** (ADR-0108 §1): `lawfulBasis` is no longer a field, and a body carrying it is refused with `400 VALIDATION_FAILED` like any other unknown field."
           },
           "remarks": {
             "type": "string",
@@ -23185,7 +23322,7 @@
               "MEASURED_LEAD_TO_APPOINTMENT_RATE",
               "MEASURED_CLOSING_RATE",
               "MONTHLY_APE_TARGET",
-              "PROJECTED_CLOSINGS_THIS_MONTH",
+              "CLOSINGS_LAST_30_DAYS",
               "CLOSINGS_NEEDED_PER_WEEK",
               "SUMMARY_ACTIVITY_TARGET",
               "ACTIVITY_TARGET_ATTAINMENT_PCT",
@@ -23665,7 +23802,7 @@
               "needs_attention",
               "no_goal_set"
             ],
-            "description": "`GOAL_PACE_STATUS` for the calendar month: `no_goal_set` with no goal for the year; else `needs_attention` when not pacing to at least one policy submission this month; else `on_track` at or above the on-track share of this month’s APE target, and `watch_closely` below it. A year already met needs nothing more this month and reads `on_track` once the policy gate passes. Until this month’s production file is uploaded, the share is the closings logged, projected to the month’s end, over this month’s closing target — from the 7th; before it, `watch_closely`."
+            "description": "`GOAL_PACE_STATUS` for the calendar month: `no_goal_set` with no goal for the year; else `needs_attention` when not pacing to at least one policy submission this month; else `on_track` at or above the on-track share of this month’s APE target, and `watch_closely` below it. A year already met needs nothing more this month and reads `on_track` once the policy gate passes. Until this month’s production file is uploaded, the share is `CLOSINGS_LAST_30_DAYS`, the policy submissions logged over the last 30 days, over this month’s closing target (`POLICY_COUNT_TARGET`) — the Summary’s pace sentence, answered from the 1st (ADR-0109)."
           }
         },
         "required": [
@@ -25640,6 +25777,30 @@
         },
         "required": [
           "people"
+        ]
+      },
+      "CalendarSettingsDto": {
+        "type": "object",
+        "properties": {
+          "hideDetails": {
+            "type": "boolean",
+            "description": "*Hide my personal activities*: on, your leaders comparing your week see only *Busy* at the times of the entries you organise, unless they are on one. Off until you turn it on."
+          }
+        },
+        "required": [
+          "hideDetails"
+        ]
+      },
+      "SaveCalendarSettingsDto": {
+        "type": "object",
+        "properties": {
+          "hideDetails": {
+            "type": "boolean",
+            "description": "On, your leaders comparing your week see only *Busy* at the times of the entries you organise; the people on an entry still read it in full. Off, they read what you organise in full."
+          }
+        },
+        "required": [
+          "hideDetails"
         ]
       },
       "CreateCalendarBlockDto": {

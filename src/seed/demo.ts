@@ -61,6 +61,7 @@ import { LeaderNote, LeaderNoteSchema } from '@/modules/coaching/leader-note.sch
 import { backfillCoachingSnapshots } from './coaching-snapshots';
 import { buildCalendarFixture, type CalendarFixture } from './calendar-fixture';
 import { buildActivationFixture, type ActivationFixture } from './activation-fixture';
+import { LONG_PIPELINE } from './long-pipeline';
 import {
   ActivationProgress, ActivationProgressSchema,
 } from '@/modules/activation/activation-progress.schema';
@@ -1163,66 +1164,21 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const id0417 = String(kpm0417._id);
 
   await configure(id0417);
-  // Published a while back, then edited — so 0417's publish bar shows the state that
-  // matters: agents on one copy while the Owner works on another. 0555 is the clean
-  // counterpart.
+  /*
+   * **Published, and untouched since: the prototype's settings** (P13.1-T3, K5). The office the client
+   * walks is the one their prototype draws: the platform's defaults as `configure` copies them — the
+   * twelve activity types, the two ladders, the five ratios at the prototype's benchmarks — with nothing
+   * archived, no ratio of the office's own and no edit since publishing, so its publish bar reads clean.
+   * The defaults differ from the prototype only where a register says so (ADR-0043's seventh recruitment
+   * stage, item 7's label).
+   *
+   * It used to carry the settings screens' demonstration states as well: an archived type and status,
+   * *Referral rate*, *Selling success rate* raised to 18%. The client read them as the seed disagreeing
+   * with the prototype, and the archived type was behind their Log Activity report besides (a row the
+   * screen showed and the save refused). They are office 0555's now, below. A database seeded before
+   * keeps them here until `--reset`: the seed leaves rows that exist.
+   */
   await publish(id0417, daysAgo(45));
-
-  /*
-   * The states a settings screen can only show if something is in them.
-   *
-   * Every one of these was unreachable in a seeded database: nothing was ever archived, so
-   * *Show archived* was an empty checkbox; every ratio was the platform's, so the two row
-   * kinds P4-T15 added looked identical; and nothing had been touched since publishing, so
-   * the publish bar only ever had one thing to say.
-   */
-  if (!(await ActivityTypes.findOne({ kpmId: id0417, status: 'archived' }).exec())) {
-    // Retired, not deleted (invariant §3): its history still renders wherever it is named.
-    await ActivityTypes.updateOne(
-      { kpmId: id0417, code: 'DEV_COACHING_RECEIVED' },
-      { $set: { status: 'archived', archivedAt: daysAgo(12), version: 2 } },
-    );
-    await LeadStatuses.updateOne(
-      { kpmId: id0417, code: 'APPROVED_NOT_PAID' },
-      { $set: { status: 'archived', archivedAt: daysAgo(9), version: 2 } },
-    );
-  }
-
-  /*
-   * An edit since publishing, on a row that is still **active**.
-   *
-   * `hasUnpublishedChanges` compares the highest *live* version against the version the
-   * snapshot was rendered from, so bumping a row and archiving it in the same breath
-   * leaves the bar reading clean — which is what the first version of this seed did, and
-   * the state it was written to produce never appeared.
-   */
-  await RatioDefinitions.updateOne(
-    { kpmId: id0417, code: 'SELLING_SUCCESS_RATE', version: 1 },
-    { $set: { benchmark: 0.18, version: 2 } },
-  );
-
-  if (!(await RatioDefinitions.findOne({ kpmId: id0417, origin: 'office' }).exec())) {
-    // An office's own (ADR-0021): formula included, and comparable with nobody.
-    await RatioDefinitions.create({
-      kpmId: id0417,
-      code: 'REFERRAL_RATE',
-      label: 'Referral rate',
-      numerator: ['LEADS_NEW_PROSPECT'],
-      denominator: ['LEADS_CONTACTED'],
-      benchmark: 0.35,
-      comparison: 'gte',
-      // A conversion rate, so the Owner reads 35.0% — the unit they chose for their own.
-      displayUnit: 'percent',
-      displayOrder: 6,
-      origin: 'office',
-      // Their referral push is the senior rungs' programme this quarter (ADR-0020).
-      appliesToOrgLevelCodes: ['AB', 'AAB'],
-      version: 1,
-      status: 'active',
-      archivedAt: null,
-      deletedAt: null,
-    });
-  }
 
   /*
    * **When the people the coaching demo rests on joined** (P11-T2, from the verification of its history).
@@ -1390,8 +1346,9 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    *
    * Three things are deliberately spread across them:
    *
-   * - **The lawful basis**, which is the rule P7-T1 exists for: one with a name and nothing else,
-   *   one on each of the three grounds, and one reachable only by email.
+   * - **The contact details**: one with a name and nothing else, phones in the formats agents type —
+   *   each opens WhatsApp from *Lead details* — and one reachable only by email. *No lawful basis since
+   *   2026-10-07 (ADR-0108): the client removed the field, and the API neither takes nor returns one.*
    * - **The ladder**, because a status is reached by *moving* (ADR-0045) — so each seeded lead
    *   that holds one also holds the transitions that put it there, walked or jumped.
    * - **What is asking to be picked up**, so the attention filter has something to find: one
@@ -1415,7 +1372,6 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     outcome?: 'won' | 'lost';
     phone?: string;
     email?: string;
-    lawfulBasis?: 'consent' | 'contract' | 'legitimate_interest';
     remarks?: string;
     /** Days from today. Negative is in the past, which is what *overdue* means. */
     nextActionIn?: number;
@@ -1430,6 +1386,14 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
      * cannot be checked the way it is written.
      */
     lastEditedBy?: string;
+    /**
+     * Days before the run it was registered, and of its last move (P13.1-T3): a pipeline built over
+     * weeks, so the table's newest-registered order has something to order. The moves are spread
+     * evenly between the two. Left out, a lead is registered 20 days back and moves every four days
+     * from 18 back, as every lead before these was.
+     */
+    registeredDaysAgo?: number;
+    movedDaysAgo?: number;
   }
 
   /** `YYYY-MM-DD` in the office's timezone — the same day boundary the server resolves. */
@@ -1449,10 +1413,15 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
 
       // Oldest first, and spaced so the history reads as a fortnight of work rather than as one
       // instant — which is what makes it useful to a leader reading it in a coaching session.
+      const registered = seed.registeredDaysAgo ?? 20;
+      const moved = seed.movedDaysAgo ?? registered;
+      const movedAt = (i: number) => (seed.registeredDaysAgo === undefined
+        ? daysAgo(18 - i * 4)
+        : daysAgo(registered - (path.length > 1 ? Math.round((i * (registered - moved)) / (path.length - 1)) : 0)));
       const transitions = path.map((code, i) => ({
         fromStatusCode: i === 0 ? null : path[i - 1],
         toStatusCode: code,
-        at: daysAgo(18 - i * 4),
+        at: movedAt(i),
         byMembershipId: seed.owner,
       }));
 
@@ -1462,8 +1431,6 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
         name: seed.name,
         type: seed.type,
         contact: { phone: seed.phone ?? null, email: seed.email ?? null },
-        lawfulBasis: seed.lawfulBasis ?? null,
-        consentAt: seed.lawfulBasis ? daysAgo(20) : null,
         statusCode: here,
         statusId: status ? String((status as { _id: unknown })._id) : null,
         /*
@@ -1480,7 +1447,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
         nextActionNote: seed.nextActionNote ?? null,
         outcome: seed.outcome ?? null,
         outcomeAt: seed.outcome ? daysAgo(2) : null,
-        dateRegistered: daysAgo(20),
+        dateRegistered: daysAgo(registered),
         source: seed.source ?? null,
         // One for the record, one for each move, one for the outcome — what the product would
         // have written had somebody done this by hand.
@@ -1502,7 +1469,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       // coaching demo walks, where *Leads · Ibu Dewi Lestari* in Rina's sessions read as the AAB.
       owner: rina.id, name: 'Ibu Rosa Damayanti', formerly: 'Ibu Dewi Lestari', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'],
-      phone: '0812-1100-2200', lawfulBasis: 'consent',
+      phone: '0812-1100-2200',
       remarks: 'Hot button: the eldest starts university in two years.',
       nextActionIn: 7, nextActionNote: 'Coffee at Grand Indonesia, 10:00.',
       thisMonth: true, source: 'Referral — Ibu Sari',
@@ -1515,7 +1482,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       lastEditedBy: sari.id,
       owner: rina.id, name: 'Pak Hendro Gunawan', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED'],
-      email: 'hendro.g@example.com', lawfulBasis: 'contract',
+      email: 'hendro.g@example.com',
       remarks: 'Application already in with another insurer; comparing.',
       nextActionIn: -6, nextActionNote: 'Chase the illustration.',
       thisMonth: true, source: 'Canvassing — Senayan',
@@ -1530,7 +1497,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       // Open, on the stage that closes the pipeline. The only state in which ✓ is available.
       owner: rina.id, name: 'Ibu Wulan Sari', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED', 'APPROVED_NOT_PAID', 'PAID_AND_ISSUED'],
-      phone: '0811-9090-3030', lawfulBasis: 'consent',
+      phone: '0811-9090-3030',
       remarks: 'Premium paid on the 12th; waiting on the policy document.',
       nextActionIn: 2, nextActionNote: 'Hand over the policy.',
       thisMonth: true, source: 'Referral — Pak Hendro',
@@ -1539,21 +1506,21 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       // Won, and therefore carrying no attention flags whatever its dates say.
       owner: rina.id, name: 'Ibu Ratna Kusuma', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'], outcome: 'won',
-      phone: '0812-3344-5566', lawfulBasis: 'consent',
+      phone: '0812-3344-5566',
       remarks: 'Took the education plan. Asked about a second policy for her son.',
       source: 'Referral — Ibu Sari',
     },
     {
       owner: budi.id, name: 'Sdri. Maya Puspita', type: 'recruitment',
       path: ['NOT_APPROACHED'],
-      phone: '0813-4455-6677', lawfulBasis: 'legitimate_interest',
+      phone: '0813-4455-6677',
       remarks: 'Referred by her cousin, who is already an agent. Not yet approached.',
       source: 'Referral — agent network',
     },
     {
       owner: budi.id, name: 'Pak Andi Kurniawan', type: 'recruitment',
       path: ['NOT_APPROACHED', 'MEETING_SCHEDULED', 'RECRUITMENT_PRESENTATION', 'AGENT_CODE_CREATED', 'AAJI_LICENSED'],
-      phone: '0857-7788-9900', lawfulBasis: 'consent',
+      phone: '0857-7788-9900',
       remarks: 'Sat through the NBO. Asked about the licence timeline.',
       nextActionIn: 11, nextActionNote: 'Send the AAJI schedule.',
       thisMonth: true, source: 'BOP — 12 September',
@@ -1562,7 +1529,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       // Lost from the middle of the ladder, which is allowed and won is not (§3.7).
       owner: budi.id, name: 'Pak Joko Prasetyo', type: 'recruitment',
       path: ['NOT_APPROACHED', 'MEETING_SCHEDULED'], outcome: 'lost',
-      phone: '0856-2233-4455', lawfulBasis: 'consent',
+      phone: '0856-2233-4455',
       remarks: 'Took a salaried role instead. Happy to be asked again next year.',
       source: 'BOP — 12 September',
     },
@@ -1579,35 +1546,35 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     {
       owner: rina.id, name: 'Pak Bambang Sutrisno', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED', 'APPROVED_NOT_PAID', 'PAID_AND_ISSUED'],
-      outcome: 'won', phone: '0811-2233-4455', lawfulBasis: 'consent',
+      outcome: 'won', phone: '0811-2233-4455',
       remarks: 'Whole-life, paid annually. Wants his wife reviewed next.',
       source: 'Referral — Pak Hendro',
     },
     {
       owner: rina.id, name: 'Ibu Dewi Anggraini', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'],
-      outcome: 'won', email: 'dewi.a@example.com', lawfulBasis: 'consent',
+      outcome: 'won', email: 'dewi.a@example.com',
       remarks: 'Education plan for two children. Asked about topping up next year.',
       source: 'Canvassing — Senayan',
     },
     {
       owner: rina.id, name: 'Pak Slamet Riyadi', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'],
-      outcome: 'won', phone: '0812-9988-7766', lawfulBasis: 'consent',
+      outcome: 'won', phone: '0812-9988-7766',
       remarks: 'Critical illness rider added at underwriting.',
       source: 'BOP — 12 September',
     },
     {
       owner: rina.id, name: 'Ibu Lestari Wibowo', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'],
-      outcome: 'won', lawfulBasis: 'consent',
+      outcome: 'won',
       remarks: 'Renewal from a policy she held elsewhere.',
       source: 'Referral — Ibu Ratna',
     },
     {
       owner: rina.id, name: 'Pak Yusuf Maulana', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'],
-      outcome: 'won', phone: '0857-1122-3344', lawfulBasis: 'consent',
+      outcome: 'won', phone: '0857-1122-3344',
       remarks: 'Paid by transfer on the day. Referred his brother.',
       source: 'Referral — agent network',
     },
@@ -1616,14 +1583,14 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       // because a lead that reached submission and still fell away is the one worth a conversation.
       owner: rina.id, name: 'Pak Hendra Gunawan', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED'], outcome: 'lost',
-      phone: '0813-7766-5544', lawfulBasis: 'legitimate_interest',
+      phone: '0813-7766-5544',
       remarks: 'Underwriting asked for a medical he did not want to take.',
       source: 'Canvassing — Senayan',
     },
     {
       owner: rina.id, name: 'Sdri. Fitri Handayani', type: 'recruitment',
       path: ['NOT_APPROACHED', 'MEETING_SCHEDULED'], outcome: 'lost',
-      email: 'fitri.h@example.com', lawfulBasis: 'legitimate_interest',
+      email: 'fitri.h@example.com',
       remarks: 'Finishing her degree first. Said to ask again in a year.',
       source: 'BOP — 12 September',
     },
@@ -1631,7 +1598,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       // Somebody else's, so a leader screen has more than one agent's work to show in P7-T7.
       owner: dewi.id, name: 'Pak Rizal Effendi', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'],
-      phone: '0815-6677-8899', lawfulBasis: 'consent',
+      phone: '0815-6677-8899',
       remarks: 'Wants a critical-illness rider costed.',
       nextActionIn: 4, nextActionNote: 'Send the two illustrations.',
       source: 'Referral — Pak Agus',
@@ -1662,6 +1629,16 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     });
   }
   await seedLeads(id0417, coachingLeadSeeds);
+
+  /*
+   * **Budi's long pipeline (P13.1-T3 AC-3):** 39 open leads beside the three he had, so `/leads` has more
+   * than its first 30 to show and *Show more* can be reviewed. After the coaching cast's, so his
+   * `'unless-held'` promise is decided as before: none of these is promised for any month. Why Budi, and
+   * what is spread across them, is in `long-pipeline.ts`.
+   */
+  await seedLeads(id0417, LONG_PIPELINE.map((lead) => ({
+    ...lead, owner: budi.id, path: lead.path ? [...lead.path] : undefined,
+  })));
 
   /*
    * ------------------------------------------------------------------ Goals (P8-T1)
@@ -2113,10 +2090,74 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     code: kpm0555.get('code') as string,
     companyId: kpm0555.get('companyId') as string,
   };
-  await configure(String(kpm0555._id));
-  // Published and untouched since, so its publish bar reads clean — the state 0417 is
-  // deliberately *not* in.
-  await publish(String(kpm0555._id), daysAgo(30));
+  const id0555 = String(kpm0555._id);
+  await configure(id0555);
+  // Published a month back, then changed — so 0555's publish bar shows the state that matters: its
+  // agent on one copy while the Owner works on another. 0417 is the clean counterpart (K5).
+  await publish(id0555, daysAgo(30));
+
+  /*
+   * **The states a settings screen can only show if something is in them** (P13.1-T3: moved here from
+   * 0417, which now holds the prototype's settings and nothing else).
+   *
+   * Every one of these was unreachable in a seeded database once: nothing was ever archived, so
+   * *Show archived* was an empty checkbox; every ratio was the platform's, so the two row kinds P4-T15
+   * added looked identical; and nothing had been touched since publishing, so the publish bar only ever
+   * had one thing to say. Sign in as `owner@kpm0555.test` to see them.
+   *
+   * **Each is written only over the row as `configure` left it** — version 1, active — so a re-run
+   * writes nothing, and a row somebody restored or edited in a walk is theirs, not the seed's to undo.
+   */
+  // Retired, not deleted (invariant §3): the office records its 1-on-1s as coaching sessions, so the
+  // self-reported row went. Archived after publishing, so Lina's Log Activity still offers it until the
+  // Owner publishes — the case P13.1-T2 makes savable.
+  await ActivityTypes.updateOne(
+    { kpmId: id0555, code: 'DEV_COACHING_RECEIVED', version: 1, status: 'active' },
+    { $set: { status: 'archived', archivedAt: daysAgo(12), version: 2 } },
+  );
+  // Kelapa Gading takes the first premium with the application, so a policy is never approved and
+  // unpaid there. Neither of the office's two leads stands on it.
+  await LeadStatuses.updateOne(
+    { kpmId: id0555, code: 'APPROVED_NOT_PAID', version: 1, status: 'active' },
+    { $set: { status: 'archived', archivedAt: daysAgo(9), version: 2 } },
+  );
+
+  /*
+   * **An edit since publishing, on a row that is still active**: the Owner raised the selling bar to 18%
+   * and has not published, so the settings screen shows 18.0% while Lina is still judged at 15.0%.
+   *
+   * The first version of this seed archived and edited one row in the same breath, when the bar compared
+   * the highest live version only and so read clean; P5-T11 compares which rows are present at which
+   * version, and an edit on a live row is the change an Owner most often makes.
+   */
+  await RatioDefinitions.updateOne(
+    { kpmId: id0555, code: 'SELLING_SUCCESS_RATE', version: 1 },
+    { $set: { benchmark: 0.18, version: 2 } },
+  );
+
+  if (!(await RatioDefinitions.findOne({ kpmId: id0555, code: 'REFERRAL_RATE' }).exec())) {
+    // An office's own (ADR-0021): formula included, and comparable with nobody. New prospects per
+    // existing prospect contacted, which is where a referral comes from.
+    await RatioDefinitions.create({
+      kpmId: id0555,
+      code: 'REFERRAL_RATE',
+      label: 'Referral rate',
+      numerator: ['LEADS_NEW_PROSPECT'],
+      denominator: ['LEADS_CONTACTED'],
+      benchmark: 0.35,
+      comparison: 'gte',
+      // A conversion rate, so the Owner reads 35.0% — the unit they chose for their own.
+      displayUnit: 'percent',
+      displayOrder: 6,
+      origin: 'office',
+      // Their referral push is the senior rungs' programme this quarter (ADR-0020): Hendra's, not Lina's.
+      appliesToOrgLevelCodes: ['AB', 'AAB'],
+      version: 1,
+      status: 'active',
+      archivedAt: null,
+      deletedAt: null,
+    });
+  }
 
   const owner0555 = await place(office0555, String(owner0555User._id), 'ab', null);
   const agent0555User = await user('agent@kpm0555.test', 'Lina Marlina', { pronoun: 'she' });
@@ -2134,7 +2175,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     {
       owner: agent0555.id, name: 'Ibu Christine Halim', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'],
-      phone: '0819-2200-3311', lawfulBasis: 'consent',
+      phone: '0819-2200-3311',
       remarks: 'Kelapa Gading. Wants unit-link, sceptical about fees.',
       nextActionIn: 3, nextActionNote: 'Walk through the fee table.',
       source: 'Walk-in — Kelapa Gading',
@@ -2142,7 +2183,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     {
       owner: owner0555.id, name: 'Pak Teguh Santoso', type: 'recruitment',
       path: ['NOT_APPROACHED', 'MEETING_SCHEDULED'],
-      email: 'teguh.s@example.com', lawfulBasis: 'legitimate_interest',
+      email: 'teguh.s@example.com',
       remarks: 'Branch manager at a bank, looking for a second income.',
       source: 'Referral — Hendra',
     },
@@ -2821,6 +2862,18 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const CalendarEvents = mongoose.model(CalendarEvent.name, CalendarEventSchema, undefined, RECOMPILE);
   await insertFixtureRows(CalendarEvents as unknown as mongoose.Model<object>, calendar.entries);
   /*
+   * **Rina hides her own entries from her leaders** (P13.1-T8, ADR-0110): *Hide my personal activities* is on
+   * for her, so Sari's compare shows *Client meeting — Pak Gunadi* and her task as *Busy* at their times, while
+   * Sari's own 1:1s with her stay in full — Sari organised them. Agus's compare with Sari, the OD-87 walk, is
+   * untouched. Set on every run — the schema writes `false` when a membership is created, so there is no
+   * "never written" to wait for — and a walker who switched it off gets it back on the next run, as `--reset`
+   * gives them every other state.
+   */
+  await Memberships.updateOne(
+    { _id: rina.id, kpmId: id0417, calendarHideDetails: { $ne: true } },
+    { $set: { calendarHideDetails: true } },
+  );
+  /*
    * Each notice names its entry as the office holds it: an entry an earlier run stored keeps that run's
    * date, and so does its notice, which is keyed on its payload — so a re-run writes none.
    */
@@ -2999,6 +3052,10 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const longInboxes = {
     agus: await inboxLine(abUser), sari: await inboxLine(sariUser), rina: await inboxLine(rinaUser),
   };
+  // Counted, not quoted: a lead closed or deleted in a walk changes it, and the line should say so.
+  const budiOpenLeads = await Leads.countDocuments({
+    kpmId: id0417, ownerMembershipId: budi.id, outcome: null, deletedAt: null,
+  }).exec();
 
   const storedCalendar = await mongoose.connection.collection('calendarEvents').countDocuments({ kpmId: id0417, deletedAt: null });
 
@@ -3025,7 +3082,8 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
                                                        Sari, Dewi and Arief were promoted from Agent,
                                                        so /people/members Role change log has rows
     rina@kpm0417.test            demo password rina    Agent under Sari
-    budi@kpm0417.test                                  Agent under Sari
+    budi@kpm0417.test                                  Agent under Sari, with ${budiOpenLeads} open leads: /leads
+                                                       shows 30, then Show more
     indah@ · dimas@ · siti@kpm0417.test                Agents under Agus — his direct agents
     arief@kpm0417.test                                 AAB under Agus, promoted from Agent, leading two:
     novi@ · wahyu@kpm0417.test                         Agents under Arief
@@ -3035,7 +3093,11 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
                                                        two agent codes, one person (P3-T7 AC-4)
 
   KPM 0555 · Kelapa Gading Branch  (${String(kpm0555._id)})
-    owner@kpm0555.test                                 KPM Owner — for cross-tenant checks
+    owner@kpm0555.test                                 KPM Owner — for cross-tenant checks, and the
+                                                       settings screens' states: an archived activity
+                                                       type and lead status, an office-made ratio, and
+                                                       an edit since publishing. 0417's settings are
+                                                       the prototype's, published and untouched
     agent@kpm0555.test                                 Agent
 
   KPM 0999 · Suspended Branch
@@ -3181,6 +3243,8 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     rina@kpm0417.test            Client meeting — Pak Gunadi and a task; Sari's 1:1s, whose chip
                                  links nowhere for her; the declined huddle is off her grid, and
                                  its "You have a new invitation" in the bell, read, still opens it
+    Hide my personal activities  on for Rina: Sari's compare shows her Client meeting and task as
+                                 Busy; Sari's own 1:1s with her stay in full
     indah@kpm0417.test           a task, the standups accepted, Agus's block (Close alone)
     The month                    four lighter weeks before this one and the week after
     Entries stored               ${storedCalendar} in KPM 0417 (${calendar.entries.length} in this run's fixture)

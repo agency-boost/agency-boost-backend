@@ -22,8 +22,8 @@ const noOffice = () => new RequestContext('u9', 'none', null);
  * The lead record (P7-T1).
  *
  * **The first record in this product about somebody who is not a user of it.** Most of what is
- * asserted here is about that: the lawful basis, the soft delete, and an audit row that records
- * that contact details exist without recording them.
+ * asserted here is about that: the soft delete, and an audit row that records that contact details
+ * exist without recording them. The lawful basis was too, until ADR-0108 set it aside (P13.1-T4).
  */
 describe('the lead record (P7-T1)', () => {
   let wired: ReturnType<typeof configModule>;
@@ -133,66 +133,65 @@ describe('the lead record (P7-T1)', () => {
     });
   });
 
-  describe('AC-3 — a ground before the details', () => {
-    it('stores a lead with a name and nothing else', async () => {
-      // An agent jotting down a name from a Thursday BOP has collected nothing the regulation
-      // governs. A gate on creation would make the first thing they meet a compliance form.
+  /*
+   * P7-T1's AC-3 was *a ground before the details*: no phone or email without a recorded lawful basis
+   * (UU 27/2022). The product owner set that aside on 2026-10-07 and the client removed the field, so
+   * the rule went with it (ADR-0108 §1). What is pinned now is that it has gone — and that nothing
+   * stored while it stood is erased by its going.
+   */
+  describe('P13.1-T4 AC-1 — contact details with no ground (ADR-0108 §1)', () => {
+    const stored = () => mongoose.connection.db!.collection('leads').findOne({});
+
+    it('P13.1-T4 AC-1 stores a lead with a name and nothing else, and returns no ground at all', async () => {
       const lead = await create(A());
 
-      expect(lead).toMatchObject({ name: 'Pak Budi', lawfulBasis: null, consentAt: null });
       expect(lead.contact).toEqual({ phone: null, email: null });
+      expect(lead).not.toHaveProperty('lawfulBasis');
+      expect(lead).not.toHaveProperty('consentAt');
     });
 
     it.each([
       ['a phone number', { phone: '0812-3456-7890', email: null }],
       ['an email', { phone: null, email: 'budi@example.com' }],
-    ])('refuses %s with no recorded ground', async (_what, contact) => {
-      await expect(create(A(), { contact }))
-        .rejects.toMatchObject({ code: 'LEAD_CONSENT_REQUIRED' });
+      ['both', { phone: '0812-3456-7890', email: 'budi@example.com' }],
+    ])('P13.1-T4 AC-1 creates a lead holding %s with no recorded ground', async (_what, contact) => {
+      const lead = await create(A(), { contact });
+
+      expect(lead.contact).toEqual(contact);
+      expect(lead).not.toHaveProperty('lawfulBasis');
+      // The schema's defaults, never a ground nobody chose.
+      expect(await stored()).toMatchObject({ lawfulBasis: null, consentAt: null });
     });
 
-    it('takes them once a ground is recorded, and stamps when', async () => {
-      const lead = await create(A(), {
-        contact: { phone: '0812-3456-7890' }, lawfulBasis: 'consent',
-      });
-
-      expect(lead.contact.phone).toBe('0812-3456-7890');
-      expect(lead.consentAt).toBe(NOW.toISOString());
-    });
-
-    it('refuses contact details added later to a lead that has no ground', async () => {
+    it('P13.1-T4 AC-1 adds contact details later to a lead that has no ground', async () => {
       const lead = await create(A());
 
-      await expect(wired.leadRecords.update(A(), lead.id, { contact: { phone: '0812' } }))
-        .rejects.toMatchObject({ code: 'LEAD_CONSENT_REQUIRED' });
+      const updated = await wired.leadRecords.update(A(), lead.id, { contact: { phone: '0812' } });
+
+      expect(updated.contact).toEqual({ phone: '0812', email: null });
+      expect(updated).not.toHaveProperty('lawfulBasis');
     });
 
-    it('refuses clearing the ground from a lead that still holds details', async () => {
-      /*
-       * Checked against the lead as it **will be**, not as the patch arrived. A rule that only
-       * read the incoming fields would let the same thing happen in two steps: record a basis,
-       * add the number, remove the basis.
-       */
-      const lead = await create(A(), { contact: { phone: '0812' }, lawfulBasis: 'consent' });
-
+    it('P13.1-T4 AC-1 refuses a lawfulBasis in the body as a field nobody defines, writing nothing', async () => {
+      await expect(create(A(), { lawfulBasis: 'consent' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      const lead = await create(A());
       await expect(wired.leadRecords.update(A(), lead.id, { lawfulBasis: null }))
-        .rejects.toMatchObject({ code: 'LEAD_CONSENT_REQUIRED' });
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      expect((await wired.leadRecords.read(A(), lead.id)).version).toBe(1);
     });
 
-    it('allows the ground to be cleared once the details are gone', async () => {
-      const lead = await create(A(), { contact: { phone: '0812' }, lawfulBasis: 'consent' });
+    it('P13.1-T4 AC-1 keeps a ground stored before the rule went, through a write to the details', async () => {
+      // A deploy is not an erasure: the column stays, unread, and nothing clears it.
+      const lead = await create(A(), { contact: { phone: '0812' } });
+      const before = new Date('2026-09-20T02:00:00Z');
+      await mongoose.connection.db!.collection('leads')
+        .updateOne({}, { $set: { lawfulBasis: 'consent', consentAt: before } });
 
-      const cleared = await wired.leadRecords.update(A(), lead.id, {
-        contact: null, lawfulBasis: null,
-      });
+      const cleared = await wired.leadRecords.update(A(), lead.id, { contact: null, remarks: 'Rang him.' });
 
       expect(cleared.contact).toEqual({ phone: null, email: null });
-      expect(cleared.consentAt).toBeNull();
-    });
-
-    it('refuses a ground the regulation does not name', async () => {
-      await expect(create(A(), { lawfulBasis: 'because I asked nicely' }))
-        .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      expect(cleared).not.toHaveProperty('lawfulBasis');
+      expect(await stored()).toMatchObject({ lawfulBasis: 'consent', consentAt: before });
     });
   });
 
@@ -247,13 +246,15 @@ describe('the lead record (P7-T1)', () => {
        * administrator who has no right to the lead — putting the name or the phone number in it
        * would route around the thing that paragraph exists to protect.
        */
-      await create(A(), { contact: { phone: '0812-3456-7890' }, lawfulBasis: 'consent' });
+      await create(A(), { contact: { phone: '0812-3456-7890' } });
 
       const entry = await mongoose.connection.db!.collection('auditLog')
         .findOne({ action: 'lead.created' });
       const after = entry!.after as Record<string, unknown>;
 
-      expect(after).toMatchObject({ hasContact: true, lawfulBasis: 'consent' });
+      expect(after).toMatchObject({ hasContact: true });
+      // P13.1-T4 AC-1: no ground to record, so the entry names none (ADR-0108 §1).
+      expect(after).not.toHaveProperty('lawfulBasis');
       expect(JSON.stringify(entry)).not.toContain('Pak Budi');
       expect(JSON.stringify(entry)).not.toContain('0812');
     });
@@ -424,6 +425,88 @@ describe('the lead record (P7-T1)', () => {
 
       await expect(wired.leadRecords.setStatus(A(), lead.id, 'POLICY_SUBMITTED'))
         .rejects.toMatchObject({ code: 'LEAD_ALREADY_CLOSED' });
+    });
+  });
+
+  /*
+   * P13.1-T4 AC-10: a move and a close are judged against the ladder the agent was shown — the
+   * office's **published** snapshot, which the table's *Status* select and its ✓ gate read — not the
+   * Owner's draft. The defect P13.1-T2 fixed for the activity log, on the leads screen.
+   */
+  describe('P13.1-T4 AC-10 — the published ladder, not the draft', () => {
+    beforeEach(() => provisionOffice(wired, KPM_A, COMPANY));
+
+    const salesStage = async (ctx: RequestContext, code: string) =>
+      (await wired.leads.list(ctx)).find((p) => p.pipeline === 'sales')!.statuses.find((s) => s.code === code)!;
+    const sales = () => create(A(), { type: 'sales' });
+
+    it('P13.1-T4 AC-10 keeps a stage retired in the draft selectable until the Owner publishes again', async () => {
+      await wired.config.publish(A());
+      await wired.leads.archive(A(), (await salesStage(A(), 'FOLLOW_UP')).id);
+
+      const lead = await sales();
+      const moved = await wired.leadRecords.setStatus(A(), lead.id, 'FOLLOW_UP');
+      expect(moved.statusCode).toBe('FOLLOW_UP');
+
+      await wired.config.publish(A());
+      const later = await sales();
+      await expect(wired.leadRecords.setStatus(A(), later.id, 'FOLLOW_UP'))
+        .rejects.toMatchObject({ code: 'CONFIG_ARCHIVED' });
+    });
+
+    it('P13.1-T4 AC-10 refuses a stage created in the draft until it is published, and then takes it', async () => {
+      await wired.config.publish(A());
+      await wired.leads.create(A(), { pipeline: 'sales', code: 'HOT_PROSPECT', label: 'Hot prospect' });
+      const lead = await sales();
+
+      await expect(wired.leadRecords.setStatus(A(), lead.id, 'HOT_PROSPECT'))
+        .rejects.toMatchObject({ code: 'NOT_FOUND' });
+      expect((await wired.leadRecords.read(A(), lead.id)).statusCode).toBeNull();
+
+      await wired.config.publish(A());
+      expect((await wired.leadRecords.setStatus(A(), lead.id, 'HOT_PROSPECT')).statusCode).toBe('HOT_PROSPECT');
+    });
+
+    it('P13.1-T4 AC-10 writes the published stage’s id beside its code', async () => {
+      await wired.config.publish(A());
+      const lead = await sales();
+      await wired.leadRecords.setStatus(A(), lead.id, 'POLICY_SUBMITTED');
+
+      const stored = await mongoose.connection.db!.collection('leads').findOne({ _id: new mongoose.Types.ObjectId(lead.id) });
+      expect(stored!.statusId).toBe((await salesStage(A(), 'POLICY_SUBMITTED')).id);
+    });
+
+    it('P13.1-T4 AC-10 closes as won on the stage the published ladder ends on, whatever the draft says', async () => {
+      await wired.config.publish(A());
+      const paid = await sales();
+      await wired.leadRecords.setStatus(A(), paid.id, 'PAID_AND_ISSUED');
+      const submitted = await sales();
+      await wired.leadRecords.setStatus(A(), submitted.id, 'POLICY_SUBMITTED');
+
+      // The Owner names a new closing stage in the draft and has not published it.
+      await wired.leads.setTerminal(A(), (await salesStage(A(), 'POLICY_SUBMITTED')).id);
+
+      await expect(wired.leadRecords.setOutcome(A(), submitted.id, 'won'))
+        .rejects.toMatchObject({ code: 'LEAD_STATUS_NOT_FINAL' });
+      expect((await wired.leadRecords.setOutcome(A(), paid.id, 'won')).outcome).toBe('won');
+
+      await wired.config.publish(A());
+      expect((await wired.leadRecords.setOutcome(A(), submitted.id, 'won')).outcome).toBe('won');
+    });
+
+    it('P13.1-T4 AC-10 reads only its own office’s published ladder', async () => {
+      await provisionOffice(wired, KPM_B, COMPANY);
+      await wired.config.publish(A());
+      await wired.leads.create(B(), { pipeline: 'sales', code: 'B_ONLY', label: 'Office B only' });
+      await wired.config.publish(B());
+      // Office B retires a stage A still offers, and publishes it.
+      await wired.leads.archive(B(), (await salesStage(B(), 'FOLLOW_UP')).id);
+      await wired.config.publish(B());
+
+      const lead = await sales();
+      await expect(wired.leadRecords.setStatus(A(), lead.id, 'B_ONLY'))
+        .rejects.toMatchObject({ code: 'NOT_FOUND' });
+      expect((await wired.leadRecords.setStatus(A(), lead.id, 'FOLLOW_UP')).statusCode).toBe('FOLLOW_UP');
     });
   });
 

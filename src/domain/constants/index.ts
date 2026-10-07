@@ -105,11 +105,12 @@ export const ACTIVITY = {
 /** The Personal Summary (P10-T4). */
 export const SUMMARY = {
   /**
-   * How far into a month the pace sentence projects (ADR-0057). Before this many days of the month
-   * have passed a run-rate is noise — one closing on the 2nd is fifteen by the 30th — and the sentence
-   * says only how many of the target are closed so far.
+   * `SUMMARY_PACE_WINDOW_DAYS`: the days, today included, whose closings the pace sentence says the
+   * member is *tracking to close* (ADR-0109) — the prototype's `days = 30` for the month
+   * (`Overall.html:6295`), summed by `sumActivitySharedDays(6, days)` (`:6316`). Derived, not restated:
+   * it is `ROLLING_30D` (ADR-0022). It replaced ADR-0057's run-rate and its `PACE_MIN_DAYS` of 7.
    */
-  PACE_MIN_DAYS: 7,
+  PACE_WINDOW_DAYS: PERIOD.ROLLING_30D_DAYS,
   /**
    * How many of a member's open leads *Leads that need you* lists, nearest next action first (P10-T6).
    * The prototype lists every one; a summary of two hundred rows is the Leads screen without its search,

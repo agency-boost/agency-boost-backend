@@ -183,6 +183,19 @@ export class Membership {
   @Prop({ type: String, default: null })
   sourceLeadId!: string | null;
 
+  /**
+   * ***Hide my personal activities*** (ADR-0110, amending ADR-0093; `functional/calendar.md`, *Who reads
+   * what*): when `true`, a leader who compares this member's week is answered every entry the member
+   * organised as a busy block — its time and nothing else — unless that leader is on it. **Off by
+   * default**, and the member's own to switch, from `/calendar` (`PUT /calendar/settings`).
+   *
+   * On the membership because it is how this person takes part in this office's calendar, as the rest of
+   * this record is (invariant §2): it is scoped and indexed as the membership already is, and somebody who
+   * leaves and rejoins starts with it off. A row written before it existed has no value, which reads as off.
+   */
+  @Prop({ type: Boolean, default: false })
+  calendarHideDetails!: boolean;
+
   /*
    * No `activationGraduatedAt`. It sat here unwritten from Phase 3, waiting for Phase 13 — which records
    * graduation on the hire's `activationProgress` (`graduatedAt`, `graduatedByMembershipId`), with the rest

@@ -18,7 +18,7 @@ type Explained = { queryPlanner: unknown; executionStats: { nReturned: number; t
 
 /**
  * **The session's Ratios and Activity cards' reads, measured** (P11-T4 AC-7; `performance-and-scale.md`,
- * 300 ms at p95 for a read).
+ * 300 ms at p95 for a read) — and the *Activity* tab's Dashboard of a coachee (P13.1-T9).
  *
  * A leader's read of one coachee is the coachee's own read plus the resolution and the audit entry: the
  * subject through `COACH` (the coachee's membership and every link above them), then for the week the
@@ -146,12 +146,20 @@ describe('P11-T4 AC-7 — a coachee’s ratios and week, measured', () => {
     expect(ms).toBeLessThan(300);
   });
 
+  it('P13.1-T9 GET /activity/dashboard?for=, coaching’s Activity tab over its widest preset, answers inside the budget at p95', async () => {
+    const ms = await p95(20, (agent) => wired.activityLogs.dashboard(leader, { for: agent, range: 'ROLLING_30D' }));
+    // eslint-disable-next-line no-console
+    console.log(`  dashboard for= 30d    p95 of 20: ${ms.toFixed(1)} ms`);
+    expect(ms).toBeLessThan(300);
+  });
+
   it('P11-T4 AC-5 every one of those reads left its record', async () => {
     const entries = await mongoose.connection.db!.collection('auditLog').aggregate([
       { $match: { action: 'activity_log.read_raw' } },
       { $group: { _id: '$after.surface', n: { $sum: 1 } } },
     ]).toArray();
     // The figures' read above, and twenty of each measured.
-    expect(Object.fromEntries(entries.map((e) => [e._id, e.n]))).toEqual({ ratios: 21, summary: 21 });
+    expect(Object.fromEntries(entries.map((e) => [e._id, e.n])))
+      .toEqual({ ratios: 21, summary: 21, activity_dashboard: 20 });
   });
 });

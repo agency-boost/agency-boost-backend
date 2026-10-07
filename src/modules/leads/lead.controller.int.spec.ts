@@ -92,7 +92,6 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
       const res = await add({
         type: 'sales',
         contact: { phone: '0812-3456-7890' },
-        lawfulBasis: 'consent',
         remarks: 'Hot button: the eldest starts university.',
         nextActionDate: '2026-10-02',
         nextActionNote: 'Coffee at 10:00.',
@@ -103,7 +102,6 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
       expect(res.body).toMatchObject({
         type: 'sales',
         contact: { phone: '0812-3456-7890', email: null },
-        lawfulBasis: 'consent',
         nextActionDate: '2026-10-02',
         thisMonth: true,
         version: 1,
@@ -117,16 +115,31 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
     });
   });
 
-  describe('the lawful basis, over the wire', () => {
-    it('refuses contact details with no ground, with a code a client can branch on', async () => {
-      const res = await add({ contact: { phone: '0812' } }).expect(422);
-      expect(res.body.error.code).toBe('LEAD_CONSENT_REQUIRED');
-      expect(res.body.error.details.allowed).toContain('consent');
+  describe('P13.1-T4 AC-1 — no lawful basis, over the wire (ADR-0108 §1)', () => {
+    it('P13.1-T4 AC-1 creates a lead with a phone and an email and no ground', async () => {
+      const res = await add({ contact: { phone: '0812', email: 'budi@example.com' } }).expect(201);
+      expect(res.body.contact).toEqual({ phone: '0812', email: 'budi@example.com' });
     });
 
-    it('takes a lead with a name alone', async () => {
+    it('P13.1-T4 AC-1 answers with neither lawfulBasis nor consentAt', async () => {
       const res = await add().expect(201);
-      expect(res.body).toMatchObject({ lawfulBasis: null, flags: expect.any(Array) });
+      expect(res.body).toMatchObject({ flags: expect.any(Array) });
+      expect(res.body).not.toHaveProperty('lawfulBasis');
+      expect(res.body).not.toHaveProperty('consentAt');
+      const read = await http().get(`${url}/${res.body.id}`).expect(200);
+      expect(read.body).not.toHaveProperty('lawfulBasis');
+      const list = await http().get(url).expect(200);
+      expect(list.body.rows[0]).not.toHaveProperty('consentAt');
+    });
+
+    it('P13.1-T4 AC-1 refuses lawfulBasis on a create or a patch as a field nobody defined', async () => {
+      const created = await add({ lawfulBasis: 'consent' }).expect(400);
+      expect(created.body.error.code).toBe('VALIDATION_FAILED');
+      expect(JSON.stringify(created.body)).toMatch(/lawfulBasis/);
+
+      const { body } = await add().expect(201);
+      const patched = await http().patch(`${url}/${body.id}`).send({ lawfulBasis: null }).expect(400);
+      expect(patched.body.error.code).toBe('VALIDATION_FAILED');
     });
   });
 
@@ -186,15 +199,12 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
       });
     });
 
-    it('refuses clearing the ground from a lead that still holds details', async () => {
-      // The two-step version of adding a number with no basis. Checked against the lead as it
-      // will be, not as the patch arrived.
-      const { body } = await add({ contact: { phone: '0812' }, lawfulBasis: 'consent' })
-        .expect(201);
+    it('P13.1-T4 AC-1 adds a phone number to a lead that has none, with no ground', async () => {
+      const { body } = await add().expect(201);
 
       const res = await http().patch(`${url}/${body.id}`)
-        .send({ lawfulBasis: null }).expect(422);
-      expect(res.body.error.code).toBe('LEAD_CONSENT_REQUIRED');
+        .send({ contact: { phone: '0812-1100-2200', email: null } }).expect(200);
+      expect(res.body).toMatchObject({ contact: { phone: '0812-1100-2200', email: null }, version: 2 });
     });
 
     it('removes softly, and the lead leaves the list without leaving the database', async () => {

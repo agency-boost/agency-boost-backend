@@ -89,37 +89,62 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
     expect(madeFigures(null)).toMatchObject({ targetMet: true, overMinor: null });
   });
 
-  describe('AC-4 — the pace (ADR-0057)', () => {
-    it('runs this month’s closings forward at their daily rate, and says what each week left needs', () => {
-      // The 14th of a 30-day month: 2 closings, a target of 6. Seventeen days left, today included.
-      expect(paceFor({ closingTarget: 6, closingsLogged: 2, dayOfMonth: 14, daysInMonth: 30, apeTargetMet: false }))
-        .toEqual({
-          closingTarget: 6, closingsLogged: 2, dayOfMonth: 14, daysInMonth: 30,
-          projected: 4, weeksLeft: 3, neededPerWeek: 2, targetMet: false,
-        });
+  /*
+   * **P13.1-T5 — the prototype's sentence, by the prototype's arithmetic** (ADR-0109, superseding
+   * ADR-0057; `Overall.html:6326-6347`). N is what the caller counted over the last 30 days; W comes from
+   * the office's calendar; K is the APE gap in policies over W.
+   */
+  describe('P13.1-T5 — the pace (ADR-0109)', () => {
+    const base = {
+      closingTarget: 6, closingsLast30Days: 2, dayOfMonth: 17, daysInMonth: 30,
+      apeTargetMinor: 100 * M, apeProducedMinor: 45 * M, caseSizeMinor: 18 * M, apeTargetMet: false,
+    };
+
+    it('P13.1-T5 AC-3 the prototype’s own month: Rp 45 M of Rp 100 M at Rp 18 M a case, two weeks left', () => {
+      // `:6261-6263`, `:3134`: ceil(55 / 18) = 4 policies still needed, ceil(4 / 2) = 2 a week.
+      expect(paceFor(base)).toEqual({
+        closingTarget: 6, closingsLast30Days: 2, dayOfMonth: 17, daysInMonth: 30,
+        weeksLeft: 2, policiesNeeded: 4, neededPerWeek: 2, targetMet: false,
+      });
     });
 
-    it('does not project before the 7th — a run-rate over three days is noise', () => {
-      expect(paceFor({ closingTarget: 6, closingsLogged: 1, dayOfMonth: 2, daysInMonth: 30, apeTargetMet: false }).projected)
-        .toBeNull();
-      expect(paceFor({ closingTarget: 6, closingsLogged: 1, dayOfMonth: 7, daysInMonth: 30, apeTargetMet: false }).projected)
-        .toBe(4);
+    it('P13.1-T5 AC-3 the client’s sentence: 21 closed against a target of 10, still 4 a week to catch up', () => {
+      // Rp 40 M of Rp 180 M: ceil(140 / 18) = 8 policies over 2 weeks. N past M does not reach the APE.
+      expect(paceFor({ ...base, closingTarget: 10, closingsLast30Days: 21, apeTargetMinor: 180 * M, apeProducedMinor: 40 * M }))
+        .toMatchObject({ closingsLast30Days: 21, closingTarget: 10, weeksLeft: 2, policiesNeeded: 8, neededPerWeek: 4, targetMet: false });
     });
 
-    it('never divides by zero weeks — the last day of the month is one week left', () => {
-      expect(paceFor({ closingTarget: 6, closingsLogged: 2, dayOfMonth: 30, daysInMonth: 30, apeTargetMet: false }))
-        .toMatchObject({ weeksLeft: 1, neededPerWeek: 4 });
+    it('P13.1-T5 AC-3 day 1 of a 31-day month is five weeks left, and the file not landed counts nothing produced', () => {
+      // ceil(31 / 7) = 5; Rp 75 M with nothing uploaded is ceil(75 / 18) = 5 policies, one a week.
+      expect(paceFor({ ...base, dayOfMonth: 1, daysInMonth: 31, apeTargetMinor: 75 * M, apeProducedMinor: null }))
+        .toMatchObject({ weeksLeft: 5, policiesNeeded: 5, neededPerWeek: 1 });
     });
 
-    it('asks for no more closings once the closing target is logged — but that is not the APE target reached', () => {
-      // Closings are the agent's count; APE is the carrier's. Reached means the APE gap is zero.
-      expect(paceFor({ closingTarget: 6, closingsLogged: 7, dayOfMonth: 20, daysInMonth: 30, apeTargetMet: false }))
-        .toMatchObject({ targetMet: false, neededPerWeek: 0, projected: 11 });
+    it('P13.1-T5 AC-3 never divides by zero weeks: the month’s last day is one week left', () => {
+      expect(paceFor({ ...base, dayOfMonth: 30 })).toMatchObject({ weeksLeft: 1, policiesNeeded: 4, neededPerWeek: 4 });
+      // February's last day, and a 28-day month's first: four whole weeks.
+      expect(paceFor({ ...base, dayOfMonth: 28, daysInMonth: 28 }).weeksLeft).toBe(1);
+      expect(paceFor({ ...base, dayOfMonth: 1, daysInMonth: 28 }).weeksLeft).toBe(4);
     });
 
-    it('reads the APE target reached — this month’s or the year’s — as met, whatever the closings say (ADR-0047)', () => {
-      expect(paceFor({ closingTarget: 0, closingsLogged: 0, dayOfMonth: 20, daysInMonth: 30, apeTargetMet: true }))
-        .toMatchObject({ targetMet: true, neededPerWeek: 0 });
+    it('P13.1-T5 AC-3 rounds each step up, as the prototype does', () => {
+      // Rp 1 short is one policy; one policy over three weeks is one a week, not a third.
+      expect(paceFor({ ...base, dayOfMonth: 10, apeProducedMinor: 100 * M - 1 }))
+        .toMatchObject({ weeksLeft: 3, policiesNeeded: 1, neededPerWeek: 1 });
+    });
+
+    it('P13.1-T5 AC-1 the APE target reached — this month’s or the year’s — is met, and asks for nothing (ADR-0047)', () => {
+      expect(paceFor({ ...base, apeProducedMinor: 100 * M, apeTargetMet: true }))
+        .toMatchObject({ targetMet: true, policiesNeeded: 0, neededPerWeek: 0 });
+      // A year made before the month: a target of 0, met whatever the closings say.
+      expect(paceFor({ ...base, closingTarget: 0, closingsLast30Days: 0, apeTargetMinor: 0, apeProducedMinor: null, apeTargetMet: true }))
+        .toMatchObject({ targetMet: true, policiesNeeded: 0, neededPerWeek: 0 });
+    });
+
+    it('P13.1-T5 AC-4 says nothing of a run-rate, or of a first week without one', () => {
+      expect(Object.keys(paceFor(base)).sort()).toEqual([
+        'closingTarget', 'closingsLast30Days', 'dayOfMonth', 'daysInMonth', 'neededPerWeek', 'policiesNeeded', 'targetMet', 'weeksLeft',
+      ]);
     });
   });
 

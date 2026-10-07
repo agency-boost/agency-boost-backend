@@ -24,7 +24,12 @@ export interface RatioOutcome {
   value: number | null;
   numeratorCount: number;
   denominatorCount: number;
-  /** `band` only: the numerator side's share of both, in percent — where the marker sits on the track. */
+  /**
+   * `band` only: the numerator side's share of both, in percent — where the marker sits on the track,
+   * and, since P13.1-T6, **what the screens write**: *40% Selling · 60% Recruitment* for a 40 share. The
+   * status is still judged on the lean, which is the same split: `|lean| ≤ b` is a share within
+   * `(100 ∓ b) ÷ 2`, so ±30 points reads as each side between 35% and 65%.
+   */
   share: number | null;
   status: RatioStatus;
 }

@@ -49,7 +49,8 @@ export interface CalendarEntryView extends OfficeTiming {
 /**
  * **A busy block**: an entry a compared member attends that the reader could not read in their own
  * right, answered by its time and nothing else — no id, no type, no title, no notes, no people (roles §2
- * rule 4: compare is never a way above the reader's own line).
+ * rule 4: compare is never a way above the reader's own line). The same shape answers an entry whose
+ * organiser hides their details (ADR-0110), so the wire never says which of the two it is.
  */
 export interface CalendarBusyView extends OfficeTiming {
   busy: true;
@@ -117,6 +118,9 @@ export function busyView(entry: StoredEntry, timezone: string): CalendarBusyView
   };
 }
 
+/** Nobody has hidden their entries' details. */
+const NOBODY: ReadonlySet<string> = new Set();
+
 /**
  * **One entry of a compared member's calendar, as an ancestor is answered it** (ADR-0093; P12-T5 AC-4).
  *
@@ -125,13 +129,19 @@ export function busyView(entry: StoredEntry, timezone: string): CalendarBusyView
  * - **An entry the member only attends** is in full only when the reader could read it in their own
  *   right: they organised it, they are on it (whatever their answer), or they coach its organiser.
  *   Otherwise it is a busy block, because its organiser may be the reader's peer or their own leader.
+ * - **An organiser in `hidden` has turned on *Hide my personal activities*** (ADR-0110, amending
+ *   ADR-0093; P13.1-T8): what they organised is a busy block to every reader who is not on it — in the
+ *   compared member's own pane, and in any other pane it appears in through coaching its organiser, which
+ *   would otherwise show what their own pane hides. The reader's place on an entry comes first, so an
+ *   invitee, the placed member and the organiser still read it in full.
  */
 export function comparedView(
-  entry: StoredEntry, subjectId: string, reader: Reader,
+  entry: StoredEntry, subjectId: string, reader: Reader, hidden: ReadonlySet<string> = NOBODY,
 ): CalendarEntryView | CalendarBusyView {
   const own = standingOf(entry, reader.membershipId);
   if (own) return entryView(entry, reader, own);
-  if (entry.organiserMembershipId === subjectId || reader.coaches.has(entry.organiserMembershipId)) {
+  const organiser = entry.organiserMembershipId;
+  if ((organiser === subjectId || reader.coaches.has(organiser)) && !hidden.has(organiser)) {
     return entryView(entry, reader, 'ancestor');
   }
   return busyView(entry, reader.timezone);

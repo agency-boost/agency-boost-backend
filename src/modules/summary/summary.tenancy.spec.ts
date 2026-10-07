@@ -73,7 +73,8 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     await production('2026-09', { apeMonthly: cell(30 * M), apeYtd: cell(230 * M) });
     await day('2026-09-02', { SELL_SUBMISSION: 1 });
     await day('2026-09-10', { SELL_SUBMISSION: 1, SELL_PRESENTATION: 4 });
-    await day('2026-08-31', { SELL_SUBMISSION: 9 }); // last month: not this month's pace
+    await day('2026-08-31', { SELL_SUBMISSION: 9 }); // last month, but inside the last 30 days: the pace's
+    await day('2026-08-15', { SELL_SUBMISSION: 50 }); // the 31st day back: nobody's pace
 
     const view = await wired.summary.read(agent());
 
@@ -86,11 +87,11 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       targetMinor: 500 * M, actualMinor: 230 * M, attainmentPct: 46, gapMinor: 270 * M, policiesNeeded: 15,
       source: { provenance: 'imported', month: '2026-09' },
     });
-    // A closing target of ceil(75 / 18) = 5; two closings by the 14th of 30 run forward to 4; three weeks
-    // left today included; three still needed, one a week.
+    // P13.1-T5 (ADR-0109): a closing target of ceil(75 / 18) = 5; 11 closings from 16 August to today;
+    // three weeks left today included; Rp 45 M short is ceil(45 / 18) = 3 policies, one a week.
     expect(view.pace).toEqual({
-      closingTarget: 5, closingsLogged: 2, dayOfMonth: 14, daysInMonth: 30,
-      projected: 4, weeksLeft: 3, neededPerWeek: 1, targetMet: false,
+      closingTarget: 5, closingsLast30Days: 11, dayOfMonth: 14, daysInMonth: 30,
+      weeksLeft: 3, policiesNeeded: 3, neededPerWeek: 1, targetMet: false,
     });
   });
 
@@ -197,7 +198,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     expect(view.pace).toMatchObject({ targetMet: true, neededPerWeek: 0 });
   });
 
-  it('AC-4: says reached only when the APE is — a closings count at its target is on pace, not reached', async () => {
+  it('P13.1-T5 AC-1, AC-3: says reached only when the APE is — closings past their target still need the APE’s policies', async () => {
     await wired.goals.save(agent(), plan());
     await production('2026-08', { apeYtd: cell(200 * M) });
     await production('2026-09', { apeMonthly: cell(60 * M), apeYtd: cell(260 * M) }); // 60 of 75
@@ -205,7 +206,8 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
     const view = await wired.summary.read(agent());
     expect(view.monthly.targetMet).toBe(false);
-    expect(view.pace).toMatchObject({ targetMet: false, neededPerWeek: 0, closingsLogged: 6 });
+    // Rp 15 M short of Rp 75 M is one policy, over three weeks: one a week, whatever the closings say.
+    expect(view.pace).toMatchObject({ targetMet: false, closingsLast30Days: 6, policiesNeeded: 1, neededPerWeek: 1 });
 
     await mongoose.connection.db!.collection('monthlyAgentData').updateOne(
       { month: '2026-09' }, { $set: { 'apeMonthly.value': 80 * M } },
@@ -213,12 +215,27 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     expect((await wired.summary.read(agent())).pace?.targetMet).toBe(true);
   });
 
-  it('AC-4: does not project before the 7th of the month', async () => {
+  it('P13.1-T5 AC-1, AC-2: on the 3rd the pace is there, over the last 30 days — last month’s included', async () => {
     at('2026-09-03T02:00:00Z');
     await wired.goals.save(agent(), plan());
+    await production('2026-08', { apeYtd: cell(200 * M) });
     await day('2026-09-02', { SELL_SUBMISSION: 1 });
+    await day('2026-08-20', { SELL_SUBMISSION: 2 });
+    await day('2026-08-04', { SELL_SUBMISSION: 5 }); // 4 August to 3 September is 31 days: outside
 
-    expect((await wired.summary.read(agent())).pace).toMatchObject({ closingsLogged: 1, projected: null, dayOfMonth: 3 });
+    // September's file has not landed: nothing counted as produced, so all ceil(75 / 18) = 5 policies are
+    // needed over ceil(28 / 7) = 4 weeks.
+    expect((await wired.summary.read(agent())).pace).toEqual({
+      closingTarget: 5, closingsLast30Days: 3, dayOfMonth: 3, daysInMonth: 30,
+      weeksLeft: 4, policiesNeeded: 5, neededPerWeek: 2, targetMet: false,
+    });
+  });
+
+  it('P13.1-T5 AC-2: counts the closing code, SELL_SUBMISSION, and no other activity', async () => {
+    await wired.goals.save(agent(), plan());
+    await day('2026-09-10', { SELL_SUBMISSION: 2, SELL_PRESENTATION: 7, RECRUIT_AGENT_CODE: 4 });
+
+    expect((await wired.summary.read(agent())).pace?.closingsLast30Days).toBe(2);
   });
 
   it('AC-1: in January there is no last month, and the target is the year over twelve', async () => {
@@ -239,7 +256,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     const view = await wired.summary.read(agent());
 
     expect(view.monthly.actualMinor).toBe(10 * M);
-    expect(view.pace?.closingsLogged).toBe(1);
+    expect(view.pace?.closingsLast30Days).toBe(1);
   });
 
   describe('P10-T5 — your sales activity targets, and the rest of your sections', () => {
@@ -522,7 +539,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     it('AC-1, AC-3: each rule that fired, from the reader’s pace, leads and ratios, in the fixed priority', async () => {
       await wired.goals.save(agent(), plan());
       await production('2026-08', { apeYtd: cell(200 * M) });
-      // One closing by the 14th against a target of 5: two at this rate. Ten presentations, one submission:
+      // One closing in the last 30 days against a target of 5 (ADR-0109). Ten presentations, one submission:
       // a selling success rate of 0.10 against 0.15, over enough of them to say so.
       await day('2026-09-10', { SELL_SUBMISSION: 1, SELL_PRESENTATION: 10 });
       await lead('Pak Heri', { nextActionDate: '2026-09-06' });
@@ -531,7 +548,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       const view = await cards();
 
       expect(view.map((c) => c.rule)).toEqual(['BEHIND_PACE', 'LEAD_OVERDUE', 'LEAD_NEGLECTED', 'RATIO_BELOW']);
-      expect(view[0]).toMatchObject({ kind: 'action', facts: { projected: 2, closingTarget: 5, weeksLeft: 3 } });
+      expect(view[0]).toMatchObject({ kind: 'action', facts: { closingsLast30Days: 1, closingTarget: 5, weeksLeft: 3, neededPerWeek: 2 } });
       expect(view[1]).toMatchObject({ facts: { name: 'Pak Heri', overdueDays: 8, others: 0 } });
       expect(view[3]).toMatchObject({
         kind: 'improve', facts: { code: 'SELLING_SUCCESS_RATE', label: 'Selling success rate', value: 0.1, benchmark: 0.15 },

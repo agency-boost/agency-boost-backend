@@ -12,7 +12,7 @@ const ratio = (over: Partial<RatioReading>): RatioReading => ({
   benchmark: 0.15, value: 0.15, denominatorCount: 10, status: 'success', ...over,
 });
 const pace = (over: Record<string, unknown> = {}) => ({
-  closingTarget: 6, closingsLogged: 2, dayOfMonth: 14, daysInMonth: 30, projected: 4, weeksLeft: 3, neededPerWeek: 2,
+  closingTarget: 6, closingsLast30Days: 4, dayOfMonth: 14, daysInMonth: 30, weeksLeft: 3, policiesNeeded: 5, neededPerWeek: 2,
   targetMet: false, ...over,
 });
 const quiet: InsightInputs = { compliance: logged, pace: null, leads: [], ratios: [] };
@@ -37,15 +37,19 @@ describe('the insight rules (P10-T7)', () => {
   });
 
   describe('BEHIND_PACE — the pace line’s own *behind*', () => {
-    it('fires on a projection short of the month’s closing target', () => {
+    it('P13.1-T5 AC-2 fires on the last 30 days’ closings short of the month’s closing target (ADR-0109)', () => {
       expect(insightsFor({ ...quiet, pace: pace() })).toEqual([
-        { rule: 'BEHIND_PACE', kind: 'action', facts: { projected: 4, closingTarget: 6, neededPerWeek: 2, weeksLeft: 3 } },
+        { rule: 'BEHIND_PACE', kind: 'action', facts: { closingsLast30Days: 4, closingTarget: 6, neededPerWeek: 2, weeksLeft: 3 } },
       ]);
     });
 
-    it('stays quiet on pace, before the 7th, once the APE target is reached, and without a goal', () => {
-      expect(rules({ pace: pace({ projected: 6 }) })).toEqual([]);
-      expect(rules({ pace: pace({ projected: null }) })).toEqual([]);
+    it('P13.1-T5 AC-1 fires on the 1st as on any day: there is no first week without a pace', () => {
+      expect(rules({ pace: pace({ dayOfMonth: 1, weeksLeft: 5, closingsLast30Days: 0 }) })).toEqual(['BEHIND_PACE']);
+    });
+
+    it('stays quiet at the target, once the APE target is reached, and without a goal', () => {
+      expect(rules({ pace: pace({ closingsLast30Days: 6 }) })).toEqual([]);
+      expect(rules({ pace: pace({ closingsLast30Days: 21 }) })).toEqual([]);
       expect(rules({ pace: pace({ targetMet: true }) })).toEqual([]);
       expect(rules({ pace: null })).toEqual([]);
     });

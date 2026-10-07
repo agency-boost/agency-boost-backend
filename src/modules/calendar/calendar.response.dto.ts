@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional, getSchemaPath } from '@nestjs/swagger';
 import { CALENDAR_ENTRY_TYPES, type CalendarEntryType } from '@/domain/constants';
 import { CALENDAR_ANSWERS, type CalendarAnswer } from './calendar-event.schema';
-import type { CalendarDeleted } from './calendar.service';
+import type { CalendarDeleted, CalendarSettings } from './calendar.service';
 import {
   PEOPLE_GROUPS, type CalendarDownline, type CalendarDownlineRow, type CalendarPeoplePage, type CalendarPersonRow,
   type PeopleGroup,
@@ -186,6 +186,16 @@ export class CalendarDeletedDto implements CalendarDeleted {
 
   @ApiProperty({ example: '2026-09-28T03:00:00.000Z', description: 'When it was deleted. It leaves every calendar it was on.' })
   deletedAt!: string;
+}
+
+/** The reader's own calendar settings (ADR-0110). */
+export class CalendarSettingsDto implements CalendarSettings {
+  @ApiProperty({
+    description:
+      '*Hide my personal activities*: on, your leaders comparing your week see only *Busy* at the times of '
+      + 'the entries you organise, unless they are on one. Off until you turn it on.',
+  })
+  hideDetails!: boolean;
 }
 
 export class CalendarPersonRowDto implements CalendarPersonRow {

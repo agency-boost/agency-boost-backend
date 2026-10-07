@@ -14,6 +14,7 @@ import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import type { MembershipDocument } from '@/modules/org/membership.schema';
 import { scopeFor } from '@/modules/rbac/permissions';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { TenantDay, type Office } from '@/modules/tenants/tenant-day.service';
@@ -68,6 +69,17 @@ export interface CalendarDeleted {
   deletedAt: string;
 }
 
+/**
+ * **The reader's own calendar settings** (ADR-0110; `GET` and `PUT /calendar/settings`). One today:
+ * *Hide my personal activities*, off until the member turns it on.
+ */
+export interface CalendarSettings {
+  hideDetails: boolean;
+}
+
+/** The record a change of the settings leaves: ids and the setting, never anything typed. */
+export const CALENDAR_SETTINGS_AUDIT_ACTION = 'calendar_settings.updated';
+
 const ENTRY = 'Calendar entry';
 const TIMING_FIELDS = ['date', 'start', 'end', 'startsOn', 'endsOn'] as const;
 
@@ -82,7 +94,9 @@ const TIMING_FIELDS = ['date', 'start', 'end', 'startsOn', 'endsOn'] as const;
  *    answered 404, so a refusal never confirms an entry to somebody who may not read it.
  * 2. **A leader's read of somebody else's calendar leaves a record** (D-audit, ADR-0093), and nothing in
  *    that read reaches above the reader's own line: an entry the compared member only attends is busy
- *    unless the reader could read it in their own right.
+ *    unless the reader could read it in their own right. **A member who hides their details**
+ *    (*Hide my personal activities*, ADR-0110, their own setting on their membership) is read the same
+ *    way in every pane: what they organised is busy to a reader who is not on it.
  * 3. **Days, weeks and months are the office's** (invariant §9), served by the read with its `today`
  *    and `now`, never worked out in the browser.
  *
@@ -122,7 +136,8 @@ export class CalendarService {
    *   themselves, since compare never reaches oneself. An empty `for` is the DTO's 400, never the
    *   reader's own calendar. Week only. In *Who reads what*'s projection
    *   (`comparedView`), and one §3.5 entry, surface `calendar`, written last, so a refused read writes
-   *   none.
+   *   none. **Each organiser in the week who hides their details** (ADR-0110) is read in the same round
+   *   trip as the names, so their entries go out as busy blocks to a reader who is not on them.
    */
   async read(ctx: RequestContext, query: CalendarReadQuery): Promise<CalendarPeriodView> {
     const me = requireMembership(ctx);
@@ -146,10 +161,13 @@ export class CalendarService {
       ctx, onCalendarOf(subject.membershipId),
       startOfOfficeDay(timezone, period.from), startOfOfficeDay(timezone, addDays(period.to, 1)),
     );
-    const [coaches, names, labels] = await Promise.all([
+    const [coaches, names, labels, hidden] = await Promise.all([
       compared || rows.some((e) => e.type === 'coaching') ? this.coachedBy(ctx, me) : Promise.resolve(new Set<string>()),
       this.names.byMembershipId(ctx, [subject.membershipId, ...namedIn(rows)]),
       this.rungLabels(ctx, office),
+      compared
+        ? this.hidingDetails(ctx, [subject.membershipId, ...rows.map((e) => e.organiserMembershipId)])
+        : Promise.resolve(new Set<string>()),
     ]);
     const reader: Reader = { membershipId: me, coaches, names, timezone };
     const now = this.clock.now();
@@ -165,7 +183,7 @@ export class CalendarService {
         rung: { code: subject.orgLevelCode, label: labels.get(subject.orgLevelCode) ?? subject.orgLevelCode },
       },
       entries: rows.map((entry) => (compared
-        ? comparedView(entry, subject.membershipId, reader)
+        ? comparedView(entry, subject.membershipId, reader, hidden)
         : entryView(entry, reader, standingOf(entry, me)!))),
     };
     if (compared) {
@@ -189,7 +207,52 @@ export class CalendarService {
     return this.answerAs(ctx, entry, (await this.days.office(ctx)).timezone);
   }
 
+  /**
+   * **`GET /calendar/settings`** (P13.1-T8, ADR-0110): the reader's own, and only theirs — the route
+   * names nobody, so there is nobody else's to ask for. Never audited: a self-read.
+   */
+  async settings(ctx: RequestContext): Promise<CalendarSettings> {
+    return { hideDetails: (await this.ownMembership(ctx)).calendarHideDetails === true };
+  }
+
   // ------------------------------------------------------------------ writes
+
+  /**
+   * **`PUT /calendar/settings`** (P13.1-T8, ADR-0110): *Hide my personal activities*, written on the
+   * reader's own membership. The route names nobody, so it reaches nobody else; a read-only support
+   * session meets the guard's 403, as every calendar write does. The whole setting is sent, and sending
+   * what is stored already answers it as it stands, writing and recording nothing.
+   *
+   * **A change leaves one `auditLog` row**, `calendar_settings.updated` on `memberships`: the member's id,
+   * and the setting before and after — a yes or a no, nothing anybody typed. In a support session the row
+   * names both people (§3.13), as every calendar write's does.
+   */
+  async saveSettings(ctx: RequestContext, input: CalendarSettings): Promise<CalendarSettings> {
+    const mine = await this.ownMembership(ctx);
+    const before = mine.calendarHideDetails === true;
+    if (before === input.hideDetails) return { hideDetails: before };
+    /*
+     * **Conditional on what was read**, so only the save that turns the stored value over writes, and only
+     * it is audited. Two saves from two devices can both read the same *before*: the second finds nothing
+     * left to change and answers what is stored now, rather than a value it did not write — or a second row
+     * recording the same change (the exit review's N1). A membership gone since the read answers 404 there.
+     */
+    const changed = await this.memberships.updateMany(
+      ctx,
+      { _id: mine._id, calendarHideDetails: before ? true : { $ne: true } },
+      { $set: { calendarHideDetails: input.hideDetails } },
+    );
+    if (changed === 0) return this.settings(ctx);
+    await this.audit.record(ctx, {
+      action: CALENDAR_SETTINGS_AUDIT_ACTION,
+      targetCollection: 'memberships',
+      targetId: String(mine._id),
+      targetMembershipId: String(mine._id),
+      before: { hideDetails: before },
+      after: { hideDetails: input.hideDetails },
+    });
+    return { hideDetails: input.hideDetails };
+  }
 
   /**
    * **`POST /calendar/entries`** (P12-T2, P12-T4): the reader becomes its organiser, at `version: 1`.
@@ -397,6 +460,26 @@ export class CalendarService {
     } as FilterQuery<CalendarEventDocument>);
     if (!entry) throw new NotFoundException(ENTRY);
     return entry;
+  }
+
+  /**
+   * The reader's own membership, read through the office's scope: a context whose membership is not this
+   * office's finds nothing and is 404, so the settings never reach across offices.
+   */
+  private async ownMembership(ctx: RequestContext): Promise<MembershipDocument> {
+    const mine = await this.memberships.findById(ctx, requireMembership(ctx));
+    if (!mine) throw new NotFoundException('Membership');
+    return mine;
+  }
+
+  /**
+   * **Who among these hides their entries' details** (ADR-0110): one scoped read of the memberships with
+   * *Hide my personal activities* on. An id that is nobody's finds nothing.
+   */
+  private async hidingDetails(ctx: RequestContext, ids: readonly string[]): Promise<Set<string>> {
+    const asked = [...new Set(ids)].filter((id) => isValidObjectId(id));
+    const found = await this.memberships.find(ctx, { _id: { $in: asked }, calendarHideDetails: true });
+    return new Set(found.map((m) => String(m._id)));
   }
 
   /** A pinned write matched nothing: the entry is gone (404), or it moved on (409). */

@@ -11,12 +11,16 @@ export const LEAD_OUTCOMES = ['won', 'lost'] as const;
 export type LeadOutcome = (typeof LEAD_OUTCOMES)[number];
 
 /**
- * Why this person's details may be held (UU 27/2022).
+ * Why this person's details may be held (UU 27/2022) — **as recorded until 2026-10-07.**
  *
  * Three grounds, because three are what an agent in the field actually has. `consent` is the
  * ordinary one; `contract` covers somebody already mid-application; `legitimate_interest` covers a
- * referral the agent has not yet spoken to. A free-text field would record a sentence nobody can
- * report on, which is the opposite of what the regulation asks for.
+ * referral the agent has not yet spoken to.
+ *
+ * **No route writes or returns one any more** (ADR-0108 §1): the product owner set the PDP question
+ * aside and the client removed the field. The enum stays because the column does — rows written
+ * before that day keep what they hold, and a schema that no longer knew the values would refuse to
+ * save a row carrying one.
  */
 export const LAWFUL_BASES = ['consent', 'contract', 'legitimate_interest'] as const;
 export type LawfulBasis = (typeof LAWFUL_BASES)[number];
@@ -67,7 +71,7 @@ export class LeadCommitment {
 }
 export const LeadCommitmentSchema = SchemaFactory.createForClass(LeadCommitment);
 
-/** Whatever contact detail the agent has. Both optional; neither free of a lawful basis. */
+/** Whatever contact detail the agent has. Both optional, and since 2026-10-07 nothing asked beside them. */
 @Schema({ _id: false })
 export class LeadContact {
   @Prop({ type: String, default: null, trim: true })
@@ -83,9 +87,9 @@ export const LeadContactSchema = SchemaFactory.createForClass(LeadContact);
  *
  * **The first record in this product about somebody who is not a user of it.** An activity log is
  * an agent's account of their own day; this is a name, a phone number and a note about a third
- * party who never met AgencyBoost and cannot see what is written about them. The lawful basis, the
- * soft delete and the admin read that returns counts rather than rows all follow from that one
- * difference.
+ * party who never met AgencyBoost and cannot see what is written about them. The soft delete and the
+ * admin read that returns counts rather than rows follow from that one difference, as the lawful basis
+ * did until ADR-0108 set it aside.
  *
  * **`configSchemaOptions`, not `baseSchemaOptions`** — the same choice `activityLogs` made, and for
  * the same reason. `version` here is the domain's number: what a write pins so that two people in
@@ -121,9 +125,10 @@ export class Lead {
   contact!: LeadContact;
 
   /**
-   * Why the contact details may be held. **Required before either is stored**, and not before the
-   * lead is: an agent jotting down a name from a Thursday BOP has collected nothing the regulation
-   * governs; the moment they add the phone number they have.
+   * Why the contact details may be held, and when that was recorded. **Kept, unwritten, since
+   * 2026-10-07** (ADR-0108 §1): the API neither takes nor returns either, and nothing clears them,
+   * so a value written while the rule stood is still here — a deploy is not an erasure. A new lead
+   * gets the defaults.
    */
   @Prop({ type: String, enum: LAWFUL_BASES, default: null })
   lawfulBasis!: LawfulBasis | null;

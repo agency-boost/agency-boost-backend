@@ -76,6 +76,7 @@ import {
 import { MySessionsDto, SessionPrintDto } from '@/modules/coaching/coaching-record.response.dto';
 import {
   CalendarDeletedDto, CalendarDownlineDto, CalendarEntryDto, CalendarPeoplePageDto, CalendarPeriodDto,
+  CalendarSettingsDto,
 } from '@/modules/calendar/calendar.response.dto';
 
 export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
@@ -115,6 +116,9 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   CalendarController_block: { type: CalendarEntryDto },
   CalendarController_searchPeople: { type: CalendarPeoplePageDto },
   CalendarController_downline: { type: CalendarDownlineDto },
+  // P13.1-T8: the reader's own calendar settings, *Hide my personal activities* (ADR-0110).
+  CalendarController_readSettings: { type: CalendarSettingsDto },
+  CalendarController_saveSettings: { type: CalendarSettingsDto },
   // Phase 13: the hire's own activation, and a leader's new hires.
   ActivationProgressController_mine: { type: ActivationViewDto },
   ActivationProgressController_tick: { type: ActivationViewDto },

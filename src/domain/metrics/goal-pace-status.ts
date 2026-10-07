@@ -10,8 +10,7 @@
  * else                                                       -> 'watch_closely'
  *
  * pace(m) = APE_ACHIEVED / APE_TARGET                                  once this month's file is in
- *         = PROJECTED_CLOSINGS_THIS_MONTH / POLICY_COUNT_TARGET        until then (OD-110)
- *         = 0                                                          until then, before the 7th
+ *         = CLOSINGS_LAST_30_DAYS / POLICY_COUNT_TARGET                until then (OD-110, ADR-0109)
  * ```
  *
  * **Evaluated on the calendar month** (ADR-0080): this month's APE produced against this month's target,
@@ -30,9 +29,10 @@
  *
  * **Before this month's file lands (OD-110, option 3, decided 2026-10-02)** there is no APE for the month:
  * a file lands after its month ends (ADR-0050). The last two branches then judge the pace on the activity,
- * as the Summary's *Your pace this month* does: `PROJECTED_CLOSINGS_THIS_MONTH` over `POLICY_COUNT_TARGET`
- * at `PACE_ON_TRACK_RATIO`. Before the 7th that projection is `null` — too early to project — and the
- * answer stays the prototype's pace of 0 (`Overall.html:7042`). Once the file lands, APE decides.
+ * as the Summary's pace sentence does: its *tracking to close N* over its *target of M* —
+ * `CLOSINGS_LAST_30_DAYS` over `POLICY_COUNT_TARGET` — at `PACE_ON_TRACK_RATIO`. Once the file lands, APE
+ * decides. *Amended 2026-10-07 (ADR-0109): it read `PROJECTED_CLOSINGS_THIS_MONTH`, a run-rate with no
+ * answer before the 7th; the Summary's sentence changed, and the roster reads what the sentence says.*
  */
 
 /** The four values, rendered *On track*, *Watch closely*, *Needs attention* and *No goal set*. */
@@ -52,10 +52,10 @@ export interface GoalPaceInputs {
     /** `PACING_TO_MAA` for the month. */
     pacing: boolean;
     /**
-     * The Summary's *Your pace this month* (OD-110), read only while `apeMinor` is `null`:
-     * `PROJECTED_CLOSINGS_THIS_MONTH` — `null` before the 7th — and `POLICY_COUNT_TARGET`.
+     * The Summary's pace sentence (OD-110, ADR-0109), read only while `apeMinor` is `null`:
+     * `CLOSINGS_LAST_30_DAYS` and `POLICY_COUNT_TARGET`.
      */
-    closings: { projected: number | null; target: number } | null;
+    closings: { last30Days: number; target: number } | null;
   };
   /** `PACE_ON_TRACK_RATIO`: the office's `onTrackPaceThreshold`, else `ON_TRACK_PACE_THRESHOLD`. */
   onTrackRatio: number;
@@ -70,13 +70,13 @@ export function goalPaceStatus({ month, onTrackRatio }: GoalPaceInputs): GoalPac
 }
 
 /**
- * The share of this month's target the member is at: APE once the month's file is in, the projected
- * closings over the closing target until then (OD-110), and 0 before either can answer.
+ * The share of this month's target the member is at: APE once the month's file is in, the last 30 days'
+ * closings over the closing target until then (OD-110, ADR-0109), and 0 when neither can answer.
  */
 function monthPace(month: NonNullable<GoalPaceInputs['month']>): number {
   if (month.apeMinor !== null) return month.apeMinor / month.targetMinor;
   const closings = month.closings;
-  if (closings && closings.projected !== null && closings.target > 0) return closings.projected / closings.target;
-  // Too early to project: the prototype's pace of 0 (`Overall.html:7042`).
+  if (closings && closings.target > 0) return closings.last30Days / closings.target;
+  // Nothing to divide by: the prototype's pace of 0 (`Overall.html:7042`).
   return 0;
 }

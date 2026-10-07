@@ -199,6 +199,32 @@ describe('the coaching roster (P11-T6)', () => {
       }
     });
 
+    it('P13.1-T5 AC-2 before the month’s file lands, the roster reads the Summary’s last 30 days (ADR-0092, ADR-0109)', async () => {
+      const db = mongoose.connection.db!;
+      const september = { kpmId: KPM_A, membershipId: office.id.DIMAS, month: '2026-09' };
+      // Dimas paces to MAA on his presentations. His September is not filed yet, and five closings on
+      // 20 August are inside the last 30 days of the 14th of September, outside the calendar month.
+      await db.collection('monthlyAgentData').updateOne(september, { $set: { deletedAt: new Date() } });
+      const late = await db.collection('activityLogs').insertOne({
+        kpmId: KPM_A, membershipId: office.id.DIMAS, localDate: '2026-08-20',
+        entries: [{ activityTypeId: 't-SELL_SUBMISSION', activityTypeCode: 'SELL_SUBMISSION', count: 5 }], totalCount: 5,
+        source: 'self', enteredByMembershipId: office.id.DIMAS, version: 1, frozenAt: null, corrections: [], deletedAt: null,
+      } as never);
+      try {
+        // One number: his Summary's *tracking to close 5 … against a target of 5*, and his row On track.
+        expect((await wired.summary.read(office.as('DIMAS'))).pace).toMatchObject({ closingsLast30Days: 5, closingTarget: 5 });
+        expect(rowOf(await roster('AGUS'), 'DIMAS').status).toBe('on_track');
+
+        // On 15 August they are the 31st day back: neither counts them.
+        await db.collection('activityLogs').updateOne({ _id: late.insertedId }, { $set: { localDate: '2026-08-15' } });
+        expect((await wired.summary.read(office.as('DIMAS'))).pace?.closingsLast30Days).toBe(0);
+        expect(rowOf(await roster('AGUS'), 'DIMAS').status).toBe('watch_closely');
+      } finally {
+        await db.collection('monthlyAgentData').updateOne(september, { $set: { deletedAt: null } });
+        await db.collection('activityLogs').deleteOne({ _id: late.insertedId });
+      }
+    });
+
     it('P11-T6 AC-4 reads the office’s own on-track ratio', async () => {
       await mongoose.connection.db!.collection('kpms').updateOne(
         { _id: new mongoose.Types.ObjectId(KPM_A) }, { $set: { 'settings.onTrackPaceThreshold': 0.2 } },

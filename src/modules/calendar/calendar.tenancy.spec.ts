@@ -150,6 +150,44 @@ describe('a member’s entries are readable only by them, their invitees and the
       expect((await h.http().get('/calendar/downline').expect(200)).body.people.map((p: Doc) => p.membershipId)).toEqual([h.id('B_AGENT')]);
     });
 
+    it('P13.1-T8 AC-4 the settings reach one office: a context in another office naming this office’s member finds nobody, either way round', async () => {
+      const mongoId = (who: Who) => new mongoose.Types.ObjectId(h.id(who));
+      const forged: [string, RequestContext, Who][] = [
+        ['office B’s AB holding Sari’s membership id', (() => {
+          const b = h.office.as('B_AB');
+          return new RequestContext(b.userId, 'none', { ...b.membership!, membershipId: h.id('SARI') });
+        })(), 'SARI'],
+        ['Sari holding office B’s agent’s membership id', (() => {
+          const sari = h.office.as('SARI');
+          return new RequestContext(sari.userId, 'none', { ...sari.membership!, membershipId: h.id('B_AGENT') });
+        })(), 'B_AGENT'],
+      ];
+      try {
+        for (const [who, ctx, named] of forged) {
+          h.as(ctx);
+          const read = await h.http().get('/calendar/settings');
+          const write = await h.http().put('/calendar/settings').send({ hideDetails: true });
+          expect([who, read.status, read.body.error?.code, write.status, write.body.error?.code])
+            .toEqual([who, 404, 'NOT_FOUND', 404, 'NOT_FOUND']);
+          expect([who, (await h.col('memberships').findOne({ _id: mongoId(named) }))!.calendarHideDetails]).toEqual([who, undefined]);
+        }
+        // Office B's own member switches theirs; this office's reads are none the wiser.
+        h.as('B_AGENT');
+        await h.http().put('/calendar/settings').send({ hideDetails: true }).expect(200);
+        h.as('B_AB');
+        const b = (await h.http().get('/calendar/entries').query({ for: h.id('B_AGENT') }).expect(200)).body;
+        expect(b.entries).toEqual([]);
+        h.as('SARI');
+        expect((await h.http().get('/calendar/settings').expect(200)).body).toEqual({ hideDetails: false });
+        h.as('AGUS');
+        expect((await h.http().get('/calendar/entries').query({ for: h.id('SARI') }).expect(200)).body.entries).toEqual([
+          expect.objectContaining({ entryId: entry.entryId, title: 'Client visit — Kusuma', readerIs: 'ancestor' }),
+        ]);
+      } finally {
+        await h.col('memberships').updateMany({}, { $unset: { calendarHideDetails: '' } });
+      }
+    });
+
     it('P12-T4 AC-9 the picker answers one office: another office’s members are never in it, either way round', async () => {
       h.as('B_AB');
       const theirs = (await h.http().get('/calendar/people').expect(200)).body.items.map((p: Doc) => p.membershipId);

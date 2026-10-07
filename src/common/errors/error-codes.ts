@@ -42,14 +42,11 @@ export const ErrorCode = {
    * `LEAD_STATUS_NOT_FINAL`, `LEAD_STATUS_WRONG_PIPELINE` and `LEAD_ALREADY_CLOSED` belong to
    * P7-T3, which is the task that can throw them.
    */
-  /**
-   * Contact details were to be stored with no recorded ground for holding them (UU 27/2022).
-   *
-   * **On the contact fields, not on the lead.** A name jotted down from a Thursday BOP is not
-   * personal data the regulation governs; a phone number is. A gate on creation would make the
-   * first thing an agent meets a compliance form, and the predictable outcome is a notebook.
+  /*
+   * `LEAD_CONSENT_REQUIRED` was here: contact details with no recorded lawful basis (UU 27/2022).
+   * Retired on 2026-10-07 with the field and its rule (ADR-0108 §1); the error catalog keeps its row,
+   * marked retired, so a client that still branches on it can find out why it never comes.
    */
-  LEAD_CONSENT_REQUIRED: 'LEAD_CONSENT_REQUIRED',
   /** A stage from the other ladder. Two vocabularies, so this is a type error, not a path rule. */
   LEAD_STATUS_WRONG_PIPELINE: 'LEAD_STATUS_WRONG_PIPELINE',
   /**

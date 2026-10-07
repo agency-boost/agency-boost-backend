@@ -1,8 +1,5 @@
-import { HttpStatus } from '@nestjs/common';
-import { DomainException } from '@/common/errors/domain.exception';
-import { ErrorCode } from '@/common/errors/error-codes';
 import { Fields, refuseWith } from '@/common/validation/fields';
-import { LAWFUL_BASES, LEAD_TYPES, type LawfulBasis, type LeadType } from './lead.schema';
+import { LEAD_TYPES, type LeadType } from './lead.schema';
 
 /** What a lead's own fields may be. Bounds in one place, so a screen and a service agree. */
 export const LEAD_BOUNDS = {
@@ -18,7 +15,6 @@ export interface CheckedLead {
   name?: string;
   type?: LeadType | null;
   contact?: { phone: string | null; email: string | null };
-  lawfulBasis?: LawfulBasis | null;
   remarks?: string | null;
   nextActionDate?: string | null;
   nextActionNote?: string | null;
@@ -38,16 +34,19 @@ const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * One lead, read field by field (P7-T1).
  *
- * **The rule this exists for is AC-3**: contact details may not be stored without a recorded ground
- * for holding them (UU 27/2022). Everything else here is ordinary shape-checking.
+ * Ordinary shape-checking, and nothing more since 2026-10-07. It was here for P7-T1's AC-3 — no
+ * contact details without a recorded lawful basis (UU 27/2022) — and the product owner set that aside
+ * with the field that asked for it (ADR-0108 §1). **`lawfulBasis` is now a field nobody defined**, so a
+ * body that still carries it is refused by name, as any other unknown field is, rather than silently
+ * dropped: a client that thinks it is recording a ground should be told it is not.
  *
- * Pure, and separate from the service, so the rule can be exercised without a database — the same
- * shape `campaign-input.ts` and `activation-input.ts` take, and the reason ADR-0030 gives for it.
+ * Pure, and separate from the service, so it can be exercised without a database — the same shape
+ * `campaign-input.ts` and `activation-input.ts` take, and the reason ADR-0030 gives for it.
  */
 export function checkLead(body: unknown, opts: { partial?: boolean } = {}): CheckedLead {
   const required = !opts.partial;
   const f = new Fields(body, [
-    'name', 'type', 'contact', 'lawfulBasis', 'remarks',
+    'name', 'type', 'contact', 'remarks',
     'nextActionDate', 'nextActionNote', 'source', 'thisMonth', 'version',
   ]);
 
@@ -57,12 +56,11 @@ export function checkLead(body: unknown, opts: { partial?: boolean } = {}): Chec
   if (name !== undefined) out.name = name;
 
   /*
-   * **`null` is a value here, not an absence**, for both of these: a lead may be saved before the
-   * agent picks a ladder, and a ground may be withdrawn. `oneOf` reads null as *not one of these*
-   * and records a violation, so the null is taken first and the enum never sees it.
+   * **`null` is a value here, not an absence**: a lead may be saved before the agent picks a ladder.
+   * `oneOf` reads null as *not one of these* and records a violation, so the null is taken first and
+   * the enum never sees it.
    */
   readNullable(f, body, 'type', LEAD_TYPES, (v) => { out.type = v; });
-  readNullable(f, body, 'lawfulBasis', LAWFUL_BASES, (v) => { out.lawfulBasis = v; });
 
   const remarks = f.note('remarks', LEAD_BOUNDS.remarks);
   if (remarks !== undefined) out.remarks = remarks;
@@ -101,7 +99,7 @@ export function checkLead(body: unknown, opts: { partial?: boolean } = {}): Chec
   return out;
 }
 
-/** Both optional, both clearable. Shape only — whether they may be *stored* is the next rule. */
+/** Both optional, both clearable, and shape only. No ground is asked for either (ADR-0108 §1). */
 function readContact(value: unknown, f: Fields): { phone: string | null; email: string | null } {
   if (value === null) return { phone: null, email: null };
   if (typeof value !== 'object' || Array.isArray(value)) {
@@ -132,31 +130,6 @@ function readContact(value: unknown, f: Fields): { phone: string | null; email: 
   };
 
   return { phone: read('phone'), email: read('email') };
-}
-
-/**
- * **A phone number or an email needs a recorded ground for holding it** (UU 27/2022; AC-3).
- *
- * Checked against the lead as it **will be**, not as it arrived: clearing the basis on a lead that
- * already has a phone number is the same act as adding the number without one, and a rule that
- * only read the incoming patch would let the second happen in two steps.
- *
- * Its own function rather than a branch inside `checkLead`, because it needs the stored row and
- * `checkLead` deliberately does not.
- */
-export function requireLawfulBasis(next: {
-  contact: { phone: string | null; email: string | null };
-  lawfulBasis: string | null;
-}): void {
-  const holdsContact = Boolean(next.contact.phone) || Boolean(next.contact.email);
-  if (!holdsContact || next.lawfulBasis) return;
-
-  throw new DomainException(
-    ErrorCode.LEAD_CONSENT_REQUIRED,
-    'Record why this person’s details may be held before storing a phone number or an email.',
-    HttpStatus.UNPROCESSABLE_ENTITY,
-    { allowed: [...LAWFUL_BASES] },
-  );
 }
 
 /** An enum that may also be explicitly cleared. */

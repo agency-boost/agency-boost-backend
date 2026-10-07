@@ -51,6 +51,40 @@ describe('calendar-view', () => {
     expect(comparedView(attended, 'rina', reader('indah'))).toMatchObject({ readerIs: 'placed' });
   });
 
+  describe('P13.1-T8 Hide my personal activities (ADR-0110)', () => {
+    const hiding = new Set(['sari']);
+
+    it('P13.1-T8 AC-3 a member who hides is answered to an ancestor as busy blocks, their time and nothing else', () => {
+      expect(comparedView(entry(), 'sari', reader('agus'), hiding)).toEqual(busyView(entry(), J));
+      // A trip hidden is a busy trip: its two dates kept.
+      const trip = entry({ type: 'travel', startsOn: '2026-09-16', endsOn: '2026-09-17' });
+      expect(comparedView(trip, 'sari', reader('agus'), hiding)).toEqual(busyView(trip, J));
+    });
+
+    it('P13.1-T8 AC-3 a reader on the entry still reads it in full: an invitee, the placed member, its organiser', () => {
+      expect(comparedView(entry(), 'sari', reader('rina'), hiding)).toMatchObject({ readerIs: 'invitee', title: 'Client visit — Kusuma' });
+      expect(comparedView(entry(), 'sari', reader('indah'), hiding)).toMatchObject({ readerIs: 'placed', notes: 'Kusuma residence' });
+      expect(comparedView(entry(), 'rina', reader('sari'), hiding)).toMatchObject({ readerIs: 'organiser' });
+    });
+
+    it('P13.1-T8 AC-3 what a hiding member organised is busy in another member’s pane too, though the reader coaches them', () => {
+      // Rina is on Sari's entry; Agus, comparing Rina, coaches Sari — and Sari hides.
+      expect(comparedView(entry(), 'rina', reader('agus', ['sari']), hiding)).toEqual(busyView(entry(), J));
+      expect(comparedView(entry(), 'rina', reader('agus', ['sari']))).toMatchObject({ readerIs: 'ancestor' });
+    });
+
+    it('P13.1-T8 AC-3 a leader’s entry on the member’s calendar is not the member’s to hide: it is read as before', () => {
+      const block = entry({ organiserMembershipId: 'agus', attendees: [{ membershipId: 'sari', placed: true, answer: null, answeredAt: null, addedAt: new Date() }] });
+      expect(comparedView(block, 'sari', reader('agus'), hiding)).toMatchObject({ readerIs: 'organiser' });
+      // The leader above who coaches the block's organiser reads it in full, as without the setting.
+      expect(comparedView(block, 'sari', reader('owner', ['agus', 'sari']), hiding)).toMatchObject({ readerIs: 'ancestor' });
+    });
+
+    it('P13.1-T8 AC-3 off — nobody hiding — changes nothing', () => {
+      expect(comparedView(entry(), 'sari', reader('agus'), new Set())).toEqual(comparedView(entry(), 'sari', reader('agus')));
+    });
+  });
+
   it('P12-T5 AC-4 a busy block is its time and nothing else', () => {
     expect(busyView(entry(), J)).toEqual({
       busy: true, allDay: false, date: '2026-09-16', start: '10:00', end: '11:00', startsOn: null, endsOn: null,

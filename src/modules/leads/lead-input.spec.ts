@@ -1,11 +1,11 @@
-import { checkLead, requireLawfulBasis } from './lead-input';
+import { checkLead } from './lead-input';
 
 /**
  * A lead's fields, read without a database (P7-T1).
  *
- * The service spec exercises the **rule** that matters — a ground before the details — end to end.
- * What is here is the shape-checking underneath it, which is cheaper to state directly and which a
- * service test would only reach by accident.
+ * The shape-checking, which is cheaper to state directly than to reach through the service. The rule
+ * it once served — a ground before the details — went on 2026-10-07 (ADR-0108 §1); what replaces it
+ * is the absence pinned at the end.
  */
 describe('reading a lead’s fields (P7-T1)', () => {
   const ok = { name: 'Pak Budi' };
@@ -39,8 +39,7 @@ describe('reading a lead’s fields (P7-T1)', () => {
     });
 
     it('reads a blank string as nothing held', () => {
-      // Blank and absent are the same fact about a phone number and should read alike — which
-      // also means blanking one lifts the lawful-basis requirement rather than tripping it.
+      // Blank and absent are the same fact about a phone number and should read alike.
       expect(checkLead({ ...ok, contact: { phone: '   ' } }).contact)
         .toEqual({ phone: null, email: null });
     });
@@ -79,10 +78,10 @@ describe('reading a lead’s fields (P7-T1)', () => {
   });
 
   describe('the nullable enums', () => {
-    it.each(['type', 'lawfulBasis'])('reads null on %s as a value, not as a violation', (field) => {
-      // A lead may be saved before the agent picks a ladder, and a ground may be withdrawn.
-      // `oneOf` reads null as *not one of these*, so the null is taken before the enum sees it.
-      expect(checkLead({ ...ok, [field]: null })).toMatchObject({ [field]: null });
+    it('reads null on type as a value, not as a violation', () => {
+      // A lead may be saved before the agent picks a ladder. `oneOf` reads null as *not one of
+      // these*, so the null is taken before the enum sees it.
+      expect(checkLead({ ...ok, type: null })).toMatchObject({ type: null });
     });
 
     it('still refuses a value that is neither null nor one of the names', () => {
@@ -100,26 +99,20 @@ describe('reading a lead’s fields (P7-T1)', () => {
     expect(() => checkLead({ ...ok, thisMonth: 'yes' })).toThrow(/true or false/);
   });
 
-  describe('the ground for holding contact details', () => {
-    const held = { phone: '0812', email: null };
-    const none = { phone: null, email: null };
-
-    it('says nothing when there is nothing to hold', () => {
-      expect(() => requireLawfulBasis({ contact: none, lawfulBasis: null })).not.toThrow();
+  describe('P13.1-T4 AC-1 — no ground is asked for (ADR-0108 §1)', () => {
+    it('P13.1-T4 AC-1 takes a phone and an email with nothing beside them', () => {
+      expect(checkLead({ ...ok, contact: { phone: '0812-1100-2200', email: 'budi@example.com' } }).contact)
+        .toEqual({ phone: '0812-1100-2200', email: 'budi@example.com' });
     });
 
-    it('refuses details with no ground, and names the ones it would take', () => {
-      try {
-        requireLawfulBasis({ contact: held, lawfulBasis: null });
-        throw new Error('should have refused');
-      } catch (err) {
-        const details = (err as { details?: { allowed?: string[] } }).details;
-        expect(details?.allowed).toEqual(['consent', 'contract', 'legitimate_interest']);
-      }
+    it('P13.1-T4 AC-1 refuses lawfulBasis by name, as a field nobody defines any more', () => {
+      // Refused rather than dropped: a client that believes it is recording a ground is told it is not.
+      expect(() => checkLead({ ...ok, lawfulBasis: 'consent' })).toThrow(/property lawfulBasis should not exist/);
+      expect(() => checkLead({ lawfulBasis: null }, { partial: true })).toThrow(/property lawfulBasis should not exist/);
     });
 
-    it('takes details once a ground is recorded', () => {
-      expect(() => requireLawfulBasis({ contact: held, lawfulBasis: 'consent' })).not.toThrow();
+    it('P13.1-T4 AC-1 never hands the service a lawfulBasis to write', () => {
+      expect(checkLead({ ...ok, contact: { phone: '0812' } })).not.toHaveProperty('lawfulBasis');
     });
   });
 });

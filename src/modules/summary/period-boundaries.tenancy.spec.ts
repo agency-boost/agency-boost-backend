@@ -119,14 +119,33 @@ describe('Phase 10’s periods, at midnight in Jakarta (P10-T8)', () => {
 
       const closings = (view: typeof before, period: 'monthly' | 'yearly') => view.activity[period].targets[2].logged;
       expect(before).toMatchObject({ month: '2026-09', today: '2026-09-30', activity: { monthly: { from: '2026-09-01', to: '2026-09-30' } } });
-      expect(before.pace).toMatchObject({ dayOfMonth: 30, daysInMonth: 30, closingsLogged: 1 });
+      expect(before.pace).toMatchObject({ dayOfMonth: 30, daysInMonth: 30, weeksLeft: 1, closingsLast30Days: 1 });
       expect(closings(before, 'monthly')).toBe(1);
 
       expect(after).toMatchObject({ month: '2026-10', today: '2026-10-01', activity: { monthly: { from: '2026-10-01', to: '2026-10-01' } } });
-      expect(after.pace).toMatchObject({ dayOfMonth: 1, daysInMonth: 31, closingsLogged: 0 });
+      // The month turned over; the last 30 days did not lose the 30th (ADR-0109).
+      expect(after.pace).toMatchObject({ dayOfMonth: 1, daysInMonth: 31, weeksLeft: 5, closingsLast30Days: 1 });
       expect(closings(after, 'monthly')).toBe(0);
       // The year still holds September's.
       expect(closings(after, 'yearly')).toBe(1);
+    });
+
+    it('P13.1-T5 AC-2: the pace’s last 30 days are the office’s, and let their first day go at its midnight', async () => {
+      await wired.goals.save(agent(), {
+        period: '2026', mode: 'direct', annualApeTargetMinor: 500 * M, savingsTargetMinor: 0, commissionRatePct: 10,
+        monthsLeft: 4, apeAchievedMinor: 0, caseSizeMinor: 18 * M, leadsToApptPct: 30, closingRatePct: 30,
+      });
+      await day('2026-09-01', { SELL_SUBMISSION: 2 });
+      await day('2026-09-30', { SELL_SUBMISSION: 1 });
+
+      const before = await wired.summary.read(agent());
+      at(AFTER);
+      const after = await wired.summary.read(agent());
+
+      // 1 to 30 September at 23:59 in Jakarta; 2 September to 1 October a minute later — still 30 September
+      // in UTC, where a server-clock window would keep the 1st for seven more hours.
+      expect(before.pace?.closingsLast30Days).toBe(3);
+      expect(after.pace?.closingsLast30Days).toBe(1);
     });
 
     it('this year turns over at midnight on 31 December in Jakarta, not in UTC', async () => {

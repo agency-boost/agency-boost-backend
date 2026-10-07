@@ -29,6 +29,7 @@ import {
   ActivityCategoryRepository, ActivityTypeRepository, RatioDefinitionRepository,
 } from '@/modules/config/activity.repository';
 import { diverges } from '@/modules/config/ratio.service';
+import { TenantConfigService } from '@/modules/config/tenant-config.service';
 import { GoalService } from '@/modules/goals/goal.service';
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import { ProductionReadings } from '@/modules/production/production-readings';
@@ -123,7 +124,10 @@ export interface DashboardSectionView {
   types: DashboardTypeView[];
 }
 
-/** The Activity Dashboard (P10-T1): the reader's own days over a range, types down and time across. */
+/**
+ * The Activity Dashboard (P10-T1): one member's days over a range, types down and time across — the
+ * reader's own, or a coachee's on coaching's *Activity* tab (P13.1-T9).
+ */
 export interface ActivityDashboardView {
   range: DashboardRange;
   from: LocalDate;
@@ -189,6 +193,16 @@ export interface ActivityRatiosView {
   ratios: ActivityRatioView[];
 }
 
+/**
+ * **What a member may log against** (P13.1-T2): the types of the sections their rung is shown, and
+ * every code the office has at all — which is what tells *not your section* from *no such type*.
+ */
+interface LogVocabulary {
+  /** In display order. `id` is the type's own, stored beside the code on every entry. */
+  applicable: { id: string; code: string; label: string }[];
+  codes: Set<string>;
+}
+
 export interface ActivityComplianceView {
   membershipId: string;
   /** `ACTIVITY_COMPLIANCE_7D` — logged at least once in the rolling window. */
@@ -247,11 +261,27 @@ export class ActivityService {
      * activation module answers, so activity does not depend on it; optional, failing open.
      */
     @Optional() @Inject(ActivationEvents) private readonly activation: ActivationEvents | null = null,
+    /*
+     * P13.1-T2: the published copy Log Activity draws its rows from (`/kpm/config`), so the day it opens
+     * and the save after it read the vocabulary the screen shows. The application always provides it;
+     * optional so a hand-built instance that saves no day — the seed's snapshot builder — need not
+     * construct the whole configuration renderer. Without it the vocabulary is the working copy, which is
+     * what `readPublished` itself answers an office with nothing published.
+     *
+     * **The token is named**, as the activation port's is: a parameter typed `X | null` is emitted as
+     * `Object`, which no provider answers, so `@Optional()` alone resolved it to null in the real graph and
+     * the save read the draft again (`app.module.int.spec.ts` pins it).
+     */
+    @Optional() @Inject(TenantConfigService) private readonly published: TenantConfigService | null = null,
   ) {}
 
   // ------------------------------------------------------------------ reading
 
-  /** One day, for the caller or for somebody their scope reaches. */
+  /**
+   * One day, for the caller or for somebody their scope reaches. Its rows are the published vocabulary on
+   * the subject's rung (P13.1-T2), read once beside the day: the rows Log Activity draws, so every code the
+   * screen sends back on Save is one the save accepts.
+   */
   async readDay(
     ctx: RequestContext, input: { membershipId?: string; date?: string },
   ): Promise<ActivityDayView> {
@@ -260,11 +290,12 @@ export class ActivityService {
     const subject = await this.coach.subject(ctx, input.membershipId, 'activity_log:read_raw');
     const date = this.requireDay(input.date ?? today);
 
-    const row = await this.logs.findOne(ctx, {
-      membershipId: subject.membershipId, localDate: date,
-    });
+    const [row, vocabulary] = await Promise.all([
+      this.logs.findOne(ctx, { membershipId: subject.membershipId, localDate: date }),
+      this.vocabularyFor(ctx, subject.orgLevelCode),
+    ]);
     await this.subjectReads.record(ctx, subject, 'log', { from: date, to: date });
-    return this.view(row, subject, date, today, office, ctx);
+    return this.view(row, subject, date, today, office, vocabulary, ctx);
   }
 
   /**
@@ -364,30 +395,37 @@ export class ActivityService {
   }
 
   /**
-   * The Activity Dashboard (P10-T1): **your own** days over a range, per type and per column.
+   * The Activity Dashboard (P10-T1): a member's days over a range, per type and per column.
    *
-   * **No subject.** The screen is first-person and the route takes nobody else's id: a leader reading a
-   * downline's day-by-day is Phase 11's coaching copy, and §3.5 owes every such read the audit entry
-   * `SubjectReadAudit` writes, which this route would otherwise have to write too.
+   * **Yours, or a coachee's** (P13.1-T9). Without `for` it is the reader's own, as `/activity/dashboard`
+   * shows it. With one it is coaching's *Activity* tab: the subject resolved by `CoachResolver.subject` on
+   * `activity_log:read_raw` as `GET /activity/log` resolves its own — `own` reaches only the caller, a
+   * hierarchy token `COACH`, `own-kpm` the office; outside it, 404 — and drawn on **the subject's rung**
+   * (ADR-0020), so a leader reads the sections the coachee is shown. Another member's read writes the
+   * §3.5 entry, surface `activity_dashboard`, over the range, last, once the answer exists; a self-read
+   * writes none. It was first-person only until 2026-10-07, when the client asked for the same data in
+   * coaching, which is where a leader's read of a downline and its audit entry live.
    *
    * **Summed from what is stored, not from the summary's `totals`.** Those keep only the codes this
    * rung is shown today, while `totalCount` counts everything; reusing them would make a section's
    * rows add up to less than its total the day an office archives a type.
    */
   async dashboard(
-    ctx: RequestContext, input: { range?: string; from?: string; to?: string },
+    ctx: RequestContext, input: { for?: string; range?: string; from?: string; to?: string },
   ): Promise<ActivityDashboardView> {
     // The membership first: a Super Admin holds `read_raw` over everything and has no days of their
     // own, and *you have no membership here* is the true answer — not *office not found*.
-    const me = this.requireMembership(ctx);
+    this.requireMembership(ctx);
     const office = await this.office(ctx);
-    const rung = ctx.membership?.orgLevelCode ?? '';
+    const subject = await this.coach.subject(ctx, input.for, 'activity_log:read_raw');
+    // The subject's rung, not the reader's (ADR-0020): a leader reads the coachee's own sections.
+    const rung = subject.orgLevelCode;
     const today = localDayOf(this.clock.now(), office.timezone);
     const range = dashboardRange(input, today);
     const buckets = bucketsFor(range);
 
     const [rows, categories, types] = await Promise.all([
-      this.logs.find(ctx, { membershipId: me, localDate: { $gte: range.from, $lte: range.to } }),
+      this.logs.find(ctx, { membershipId: subject.membershipId, localDate: { $gte: range.from, $lte: range.to } }),
       this.categories.find(ctx, {}, { sort: { displayOrder: 1 } }),
       this.types.find(ctx, {}, { sort: { displayOrder: 1 } }),
     ]);
@@ -460,7 +498,7 @@ export class ActivityService {
     }
 
     const counts = sum(sections.map((s) => s.counts));
-    return {
+    const view: ActivityDashboardView = {
       ...range,
       today,
       buckets,
@@ -470,6 +508,10 @@ export class ActivityService {
       daysLogged: rows.length,
       correctedDays: rows.filter((r) => (r.corrections ?? []).length > 0).length,
     };
+
+    // Last, once the answer exists; nothing for the caller's own read (`SubjectReadAudit`).
+    await this.subjectReads.record(ctx, subject, 'activity_dashboard', { from: view.from, to: view.to });
+    return view;
   }
 
   /**
@@ -668,9 +710,9 @@ export class ActivityService {
     }
 
     const mine = ctx.membership?.orgLevelCode ?? '';
-    const entries = await this.readCounts(
-      ctx, mine, office.settings.activityDailyMaxCount, input.counts,
-    );
+    // Read once, for the check and for the answer: the save's vocabulary is the one the screen showed.
+    const vocabulary = await this.vocabularyFor(ctx, mine);
+    const entries = this.readCounts(vocabulary, office.settings.activityDailyMaxCount, input.counts);
     const totalCount = entries.reduce((sum: number, e: { count: number }) => sum + e.count, 0);
     const existing = await this.logs.findOne(ctx, { membershipId: me, localDate: date });
 
@@ -701,7 +743,7 @@ export class ActivityService {
     // P13-T3 AC-4: a day logged above zero may make the hire's fourth consecutive week.
     await signalActivation(this.activation, ctx, me, 'feature:activity');
 
-    return this.view(row, { membershipId: me, orgLevelCode: mine }, date, today, office, ctx);
+    return this.view(row, { membershipId: me, orgLevelCode: mine }, date, today, office, vocabulary, ctx);
   }
 
   /**
@@ -744,9 +786,8 @@ export class ActivityService {
     }
 
     const mine = ctx.membership?.orgLevelCode ?? '';
-    const entries = await this.readCounts(
-      ctx, mine, office.settings.activityDailyMaxCount, input.counts,
-    );
+    const vocabulary = await this.vocabularyFor(ctx, mine);
+    const entries = this.readCounts(vocabulary, office.settings.activityDailyMaxCount, input.counts);
     const totalCount = entries.reduce((sum: number, e: { count: number }) => sum + e.count, 0);
     const now = this.clock.now();
 
@@ -782,7 +823,7 @@ export class ActivityService {
     // A corrected day counts as corrected (ADR-0042): it may make the fourth week, and never unmakes one.
     await signalActivation(this.activation, ctx, me, 'feature:activity');
 
-    return this.view(row, { membershipId: me, orgLevelCode: mine }, date, today, office, ctx);
+    return this.view(row, { membershipId: me, orgLevelCode: mine }, date, today, office, vocabulary, ctx);
   }
 
   // ---------------------------------------------------------------- internals
@@ -873,7 +914,10 @@ export class ActivityService {
     return { applicable: all.filter((t) => shown.has(t.categoryCode)), all };
   }
 
-  /** Every active activity type, by code. The vocabulary a count may be filed against. */
+  /**
+   * Every active activity type this rung is shown, by code, in the working copy: the summary's
+   * `totals` (P6-T4). Not the log's vocabulary any more, which is the published one (`vocabularyFor`).
+   */
   private async labelsByCode(
     ctx: RequestContext, orgLevelCode: string,
   ): Promise<Map<string, string>> {
@@ -882,23 +926,66 @@ export class ActivityService {
   }
 
   /**
-   * Turn `{ CODE: n }` into stored entries.
+   * **The vocabulary a day is read and saved in: the office's published copy, on a rung** (P13.1-T2).
+   *
+   * Log Activity draws its sections and rows from `/kpm/config` — the snapshot agents work against
+   * (P4-T6), never the draft an Owner is editing — and hides a section the reader's rung is not shown.
+   * The day's rows and the save's check read that same copy through the same read, `readPublished`, so
+   * a row on screen is a row the save takes and a code no screen offers is refused. They read the live
+   * rows until 2026-10-07, and the client found the gap: a type archived in the draft after publishing
+   * stayed on screen and its count was refused on Save as a code the office did not have — the seed's
+   * `DEV_COACHING_RECEIVED`, and any office between an archive and its next publish. A type created in
+   * the draft was the other way round: on no screen, and accepted.
+   *
+   * - **One read, one document.** `readDay` holds its 300 ms budget with it, beside the day's own read.
+   * - **The screen's rule for a section** (ADR-0020): active, and for every rung or naming this one.
+   *   The snapshot carries active rows only; the status is read again because the screen reads it.
+   * - **Nothing published reads the working copy**, on both sides: `readPublished` falls back to it, so
+   *   the screen and the save still agree. An office whose copy holds no type for the rung shows the
+   *   empty-configuration card and no Save, and any code sent is refused here by name.
+   */
+  private async vocabularyFor(ctx: RequestContext, orgLevelCode: string): Promise<LogVocabulary> {
+    if (!this.published) {
+      const { applicable, all } = await this.taxonomyFor(ctx, orgLevelCode);
+      return {
+        applicable: applicable.map((t) => ({ id: String(t._id), code: t.code, label: t.label })),
+        codes: new Set(all.map((t) => t.code)),
+      };
+    }
+    const published = (await this.published.readPublished(ctx)).activity;
+    const sections = published.filter((c) => c.status === 'active');
+    const typesOf = (list: typeof published) => list
+      .flatMap((c) => c.types.filter((t) => t.status === 'active'))
+      .sort((a, b) => a.displayOrder - b.displayOrder);
+    return {
+      applicable: typesOf(sections.filter((c) => appliesTo(c.appliesToOrgLevelCodes, orgLevelCode)))
+        .map((t) => ({ id: t.id, code: t.code, label: t.label })),
+      /*
+       * **Every type the copy holds, whatever its section's standing** — as the working copy's `all` was —
+       * so a type the office has, in a section it does not show, keeps its own refusal,
+       * `ACTIVITY_TYPE_NOT_APPLICABLE`, rather than reading as a code the office lacks (P13.1-T2 AC-3; the
+       * exit review's finding 5).
+       */
+      codes: new Set(typesOf(published).map((t) => t.code)),
+    };
+  }
+
+  /**
+   * Turn `{ CODE: n }` into stored entries, against the vocabulary the screen showed (`vocabularyFor`).
    *
    * A code the office does not have is refused **by name** rather than dropped: a count filed
-   * against a typo would vanish silently, and the agent would believe they had logged it.
+   * against a typo would vanish silently, and the agent would believe they had logged it. *Has* means
+   * has published: a type the Owner has created and not published is on nobody's screen yet.
    */
-  private async readCounts(
-    ctx: RequestContext, orgLevelCode: string, max: number, counts: Record<string, number>,
-  ) {
-    const { applicable, all } = await this.taxonomyFor(ctx, orgLevelCode);
+  private readCounts(vocabulary: LogVocabulary, max: number, counts: Record<string, number>) {
+    const { applicable, codes } = vocabulary;
     const byCode = new Map(applicable.map((row) => [row.code, row]));
-    const exists = new Set(all.map((row) => row.code));
 
     const sent = Object.keys(counts ?? {}).map((code) => code.trim().toUpperCase());
-    const unknown = sent.filter((code) => !exists.has(code));
+    const unknown = sent.filter((code) => !codes.has(code));
     if (unknown.length > 0) {
       throw new BadRequestException(
-        `This office has no activity type with the code ${unknown.join(', ')}.`,
+        `This office has no activity type with the code ${unknown.join(', ')} in the list it has published.`,
       );
     }
 
@@ -919,7 +1006,7 @@ export class ActivityService {
       const raw = Number(counts?.[row.code] ?? counts?.[row.code.toLowerCase()] ?? 0);
       // The prototype's clamp, kept: `Math.max(0, Math.min(999, n))`, and a non-number is 0.
       const count = Number.isFinite(raw) ? Math.max(0, Math.min(max, Math.trunc(raw))) : 0;
-      return { activityTypeId: String(row._id), activityTypeCode: row.code, count };
+      return { activityTypeId: row.id, activityTypeCode: row.code, count };
     });
   }
 
@@ -951,20 +1038,20 @@ export class ActivityService {
     }
   }
 
-  private async view(
+  private view(
     row: ActivityLogDocument | null,
     subject: { membershipId: string; orgLevelCode: string },
     date: LocalDate,
     today: LocalDate,
     office: { settings: { activityBackdateGraceDays: number } },
+    vocabulary: LogVocabulary,
     ctx: RequestContext,
-  ): Promise<ActivityDayView> {
-    const labels = await this.labelsByCode(ctx, subject.orgLevelCode);
+  ): ActivityDayView {
     const stored = new Map((row?.entries ?? []).map((e) => [e.activityTypeCode, e]));
 
-    // Every active type, zeros included — the screen is the office's taxonomy, so a type with no
-    // count still has a row to type into.
-    const entries: ActivityCountView[] = [...labels.entries()].map(([code, label]) => ({
+    // Every type of the published vocabulary, zeros included — the screen is the office's taxonomy,
+    // so a type with no count still has a row to type into.
+    const entries: ActivityCountView[] = vocabulary.applicable.map(({ code, label }) => ({
       activityTypeId: stored.get(code)?.activityTypeId ?? '',
       activityTypeCode: code,
       label,

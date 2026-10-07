@@ -1,4 +1,4 @@
-import { PERFORMANCE, SUMMARY, TIME } from '@/domain/constants';
+import { PERFORMANCE, TIME } from '@/domain/constants';
 import { cascadeCounts, type CascadeCounts } from '@/modules/goals/goal-cascade';
 
 /**
@@ -163,42 +163,66 @@ export function summaryPlan(input: {
   };
 }
 
-/** The pace sentence's figures (ADR-0057). */
+/**
+ * The pace sentence's figures (ADR-0109, superseding ADR-0057) — the prototype's own arithmetic
+ * (`Overall.html:6326-6347`): *"At your current pace, you're tracking to close **N** policies this month
+ * against a target of **M**. With **W** weeks left, you'd need to close roughly **K** policies/week to
+ * catch up."*
+ */
 export interface Pace {
-  /** The month's closing target, from the plan. */
+  /** *M*: the month's closing target, from the plan — the closings chip's own target. */
   closingTarget: number;
-  closingsLogged: number;
+  /**
+   * *N*, `CLOSINGS_LAST_30_DAYS`: the goal's closing code logged over the last `SUMMARY.PACE_WINDOW_DAYS`,
+   * today included, in the office's calendar — the prototype's `loggedClosing` (`:6316`). Early in a month
+   * it counts last month's closings too; that is the prototype's reading, and every day has one.
+   */
+  closingsLast30Days: number;
   dayOfMonth: number;
   daysInMonth: number;
-  /** `PROJECTED_CLOSINGS_THIS_MONTH`: `null` before `SUMMARY.PACE_MIN_DAYS` — too early to project. */
-  projected: number | null;
-  /** The days left **today included**, over 7, rounded up — never zero, the month's last day included. */
+  /** *W*: the days left **today included**, over 7, rounded up — never zero, the month's last day included. */
   weeksLeft: number;
-  /** `CLOSINGS_NEEDED_PER_WEEK`: what is left of the closing target over the weeks left; 0 once it is. */
+  /**
+   * `POLICIES_NEEDED` for the month: what is left of this month's APE target over the case size, rounded
+   * up (`:6328-6329`). Until this month's file lands nothing is counted as produced, so it is the whole
+   * target's. 0 once the target is reached.
+   */
+  policiesNeeded: number;
+  /** *K*, `CLOSINGS_NEEDED_PER_WEEK`: the policies still needed over the weeks left, rounded up (`:6331`). */
   neededPerWeek: number;
   /**
    * **The APE target is reached** — this month's or the year's (ADR-0047) — the prototype's own test
-   * (`policiesNeeded <= 0`, `Overall.html:6330`). Not the closings count: closings are logged by the agent
-   * and APE is reported by the carrier, and a line saying *"You've already reached this month's target"*
-   * under a card at 89% of it was the first walk of this screen.
+   * (`paceOnTrack = policiesNeeded <= 0`, `:6330`), and what turns the danger box green. Not the closings
+   * count: closings are logged by the agent and APE is reported by the carrier.
    */
   targetMet: boolean;
 }
 
 export function paceFor(input: {
-  closingTarget: number; closingsLogged: number; dayOfMonth: number; daysInMonth: number; apeTargetMet: boolean;
+  closingTarget: number;
+  closingsLast30Days: number;
+  dayOfMonth: number;
+  daysInMonth: number;
+  /** `MONTHLY_APE_TARGET`. */
+  apeTargetMinor: number;
+  /** This month's APE produced; `null` until the month's file lands, which counts as nothing produced yet. */
+  apeProducedMinor: number | null;
+  caseSizeMinor: number;
+  apeTargetMet: boolean;
 }): Pace {
-  const { closingTarget, closingsLogged, dayOfMonth, daysInMonth } = input;
+  const { closingTarget, closingsLast30Days, dayOfMonth, daysInMonth, caseSizeMinor } = input;
   const weeksLeft = Math.ceil((daysInMonth - dayOfMonth + 1) / 7);
   const targetMet = input.apeTargetMet;
+  const remaining = Math.max(0, input.apeTargetMinor - (input.apeProducedMinor ?? 0));
+  const policiesNeeded = targetMet || caseSizeMinor <= 0 ? 0 : Math.ceil(remaining / caseSizeMinor);
   return {
     closingTarget,
-    closingsLogged,
+    closingsLast30Days,
     dayOfMonth,
     daysInMonth,
-    projected: dayOfMonth < SUMMARY.PACE_MIN_DAYS ? null : Math.round((closingsLogged / dayOfMonth) * daysInMonth),
     weeksLeft,
-    neededPerWeek: targetMet ? 0 : Math.ceil(Math.max(0, closingTarget - closingsLogged) / weeksLeft),
+    policiesNeeded,
+    neededPerWeek: Math.ceil(policiesNeeded / weeksLeft),
     targetMet,
   };
 }

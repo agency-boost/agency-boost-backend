@@ -93,6 +93,20 @@ export class ActivityDashboardQueryDto {
   @ApiPropertyOptional({ example: '2026-09-28', description: '`CUSTOM` only. Not after today.' })
   @IsOptional() @IsString() @Matches(LOCAL_DATE, { message: DATE_MESSAGE })
   to?: string;
+
+  /**
+   * **Whose days** (P13.1-T9): coaching's *Activity* tab names the coachee here, by the name the
+   * ratios' subject has — `for` — so a caller who sent `membershipId` is refused by name rather than
+   * answered with their own days.
+   */
+  @ApiPropertyOptional({
+    name: 'for',
+    maxLength: 64,
+    description: 'Whose days: a membership id. Defaults to your own; another member’s needs the scope '
+      + 'to read them, is a 404 outside it, is drawn on their rung, and is audited.',
+  })
+  @IsOptional() @IsString() @MaxLength(64)
+  for?: string;
 }
 
 /**

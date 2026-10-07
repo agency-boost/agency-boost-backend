@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
-import { endOfMonth, type LocalDate } from '@/common/time/local-day';
-import { PERFORMANCE } from '@/domain/constants';
+import { rollingWindow, type LocalDate } from '@/common/time/local-day';
+import { PERFORMANCE, SUMMARY } from '@/domain/constants';
 import { goalPaceStatus, type GoalPaceStatus } from '@/domain/metrics/goal-pace-status';
 import { pacingToMaa } from '@/domain/metrics/pacing-to-maa';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
@@ -9,7 +9,7 @@ import { cascadeCounts, computeCascade } from '@/modules/goals/goal-cascade';
 import { GoalRepository } from '@/modules/goals/goal.repository';
 import type { Goal } from '@/modules/goals/goal.schema';
 import { ProductionReadings, type MonthStanding } from '@/modules/production/production-readings';
-import { monthlyApeTarget, paceFor, ytdBeforeThisMonth } from '@/modules/summary/summary-figures';
+import { monthlyApeTarget, ytdBeforeThisMonth } from '@/modules/summary/summary-figures';
 
 /** What a stored goal contributes to the month: its plan, its own APE figure, its codes. */
 export type GoalPlan = Pick<
@@ -68,13 +68,16 @@ export function monthPaceOf(input: {
   standing: MonthStanding;
   /** The member's counts this calendar month, by activity code. */
   counts: ReadonlyMap<string, number>;
+  /**
+   * The member's counts over the last `SUMMARY.PACE_WINDOW_DAYS`, today included, by activity code: what
+   * the Summary's pace sentence says they are *tracking to close* (OD-110, ADR-0109).
+   */
+  recentCounts: ReadonlyMap<string, number>;
   /** The office's month, `YYYY-MM`. */
   month: string;
-  /** The office's today, in that month: the day `PROJECTED_CLOSINGS_THIS_MONTH` runs to (OD-110). */
-  today: LocalDate;
   onTrackRatio: number;
 }): MonthPace {
-  const { goal, standing, counts, month, today, onTrackRatio } = input;
+  const { goal, standing, counts, recentCounts, month, onTrackRatio } = input;
   // An unsaved default is an offer, not a goal, as the Summary says: it measures nobody.
   const planned = goal && goal.savedAt !== null ? plannedAnnualTarget(goal) : null;
   if (goal === null || planned === null || planned <= 0) {
@@ -113,21 +116,13 @@ export function monthPaceOf(input: {
 
   /*
    * **OD-110, option 3 (decided 2026-10-02): until this month's file lands, the pace is the activity's** —
-   * the Summary's own *Your pace this month*, by the Summary's own function, so the roster and the
-   * coachee's Summary say the same thing about the same person: the closings logged, run to the month's
-   * end, over this month's closing target. `null` before the 7th, and the status then stays as it was.
+   * the Summary's own pace sentence, so the roster and the coachee's Summary say the same thing about the
+   * same person: its *tracking to close N*, the closings of the last 30 days, over its *target of M*, this
+   * month's closing target. *Amended 2026-10-07 (ADR-0109): N was ADR-0057's run-rate, with no answer
+   * before the 7th; the sentence now counts the last 30 days, and has an answer every day.*
    */
   const apeMinor = standing.thisMonth?.minor ?? null;
-  const closings = apeMinor !== null ? null : {
-    projected: paceFor({
-      closingTarget: plan.policies,
-      closingsLogged: counts.get(closingsCode) ?? 0,
-      dayOfMonth: Number(today.slice(8, 10)),
-      daysInMonth: Number(endOfMonth(today).slice(8, 10)),
-      apeTargetMet: false,
-    }).projected,
-    target: plan.policies,
-  };
+  const closings = apeMinor !== null ? null : { last30Days: recentCounts.get(closingsCode) ?? 0, target: plan.policies };
 
   return {
     status: goalPaceStatus({ month: { targetMinor, apeMinor, pacing, closings }, onTrackRatio }),
@@ -138,8 +133,8 @@ export function monthPaceOf(input: {
 
 /**
  * **`GOAL_PACE_STATUS` for many members at once** (P11-T6 AC-4, AC-9): the goals for the office's year,
- * the year's production and the month's activity, **three queries for the whole list** whatever its
- * length, then `monthPaceOf` per member. Served first by the coaching roster; the Unit Dashboard's
+ * the year's production, the month's activity and the last 30 days' (ADR-0109), **four queries for the
+ * whole list** whatever its length, then `monthPaceOf` per member. Served first by the coaching roster; the Unit Dashboard's
  * *Status* (Phase 15) is the same metric.
  *
  * The counts it reads stay here: the roster answers a verdict per person, never a figure (AC-6).
@@ -159,19 +154,21 @@ export class PaceStatusReadings {
   ): Promise<Map<string, MonthPace>> {
     const ids = [...new Set(membershipIds)];
     if (ids.length === 0) return new Map();
-    const [goals, standings, counts] = await Promise.all([
+    const [goals, standings, counts, recent] = await Promise.all([
       this.goals.find(ctx, { membershipId: { $in: ids }, period: office.month.slice(0, 4) }),
       this.production.standingsFor(ctx, ids, office.month),
       // The calendar month so far: no day after today can hold a log (ADR-0042).
       this.activity.countsOverMany(ctx, ids, { from: `${office.month}-01` as LocalDate, to: office.today }),
+      // The pace sentence's last 30 days, the office's, as the Summary counts them (ADR-0109).
+      this.activity.countsOverMany(ctx, ids, rollingWindow(office.today, SUMMARY.PACE_WINDOW_DAYS)),
     ]);
     const goalOf = new Map(goals.map((goal) => [goal.membershipId, goal]));
     return new Map(ids.map((id) => [id, monthPaceOf({
       goal: goalOf.get(id) ?? null,
       standing: standings.get(id) as MonthStanding,
       counts: counts.get(id) ?? new Map(),
+      recentCounts: recent.get(id) ?? new Map(),
       month: office.month,
-      today: office.today,
       onTrackRatio: office.onTrackRatio,
     })]));
   }

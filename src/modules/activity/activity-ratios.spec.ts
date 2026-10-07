@@ -75,6 +75,19 @@ describe('computing one ratio (P10-T2)', () => {
     it('reads all selling and no recruitment as a full lean, not as missing data', () => {
       expect(computeRatio(BALANCE, sums({ SELL_PRESENTATION: 6 }))).toMatchObject({ value: 100, share: 100 });
     });
+
+    it('P13.1-T6 AC-1: gives two selling and three recruiting a 40% share, which the card writes 40% · 60%', () => {
+      // The share is what the screen reads now; the lean is the same split, and still what is judged.
+      expect(computeRatio(BALANCE, sums({ SELL_PRESENTATION: 2, RECRUIT_PRESENTATION: 3 })))
+        .toEqual({ value: -20, share: 40, numeratorCount: 2, denominatorCount: 3, status: 'success' });
+    });
+
+    it('P13.1-T6 AC-2: judges the share band the card states — 35% to 65% for ±30 points, edges included', () => {
+      expect(computeRatio(BALANCE, sums({ SELL_PRESENTATION: 7, RECRUIT_PRESENTATION: 13 })))
+        .toMatchObject({ share: 35, status: 'success' });
+      expect(computeRatio(BALANCE, sums({ SELL_PRESENTATION: 34, RECRUIT_PRESENTATION: 66 })))
+        .toMatchObject({ share: 34, status: 'alert' });
+    });
   });
 
   describe('P10-T3 AC-1 — which rungs a ratio is a question about', () => {

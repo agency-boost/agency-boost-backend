@@ -69,9 +69,9 @@ export class RosterRowDto implements RosterRow {
       + '`needs_attention` when not pacing to at least one policy submission this month; else '
       + '`on_track` at or above the on-track share of this month’s APE target, and `watch_closely` below it. '
       + 'A year already met needs nothing more this month and reads `on_track` once the policy gate '
-      + 'passes. Until this month’s production file is uploaded, the share is the closings logged, '
-      + 'projected to the month’s end, over this month’s closing target — from the 7th; before it, '
-      + '`watch_closely`.',
+      + 'passes. Until this month’s production file is uploaded, the share is `CLOSINGS_LAST_30_DAYS`, the '
+      + 'policy submissions logged over the last 30 days, over this month’s closing target '
+      + '(`POLICY_COUNT_TARGET`) — the Summary’s pace sentence, answered from the 1st (ADR-0109).',
   })
   status!: GoalPaceStatus;
 }

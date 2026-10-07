@@ -275,12 +275,13 @@ describe('the office activity taxonomy (P4-T1)', () => {
       ]);
     });
 
-    it('uses the KPM Owner wording where the two prototypes disagree (AC-3)', async () => {
+    it('uses the KPM Owner wording where the two prototypes disagree (AC-3), and the client’s for item 7', async () => {
       // The Owner app is the configuration screen — it depicts what an Owner edits — so
-      // its wording is authoritative. The agent app has items 7–9 in English.
+      // its wording is authoritative. The agent app has items 7–9 in English. Item 7's label
+      // is the client's since P13.1-T3 (2026-10-07); its note is still the Owner app's.
       const types = (await service.list(ctx(KPM_A))).flatMap((c) => c.types);
       const byCode = new Map(types.map((t) => [t.code, t]));
-      expect(byCode.get('RECRUIT_PRESENTATION')!.label).toBe('Presentasi NBO ke calon agen');
+      expect(byCode.get('RECRUIT_PRESENTATION')!.label).toBe('Proses pendaftaran kode agen');
       expect(byCode.get('RECRUIT_PRESENTATION')!.description)
         .toBe('secara mandiri atau melalui BOP');
       expect(byCode.get('RECRUIT_AGENT_CODE')!.label).toBe('Proses NPA');

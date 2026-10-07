@@ -29,7 +29,7 @@ const logged = (leads: number, appointments = 0, closings = 0, other = 0) => new
 ]);
 
 const pace = (over: Partial<Parameters<typeof monthPaceOf>[0]> = {}) => monthPaceOf({
-  goal: goal(), standing: SEPTEMBER, counts: logged(16), month: '2026-09', today: '2026-09-14', onTrackRatio: RATIO, ...over,
+  goal: goal(), standing: SEPTEMBER, counts: logged(16), recentCounts: new Map(), month: '2026-09', onTrackRatio: RATIO, ...over,
 });
 
 /**
@@ -95,7 +95,7 @@ describe('a member’s month (P11-T6 AC-4)', () => {
 
     it('P11-T6 AC-4 January has nothing before it', () => {
       const january: MonthStanding = { yearToDate: null, throughLastMonth: held(400 * M, '2025-12'), thisMonth: null };
-      expect(pace({ month: '2026-01', today: '2026-01-14', standing: january }).monthlyTargetMinor).toBe(Math.round((500 * M) / 12));
+      expect(pace({ month: '2026-01', standing: january }).monthlyTargetMinor).toBe(Math.round((500 * M) / 12));
     });
   });
 
@@ -189,43 +189,55 @@ describe('a member’s month (P11-T6 AC-4)', () => {
   /*
    * **OD-110, option 3 (decided 2026-10-02).** This month's APE comes only from the office's file, which
    * lands after the month ends (ADR-0050). Until it does, the last two branches read the Summary's own
-   * *Your pace this month*: the closings logged, run to the month's end, over this month's closing target
-   * — September's Rp 85 M at Rp 18 M a case is 5 — at the on-track ratio. On the 14th of a 30-day month,
-   * 3 closings project round(3 / 14 × 30) = 6, and 2 project 4.
+   * pace sentence: its *tracking to close N* over its *target of M* — September's Rp 85 M at Rp 18 M a
+   * case is 5 — at the on-track ratio. *Amended 2026-10-07 (ADR-0109): N is the closings of the last
+   * 30 days, today included (`recentCounts`), where it was this month's closings run forward to the
+   * month's end, with no answer before the 7th.*
    */
   describe('OD-110: until this month’s file lands, the pace is the activity’s', () => {
     const unfiled: MonthStanding = { ...SEPTEMBER, thisMonth: null, yearToDate: held(160 * M, '2026-08') };
 
-    it('OD-110 a member pacing to MAA whose closings project the target reads On track before the file', () => {
-      expect(pace({ standing: unfiled, counts: logged(16, 0, 3) }))
+    it('OD-110 a member pacing to MAA whose last 30 days reach the on-track share reads On track before the file', () => {
+      expect(pace({ standing: unfiled, recentCounts: logged(0, 0, 5) }))
         .toEqual({ status: 'on_track', pacingToMaa: true, monthlyTargetMinor: 85 * M });
     });
 
-    it('OD-110 closings projecting below the on-track share read Watch closely', () => {
+    it('OD-110 closings below the on-track share read Watch closely', () => {
       // 4 of 5 is 0.8.
-      expect(pace({ standing: unfiled, counts: logged(16, 0, 2) }).status).toBe('watch_closely');
+      expect(pace({ standing: unfiled, recentCounts: logged(0, 0, 4) }).status).toBe('watch_closely');
     });
 
-    it('OD-110 before the 7th nothing projects, and the answer stays as it was: Watch closely', () => {
-      expect(pace({ standing: unfiled, today: '2026-09-06', counts: logged(16, 0, 5) }).status).toBe('watch_closely');
-      // The 7th is the first day it projects: 5 / 7 × 30 ≈ 21.
-      expect(pace({ standing: unfiled, today: '2026-09-07', counts: logged(16, 0, 5) }).status).toBe('on_track');
+    it('P13.1-T5 AC-2 reads the last 30 days for the pace and the calendar month for the gate', () => {
+      // Five closings this month but none in the window cannot happen on the office's calendar; the two
+      // counts are held apart here to pin which one each branch reads.
+      expect(pace({ standing: unfiled, counts: logged(16, 0, 5), recentCounts: new Map() }).status).toBe('watch_closely');
+      expect(pace({ standing: unfiled, counts: logged(16), recentCounts: logged(0, 0, 5) }).status).toBe('on_track');
     });
 
-    it('OD-110 once the file lands APE decides, whatever the closings project', () => {
-      // Rp 20 M of Rp 85 M, though 10 closings would project 21.
-      expect(pace({ counts: logged(16, 0, 10) }).status).toBe('watch_closely');
+    it('P13.1-T5 AC-4 has an answer on the 1st: last month’s closings inside the window count, as on the Summary', () => {
+      // On 1 October the month has no closings yet, and the last 30 days hold September's six — against
+      // October's (500 − 180) / 3 ≈ Rp 106.7 M, ceil(106.7 / 18) = 6 closings.
+      const october: MonthStanding = { yearToDate: held(180 * M, '2026-09'), throughLastMonth: held(180 * M, '2026-09'), thisMonth: null };
+      expect(pace({ month: '2026-10', standing: october, counts: logged(30, 10, 0), recentCounts: logged(0, 0, 6) }).status)
+        .toBe('on_track');
+      expect(pace({ month: '2026-10', standing: october, counts: logged(30, 10, 0), recentCounts: new Map() }).status)
+        .toBe('watch_closely');
+    });
+
+    it('OD-110 once the file lands APE decides, whatever the closings say', () => {
+      // Rp 20 M of Rp 85 M, though 10 closings are twice the target.
+      expect(pace({ recentCounts: logged(0, 0, 10) }).status).toBe('watch_closely');
     });
 
     it('OD-110 counts the goal’s own closing code (invariant §4)', () => {
       const rebound = goal({ cascadeMapping: { ...CODES, closingsCode: 'RECRUIT_FOLLOWUP' } });
-      expect(pace({ goal: rebound, standing: unfiled, counts: logged(16, 0, 0, 3) }).status).toBe('on_track');
-      expect(pace({ goal: rebound, standing: unfiled, counts: logged(16, 0, 3, 0) }).status).toBe('watch_closely');
+      expect(pace({ goal: rebound, standing: unfiled, counts: logged(16, 0, 0, 3), recentCounts: logged(0, 0, 0, 5) }).status).toBe('on_track');
+      expect(pace({ goal: rebound, standing: unfiled, counts: logged(16, 0, 3, 0), recentCounts: logged(0, 0, 5, 0) }).status).toBe('watch_closely');
     });
 
-    it('OD-110 the gate still comes first: closings that project the target do not lift a member who is not pacing', () => {
+    it('OD-110 the gate still comes first: closings at the target do not lift a member who is not pacing', () => {
       // 3 + 3 cascade counts of 79 project well under one policy.
-      expect(pace({ standing: unfiled, counts: logged(3, 0, 3) }).status).toBe('needs_attention');
+      expect(pace({ standing: unfiled, counts: logged(3, 0, 3), recentCounts: logged(0, 0, 5) }).status).toBe('needs_attention');
     });
   });
 });

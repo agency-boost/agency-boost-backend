@@ -118,8 +118,14 @@ describe('domain constants', () => {
       // The block is the 7-day period's length: *Week 1* of *Last 30 days* is *Last 7 days*.
       expect(ACTIVITY.DASHBOARD_BLOCK_DAYS).toBe(PERIOD.ROLLING_7D_DAYS);
     });
-    it('pins the pace projection’s first day at the 7th of the month (ADR-0057)', () => {
-      expect(SUMMARY.PACE_MIN_DAYS).toBe(7);
+    it('P13.1-T5 AC-2 pins the pace sentence’s window at the prototype’s 30 days, today included (ADR-0109)', () => {
+      // `Overall.html:6295`: `const days = currentPeriod === 'month' ? 30 : 365`, summed by `:6316`.
+      expect(SUMMARY.PACE_WINDOW_DAYS).toBe(30);
+      // It is `ROLLING_30D` (ADR-0022): one number, not a second copy of it.
+      expect(SUMMARY.PACE_WINDOW_DAYS).toBe(PERIOD.ROLLING_30D_DAYS);
+    });
+    it('P13.1-T5 AC-4 has no first day for the pace any more: ADR-0057’s seven days went with its run-rate', () => {
+      expect(SUMMARY).not.toHaveProperty('PACE_MIN_DAYS');
     });
     it('pins how many open leads the Summary lists before it counts the rest (P10-T6)', () => {
       expect(SUMMARY.LEADS_SHOWN).toBe(10);

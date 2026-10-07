@@ -1,7 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
-  ArrayMaxSize, ArrayUnique, IsArray, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min,
+  ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength,
+  Min,
 } from 'class-validator';
 import { CALENDAR, CALENDAR_ENTRY_TYPES, type CalendarEntryType } from '@/domain/constants';
 
@@ -162,3 +163,21 @@ export class CalendarPeopleQueryDto {
  * query parameter of any name is refused by name rather than ignored.
  */
 export class CalendarDownlineQueryDto {}
+
+/** **Empty on purpose**, as the compare list's: the settings are the reader's own, with nothing to ask for. */
+export class CalendarSettingsQueryDto {}
+
+/**
+ * ***Hide my personal activities*** (ADR-0110): the whole setting, every time — a yes or a no, never left
+ * out, so a save cannot mean "leave it as it is" by accident.
+ */
+export class SaveCalendarSettingsDto {
+  @ApiProperty({
+    type: Boolean,
+    description:
+      'On, your leaders comparing your week see only *Busy* at the times of the entries you organise; '
+      + 'the people on an entry still read it in full. Off, they read what you organise in full.',
+  })
+  @IsBoolean()
+  hideDetails!: boolean;
+}
