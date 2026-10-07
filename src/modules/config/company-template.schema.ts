@@ -21,12 +21,20 @@ export const TEMPLATE_KINDS = [
 export type TemplateKind = (typeof TEMPLATE_KINDS)[number];
 
 /**
- * Which published version of one template kind an office was built from (P5-T12).
+ * Which published version of one template kind an office was built from (P5-T12, ADR-0115 §4).
  *
- * `version: null` means provisioning looked, found nothing of this kind published for the
- * company, and copied the platform defaults. That is a known answer — the office is on
- * something the company never chose — and it is different from **no record at all**, which
- * means the office was created before provisioning recorded this kind.
+ * **Since Phase 13.2**, `templateId` is the **named template** the office started from (`templates`),
+ * and `null` when it started from the AgencyBoost defaults or *Empty*; `version` is the version of
+ * this kind it copied, and `null` when the source held none of it — an unpublished kind of a
+ * template, or *Empty* — or when the source was the AgencyBoost defaults. Which of the three sources
+ * it was is `kpms.startedFrom`.
+ *
+ * An office created **before** 13.2 is not rewritten: its `templateId` names the `companyTemplates`
+ * row it copied, and its `version: null` means provisioning found nothing published and copied the
+ * platform defaults. Nothing reads `templateId`; the counts read `version`.
+ *
+ * A record with `version: null` is a known answer, and it is different from **no record at all**,
+ * which means the office was created before provisioning recorded this kind.
  */
 export interface SeedRecord {
   templateId: string | null;
@@ -61,6 +69,14 @@ export class CompanyTemplate {
   @Prop({ type: String, required: true, index: true })
   companyId!: string;
 
+  /**
+   * The named template this row belongs to (ADR-0115 §3, `templates`). **`null` for
+   * `campaign_kinds`**, which is the company's — one per company, shared by every template — and
+   * applied to its live carrier rules when published (ADR-0026).
+   */
+  @Prop({ type: String, default: null })
+  templateId!: string | null;
+
   @Prop({ type: String, required: true, enum: TEMPLATE_KINDS, index: true })
   kind!: TemplateKind;
 
@@ -94,11 +110,14 @@ export class CompanyTemplate {
 
 export const CompanyTemplateSchema = SchemaFactory.createForClass(CompanyTemplate);
 
-/** One version of one kind per company. */
+/**
+ * One version of one kind per **template** (ADR-0115 §3). It was one per company, `(companyId, kind,
+ * version)`, until a company could hold several; migration `0023` drops that index.
+ */
 CompanyTemplateSchema.index(
-  { companyId: 1, kind: 1, version: 1 },
+  { companyId: 1, templateId: 1, kind: 1, version: 1 },
   { unique: true, partialFilterExpression: { deletedAt: null } },
 );
 
-/** The provisioning read: this company's current published template of this kind. */
-CompanyTemplateSchema.index({ companyId: 1, kind: 1, status: 1, version: -1 });
+/** The provisioning read: one template's current published version of this kind. */
+CompanyTemplateSchema.index({ companyId: 1, templateId: 1, kind: 1, status: 1, version: -1 });

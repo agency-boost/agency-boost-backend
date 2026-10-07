@@ -84,6 +84,12 @@ import {
 } from '@/modules/config/config.controller';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
 import { TemplateService } from '@/modules/config/template.service';
+import { NamedTemplate, NamedTemplateSchema } from '@/modules/config/named-template.schema';
+import { NamedTemplateService } from '@/modules/config/named-template.service';
+import { NamedTemplateController } from '@/modules/config/named-template.controller';
+import { OfficeTemplateController } from '@/modules/config/office-template.controller';
+import { OfficeSettingsSource } from '@/modules/config/office-settings.source';
+import { TemplateCopyService } from '@/modules/config/template-copy.service';
 import {
   TrainingCategory, TrainingCategorySchema,
 } from '@/modules/training/training-category.schema';
@@ -109,6 +115,7 @@ import { ActivationProgressService } from '@/modules/activation/activation-progr
 import { NewHiresService } from '@/modules/activation/new-hires.service';
 import { ActivationProgressController } from '@/modules/activation/activation-progress.controller';
 import { NewHiresController } from '@/modules/activation/new-hires.controller';
+import { BillingController } from '@/modules/billing/billing.controller';
 import { ActivationEvents } from '@/modules/activation/activation-events.port';
 import { ActivationNav } from '@/modules/activation/activation-nav.port';
 import { ActivationStarter } from '@/modules/org/activation-starter.port';
@@ -275,6 +282,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
       { name: RatioDefinition.name, schema: RatioDefinitionSchema },
       { name: ConfigSnapshot.name, schema: ConfigSnapshotSchema },
       { name: CompanyTemplate.name, schema: CompanyTemplateSchema },
+      // ADR-0115: a company's named templates, each a name over seven kinds of companyTemplates.
+      { name: NamedTemplate.name, schema: NamedTemplateSchema },
       { name: TrainingCategory.name, schema: TrainingCategorySchema },
       { name: TrainingSkill.name, schema: TrainingSkillSchema },
       { name: TrainingModule.name, schema: TrainingModuleSchema },
@@ -306,6 +315,10 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     HealthController,
     AuthController,
     AdminController,
+    // P13.2-T6: a company's named templates (ADR-0115).
+    NamedTemplateController,
+    // P13.2-T7: *Save as template*, an office's published settings into a company's template.
+    OfficeTemplateController,
     CompanyController,
     OrgController,
     OnboardingController,
@@ -330,6 +343,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     // Phase 13: the hire's own activation, and a leader's new hires.
     ActivationProgressController,
     NewHiresController,
+    // P13.2-T2: the quote tool's price read; it stores nothing (ADR-0111).
+    BillingController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -414,6 +429,10 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ConfigSnapshotRepository,
     TenantConfigService,
     TemplateService,
+    NamedTemplateService,
+    // P13.2-T7: the copies — an office's settings read across tenants by name, and the copy itself.
+    OfficeSettingsSource,
+    TemplateCopyService,
     { provide: OfficeCounter, useClass: KpmOfficeCounter },
     ProvisioningService,
     { provide: CampaignKindsApplier, useExisting: ProvisioningService },

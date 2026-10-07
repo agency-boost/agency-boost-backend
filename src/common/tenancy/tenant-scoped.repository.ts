@@ -254,4 +254,28 @@ export abstract class TenantScopedRepository<T extends Document> {
     }
     return this.model.find({ ...filter, deletedAt: null } as FilterQuery<T>).exec();
   }
+
+  /**
+   * **One named office's rows, read by a Super Admin who is in no office** (P13.2-T7, ADR-0115 §5,
+   * §6): *Save as template* reads what that office's agents read.
+   *
+   * Deliberately verbose, like `findAcrossAllTenants`, and narrower: the office is **named**, never
+   * absent — `kpmId` is written last, so nothing in `filter` can widen it — and soft-deleted rows stay
+   * out. The caller must be a Super Admin; anybody else is refused as an unscoped read is. Which
+   * repositories may be read this way, and from where, is fixed by
+   * `named-cross-tenant-reads.tenancy.spec.ts`: configuration only, from `OfficeSettingsSource`.
+   */
+  async findInOfficeAcrossTenants(
+    ctx: RequestContext,
+    kpmId: string,
+    filter: FilterQuery<T> = {},
+    options: QueryOptions<T> = {},
+  ): Promise<T[]> {
+    if (!ctx.isSuperAdmin || !kpmId) {
+      throw new MissingTenantContextError(this.collectionName, 'findInOfficeAcrossTenants');
+    }
+    return this.model
+      .find({ ...filter, kpmId, deletedAt: null } as FilterQuery<T>, null, options)
+      .exec();
+  }
 }

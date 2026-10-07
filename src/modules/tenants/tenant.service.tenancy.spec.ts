@@ -49,6 +49,9 @@ import { ProductService } from '@/modules/products/product.service';
 import {
   CompanyTemplate, CompanyTemplateSchema,
 } from '@/modules/config/company-template.schema';
+import { NamedTemplate, NamedTemplateSchema } from '@/modules/config/named-template.schema';
+import { NamedTemplateService } from '@/modules/config/named-template.service';
+import { KpmOfficeCounter } from '@/modules/config/office-counter';
 
 const NOW = new Date('2026-09-05T02:00:00Z');
 
@@ -76,6 +79,7 @@ function userModel() {
 
 describe('TenantService', () => {
   let service: TenantService;
+  let namedTemplates: NamedTemplateService;
   let users: ReturnType<typeof userModel>;
   let memberModel: mongoose.Model<MembershipDocument>;
   let companyModel: mongoose.Model<CompanyDocument>;
@@ -115,6 +119,16 @@ describe('TenantService', () => {
       mongoose.model(QualificationRule.name, QualificationRuleSchema) as never,
       new FixedClock(NOW),
       configModule(NOW).config,
+      mongoose.model(NamedTemplate.name, NamedTemplateSchema) as never,
+    );
+    // ADR-0115: a company's named templates; its first is made with it, and offices start from one.
+    namedTemplates = new NamedTemplateService(
+      mongoose.model(NamedTemplate.name, NamedTemplateSchema) as never,
+      mongoose.model(CompanyTemplate.name, CompanyTemplateSchema) as never,
+      companies as never,
+      new KpmOfficeCounter(kpms as never),
+      new AuditService(auditModel as never),
+      clock,
     );
     service = new TenantService(
       kpms as never,
@@ -142,6 +156,7 @@ describe('TenantService', () => {
         new AuditService(auditModel as never),
         clock,
       ),
+      namedTemplates,
     );
   });
   afterAll(stopMongo);
@@ -153,6 +168,8 @@ describe('TenantService', () => {
       .create({ name: 'Prudential', slug: 'prudential', defaultTimezone: 'Asia/Jakarta' });
     companyId = String(company._id);
     await seedLadder(companyId);
+    // Its first template, as `createCompany` makes one (ADR-0115 §3): the defaults, published.
+    await namedTemplates.createFirst(ctx({ superAdmin: true }), company as never);
   });
 
   const input = () => ({ companyId, code: '0417', branchName: 'BSD City Branch' });
@@ -424,15 +441,19 @@ describe('TenantService', () => {
 
       const stored = await mongoose.model(Kpm.name).findById(kpm._id).lean().exec() as
         { seededFrom: Record<string, unknown>; seededFromVersion?: unknown } | null;
-      // Nothing is published for this company, so every kind came from the platform defaults
-      // — a known answer, recorded as a null version rather than left out.
+      // Started from the company's default template (ADR-0115 §4), whose seven kinds are each a
+      // published version 1 — all seven recorded since 13.2, each with the template's id.
+      const templateId = String((await namedTemplates.resolve(companyId))._id);
+      const v1 = { templateId, version: 1 };
       expect(stored?.seededFrom).toEqual({
-        activity_taxonomy: { templateId: null, version: null },
-        lead_pipeline: { templateId: null, version: null },
-        ratio_set: { templateId: null, version: null },
+        activity_taxonomy: v1,
+        lead_pipeline: v1,
+        ratio_set: v1,
         // P5-T1: the training taxonomy is seeded, and recorded, like the rest.
-        training_taxonomy: { templateId: null, version: null },
-        activation_checklist: { templateId: null, version: null },
+        training_taxonomy: v1,
+        activation_checklist: v1,
+        event_types: v1,
+        capability_ladder: v1,
       });
       expect(stored).not.toHaveProperty('seededFromVersion');
     });
@@ -448,6 +469,7 @@ describe('TenantService', () => {
       await service.createKpm(ctx({ superAdmin: true }), input());
       const other = await mongoose.model(Company.name).create({ name: 'Allianz', slug: 'allianz' });
       await seedLadder(String(other._id));
+      await namedTemplates.createFirst(ctx({ superAdmin: true }), other as never);
       const kpm = await service.createKpm(ctx({ superAdmin: true }), {
         ...input(),
         companyId: String(other._id),
@@ -1218,4 +1240,115 @@ describe('TenantService', () => {
     });
   });
 
+
+  /*
+   * **P13.2-T6 — Start from** (ADR-0115 §1, §2, §4): the office is the chosen source and nothing else, but
+   * for the three cascade activity types; the whole source is checked before the office row is written;
+   * and where it came from is recorded on it and in `kpm.created`.
+   */
+  describe('P13.2-T6 Start from', () => {
+    const sa = () => ctx({ superAdmin: true });
+    const col = (name: string) => mongoose.connection.db!.collection(name);
+    const typesOf = async (kpmId: string) =>
+      (await col('activityTypes').find({ kpmId }).sort({ displayOrder: 1 }).toArray()).map((t) => t.code);
+    const counts = async (kpmId: string) => Object.fromEntries(await Promise.all(
+      ['activityTypes', 'leadStatuses', 'ratioDefinitions', 'trainingCategories', 'activationTemplates', 'eventTypes']
+        .map(async (name) => [name, await col(name).countDocuments({ kpmId })]),
+    ));
+    const stored = async (kpmId: string) => (await col('kpms').findOne({ _id: new mongoose.Types.ObjectId(kpmId) }))!;
+    const CASCADE = ['LEADS_CONTACTED', 'SELL_PRESENTATION', 'SELL_SUBMISSION'];
+
+    it('AC-4: starts from the company’s default when nothing is chosen, and records it on the office and in kpm.created', async () => {
+      const kpm = await service.createKpm(sa(), input());
+      const defaultId = String((await namedTemplates.resolve(companyId))._id);
+      const startedFrom = { source: 'template', templateId: defaultId, templateName: 'Prudential template' };
+
+      expect((await stored(kpm._id)).startedFrom).toEqual(startedFrom);
+      const created = await col('auditLog').findOne({ action: 'kpm.created', targetId: kpm._id });
+      expect(created!.after).toMatchObject({ startedFrom, cascadeTypesAdded: [] });
+      expect((await typesOf(kpm._id))).toHaveLength(12);
+    });
+
+    it('AC-2: copies a template’s published kinds and leaves each kind it never published empty — no fallback', async () => {
+      const lean = await namedTemplates.create(sa(), companyId, { name: 'Lean', from: 'empty' });
+      await mongoose.model(CompanyTemplate.name).create({
+        companyId, templateId: lean.id, kind: 'event_types', version: 1, status: 'published', publishedAt: NOW,
+        payload: { types: [{ code: 'TOWN_HALL', label: 'Town hall', emoji: '📣', color: '#2D9CDB' }] },
+      });
+
+      const kpm = await service.createKpm(sa(), { ...input(), startFrom: { kind: 'template', templateId: lean.id } });
+
+      expect(await counts(kpm._id)).toEqual({
+        activityTypes: 3, leadStatuses: 0, ratioDefinitions: 0, trainingCategories: 0, activationTemplates: 0, eventTypes: 1,
+      });
+      expect(await typesOf(kpm._id)).toEqual(CASCADE);
+      const office = await stored(kpm._id);
+      expect(office.startedFrom).toEqual({ source: 'template', templateId: lean.id, templateName: 'Lean' });
+      expect(office.seededFrom.event_types).toEqual({ templateId: lean.id, version: 1 });
+      expect(office.seededFrom.ratio_set).toEqual({ templateId: lean.id, version: null });
+      expect(Object.keys(office.seededFrom)).toHaveLength(7);
+      expect((await col('capabilityCatalogs').findOne({ kpmId: kpm._id }))).toMatchObject({ stages: [], grids: [] });
+    });
+
+    it('AC-2: the AgencyBoost defaults, chosen — the platform’s own, no template and no version', async () => {
+      const kpm = await service.createKpm(sa(), { ...input(), startFrom: { kind: 'defaults' } });
+      const office = await stored(kpm._id);
+      expect(office.startedFrom).toEqual({ source: 'defaults', templateId: null, templateName: null });
+      expect(Object.values(office.seededFrom)).toEqual(Array(7).fill({ templateId: null, version: null }));
+      expect(await counts(kpm._id)).toMatchObject({ activityTypes: 12, activationTemplates: 1 });
+    });
+
+    it('AC-2, AC-3: Empty — the three cascade types, active, in their platform sections, and nothing else', async () => {
+      const kpm = await service.createKpm(sa(), { ...input(), startFrom: { kind: 'empty' } });
+      expect(await counts(kpm._id)).toEqual({
+        activityTypes: 3, leadStatuses: 0, ratioDefinitions: 0, trainingCategories: 0, activationTemplates: 0, eventTypes: 0,
+      });
+      const types = await col('activityTypes').find({ kpmId: kpm._id }).sort({ displayOrder: 1 }).toArray();
+      expect(types.map((t) => [t.code, t.categoryCode, t.status])).toEqual([
+        ['LEADS_CONTACTED', 'LEADS_GENERATION', 'active'],
+        ['SELL_PRESENTATION', 'SELLING', 'active'],
+        ['SELL_SUBMISSION', 'SELLING', 'active'],
+      ]);
+      expect((await col('activityCategories').find({ kpmId: kpm._id }).sort({ displayOrder: 1 }).toArray())
+        .map((c) => [c.code, c.label])).toEqual([['LEADS_GENERATION', 'Leads Generation'], ['SELLING', 'Selling']]);
+      const created = await col('auditLog').findOne({ action: 'kpm.created', targetId: kpm._id });
+      expect(created!.after).toMatchObject({ startedFrom: { source: 'empty' }, cascadeTypesAdded: CASCADE });
+    });
+
+    it('AC-2: checks the whole source before the office row is written — a refusal leaves no office and no rows', async () => {
+      const broken = await namedTemplates.create(sa(), companyId, { name: 'Broken', from: 'empty' });
+      // A checklist linked to a module the template's own training does not give (it publishes none).
+      await mongoose.model(CompanyTemplate.name).create({
+        companyId, templateId: broken.id, kind: 'activation_checklist', version: 1, status: 'published', publishedAt: NOW,
+        payload: {
+          aspects: [{
+            code: 'TRAINING', label: 'Training',
+            items: [{ code: 'MANDATORY', label: 'Mandatory training', autoLink: 'training:PROSPECT_LIST' }],
+          }],
+        },
+      });
+      const before = await Promise.all(['kpms', 'activityTypes', 'configSnapshots', 'auditLog'].map((c) => col(c).countDocuments({})));
+
+      await expect(service.createKpm(sa(), { ...input(), startFrom: { kind: 'template', templateId: broken.id } }))
+        .rejects.toMatchObject({ status: 400, message: expect.stringContaining('PROSPECT_LIST') });
+
+      expect(await Promise.all(['kpms', 'activityTypes', 'configSnapshots', 'auditLog'].map((c) => col(c).countDocuments({}))))
+        .toEqual(before);
+    });
+
+    it('refuses an archived template, another company’s, and a template kind without its id', async () => {
+      const old = await namedTemplates.create(sa(), companyId, { name: 'Old', from: 'empty' });
+      await namedTemplates.archive(sa(), companyId, old.id);
+      await expect(service.createKpm(sa(), { ...input(), startFrom: { kind: 'template', templateId: old.id } }))
+        .rejects.toMatchObject({ status: 400 });
+
+      const other = await mongoose.model(Company.name).create({ name: 'Allianz', slug: 'allianz' });
+      const theirs = await namedTemplates.createFirst(sa(), other as never);
+      await expect(service.createKpm(sa(), { ...input(), startFrom: { kind: 'template', templateId: String(theirs._id) } }))
+        .rejects.toMatchObject({ status: 404 });
+      await expect(service.createKpm(sa(), { ...input(), startFrom: { kind: 'template' } }))
+        .rejects.toMatchObject({ status: 400 });
+      expect(await col('kpms').countDocuments({})).toBe(0);
+    });
+  });
 });

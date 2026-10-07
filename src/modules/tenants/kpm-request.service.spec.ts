@@ -26,6 +26,9 @@ import { OrgLevelService } from './org-level.service';
 import { CompanyOrgLevel, CompanyOrgLevelSchema } from './company-org-level.schema';
 import { TenantService } from './tenant.service';
 import { clearCollections, seedLadder, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
+import { NamedTemplate, NamedTemplateSchema } from '@/modules/config/named-template.schema';
+import { NamedTemplateService } from '@/modules/config/named-template.service';
+import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import { ProvisioningService } from '@/modules/config/provisioning.service';
 import { ActivityCategory, ActivityCategorySchema } from '@/modules/config/activity-category.schema';
 import { ActivityType, ActivityTypeSchema } from '@/modules/config/activity-type.schema';
@@ -62,6 +65,7 @@ function platform() {
 describe('KpmRequestService (P3.5-T2)', () => {
   let service: KpmRequestService;
   let tenants: TenantService;
+  let namedTemplates: NamedTemplateService;
   let companyId: string;
   let requesterId: string;
 
@@ -97,6 +101,16 @@ describe('KpmRequestService (P3.5-T2)', () => {
       mongoose.model(QualificationRule.name, QualificationRuleSchema) as never,
       new FixedClock(NOW),
       configModule(NOW).config,
+      mongoose.model(NamedTemplate.name, NamedTemplateSchema) as never,
+    );
+    // ADR-0115: approval starts the office from the company's default template.
+    namedTemplates = new NamedTemplateService(
+      mongoose.model(NamedTemplate.name, NamedTemplateSchema) as never,
+      mongoose.model(CompanyTemplate.name, CompanyTemplateSchema) as never,
+      companies as never,
+      new KpmOfficeCounter(kpms as never),
+      audit,
+      clock,
     );
     tenants = new TenantService(
       kpms as never, companies as never, users as never, requests as never, audit, clock,
@@ -118,6 +132,7 @@ describe('KpmRequestService (P3.5-T2)', () => {
         audit,
         clock,
       ),
+      namedTemplates,
     );
     service = new KpmRequestService(
       requests as never, companies as never, users as never, tenants, audit, clock,
@@ -133,6 +148,7 @@ describe('KpmRequestService (P3.5-T2)', () => {
     });
     await seedLadder(String(company._id));
     companyId = String(company._id);
+    await namedTemplates.createFirst(RequestContext.platform('root'), company as never);
     const user = await mongoose.model(User.name).create({
       email: 'rangga@example.test', fullName: 'Rangga Wibisono', passwordHash: 'x',
       // Approving a request creates the office and puts the asker in it, so they need
@@ -227,6 +243,19 @@ describe('KpmRequestService (P3.5-T2)', () => {
       expect(kpm.code).toBe('0629');
       // The office is theirs, which is what "proposed KPM Owner" means.
       expect(String(kpm.ownerUserId)).toBe(requesterId);
+    });
+
+    it('P13.2-T6 AC-7: approving starts the office from the company’s default template', async () => {
+      // Moved to a template of its own, so the default is not merely the only one there is.
+      const other = await namedTemplates.create(platform(), companyId, { name: 'Surabaya settings', from: 'empty' });
+      await namedTemplates.update(platform(), companyId, other.id, { isDefault: true });
+
+      const row = await service.create(asker(requesterId), ask());
+      const [after] = await service.approve(platform(), row.requestId, { code: '0629' });
+
+      const stored = await mongoose.model(Kpm.name).findById(after.createdKpmId).lean().exec() as
+        { startedFrom: unknown } | null;
+      expect(stored?.startedFrom).toEqual({ source: 'template', templateId: other.id, templateName: 'Surabaya settings' });
     });
 
     it('AC-2: declining creates nothing, and keeps the reason', async () => {

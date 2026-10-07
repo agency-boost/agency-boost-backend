@@ -9,6 +9,9 @@ import { SEED_ACTIVITY_TYPES, SEED_TRAINING_MODULES } from '@/domain/constants';
 import { CompanyTemplate, CompanyTemplateSchema } from './company-template.schema';
 import { TemplateService } from './template.service';
 import { KpmOfficeCounter } from './office-counter';
+import { NamedTemplate, NamedTemplateSchema } from './named-template.schema';
+import { NamedTemplateService } from './named-template.service';
+import { platformDefaultPayload } from './template-defaults';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 
 const NOW = new Date('2026-09-11T02:00:00Z');
@@ -19,9 +22,12 @@ function ctx() {
 
 describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
   let service: TemplateService;
+  let named: NamedTemplateService;
   let companies: mongoose.Model<never>;
   let kpms: mongoose.Model<never>;
   let companyId: string;
+  /** The company's default template, as migration `0023` leaves one (ADR-0115 §3). */
+  let defaultId: string;
   /**
    * What publishing `campaign_kinds` handed on (P5-T9 AC-4).
    *
@@ -43,6 +49,14 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
     await startMongo();
     companies = mongoose.model(Company.name, CompanySchema) as never;
     kpms = mongoose.model(Kpm.name, KpmSchema) as never;
+    named = new NamedTemplateService(
+      mongoose.model(NamedTemplate.name, NamedTemplateSchema) as never,
+      mongoose.model(CompanyTemplate.name, CompanyTemplateSchema) as never,
+      companies as never,
+      new KpmOfficeCounter(kpms as never),
+      new AuditService(mongoose.model(AuditLog.name, AuditLogSchema) as never),
+      new FixedClock(NOW),
+    );
     service = new TemplateService(
       mongoose.model(CompanyTemplate.name, CompanyTemplateSchema) as never,
       companies as never,
@@ -50,8 +64,15 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
       new FixedClock(NOW),
       new KpmOfficeCounter(kpms as never),
       applier,
+      named,
     );
   });
+
+  /** A default template for a company, as the migration gives every existing one. */
+  const defaultTemplateFor = async (company: string) => String((await mongoose.model(NamedTemplate.name, NamedTemplateSchema).create({
+    companyId: company, name: 'Company template', isDefault: true, status: 'active',
+    origin: { kind: 'migration' }, deletedAt: null,
+  }))._id);
 
   afterAll(stopMongo);
 
@@ -62,20 +83,30 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
       defaultLocale: 'id-ID', defaultTimezone: 'Asia/Jakarta', status: 'active',
     } as never);
     companyId = String((company as unknown as { _id: unknown })._id);
+    defaultId = await defaultTemplateFor(companyId);
   });
 
   describe('what a Super Admin opens', () => {
-    it('hands back a starting point rather than an empty box', async () => {
+    it('reads nothing for a kind the template never published — what its offices get (ADR-0115 §1)', async () => {
       /*
-       * A company with nothing published is the normal state of a new insurer. An empty
-       * answer would mean the first thing a Super Admin does is retype twelve activity
-       * types out of a PDF.
+       * It handed back the platform's twelve as a starting point, which made a template with nothing
+       * published look as if it held them — while its offices got them by a fallback nobody chose.
+       * *New template from the AgencyBoost defaults* is how a template holds them now.
        */
       const view = await service.read(companyId, 'activity_taxonomy');
-      expect(view.status).toBe('draft');
-      expect(view.version).toBe(0);
+      expect(view).toMatchObject({
+        status: 'draft', version: 0, payload: {}, publishedVersion: null, templateId: defaultId,
+      });
+    });
+
+    it('reads a template made from the AgencyBoost defaults as its published version 1', async () => {
+      const made = await named.create(ctx(), companyId, { name: 'From the defaults', from: 'defaults' });
+
+      const view = await service.read(companyId, 'activity_taxonomy', made.id);
+      expect(view).toMatchObject({ status: 'published', version: 1, templateId: made.id });
       expect((view.payload.types as unknown[])).toHaveLength(SEED_ACTIVITY_TYPES.length);
-      expect(view.publishedVersion).toBeNull();
+      // The default template is another template, and still holds nothing.
+      expect((await service.read(companyId, 'activity_taxonomy')).payload).toEqual({});
     });
 
     it('refuses a company that does not exist, without a CastError', async () => {
@@ -105,6 +136,7 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
         usesPlatformDefaults: false,
       } as never);
       const blankId = String((blank as unknown as { _id: unknown })._id);
+      await defaultTemplateFor(blankId);
 
       for (const kind of [
         'activity_taxonomy', 'ratio_set', 'lead_pipeline', 'training_taxonomy',
@@ -122,6 +154,7 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
         usesPlatformDefaults: false,
       } as never);
       const blankId = String((blank as unknown as { _id: unknown })._id);
+      await defaultTemplateFor(blankId);
 
       await service.saveDraft(ctx(), blankId, 'activity_taxonomy', {
         categories: [{ code: 'OWN', label: 'Our own', displayOrder: 1 }], types: [],
@@ -235,7 +268,7 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
       for (let i = 0; i < times; i += 1) {
         const payload = kind === 'activity_taxonomy'
           ? taxonomy
-          : (await service.read(companyId, 'lead_pipeline')).payload;
+          : platformDefaultPayload('lead_pipeline');
         await service.saveDraft(ctx(), companyId, kind, payload);
         await service.publish(ctx(), companyId, kind);
       }
@@ -382,9 +415,9 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
         .rejects.toThrow(/NO_SUCH_CODE is named by a ratio/);
     });
 
-    it('accepts codes the platform defaults declare, when the company has published none', async () => {
-      // The fallback provisioning itself uses. Refusing here would make the first ratio
-      // set of every new company unpublishable.
+    it('accepts the three cascade codes with no taxonomy published — every office has them (ADR-0115 §2)', async () => {
+      // There is no platform fallback any more; these three are given to every office whatever its
+      // source, so a ratio over them builds a working office from any template.
       await service.saveDraft(ctx(), companyId, 'ratio_set', ratioSet(['SELL_SUBMISSION', 'SELL_PRESENTATION']));
       await expect(service.publish(ctx(), companyId, 'ratio_set')).resolves.toMatchObject({
         kind: 'ratio_set', status: 'published', version: 1,
@@ -443,8 +476,9 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
       });
     });
 
-    it('starts a new ratio set from the platform’s units', async () => {
-      const draft = await service.read(companyId, 'ratio_set');
+    it('starts a ratio set made from the defaults with the platform’s units', async () => {
+      const made = await named.create(ctx(), companyId, { name: 'Defaults', from: 'defaults' });
+      const draft = await service.read(companyId, 'ratio_set', made.id);
       const units = (draft.payload as { ratios: { code: string; displayUnit: string }[] }).ratios
         .map((r) => [r.code, r.displayUnit]);
       expect(Object.fromEntries(units)).toMatchObject({
@@ -459,8 +493,9 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
     });
   });
   describe('the training taxonomy (P5-T1)', () => {
-    it('starts from the domain defaults', async () => {
-      const view = await service.read(companyId, 'training_taxonomy');
+    it('holds the domain defaults in a template made from them', async () => {
+      const made = await named.create(ctx(), companyId, { name: 'Defaults', from: 'defaults' });
+      const view = await service.read(companyId, 'training_taxonomy', made.id);
       expect((view.payload.modules as unknown[])).toHaveLength(SEED_TRAINING_MODULES.length);
       expect((view.payload.categories as { code: string }[])[0].code).toBe('SALES');
     });
@@ -481,8 +516,9 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
   });
 
   describe('the activation checklist (P5-T3)', () => {
-    it('starts from the seed: sixteen items in five aspects', async () => {
-      const view = await service.read(companyId, 'activation_checklist');
+    it('holds the seed in a template made from the defaults: sixteen items in five aspects', async () => {
+      const made = await named.create(ctx(), companyId, { name: 'Defaults', from: 'defaults' });
+      const view = await service.read(companyId, 'activation_checklist', made.id);
       const aspects = view.payload.aspects as { code: string; items: unknown[] }[];
 
       expect(aspects).toHaveLength(5);

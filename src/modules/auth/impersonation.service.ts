@@ -129,16 +129,6 @@ export class ImpersonationService {
     }
 
     const owned = ownedByTarget;
-    if (owned && owned.status !== 'active') {
-      throw new DomainException(
-        ErrorCode.TENANT_SUSPENDED,
-        'That office is suspended; impersonation is refused.',
-        HttpStatus.FORBIDDEN,
-      );
-    }
-
-    const minutes = Math.min(Math.max(1, Math.floor(durationMinutes)), IMPERSONATION_MAX_MINUTES);
-    const ttlSeconds = minutes * 60;
 
     /*
      * **In the target's tenant, not the platform's** (P4-T10).
@@ -160,6 +150,34 @@ export class ImpersonationService {
     const office = membership?.kpmId
       ? await this.kpms.findOne({ _id: membership.kpmId, deletedAt: null }).exec()
       : owned;
+
+    /*
+     * **An office nobody can use is refused here, whoever in it is named** (P13.2 exit review).
+     *
+     * `ContextResolver` refuses every request of a suspended or archived office's member, a support
+     * session's included, so a session started there could do nothing — and its first request, the
+     * session's own `/auth/me`, replaced the Super Admin's console with the member's *office
+     * unavailable* page. This used to look only at an office the target **owns**, and only under
+     * `TENANT_SUSPENDED`, the member's own code, which the app treats as *your office*. Now it reads the
+     * office the target is in, as well, and refuses under its own code: a `409` the support screen shows
+     * as an error, naming the office and why. An ended subscription is not refused: support may look
+     * into an ended office (ADR-0112 §3).
+     */
+    for (const unavailable of [office, owned]) {
+      if (unavailable && unavailable.status !== 'active') {
+        const reason = unavailable.status === 'archived' ? 'archived' : 'suspended';
+        throw new DomainException(
+          ErrorCode.IMPERSONATION_OFFICE_UNAVAILABLE,
+          `KPM ${unavailable.code} · ${unavailable.branchName} is ${reason}, so nobody can act as `
+            + 'its members until it is reactivated.',
+          HttpStatus.CONFLICT,
+          { kpmCode: unavailable.code, branch: unavailable.branchName, reason },
+        );
+      }
+    }
+
+    const minutes = Math.min(Math.max(1, Math.floor(durationMinutes)), IMPERSONATION_MAX_MINUTES);
+    const ttlSeconds = minutes * 60;
     const inTenant = kpmId
       ? RequestContext.superAdminInTenant(ctx.userId, kpmId)
       : ctx;

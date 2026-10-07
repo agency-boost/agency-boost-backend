@@ -20,15 +20,15 @@ import {
   UntaggedMemberDto,
 } from '@/modules/org/org.response.dto';
 import {
-  KpmRequestRowDto, KpmViewDto, OrgLevelRowDto, PlatformAdminRowDto, PlatformOverviewDto,
-  RosterCommitDto, RosterPreviewDto, RosterTemplateDto,
+  KpmAdminViewDto, KpmRequestRowDto, KpmViewDto, OrgLevelRowDto, PlatformAdminRowDto,
+  PlatformOverviewDto, RosterCommitDto, RosterPreviewDto, RosterTemplateDto,
 } from '@/modules/tenants/tenant.response.dto';
 import {
   AuditEntryResponseDto, CompanyResponseDto, PublicCompanyDto,
 } from '@/modules/tenants/platform.response.dto';
 import {
   ActivityCategoryDto, ActivityTypeDto, LeadPipelineDto, LeadStatusDto, RatioDefinitionDto,
-  CompanyTemplateDto, PublishStateDto, TenantConfigDto,
+  CompanyTemplateDto, NamedTemplateDto, PublishStateDto, SavedOfficeTemplateDto, TenantConfigDto,
 } from '@/modules/config/config.response.dto';
 import {
   ModuleContentDto, SignedUploadDto, SignedUrlDto, TrainingCategoryDto,
@@ -44,6 +44,7 @@ import {
 import { EventDto, EventTypeDto } from '@/modules/events/event.response.dto';
 import { CampaignDto, MetricDefinitionDto, QualificationRuleDto } from '@/modules/campaigns/campaign.response.dto';
 import { CapabilityCatalogDto } from '@/modules/capability/capability.response.dto';
+import { BillingPricesDto } from '@/modules/billing/billing.response.dto';
 
 /** What one operation answers with: a class, and whether it comes back as an array. */
 export interface ResponseShape {
@@ -211,6 +212,15 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AdminController_templateHistory: { type: CompanyTemplateDto, isArray: true },
   AdminController_saveTemplateDraft: { type: CompanyTemplateDto },
   AdminController_publishTemplate: { type: CompanyTemplateDto },
+  // P13.2-T6: a company's named templates (ADR-0115).
+  NamedTemplateController_list: { type: NamedTemplateDto, isArray: true },
+  NamedTemplateController_create: { type: NamedTemplateDto },
+  NamedTemplateController_update: { type: NamedTemplateDto },
+  NamedTemplateController_archive: { type: NamedTemplateDto },
+  // P13.2-T7: the copies across an owner boundary answer with the template they made.
+  NamedTemplateController_importFrom: { type: NamedTemplateDto },
+  // P13.2's exit review (finding 2): with what the office held that the template left out, and why.
+  OfficeTemplateController_save: { type: SavedOfficeTemplateDto },
   TenantConfigReadController_orgLevels: { type: OrgLevelRowDto, isArray: true },
   TenantConfigReadController_readConfig: { type: TenantConfigDto },
   TenantConfigController_publishState: { type: PublishStateDto },
@@ -324,17 +334,21 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AdminController_listOrgLevels: { type: OrgLevelRowDto, isArray: true },
   AdminController_createOrgLevel: { type: OrgLevelRowDto, isArray: true },
   AdminController_updateOrgLevel: { type: OrgLevelRowDto, isArray: true },
-  AdminController_listTenants: { type: KpmViewDto, isArray: true },
+  // P13.2-T3: the Super Admin's rows carry the subscription, Leaders used and the ended state.
+  AdminController_listTenants: { type: KpmAdminViewDto, isArray: true },
   AdminController_createTenant: { type: KpmViewDto },
-  AdminController_readTenant: { type: KpmViewDto },
-  AdminController_assignOwner: { type: KpmViewDto },
-  AdminController_setStatus: { type: KpmViewDto },
+  AdminController_readTenant: { type: KpmAdminViewDto },
+  AdminController_assignOwner: { type: KpmAdminViewDto },
+  AdminController_setStatus: { type: KpmAdminViewDto },
+  AdminController_updateSubscription: { type: KpmAdminViewDto },
   AdminController_rosterTemplate: { type: RosterTemplateDto },
   AdminController_previewRoster: { type: RosterPreviewDto },
   AdminController_importRoster: { type: RosterCommitDto },
   AdminController_readAudit: { type: AuditEntryResponseDto, isArray: true },
   AdminController_impersonate: { type: ImpersonationSessionDto },
   AdminController_endImpersonation: { type: StatusAckDto },
+  // P13.2-T2: the quote tool's price table, the Super Admin's alone (ADR-0111).
+  BillingController_prices: { type: BillingPricesDto },
 };
 
 /** Every class the table names, so Swagger emits a schema for each. */

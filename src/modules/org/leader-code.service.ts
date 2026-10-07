@@ -10,6 +10,7 @@ import { NotificationService } from '@/modules/notifications/notification.servic
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
+import { isEnded } from '@/modules/tenants/subscription';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { ActivationStarter, startActivation } from './activation-starter.port';
 import { HierarchyService } from './hierarchy.service';
@@ -102,8 +103,10 @@ export class LeaderCodeService {
     if (!leader || leader.status !== 'active') throw refuse();
 
     const kpm = await this.kpms.findOne({ _id: leader.kpmId, deletedAt: null }).exec();
-    // A suspended office refuses its own members; it must not admit new ones either.
-    if (!kpm || kpm.status !== 'active') throw refuse();
+    // A suspended office refuses its own members; it must not admit new ones either. Nor
+    // does an office whose subscription has ended (ADR-0112 §3): to an outsider it reads as
+    // a suspended one, the same refusal and nothing that says why.
+    if (!kpm || kpm.status !== 'active' || isEnded(kpm, this.clock)) throw refuse();
 
     return { leader, kpm };
   }

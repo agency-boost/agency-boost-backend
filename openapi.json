@@ -3646,7 +3646,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/KpmViewDto"
+                    "$ref": "#/components/schemas/KpmAdminViewDto"
                   }
                 }
               }
@@ -3696,7 +3696,7 @@
         "description": "**Requires `kpm:list_all`.** See `docs/00-product/roles-and-permissions.md`."
       },
       "post": {
-        "description": "The only way an office comes into existence — there is no self-service path (ADR-0005). Seeds the per-office settings every prototype screen hardcodes.\n\n**Requires `kpm:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The only way an office comes into existence — there is no self-service path (ADR-0005). Seeds the per-office settings every prototype screen hardcodes, and its configuration from `startFrom` (ADR-0115): one of the company's active templates, the AgencyBoost defaults, or empty — the company's default template when absent. There is no fallback: a kind the source holds none of is empty in the office, and every office has the three cascade activity types. The whole source is checked before the office is written, so a refusal (400, naming what is broken; 404 for a template that is not the company's) leaves nothing behind.\n\n**Requires `kpm:create`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_createTenant_v1",
         "parameters": [],
         "requestBody": {
@@ -3834,7 +3834,7 @@
     },
     "/api/v1/admin/companies/{companyId}/template/{kind}": {
       "get": {
-        "description": "The draft if there is one, else the newest published, else a starting point built from the platform defaults — a company with nothing published is the normal state of a new insurer, and an empty answer would mean retyping twelve activity types from a PDF. `officesBehind` says how many of this company's offices are on something older, which is the count the Superadmin prototype puts on its front page.\n\n**Requires `company_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "One kind of one of the company's named templates — `?templateId=`, or the company's default when absent (404 for a template that is not the company's). The draft if there is one, else the newest published, else nothing: version 0 and an empty payload, which is what an office made from the template would get of the kind. `campaign_kinds` is the company's own, shared by every template, and ignores `templateId`. `officesBehind` says how many of the template's offices are on something older, which is the count the Superadmin prototype puts on its front page.\n\n**Requires `company_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_readTemplate_v1",
         "parameters": [
           {
@@ -3852,6 +3852,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "templateId",
+            "required": false,
+            "in": "query",
+            "description": "The named template. Absent: the company’s default.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -3861,6 +3870,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CompanyTemplateDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
                 }
               }
             }
@@ -3918,7 +3937,7 @@
         "x-required-permission": "company_template:read"
       },
       "put": {
-        "description": "The whole payload, not a patch: a template is edited and copied as one document, and merging two versions of an ordered list of codes has no answer anybody would predict. Creates the draft if this is the first edit since publishing. An `activity_taxonomy` draft has its summary tiles checked here (ADR-0064): `summaryGroupCode` and `summaryGroupLabel` on a category together or not at all (`400 VALIDATION_FAILED`), one label per tile (`422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`), and no shared tile under the code of a category outside it (`422 CONFIG_SUMMARY_GROUP_CODE_TAKEN`).\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The whole payload, not a patch: a template is edited and copied as one document, and merging two versions of an ordered list of codes has no answer anybody would predict. Creates the draft if this is the first edit since publishing. An `activity_taxonomy` draft has its summary tiles checked here (ADR-0064): `summaryGroupCode` and `summaryGroupLabel` on a category together or not at all (`400 VALIDATION_FAILED`), one label per tile (`422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`), and no shared tile under the code of a category outside it (`422 CONFIG_SUMMARY_GROUP_CODE_TAKEN`). Writes the template `?templateId=` names, the default when absent; an archived template is refused (400).\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_saveTemplateDraft_v1",
         "parameters": [
           {
@@ -3933,6 +3952,15 @@
             "name": "kind",
             "required": true,
             "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "templateId",
+            "required": false,
+            "in": "query",
+            "description": "The named template. Absent: the company’s default.",
             "schema": {
               "type": "string"
             }
@@ -4024,7 +4052,7 @@
     },
     "/api/v1/admin/companies/{companyId}/template/{kind}/history": {
       "get": {
-        "description": "Newest first. A published version is immutable; this is the record of them.\n\n**Requires `company_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Newest first, for one kind of the template `?templateId=` names (the default when absent). A published version is immutable; this is the record of them.\n\n**Requires `company_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_templateHistory_v1",
         "parameters": [
           {
@@ -4042,6 +4070,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "templateId",
+            "required": false,
+            "in": "query",
+            "description": "The named template. Absent: the company’s default.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4054,6 +4091,16 @@
                   "items": {
                     "$ref": "#/components/schemas/CompanyTemplateDto"
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
                 }
               }
             }
@@ -4113,7 +4160,7 @@
     },
     "/api/v1/admin/companies/{companyId}/template/{kind}/publish": {
       "post": {
-        "description": "Becomes the version new offices are seeded from. **Reaches nothing that already exists** — copy-on-provision means copy once, and an office that has diverged keeps its divergence. Refuses a payload that would produce a broken office, because the alternative is discovering it while creating one for a real branch.\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Becomes the version new offices are seeded from. **Reaches nothing that already exists** — copy-on-provision means copy once, and an office that has diverged keeps its divergence. Refuses a payload that would produce a broken office, because the alternative is discovering it while creating one for a real branch. Publishes the template `?templateId=` names, the default when absent; an archived template is refused (400). A ratio set is checked against the same template's published taxonomy and the three cascade activity types.\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_publishTemplate_v1",
         "parameters": [
           {
@@ -4131,6 +4178,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "templateId",
+            "required": false,
+            "in": "query",
+            "description": "The named template. Absent: the company’s default.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4140,6 +4196,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CompanyTemplateDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
                 }
               }
             }
@@ -4307,7 +4373,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/KpmViewDto"
+                  "$ref": "#/components/schemas/KpmAdminViewDto"
                 }
               }
             }
@@ -4396,7 +4462,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/KpmViewDto"
+                  "$ref": "#/components/schemas/KpmAdminViewDto"
                 }
               }
             }
@@ -4494,7 +4560,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/KpmViewDto"
+                  "$ref": "#/components/schemas/KpmAdminViewDto"
                 }
               }
             }
@@ -4560,6 +4626,104 @@
           "admin (Super Admin)"
         ],
         "x-required-permission": "kpm:suspend"
+      }
+    },
+    "/api/v1/admin/tenants/{kpmId}/subscription": {
+      "patch": {
+        "description": "Its start and end dates (office dates, both or neither, the end on or after the start), the price per leader per month in IDR minor units (whole rupiah; informational, nothing is charged), the leader limit (or null for none) and keep-active-after-the-end, all five every time (ADR-0112). From 00:00 of the office day after the end date its members are refused TENANT_SUBSCRIPTION_ENDED unless it is kept active. A limit below the leaders it has demotes nobody. Super Admin only, refused in a support session; audited with the five fields before and after. Answers the office as GET /admin/tenants reads it. 400 VALIDATION_FAILED names the field; an unknown office is 404.\n\n**Requires `kpm:update_subscription`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AdminController_updateSubscription_v1",
+        "parameters": [
+          {
+            "name": "kpmId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSubscriptionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KpmAdminViewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `kpm:update_subscription`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set an office’s subscription",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "kpm:update_subscription"
       }
     },
     "/api/v1/admin/tenants/{id}/roster/preview": {
@@ -4984,6 +5148,571 @@
           "admin (Super Admin)"
         ],
         "x-required-permission": "impersonation:start"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/templates": {
+      "get": {
+        "description": "Every named template of the company, the default first: its name, whether it is the default, active or archived, where it came from, the newest published version of each of its seven kinds (null where none is, which an office made from it gets empty), and how many live offices it answers for. Archived templates are listed — offices record that they started from one — and are not offered as *Start from*. 404 for a company that does not exist.\n\n**Requires `company_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NamedTemplateController_list_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NamedTemplateDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `company_template:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A company’s templates",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "company_template:read"
+      },
+      "post": {
+        "description": "`from: \"empty\"` holds nothing, so an office made from it starts empty but for the three cascade activity types; `from: \"defaults\"` publishes each of the seven kinds as version 1 of the AgencyBoost defaults; `from: { templateId }` copies one of this company’s templates — each kind’s newest published version becomes the copy’s version 1, a draft is not copied, codes are kept and training files referenced; 404 for a template that is not the company’s. Never the default when made. 409 TEMPLATE_NAME_TAKEN when an active template of the company already has the name (compared ignoring case). Audited once, naming the source of a copy.\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NamedTemplateController_create_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTemplateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamedTemplateDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `company_template:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "New template",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "company_template:write"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/templates/import": {
+      "post": {
+        "description": "One template of `fromCompanyId` becomes a new template of this company (ADR-0115 §5): each kind’s newest published version as version 1, drafts not copied, codes kept. Every training file is **duplicated** into this company’s assets; links are copied as links. Nothing links back: later edits on either side never reach the other. 409 TEMPLATE_RUNG_UNKNOWN `{ codes }` when a ratio or an activity section names a rung this company’s ladder lacks; 409 TEMPLATE_NAME_TAKEN; 409 ASSET_NOT_CONFIRMED for a file that never finished uploading; 400 for this company as its own source; 404 for an unknown company or a template that is not the source company’s. Every check runs before any write, and the template is written after its files. Audited once, naming both companies.\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NamedTemplateController_importFrom_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportTemplateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamedTemplateDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `company_template:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Import a template from another company",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "company_template:write"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/templates/{templateId}": {
+      "patch": {
+        "description": "`name` renames it (409 TEMPLATE_NAME_TAKEN as above). `isDefault: true` makes it the company’s default, moving it from the template that was; refused (400) for an archived template. `isDefault: false` on the default is 409 TEMPLATE_IS_DEFAULT — another is made the default instead. Every refusal comes before any write. 409 VERSION_CONFLICT when the company’s default changed while this was being made the default — nothing is changed, and the old default stands. Each change audited. 404 for a template that is not the company’s.\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NamedTemplateController_update_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "templateId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTemplateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamedTemplateDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `company_template:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rename a template, or make it the default",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "company_template:write"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/templates/{templateId}/archive": {
+      "post": {
+        "description": "Archived, never deleted: it stays readable, because offices record that they started from it, and it is no longer offered. 409 TEMPLATE_IS_DEFAULT for the company’s default — make another the default first; also when it was made the default while this was being archived. Archiving an archived template changes nothing. Audited.\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NamedTemplateController_archive_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "templateId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamedTemplateDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `company_template:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Archive a template",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "company_template:write"
+      }
+    },
+    "/api/v1/admin/tenants/{kpmId}/template": {
+      "post": {
+        "description": "What the office’s agents read — its newest published configuration snapshot (activity types, ratios, both lead pipelines, the training agents are offered, event types and the capability ladder without archived rows), its newest published activation checklist, and each offered module’s content — becomes a new template of `companyId`: the office’s own company or another. Never the Owner’s unpublished draft, anything archived, or any member, log or lead. What archiving left behind is dropped and listed in `dropped`, never refused: an archived activity type out of a ratio (the ratio left out if a side counts nothing else), a stage’s archived milestones (the stage left out if it requires nothing else), a checklist item’s link to a module no longer offered (kept as a manual item). Each kind it holds is published as version 1; a kind it holds nothing of is left empty. The office’s own training files are duplicated into the company’s assets, and into another company every file is; links are copied as links. 400 when the settings would produce a broken office; 409 TEMPLATE_RUNG_UNKNOWN `{ codes }` into another company whose ladder lacks a rung they name; 409 TEMPLATE_NAME_TAKEN; 409 ASSET_NOT_CONFIRMED for a file that never finished uploading; 404 for an unknown office or company; 403 PERM_DENIED, here and in the service, to anybody without `company_template:write`. Every check runs before any write. Audited once, naming the office, the destination and what was dropped.\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "OfficeTemplateController_save_v1",
+        "parameters": [
+          {
+            "name": "kpmId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveOfficeTemplateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedOfficeTemplateDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `company_template:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save an office’s settings as a template",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "company_template:write"
       }
     },
     "/api/v1/companies": {
@@ -8448,7 +9177,7 @@
         "x-required-permission": "tenant_config:write"
       },
       "delete": {
-        "description": "Archiving, never deleting (invariant §3) — and it cascades to the section’s types, because a live type inside a retired section would still be loggable from nowhere. A ratio naming an archived type keeps computing over its history.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Archiving, never deleting (invariant §3) — and it cascades to the section’s types, because a live type inside a retired section would still be loggable from nowhere. A ratio naming an archived type keeps computing over its history. 409 ACTIVITY_TYPE_RESERVED while it holds LEADS_CONTACTED, SELL_PRESENTATION or SELL_SUBMISSION, which the goal plan and the summary count (`details.codes`): move them out first.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TenantConfigController_archiveCategory_v1",
         "parameters": [
           {
@@ -8782,7 +9511,7 @@
         "x-required-permission": "tenant_config:write"
       },
       "delete": {
-        "description": "Archived, not deleted (invariant §3). It leaves the capture screen and stays readable wherever a historical activity log names it.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Archived, not deleted (invariant §3). It leaves the capture screen and stays readable wherever a historical activity log names it. 409 ACTIVITY_TYPE_RESERVED for LEADS_CONTACTED, SELL_PRESENTATION and SELL_SUBMISSION, which the goal plan and the summary count: they are renamed, described, reordered and moved, never archived.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TenantConfigController_archiveType_v1",
         "parameters": [
           {
@@ -14683,7 +15412,7 @@
     },
     "/api/v1/metrics": {
       "get": {
-        "description": "The key, the name a screen shows, the unit its number is in, and `computed`: whether it is measured by the time campaigns are evaluated. A screen says so from `computed` and never from `phase`, which is the roadmap's. A carrier rule naming a metric that is not is recorded as waiting on it, and a campaign requirement naming one is refused, rather than either silently never qualifying anybody (ADR-0035).\n\n**Requires `metric_registry:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every metric this product defines but those about an office rather than a member, which no campaign or qualification rule may name (Leaders used, an office capacity count). The key, the name a screen shows, the unit its number is in, and `computed`: whether it is measured by the time campaigns are evaluated. A screen says so from `computed` and never from `phase`, which is the roadmap's. A carrier rule naming a metric that is not is recorded as waiting on it, and a campaign requirement naming one is refused, rather than either silently never qualifying anybody (ADR-0035).\n\n**Requires `metric_registry:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "MetricRegistryController_list_v1",
         "parameters": [],
         "responses": {
@@ -14736,7 +15465,7 @@
             "bearer": []
           }
         ],
-        "summary": "Every metric this product defines",
+        "summary": "Every metric a requirement may name",
         "tags": [
           "tenant configuration"
         ],
@@ -18113,6 +18842,65 @@
         ],
         "x-required-permission": "activation_note:write"
       }
+    },
+    "/api/v1/admin/billing/prices": {
+      "get": {
+        "description": "Every tier by its stable code: the leader-count bounds (the last open), the standard, six-month and annual rates per leader per month in IDR minor units, and whether the tier is shown publicly as “Custom pricing”; and the annual rate’s discount off the six-month rate. A constant served read-only: nothing is stored, nothing is audited, and no collection is read. The Super Admin’s alone — never a tenant role or a support session.\n\n**Requires `billing:read_prices`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "BillingController_prices_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingPricesDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `billing:read_prices`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The subscription price table, for the quote tool",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "billing:read_prices"
+      }
     }
   },
   "info": {
@@ -20520,6 +21308,27 @@
           }
         }
       },
+      "StartFromDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "template",
+              "defaults",
+              "empty"
+            ],
+            "description": "`template`: one of the company’s active templates, named by `templateId`. `defaults`: the AgencyBoost defaults. `empty`: nothing but the three cascade activity types."
+          },
+          "templateId": {
+            "type": "string",
+            "description": "Required when `kind` is `template`."
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
       "CreateKpmDto": {
         "type": "object",
         "properties": {
@@ -20551,6 +21360,14 @@
               "Asia/Jakarta"
             ],
             "description": "v1 runs on a single time zone. Asia/Jakarta is the only accepted value; omit it and the office inherits the same value from its company (ADR-0016)."
+          },
+          "startFrom": {
+            "description": "What the office is built from. Absent: the company’s default template. A kind the source holds none of is empty in the office; every office has the three cascade activity types.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StartFromDto"
+              }
+            ]
           }
         },
         "required": [
@@ -20619,6 +21436,53 @@
           "status"
         ]
       },
+      "UpdateSubscriptionDto": {
+        "type": "object",
+        "properties": {
+          "startDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-01",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "The first day, an office date (YYYY-MM-DD in the office's timezone). Null with endDate for no dates."
+          },
+          "endDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2027-09-30",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "The last day the office can be used, an office date. From 00:00 the next office day every member is refused TENANT_SUBSCRIPTION_ENDED unless keepActiveAfterEnd is on. On or after startDate."
+          },
+          "pricePerLeaderMinor": {
+            "type": "number",
+            "nullable": true,
+            "example": 35000000,
+            "minimum": 0,
+            "maximum": 10000000000,
+            "description": "Price per leader per month, in IDR minor units (sen), whole rupiah. Informational: nothing is charged from it."
+          },
+          "maxLeaders": {
+            "type": "number",
+            "nullable": true,
+            "example": 10,
+            "minimum": 1,
+            "maximum": 10000,
+            "description": "The most leaders (active ABs and AABs, the Owner included) the office may have. Null for no limit. May be set below the leaders it has now: nobody is demoted, new ones are refused."
+          },
+          "keepActiveAfterEnd": {
+            "type": "boolean",
+            "example": false,
+            "description": "On, and the office stays open after its end date (Ended — kept active). Never null."
+          }
+        },
+        "required": [
+          "startDate",
+          "endDate",
+          "pricePerLeaderMinor",
+          "maxLeaders",
+          "keepActiveAfterEnd"
+        ]
+      },
       "RosterRowsDto": {
         "type": "object",
         "properties": {
@@ -20649,6 +21513,103 @@
         },
         "required": [
           "reason"
+        ]
+      },
+      "CreateTemplateDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Prudential — Jakarta branches",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "from": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "empty",
+                  "defaults"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "templateId": {
+                    "type": "string",
+                    "description": "One of this company’s templates."
+                  }
+                },
+                "required": [
+                  "templateId"
+                ],
+                "additionalProperties": false
+              }
+            ],
+            "description": "`empty`: nothing in any of the seven kinds — an office made from it starts empty but for the three cascade activity types. `defaults`: each kind a published version 1 of the AgencyBoost defaults. `{ templateId }`: **a copy** of one of this company’s templates — each kind’s newest published version as the copy’s version 1, drafts not copied, codes kept, training files referenced."
+          }
+        },
+        "required": [
+          "name",
+          "from"
+        ]
+      },
+      "ImportTemplateDto": {
+        "type": "object",
+        "properties": {
+          "fromCompanyId": {
+            "type": "string",
+            "description": "The company the template is imported from: not this one."
+          },
+          "templateId": {
+            "type": "string",
+            "description": "One of that company’s templates."
+          },
+          "name": {
+            "type": "string",
+            "example": "Allianz — Jakarta",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "fromCompanyId",
+          "templateId",
+          "name"
+        ]
+      },
+      "UpdateTemplateDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "isDefault": {
+            "type": "boolean",
+            "description": "`true` makes this the company’s default, moving it from the template that was. `false` is refused on the default (409 TEMPLATE_IS_DEFAULT): a company always has one, so another is made the default instead."
+          }
+        }
+      },
+      "SaveOfficeTemplateDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "BSD City settings",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "companyId": {
+            "type": "string",
+            "description": "The company the template is made in: the office’s own, or another."
+          }
+        },
+        "required": [
+          "name",
+          "companyId"
         ]
       },
       "PublicCompanyDto": {
@@ -28185,6 +29146,11 @@
           "companyId": {
             "type": "string"
           },
+          "templateId": {
+            "type": "string",
+            "nullable": true,
+            "description": "The named template this kind belongs to. Null for `campaign_kinds`, which is the company's, shared by every template."
+          },
           "kind": {
             "type": "string",
             "enum": [
@@ -28225,7 +29191,7 @@
           },
           "officesBehind": {
             "type": "number",
-            "description": "How many of this company's offices were built from an older version of this kind — including those built from the platform defaults because nothing of it was published."
+            "description": "How many of this template's offices were built from an older version of this kind — including those whose record for it has no version: since 13.2, an office whose template held none of this kind when it was made; before 13.2, one built from the platform defaults because the company had published nothing of it."
           },
           "officesUnrecorded": {
             "type": "number",
@@ -28235,6 +29201,7 @@
         "required": [
           "id",
           "companyId",
+          "templateId",
           "kind",
           "version",
           "status",
@@ -28243,6 +29210,198 @@
           "publishedVersion",
           "officesBehind",
           "officesUnrecorded"
+        ]
+      },
+      "TemplateOriginDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "migration",
+              "empty",
+              "defaults",
+              "copy",
+              "office",
+              "import"
+            ]
+          },
+          "templateId": {
+            "type": "string",
+            "nullable": true
+          },
+          "kpmId": {
+            "type": "string",
+            "nullable": true
+          },
+          "companyId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "NamedTemplateDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "companyId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Prudential template"
+          },
+          "isDefault": {
+            "type": "boolean",
+            "description": "The company's default: exactly one per company."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "origin": {
+            "$ref": "#/components/schemas/TemplateOriginDto"
+          },
+          "publishedVersions": {
+            "type": "object",
+            "description": "The newest published version of each of the seven kinds, keyed by kind; null where none is published, which an office made from this template gets empty."
+          },
+          "officeCount": {
+            "type": "number",
+            "description": "Live offices started from this template — and, for the template each existing company was given when templates were named, the offices created before then."
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "companyId",
+          "name",
+          "isDefault",
+          "status",
+          "archivedAt",
+          "origin",
+          "publishedVersions",
+          "officeCount",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "DroppedSettingDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "activity_taxonomy",
+              "lead_pipeline",
+              "ratio_set",
+              "activation_checklist",
+              "training_taxonomy",
+              "capability_ladder",
+              "event_types"
+            ],
+            "description": "The template kind it was in: `ratio_set`, `capability_ladder` or `activation_checklist`."
+          },
+          "code": {
+            "type": "string",
+            "nullable": true,
+            "description": "The ratio, stage, grid or checklist item concerned; null when the whole kind was left out."
+          },
+          "reason": {
+            "type": "string",
+            "example": "Ratio CLOSING no longer counts OLD_VISIT, which is not an active activity type in this office.",
+            "description": "One sentence naming the codes, as the office page shows it."
+          }
+        },
+        "required": [
+          "kind",
+          "code",
+          "reason"
+        ]
+      },
+      "SavedOfficeTemplateDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "companyId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Prudential template"
+          },
+          "isDefault": {
+            "type": "boolean",
+            "description": "The company's default: exactly one per company."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "origin": {
+            "$ref": "#/components/schemas/TemplateOriginDto"
+          },
+          "publishedVersions": {
+            "type": "object",
+            "description": "The newest published version of each of the seven kinds, keyed by kind; null where none is published, which an office made from this template gets empty."
+          },
+          "officeCount": {
+            "type": "number",
+            "description": "Live offices started from this template — and, for the template each existing company was given when templates were named, the offices created before then."
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "dropped": {
+            "description": "What the office held that the template leaves out or changes, because it names something archived: an archived activity type taken out of a ratio (the ratio left out when a side counts nothing else), a stage's archived milestones (the stage left out when it requires nothing else), a grid whose every item is archived, the ladder when no stage or milestone is left, and a checklist item's link to a module no longer offered (the item kept as a manual one). Empty when nothing was. Recorded in the `template.created` audit row as well.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DroppedSettingDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "companyId",
+          "name",
+          "isDefault",
+          "status",
+          "archivedAt",
+          "origin",
+          "publishedVersions",
+          "officeCount",
+          "createdAt",
+          "updatedAt",
+          "dropped"
         ]
       },
       "OrgLevelRowDto": {
@@ -29288,6 +30447,177 @@
           "usesPlatformDefaults"
         ]
       },
+      "KpmSubscriptionDto": {
+        "type": "object",
+        "properties": {
+          "startDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-01",
+            "description": "An office date, YYYY-MM-DD."
+          },
+          "endDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2027-09-30",
+            "description": "The last day the office can be used, an office date. Ended from the next office day."
+          },
+          "pricePerLeaderMinor": {
+            "type": "number",
+            "nullable": true,
+            "example": 35000000,
+            "description": "Per leader per month, IDR minor units (sen). Informational: nothing is charged from it."
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "IDR"
+            ]
+          },
+          "maxLeaders": {
+            "type": "number",
+            "nullable": true,
+            "example": 10,
+            "description": "Null for no leader limit."
+          },
+          "keepActiveAfterEnd": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "startDate",
+          "endDate",
+          "pricePerLeaderMinor",
+          "currency",
+          "maxLeaders",
+          "keepActiveAfterEnd"
+        ]
+      },
+      "KpmAdminViewDto": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "companyId": {
+            "type": "string"
+          },
+          "companyName": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "branchName": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true
+          },
+          "ownerUserId": {
+            "type": "string",
+            "nullable": true
+          },
+          "ownerName": {
+            "type": "string",
+            "nullable": true
+          },
+          "ownerEmail": {
+            "type": "string",
+            "nullable": true
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "locale": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "fiscalYearStartMonth": {
+            "type": "number",
+            "example": 1,
+            "description": "The month the office's financial year starts, 1–12. Stored and shown now; no period computation reads it yet."
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "suspended",
+              "archived"
+            ]
+          },
+          "suspendedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "suspendedReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "subscription": {
+            "nullable": true,
+            "description": "Null: no subscription, no end and no limit.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KpmSubscriptionDto"
+              }
+            ]
+          },
+          "leadersUsed": {
+            "type": "number",
+            "example": 6,
+            "description": "Leaders used (ADR-0113): active members at AB or AAB, the Owner and an Admin included."
+          },
+          "subscriptionState": {
+            "type": "string",
+            "enum": [
+              "none",
+              "active",
+              "ended",
+              "ended_kept_active"
+            ],
+            "description": "Against the office's today: none (no end date), active (the end is today or later), ended (past it, members refused) or ended_kept_active (past it, kept active)."
+          }
+        },
+        "required": [
+          "_id",
+          "companyId",
+          "companyName",
+          "code",
+          "branchName",
+          "address",
+          "contactPhone",
+          "ownerUserId",
+          "ownerName",
+          "ownerEmail",
+          "timezone",
+          "locale",
+          "currency",
+          "fiscalYearStartMonth",
+          "settings",
+          "status",
+          "suspendedAt",
+          "suspendedReason",
+          "createdAt",
+          "subscription",
+          "leadersUsed",
+          "subscriptionState"
+        ]
+      },
       "RosterTemplateDto": {
         "type": "object",
         "properties": {
@@ -29508,6 +30838,84 @@
         "required": [
           "accessToken",
           "expiresAt"
+        ]
+      },
+      "BillingTierDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "TIER_1_10",
+            "description": "The tier’s stable code. A tier is named by it, never by its position."
+          },
+          "minLeaders": {
+            "type": "number",
+            "example": 1,
+            "description": "The smallest leader count the tier prices, inclusive."
+          },
+          "maxLeaders": {
+            "type": "number",
+            "nullable": true,
+            "example": 10,
+            "description": "The largest leader count the tier prices, inclusive; `null` for the open last tier."
+          },
+          "standardMinor": {
+            "type": "number",
+            "example": 50000000,
+            "description": "The standard rate per leader per month, in IDR minor units (sen). Shown struck through."
+          },
+          "sixMonthMinor": {
+            "type": "number",
+            "example": 40000000,
+            "description": "The six-month rate per leader per month, in IDR minor units (sen)."
+          },
+          "annualMinor": {
+            "type": "number",
+            "example": 38000000,
+            "description": "The annual rate per leader per month, in IDR minor units (sen): the six-month rate less `annualDiscountPct` percent, exactly."
+          },
+          "customPricing": {
+            "type": "boolean",
+            "description": "Shown publicly as “Custom pricing”: its card draws no rate."
+          }
+        },
+        "required": [
+          "code",
+          "minLeaders",
+          "maxLeaders",
+          "standardMinor",
+          "sixMonthMinor",
+          "annualMinor",
+          "customPricing"
+        ]
+      },
+      "BillingPricesDto": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string",
+            "enum": [
+              "IDR"
+            ],
+            "description": "The currency of every rate."
+          },
+          "tiers": {
+            "description": "Smallest leader count first. Together they cover every count from 1 up, without a gap.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingTierDto"
+            }
+          },
+          "annualDiscountPct": {
+            "type": "number",
+            "example": 5,
+            "description": "The annual rate’s discount off the six-month rate, in percent."
+          }
+        },
+        "required": [
+          "currency",
+          "tiers",
+          "annualDiscountPct"
         ]
       }
     }

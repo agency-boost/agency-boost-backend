@@ -1,15 +1,19 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import type { SeedRecord } from './company-template.schema';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
-  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES,
-  SEED_RATIO_DEFINITIONS,
   type SeedActivityCategory, type SeedActivityType, type SeedLeadStatus, type SeedRatioDefinition,
   defaultDisplayUnitFor, resolveDisplayUnit,
 } from '@/domain/constants';
+import { NotFoundException } from '@/common/errors/domain.exception';
+import type { KpmStartedFrom } from '@/modules/tenants/kpm.schema';
+import { NamedTemplate, NamedTemplateDocument } from './named-template.schema';
+import {
+  OFFICE_TEMPLATE_KINDS, platformDefaultPayload, withCascadeTypes, type OfficeTemplateKind,
+} from './template-defaults';
 import { ActivityCategory, ActivityCategoryDocument } from './activity-category.schema';
 import { ActivityType, ActivityTypeDocument } from './activity-type.schema';
 import { LeadStatus, LeadStatusDocument } from './lead-status.schema';
@@ -24,11 +28,10 @@ import {
   CapabilityCatalog, CapabilityCatalogDocument,
 } from '@/modules/capability/capability.schema';
 import {
-  capabilityLadderProblems, capabilitySeedDocument, defaultCapabilityLadder,
-  type CapabilityLadderPayload,
+  capabilityLadderProblems, capabilitySeedDocument, type CapabilityLadderPayload,
 } from '@/modules/capability/capability-payload';
 import {
-  defaultEventTypes, eventTypeSeedDocuments, eventTypesProblems, type EventTypesPayload,
+  eventTypeSeedDocuments, eventTypesProblems, type EventTypesPayload,
 } from '@/modules/events/event-types-payload';
 import {
   qualificationRuleSeedDocuments, type CampaignKindsPayload,
@@ -38,7 +41,7 @@ import {
 } from '@/modules/campaigns/campaign.schema';
 import {
   activationChecklistProblems, activationSeedAspects, activationTrainingLinks,
-  defaultActivationChecklist, type ActivationChecklistPayload,
+  type ActivationChecklistPayload,
 } from '@/modules/activation/activation-payload';
 import { TenantConfigService } from './tenant-config.service';
 import { summaryGroupCodeTaken, summaryGroupConflict } from './summary-group';
@@ -48,8 +51,7 @@ import {
 import { TrainingSkill, TrainingSkillDocument } from '@/modules/training/training-skill.schema';
 import { TrainingModule, TrainingModuleDocument } from '@/modules/training/training-module.schema';
 import {
-  defaultTrainingTaxonomy, trainingSeedDocuments, trainingTaxonomyProblems,
-  type TrainingTaxonomyPayload,
+  trainingSeedDocuments, trainingTaxonomyProblems, type TrainingTaxonomyPayload,
 } from '@/modules/training/training-payload';
 
 export interface ProvisionedTaxonomy {
@@ -57,8 +59,10 @@ export interface ProvisionedTaxonomy {
   types: number;
   /** What was actually copied — what the ratios must be checkable against. */
   typeCodes: string[];
-  /** The template it came from, or a `null` version when the platform defaults were used. */
+  /** The template it came from, or a `null` version when the source held none of it. */
   seededFrom: SeedRecord;
+  /** The cascade codes the source lacked, added with their platform label (ADR-0115 §2). */
+  cascadeAdded: string[];
 }
 
 /** What one kind's seed copied, and from which published version (P5-T12). */
@@ -74,20 +78,87 @@ export interface ProvisionedTraining extends ProvisionedKind {
 }
 
 /**
- * The record of what a seed read, taken from the **same** template document it copied.
- *
- * Returned by each seed rather than looked up afterwards: a second query could land on a
- * version published in between, and then the record would describe something the office was
- * never built from.
+ * **Where an office is started from** (ADR-0115 §4): one of its company's named templates, the
+ * AgencyBoost defaults, or *Empty*. Absent, the company's default template — what approving a KPM
+ * request uses.
  */
-const recordOf = (template: { _id: unknown; version: number } | null): SeedRecord => ({
-  templateId: template ? String(template._id) : null,
-  version: template ? template.version : null,
-});
+export interface StartFrom {
+  kind: 'template' | 'defaults' | 'empty';
+  /** The template, when `kind` is `template`. */
+  templateId?: string | null;
+}
+
+/**
+ * **One kind's source**: the payload to copy, or `null` when the source holds none of it — an
+ * unpublished kind of a template, or *Empty* — and the record of where it came from.
+ *
+ * Resolved once, before the office row exists, and handed to the seed that writes it: a second read
+ * could land on a version published in between, and then the record would describe something the
+ * office was never built from.
+ */
+export interface KindSource {
+  payload: Record<string, unknown> | null;
+  seededFrom: SeedRecord;
+}
+
+/** Everything an office is about to be built from, checked whole before anything is written. */
+export interface ProvisioningPlan {
+  startedFrom: KpmStartedFrom;
+  kinds: Record<OfficeTemplateKind, KindSource>;
+}
+
+/** What `provision` wrote: the per-kind record for `kpms.seededFrom`, and the audit's counts. */
+export interface Provisioned {
+  seededFrom: Record<OfficeTemplateKind, SeedRecord>;
+  activityTypes: number;
+  cascadeAdded: string[];
+}
+
+const NO_RECORD: SeedRecord = { templateId: null, version: null };
+
+/** The AgencyBoost defaults of one kind, as a source. Its record has no template and no version. */
+export function defaultSource(kind: OfficeTemplateKind): KindSource {
+  return { payload: platformDefaultPayload(kind), seededFrom: { ...NO_RECORD } };
+}
+
+/** Nothing of a kind, as a source. */
+export function emptySource(templateId: string | null = null): KindSource {
+  return { payload: null, seededFrom: { templateId, version: null } };
+}
 
 interface ActivityTaxonomyPayload {
   categories?: SeedActivityCategory[];
   types?: SeedActivityType[];
+}
+
+/** A section as a template may hold it: the seed's fields, and two an office's own carries (P13.2-T7). */
+type TemplateCategory = SeedActivityCategory & {
+  description?: string | null;
+  appliesToOrgLevelCodes?: string[];
+};
+
+/** What would make a lead pipeline payload produce a broken office — one sentence each. */
+export function leadPipelineProblems(statuses: readonly SeedLeadStatus[]): string[] {
+  const problems: string[] = [];
+  // A closed lead is not expected to close. A template saying both would make the Overview's
+  // *Expected to close* double-count against *Last month* (ADR-0043).
+  const contradictory = statuses.filter((s) => s.isTerminal && s.isLateStage);
+  if (contradictory.length) {
+    problems.push(
+      `${contradictory.map((s) => s.code).join(', ')} is flagged as both the stage that closes its `
+        + 'pipeline and a stage still expected to close. A lead can only be one.',
+    );
+  }
+  for (const pipeline of ['sales', 'recruitment'] as const) {
+    const terminals = statuses.filter((s) => s.pipeline === pipeline && s.isTerminal);
+    if (terminals.length !== 1) {
+      problems.push(
+        `The ${pipeline} pipeline has ${terminals.length} terminal stages. It needs exactly one: it is `
+          + 'what gates marking a lead successful.',
+      );
+    }
+  }
+  return problems;
 }
 
 /**
@@ -98,12 +169,13 @@ interface ActivityTaxonomyPayload {
  * reorder, add and archive freely, and publishing a new template later does not reach back
  * into it.
  *
- * **From its own company's template, falling back to the platform defaults.** A company
- * that has published nothing must still be able to have an office — the alternative makes
- * the first office of every new company unreachable, gated behind somebody remembering to
- * publish a preset first. So the fallback is not a convenience: without it, ADR-0018 would
- * have made the product unusable for every new insurer on day one. Which source was used is
- * recorded on the office, so "who is on a stale taxonomy" stays answerable.
+ * **From the chosen source and nothing else** (ADR-0115 §1): one of the company's named
+ * templates, the AgencyBoost defaults, or *Empty*. **There is no fallback.** It fell back to the
+ * platform defaults whenever a company had published nothing of a kind, which made a blank
+ * company's offices anything but blank; a kind the source holds none of is now empty in the office,
+ * and the AgencyBoost defaults are a source a Super Admin chooses. The one exception is structural:
+ * every office has the three cascade activity types (ADR-0115 §2, {@link withCascadeTypes}).
+ * Which source was used is recorded on the office, so "who is on a stale taxonomy" stays answerable.
  *
  * **Written on the models, not through the tenant repository, and deliberately.** The
  * office is being created — there is no request context scoped to it yet, and the caller
@@ -139,7 +211,202 @@ export class ProvisioningService {
     // Reads the rows this service has just written, and renders them the way agents will
     // read them — one renderer, so the snapshot and the live read cannot disagree.
     private readonly renderer: TenantConfigService,
+    @InjectModel(NamedTemplate.name) private readonly named: Model<NamedTemplateDocument>,
   ) {}
+
+  /**
+   * **Resolve and check the whole source** an office will be built from (ADR-0115 §4), before the
+   * office row is written — so a refusal leaves no half-made office.
+   *
+   * `startFrom` absent means the company's default template: what approving a KPM request uses. A
+   * template must be the company's and active (an archived one is kept to be read, not offered).
+   * Each of its seven kinds is its newest **published** version, or nothing: a draft is somebody's
+   * work in progress, and a kind never published is empty in the office (ADR-0115 §3).
+   */
+  async planFor(companyId: string, startFrom?: StartFrom): Promise<ProvisioningPlan> {
+    let plan: ProvisioningPlan;
+    if (startFrom?.kind === 'defaults') {
+      plan = {
+        startedFrom: { source: 'defaults', templateId: null, templateName: null },
+        kinds: this.each((kind) => defaultSource(kind)),
+      };
+    } else if (startFrom?.kind === 'empty') {
+      plan = {
+        startedFrom: { source: 'empty', templateId: null, templateName: null },
+        kinds: this.each(() => emptySource()),
+      };
+    } else {
+      if (startFrom?.kind === 'template' && !startFrom.templateId) {
+        throw new BadRequestException('Choose the template the office starts from.');
+      }
+      const template = await this.templateFor(companyId, startFrom?.templateId ?? null);
+      const templateId = String(template._id);
+      const rows = await Promise.all(OFFICE_TEMPLATE_KINDS.map((kind) => this.templates
+        .findOne({ companyId, templateId, kind, status: 'published', deletedAt: null })
+        .sort({ version: -1 })
+        .exec()));
+      plan = {
+        startedFrom: { source: 'template', templateId, templateName: template.name },
+        kinds: this.each((_kind, i) => {
+          const row = rows[i];
+          return row
+            ? { payload: row.payload, seededFrom: { templateId, version: row.version } }
+            : emptySource(templateId);
+        }),
+      };
+    }
+    this.refuseBrokenPlan(plan);
+    return plan;
+  }
+
+  /**
+   * **The whole-source check, over payloads no template publish has seen** (P13.2-T7 AC-5): a
+   * template saved from an office's published settings is checked as `planFor` checks a template,
+   * before anything is written, so it can never hold what an office made from it would be refused.
+   * `sourceName` begins the refusal — *"KPM 0417's published settings would produce a broken
+   * office, so nothing was created."* — and a kind absent from `payloads` is a kind held empty.
+   */
+  checkSource(
+    sourceName: string,
+    payloads: Partial<Record<OfficeTemplateKind, Record<string, unknown>>>,
+  ): void {
+    this.refuseBrokenPlan({
+      startedFrom: { source: 'template', templateId: null, templateName: sourceName },
+      kinds: this.each((kind) => ({ payload: payloads[kind] ?? null, seededFrom: { ...NO_RECORD } })),
+    });
+  }
+
+  /**
+   * **Write an office's configuration from a checked plan**, in the order each kind's checks need:
+   * the taxonomy before the ratios that name its codes, the training before the checklist that links
+   * to its modules. The snapshot is published afterwards by the caller, from what was written.
+   */
+  async provision(kpmId: string, plan: ProvisioningPlan): Promise<Provisioned> {
+    const { kinds } = plan;
+    const taxonomy = await this.seedActivityTaxonomy(kpmId, kinds.activity_taxonomy);
+    const leads = await this.seedLeadPipelines(kpmId, kinds.lead_pipeline);
+    const ratios = await this.seedRatioDefinitions(kpmId, taxonomy.typeCodes, kinds.ratio_set);
+    const training = await this.seedTrainingTaxonomy(kpmId, kinds.training_taxonomy);
+    const activation = await this.seedActivationChecklist(
+      kpmId, training.publishedModuleCodes, kinds.activation_checklist,
+    );
+    const events = await this.seedEventTypes(kpmId, kinds.event_types);
+    const capability = await this.seedCapabilityCatalog(kpmId, kinds.capability_ladder);
+    return {
+      seededFrom: {
+        activity_taxonomy: taxonomy.seededFrom,
+        lead_pipeline: leads.seededFrom,
+        ratio_set: ratios.seededFrom,
+        training_taxonomy: training.seededFrom,
+        activation_checklist: activation.seededFrom,
+        event_types: events.seededFrom,
+        capability_ladder: capability,
+      },
+      activityTypes: taxonomy.types,
+      cascadeAdded: taxonomy.cascadeAdded,
+    };
+  }
+
+  private each(make: (kind: OfficeTemplateKind, index: number) => KindSource): Record<OfficeTemplateKind, KindSource> {
+    return Object.fromEntries(OFFICE_TEMPLATE_KINDS.map((kind, i) => [kind, make(kind, i)])) as Record<
+      OfficeTemplateKind, KindSource
+    >;
+  }
+
+  /** The named template a plan reads: the one chosen, or the company's default. */
+  private async templateFor(companyId: string, templateId: string | null): Promise<NamedTemplateDocument> {
+    const template = await this.named
+      .findOne(templateId
+        ? { _id: templateId, companyId, deletedAt: null }
+        : { companyId, isDefault: true, deletedAt: null })
+      .exec()
+      .catch(() => null);
+    if (!template) throw new NotFoundException('Template');
+    if (template.status === 'archived') {
+      throw new BadRequestException(
+        `${template.name} is archived and is not offered. Start the office from an active template.`,
+      );
+    }
+    return template;
+  }
+
+  /**
+   * **Every check each kind's seed makes, over the whole plan, before anything is written**
+   * (ADR-0115 §4). The checklist's training links are checked against the plan's own modules, and the
+   * ratios against the plan's taxonomy with the three cascade types in it — what the office will have.
+   */
+  private refuseBrokenPlan(plan: ProvisioningPlan): void {
+    const { kinds } = plan;
+    const problems: string[] = [];
+    const say = (what: string, found: string[]) => problems.push(...found.map((p) => `${what}: ${p}`));
+
+    const taxonomy = (kinds.activity_taxonomy.payload ?? {}) as ActivityTaxonomyPayload;
+    const { categories, types } = withCascadeTypes(taxonomy.categories ?? [], taxonomy.types ?? []);
+    const conflict = summaryGroupConflict(categories);
+    if (conflict) {
+      say('Activity types', [`the summary tile ${conflict.summaryGroupCode} is labelled `
+        + `${conflict.labels.join(' and ')}. One tile has one label.`]);
+    }
+    const taken = summaryGroupCodeTaken(categories);
+    if (taken) {
+      say('Activity types', [`the summary tile ${taken.summaryGroupCode} has the code of a section `
+        + 'outside it. One code is one tile.']);
+    }
+    const known = new Set(categories.map((c) => c.code));
+    const typeCodes = new Set(types.filter((t) => known.has(t.categoryCode)).map((t) => t.code));
+
+    const statuses = (kinds.lead_pipeline.payload as { statuses?: SeedLeadStatus[] } | null)?.statuses;
+    if (statuses) say('Lead statuses', leadPipelineProblems(statuses));
+
+    const ratios = (kinds.ratio_set.payload as { ratios?: SeedRatioDefinition[] } | null)?.ratios ?? [];
+    for (const ratio of ratios) {
+      const resolved = resolveDisplayUnit(
+        ratio.comparison,
+        (ratio as { displayUnit?: string }).displayUnit ?? defaultDisplayUnitFor(ratio.code, ratio.comparison),
+      );
+      if (resolved.refusal !== undefined) say('Ratio benchmarks', [`${ratio.code}: ${resolved.refusal}`]);
+      const missing = [...ratio.numerator, ...ratio.denominator].filter((c) => !typeCodes.has(c));
+      if (missing.length) {
+        say('Ratio benchmarks', [`${ratio.code} names ${missing.join(', ')}, which the activity types `
+          + 'it would be given do not contain.']);
+      }
+    }
+
+    let moduleCodes: string[] = [];
+    if (kinds.training_taxonomy.payload) {
+      const found = trainingTaxonomyProblems(kinds.training_taxonomy.payload);
+      say('Training', found);
+      if (!found.length) {
+        moduleCodes = trainingSeedDocuments('', kinds.training_taxonomy.payload as unknown as TrainingTaxonomyPayload)
+          .modules.filter((m) => m.publishState === 'published').map((m) => m.code);
+      }
+    }
+    if (kinds.activation_checklist.payload) {
+      const found = activationChecklistProblems(kinds.activation_checklist.payload);
+      say('Activation checklist', found);
+      if (!found.length) {
+        const offered = new Set(moduleCodes);
+        const missing = activationTrainingLinks(activationSeedAspects(kinds.activation_checklist.payload))
+          .filter((code) => !offered.has(code));
+        if (missing.length) {
+          say('Activation checklist', [`it links to training modules the office would not be given: `
+            + `${missing.join(', ')}.`]);
+        }
+      }
+    }
+    if (kinds.event_types.payload) say('Events', eventTypesProblems(kinds.event_types.payload));
+    if (kinds.capability_ladder.payload) {
+      say('Capability mapping', capabilityLadderProblems(kinds.capability_ladder.payload));
+    }
+
+    if (problems.length) {
+      const from = plan.startedFrom.templateName ?? (plan.startedFrom.source === 'defaults'
+        ? 'The AgencyBoost defaults' : 'The source');
+      throw new BadRequestException(
+        `${from} would produce a broken office, so nothing was created. ${problems.join(' ')}`,
+      );
+    }
+  }
 
   /**
    * Publish the copy a brand-new office starts on (P4-T6).
@@ -167,52 +434,24 @@ export class ProvisioningService {
   }
 
   /**
-   * The newest **published** template of a kind for a company, or nothing.
-   *
-   * Published, not newest: a draft is somebody's work in progress, and seeding an office
-   * from one would ship an unfinished taxonomy to real agents.
-   */
-  private async publishedTemplate(companyId: string, kind: string) {
-    return this.templates
-      .findOne({ companyId, kind, status: 'published', deletedAt: null })
-      .sort({ version: -1 })
-      .exec();
-  }
-
-  /**
    * The two lead pipelines (P4-T3).
    *
-   * Same rule as the taxonomy: from the company's published template, or the platform
-   * defaults. A pipeline with no terminal stage is refused rather than copied — *mark
-   * successful* is gated on it, and an office whose leads can never be closed would look
+   * From the source, or nothing when it holds none (ADR-0115 §1) — the Owner then builds both, the
+   * closing stage of each included. A pipeline with no terminal stage is refused rather than copied
+   * — *mark successful* is gated on it, and an office whose leads can never be closed would look
    * like a leads bug for weeks before anybody traced it to a template.
+   *
+   * The source defaults to the AgencyBoost defaults; `createKpm` always names one.
    */
-  async seedLeadPipelines(kpmId: string, companyId: string): Promise<ProvisionedKind> {
-    const template = await this.publishedTemplate(companyId, 'lead_pipeline');
-    const fromTemplate = (template?.payload as { statuses?: SeedLeadStatus[] })?.statuses;
-    const statuses = fromTemplate?.length ? fromTemplate : SEED_LEAD_STATUSES;
+  async seedLeadPipelines(
+    kpmId: string, source: KindSource = defaultSource('lead_pipeline'),
+  ): Promise<ProvisionedKind> {
+    const statuses = (source.payload as { statuses?: SeedLeadStatus[] } | null)?.statuses ?? [];
+    if (statuses.length === 0) return { rows: 0, seededFrom: source.seededFrom };
 
-    // A closed lead is not expected to close. A template saying both would make the
-    // Overview's *Expected to close* double-count against *Last month* (ADR-0043).
-    const contradictory = statuses.filter((s) => s.isTerminal && s.isLateStage);
-    if (contradictory.length) {
-      throw new Error(
-        `The published lead pipeline template for company ${companyId} flags `
-          + `${contradictory.map((s) => s.code).join(', ')} as both the stage that closes `
-          + 'its pipeline and a stage still expected to close. A lead can only be one.',
-      );
-    }
-
-    for (const pipeline of ['sales', 'recruitment'] as const) {
-      const terminals = statuses.filter((s) => s.pipeline === pipeline && s.isTerminal);
-      if (terminals.length !== 1) {
-        throw new Error(
-          `The published lead pipeline template for company ${companyId} gives the `
-            + `${pipeline} pipeline `
-            + `${terminals.length} terminal stages. It needs exactly one: it is what gates `
-            + 'marking a lead successful.',
-        );
-      }
+    const problems = leadPipelineProblems(statuses);
+    if (problems.length) {
+      throw new Error(`The lead pipeline for office ${kpmId} would be broken: ${problems.join(' ')}`);
     }
 
     await this.leadStatuses.insertMany(statuses.map((s) => ({
@@ -230,23 +469,23 @@ export class ProvisioningService {
       createdBy: null,
       updatedBy: null,
     })));
-    return { rows: statuses.length, seededFrom: recordOf(template) };
+    return { rows: statuses.length, seededFrom: source.seededFrom };
   }
 
-  async seedActivityTaxonomy(kpmId: string, companyId: string): Promise<ProvisionedTaxonomy> {
-    const template = await this.publishedTemplate(companyId, 'activity_taxonomy');
-
-    const payload = (template?.payload ?? {}) as ActivityTaxonomyPayload;
-    const categories = payload.categories?.length ? payload.categories : SEED_ACTIVITY_CATEGORIES;
-    const types = payload.types?.length ? payload.types : SEED_ACTIVITY_TYPES;
-
-    if (!template) {
-      // Worth a line in the log rather than silence: it is the normal state of a brand-new
-      // company, and the wrong thing to discover from an office's taxonomy looking odd.
-      this.logger.log(
-        `Company ${companyId} has published no activity taxonomy; seeding office ${kpmId} `
-          + 'from the platform defaults.',
-      );
+  /**
+   * The activity taxonomy (P4-T1): the source's categories and types, **and the three cascade types
+   * whatever the source** (ADR-0115 §2) — added with their platform label in their platform category
+   * where the source lacks them. An *Empty* office has those three and nothing else.
+   *
+   * The source defaults to the AgencyBoost defaults; `createKpm` always names one.
+   */
+  async seedActivityTaxonomy(
+    kpmId: string, source: KindSource = defaultSource('activity_taxonomy'),
+  ): Promise<ProvisionedTaxonomy> {
+    const payload = (source.payload ?? {}) as ActivityTaxonomyPayload;
+    const { categories, types, added } = withCascadeTypes(payload.categories ?? [], payload.types ?? []);
+    if (added.length) {
+      this.logger.log(`Office ${kpmId} was given the cascade activity types ${added.join(', ')} (ADR-0115 §2).`);
     }
 
     /*
@@ -257,14 +496,14 @@ export class ProvisioningService {
     const conflict = summaryGroupConflict(categories);
     if (conflict) {
       throw new Error(
-        `The published activity taxonomy for company ${companyId} labels the summary tile `
+        `The activity taxonomy for office ${kpmId} labels the summary tile `
           + `${conflict.summaryGroupCode} as ${conflict.labels.join(' and ')}. One tile has one label.`,
       );
     }
     const taken = summaryGroupCodeTaken(categories);
     if (taken) {
       throw new Error(
-        `The published activity taxonomy for company ${companyId} gives the summary tile `
+        `The activity taxonomy for office ${kpmId} gives the summary tile `
           + `${taken.summaryGroupCode} the code of a section outside it. One code is one tile.`,
       );
     }
@@ -273,6 +512,13 @@ export class ProvisioningService {
       kpmId,
       code: c.code,
       label: c.label,
+      /*
+       * What a template saved from an office carries (P13.2-T7, ADR-0115 §5): the section's
+       * description and the rungs it is shown to. A template authored on the console carries
+       * neither, and reads as today — no description, every rung.
+       */
+      description: (c as TemplateCategory).description ?? null,
+      appliesToOrgLevelCodes: [...((c as TemplateCategory).appliesToOrgLevelCodes ?? [])],
       displayOrder: c.displayOrder,
       // The tile it counts toward, as the template says; none is a tile of its own (ADR-0064).
       summaryGroupCode: c.summaryGroupCode ?? null,
@@ -292,7 +538,7 @@ export class ProvisioningService {
     const usable = types.filter((t) => known.has(t.categoryCode));
     if (usable.length !== types.length) {
       this.logger.warn(
-        `Template for company ${companyId} names ${types.length - usable.length} activity `
+        `The taxonomy for office ${kpmId} names ${types.length - usable.length} activity `
           + 'type(s) in categories it does not define. They were not copied.',
       );
     }
@@ -316,76 +562,58 @@ export class ProvisioningService {
       categories: categories.length,
       types: usable.length,
       typeCodes: usable.map((t) => t.code),
-      seededFrom: recordOf(template),
+      seededFrom: source.seededFrom,
+      cascadeAdded: added,
     };
   }
 
   /**
-   * The training taxonomy (P5-T1, ADR-0029): categories, skills and modules.
-   *
-   * **From the company's published template exactly as published**, or from the domain
-   * defaults when it has published none. Not "defaults when a list is empty", as the activity
-   * taxonomy reads it: a company may publish a category with nothing in it yet, and that is a
-   * choice to copy, not a gap to fill.
-   *
-   * A published template that would produce a broken tree is refused rather than copied. Publish
-   * already refuses one (`TemplateService`), so this can only be a template older than that
-   * check — and a skill under a category that does not exist would render on no screen.
-   */
-  /**
    * The capability catalog a new office starts with (P5-T8, ADR-0025).
    *
-   * From the company's published `capability_ladder` where there is one, else the defaults — and
-   * **refused when that payload would produce a broken office** (AC-5). A catalog with no stages,
-   * or two items sharing a code, reaches every office created afterwards and nothing says so until
-   * a leader opens an assessment and finds it cannot be scored.
+   * From the source — and **refused when that payload would produce a broken office** (AC-5). A
+   * catalog with no stages, or two items sharing a code, reaches every office created afterwards and
+   * nothing says so until a leader opens an assessment and finds it cannot be scored.
+   *
+   * **A source holding none gives the office an empty catalog** (ADR-0115 §1), not none: an office
+   * with no catalog row reads as the platform's ladder (`CapabilityService.read`, for offices made
+   * before catalogs existed), which is exactly the fallback an *Empty* office must not have.
    *
    * Two offices seeded from the same version hold **identical item codes** (AC-3), because the
    * codes come from the payload rather than being minted per office.
    */
-  async seedCapabilityCatalog(kpmId: string, companyId: string): Promise<SeedRecord> {
-    const template = await this.publishedTemplate(companyId, 'capability_ladder');
-    const problems = template ? capabilityLadderProblems(template.payload) : [];
+  async seedCapabilityCatalog(
+    kpmId: string, source: KindSource = defaultSource('capability_ladder'),
+  ): Promise<SeedRecord> {
+    const payload = (source.payload ?? { stages: [], milestones: [], grids: [] }) as unknown as CapabilityLadderPayload;
+    const problems = source.payload ? capabilityLadderProblems(source.payload) : [];
     if (problems.length) {
       throw new Error(
-        `The published capability catalog for company ${companyId} would produce a broken office: `
-          + problems.join(' '),
+        `The capability catalog for office ${kpmId} would be broken: ${problems.join(' ')}`,
       );
     }
-    const payload = template
-      ? (template.payload as unknown as CapabilityLadderPayload)
-      : defaultCapabilityLadder();
-
     await this.capabilityCatalogs.create(capabilitySeedDocument(kpmId, payload));
-    return recordOf(template);
+    return source.seededFrom;
   }
 
   /**
    * The event types a new office starts with (P5-T6, P5-T9 AC-4).
    *
-   * From the company's published `event_types` where there is one, else the platform defaults —
-   * ADR-0034 puts them on the Company template's Events tab, because an insurer that runs
-   * *Product launch* and not *Community* should not hand every office a type it never uses.
-   *
-   * Seeded rather than left empty, because an office with no event type has nothing to file an
-   * event under, and its Events screen would say so on day one for a reason nobody chose.
+   * From the source — ADR-0034 puts them on the Company template's Events tab, because an insurer
+   * that runs *Product launch* and not *Community* should not hand every office a type it never
+   * uses. A source holding none gives none (ADR-0115 §1): the office's Events screen says so, and
+   * the Owner adds the first.
    */
-  async seedEventTypes(kpmId: string, companyId: string): Promise<ProvisionedKind> {
-    const template = await this.publishedTemplate(companyId, 'event_types');
-    const problems = template ? eventTypesProblems(template.payload) : [];
+  async seedEventTypes(
+    kpmId: string, source: KindSource = defaultSource('event_types'),
+  ): Promise<ProvisionedKind> {
+    if (!source.payload) return { rows: 0, seededFrom: source.seededFrom };
+    const problems = eventTypesProblems(source.payload);
     if (problems.length) {
-      throw new Error(
-        `The published event types for company ${companyId} would produce a broken office: `
-          + problems.join(' '),
-      );
+      throw new Error(`The event types for office ${kpmId} would be broken: ${problems.join(' ')}`);
     }
-    const payload = template
-      ? (template.payload as unknown as EventTypesPayload)
-      : defaultEventTypes();
-
-    const rows = eventTypeSeedDocuments(kpmId, payload);
-    await this.eventTypes.insertMany(rows);
-    return { rows: rows.length, seededFrom: recordOf(template) };
+    const rows = eventTypeSeedDocuments(kpmId, source.payload as unknown as EventTypesPayload);
+    if (rows.length) await this.eventTypes.insertMany(rows);
+    return { rows: rows.length, seededFrom: source.seededFrom };
   }
 
   /**
@@ -423,26 +651,31 @@ export class ProvisioningService {
     return { written: wanted.length, retired: retired.length };
   }
 
-  async seedTrainingTaxonomy(kpmId: string, companyId: string): Promise<ProvisionedTraining> {
-    const template = await this.publishedTemplate(companyId, 'training_taxonomy');
-    const problems = template ? trainingTaxonomyProblems(template.payload) : [];
+  /**
+   * The training taxonomy (P5-T1, ADR-0029): categories, skills and modules.
+   *
+   * **From the source exactly as it holds it**, or nothing. A company may publish a category with
+   * nothing in it yet, and that is a choice to copy, not a gap to fill.
+   *
+   * A payload that would produce a broken tree is refused rather than copied. Publish already
+   * refuses one (`TemplateService`), so this can only be a template older than that check — and a
+   * skill under a category that does not exist would render on no screen.
+   */
+  async seedTrainingTaxonomy(
+    kpmId: string, source: KindSource = defaultSource('training_taxonomy'),
+  ): Promise<ProvisionedTraining> {
+    if (!source.payload) return { rows: 0, seededFrom: source.seededFrom, publishedModuleCodes: [] };
+    const problems = trainingTaxonomyProblems(source.payload);
     if (problems.length) {
-      throw new Error(
-        `The published training taxonomy for company ${companyId} would produce a broken office: `
-          + problems.join(' '),
-      );
+      throw new Error(`The training taxonomy for office ${kpmId} would be broken: ${problems.join(' ')}`);
     }
-    const payload = template
-      ? (template.payload as unknown as TrainingTaxonomyPayload)
-      : defaultTrainingTaxonomy();
-
-    const rows = trainingSeedDocuments(kpmId, payload);
-    await this.trainingCategories.insertMany(rows.categories);
-    await this.trainingSkills.insertMany(rows.skills);
-    await this.trainingModules.insertMany(rows.modules);
+    const rows = trainingSeedDocuments(kpmId, source.payload as unknown as TrainingTaxonomyPayload);
+    if (rows.categories.length) await this.trainingCategories.insertMany(rows.categories);
+    if (rows.skills.length) await this.trainingSkills.insertMany(rows.skills);
+    if (rows.modules.length) await this.trainingModules.insertMany(rows.modules);
     return {
       rows: rows.categories.length + rows.skills.length + rows.modules.length,
-      seededFrom: recordOf(template),
+      seededFrom: source.seededFrom,
       publishedModuleCodes: rows.modules
         .filter((m) => m.publishState === 'published')
         .map((m) => m.code),
@@ -456,23 +689,21 @@ export class ProvisioningService {
    * seeded after the activity types: an item linked to a module this office does not offer can never
    * complete, and the hire it stalls has no way to know why. Refusing here puts the failure where
    * the bad template is still the obvious suspect.
+   *
+   * **A source holding none gives the office no checklist** (ADR-0115 §8), and an office with no
+   * published checklist creates no activation: the Owner's first publish starts them.
    */
   async seedActivationChecklist(
     kpmId: string,
-    companyId: string,
     publishedModuleCodes: readonly string[],
+    source: KindSource = defaultSource('activation_checklist'),
   ): Promise<ProvisionedKind> {
-    const template = await this.publishedTemplate(companyId, 'activation_checklist');
-    const payload = template
-      ? (template.payload as unknown as ActivationChecklistPayload)
-      : defaultActivationChecklist();
+    if (!source.payload) return { rows: 0, seededFrom: source.seededFrom };
+    const payload = source.payload as unknown as ActivationChecklistPayload;
 
-    const problems = template ? activationChecklistProblems(template.payload) : [];
+    const problems = activationChecklistProblems(source.payload);
     if (problems.length) {
-      throw new Error(
-        `The published activation checklist for company ${companyId} would produce a broken office: `
-          + problems.join(' '),
-      );
+      throw new Error(`The activation checklist for office ${kpmId} would be broken: ${problems.join(' ')}`);
     }
 
     const aspects = activationSeedAspects(payload);
@@ -480,8 +711,8 @@ export class ProvisioningService {
     const missing = activationTrainingLinks(aspects).filter((code) => !offered.has(code));
     if (missing.length) {
       throw new Error(
-        `The published activation checklist for company ${companyId} links to training modules this `
-          + `office is not given: ${missing.join(', ')}.`,
+        `The activation checklist for office ${kpmId} links to training modules it is not given: `
+          + `${missing.join(', ')}.`,
       );
     }
 
@@ -501,7 +732,7 @@ export class ProvisioningService {
 
     return {
       rows: aspects.reduce((total, aspect) => total + aspect.items.length, 0),
-      seededFrom: recordOf(template),
+      seededFrom: source.seededFrom,
     };
   }
 
@@ -515,12 +746,11 @@ export class ProvisioningService {
    */
   async seedRatioDefinitions(
     kpmId: string,
-    companyId: string,
     availableCodes: readonly string[],
+    source: KindSource = defaultSource('ratio_set'),
   ): Promise<ProvisionedKind> {
-    const template = await this.publishedTemplate(companyId, 'ratio_set');
-    const fromTemplate = (template?.payload as { ratios?: SeedRatioDefinition[] })?.ratios;
-    const ratios = fromTemplate?.length ? fromTemplate : SEED_RATIO_DEFINITIONS;
+    const ratios = (source.payload as { ratios?: SeedRatioDefinition[] } | null)?.ratios ?? [];
+    if (ratios.length === 0) return { rows: 0, seededFrom: source.seededFrom };
 
     /*
      * The unit each ratio is written in (P4-T25). A template published before units existed
@@ -585,6 +815,6 @@ export class ProvisioningService {
       createdBy: null,
       updatedBy: null,
     })));
-    return { rows: ratios.length, seededFrom: recordOf(template) };
+    return { rows: ratios.length, seededFrom: source.seededFrom };
   }
 }

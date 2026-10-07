@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
-import { configModule, provisionOffice } from '../../../test/config-module';
+import { configModule, givenDefaultTemplate, provisionOffice } from '../../../test/config-module';
 import type { ActivityCategoryView } from './activity.service';
 
 const NOW = new Date('2026-03-11T02:00:00Z');
@@ -60,6 +60,8 @@ describe('the summary tile a section counts toward (ADR-0064)', () => {
   beforeEach(async () => {
     await clearCollections();
     await (wired.companies as unknown as mongoose.Model<never>).create({ _id: COMPANY, name: 'Prudential', slug: 'p' } as never);
+    // The company's default template, which the template routes read when none is named (ADR-0115 §3).
+    await givenDefaultTemplate(wired, COMPANY);
     await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create([
       { _id: KPM_A, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta' },
       { _id: KPM_B, companyId: COMPANY, code: '0555', branchName: 'B', timezone: 'Asia/Jakarta' },
@@ -205,13 +207,14 @@ describe('the summary tile a section counts toward (ADR-0064)', () => {
     });
 
     it('refuses moving sections into a shared tile under another section’s code, archived included', async () => {
-      const [personal, selling] = [await section('PERSONAL_DEVELOPMENT'), await section('SELLING')];
-      await wired.activity.archiveCategory(owner(), selling.id);
+      // *Recruitment*: *Selling* holds cascade types and cannot be archived (ADR-0115 §2).
+      const [personal, recruitment] = [await section('PERSONAL_DEVELOPMENT'), await section('RECRUITMENT')];
+      await wired.activity.archiveCategory(owner(), recruitment.id);
 
       expect(await refusalOf(wired.activity.updateCategory(owner(), personal.id, {
-        summaryGroupCode: 'SELLING', summaryGroupLabel: 'Selling',
+        summaryGroupCode: 'RECRUITMENT', summaryGroupLabel: 'Recruitment',
       }))).toMatchObject({
-        code: 'CONFIG_SUMMARY_GROUP_CODE_TAKEN', status: 422, details: { summaryGroupCode: 'SELLING' },
+        code: 'CONFIG_SUMMARY_GROUP_CODE_TAKEN', status: 422, details: { summaryGroupCode: 'RECRUITMENT' },
       });
       expect(await section('PERSONAL_DEVELOPMENT')).toMatchObject({ summaryGroupCode: 'DEVELOPMENT', version: personal.version });
     });
@@ -498,8 +501,9 @@ describe('the summary tile a section counts toward (ADR-0064)', () => {
       types: [{ code: 'SELL_X', categoryCode: 'SELLING', label: 'x', description: null, displayOrder: 1 }],
     });
 
-    it('starts from the seed’s tiles', async () => {
-      const view = await wired.templateService.read(COMPANY, 'activity_taxonomy');
+    it('starts a template made from the defaults with the seed’s tiles', async () => {
+      const made = await wired.namedTemplates.create(sa, COMPANY, { name: 'Defaults', from: 'defaults' });
+      const view = await wired.templateService.read(COMPANY, 'activity_taxonomy', made.id);
       expect((view.payload.categories as Record<string, unknown>[]).map((c) => c.summaryGroupCode))
         .toEqual([null, null, null, 'DEVELOPMENT', 'DEVELOPMENT']);
     });
@@ -580,39 +584,47 @@ describe('the summary tile a section counts toward (ADR-0064)', () => {
         _id: KPM_C, companyId: COMPANY, code: '0600', branchName: 'C', timezone: 'Asia/Jakarta',
       });
 
-      await wired.provisioning.seedActivityTaxonomy(KPM_C, COMPANY);
+      const plan = await wired.provisioning.planFor(COMPANY);
+      await wired.provisioning.seedActivityTaxonomy(KPM_C, plan.kinds.activity_taxonomy);
 
       expect(stripOf(await wired.activity.list(owner(KPM_C)), 'AGENT')).toEqual([
         { label: 'Core', codes: ['SELLING', 'RECRUITMENT'] },
         { label: 'Referrals', codes: ['REFERRALS'] },
+        // The template lacked `LEADS_CONTACTED`, so its platform section came with it (ADR-0115 §2).
+        { label: 'Leads Generation', codes: ['LEADS_GENERATION'] },
       ]);
     });
 
     it('refuses to build an office from a published template older than the rule', async () => {
+      const templateId = String((await wired.namedTemplates.resolve(COMPANY))._id);
       await (wired.templates as unknown as mongoose.Model<never>).create({
-        companyId: COMPANY, kind: 'activity_taxonomy', status: 'published', version: 1, deletedAt: null,
+        companyId: COMPANY, templateId, kind: 'activity_taxonomy', status: 'published', version: 1, deletedAt: null,
         payload: taxonomy([
           { code: 'SELLING', label: 'Selling', displayOrder: 1, summaryGroupCode: 'CORE', summaryGroupLabel: 'Core' },
           { code: 'RECRUITMENT', label: 'Recruitment', displayOrder: 2, summaryGroupCode: 'CORE', summaryGroupLabel: 'Inti' },
         ]),
       } as never);
 
-      await expect(wired.provisioning.seedActivityTaxonomy('66f0000000000000000000d1', COMPANY))
+      // Checked whole before the office row is written (ADR-0115 §4)…
+      await expect(wired.provisioning.planFor(COMPANY))
+        .rejects.toThrow(/the summary tile CORE is labelled Core and Inti/);
+      // …and by the seed itself, for a caller that hands it a source directly.
+      const source = { payload: (await (wired.templates as unknown as mongoose.Model<{ payload: Record<string, unknown> }>)
+        .findOne({ companyId: COMPANY }).lean().exec())!.payload, seededFrom: { templateId, version: 1 } };
+      await expect(wired.provisioning.seedActivityTaxonomy('66f0000000000000000000d1', source))
         .rejects.toThrow(/labels the summary tile CORE as Core and Inti/);
     });
 
     it('refuses to build an office from a published template whose tile code a section outside it carries', async () => {
-      await (wired.templates as unknown as mongoose.Model<never>).create({
-        companyId: COMPANY, kind: 'activity_taxonomy', status: 'published', version: 1, deletedAt: null,
-        payload: taxonomy([
-          { code: 'SELLING', label: 'Selling', displayOrder: 1, summaryGroupCode: 'CORE', summaryGroupLabel: 'Core' },
-          { code: 'RECRUITMENT', label: 'Recruitment', displayOrder: 2, summaryGroupCode: 'CORE', summaryGroupLabel: 'Core' },
-          { code: 'CORE', label: 'Core skills', displayOrder: 3 },
-        ]),
-      } as never);
+      const payload = taxonomy([
+        { code: 'SELLING', label: 'Selling', displayOrder: 1, summaryGroupCode: 'CORE', summaryGroupLabel: 'Core' },
+        { code: 'RECRUITMENT', label: 'Recruitment', displayOrder: 2, summaryGroupCode: 'CORE', summaryGroupLabel: 'Core' },
+        { code: 'CORE', label: 'Core skills', displayOrder: 3 },
+      ]);
 
-      await expect(wired.provisioning.seedActivityTaxonomy('66f0000000000000000000d1', COMPANY))
-        .rejects.toThrow(/gives the summary tile CORE the code of a section outside it/);
+      await expect(wired.provisioning.seedActivityTaxonomy('66f0000000000000000000d1', {
+        payload, seededFrom: { templateId: null, version: 1 },
+      })).rejects.toThrow(/gives the summary tile CORE the code of a section outside it/);
     });
   });
 });

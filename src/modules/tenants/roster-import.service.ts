@@ -8,6 +8,7 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { can } from '@/modules/rbac/permissions';
 import { AuditService } from '@/modules/audit/audit.service';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
+import { countLeadersUsed, isLeaderRung, leaderLimitReached } from '@/modules/org/leader-limit';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { PasswordService } from '@/modules/auth/password.service';
 import { User, UserDocument } from '@/modules/users/user.schema';
@@ -177,12 +178,67 @@ export class RosterImportService {
     return issues;
   }
 
+  /**
+   * *Leaders used*, and the maximum, for the office being filled (ADR-0113, P13.2-T4). `max` is
+   * `null` when the office has no limit, and then nothing here is ever refused.
+   */
+  private async seats(kpm: KpmDocument): Promise<{ max: number | null; used: number }> {
+    const max = kpm.subscription?.maxLeaders ?? null;
+    if (max === null) return { max, used: 0 };
+    const used = await countLeadersUsed(
+      this.members, RequestContext.tenantRead(String(kpm._id), 'roster-import'),
+    );
+    return { max, used };
+  }
+
+  /**
+   * **Each row that would pass the office's leader limit, as an issue** (P13.2-T4 AC-4), with its line
+   * and the *role* column, in the issue list the import already has — so the file is refused whole and
+   * nothing commits. Rows are counted in the file's order: the first ABs and AABs that fit are fine,
+   * and every one after them is named.
+   *
+   * The words differ by reader (AC-5): the Super Admin is told where to raise the limit, an Owner or an
+   * Admin that AgencyBoost can. Neither is shown a code.
+   */
+  private async issuesAgainstTheLimit(
+    ctx: RequestContext,
+    kpm: KpmDocument,
+    rows: RosterRow[],
+  ): Promise<RosterIssue[]> {
+    const { max, used } = await this.seats(kpm);
+    if (max === null) return [];
+
+    const issues: RosterIssue[] = [];
+    let leaders = used;
+    for (const row of [...rows].sort((a, b) => a.line - b.line)) {
+      if (!isLeaderRung(row.role)) continue;
+      leaders += 1;
+      if (leaders <= max) continue;
+      const already = `${used} ${used === 1 ? 'is' : 'are'} in use already`;
+      issues.push({
+        line: row.line,
+        column: 'role',
+        message: ctx.isSuperAdmin
+          ? `This office’s leader limit is ${max} — ABs and AABs together — and ${already}, so this `
+            + `row would be one too many. Raise the limit with Edit subscription on the offices list `
+            + 'first, or import them as an Agent.'
+          : `Your office’s leader limit is ${max} — ABs and AABs together — and ${already}, so this `
+            + 'row would be one too many. Import them as an Agent, or ask AgencyBoost to raise the limit.',
+      });
+    }
+    return issues;
+  }
+
   async preview(ctx: RequestContext, kpmId: string, text: string): Promise<RosterPreview> {
     this.require(ctx);
     const kpm = await this.office(ctx, kpmId);
 
     const { rows, issues } = parseRoster(text);
-    const all = [...issues, ...(await this.issuesAgainstTheOffice(kpm, rows))]
+    const all = [
+      ...issues,
+      ...(await this.issuesAgainstTheOffice(kpm, rows)),
+      ...(await this.issuesAgainstTheLimit(ctx, kpm, rows)),
+    ]
       .sort((a, b) => a.line - b.line || a.column.localeCompare(b.column));
 
     return {
@@ -217,6 +273,19 @@ export class RosterImportService {
       );
     }
 
+    /*
+     * **The leader limit, again** (P13.2-T4 AC-4). The preview named every row past it; this is the
+     * office that filled up between the preview and the commit — a promotion in another tab — and it
+     * refuses whole with the limit's own code, before anybody is created. Each row's write is checked
+     * once more inside `HierarchyService.create`, which is what holds when a promotion lands while
+     * this very loop runs.
+     */
+    const { max, used } = await this.seats(kpm);
+    const leadersInFile = rows.filter((row) => isLeaderRung(row.role)).length;
+    if (max !== null && leadersInFile > 0 && used + leadersInFile > max) {
+      throw leaderLimitReached(max, used);
+    }
+
     // Checked above, so this cannot be null — but the ordering is what makes the loop
     // below work at all, and reading it from the same function keeps the two in step.
     const ordered = inLeaderFirstOrder(rows) as RosterRow[];
@@ -227,34 +296,44 @@ export class RosterImportService {
 
     for (const row of ordered) {
       const temporaryPassword = generateTemporaryPassword();
-      const account = await this.users.create({
-        email: row.email,
-        passwordHash: await this.passwords.hash(temporaryPassword),
-        fullName: row.fullName,
-        companyId: kpm.companyId,
-        agentCode: row.agentCode,
-        // **The credential the admin has read opens nothing but the screen that replaces
-        // it.** Set here rather than by a later sweep: an account that reached `active`
-        // without it would be a permanent hole.
-        mustChangePassword: true,
-        // Pre-verified: the admin vouched for the address by putting it in the file, and
-        // the password is going to that address anyway — an unverified account could not
-        // sign in to receive it.
-        emailVerifiedAt: this.clock.now(),
-        status: 'active',
-        platformRole: 'none',
-      });
+      // Hashed before the write, so the leader lease is never held while a hash is computed.
+      const passwordHash = await this.passwords.hash(temporaryPassword);
+      const makeAccount = async () => {
+        const account = await this.users.create({
+          email: row.email,
+          passwordHash,
+          fullName: row.fullName,
+          companyId: kpm.companyId,
+          agentCode: row.agentCode,
+          // **The credential the admin has read opens nothing but the screen that replaces
+          // it.** Set here rather than by a later sweep: an account that reached `active`
+          // without it would be a permanent hole.
+          mustChangePassword: true,
+          // Pre-verified: the admin vouched for the address by putting it in the file, and
+          // the password is going to that address anyway — an unverified account could not
+          // sign in to receive it.
+          emailVerifiedAt: this.clock.now(),
+          status: 'active',
+          platformRole: 'none',
+        });
+        return String(account._id);
+      };
 
       const leaderId = row.leaderAgentCode
         ? madeInThisRun.get(row.leaderAgentCode) ?? (await this.existingLeader(kpm, row))
         : null;
 
-      const membership = await this.hierarchy.create(scoped, {
-        userId: String(account._id),
+      /*
+       * **The account is made inside the membership's write** (P13.2 exit review). It used to be made
+       * first, and a leader row the limit refused — the office filled while this loop ran — left the
+       * account behind: a person in no office, whose email then refused the same row on the next
+       * import. `createWithAccount` makes it only once the row has its seat, with the lease held.
+       */
+      const membership = await this.hierarchy.createWithAccount(scoped, {
         role: row.role as 'ab' | 'aab' | 'agent',
         leaderId,
         status: 'active',
-      });
+      }, makeAccount);
       madeInThisRun.set(row.agentCode, String(membership._id));
 
       created.push({

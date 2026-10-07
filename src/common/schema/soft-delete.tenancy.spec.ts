@@ -26,6 +26,7 @@ import {
   ImpersonationSessionSchema,
 } from '@/modules/auth/impersonation-session.schema';
 import { CompanyTemplateSchema } from '@/modules/config/company-template.schema';
+import { NamedTemplateSchema } from '@/modules/config/named-template.schema';
 import {
   TrainingCategorySchema,
 } from '@/modules/training/training-category.schema';
@@ -108,6 +109,7 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['configSnapshots', ConfigSnapshotSchema],
   ['impersonationSessions', ImpersonationSessionSchema],
   ['companyTemplates', CompanyTemplateSchema],
+  ['templates', NamedTemplateSchema],
   ['trainingCategories', TrainingCategorySchema],
   ['trainingSkills', TrainingSkillSchema],
   ['trainingModules', TrainingModuleSchema],
@@ -365,6 +367,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [ConfigSnapshotSchema, 'ConfigSnapshotSchema'],
   [ImpersonationSessionSchema, 'ImpersonationSessionSchema'],
   [CompanyTemplateSchema, 'CompanyTemplateSchema'],
+  [NamedTemplateSchema, 'NamedTemplateSchema'],
   [TrainingCategorySchema, 'TrainingCategorySchema'],
   [TrainingSkillSchema, 'TrainingSkillSchema'],
   [TrainingModuleSchema, 'TrainingModuleSchema'],

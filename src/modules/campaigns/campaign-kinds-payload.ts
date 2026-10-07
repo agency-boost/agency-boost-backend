@@ -156,6 +156,10 @@ export function campaignKindsProblems(payload: unknown): string[] {
         const at = `${where}, group ${g + 1}, criterion ${j + 1}`;
         if (!String(c.metricKey ?? '').trim()) {
           problems.push(`${at} names no metric.`);
+        } else if (metricByKey(String(c.metricKey).trim().toUpperCase())?.requirable === false) {
+          // An office's count, not anybody's work (P13.2-T4): a rule asking for it qualifies nobody.
+          problems.push(`${at}: ${metricByKey(String(c.metricKey).trim().toUpperCase())?.name} counts `
+            + 'the office, not anybody’s work, so a rule cannot ask for it.');
         }
         if (!(REQUIREMENT_COMPARATORS as readonly string[]).includes(String(c.comparator))) {
           problems.push(

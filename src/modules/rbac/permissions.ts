@@ -87,6 +87,13 @@ export const PERMISSIONS = {
   // separate so a future read-only platform role is a grant, not a refactor.
   'kpm_request:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm_request:decide': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
+   * The quote tool's price table (ADR-0111 §3, P13.2-T2): `GET /admin/billing/prices`. The Super
+   * Admin's alone, since the 101+ tier's real rates are AgencyBoost's own (`Billing_Subscription.html:500`).
+   * A support session acts as its member, whose context holds no platform grant, so it is refused too.
+   * A read, and the only one: the tool writes nothing (ADR-0111 §2).
+   */
+  'billing:read_prices': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:read_profile': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
@@ -147,6 +154,14 @@ export const PERMISSIONS = {
   'kpm:archive': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:assign_owner': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:transfer_ownership': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
+   * An office's subscription — its dates, price per leader, leader limit and *keep active*
+   * (ADR-0112 §2, P13.2-T3): `PATCH /admin/tenants/:kpmId/subscription`. **The Super Admin's
+   * alone.** It is the commercial relationship with AgencyBoost, and its end cuts every member off,
+   * so no tenant grantee holds it — not the Owner, whose office it is — and it is on
+   * `BLOCKED_WHILE_IMPERSONATING` below, so a support session cannot write it in a member's name.
+   */
+  'kpm:update_subscription': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'company:crud': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   // The company role ladder (ADR-0012). Read is Super Admin only *for now*: nothing
   // tenant-side consumes it until the role-badge maps become server-supplied, and a
@@ -1009,6 +1024,8 @@ export const BLOCKED_WHILE_IMPERSONATING: readonly Permission[] = [
   'kpm:create',
   'kpm:archive',
   'kpm:transfer_ownership',
+  // ADR-0112 §2: an office's subscription is the platform's, and its end cuts every member off.
+  'kpm:update_subscription',
   'kpm_admin:grant',
   'kpm_admin:revoke',
   'notification_preference:manage',

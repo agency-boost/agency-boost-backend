@@ -23,12 +23,15 @@ describe('the office ratio definitions (P4-T2)', () => {
   let ratios: RatioService;
   let activity: ActivityConfigService;
   let provisioning: ProvisioningService;
-  let templates: mongoose.Model<never>;
   let wired: ReturnType<typeof configModule>;
 
-  async function provision(kpmId: string, companyId = COMPANY) {
-    const seeded = await provisioning.seedActivityTaxonomy(kpmId, companyId);
-    return provisioning.seedRatioDefinitions(kpmId, companyId, seeded.typeCodes);
+  /** The defaults' taxonomy, and the ratio set given — a template's, resolved first (ADR-0115 §4). */
+  async function provision(kpmId: string, ratioSet?: { payload: Record<string, unknown>; version: number }) {
+    const seeded = await provisioning.seedActivityTaxonomy(kpmId);
+    return provisioning.seedRatioDefinitions(
+      kpmId, seeded.typeCodes,
+      ratioSet ? { payload: ratioSet.payload, seededFrom: { templateId: 'tpl-1', version: ratioSet.version } } : undefined,
+    );
   }
 
   beforeAll(async () => {
@@ -37,7 +40,6 @@ describe('the office ratio definitions (P4-T2)', () => {
     ratios = wired.ratios;
     activity = wired.activity;
     provisioning = wired.provisioning;
-    templates = wired.templates as never;
   });
 
   afterAll(stopMongo);
@@ -179,18 +181,17 @@ describe('the office ratio definitions (P4-T2)', () => {
     it('refuses a ratio template that disagrees with the taxonomy template', async () => {
       // Two templates that disagree produce a ratio reading 0.0% on every agent's screen,
       // which looks like an agent problem rather than a template one.
-      await templates.create({
-        companyId: COMPANY, kind: 'ratio_set', version: 1, status: 'published',
-        publishedAt: NOW,
+      const ratioSet = {
+        version: 1,
         payload: {
           ratios: [{
             code: 'BROKEN', label: 'Broken', numerator: ['NOT_IN_TAXONOMY'],
             denominator: ['SELL_SUBMISSION'], benchmark: 1, comparison: 'gte', displayOrder: 1,
           }],
         },
-      } as never);
+      };
 
-      await expect(provision(KPM_A)).rejects.toThrow(/NOT_IN_TAXONOMY/);
+      await expect(provision(KPM_A, ratioSet)).rejects.toThrow(/NOT_IN_TAXONOMY/);
     });
 
     it('keeps two offices’ benchmarks apart', async () => {
@@ -398,8 +399,8 @@ describe('the office ratio definitions (P4-T2)', () => {
       // A published version is immutable, so it was never rewritten. The platform's unit
       // for a code it seeded stands in, and the rule's default for anything else.
       await clearCollections();
-      await templates.create({
-        companyId: COMPANY, kind: 'ratio_set', version: 1, status: 'published', publishedAt: NOW,
+      const ratioSet = {
+        version: 1,
         payload: {
           ratios: [
             {
@@ -414,8 +415,8 @@ describe('the office ratio definitions (P4-T2)', () => {
             },
           ],
         },
-      } as never);
-      await provision(KPM_B);
+      };
+      await provision(KPM_B, ratioSet);
 
       const byCode = Object.fromEntries(
         (await ratios.list(ctx(KPM_B))).map((r) => [r.code, r.displayUnit]),

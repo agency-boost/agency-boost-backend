@@ -1,7 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
 import type {
-  AttentionItem, CompanyCard, KpmView, PlatformAdminRow, PlatformOverview,
+  AttentionItem, CompanyCard, KpmAdminView, KpmView, PlatformAdminRow, PlatformOverview,
 } from './tenant.service';
+import type { KpmSubscription } from './kpm.schema';
+import type { SubscriptionState } from './subscription';
 import type { KpmRequestRow } from './kpm-request.service';
 import type { KpmRequestStatus } from './kpm-request.schema';
 import type { OrgLevelRow } from './org-level.service';
@@ -80,6 +82,59 @@ export class KpmViewDto implements KpmView {
   @ApiProperty({ type: String })
   createdAt!: string;
 
+}
+
+/** An office's subscription, as stored (ADR-0112 §1). */
+export class KpmSubscriptionDto implements KpmSubscription {
+  @ApiProperty({ type: String, nullable: true, example: '2026-10-01', description: 'An office date, YYYY-MM-DD.' })
+  startDate!: string | null;
+
+  @ApiProperty({
+    type: String, nullable: true, example: '2027-09-30',
+    description: 'The last day the office can be used, an office date. Ended from the next office day.',
+  })
+  endDate!: string | null;
+
+  @ApiProperty({
+    type: Number, nullable: true, example: 350_000_00,
+    description: 'Per leader per month, IDR minor units (sen). Informational: nothing is charged from it.',
+  })
+  pricePerLeaderMinor!: number | null;
+
+  @ApiProperty({ type: String, enum: ['IDR'] })
+  currency!: 'IDR';
+
+  @ApiProperty({ type: Number, nullable: true, example: 10, description: 'Null for no leader limit.' })
+  maxLeaders!: number | null;
+
+  @ApiProperty({ type: Boolean })
+  keepActiveAfterEnd!: boolean;
+}
+
+/**
+ * An office as the Super Admin's offices list and detail read it (P13.2-T3 AC-3): the office, its
+ * subscription, *Leaders used* and where it stands against its end date.
+ *
+ * `GET /admin/tenants/:id` answers this shape to the Super Admin only; an Owner or an Admin reading
+ * their own office there is answered without the three fields, as `KpmViewDto`.
+ */
+export class KpmAdminViewDto extends KpmViewDto implements KpmAdminView {
+  @ApiProperty({ type: KpmSubscriptionDto, nullable: true, description: 'Null: no subscription, no end and no limit.' })
+  subscription!: KpmSubscriptionDto | null;
+
+  @ApiProperty({
+    type: Number, example: 6,
+    description: 'Leaders used (ADR-0113): active members at AB or AAB, the Owner and an Admin included.',
+  })
+  leadersUsed!: number;
+
+  @ApiProperty({
+    type: String, enum: ['none', 'active', 'ended', 'ended_kept_active'],
+    description:
+      'Against the office\'s today: none (no end date), active (the end is today or later), ended (past it, '
+      + 'members refused) or ended_kept_active (past it, kept active).',
+  })
+  subscriptionState!: SubscriptionState;
 }
 
 export class PlatformAdminRowDto implements PlatformAdminRow {

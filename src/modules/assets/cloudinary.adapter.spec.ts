@@ -7,7 +7,10 @@ jest.mock('cloudinary', () => ({
     config: jest.fn(),
     utils: { api_sign_request: jest.fn(() => 'signed-abc') },
     url: jest.fn((key: string, opts: Record<string, unknown>) => `https://cdn.test/${key}?e=${opts.expires_at}`),
-    uploader: { destroy: jest.fn(async () => ({ result: 'ok' })) },
+    uploader: {
+      destroy: jest.fn(async () => ({ result: 'ok' })),
+      upload: jest.fn(async () => ({ bytes: 4096 })),
+    },
     api: { resource: jest.fn() },
   },
 }));
@@ -153,6 +156,66 @@ describe('CloudinaryAdapter', () => {
         .mockRejectedValue(Object.assign(new Error('Unauthorized'), { http_code: 401 }));
 
       await expect(makeAdapter().describe('dev/kpm-1/x/1')).rejects.toThrow('Unauthorized');
+    });
+  });
+
+  describe('copying an object into another owner\u2019s folder (P13.2-T7 AC-3, ADR-0115 \u00a76)', () => {
+    const notFound = () => Object.assign(new Error('Resource not found'), { http_code: 404 });
+
+    it('uploads from the source\u2019s signed delivery URL into a key minted under the destination', async () => {
+      // A spreadsheet: found under `raw`, delivered `authenticated`.
+      (cloudinary.api.resource as jest.Mock)
+        .mockRejectedValueOnce(notFound())
+        .mockRejectedValueOnce(notFound())
+        .mockResolvedValueOnce({ format: 'xlsx', bytes: 64, type: 'authenticated' });
+
+      const copied = await makeAdapter('dev').copy({
+        storageKey: 'dev/kpm-0417/training/01SOURCE',
+        owner: { kind: 'company', companyId: 'co-2' },
+        folder: 'training',
+      });
+
+      // The destination's folder, a fresh ULID: the copy is the destination company's by its key.
+      expect(copied.storageKey).toMatch(/^dev\/company\/co-2\/training\/[0-9A-HJKMNP-TV-Z]{26}$/);
+      expect(copied).toMatchObject({
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        bytes: 4096,
+      });
+      expect(cloudinary.url).toHaveBeenCalledWith('dev/kpm-0417/training/01SOURCE', expect.objectContaining({
+        resource_type: 'raw', type: 'authenticated', sign_url: true,
+      }));
+      expect(cloudinary.uploader.upload).toHaveBeenCalledWith(
+        expect.stringContaining('dev/kpm-0417/training/01SOURCE'),
+        expect.objectContaining({
+          public_id: copied.storageKey, resource_type: 'raw', type: 'authenticated', overwrite: false,
+        }),
+      );
+    });
+
+    it('takes the source as `upload`-delivered when the vendor names no type', async () => {
+      (cloudinary.api.resource as jest.Mock).mockResolvedValueOnce({ format: 'pdf', bytes: 10 });
+      await makeAdapter().copy({
+        storageKey: 'dev/company/co-1/training/01A', owner: { kind: 'company', companyId: 'co-2' }, folder: 'training',
+      });
+      expect(cloudinary.uploader.upload).toHaveBeenCalledWith(
+        expect.any(String), expect.objectContaining({ resource_type: 'image', type: 'upload' }),
+      );
+    });
+
+    it('refuses to copy a key that holds nothing, and uploads nothing', async () => {
+      (cloudinary.api.resource as jest.Mock).mockRejectedValue(notFound());
+      await expect(makeAdapter().copy({
+        storageKey: 'dev/kpm-1/training/gone', owner: { kind: 'company', companyId: 'co-2' }, folder: 'training',
+      })).rejects.toThrow('holds nothing');
+      expect(cloudinary.uploader.upload).not.toHaveBeenCalled();
+    });
+
+    it('lets a vendor failure through, so a copy that did not happen is never reported as one', async () => {
+      (cloudinary.api.resource as jest.Mock).mockResolvedValueOnce({ format: 'pdf', bytes: 10 });
+      (cloudinary.uploader.upload as jest.Mock).mockRejectedValueOnce(new Error('Rate limited'));
+      await expect(makeAdapter().copy({
+        storageKey: 'dev/kpm-1/training/a', owner: { kind: 'company', companyId: 'co-2' }, folder: 'training',
+      })).rejects.toThrow('Rate limited');
     });
   });
 });

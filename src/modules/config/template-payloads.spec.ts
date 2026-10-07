@@ -122,6 +122,14 @@ describe('the campaign kinds payload (P5-T9)', () => {
       .toEqual([expect.stringContaining('(none) is not a rule kind')]);
   });
 
+  it('P13.2-T4: refuses a rule asking for Leaders used, an office’s count rather than anybody’s work', () => {
+    const asked = rule({
+      criteriaGroups: [{ mode: 'all', criteria: [{ metricKey: 'leaders_used', comparator: 'lte', value: 10 }] }],
+    });
+    expect(campaignKindsProblems({ rules: [asked] }))
+      .toEqual([expect.stringContaining('Leaders used counts the office, not anybody’s work')]);
+  });
+
   it('refuses a missing code and a missing name', () => {
     expect(campaignKindsProblems({ rules: [rule({ code: '' })] }))
       .toEqual([expect.stringContaining('has no code')]);

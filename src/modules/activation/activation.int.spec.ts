@@ -436,6 +436,36 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
       });
     });
 
+    it('P13.2-T6 AC-9 an office with no published checklist gives a placed hire none; its first publish reaches him at his next read, from his join date', async () => {
+      // As an office started Empty is (ADR-0115 §8): the office's checklist is set aside for the test.
+      const kpmId = h.office.as('BUDI').kpmId!;
+      await h.col('activationTemplates').updateMany({ kpmId }, { $set: { deletedAt: new Date() } });
+      try {
+        await joinedOnTheFirst((userId) => [{ toLeaderId: id('SARI'), actorUserId: userId }], async () => {
+          expect((await facts()).activation).toBeNull();
+          await h.http().get('/activation/me').expect(404);
+          expect(await h.col('activationProgress').countDocuments({})).toBe(0);
+
+          // The Owner authors the office's first checklist from nothing, and publishes it.
+          const owner = h.office.as('OWNER');
+          await h.wired.activation.saveDraft(owner, {
+            aspects: [{ code: 'FIRST_STEPS', label: 'First steps', items: [{ code: 'MEET_LEADER', label: 'Meet your leader' }] }],
+          });
+          await h.wired.activation.publish(owner);
+
+          h.as('BUDI');
+          expect((await h.http().get('/activation/me').expect(200)).body).toMatchObject({
+            startDate: '2026-08-01', day: 45, total: 1,
+          });
+          expect(await h.col('activationProgress').findOne({ membershipId: id('BUDI') }))
+            .toMatchObject({ origin: 'joined', templateVersion: 1 });
+        });
+      } finally {
+        await h.col('activationTemplates').deleteMany({ kpmId, deletedAt: null });
+        await h.col('activationTemplates').updateMany({ kpmId }, { $set: { deletedAt: null } });
+      }
+    });
+
     it.each([
       ['a roster import: one joined edge, written by whoever imported it', () => [
         { toLeaderId: id('SARI'), actorUserId: 'u-owner' },

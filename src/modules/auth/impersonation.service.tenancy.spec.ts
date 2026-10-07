@@ -118,14 +118,61 @@ describe('ImpersonationService', () => {
     });
   });
 
-  it('refuses a target whose office is suspended', async () => {
-    const target = await makeUser();
-    await mongoose.model(Kpm.name).create({
-      companyId: 'c1', code: '0417', branchName: 'BSD', ownerUserId: String(target._id),
-      status: 'suspended',
+  /*
+   * **An office nobody can use** (P13.2 exit review): refused at the start under its own code, `409`,
+   * naming the office and why — whoever in it is named. It was the member's `TENANT_SUSPENDED`, for an
+   * office's Owner only: a session as anybody else in a suspended office started, and its first
+   * request replaced the Super Admin's console with the member's *office unavailable* page.
+   */
+  describe('an office nobody can use (P13.2 exit review)', () => {
+    async function memberOf(status: string, over: Record<string, unknown> = {}) {
+      const kpm = await mongoose.model(Kpm.name).create({
+        companyId: 'c1', code: '0417', branchName: 'BSD', timezone: 'Asia/Jakarta', status, ...over,
+      } as never) as unknown as { _id: unknown };
+      const target = await makeUser();
+      await mongoose.model(Membership.name).create({
+        kpmId: String(kpm._id), userId: String(target._id), role: 'agent', status: 'active',
+        agentCode: 'A1', agentSeq: 1, orgLevelId: 'level-agent', orgLevelCode: 'AGENT',
+        leaderCode: `LC${Math.floor(Math.random() * 100000)}`,
+      } as never);
+      return String(target._id);
+    }
+
+    it('refuses an Owner of a suspended office, 409 with the office and the reason', async () => {
+      const target = await makeUser();
+      await mongoose.model(Kpm.name).create({
+        companyId: 'c1', code: '0417', branchName: 'BSD', ownerUserId: String(target._id),
+        status: 'suspended',
+      });
+      const refused = await service.start(superAdmin, String(target._id), 'r').catch((e) => e);
+      expect(refused).toMatchObject({
+        code: 'IMPERSONATION_OFFICE_UNAVAILABLE',
+        details: { kpmCode: '0417', branch: 'BSD', reason: 'suspended' },
+      });
+      expect(refused.getStatus()).toBe(409);
+      expect(refused.message).toBe('KPM 0417 · BSD is suspended, so nobody can act as its members until it is reactivated.');
     });
-    await expect(service.start(superAdmin, String(target._id), 'r')).rejects.toMatchObject({
-      code: 'TENANT_SUSPENDED',
+
+    it.each(['suspended', 'archived'])('refuses an Agent of a %s office, and starts nothing', async (status) => {
+      const target = await memberOf(status);
+      const told = notified.length;
+      await expect(service.start(superAdmin, target, 'ticket 42')).rejects.toMatchObject({
+        code: 'IMPERSONATION_OFFICE_UNAVAILABLE',
+        details: { kpmCode: '0417', branch: 'BSD', reason: status },
+      });
+      expect(await mongoose.model(ImpersonationSession.name).countDocuments({})).toBe(0);
+      expect(await mongoose.model(AuditLog.name).countDocuments({ action: 'impersonation.started' })).toBe(0);
+      expect(notified).toHaveLength(told);
+    });
+
+    it('serves a member of an office whose subscription has ended: support may look into it', async () => {
+      const target = await memberOf('active', {
+        subscription: {
+          startDate: '2026-01-01', endDate: '2026-08-31', pricePerLeaderMinor: null, currency: 'IDR',
+          maxLeaders: null, keepActiveAfterEnd: false,
+        },
+      });
+      await expect(service.start(superAdmin, target, 'ticket 42')).resolves.toMatchObject({ readOnly: true });
     });
   });
 

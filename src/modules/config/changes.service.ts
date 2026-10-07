@@ -4,7 +4,9 @@ import { DomainException, NotFoundException } from '@/common/errors/domain.excep
 import type { ErrorCodeValue } from '@/common/errors/error-codes';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
-import { ActivityConfigService } from './activity.service';
+import {
+  ActivityConfigService, RESERVED_TYPE_CODES, reservedSectionRefusal, reservedTypeRefusal,
+} from './activity.service';
 import { resolveDisplayUnit, type RatioDisplayUnit } from '@/domain/constants';
 import { RatioService } from './ratio.service';
 import { TenantConfigService, type TenantConfigView } from './tenant-config.service';
@@ -68,8 +70,10 @@ interface Known {
   code: string;
   version: number;
   status: 'active' | 'archived';
-  /** A training skill's category code, or a training module's skill code. */
+  /** A training skill's category code, a training module's skill code, or an activity type's category code. */
   parent?: string;
+  /** An activity type's or category's label, for the cascade types' refusal (ADR-0115 §2). */
+  label?: string;
 }
 
 /**
@@ -143,10 +147,12 @@ export class ConfigChangeService {
     const groupTouchedBy = new Map<string, number>();
 
     for (const c of await this.activity.list(ctx, true)) {
-      categories.set(c.id, { id: c.id, code: c.code, version: c.version, status: c.status });
+      categories.set(c.id, { id: c.id, code: c.code, version: c.version, status: c.status, label: c.label });
       groups.set(c.id, { code: c.code, summaryGroupCode: c.summaryGroupCode, summaryGroupLabel: c.summaryGroupLabel });
       for (const t of c.types) {
-        types.set(t.id, { id: t.id, code: t.code, version: t.version, status: t.status });
+        types.set(t.id, {
+          id: t.id, code: t.code, version: t.version, status: t.status, parent: t.categoryCode, label: t.label,
+        });
       }
     }
     /* The rule and unit each ratio holds, so a unit that no longer fits is refused here. */
@@ -247,8 +253,27 @@ export class ConfigChangeService {
             HttpStatus.CONFLICT,
           ));
         }
+        /*
+         * **The three cascade types are never archived, nor a section holding one** (ADR-0115 §2) —
+         * refused here, in the projection, so a batch that would is refused before any of it is
+         * written. The section's types are read as the batch has moved them so far.
+         */
+        if (op.op === 'type.archive' && RESERVED_TYPE_CODES.includes(row!.code)) {
+          throw this.atOp(index, op.op, reservedTypeRefusal({ code: row!.code, label: row!.label ?? row!.code }));
+        }
+        if (op.op === 'category.archive') {
+          const held = [...types.values()].filter((t) => t.parent === row!.code && t.status === 'active'
+            && RESERVED_TYPE_CODES.includes(t.code));
+          if (held.length) {
+            throw this.atOp(index, op.op, reservedSectionRefusal(
+              { label: row!.label ?? row!.code }, held.map((t) => ({ code: t.code, label: t.label ?? t.code })),
+            ));
+          }
+        }
+
         // The projection moves on, so two ops against one row in a batch both hold.
         row!.version += 1;
+        if (op.op === 'type.update' && checked.categoryCode) row!.parent = checked.categoryCode;
         if (op.op.endsWith('.archive')) row!.status = 'archived';
         if (op.op.endsWith('.restore')) row!.status = 'active';
 

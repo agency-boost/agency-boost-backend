@@ -35,6 +35,9 @@ import {
 import { EmailTemplateRenderer } from '@/modules/notifications/email-renderer';
 import { NotificationRepository } from '@/modules/notifications/notification.repository';
 import { User, UserDocument, UserSchema } from '@/modules/users/user.schema';
+import { NamedTemplateService } from '@/modules/config/named-template.service';
+import { NamedTemplate, NamedTemplateSchema } from '@/modules/config/named-template.schema';
+import { RequestContext } from '@/common/context/request-context';
 import { Company, CompanyDocument, CompanySchema } from '@/modules/tenants/company.schema';
 import { DEFAULT_ORG_LADDER } from '@/domain/constants';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
@@ -209,6 +212,7 @@ describe('auth and admin over HTTP', () => {
           { name: RatioDefinition.name, schema: RatioDefinitionSchema },
           { name: ConfigSnapshot.name, schema: ConfigSnapshotSchema },
           { name: CompanyTemplate.name, schema: CompanyTemplateSchema },
+          { name: NamedTemplate.name, schema: NamedTemplateSchema },
           { name: TrainingCategory.name, schema: TrainingCategorySchema },
           { name: TrainingSkill.name, schema: TrainingSkillSchema },
           { name: TrainingModule.name, schema: TrainingModuleSchema },
@@ -245,7 +249,7 @@ describe('auth and admin over HTTP', () => {
         ActivityCategoryRepository, ActivityTypeRepository, ActivityConfigService,
         LeadStatusRepository, LeadStatusService, RatioDefinitionRepository, RatioService,
         ConfigSnapshotRepository,
-        TenantConfigService, TemplateService, ConfigChangeService,
+        TenantConfigService, TemplateService, NamedTemplateService, ConfigChangeService,
         TrainingCategoryRepository, TrainingSkillRepository, TrainingModuleRepository, TrainingService,
         // P5-T9: `/kpm/config` carries the office's own Phase 5 catalogs too, so the three
         // services that read them are part of the graph now.
@@ -347,6 +351,9 @@ describe('auth and admin over HTTP', () => {
         ...rung, companyId: String(made._id), status: 'active', deletedAt: null,
       })),
     );
+    // **And its first template** (ADR-0115 §3), which `createCompany` makes too: an office with no
+    // `startFrom` starts from the company's default, and a company without one has none to start from.
+    await app.get(NamedTemplateService).createFirst(RequestContext.platform('e2e'), made);
     return String(made._id);
   }
 
@@ -1509,19 +1516,37 @@ describe('auth and admin over HTTP', () => {
     it('AC-6: archiving takes a type off the list and leaves it readable', async () => {
       const { auth } = await anOfficeWithOwner();
       const list = await api().get('/api/v1/kpm/settings/activity-types').set(auth).expect(200);
-      const type = list.body[1].types[2];
-      expect(type.code).toBe('SELL_SUBMISSION');
+      // Not a cascade type: those three are refused (ADR-0115 §2, below).
+      const type = list.body[1].types[1];
+      expect(type.code).toBe('SELL_FOLLOWUP');
 
       await api().delete(`/api/v1/kpm/settings/activity-types/${type.id}`).set(auth).expect(200);
 
       const after = await api().get('/api/v1/kpm/settings/activity-types').set(auth).expect(200);
       const codes = (rows: { types: { code: string }[] }[]) =>
         rows.flatMap((c) => c.types).map((t) => t.code);
-      expect(codes(after.body)).not.toContain('SELL_SUBMISSION');
+      expect(codes(after.body)).not.toContain('SELL_FOLLOWUP');
 
       const withArchived = await api()
         .get('/api/v1/kpm/settings/activity-types?includeArchived=true').set(auth).expect(200);
-      expect(codes(withArchived.body)).toContain('SELL_SUBMISSION');
+      expect(codes(withArchived.body)).toContain('SELL_FOLLOWUP');
+    });
+
+    it('P13.2-T6 AC-3: refuses archiving a cascade type, or the section holding it, with 409', async () => {
+      const { auth } = await anOfficeWithOwner();
+      const list = await api().get('/api/v1/kpm/settings/activity-types').set(auth).expect(200);
+      const selling = list.body[1];
+      const submission = selling.types.find((t: { code: string }) => t.code === 'SELL_SUBMISSION');
+
+      const type = await api().delete(`/api/v1/kpm/settings/activity-types/${submission.id}`).set(auth).expect(409);
+      expect(type.body.error).toMatchObject({ code: 'ACTIVITY_TYPE_RESERVED', details: { codes: ['SELL_SUBMISSION'] } });
+      const section = await api().delete(`/api/v1/kpm/settings/activity-categories/${selling.id}`).set(auth);
+      expect([section.status, section.body.error?.code]).toEqual([409, 'ACTIVITY_TYPE_RESERVED']);
+      expect(section.body.error.details.codes).toEqual(['SELL_PRESENTATION', 'SELL_SUBMISSION']);
+
+      // Renaming and describing it are the office's.
+      await api().patch(`/api/v1/kpm/settings/activity-types/${submission.id}`).set(auth)
+        .send({ label: 'Polis masuk', description: 'Diserahkan ke underwriting' }).expect(200);
     });
 
     it('refuses a duplicate code with 400, naming it', async () => {
@@ -1692,7 +1717,7 @@ describe('auth and admin over HTTP', () => {
       const { auth } = await anOfficeWithAgentAndOwner();
       const before = await api().get('/api/v1/kpm/config').set(auth).expect(200);
       const type = before.body.activity[1].types.find(
-        (t: { code: string }) => t.code === 'SELL_SUBMISSION',
+        (t: { code: string }) => t.code === 'SELL_FOLLOWUP',
       );
 
       await api().delete(`/api/v1/kpm/settings/activity-types/${type.id}`).set(auth).expect(200);
@@ -1702,7 +1727,7 @@ describe('auth and admin over HTTP', () => {
       const codes = after.body.activity
         .flatMap((c: { types: { code: string }[] }) => c.types)
         .map((t: { code: string }) => t.code);
-      expect(codes).not.toContain('SELL_SUBMISSION');
+      expect(codes).not.toContain('SELL_FOLLOWUP');
     });
 
     it('tells a caller not to trust the copy without asking', async () => {

@@ -22,6 +22,15 @@ import {
 import { ROSTER_PLAN, seedObjectId, type CoachingFixture, type LastOneToOne } from '../coaching-fixture';
 import { seedDemo, type SeedResult } from '../demo';
 import { backfillCoachingSnapshots } from '../coaching-snapshots';
+import { SUBSCRIPTION_FIXTURE_PEOPLE } from '../subscription-fixture';
+import { TEMPLATE_FIXTURE_PEOPLE } from '../template-fixture';
+
+/** The people the subscription fixture makes, by pronoun. */
+const subscriptionPeople = (pronoun: 'she' | 'he') =>
+  Object.values(SUBSCRIPTION_FIXTURE_PEOPLE).filter((p) => p.pronoun === pronoun).map((p) => p.email);
+/** The people the template fixture makes — office 0701, started Empty — by pronoun. */
+const templatePeople = (pronoun: 'she' | 'he') =>
+  Object.values(TEMPLATE_FIXTURE_PEOPLE).filter((p) => p.pronoun === pronoun).map((p) => p.email);
 
 /**
  * P11-T2 — the early coaching demo seed, run on the in-memory database.
@@ -140,11 +149,17 @@ const WOMEN = [
   'admin@kpm0417.test', 'sari@kpm0417.test', 'dewi@kpm0417.test', 'rina@kpm0417.test', 'pending@kpm0417.test',
   'removed@kpm0417.test', 'indah@kpm0417.test', 'siti@kpm0417.test', 'novi@kpm0417.test', 'agent@kpm0555.test',
   'maya@agencyboost.test', 'newcomer@agencyboost.test',
+  // P13.2: offices 0601 and 0602 (`subscription-fixture.ts`).
+  ...subscriptionPeople('she'),
+  // P13.2-T6: office 0701 (`template-fixture.ts`).
+  ...templatePeople('she'),
 ];
 const MEN = [
   'owner@kpm0417.test', 'agus@kpm0417.test', 'budi@kpm0417.test', 'untagged@kpm0417.test', 'dimas@kpm0417.test',
   'arief@kpm0417.test', 'wahyu@kpm0417.test', 'owner@kpm0555.test', 'owner@kpm0999.test', 'ade@agencyboost.test',
   'tomi@agencyboost.test',
+  ...subscriptionPeople('he'),
+  ...templatePeople('he'),
 ];
 const OPERATORS = ['superadmin@agencyboost.test', 'root@agencyboost.test'];
 

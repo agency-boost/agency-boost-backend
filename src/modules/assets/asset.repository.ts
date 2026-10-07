@@ -45,4 +45,21 @@ export class AssetRepository extends TenantScopedRepository<AssetDocument> {
       .findOneAndUpdate({ companyId, storageKey, deletedAt: null }, { $set: set }, { new: true })
       .exec();
   }
+
+  /**
+   * **The company's copies, now referenced by the template that holds them** (P13.2-T7 AC-5).
+   *
+   * A copy is registered with `refCount: 0` the moment its bytes land, and retained here only once
+   * the template naming it exists — so a copy that failed part-way leaves its files at zero, which is
+   * exactly what the orphan sweep (`AssetService.findOrphans`) reports.
+   */
+  async retainCompanyAssets(companyId: string, storageKeys: string[]): Promise<void> {
+    if (storageKeys.length === 0) return;
+    await this.model
+      .updateMany(
+        { companyId, storageKey: { $in: storageKeys }, deletedAt: null },
+        { $inc: { refCount: 1 } },
+      )
+      .exec();
+  }
 }

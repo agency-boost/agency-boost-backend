@@ -1,10 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
+import { StartFromDto } from '@/modules/config/named-template.dto';
 import {
   IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsMongoId, IsOptional, IsString, Matches, Max,
-  MaxLength, Min, MinLength,
+  MaxLength, Min, MinLength, ValidateIf, ValidateNested,
 } from 'class-validator';
-import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
+import { DEFAULT_TENANT_TIMEZONE, SUBSCRIPTION } from '@/domain/constants';
 
 export class CreateCompanyDto {
   @ApiProperty({ example: 'Prudential', minLength: 2, maxLength: 120 })
@@ -199,6 +200,21 @@ export class CreateKpmDto {
     message: `timezone must be ${DEFAULT_TENANT_TIMEZONE} — v1 runs on a single time zone`,
   })
   timezone?: string;
+
+  /**
+   * **Start from** (ADR-0115 §4): one of the company's active templates, the AgencyBoost defaults,
+   * or *Empty*. Absent, the company's default template — what approving a KPM request uses.
+   */
+  @ApiPropertyOptional({
+    type: () => StartFromDto,
+    description:
+      'What the office is built from. Absent: the company\u2019s default template. A kind the source '
+      + 'holds none of is empty in the office; every office has the three cascade activity types.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => StartFromDto)
+  startFrom?: StartFromDto;
 }
 
 export class AssignOwnerDto {
@@ -234,6 +250,71 @@ export class SetStatusDto {
   @IsOptional()
   @IsString()
   reason?: string;
+}
+
+/**
+ * An office's subscription, **all five fields every time** (ADR-0112, P13.2-T3 AC-1).
+ *
+ * Each field is required and every one but *keep active* may be `null`: the dialog always sends the
+ * whole subscription, so a field left out is a client defect, not "unchanged". `ValidateIf` skips a
+ * `null` and runs on anything else, `undefined` included, so an absent field is refused by name.
+ * What one field says about another — dates both or neither, the end on or after the start, a date
+ * that is a real day — is `validateSubscription`'s, in the service.
+ */
+export class UpdateSubscriptionDto {
+  @ApiProperty({
+    type: String, nullable: true, example: '2026-10-01', pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+    description: 'The first day, an office date (YYYY-MM-DD in the office\'s timezone). Null with endDate for no dates.',
+  })
+  @ValidateIf((o: UpdateSubscriptionDto) => o.startDate !== null)
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'startDate must be a date written YYYY-MM-DD' })
+  startDate!: string | null;
+
+  @ApiProperty({
+    type: String, nullable: true, example: '2027-09-30', pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+    description:
+      'The last day the office can be used, an office date. From 00:00 the next office day every member '
+      + 'is refused TENANT_SUBSCRIPTION_ENDED unless keepActiveAfterEnd is on. On or after startDate.',
+  })
+  @ValidateIf((o: UpdateSubscriptionDto) => o.endDate !== null)
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'endDate must be a date written YYYY-MM-DD' })
+  endDate!: string | null;
+
+  @ApiProperty({
+    type: Number, nullable: true, example: 350_000_00, minimum: 0, maximum: SUBSCRIPTION.PRICE_PER_LEADER_MAX_MINOR,
+    description:
+      'Price per leader per month, in IDR minor units (sen), whole rupiah. Informational: nothing is charged from it.',
+  })
+  /*
+   * **The type here, the bounds in `validateSubscription`** (P13.2 exit review). `@Min`/`@Max` ran
+   * before the service and answered *"pricePerLeaderMinor must not be greater than 10000000000"* — sen,
+   * a field name and no `details.field` — which the dialog could not put under its field. The service
+   * owns them now, in rupiah and with the field named.
+   */
+  @ValidateIf((o: UpdateSubscriptionDto) => o.pricePerLeaderMinor !== null)
+  @IsInt()
+  pricePerLeaderMinor!: number | null;
+
+  @ApiProperty({
+    type: Number, nullable: true, example: 10,
+    minimum: SUBSCRIPTION.MAX_LEADERS_MIN, maximum: SUBSCRIPTION.MAX_LEADERS_MAX,
+    description:
+      'The most leaders (active ABs and AABs, the Owner included) the office may have. Null for no limit. '
+      + 'May be set below the leaders it has now: nobody is demoted, new ones are refused.',
+  })
+  // The type here, the bounds in `validateSubscription`, as the price's are.
+  @ValidateIf((o: UpdateSubscriptionDto) => o.maxLeaders !== null)
+  @IsInt()
+  maxLeaders!: number | null;
+
+  @ApiProperty({
+    example: false,
+    description: 'On, and the office stays open after its end date (Ended — kept active). Never null.',
+  })
+  @IsBoolean()
+  keepActiveAfterEnd!: boolean;
 }
 
 export class AuditQueryDto {

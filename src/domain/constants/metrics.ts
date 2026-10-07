@@ -29,6 +29,12 @@ export interface MetricDefinition {
   readonly unit: MetricUnit;
   /** The roadmap phase that first computes it for real. */
   readonly phase: number;
+  /**
+   * `false` for a metric about **an office rather than a member** (P13.2-T4): no campaign requirement
+   * and no qualification rule may name it, whatever its phase, because nobody could qualify by it. Absent
+   * on every metric a requirement may name. `REQUIREMENT_METRICS` below is the list without them.
+   */
+  readonly requirable?: false;
 }
 
 /**
@@ -98,10 +104,21 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'RECRUITMENT_EXPECTED_TO_CLOSE', name: 'Expected to close', unit: 'count', phase: 7 },
   { key: 'NEW_ACTIVE_AGENTS', name: 'New active agents', unit: 'count', phase: 9 },
   { key: 'ROLLING_PERSISTENCY', name: 'Rolling persistency', unit: 'percentage', phase: 9 },
+  // P13.2-T4 (ADR-0113): the office's active ABs and AABs, which its leader limit bounds. An office's
+  // seats, not anybody's work: no campaign or qualification rule may name it.
+  { key: 'LEADERS_USED', name: 'Leaders used', unit: 'count', phase: 13.2, requirable: false },
 ];
 
 export const metricByKey = (key: string): MetricDefinition | undefined =>
   METRIC_REGISTRY.find((m) => m.key === key);
+
+/**
+ * **What a campaign requirement or a qualification rule may name** (ADR-0035): every metric but those
+ * about an office rather than a member (`requirable: false`). `GET /metrics` serves this list, the
+ * requirement DTO enumerates it, and `checkCampaign` refuses a key outside it by name.
+ */
+export const REQUIREMENT_METRICS: readonly MetricDefinition[] = METRIC_REGISTRY
+  .filter((m) => m.requirable !== false);
 
 /**
  * The phase that evaluates a campaign, which is what a requirement has to be computable by.

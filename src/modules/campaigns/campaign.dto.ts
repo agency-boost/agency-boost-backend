@@ -1,10 +1,10 @@
 import { Allow } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { METRIC_REGISTRY, REQUIREMENT_COMPARATORS } from '@/domain/constants';
+import { REQUIREMENT_COMPARATORS, REQUIREMENT_METRICS } from '@/domain/constants';
 
 export class RequirementDto {
   @ApiProperty({
-    enum: METRIC_REGISTRY.map((m) => m.key),
+    enum: REQUIREMENT_METRICS.map((m) => m.key),
     description: 'A key from the metric registry. Anything else is refused at write time, by name.',
   })
   @Allow()

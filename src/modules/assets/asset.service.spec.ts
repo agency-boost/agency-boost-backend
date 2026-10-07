@@ -30,6 +30,10 @@ class StubStorage extends StoragePort {
   async remove(key: string): Promise<void> {
     this.removed.push(key);
   }
+  /** A copy into another owner's folder (P13.2-T7). */
+  async copy(p: { storageKey: string; owner: AssetOwner; folder: string }): Promise<StoredObject> {
+    return { storageKey: `dev/${ownerFolder(p.owner)}/${p.folder}/copy-of-${p.storageKey.split('/').pop()}`, mimeType: 'application/pdf', bytes: 1024 };
+  }
 }
 
 const ctx = new RequestContext('u1', 'none', {

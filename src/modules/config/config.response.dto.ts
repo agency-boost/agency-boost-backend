@@ -9,6 +9,11 @@ import type {
   PublishState, SnapshotEventTypeView, TenantConfigView,
 } from './tenant-config.service';
 import type { TemplateView } from './template.service';
+import type { NamedTemplateView } from './named-template.service';
+import type { DroppedSetting } from './office-template';
+import type { SavedOfficeTemplateView } from './template-copy.service';
+import { TEMPLATE_ORIGINS, type TemplateOrigin } from './named-template.schema';
+import { OFFICE_TEMPLATE_KINDS, type OfficeTemplateKind } from './template-defaults';
 import { TEMPLATE_KINDS, type TemplateKind } from './company-template.schema';
 import { TrainingCategoryDto } from '@/modules/training/training.response.dto';
 import { ActivationVersionDto } from '@/modules/activation/activation.response.dto';
@@ -354,6 +359,15 @@ export class CompanyTemplateDto implements TemplateView {
   @ApiProperty({ type: String })
   companyId!: string;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'The named template this kind belongs to. Null for `campaign_kinds`, which is the company\'s, '
+      + 'shared by every template.',
+  })
+  templateId!: string | null;
+
   @ApiProperty({ enum: TEMPLATE_KINDS })
   kind!: TemplateKind;
 
@@ -379,8 +393,10 @@ export class CompanyTemplateDto implements TemplateView {
   @ApiProperty({
     type: Number,
     description:
-      'How many of this company\'s offices were built from an older version of this kind — '
-      + 'including those built from the platform defaults because nothing of it was published.',
+      'How many of this template\'s offices were built from an older version of this kind — '
+      + 'including those whose record for it has no version: since 13.2, an office whose template held '
+      + 'none of this kind when it was made; before 13.2, one built from the platform defaults because '
+      + 'the company had published nothing of it.',
   })
   officesBehind!: number;
 
@@ -419,4 +435,107 @@ export class PublishStateDto implements PublishState {
 
   @ApiProperty({ type: String, nullable: true })
   publishedAt!: string | null;
+}
+
+/** Where a template came from (ADR-0115). A record, never a link. */
+export class TemplateOriginDto implements TemplateOrigin {
+  @ApiProperty({ enum: TEMPLATE_ORIGINS })
+  kind!: TemplateOrigin['kind'];
+
+  @ApiProperty({ type: String, nullable: true, required: false })
+  templateId?: string | null;
+
+  @ApiProperty({ type: String, nullable: true, required: false })
+  kpmId?: string | null;
+
+  @ApiProperty({ type: String, nullable: true, required: false })
+  companyId?: string | null;
+}
+
+/** One of a company's named templates (ADR-0115 §3). */
+export class NamedTemplateDto implements NamedTemplateView {
+  @ApiProperty({ type: String })
+  id!: string;
+
+  @ApiProperty({ type: String })
+  companyId!: string;
+
+  @ApiProperty({ type: String, example: 'Prudential template' })
+  name!: string;
+
+  @ApiProperty({ type: Boolean, description: 'The company\'s default: exactly one per company.' })
+  isDefault!: boolean;
+
+  @ApiProperty({ type: String, enum: ['active', 'archived'] })
+  status!: 'active' | 'archived';
+
+  @ApiProperty({ type: String, nullable: true })
+  archivedAt!: string | null;
+
+  @ApiProperty({ type: () => TemplateOriginDto })
+  origin!: TemplateOriginDto;
+
+  @ApiProperty({
+    type: Object,
+    description:
+      'The newest published version of each of the seven kinds, keyed by kind; null where none is '
+      + 'published, which an office made from this template gets empty.',
+  })
+  publishedVersions!: Record<OfficeTemplateKind, number | null>;
+
+  @ApiProperty({
+    type: Number,
+    description:
+      'Live offices started from this template — and, for the template each existing company was given '
+      + 'when templates were named, the offices created before then.',
+  })
+  officeCount!: number;
+
+  @ApiProperty({ type: String })
+  createdAt!: string;
+
+  @ApiProperty({ type: String })
+  updatedAt!: string;
+}
+
+/**
+ * Something an office held that *Save as template* left out or changed, and why (exit review of P13.2,
+ * finding 2): what archiving left behind, which no office made from the template could be given.
+ */
+export class DroppedSettingDto implements DroppedSetting {
+  @ApiProperty({
+    enum: OFFICE_TEMPLATE_KINDS,
+    description: 'The template kind it was in: `ratio_set`, `capability_ladder` or `activation_checklist`.',
+  })
+  kind!: OfficeTemplateKind;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'The ratio, stage, grid or checklist item concerned; null when the whole kind was left out.',
+  })
+  code!: string | null;
+
+  @ApiProperty({
+    type: String,
+    example: 'Ratio CLOSING no longer counts OLD_VISIT, which is not an active activity type in this office.',
+    description: 'One sentence naming the codes, as the office page shows it.',
+  })
+  reason!: string;
+}
+
+/** *Save as template*'s answer: the template as made, and what the office held that it left out. */
+export class SavedOfficeTemplateDto extends NamedTemplateDto implements SavedOfficeTemplateView {
+  @ApiProperty({
+    type: () => DroppedSettingDto,
+    isArray: true,
+    description:
+      'What the office held that the template leaves out or changes, because it names something archived: '
+      + 'an archived activity type taken out of a ratio (the ratio left out when a side counts nothing '
+      + 'else), a stage\'s archived milestones (the stage left out when it requires nothing else), a grid '
+      + 'whose every item is archived, the ladder when no stage or milestone is left, and a checklist '
+      + 'item\'s link to a module no longer offered (the item kept as a manual one). Empty when nothing was. '
+      + 'Recorded in the `template.created` audit row as well.',
+  })
+  dropped!: DroppedSettingDto[];
 }

@@ -5,7 +5,7 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { ContextResolver } from '@/modules/auth/context-resolver';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
 import { TokenSigner } from '@/modules/auth/token-signer';
-import { ALLOWS_TEMPORARY_PASSWORD, IS_PUBLIC } from './auth.decorators';
+import { ALLOWED_WHILE_OFFICE_UNAVAILABLE, ALLOWS_TEMPORARY_PASSWORD, IS_PUBLIC } from './auth.decorators';
 
 /**
  * Verifies the access token and attaches the resolved RequestContext.
@@ -89,7 +89,16 @@ export class AuthGuard implements CanActivate {
       readOnlySession = session.readOnly;
     }
 
-    const context = await this.resolver.resolve(claims.sub, impersonator, readOnlySession);
+    /*
+     * **Leaving a support session is never refused for the office** (P13.2 exit review): the one route
+     * marked for it lets a session out of an office suspended or archived under it. Only a session —
+     * a member's own request to the same route meets the office's refusal as before.
+     */
+    const leavingSupport = impersonator !== null && this.reflector.getAllAndOverride<boolean>(
+      ALLOWED_WHILE_OFFICE_UNAVAILABLE, [execution.getHandler(), execution.getClass()],
+    ) === true;
+
+    const context = await this.resolver.resolve(claims.sub, impersonator, readOnlySession, leavingSupport);
 
     /*
      * **A temporary password buys three routes and nothing else.**

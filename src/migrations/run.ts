@@ -23,6 +23,7 @@ import { up as goalMonthsLeftOverride } from './0019-goal-months-left-override';
 import { up as productionLockGrace } from './0020-kpm-production-lock-grace';
 import { up as activityCategorySummaryGroup } from './0021-activity-category-summary-group';
 import { up as activationBackfill } from './0022-activation-backfill';
+import { up as namedTemplates } from './0023-named-templates';
 
 /**
  * Every migration, in order. Forward-only and idempotent, so running this twice is a
@@ -51,6 +52,7 @@ const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Date) => P
   ['0020-kpm-production-lock-grace', productionLockGrace],
   ['0021-activity-category-summary-group', activityCategorySummaryGroup],
   ['0022-activation-backfill', activationBackfill],
+  ['0023-named-templates', namedTemplates],
 ];
 
 async function main(): Promise<void> {

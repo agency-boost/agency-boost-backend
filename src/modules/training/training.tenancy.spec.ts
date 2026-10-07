@@ -67,17 +67,15 @@ describe('the office training taxonomy (P5-T1)', () => {
     });
 
     it('copies a company’s published template exactly — an empty level included — and records it', async () => {
-      await (wired.templates as unknown as mongoose.Model<unknown>).create({
-        companyId: OTHER_COMPANY, kind: 'training_taxonomy', status: 'published', version: 4,
-        deletedAt: null,
+      // ADR-0115 §4: the source is resolved before the office exists and handed to the seed.
+      const result = await wired.provisioning.seedTrainingTaxonomy(KPM_B, {
         payload: {
           categories: [{ code: 'onboarding', label: ' Onboarding ' }, { code: 'LATER', label: 'Later' }],
           skills: [{ code: 'FIRST_WEEK', categoryCode: 'ONBOARDING', label: 'First week' }],
           modules: [{ code: 'WELCOME', skillCode: 'FIRST_WEEK', title: 'Welcome' }],
         },
+        seededFrom: { templateId: `tpl-${OTHER_COMPANY}`, version: 4 },
       });
-
-      const result = await wired.provisioning.seedTrainingTaxonomy(KPM_B, OTHER_COMPANY);
 
       expect(result).toMatchObject({ rows: 4, seededFrom: { version: 4 } });
       const tree = await training.list(ctx(KPM_B));
@@ -88,14 +86,11 @@ describe('the office training taxonomy (P5-T1)', () => {
       expect((await training.list(ctx(KPM_A))).map((c) => c.code)).toContain('SALES');
     });
 
-    it('refuses a published template that would build a broken tree, naming the company', async () => {
-      await (wired.templates as unknown as mongoose.Model<unknown>).create({
-        companyId: OTHER_COMPANY, kind: 'training_taxonomy', status: 'published', version: 1,
-        deletedAt: null,
+    it('refuses a source that would build a broken tree, naming the office', async () => {
+      await expect(wired.provisioning.seedTrainingTaxonomy(KPM_B, {
         payload: { categories: [], skills: [{ code: 'ORPHAN', categoryCode: 'NOWHERE', label: 'x' }], modules: [] },
-      });
-      await expect(wired.provisioning.seedTrainingTaxonomy(KPM_B, OTHER_COMPANY))
-        .rejects.toThrow(`company ${OTHER_COMPANY} would produce a broken office`);
+        seededFrom: { templateId: null, version: 1 },
+      })).rejects.toThrow(`The training taxonomy for office ${KPM_B} would be broken`);
     });
   });
 

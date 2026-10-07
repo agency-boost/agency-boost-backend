@@ -12,6 +12,10 @@ import {
  */
 export class StubStorage extends StoragePort {
   removed: string[] = [];
+  /** Every copy made, source and destination, in order (P13.2-T7). */
+  copies: { from: string; to: string }[] = [];
+  /** Source keys whose copy fails, as a vendor refusing it would. */
+  private failing = new Set<string>();
   /** Keys storage "holds". A key absent from here confirms as never having arrived. */
   private objects = new Map<string, StoredObject>();
   private next = 0;
@@ -48,6 +52,35 @@ export class StubStorage extends StoragePort {
   async remove(storageKey: string): Promise<void> {
     this.removed.push(storageKey);
     this.objects.delete(storageKey);
+  }
+
+  /**
+   * A copy into another owner's folder (P13.2-T7): a key minted as an upload's is, holding what the
+   * source holds. Throws for a key that holds nothing, or one `failCopyOf` named.
+   */
+  async copy(params: { storageKey: string; owner: AssetOwner; folder: string }): Promise<StoredObject> {
+    const source = this.objects.get(params.storageKey);
+    if (!source || this.failing.has(params.storageKey)) {
+      throw new Error(`Storage could not copy ${params.storageKey}.`);
+    }
+    const owner = params.owner.kind === 'kpm' ? params.owner.kpmId : `company/${params.owner.companyId}`;
+    this.next += 1;
+    const storageKey = `dev/${owner}/${params.folder}/${String(this.next).padStart(4, '0')}`;
+    const copied = { ...source, storageKey };
+    this.objects.set(storageKey, copied);
+    this.copies.push({ from: params.storageKey, to: storageKey });
+    return copied;
+  }
+
+  /** Forget every copy made and every failure planned — a spec's `beforeEach`. */
+  resetCopies(): void {
+    this.copies = [];
+    this.failing.clear();
+  }
+
+  /** Make the copy of one source key fail, as the vendor refusing it mid-way would. */
+  failCopyOf(storageKey: string): void {
+    this.failing.add(storageKey);
   }
 
   /** Make storage report that a key holds nothing, as a dropped upload would. */

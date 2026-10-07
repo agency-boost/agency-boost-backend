@@ -161,6 +161,15 @@ describe('reading one campaign (P5-T7)', () => {
         .toEqual([...refused].sort());
     });
 
+    it('P13.2-T4: refuses Leaders used — an office’s count, not anybody’s work — and never offers it', () => {
+      const said = refusal(whole({ requirements: [{ metricKey: 'LEADERS_USED', comparator: 'lte', value: 10 }] }));
+      expect(said).toContain('Leaders used counts the office, not anybody’s work');
+      expect(said).not.toMatch(/LEADER_LIMIT|phase/i);
+      // Nor is it among the alternatives an unknown key is answered with.
+      expect(refusal(whole({ requirements: [{ metricKey: 'NOPE', comparator: 'gte', value: 1 }] })))
+        .not.toContain('LEADERS_USED');
+    });
+
     it('collects every violation rather than stopping at the first', () => {
       // ADR-0030: an edit that half-saved leaves nobody able to find out which half.
       const said = refusal(whole({

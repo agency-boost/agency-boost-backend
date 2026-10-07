@@ -27,6 +27,7 @@ import {
   ImpersonationSessionSchema,
 } from '@/modules/auth/impersonation-session.schema';
 import { CompanyTemplateSchema } from '@/modules/config/company-template.schema';
+import { NamedTemplateSchema } from '@/modules/config/named-template.schema';
 import {
   TrainingCategorySchema,
 } from '@/modules/training/training-category.schema';
@@ -168,6 +169,13 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     CompanyTemplateSchema,
     'company-partitioned, not tenant-scoped (ADR-0018): the preset every office of one company '
       + 'is seeded from, written only by Super Admin and read before the office exists',
+  ],
+  [
+    'templates',
+    NamedTemplateSchema,
+    'company-partitioned, not tenant-scoped (ADR-0115 §3): a company\'s named templates, each a '
+      + 'name over the seven kinds in companyTemplates, written only by Super Admin and read before '
+      + 'the office made from one exists',
   ],
   ['kpms', KpmSchema, 'the tenant record itself — it cannot be scoped to itself'],
   [
@@ -457,6 +465,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [CommissionYearSchema, 'CommissionYearSchema'],
   [ImpersonationSessionSchema, 'ImpersonationSessionSchema'],
   [CompanyTemplateSchema, 'CompanyTemplateSchema'],
+  [NamedTemplateSchema, 'NamedTemplateSchema'],
   [AssetSchema, 'AssetSchema'],
   [NotificationSchema, 'NotificationSchema'],
   [NotificationPreferencesSchema, 'NotificationPreferencesSchema'],

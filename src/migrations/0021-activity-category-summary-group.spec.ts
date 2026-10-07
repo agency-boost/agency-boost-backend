@@ -226,7 +226,7 @@ describe('0021 — the summary tiles for offices and templates that already exis
         _id: KPM_A, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta',
       } as never);
 
-      await wired.provisioning.seedActivityTaxonomy(KPM_A, COMPANY);
+      await wired.provisioning.seedActivityTaxonomy(KPM_A);
 
       expect(tilesOf(await working(KPM_A)).TEAM_DEVELOPMENT).toEqual(['DEVELOPMENT', 'Development']);
     });

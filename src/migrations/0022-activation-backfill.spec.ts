@@ -132,7 +132,8 @@ describe('0022 — the activation backfill (OD-119)', () => {
       ]);
       // Sari, Dewi and Arief joined as Agents and were promoted: the backfill reads the current rung.
       expect(holders.every((m) => m.role === 'agent' && m.status === 'active')).toBe(true);
-      expect(first).toMatchObject({ created: 9, alreadyHad: 0, noChecklist: 0 });
+      // P13.2-T6: office 0701 started Empty, so its Agent, a week in, has no checklist to be pinned to.
+      expect(first).toMatchObject({ created: 9, alreadyHad: 0, noChecklist: 1 });
 
       expect(await up(db(), NOW)).toMatchObject({ created: 0, alreadyHad: 9 });
       expect(await col('activationProgress').countDocuments({})).toBe(9);

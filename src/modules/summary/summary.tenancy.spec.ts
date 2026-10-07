@@ -329,8 +329,13 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     it('AC-1: counts a cascade code whose type the office archived since', async () => {
       await wired.goals.save(agent(), plan());
       await day('2026-09-10', { SELL_PRESENTATION: 4 });
-      const type = (await wired.activity.list(owner())).flatMap((c) => c.types).find((t) => t.code === 'SELL_PRESENTATION')!;
-      await wired.activity.archiveType(owner(), type.id);
+      /*
+       * An office can no longer archive one (ADR-0115 §2), but an office that did before 13.2 keeps it
+       * archived — migration 0023 reports it and changes nothing — so the row is archived directly.
+       */
+      await mongoose.connection.db!.collection('activityTypes').updateOne(
+        { code: 'SELL_PRESENTATION' }, { $set: { status: 'archived', archivedAt: new Date() } },
+      );
 
       expect(chips((await wired.summary.read(agent())).activity.monthly).appointments.logged).toBe(4);
     });

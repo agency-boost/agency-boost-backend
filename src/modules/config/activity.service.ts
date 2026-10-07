@@ -14,6 +14,43 @@ import {
   checkCategoryCreate, checkCategoryUpdate, checkTypeCreate, checkTypeUpdate,
 } from './config-input';
 import { refuseSummaryGroupConflict } from './summary-group';
+import { CASCADE_ACTIVITY_CODES } from '@/domain/constants';
+
+/**
+ * **The three activity types no office may archive** (ADR-0115 §2): the goal cascade and the summary
+ * count them by code, and an Owner has no way to give a type a chosen code — so one archived is a goal
+ * page and a summary that count nothing, with no way back. Renaming, describing, reordering and moving
+ * them are the office's, as for any other type.
+ */
+export const RESERVED_TYPE_CODES: readonly string[] = Object.values(CASCADE_ACTIVITY_CODES);
+
+/**
+ * The refusal for archiving one of the three, by its label — one wording for the single route and the
+ * staged batch's projection (`changes.service.ts`), which refuses it before anything of the batch is
+ * written.
+ */
+export function reservedTypeRefusal(type: { code: string; label: string }): DomainException {
+  return new DomainException(
+    ErrorCode.ACTIVITY_TYPE_RESERVED,
+    `“${type.label}” cannot be archived: the goal plan and the summary count it. You can `
+      + 'rename it, describe it, reorder it or move it to another section.',
+    HttpStatus.CONFLICT,
+    { codes: [type.code] },
+  );
+}
+
+/** The refusal for archiving a section while it holds one of the three, active. */
+export function reservedSectionRefusal(
+  section: { label: string }, held: readonly { code: string; label: string }[],
+): DomainException {
+  return new DomainException(
+    ErrorCode.ACTIVITY_TYPE_RESERVED,
+    `${section.label} cannot be archived while it holds ${held.map((t) => `“${t.label}”`).join(', ')}, `
+      + 'which the goal plan and the summary count. Move them to another section first.',
+    HttpStatus.CONFLICT,
+    { codes: held.map((t) => t.code) },
+  );
+}
 
 /**
  * How a category write reaches the service.
@@ -235,6 +272,17 @@ export class ActivityConfigService {
    * type keeps computing over the history that type already has.
    */
   async archiveCategory(ctx: RequestContext, id: string): Promise<ActivityCategoryView> {
+    /*
+     * **Not while it holds a cascade type** (ADR-0115 §2): archiving the section archives the types
+     * in it. The type is moved to another section first, which the Owner may do.
+     */
+    const category = await this.categories.findById(ctx, id);
+    if (!category) throw new NotFoundException('Activity category');
+    const held = await this.types.find(ctx, {
+      categoryCode: category.code, status: 'active', code: { $in: [...RESERVED_TYPE_CODES] },
+    });
+    if (held.length) throw reservedSectionRefusal(category, held);
+
     const at = this.clock.now();
     const updated = await this.categories.updateById(ctx, id, {
       $set: { status: 'archived', archivedAt: at }, $inc: { version: 1 },
@@ -369,8 +417,15 @@ export class ActivityConfigService {
       .map((t) => this.typeView(t, rungs.get(t.categoryCode) ?? []));
   }
 
-  /** Archive, which is what this product means by delete (invariant §3). */
+  /**
+   * Archive, which is what this product means by delete (invariant §3) — refused for the three cascade
+   * types (ADR-0115 §2, `ACTIVITY_TYPE_RESERVED`), for every role that may archive at all.
+   */
   async archiveType(ctx: RequestContext, id: string): Promise<ActivityTypeView> {
+    const type = await this.types.findById(ctx, id);
+    if (!type) throw new NotFoundException('Activity type');
+    if (RESERVED_TYPE_CODES.includes(type.code)) throw reservedTypeRefusal(type);
+
     const updated = await this.types.updateById(ctx, id, {
       $set: { status: 'archived', archivedAt: this.clock.now() },
       $inc: { version: 1 },

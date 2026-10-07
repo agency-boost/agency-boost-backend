@@ -14,10 +14,15 @@ import { initialsOf } from '@/modules/org/directory.service';
 import { Company, CompanyDocument } from './company.schema';
 import { KpmRequest, KpmRequestDocument } from './kpm-request.schema';
 import { OrgLevelService } from './org-level.service';
-import { ProvisioningService } from '@/modules/config/provisioning.service';
+import { ProvisioningService, type StartFrom } from '@/modules/config/provisioning.service';
+import { NamedTemplateService } from '@/modules/config/named-template.service';
 import { ProductService } from '@/modules/products/product.service';
 import { CampaignService } from '@/modules/campaigns/campaign.service';
-import { DEFAULT_KPM_SETTINGS, Kpm, KpmDocument } from './kpm.schema';
+import { DEFAULT_KPM_SETTINGS, Kpm, KpmDocument, type KpmSubscription } from './kpm.schema';
+import { countLeadersUsedPerOffice } from '@/modules/org/leader-limit';
+import {
+  subscriptionStateOf, validateSubscription, type SubscriptionInput, type SubscriptionState,
+} from './subscription';
 
 export interface CreateKpmInput {
   companyId: string;
@@ -33,6 +38,11 @@ export interface CreateKpmInput {
    * suggestion that one exists.
    */
   timezone?: string;
+  /**
+   * **What the office starts from** (ADR-0115 §4): one of the company's templates, the AgencyBoost
+   * defaults, or *Empty*. Absent, the company's default template — what approving a KPM request uses.
+   */
+  startFrom?: StartFrom;
 }
 
 /**
@@ -79,6 +89,21 @@ export interface KpmView {
   suspendedAt: string | null;
   suspendedReason: string | null;
   createdAt: string;
+}
+
+/**
+ * An office as **the Super Admin's** offices list and detail read it (ADR-0112 §2, P13.2-T3 AC-3):
+ * the office, its subscription, *Leaders used* (ADR-0113's one count) and where it stands against its
+ * end date, computed on the server from the office's today.
+ *
+ * A separate shape rather than three more fields on `KpmView`, because `KpmView` is also what the
+ * Owner and the Admin read as *Branch info*, and the subscription is the platform's business with the
+ * office, not a setting of it: nothing grants a tenant role a read of it.
+ */
+export interface KpmAdminView extends KpmView {
+  subscription: KpmSubscription | null;
+  leadersUsed: number;
+  subscriptionState: SubscriptionState;
 }
 
 /** One person who administers an office, seen from the platform. */
@@ -145,6 +170,8 @@ export class TenantService {
     private readonly products: ProductService,
     // And its carrier rules (P5-T7).
     private readonly campaigns: CampaignService,
+    // A company's named templates (ADR-0115): its first one is made with it.
+    private readonly namedTemplates: NamedTemplateService,
   ) {}
 
   private require(ctx: RequestContext, permission: Parameters<typeof can>[1]): void {
@@ -209,6 +236,32 @@ export class TenantService {
 
   private async toView(kpm: KpmDocument): Promise<KpmView> {
     return (await this.toViews([kpm]))[0];
+  }
+
+  /**
+   * The Super Admin's rows: the views above, plus each office's subscription, *Leaders used* and its
+   * state (P13.2-T3 AC-3).
+   *
+   * *Leaders used* for every office in **one** grouped count, through the membership repository's
+   * named unscoped method (invariant §1) — the console reads it for offices it is not in. The state is
+   * the office's today against its end date, through the clock port: the same rule
+   * `ContextResolver` refuses by, so the list and the refusal cannot disagree.
+   */
+  private async toAdminViews(ctx: RequestContext, kpms: KpmDocument[]): Promise<KpmAdminView[]> {
+    const [views, leaders] = await Promise.all([
+      this.toViews(kpms),
+      countLeadersUsedPerOffice(this.memberships, ctx, kpms.map((k) => String(k._id))),
+    ]);
+    return views.map((view, i) => ({
+      ...view,
+      subscription: kpms[i].subscription ?? null,
+      leadersUsed: leaders.get(view._id) ?? 0,
+      subscriptionState: subscriptionStateOf(kpms[i], this.clock),
+    }));
+  }
+
+  private async toAdminView(ctx: RequestContext, kpm: KpmDocument): Promise<KpmAdminView> {
+    return (await this.toAdminViews(ctx, [kpm]))[0];
   }
 
   /**
@@ -303,14 +356,21 @@ export class TenantService {
      * is a structural requirement, which is exactly what makes them declinable — the ladder
      * above is not, and stays.
      *
-     * A company authoring its own presets from scratch gets nothing here and nothing from
-     * `STARTING_PAYLOAD` on the template tabs either, so *blank* means blank on every screen
-     * rather than blank on some of them.
+     * A company authoring its own presets from scratch gets nothing here, and its first template
+     * holds nothing either, so *blank* means blank on every screen — and in every office made
+     * from it (ADR-0115 §1) — rather than blank on some of them.
      */
     if (usesPlatformDefaults) {
       await this.products.seedForCompany(String(company._id));
       await this.campaigns.seedForCompany(String(company._id));
     }
+
+    /*
+     * **Its first template, and its default** (ADR-0115 §3): *"{name} template"*, each kind a
+     * published version 1 of the AgencyBoost defaults, or nothing for a company that declined them.
+     * Approving a KPM request starts the office from it, so a company is never without one.
+     */
+    await this.namedTemplates.createFirst(ctx, company);
 
     await this.audit.record(ctx, {
       action: 'company.created',
@@ -456,6 +516,14 @@ export class TenantService {
       );
     }
 
+    /*
+     * **The whole source, resolved and checked before the office row exists** (ADR-0115 §4): each
+     * kind's own checks, the ratios against the taxonomy it will have and the checklist's training
+     * links against its own modules. A refusal here leaves no office and no rows — there are no
+     * transactions (ADR-0002), so checking first is the guarantee.
+     */
+    const plan = await this.provisioning.planFor(input.companyId, input.startFrom);
+
     const kpm = await this.kpms.create({
       companyId: input.companyId,
       code: input.code,
@@ -470,43 +538,20 @@ export class TenantService {
       counters: { nextMemberSeq: 1 },
       status: 'active',
       ownerUserId: null,
+      startedFrom: plan.startedFrom,
       deletedAt: null,
     });
 
     /*
-     * The office arrives with a taxonomy to work against (P4-T1, ADR-0018).
+     * The office arrives with its configuration (P4-T1, ADR-0018, ADR-0115): **the chosen source
+     * and nothing else** — a kind the source holds none of is empty here, and there is no fallback
+     * to the platform defaults. Every office has the three cascade activity types whatever its
+     * source (ADR-0115 §2). An *Empty* office has those three and nothing else.
      *
-     * Copied from its **own company's** published template, or from the platform defaults
-     * when that company has published none — which is the normal state of a new insurer's
-     * first office, and refusing it would make that office unreachable until somebody
-     * remembered to publish a preset.
-     *
-     * After the office row, not before: a taxonomy belonging to an office that failed to
-     * create would be orphaned rows nothing points at. There are no transactions
-     * (ADR-0002), so the order is the guarantee.
+     * After the office row, not before: rows belonging to an office that failed to create would
+     * be orphans nothing points at.
      */
-    const seeded = await this.provisioning.seedActivityTaxonomy(
-      String(kpm._id),
-      input.companyId,
-    );
-    const leads = await this.provisioning.seedLeadPipelines(String(kpm._id), input.companyId);
-    // The ratios last, and checked against the taxonomy that was just copied: a formula
-    // naming a code the office does not have would read as `0.0%` on every agent's screen.
-    const ratios = await this.provisioning.seedRatioDefinitions(
-      String(kpm._id), input.companyId, seeded.typeCodes,
-    );
-    // Training (P5-T1): before publishing, so the office's first snapshot offers it too.
-    const training = await this.provisioning.seedTrainingTaxonomy(String(kpm._id), input.companyId);
-    // The checklist after it (P5-T3), and checked against the modules just copied: an item linked
-    // to a module this office is not given could never complete.
-    const activation = await this.provisioning.seedActivationChecklist(
-      String(kpm._id), input.companyId, training.publishedModuleCodes,
-    );
-    // Event types (P5-T6). An office with none has nothing to file an event under, and its
-    // Events screen would say so on day one for a reason nobody chose.
-    await this.provisioning.seedEventTypes(String(kpm._id), input.companyId);
-    // The capability catalog (P5-T8): the instrument leaders assess against, one per office.
-    await this.provisioning.seedCapabilityCatalog(String(kpm._id), input.companyId);
+    const provisioned = await this.provisioning.provision(String(kpm._id), plan);
 
     /*
      * And publish what was just copied (P4-T6), so the office's agents have something to
@@ -518,14 +563,9 @@ export class TenantService {
       String(kpm._id),
       this.contextFor(ctx, String(kpm._id)),
     );
-    // One record per kind, each from the template that kind's seed actually copied (P5-T12).
-    kpm.seededFrom = {
-      activity_taxonomy: seeded.seededFrom,
-      lead_pipeline: leads.seededFrom,
-      ratio_set: ratios.seededFrom,
-      training_taxonomy: training.seededFrom,
-      activation_checklist: activation.seededFrom,
-    };
+    // One record per kind, each from the version that kind's seed actually copied (P5-T12), or a
+    // `null` version where the source held none of it — all seven since 13.2.
+    kpm.seededFrom = provisioned.seededFrom;
     await kpm.save();
 
     await this.audit.record(ctx, {
@@ -536,8 +576,11 @@ export class TenantService {
         code: kpm.code,
         branchName: kpm.branchName,
         companyId: kpm.companyId,
+        // What it was started from, with the template's name as it was (ADR-0115 §4).
+        startedFrom: plan.startedFrom,
         seededFrom: kpm.seededFrom,
-        activityTypes: seeded.types,
+        activityTypes: provisioned.activityTypes,
+        cascadeTypesAdded: provisioned.cascadeAdded,
       },
     });
 
@@ -575,7 +618,7 @@ export class TenantService {
     ctx: RequestContext,
     kpmId: string,
     who: { userId?: string; email?: string },
-  ): Promise<KpmView> {
+  ): Promise<KpmAdminView> {
     this.require(ctx, 'kpm:assign_owner');
 
     const kpm = await this.kpms
@@ -588,15 +631,20 @@ export class TenantService {
 
     const user = await this.resolveOwner(who);
 
-    const previousOwnerUserId = kpm.ownerUserId;
-    kpm.ownerUserId = String(user._id);
-    await kpm.save();
-
     // An Owner who is not a member cannot be resolved into the office, so nothing they
     // own is reachable. §6.1 of roles-and-permissions.md creates this on first login;
     // creating it here instead means the office is administrable the moment it is
     // assigned, rather than the first time someone happens to sign in.
+    //
+    // **Before the office row, since P13.2-T4.** A new Owner who is not yet a member is made
+    // the office's root AB, and the leader limit can refuse that (ADR-0113 §2). Written after
+    // `ownerUserId`, the refusal left an office owned by somebody with no membership in it —
+    // nobody able to administer it, and the screen saying the assignment had failed.
     await this.ensureOwnerMembership(ctx, kpmId, String(user._id));
+
+    const previousOwnerUserId = kpm.ownerUserId;
+    kpm.ownerUserId = String(user._id);
+    await kpm.save();
 
     await this.audit.record(ctx, {
       action: previousOwnerUserId ? 'kpm.owner_transferred' : 'kpm.owner_assigned',
@@ -606,7 +654,7 @@ export class TenantService {
       after: { ownerUserId: String(user._id), email: user.email },
     });
 
-    return this.toView(kpm);
+    return this.toAdminView(ctx, kpm);
   }
 
   /**
@@ -631,10 +679,15 @@ export class TenantService {
       status: { $in: ['active', 'pending'] },
     });
     if (existing) {
+      /*
+       * A pending member made the Owner is activated **under the leader limit** (ADR-0113 §2, P13.2
+       * exit review): one promoted to AB or AAB while pending was not counted, and activating them here
+       * asked nobody. `activate` takes the seat for a pending leader and refuses `409
+       * LEADER_LIMIT_REACHED` before anything is written — and before `ownerUserId`, which
+       * `assignOwner` writes after this.
+       */
       if (existing.status !== 'active') {
-        await this.memberships.updateById(scoped, String(existing._id), {
-          $set: { status: 'active', joinedAt: this.clock.now() },
-        });
+        await this.hierarchy.activate(scoped, String(existing._id), { joinedAt: this.clock.now() });
       }
       return;
     }
@@ -693,7 +746,7 @@ export class TenantService {
     kpmId: string,
     status: 'active' | 'suspended' | 'archived',
     reason?: string,
-  ): Promise<KpmView> {
+  ): Promise<KpmAdminView> {
     this.require(ctx, status === 'suspended' ? 'kpm:suspend' : 'kpm:activate');
 
     const kpm = await this.kpms
@@ -718,7 +771,52 @@ export class TenantService {
       after: { status, reason: reason ?? null },
     });
 
-    return this.toView(kpm);
+    return this.toAdminView(ctx, kpm);
+  }
+
+  /**
+   * Set an office's subscription (ADR-0112 §2, P13.2-T3 AC-1, AC-2): its dates, price per leader,
+   * leader limit and *keep active*, **the five together**, as the dialog sends them.
+   *
+   * The Super Admin's alone (`kpm:update_subscription`, blocked in a support session). Checked whole
+   * before anything is written; an unknown office is 404. One audit row, `kpm.subscription_updated`,
+   * with the five fields before and after — the only history a subscription has (ADR-0112 §5).
+   *
+   * **Lowering the limit below *Leaders used* is allowed** (ADR-0113 §3): nobody is demoted, and new
+   * leaders are refused until the count is under it. The dialog says so before it is saved.
+   *
+   * Answers the office **as the list reads it**, so the row redraws from the answer.
+   */
+  async updateSubscription(
+    ctx: RequestContext,
+    kpmId: string,
+    input: SubscriptionInput,
+  ): Promise<KpmAdminView> {
+    this.require(ctx, 'kpm:update_subscription');
+    const next = validateSubscription(input);
+
+    const kpm = await this.kpms
+      .findOne({ _id: kpmId, deletedAt: null })
+      .exec()
+      // A malformed id is "not here", not a 500: these arrive from a URL.
+      .catch(() => null);
+    if (!kpm) throw new NotFoundException('KPM');
+
+    const before = kpm.subscription ?? null;
+    const updated = await this.kpms
+      .findOneAndUpdate({ _id: kpmId, deletedAt: null }, { $set: { subscription: next } }, { new: true })
+      .exec();
+    if (!updated) throw new NotFoundException('KPM');
+
+    await this.audit.record(ctx, {
+      action: 'kpm.subscription_updated',
+      targetCollection: 'kpms',
+      targetId: kpmId,
+      before: { subscription: before },
+      after: { subscription: next },
+    });
+
+    return this.toAdminView(ctx, updated);
   }
 
   /**
@@ -931,13 +1029,22 @@ export class TenantService {
       );
   }
 
-  async listAll(ctx: RequestContext): Promise<KpmView[]> {
+  /** Every office, newest first, with its subscription, *Leaders used* and state (P13.2-T3 AC-3). */
+  async listAll(ctx: RequestContext): Promise<KpmAdminView[]> {
     this.require(ctx, 'kpm:list_all');
-    return this.toViews(await this.kpms.find({ deletedAt: null }).sort({ createdAt: -1 }).exec());
+    return this.toAdminViews(
+      ctx, await this.kpms.find({ deletedAt: null }).sort({ createdAt: -1 }).exec(),
+    );
   }
 
-  /** A tenant's own profile. Readable by its Owner and Admins as well as Super Admin. */
-  async readProfile(ctx: RequestContext, kpmId: string): Promise<KpmView> {
+  /**
+   * A tenant's own profile. Readable by its Owner and Admins as well as Super Admin.
+   *
+   * **The Super Admin's read carries the subscription** (P13.2-T3 AC-8, the detail page's
+   * *Lifecycle* card); an Owner's or an Admin's of their own office does not — it is the platform's
+   * arrangement with the office, and no tenant role is granted it.
+   */
+  async readProfile(ctx: RequestContext, kpmId: string): Promise<KpmView | KpmAdminView> {
     this.require(ctx, 'kpm:read_profile');
 
     // A non-Super-Admin may only read the office they belong to. Returning 404 rather
@@ -951,7 +1058,7 @@ export class TenantService {
       // uncaught CastError renders as INTERNAL_ERROR and is logged as unhandled.
       .catch(() => null);
     if (!kpm) throw new NotFoundException('KPM');
-    return this.toView(kpm);
+    return ctx.isSuperAdmin ? this.toAdminView(ctx, kpm) : this.toView(kpm);
   }
 
   /**

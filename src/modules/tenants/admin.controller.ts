@@ -3,7 +3,9 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { AllowWhileReadOnly, Ctx, RequirePermission } from '@/common/auth/auth.decorators';
+import {
+  AllowWhileOfficeUnavailable, AllowWhileReadOnly, Ctx, RequirePermission,
+} from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditReadService } from '@/modules/audit/audit-read.service';
 import { ElevateImpersonationDto, ImpersonateDto } from '@/modules/auth/auth.dto';
@@ -21,6 +23,7 @@ import {
   RosterRowsDto,
   SetStatusDto,
   UpdateOrgLevelDto,
+  UpdateSubscriptionDto,
 } from './tenant.dto';
 import { KpmRequestService } from './kpm-request.service';
 import { OrgLevelService } from './org-level.service';
@@ -34,6 +37,7 @@ import {
 import { TenantService } from './tenant.service';
 import { TemplateService } from '@/modules/config/template.service';
 import { SaveTemplateDraftDto } from '@/modules/config/template.dto';
+import { TemplateQueryDto } from '@/modules/config/named-template.dto';
 import { TEMPLATE_KINDS, type TemplateKind } from '@/modules/config/company-template.schema';
 
 /**
@@ -245,7 +249,13 @@ export class AdminController {
     summary: 'Create a KPM',
     description:
       'The only way an office comes into existence — there is no self-service path ' +
-      '(ADR-0005). Seeds the per-office settings every prototype screen hardcodes.',
+      '(ADR-0005). Seeds the per-office settings every prototype screen hardcodes, and its ' +
+      'configuration from `startFrom` (ADR-0115): one of the company\'s active templates, the ' +
+      'AgencyBoost defaults, or empty — the company\'s default template when absent. There is no ' +
+      'fallback: a kind the source holds none of is empty in the office, and every office has the ' +
+      'three cascade activity types. The whole source is checked before the office is written, so ' +
+      'a refusal (400, naming what is broken; 404 for a template that is not the company\'s) leaves ' +
+      'nothing behind.',
   })
   async createTenant(@Ctx() ctx: RequestContext, @Body() dto: CreateKpmDto) {
     return this.tenants.createKpm(ctx, dto);
@@ -283,30 +293,36 @@ export class AdminController {
   @ApiOperation({
     summary: 'A company\'s template of one kind',
     description:
-      'The draft if there is one, else the newest published, else a starting point built '
-      + 'from the platform defaults — a company with nothing published is the normal state '
-      + 'of a new insurer, and an empty answer would mean retyping twelve activity types '
-      + 'from a PDF. `officesBehind` says how many of this company\'s offices are on '
-      + 'something older, which is the count the Superadmin prototype puts on its front page.',
+      'One kind of one of the company\'s named templates — `?templateId=`, or the company\'s '
+      + 'default when absent (404 for a template that is not the company\'s). The draft if there is '
+      + 'one, else the newest published, else nothing: version 0 and an empty payload, which is what '
+      + 'an office made from the template would get of the kind. `campaign_kinds` is the company\'s '
+      + 'own, shared by every template, and ignores `templateId`. `officesBehind` says how many of '
+      + 'the template\'s offices are on something older, which is the count the Superadmin prototype '
+      + 'puts on its front page.',
   })
   async readTemplate(
     @Param('companyId') companyId: string,
     @Param('kind') kind: string,
+    @Query() query: TemplateQueryDto,
   ) {
-    return this.templates.read(companyId, this.kindOf(kind));
+    return this.templates.read(companyId, this.kindOf(kind), query.templateId);
   }
 
   @Get('companies/:companyId/template/:kind/history')
   @RequirePermission('company_template:read')
   @ApiOperation({
     summary: 'Every version of one template',
-    description: 'Newest first. A published version is immutable; this is the record of them.',
+    description:
+      'Newest first, for one kind of the template `?templateId=` names (the default when absent). A '
+      + 'published version is immutable; this is the record of them.',
   })
   async templateHistory(
     @Param('companyId') companyId: string,
     @Param('kind') kind: string,
+    @Query() query: TemplateQueryDto,
   ) {
-    return this.templates.history(companyId, this.kindOf(kind));
+    return this.templates.history(companyId, this.kindOf(kind), query.templateId);
   }
 
   @Put('companies/:companyId/template/:kind')
@@ -321,15 +337,17 @@ export class AdminController {
       + '`summaryGroupCode` and `summaryGroupLabel` on a category together or not at all '
       + '(`400 VALIDATION_FAILED`), one label per tile '
       + '(`422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`), and no shared tile under the code of a '
-      + 'category outside it (`422 CONFIG_SUMMARY_GROUP_CODE_TAKEN`).',
+      + 'category outside it (`422 CONFIG_SUMMARY_GROUP_CODE_TAKEN`). Writes the template '
+      + '`?templateId=` names, the default when absent; an archived template is refused (400).',
   })
   async saveTemplateDraft(
     @Ctx() ctx: RequestContext,
     @Param('companyId') companyId: string,
     @Param('kind') kind: string,
     @Body() dto: SaveTemplateDraftDto,
+    @Query() query: TemplateQueryDto,
   ) {
-    return this.templates.saveDraft(ctx, companyId, this.kindOf(kind), dto.payload);
+    return this.templates.saveDraft(ctx, companyId, this.kindOf(kind), dto.payload, query.templateId);
   }
 
   @Post('companies/:companyId/template/:kind/publish')
@@ -340,14 +358,18 @@ export class AdminController {
       'Becomes the version new offices are seeded from. **Reaches nothing that already '
       + 'exists** — copy-on-provision means copy once, and an office that has diverged '
       + 'keeps its divergence. Refuses a payload that would produce a broken office, '
-      + 'because the alternative is discovering it while creating one for a real branch.',
+      + 'because the alternative is discovering it while creating one for a real branch. '
+      + 'Publishes the template `?templateId=` names, the default when absent; an archived '
+      + 'template is refused (400). A ratio set is checked against the same template\'s published '
+      + 'taxonomy and the three cascade activity types.',
   })
   async publishTemplate(
     @Ctx() ctx: RequestContext,
     @Param('companyId') companyId: string,
     @Param('kind') kind: string,
+    @Query() query: TemplateQueryDto,
   ) {
-    return this.templates.publish(ctx, companyId, this.kindOf(kind));
+    return this.templates.publish(ctx, companyId, this.kindOf(kind), query.templateId);
   }
 
   /** An unknown kind is a 400 naming the ones that exist, not an empty answer. */
@@ -422,6 +444,27 @@ export class AdminController {
     return this.tenants.setStatus(ctx, id, dto.status, dto.reason);
   }
 
+  @Patch('tenants/:kpmId/subscription')
+  @RequirePermission('kpm:update_subscription')
+  @ApiOperation({
+    summary: 'Set an office’s subscription',
+    description:
+      'Its start and end dates (office dates, both or neither, the end on or after the start), the '
+      + 'price per leader per month in IDR minor units (whole rupiah; informational, nothing is charged), '
+      + 'the leader limit (or null for none) and keep-active-after-the-end, all five every time (ADR-0112). '
+      + 'From 00:00 of the office day after the end date its members are refused TENANT_SUBSCRIPTION_ENDED '
+      + 'unless it is kept active. A limit below the leaders it has demotes nobody. Super Admin only, '
+      + 'refused in a support session; audited with the five fields before and after. Answers the office '
+      + 'as GET /admin/tenants reads it. 400 VALIDATION_FAILED names the field; an unknown office is 404.',
+  })
+  async updateSubscription(
+    @Ctx() ctx: RequestContext,
+    @Param('kpmId') kpmId: string,
+    @Body() dto: UpdateSubscriptionDto,
+  ) {
+    return this.tenants.updateSubscription(ctx, kpmId, dto);
+  }
+
   @Post('tenants/:id/roster/preview')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('kpm:import_roster')
@@ -486,6 +529,8 @@ export class AdminController {
   @Post('impersonate/end')
   // Blocking this would strand the operator inside the session they are leaving.
   @AllowWhileReadOnly()
+  // And so would the office being suspended or archived while they were in it (P13.2 exit review).
+  @AllowWhileOfficeUnavailable()
   // A POST defaults to 201, and this one answers 200 — it ends a session rather than
   // creating anything. The document said 201 until P3.5-T11; a client checking the status
   // would have treated every successful call as a failure.

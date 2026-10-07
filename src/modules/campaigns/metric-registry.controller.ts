@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '@/common/auth/auth.decorators';
-import { CAMPAIGN_EVALUATION_PHASE, METRIC_REGISTRY } from '@/domain/constants';
+import { CAMPAIGN_EVALUATION_PHASE, REQUIREMENT_METRICS } from '@/domain/constants';
 import { MetricDefinitionDto } from './campaign.response.dto';
 
 /**
@@ -22,9 +22,11 @@ export class MetricRegistryController {
   @Get()
   @RequirePermission('metric_registry:read')
   @ApiOperation({
-    summary: 'Every metric this product defines',
+    summary: 'Every metric a requirement may name',
     description:
-      'The key, the name a screen shows, the unit its number is in, and `computed`: whether it '
+      'Every metric this product defines but those about an office rather than a member, which no '
+      + 'campaign or qualification rule may name (Leaders used, an office capacity count). '
+      + 'The key, the name a screen shows, the unit its number is in, and `computed`: whether it '
       + 'is measured by the time campaigns are evaluated. A screen says so from `computed` and '
       + 'never from `phase`, which is the roadmap\'s. A carrier rule naming a metric that is not '
       + 'is recorded as waiting on it, and a campaign requirement naming one is refused, rather '
@@ -32,7 +34,7 @@ export class MetricRegistryController {
   })
   @ApiResponse({ status: 200, type: MetricDefinitionDto, isArray: true })
   list(): MetricDefinitionDto[] {
-    return METRIC_REGISTRY.map((metric) => ({
+    return REQUIREMENT_METRICS.map((metric) => ({
       key: metric.key,
       name: metric.name,
       unit: metric.unit,

@@ -168,6 +168,31 @@ describe('TenantScopedRepository — cross-tenant isolation', () => {
     });
   });
 
+  describe('one named office, read by a Super Admin (P13.2-T7 AC-6)', () => {
+    const root = RequestContext.platform('root');
+
+    it('is refused to anybody but a Super Admin, and to a Super Admin naming no office', async () => {
+      await expect(repo.findInOfficeAcrossTenants(ctxFor(KPM_A), KPM_A)).rejects.toThrow(MissingTenantContextError);
+      await expect(repo.findInOfficeAcrossTenants(root, '')).rejects.toThrow(MissingTenantContextError);
+    });
+
+    it('returns the named office’s live rows and never another’s, whatever the filter says', async () => {
+      await repo.create(ctxFor(KPM_A), { name: 'a' } as Partial<WidgetDoc>);
+      const gone = await repo.create(ctxFor(KPM_A), { name: 'a-gone' } as Partial<WidgetDoc>);
+      await repo.softDeleteById(ctxFor(KPM_A), String(gone._id), new Date());
+      await repo.create(ctxFor(KPM_B), { name: 'b' } as Partial<WidgetDoc>);
+
+      expect((await repo.findInOfficeAcrossTenants(root, KPM_A)).map((w) => w.name)).toEqual(['a']);
+      // A filter naming the other office cannot widen or move the read: the named office wins.
+      const moved = await repo.findInOfficeAcrossTenants(root, KPM_A, { kpmId: KPM_B } as never);
+      expect(moved.map((w) => w.name)).toEqual(['a']);
+      // Nor reach a soft-deleted row by asking for one.
+      const deleted = await repo.findInOfficeAcrossTenants(root, KPM_A, { deletedAt: { $ne: null } } as never);
+      expect(deleted.map((w) => w.name)).toEqual(['a']);
+      expect((await repo.findInOfficeAcrossTenants(root, KPM_B, {}, { limit: 1 })).map((w) => w.name)).toEqual(['b']);
+    });
+  });
+
   describe('a malformed id is nothing found, wherever it sits in the filter', () => {
     it('answers null for a bad id at the top level and inside $and', async () => {
       const ctx = ctxFor(KPM_A);

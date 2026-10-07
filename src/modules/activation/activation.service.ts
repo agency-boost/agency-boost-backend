@@ -91,11 +91,12 @@ export class ActivationService {
 
   /** The office's published version, its draft, and the window both are read against. */
   async read(ctx: RequestContext): Promise<ActivationChecklistView> {
-    const [published, draft, windowDays] = await Promise.all([
+    const [published, draft, office] = await Promise.all([
       this.newestPublished(ctx),
       this.draftOf(ctx),
-      this.windowDays(ctx),
+      this.office(ctx),
     ]);
+    const { windowDays } = office;
 
     /*
      * **An office with neither opens on the standard checklist**, unsaved, the way the Company
@@ -105,9 +106,13 @@ export class ActivationService {
      * with nothing at all, and its Owner would have no way to start.
      *
      * `id: ''` is what says it is not saved: nothing to publish until it has been.
+     *
+     * **An office started from a source since 13.2 opens on nothing** (ADR-0115 §1, §8): its source
+     * held no checklist, the Owner asked for exactly that, and offering the platform's sixteen items
+     * would be the fallback the client reported. Its Owner authors the first aspect from nothing.
      */
     if (!published && !draft) {
-      return { published: null, draft: this.startingPoint(), windowDays };
+      return { published: null, draft: office.startedFrom ? null : this.startingPoint(), windowDays };
     }
 
     return {
@@ -250,10 +255,11 @@ export class ActivationService {
     return this.templates.findOne(ctx, { status: 'draft' });
   }
 
-  private async windowDays(ctx: RequestContext): Promise<number> {
-    const kpm = await this.kpms.findById(ctx.kpmId).select('settings').lean().exec();
-    return (kpm as { settings?: { activationWindowDays?: number } } | null)
-      ?.settings?.activationWindowDays ?? 0;
+  /** The office's window, and what it was started from (`null` before 13.2). */
+  private async office(ctx: RequestContext): Promise<{ windowDays: number; startedFrom: unknown }> {
+    const kpm = await this.kpms.findById(ctx.kpmId).select('settings startedFrom').lean().exec() as
+      { settings?: { activationWindowDays?: number }; startedFrom?: unknown } | null;
+    return { windowDays: kpm?.settings?.activationWindowDays ?? 0, startedFrom: kpm?.startedFrom ?? null };
   }
 
   /**

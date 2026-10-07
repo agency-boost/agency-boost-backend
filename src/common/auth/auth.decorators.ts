@@ -65,3 +65,15 @@ export const Ctx = createParamDecorator(resolveCtx);
  */
 export const ALLOWED_WHILE_READ_ONLY = 'allowedWhileReadOnly';
 export const AllowWhileReadOnly = () => SetMetadata(ALLOWED_WHILE_READ_ONLY, true);
+
+/**
+ * Reachable by **a support session whose office cannot be used** (P13.2 exit review).
+ *
+ * `ContextResolver` refuses every request of a suspended or archived office's member, and a support
+ * session is one of its members — so an office suspended while a Super Admin was in it left them no
+ * way out: *End support session* met `TENANT_SUSPENDED` like everything else, the session stayed live
+ * for the rest of its hour and no `impersonation.ended` row was written. One route carries this:
+ * ending the session. It exempts a support session only; a member's own request is refused as before.
+ */
+export const ALLOWED_WHILE_OFFICE_UNAVAILABLE = 'allowedWhileOfficeUnavailable';
+export const AllowWhileOfficeUnavailable = () => SetMetadata(ALLOWED_WHILE_OFFICE_UNAVAILABLE, true);

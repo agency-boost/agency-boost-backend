@@ -61,6 +61,9 @@ import { LeaderNote, LeaderNoteSchema } from '@/modules/coaching/leader-note.sch
 import { backfillCoachingSnapshots } from './coaching-snapshots';
 import { buildCalendarFixture, type CalendarFixture } from './calendar-fixture';
 import { buildActivationFixture, type ActivationFixture } from './activation-fixture';
+import { seedSubscriptionFixture } from './subscription-fixture';
+import { seedTemplateFixture } from './template-fixture';
+import { seedTemplateCopyFixture } from './template-copy-fixture';
 import { LONG_PIPELINE } from './long-pipeline';
 import {
   ActivationProgress, ActivationProgressSchema,
@@ -2209,6 +2212,27 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     null,
   );
 
+  // ------------------------- subscriptions and the leader limit (P13.2; `subscription-fixture.ts`)
+
+  const subscriptions = await seedSubscriptionFixture({
+    clock, Kpms: Kpms as never, companyId: String(prudential._id), kpm0417: id0417, kpm0555: id0555,
+    user, configure, publish, place, recount, daysAgo,
+  });
+
+  // ------------------- named templates, and an office started Empty (P13.2-T6; `template-fixture.ts`)
+
+  const templates = await seedTemplateFixture({
+    clock, reset: options.reset, Kpms: Kpms as never,
+    companies: [prudential, allianz].map((c) => ({ _id: String(c._id), name: c.get('name') as string })),
+    user, publish, place, recount, daysAgo,
+  });
+
+  // ------------------- a template saved from 0417's settings (P13.2-T7; `template-copy-fixture.ts`)
+
+  const templateCopies = await seedTemplateCopyFixture({
+    clock, companyId: String(prudential._id), kpm0417: id0417,
+  });
+
   // ------------------------------------------------- offices asking to exist
 
   /**
@@ -3101,8 +3125,8 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     agent@kpm0555.test                                 Agent
 
   KPM 0999 · Suspended Branch
-    owner@kpm0999.test                                 Signing in returns TENANT_SUSPENDED
-
+    owner@kpm0999.test                                 Signing in shows the page: the office is suspended
+${subscriptions.guide}${templates.guide}${templateCopies.guide}
   NO OFFICE
     newcomer@agencyboost.test                          Brand new — starts at Register KPM
 

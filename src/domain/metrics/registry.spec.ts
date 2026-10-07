@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ACTIVATION, PERFORMANCE, RATIO_BENCHMARKS } from '@/domain/constants';
-import { CAMPAIGN_EVALUATION_PHASE, METRIC_REGISTRY as SERVED } from '@/domain/constants/metrics';
+import {
+  CAMPAIGN_EVALUATION_PHASE, METRIC_REGISTRY as SERVED, REQUIREMENT_METRICS,
+} from '@/domain/constants/metrics';
 import { METRIC_IDS, METRIC_REGISTRY, metric, define, join as joinLists } from './registry';
 
 const DOC = join(__dirname, '../../../../docs/00-product/metrics-and-definitions.md');
@@ -204,6 +206,8 @@ describe('the metric registry (P4-T4)', () => {
       SUB_PERIOD_ACTIVITY_TARGET: 11,
       // P13.1-T5 (ADR-0109): the pace sentence's *N*, replacing `PROJECTED_CLOSINGS_THIS_MONTH`.
       CLOSINGS_LAST_30_DAYS: 13.1,
+      // P13.2-T4 (ADR-0113): the office's leaders, which its leader limit bounds.
+      LEADERS_USED: 13.2,
     };
     const existedBefore = (id: string) => !(id in REGISTERED_SINCE);
 
@@ -226,7 +230,7 @@ describe('the metric registry (P4-T4)', () => {
       // And no phase the plan gives no metric to: an old-plan 12 left behind would now read as
       // Calendar's, 16 is Billing, 17 Recruitment tools, 19 go-live.
       const phases = [...new Set(METRIC_IDS.map((id) => metric(id).phase))].sort((a, b) => a - b);
-      expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 14, 15, 18]);
+      expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 14, 15, 18]);
     });
 
     it('evaluates campaigns in Phase 14, the old plan’s 12', () => {
@@ -235,8 +239,10 @@ describe('the metric registry (P4-T4)', () => {
 
     it('pins, by key, every metric measured by the time a campaign is evaluated', () => {
       // `GET /metrics` serves this comparison as `computed`, and `checkCampaign` refuses its
-      // complement — so this list is what an Owner may build a campaign on.
-      expect(computableAt(CAMPAIGN_EVALUATION_PHASE, (id) => metric(id).phase)).toEqual([
+      // complement — so this list is what an Owner may build a campaign on. Leaders used is
+      // measured by then and is about an office, so it is no requirement (the test after next).
+      expect(computableAt(CAMPAIGN_EVALUATION_PHASE, (id) => metric(id).phase)
+        .filter((id) => id !== 'LEADERS_USED')).toEqual([
         'ACTIVATION_COMPLETION_PCT', 'ACTIVATION_DAY_INDEX',
         'ACTIVITY_COMPLIANCE_7D', 'ACTIVITY_COMPLIANCE_MONTH', 'ACTIVITY_TARGET_ATTAINMENT_PCT', 'ACTIVITY_TOTAL_BY_CATEGORY',
         'APE_ACHIEVED', 'APE_ATTAINMENT_PCT', 'APE_GAP_TO_TARGET', 'APE_TARGET', 'APPOINTMENT_TARGET',
@@ -251,6 +257,16 @@ describe('the metric registry (P4-T4)', () => {
         'SELLING_RECRUITMENT_BALANCE', 'SELLING_SUCCESS_RATE', 'SUB_PERIOD_ACTIVITY_TARGET', 'SUMMARY_ACTIVITY_TARGET',
         'TRAINING_COMPLETION_PCT',
       ].sort());
+    });
+
+    it('P13.2-T4: keeps Leaders used, an office’s count, out of what a requirement may name', () => {
+      expect(metric('LEADERS_USED')).toMatchObject({
+        unit: 'count', phase: 13.2, period: 'POINT_IN_TIME', threshold: null, label: 'Leaders used',
+      });
+      expect(SERVED.find((m) => m.key === 'LEADERS_USED')?.requirable).toBe(false);
+      expect(REQUIREMENT_METRICS.map((m) => m.key)).not.toContain('LEADERS_USED');
+      // It is the only one: every other metric is still a requirement's to name.
+      expect(SERVED.filter((m) => !REQUIREMENT_METRICS.includes(m)).map((m) => m.key)).toEqual(['LEADERS_USED']);
     });
 
     it('still refuses, by key, the seven nothing measures by then', () => {

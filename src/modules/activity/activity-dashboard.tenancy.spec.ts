@@ -157,17 +157,18 @@ describe('the Activity Dashboard (P10-T1)', () => {
 
   describe('AC-8 — history the office has since hidden still adds up', () => {
     it('keeps an archived type that holds counts, marked, and drops it when it holds none', async () => {
-      await day(TODAY, { SELL_SUBMISSION: 4 });
+      // Not a cascade type: those three cannot be archived (ADR-0115 §2).
+      await day(TODAY, { SELL_FOLLOWUP: 4 });
       const type = (await wired.activity.list(owner(KPM_A)))
-        .flatMap((c) => c.types).find((t) => t.code === 'SELL_SUBMISSION')!;
+        .flatMap((c) => c.types).find((t) => t.code === 'SELL_FOLLOWUP')!;
       await wired.activity.archiveType(owner(KPM_A), type.id);
 
       const withCounts = await read();
-      expect(typeRow(withCounts, 'SELL_SUBMISSION')).toMatchObject({ standing: 'archived', total: 4 });
+      expect(typeRow(withCounts, 'SELL_FOLLOWUP')).toMatchObject({ standing: 'archived', total: 4 });
       expect(withCounts.total).toBe(4);
 
       await mongoose.connection.db!.collection('activityLogs').deleteMany({});
-      expect(typeRow(await read(), 'SELL_SUBMISSION')).toBeUndefined();
+      expect(typeRow(await read(), 'SELL_FOLLOWUP')).toBeUndefined();
     });
 
     it('keeps a section no longer shown to this rung, after the rows it counted, marked as such', async () => {

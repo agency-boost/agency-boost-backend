@@ -558,13 +558,24 @@ export class ApprovalsService {
     // them on. There are no transactions to roll that back, so the refusal moves first.
     await this.hierarchy.assertCanMoveUnder(ctx, String(member._id), leaderId);
 
-    await this.members.updateById(ctx, String(member._id), {
-      $set: {
-        status: 'active',
-        joinedAt: member.joinedAt ?? this.clock.now(),
-        recruitedByMembershipId: member.recruitedByMembershipId ?? leaderId,
-      },
-    });
+    /*
+     * **The leader limit, at the activation** (ADR-0113 §2, P13.2 exit review). A pending member
+     * promoted to AB or AAB was not counted, and this write made them count without asking: two of
+     * them promoted at one below the limit and both approved made the office one over. Activating a
+     * member who is not active goes through `HierarchyService.activate`, which takes the seat when the
+     * row is not active at a leader rung — refused `409 LEADER_LIMIT_REACHED` before anything is
+     * written, the request left open — and serves an Agent as it always did. Somebody already active
+     * adds nobody.
+     */
+    const fields = {
+      joinedAt: member.joinedAt ?? this.clock.now(),
+      recruitedByMembershipId: member.recruitedByMembershipId ?? leaderId,
+    };
+    if (member.status !== 'active') {
+      await this.hierarchy.activate(ctx, String(member._id), fields);
+    } else {
+      await this.members.updateById(ctx, String(member._id), { $set: { status: 'active', ...fields } });
+    }
     await this.hierarchy.moveUnder(ctx, String(member._id), leaderId);
 
     // The joined edge was opened when they registered; this closes it and opens the one

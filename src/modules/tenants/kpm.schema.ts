@@ -130,6 +130,19 @@ export class Kpm {
   @Prop({ type: Object, default: {} })
   seededFrom!: Partial<Record<TemplateKind, SeedRecord>>;
 
+  /**
+   * **What the office was started from** (ADR-0115 §4, P13.2-T6): one of its company's named
+   * templates, the AgencyBoost defaults, or *Empty* — chosen as *Start from* when it was created, or
+   * the company's default when a KPM request was approved. The template's name is kept beside its id,
+   * so the record still reads after a rename.
+   *
+   * **`null` on an office created before 13.2**, and never backfilled: those were built from their
+   * company's newest published kinds or the platform fallback, which is neither a template nor a
+   * choice. A record of provenance, never a link — a later edit of the template reaches no office.
+   */
+  @Prop({ type: Object, default: null })
+  startedFrom!: KpmStartedFrom | null;
+
   @Prop({ type: String, enum: ['active', 'suspended', 'archived'], default: 'active', index: true })
   status!: 'active' | 'suspended' | 'archived';
 
@@ -139,8 +152,62 @@ export class Kpm {
   @Prop({ type: String, default: null })
   suspendedReason!: string | null;
 
+  /**
+   * The office's subscription (ADR-0112, P13.2-T3). **`null` is no subscription**, and an office
+   * with none works exactly as it did before 13.2: no end, no limit. Every office created before it
+   * has none, and nothing backfills one.
+   *
+   * On the office rather than in a collection of its own because `ContextResolver` reads the office
+   * row on every member's request already, and the end is checked there: one more condition on a row
+   * in hand, not a second read. Written by the Super Admin alone (`kpm:update_subscription`), every
+   * change audited with its before and after.
+   */
+  @Prop({ type: Object, default: null })
+  subscription!: KpmSubscription | null;
+
+  /**
+   * A short lease that serialises the writes that could add a leader to this office (ADR-0113 §2,
+   * P13.2-T4 AC-6). **Machinery, never data**: read and written only by `leader-limit.ts`, never
+   * served, and `null` whenever nobody holds it.
+   *
+   * Two promotions at one below the limit each counted the leaders, each found room, and each wrote —
+   * the count is a read of many rows and there are no transactions (ADR-0002). Whoever holds this
+   * counts and writes; the other waits for it. A holder that dies mid-write is released when `until`
+   * passes, so a crash never locks an office's leaders for longer than the lease.
+   */
+  @Prop({ type: Object, default: null })
+  leaderLimitLock!: { token: string; until: Date } | null;
+
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;
+}
+
+/**
+ * The five fields of an office's subscription (ADR-0112 §1).
+ *
+ * Dates are **office dates** — `YYYY-MM-DD` in `kpms.timezone`, never instants — so *the end date is
+ * the last day the office can be used* means the same day in Jakarta whatever clock the server runs
+ * on (invariant §9). Both or neither; the end on or after the start.
+ */
+export interface KpmSubscription {
+  startDate: string | null;
+  endDate: string | null;
+  /** Integer IDR minor units, whole rupiah. **Informational**: nothing is charged from it. */
+  pricePerLeaderMinor: number | null;
+  currency: 'IDR';
+  /** *Leaders used* may not pass it (ADR-0113). `null` is no limit. */
+  maxLeaders: number | null;
+  /** On, and the office stays open after its end date: *Ended — kept active*. Off by default. */
+  keepActiveAfterEnd: boolean;
+}
+
+/** The source an office was started from (ADR-0115 §4). */
+export interface KpmStartedFrom {
+  source: 'template' | 'defaults' | 'empty';
+  /** The named template's id when the source was one; otherwise `null`. */
+  templateId: string | null;
+  /** Its name at the time, for a record that still reads after a rename. */
+  templateName: string | null;
 }
 
 export const KpmSchema = SchemaFactory.createForClass(Kpm);

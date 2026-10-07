@@ -51,17 +51,18 @@ describe('publishing an office’s configuration (P4-T6)', () => {
        */
       await config.publish(ctx(KPM_A));
 
+      // Not a cascade type: those three cannot be archived (ADR-0115 §2).
       const type = (await activity.list(ctx(KPM_A))).flatMap((c) => c.types)
-        .find((t) => t.code === 'SELL_SUBMISSION')!;
+        .find((t) => t.code === 'SELL_FOLLOWUP')!;
       await activity.archiveType(ctx(KPM_A), type.id);
 
       const working = await config.read(ctx(KPM_A));
       const published = await config.readPublished(ctx(KPM_A));
 
       expect(working.activity.flatMap((c) => c.types).map((t) => t.code))
-        .not.toContain('SELL_SUBMISSION');
+        .not.toContain('SELL_FOLLOWUP');
       expect(published.activity.flatMap((c) => c.types).map((t) => t.code))
-        .toContain('SELL_SUBMISSION');
+        .toContain('SELL_FOLLOWUP');
     });
 
     it('moves them on once it is published', async () => {
@@ -166,7 +167,7 @@ describe('publishing an office’s configuration (P4-T6)', () => {
       });
 
       it('AC-1: sees an archive, which takes the row out of the working copy', async () => {
-        await activity.archiveType(ctx(KPM_A), (await typeNamed('SELL_SUBMISSION')).id);
+        await activity.archiveType(ctx(KPM_A), (await typeNamed('SELL_FOLLOWUP')).id);
 
         expect(await unpublished()).toBe(true);
       });
@@ -192,7 +193,7 @@ describe('publishing an office’s configuration (P4-T6)', () => {
       });
 
       it('AC-3: stops saying so once the change is published', async () => {
-        await activity.archiveType(ctx(KPM_A), (await typeNamed('SELL_SUBMISSION')).id);
+        await activity.archiveType(ctx(KPM_A), (await typeNamed('SELL_FOLLOWUP')).id);
         expect(await unpublished()).toBe(true);
 
         await config.publish(ctx(KPM_A));
@@ -200,7 +201,7 @@ describe('publishing an office’s configuration (P4-T6)', () => {
       });
 
       it('AC-4: sees a restore, which brings a row back into the working copy', async () => {
-        const type = await typeNamed('SELL_SUBMISSION');
+        const type = await typeNamed('SELL_FOLLOWUP');
         await activity.archiveType(ctx(KPM_A), type.id);
         await config.publish(ctx(KPM_A));
 

@@ -143,7 +143,10 @@ export class TenantConfigController {
     description:
       'Archiving, never deleting (invariant §3) — and it cascades to the section\u2019s '
       + 'types, because a live type inside a retired section would still be loggable from '
-      + 'nowhere. A ratio naming an archived type keeps computing over its history.',
+      + 'nowhere. A ratio naming an archived type keeps computing over its history. '
+      + '409 ACTIVITY_TYPE_RESERVED while it holds LEADS_CONTACTED, SELL_PRESENTATION or '
+      + 'SELL_SUBMISSION, which the goal plan and the summary count (`details.codes`): move them out '
+      + 'first.',
   })
   async archiveCategory(@Ctx() ctx: RequestContext, @Param('id') id: string) {
     return this.activity.archiveCategory(ctx, id);
@@ -201,7 +204,9 @@ export class TenantConfigController {
     summary: 'Archive an activity type',
     description:
       'Archived, not deleted (invariant §3). It leaves the capture screen and stays '
-      + 'readable wherever a historical activity log names it.',
+      + 'readable wherever a historical activity log names it. 409 ACTIVITY_TYPE_RESERVED for '
+      + 'LEADS_CONTACTED, SELL_PRESENTATION and SELL_SUBMISSION, which the goal plan and the summary '
+      + 'count: they are renamed, described, reordered and moved, never archived.',
   })
   async archiveType(@Ctx() ctx: RequestContext, @Param('id') id: string) {
     return this.activity.archiveType(ctx, id);

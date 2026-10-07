@@ -5,28 +5,26 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
-import {
-  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES, SEED_RATIO_DEFINITIONS,
-  resolveDisplayUnit,
-} from '@/domain/constants';
+import { resolveDisplayUnit } from '@/domain/constants';
 import {
   CompanyTemplate, CompanyTemplateDocument, TemplateKind,
 } from './company-template.schema';
-import { OfficeCounter, type OfficeStanding } from './office-counter.port';
+import { OfficeCounter, type OfficeStanding, type TemplateScope } from './office-counter.port';
+import { NamedTemplateService } from './named-template.service';
+import type { NamedTemplateDocument } from './named-template.schema';
+import {
+  RESERVED_ACTIVITY_CODES, isOfficeTemplateKind, platformDefaultPayload,
+} from './template-defaults';
 import {
   checkTemplateSummaryGroups, refuseSummaryGroupConflict, type SummaryGrouped,
 } from './summary-group';
 import { CampaignKindsApplier } from './campaign-kinds.port';
+import { trainingTaxonomyProblems } from '@/modules/training/training-payload';
+import { activationChecklistProblems } from '@/modules/activation/activation-payload';
+import { capabilityLadderProblems } from '@/modules/capability/capability-payload';
+import { eventTypesProblems } from '@/modules/events/event-types-payload';
 import {
-  defaultTrainingTaxonomy, trainingTaxonomyProblems,
-} from '@/modules/training/training-payload';
-import {
-  activationChecklistProblems, defaultActivationChecklist,
-} from '@/modules/activation/activation-payload';
-import { capabilityLadderProblems, defaultCapabilityLadder } from '@/modules/capability/capability-payload';
-import { defaultEventTypes, eventTypesProblems } from '@/modules/events/event-types-payload';
-import {
-  campaignKindsProblems, defaultCampaignKinds, type CampaignKindsPayload,
+  campaignKindsProblems, type CampaignKindsPayload,
 } from '@/modules/campaigns/campaign-kinds-payload';
 
 /** No version to stand against — nothing published, or a history row that is not current. */
@@ -35,6 +33,11 @@ const NO_STANDING: OfficeStanding = { behind: 0, unrecorded: 0 };
 export interface TemplateView {
   id: string;
   companyId: string;
+  /**
+   * The named template this kind belongs to (ADR-0115 §3). `null` for `campaign_kinds`, which is the
+   * company's, shared by every template.
+   */
+  templateId: string | null;
   kind: TemplateKind;
   version: number;
   status: 'draft' | 'published' | 'archived';
@@ -43,8 +46,10 @@ export interface TemplateView {
   /** The version offices are currently seeded from, or `null` if nothing is published. */
   publishedVersion: number | null;
   /**
-   * How many offices of this company were built from an older version of **this kind**, or
-   * from the platform defaults when nothing of it was published.
+   * How many of the template's offices were built from an older version of **this kind**, or hold a
+   * record of it with no version — which since 13.2 means the template held none of the kind when the
+   * office was made, and before 13.2 that the office was built from the platform defaults because the
+   * company had published nothing of it (`KpmOfficeCounter`).
    */
   officesBehind: number;
   /**
@@ -54,27 +59,17 @@ export interface TemplateView {
   officesUnrecorded: number;
 }
 
-/** What an empty template of each kind starts from, so a Super Admin edits rather than types. */
-const STARTING_PAYLOAD: Record<string, () => Record<string, unknown>> = {
-  activity_taxonomy: () => ({
-    categories: SEED_ACTIVITY_CATEGORIES.map((c) => ({ ...c })),
-    types: SEED_ACTIVITY_TYPES.map((t) => ({ ...t })),
-  }),
-  lead_pipeline: () => ({ statuses: SEED_LEAD_STATUSES.map((s) => ({ ...s })) }),
-  ratio_set: () => ({
-    ratios: SEED_RATIO_DEFINITIONS.map((r) => ({
-      ...r, numerator: [...r.numerator], denominator: [...r.denominator],
-    })),
-  }),
-  training_taxonomy: () => ({ ...defaultTrainingTaxonomy() }),
-  activation_checklist: () => ({ ...defaultActivationChecklist() }),
-  // P5-T9 AC-4: every Phase 5 kind starts from something. `capability_ladder` had validation and
-  // a provisioning reader since P5-T8 and no starting payload, so a Super Admin opening the tab
-  // would have been handed `{}` and asked to retype four stages from a PDF.
-  capability_ladder: () => ({ ...defaultCapabilityLadder() }),
-  event_types: () => ({ ...defaultEventTypes() }),
-  campaign_kinds: () => ({ ...defaultCampaignKinds() }),
-};
+/**
+ * Which rows one kind of one template is: its named template's, or — for `campaign_kinds`, the
+ * company's own — the company's with `templateId: null`.
+ */
+interface KindAddress {
+  companyId: string;
+  templateId: string | null;
+  kind: TemplateKind;
+  /** The named template, for an office kind; `null` for `campaign_kinds`. */
+  template: NamedTemplateDocument | null;
+}
 
 /**
  * The preset every new office of one company is built from (P4-T8, ADR-0018).
@@ -107,24 +102,34 @@ export class TemplateService {
     private readonly officesOf: OfficeCounter,
     /** Publishing `campaign_kinds` applies it; every other kind is read at provisioning. */
     private readonly campaignKinds: CampaignKindsApplier,
+    /** Which named template a kind route means: the one named, or the company's default (ADR-0115 §3). */
+    private readonly named: NamedTemplateService,
   ) {}
 
   /**
-   * What a Super Admin is looking at: the draft if there is one, else the newest
-   * published, else a starting point built from the platform defaults.
+   * What a Super Admin is looking at: the draft if there is one, else the newest published, else
+   * **nothing** — `{}`, version 0.
    *
-   * The last case matters more than it looks. A company with nothing published is the
-   * normal state of a new insurer, and handing back an empty object would mean the first
-   * thing a Super Admin does is retype twelve activity types from a PDF.
+   * *Nothing* is what an office made from this template would get of the kind (ADR-0115 §1, §3): a
+   * kind a template never published is empty, and the screen says so rather than showing the
+   * platform's presets as if the template held them. *New template from the AgencyBoost defaults*
+   * publishes them as version 1 of each kind; a company created with the defaults has its first
+   * template made that way.
+   *
+   * **`campaign_kinds` is the company's** and keeps its own starting point: the carrier rules a company
+   * created with the defaults was given, or nothing for a company that declined them.
+   *
+   * `templateId` names the template; absent, the company's default.
    */
-  async read(companyId: string, kind: TemplateKind): Promise<TemplateView> {
+  async read(companyId: string, kind: TemplateKind, templateId?: string | null): Promise<TemplateView> {
     const company = await this.requireCompany(companyId);
+    const at = await this.address(companyId, kind, templateId);
 
     const draft = await this.templates
-      .findOne({ companyId, kind, status: 'draft', deletedAt: null }).exec();
-    const published = await this.newestPublished(companyId, kind);
+      .findOne({ ...this.rowsOf(at), status: 'draft', deletedAt: null }).exec();
+    const published = await this.newestPublished(at);
 
-    const standing = await this.standing(companyId, kind, published?.version ?? null);
+    const standing = await this.standing(at, published?.version ?? null);
 
     if (draft) return this.view(draft, published?.version ?? null, standing);
     if (published) return this.view(published, published.version, standing);
@@ -132,18 +137,18 @@ export class TemplateService {
     return {
       id: '',
       companyId,
+      templateId: at.templateId,
       kind,
       version: 0,
       status: 'draft',
       /*
-       * **What a company that declined the defaults gets is nothing** (`usesPlatformDefaults`).
-       *
-       * The eight kinds are not written at creation — an unauthored one is computed here — so
-       * without this a Super Admin who asked for a blank company would open Activity types and
-       * find the platform's twelve, with no way to say they had not wanted them. Declining has
-       * to reach the screen that shows the default, not only the seeds that write one.
+       * **A company that declined the defaults gets nothing** (`usesPlatformDefaults`) — on the one
+       * kind that is still the company's. Every other kind is a template's, and an unpublished one is
+       * empty whoever the company is.
        */
-      payload: company.usesPlatformDefaults ? (STARTING_PAYLOAD[kind]?.() ?? {}) : {},
+      payload: kind === 'campaign_kinds' && company.usesPlatformDefaults
+        ? platformDefaultPayload(kind)
+        : {},
       publishedAt: null,
       publishedVersion: null,
       officesBehind: standing.behind,
@@ -164,12 +169,14 @@ export class TemplateService {
     companyId: string,
     kind: TemplateKind,
     payload: Record<string, unknown>,
+    templateId?: string | null,
   ): Promise<TemplateView> {
     await this.requireCompany(companyId);
+    const at = await this.writable(companyId, kind, templateId);
     if (kind === 'activity_taxonomy') payload = this.checkedTaxonomy(payload);
 
     const existing = await this.templates
-      .findOne({ companyId, kind, status: 'draft', deletedAt: null }).exec();
+      .findOne({ ...this.rowsOf(at), status: 'draft', deletedAt: null }).exec();
 
     const saved = existing
       ? await this.templates.findOneAndUpdate(
@@ -179,9 +186,10 @@ export class TemplateService {
       ).exec()
       : await this.templates.create({
         companyId,
+        templateId: at.templateId,
         kind,
         // A draft carries the version it *will* be, so the screen can say so.
-        version: ((await this.newestPublished(companyId, kind))?.version ?? 0) + 1,
+        version: ((await this.newestPublished(at))?.version ?? 0) + 1,
         status: 'draft',
         payload,
         publishedAt: null,
@@ -194,14 +202,14 @@ export class TemplateService {
       action: 'company_template.draft_saved',
       targetCollection: 'companyTemplates',
       targetId: String(saved!._id),
-      after: { companyId, kind },
+      after: { companyId, templateId: at.templateId, kind },
     });
 
-    const published = await this.newestPublished(companyId, kind);
+    const published = await this.newestPublished(at);
     return this.view(
       saved!,
       published?.version ?? null,
-      await this.standing(companyId, kind, published?.version ?? null),
+      await this.standing(at, published?.version ?? null),
     );
   }
 
@@ -213,21 +221,22 @@ export class TemplateService {
    * will do is a second place for them to disagree.
    */
   async publish(
-    ctx: RequestContext, companyId: string, kind: TemplateKind,
+    ctx: RequestContext, companyId: string, kind: TemplateKind, templateId?: string | null,
   ): Promise<TemplateView> {
     await this.requireCompany(companyId);
+    const at = await this.writable(companyId, kind, templateId);
 
     const draft = await this.templates
-      .findOne({ companyId, kind, status: 'draft', deletedAt: null }).exec();
+      .findOne({ ...this.rowsOf(at), status: 'draft', deletedAt: null }).exec();
     if (!draft) {
       throw new BadRequestException(
         'There is nothing to publish. Change something first — the published version is '
           + 'immutable, because offices record which one they were built from.',
       );
     }
-    await this.refuseBroken(companyId, kind, draft.payload);
+    await this.refuseBroken(at, draft.payload);
 
-    const published = await this.newestPublished(companyId, kind);
+    const published = await this.newestPublished(at);
     draft.version = (published?.version ?? 0) + 1;
     draft.status = 'published';
     draft.publishedAt = this.clock.now();
@@ -252,17 +261,20 @@ export class TemplateService {
       action: 'company_template.published',
       targetCollection: 'companyTemplates',
       targetId: String(draft._id),
-      after: { companyId, kind, version: draft.version },
+      after: { companyId, templateId: at.templateId, kind, version: draft.version },
     });
 
-    return this.view(draft, draft.version, await this.standing(companyId, kind, draft.version));
+    return this.view(draft, draft.version, await this.standing(at, draft.version));
   }
 
-  /** Every version of every kind for one company, newest first. The history panel. */
-  async history(companyId: string, kind: TemplateKind): Promise<TemplateView[]> {
+  /** Every version of one kind of one template, newest first. The history panel. */
+  async history(
+    companyId: string, kind: TemplateKind, templateId?: string | null,
+  ): Promise<TemplateView[]> {
     await this.requireCompany(companyId);
+    const at = await this.address(companyId, kind, templateId);
     const rows = await this.templates
-      .find({ companyId, kind, deletedAt: null })
+      .find({ ...this.rowsOf(at), deletedAt: null })
       .sort({ version: -1 })
       .exec();
     const published = rows.find((r) => r.status === 'published');
@@ -271,9 +283,39 @@ export class TemplateService {
 
   // -------------------------------------------------------------- internals
 
-  private async newestPublished(companyId: string, kind: TemplateKind) {
+  /**
+   * Which rows a kind route means. An office kind is a named template's — the one named, or the
+   * company's default; `campaign_kinds` is the company's own, under no template.
+   */
+  private async address(
+    companyId: string, kind: TemplateKind, templateId?: string | null,
+  ): Promise<KindAddress> {
+    if (!isOfficeTemplateKind(kind)) return { companyId, templateId: null, kind, template: null };
+    const template = await this.named.resolve(companyId, templateId);
+    return { companyId, templateId: String(template._id), kind, template };
+  }
+
+  /** As {@link address}, refusing a write to an archived template: it is kept to be read, not edited. */
+  private async writable(
+    companyId: string, kind: TemplateKind, templateId?: string | null,
+  ): Promise<KindAddress> {
+    const at = await this.address(companyId, kind, templateId);
+    if (at.template?.status === 'archived') {
+      throw new BadRequestException(
+        `${at.template.name} is archived, so it is kept as it is. Edit an active template instead.`,
+      );
+    }
+    return at;
+  }
+
+  /** The filter for one kind of one template's rows. */
+  private rowsOf(at: KindAddress): Record<string, unknown> {
+    return { companyId: at.companyId, templateId: at.templateId, kind: at.kind };
+  }
+
+  private async newestPublished(at: KindAddress) {
     return this.templates
-      .findOne({ companyId, kind, status: 'published', deletedAt: null })
+      .findOne({ ...this.rowsOf(at), status: 'published', deletedAt: null })
       .sort({ version: -1 })
       .exec();
   }
@@ -288,13 +330,16 @@ export class TemplateService {
     return company;
   }
 
-  /** Where this company's offices stand against the published version of one kind. */
-  private async standing(
-    companyId: string, kind: TemplateKind, publishedVersion: number | null,
-  ): Promise<OfficeStanding> {
+  /**
+   * Where one template's offices stand against the published version of one kind (ADR-0115 §3: per
+   * template). `campaign_kinds` is applied to every office's live carrier rules when it is published,
+   * so no office is ever behind it.
+   */
+  private async standing(at: KindAddress, publishedVersion: number | null): Promise<OfficeStanding> {
     // Nothing published of this kind: there is no version to be behind, or unrecorded against.
-    if (publishedVersion === null) return NO_STANDING;
-    return this.officesOf.standing(companyId, kind, publishedVersion);
+    if (publishedVersion === null || !at.template) return NO_STANDING;
+    const scope: TemplateScope = this.named.scopeOf(at.template);
+    return this.officesOf.standing(at.companyId, at.kind, publishedVersion, scope);
   }
 
   /**
@@ -315,9 +360,8 @@ export class TemplateService {
    * did not declare published cleanly and then threw at provisioning: exactly the failure
    * the promise rules out.
    */
-  private async refuseBroken(
-    companyId: string, kind: TemplateKind, payload: Record<string, unknown>,
-  ): Promise<void> {
+  private async refuseBroken(at: KindAddress, payload: Record<string, unknown>): Promise<void> {
+    const { kind } = at;
     this.refuseEmpty(kind, payload);
 
     /*
@@ -372,15 +416,15 @@ export class TemplateService {
     }
 
     /*
-     * Against the **published** taxonomy, and its platform fallback — because that is what
-     * provisioning reads (`provisioning.service.ts`). Checking the taxonomy *draft* would
-     * pass here and still break the office, which is the defect wearing a different hat.
+     * Against **this template's published** taxonomy, and the three cascade types every office is
+     * given whatever its source (ADR-0115 §2) — because that is what provisioning copies. Checking
+     * the taxonomy *draft* would pass here and still break the office, which is the defect wearing a
+     * different hat. There is no platform fallback any more: a template with no taxonomy published
+     * gives its offices the three and nothing else (ADR-0115 §1).
      */
-    const taxonomy = await this.newestPublished(companyId, 'activity_taxonomy');
-    const source = (taxonomy?.payload ?? STARTING_PAYLOAD.activity_taxonomy?.() ?? {}) as {
-      types?: { code: string }[];
-    };
-    const known = new Set((source.types ?? []).map((t) => t.code));
+    const taxonomy = await this.newestPublished({ ...at, kind: 'activity_taxonomy' });
+    const source = (taxonomy?.payload ?? {}) as { types?: { code: string }[] };
+    const known = new Set([...(source.types ?? []).map((t) => t.code), ...RESERVED_ACTIVITY_CODES]);
 
     const missing = [...new Set(
       ratios.flatMap((r) => [...(r.numerator ?? []), ...(r.denominator ?? [])]),
@@ -389,7 +433,7 @@ export class TemplateService {
     if (missing.length) {
       throw new BadRequestException(
         `${missing.join(', ')} is named by a ratio and declared by no activity type in this `
-          + `company\u2019s published taxonomy${taxonomy ? ` (version ${taxonomy.version})` : ''}. `
+          + `template\u2019s published taxonomy${taxonomy ? ` (version ${taxonomy.version})` : ''}. `
           + 'Publish the taxonomy first, or point the ratio at a code it has.',
       );
     }
@@ -466,6 +510,7 @@ export class TemplateService {
     return {
       id: String(doc._id),
       companyId: doc.companyId,
+      templateId: doc.templateId ?? null,
       kind: doc.kind,
       version: doc.version,
       status: doc.status,

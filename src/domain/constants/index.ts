@@ -338,6 +338,7 @@ export {
   type MetricDefinition,
   METRIC_REGISTRY,
   metricByKey,
+  REQUIREMENT_METRICS,
   CAMPAIGN_EVALUATION_PHASE,
   REQUIREMENT_COMPARATORS,
   type RequirementComparator,
@@ -370,3 +371,17 @@ export {
 } from './calendar';
 
 export { INBOX_PAGE } from './notifications';
+
+// P13.2-T2: the quote tool's price table, served to the Super Admin alone (ADR-0111).
+export {
+  BILLING_CURRENCY,
+  BILLING_ANNUAL_DISCOUNT_PCT,
+  BILLING_PRICE_TIERS,
+  type BillingTier,
+} from './billing';
+
+/** An office's subscription bounds and the leader limit's rungs (ADR-0112, ADR-0113; P13.2-T3, T4). */
+export { SUBSCRIPTION, LEADER_RUNG_CODES } from './subscription';
+
+/** A named template's name bounds (ADR-0115 §3; P13.2-T6, T7), which the frontend's constant is pinned to. */
+export { TEMPLATE } from './templates';

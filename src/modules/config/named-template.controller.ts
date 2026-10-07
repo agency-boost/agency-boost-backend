@@ -1,0 +1,128 @@
+import {
+  Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
+import { RequestContext } from '@/common/context/request-context';
+import { NamedTemplateService } from './named-template.service';
+import { TemplateCopyService } from './template-copy.service';
+import { CreateTemplateDto, ImportTemplateDto, UpdateTemplateDto } from './named-template.dto';
+
+/**
+ * **A company's named templates** (ADR-0115 §3, §5, §7; P13.2-T6) — and, since P13.2-T7, a copy of one
+ * (`POST` with `from: { templateId }`) and an import from another company (`POST …/import`).
+ *
+ * The Super Admin's alone: `company_template:read` and `company_template:write`, which no tenant role
+ * holds and a support session — acting as the member it impersonates — does not either. Each kind of a
+ * template is still read, drafted and published at `…/template/:kind` with `?templateId=`.
+ */
+@ApiTags('admin (Super Admin)')
+@ApiBearerAuth()
+@Controller('admin/companies/:companyId/templates')
+export class NamedTemplateController {
+  constructor(
+    private readonly templates: NamedTemplateService,
+    /** The copies across an owner boundary (P13.2-T7): *Import from another company*. */
+    private readonly copies: TemplateCopyService,
+  ) {}
+
+  @Get()
+  @RequirePermission('company_template:read')
+  @ApiOperation({
+    summary: 'A company’s templates',
+    description:
+      'Every named template of the company, the default first: its name, whether it is the default, '
+      + 'active or archived, where it came from, the newest published version of each of its seven '
+      + 'kinds (null where none is, which an office made from it gets empty), and how many live '
+      + 'offices it answers for. Archived templates are listed — offices record that they started '
+      + 'from one — and are not offered as *Start from*. 404 for a company that does not exist.',
+  })
+  async list(@Param('companyId') companyId: string) {
+    return this.templates.list(companyId);
+  }
+
+  @Post()
+  @RequirePermission('company_template:write')
+  @ApiOperation({
+    summary: 'New template',
+    description:
+      '`from: "empty"` holds nothing, so an office made from it starts empty but for the three '
+      + 'cascade activity types; `from: "defaults"` publishes each of the seven kinds as version 1 of '
+      + 'the AgencyBoost defaults; `from: { templateId }` copies one of this company\u2019s templates — '
+      + 'each kind\u2019s newest published version becomes the copy\u2019s version 1, a draft is not copied, '
+      + 'codes are kept and training files referenced; 404 for a template that is not the '
+      + 'company\u2019s. Never the default when made. 409 TEMPLATE_NAME_TAKEN when an active '
+      + 'template of the company already has the name (compared ignoring case). Audited once, naming the '
+      + 'source of a copy.',
+  })
+  async create(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Body() dto: CreateTemplateDto,
+  ) {
+    return this.templates.create(ctx, companyId, dto);
+  }
+
+  @Post('import')
+  @RequirePermission('company_template:write')
+  @ApiOperation({
+    summary: 'Import a template from another company',
+    description:
+      'One template of `fromCompanyId` becomes a new template of this company (ADR-0115 §5): '
+      + 'each kind\u2019s newest published version as version 1, drafts not copied, codes kept. Every '
+      + 'training file is **duplicated** into this company\u2019s assets; links are copied as links. '
+      + 'Nothing links back: later edits on either side never reach the other. 409 '
+      + 'TEMPLATE_RUNG_UNKNOWN `{ codes }` when a ratio or an activity section names a rung this '
+      + 'company\u2019s ladder lacks; 409 TEMPLATE_NAME_TAKEN; 409 ASSET_NOT_CONFIRMED for a file that '
+      + 'never finished uploading; 400 for this company as its own source; 404 for an unknown company or a '
+      + 'template that is not the source company\u2019s. Every check runs before any write, and the '
+      + 'template is written after its files. Audited once, naming both companies.',
+  })
+  async importFrom(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Body() dto: ImportTemplateDto,
+  ) {
+    return this.copies.importFrom(ctx, companyId, dto);
+  }
+
+  @Patch(':templateId')
+  @RequirePermission('company_template:write')
+  @ApiOperation({
+    summary: 'Rename a template, or make it the default',
+    description:
+      '`name` renames it (409 TEMPLATE_NAME_TAKEN as above). `isDefault: true` makes it the company’s '
+      + 'default, moving it from the template that was; refused (400) for an archived template. '
+      + '`isDefault: false` on the default is 409 TEMPLATE_IS_DEFAULT — another is made the default '
+      + 'instead. Every refusal comes before any write. 409 VERSION_CONFLICT when the company\u2019s '
+      + 'default changed while this was being made the default — nothing is changed, and the old default '
+      + 'stands. Each change audited. 404 for a template that is not the company\u2019s.',
+  })
+  async update(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Param('templateId') templateId: string,
+    @Body() dto: UpdateTemplateDto,
+  ) {
+    return this.templates.update(ctx, companyId, templateId, dto);
+  }
+
+  @Post(':templateId/archive')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('company_template:write')
+  @ApiOperation({
+    summary: 'Archive a template',
+    description:
+      'Archived, never deleted: it stays readable, because offices record that they started from it, '
+      + 'and it is no longer offered. 409 TEMPLATE_IS_DEFAULT for the company’s default — make '
+      + 'another the default first; also when it was made the default while this was being archived. '
+      + 'Archiving an archived template changes nothing. Audited.',
+  })
+  async archive(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Param('templateId') templateId: string,
+  ) {
+    return this.templates.archive(ctx, companyId, templateId);
+  }
+}

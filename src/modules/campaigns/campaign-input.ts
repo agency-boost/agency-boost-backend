@@ -1,6 +1,6 @@
 import { Fields, refuseWith } from '@/common/validation/fields';
 import {
-  CAMPAIGN_EVALUATION_PHASE, METRIC_REGISTRY, REQUIREMENT_COMPARATORS, metricByKey,
+  CAMPAIGN_EVALUATION_PHASE, REQUIREMENT_COMPARATORS, REQUIREMENT_METRICS, metricByKey,
   type RequirementComparator,
 } from '@/domain/constants';
 
@@ -105,7 +105,12 @@ function readRequirements(
       // Named, and with the alternatives: "that is not a metric" leaves somebody guessing what is.
       violations.push(
         `${where}: "${metricKey}" is not a metric this product measures. One of: `
-        + `${METRIC_REGISTRY.map((m) => m.key).join(', ')}.`,
+        + `${REQUIREMENT_METRICS.map((m) => m.key).join(', ')}.`,
+      );
+    } else if (metric.requirable === false) {
+      // An office's count, not anybody's work (P13.2-T4, `LEADERS_USED`): nobody could qualify by it.
+      violations.push(
+        `${where}: ${metric.name} counts the office, not anybody’s work, so a campaign cannot ask for it.`,
       );
     } else if (metric.phase > CAMPAIGN_EVALUATION_PHASE) {
       // Accepting it would be a campaign nobody can ever qualify for, failing silently. The Owner

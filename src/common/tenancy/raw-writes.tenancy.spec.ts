@@ -52,6 +52,14 @@ const EXEMPT: Record<string, string> = {
     + 'rule — MOC, a production club — belongs to the insurer and is read live by every office of '
     + 'it, so a carrier changing MOC does not wait on fifty Owners republishing. P5-T9 writes it '
     + 'from the published `campaign_kinds` template, filtered by `companyId` on every query.',
+  NamedTemplate:
+    'company-partitioned (ADR-0115 §3), for the same reason as Product above: a company\'s named '
+    + 'template belongs to the insurer, is written only by Super Admin, and is read before the office '
+    + 'made from it exists. Every write filters by its id, found under the company first.',
+  CompanyTemplate:
+    'company-partitioned (ADR-0018, ADR-0115 §3): a company\'s template kinds, written only by Super '
+    + 'Admin and read before the office made from them exists. P13.2-T7\'s one raw write soft-deletes the '
+    + 'rows of a template that was never written, filtered by `companyId` and that template\'s id.',
   KpmRequest: 'an office that does not exist yet, so there is no tenant to scope to.',
   AuthToken: 'platform-global. A session belongs to a user, not to an office.',
   ImpersonationSession:

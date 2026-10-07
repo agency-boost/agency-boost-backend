@@ -230,6 +230,14 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   RECRUITMENT_EXPECTED_TO_CLOSE: { period: 'CALENDAR_MONTH', threshold: null },
   NEW_ACTIVE_AGENTS: { period: 'CALENDAR_MONTH', threshold: null },
   ROLLING_PERSISTENCY: { period: 'ROLLING_12M', threshold: null },
+
+  // ---- The office (P13.2-T4, ADR-0113) ----
+  /*
+   * The count now, at the read or the write. Its threshold is **each office's own**
+   * `kpms.subscription.maxLeaders`, or none — data, not a platform constant, so `null` here (§A.9).
+   * Counted by `countLeadersUsed` in `modules/org/leader-limit.ts` and nowhere else.
+   */
+  LEADERS_USED: { period: 'POINT_IN_TIME', threshold: null },
 };
 
 export const METRIC_REGISTRY = define(join(SERVED, COMPUTATIONS));

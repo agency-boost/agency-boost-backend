@@ -26,7 +26,6 @@ function ctx(kpmId: string | null, opts: { owner?: boolean } = {}) {
 describe('the office activity taxonomy (P4-T1)', () => {
   let service: ActivityConfigService;
   let provisioning: ProvisioningService;
-  let templates: mongoose.Model<never>;
   let wired: ReturnType<typeof configModule>;
 
   beforeAll(async () => {
@@ -34,24 +33,24 @@ describe('the office activity taxonomy (P4-T1)', () => {
     wired = configModule(NOW);
     service = wired.activity;
     provisioning = wired.provisioning;
-    templates = wired.templates as never;
   });
 
   afterAll(stopMongo);
   beforeEach(clearCollections);
 
-  describe('provisioning (AC-4, AC-5)', () => {
-    it('seeds the platform defaults when the company has published nothing', async () => {
-      /*
-       * AC-5, and it is not a convenience. Refusing here would make the first office of
-       * every new insurer unreachable — gated behind somebody remembering to publish a
-       * preset before the office can exist at all.
-       */
-      const result = await provisioning.seedActivityTaxonomy(KPM_A, COMPANY);
+  describe('provisioning (AC-4, AC-5; ADR-0115)', () => {
+    /** A published taxonomy as provisioning is handed it: resolved from a template before the office exists. */
+    const source = (payload: Record<string, unknown> | null, version: number | null = 3) => ({
+      payload, seededFrom: { templateId: 'tpl-1', version },
+    });
 
-      // A record whose version is null: nothing published, so the platform defaults (P5-T12).
+    it('seeds the AgencyBoost defaults when that is the source', async () => {
+      const result = await provisioning.seedActivityTaxonomy(KPM_A);
+
+      // The defaults are no template's and no version (ADR-0115 §4).
       expect(result.seededFrom).toEqual({ templateId: null, version: null });
       expect(result.types).toBe(SEED_ACTIVITY_TYPES.length);
+      expect(result.cascadeAdded).toEqual([]);
       const taxonomy = await service.list(ctx(KPM_A));
       expect(taxonomy.map((c) => c.code)).toEqual([
         'LEADS_GENERATION', 'SELLING', 'RECRUITMENT',
@@ -60,86 +59,73 @@ describe('the office activity taxonomy (P4-T1)', () => {
       expect(taxonomy.flatMap((c) => c.types)).toHaveLength(12);
     });
 
-    it('uses the company\'s own published template when there is one (AC-4)', async () => {
-      await templates.create({
-        companyId: COMPANY,
-        kind: 'activity_taxonomy',
-        version: 3,
-        status: 'published',
-        publishedAt: NOW,
-        payload: {
-          categories: [{ code: 'ONLY', label: 'Only', displayOrder: 1 }],
-          types: [{
-            code: 'ONLY_THING', categoryCode: 'ONLY', label: 'The only thing',
-            description: null, displayOrder: 1,
-          }],
-        },
-      } as never);
+    it('copies a template’s taxonomy, and adds the three cascade types it lacks (ADR-0115 §2)', async () => {
+      const result = await provisioning.seedActivityTaxonomy(KPM_A, source({
+        categories: [{ code: 'ONLY', label: 'Only', displayOrder: 1 }],
+        types: [{
+          code: 'ONLY_THING', categoryCode: 'ONLY', label: 'The only thing',
+          description: null, displayOrder: 1,
+        }],
+      }));
 
-      const result = await provisioning.seedActivityTaxonomy(KPM_A, COMPANY);
-
-      expect(result.seededFrom.version).toBe(3);
+      expect(result.seededFrom).toEqual({ templateId: 'tpl-1', version: 3 });
+      expect(result.cascadeAdded).toEqual(['LEADS_CONTACTED', 'SELL_PRESENTATION', 'SELL_SUBMISSION']);
       const taxonomy = await service.list(ctx(KPM_A));
-      expect(taxonomy).toHaveLength(1);
+      expect(taxonomy.map((c) => [c.code, c.label])).toEqual([
+        ['ONLY', 'Only'], ['LEADS_GENERATION', 'Leads Generation'], ['SELLING', 'Selling'],
+      ]);
       expect(taxonomy[0].types.map((t) => t.code)).toEqual(['ONLY_THING']);
+      // Each with its platform label, active.
+      const contacted = taxonomy[1].types.find((t) => t.code === 'LEADS_CONTACTED')!;
+      expect(contacted).toMatchObject({ label: 'Menghubungi prospek yang sudah ada', status: 'active' });
+      expect(taxonomy[2].types.map((t) => t.code)).toEqual(['SELL_PRESENTATION', 'SELL_SUBMISSION']);
     });
 
-    it('takes the newest published version, not the newest row', async () => {
-      const common = { companyId: COMPANY, kind: 'activity_taxonomy', publishedAt: NOW };
-      await templates.create({
-        ...common, version: 1, status: 'published',
-        payload: { categories: [{ code: 'OLD', label: 'Old', displayOrder: 1 }], types: [] },
-      } as never);
-      await templates.create({
-        ...common, version: 2, status: 'published',
-        payload: { categories: [{ code: 'NEW', label: 'New', displayOrder: 1 }], types: [] },
-      } as never);
-      // A draft of 3 exists and must not be reached — publishing is the act that matters.
-      await templates.create({
-        ...common, version: 3, status: 'draft',
-        payload: { categories: [{ code: 'DRAFT', label: 'Draft', displayOrder: 1 }], types: [] },
-      } as never);
+    it('keeps a cascade type the template renamed and moved, and adds only what is missing', async () => {
+      const result = await provisioning.seedActivityTaxonomy(KPM_A, source({
+        categories: [{ code: 'CORE', label: 'Core', displayOrder: 1 }],
+        types: [{
+          code: 'SELL_SUBMISSION', categoryCode: 'CORE', label: 'Polis masuk',
+          description: null, displayOrder: 1,
+        }],
+      }));
 
-      await provisioning.seedActivityTaxonomy(KPM_A, COMPANY);
-      expect((await service.list(ctx(KPM_A))).map((c) => c.code)).toEqual(['NEW']);
+      expect(result.cascadeAdded).toEqual(['LEADS_CONTACTED', 'SELL_PRESENTATION']);
+      const taxonomy = await service.list(ctx(KPM_A));
+      expect(taxonomy[0].types).toEqual([expect.objectContaining({ code: 'SELL_SUBMISSION', label: 'Polis masuk' })]);
+    });
+
+    it('gives an empty source the three cascade types and nothing else — no fallback (ADR-0115 §1)', async () => {
+      const result = await provisioning.seedActivityTaxonomy(KPM_A, source(null, null));
+
+      expect(result.seededFrom).toEqual({ templateId: 'tpl-1', version: null });
+      const taxonomy = await service.list(ctx(KPM_A));
+      expect(taxonomy.map((c) => c.code)).toEqual(['LEADS_GENERATION', 'SELLING']);
+      expect(taxonomy.flatMap((c) => c.types).map((t) => t.code)).toEqual([
+        'LEADS_CONTACTED', 'SELL_PRESENTATION', 'SELL_SUBMISSION',
+      ]);
     });
 
     it('does not copy a type whose category the template forgot to define', async () => {
       // It would render as a blank heading on the capture screen rather than as the bad
       // template it is.
-      await templates.create({
-        companyId: COMPANY, kind: 'activity_taxonomy', version: 1, status: 'published',
-        publishedAt: NOW,
-        payload: {
-          categories: [{ code: 'REAL', label: 'Real', displayOrder: 1 }],
-          types: [
-            { code: 'KEPT', categoryCode: 'REAL', label: 'Kept', description: null, displayOrder: 1 },
-            { code: 'ORPHAN', categoryCode: 'GONE', label: 'Orphan', description: null, displayOrder: 2 },
-          ],
-        },
-      } as never);
-
-      const result = await provisioning.seedActivityTaxonomy(KPM_A, COMPANY);
-      expect(result.types).toBe(1);
+      const result = await provisioning.seedActivityTaxonomy(KPM_A, source({
+        categories: [{ code: 'REAL', label: 'Real', displayOrder: 1 }],
+        types: [
+          { code: 'KEPT', categoryCode: 'REAL', label: 'Kept', description: null, displayOrder: 1 },
+          { code: 'ORPHAN', categoryCode: 'GONE', label: 'Orphan', description: null, displayOrder: 2 },
+        ],
+      }));
+      // The kept one and the three cascade types.
+      expect(result.types).toBe(4);
       expect((await service.list(ctx(KPM_A)))[0].types.map((t) => t.code)).toEqual(['KEPT']);
-    });
-
-    it('gives another company\'s office its own defaults, not this one\'s template', async () => {
-      await templates.create({
-        companyId: COMPANY, kind: 'activity_taxonomy', version: 1, status: 'published',
-        publishedAt: NOW,
-        payload: { categories: [{ code: 'PRU_ONLY', label: 'Pru', displayOrder: 1 }], types: [] },
-      } as never);
-
-      await provisioning.seedActivityTaxonomy(KPM_B, 'a-different-company');
-      expect((await service.list(ctx(KPM_B))).map((c) => c.code)).not.toContain('PRU_ONLY');
     });
   });
 
   describe('isolation', () => {
     beforeEach(async () => {
-      await provisioning.seedActivityTaxonomy(KPM_A, COMPANY);
-      await provisioning.seedActivityTaxonomy(KPM_B, COMPANY);
+      await provisioning.seedActivityTaxonomy(KPM_A);
+      await provisioning.seedActivityTaxonomy(KPM_B);
     });
 
     it('shows an office its own taxonomy and nobody else\'s', async () => {
@@ -178,18 +164,19 @@ describe('the office activity taxonomy (P4-T1)', () => {
   });
 
   describe('codes and order (AC-2, AC-6)', () => {
-    beforeEach(() => provisioning.seedActivityTaxonomy(KPM_A, COMPANY));
+    beforeEach(() => provisioning.seedActivityTaxonomy(KPM_A));
 
     it('refuses a duplicate code, counting archived ones', async () => {
       // A retired code returning as something else would change the meaning of every
       // activity log still pointing at it.
+      // Not a cascade type: those three cannot be archived at all (ADR-0115 §2).
       const type = (await service.list(ctx(KPM_A)))
-        .flatMap((c) => c.types).find((t) => t.code === 'SELL_SUBMISSION')!;
+        .flatMap((c) => c.types).find((t) => t.code === 'SELL_FOLLOWUP')!;
       await service.archiveType(ctx(KPM_A), type.id);
 
       await expect(service.createType(ctx(KPM_A), {
-        code: 'SELL_SUBMISSION', categoryCode: 'SELLING', label: 'Something else',
-      })).rejects.toThrow('already has an activity type called SELL_SUBMISSION');
+        code: 'SELL_FOLLOWUP', categoryCode: 'SELLING', label: 'Something else',
+      })).rejects.toThrow('already has an activity type called SELL_FOLLOWUP');
     });
 
     it('refuses a code that is not a code', async () => {
@@ -238,7 +225,7 @@ describe('the office activity taxonomy (P4-T1)', () => {
     });
 
     it('refuses a reorder naming another office\'s type', async () => {
-      await provisioning.seedActivityTaxonomy(KPM_B, COMPANY);
+      await provisioning.seedActivityTaxonomy(KPM_B);
       const mine = (await service.list(ctx(KPM_A))).flatMap((c) => c.types).map((t) => t.id);
       const theirs = (await service.list(ctx(KPM_B))).flatMap((c) => c.types)[0].id;
       await expect(service.reorderTypes(ctx(KPM_A), [...mine.slice(1), theirs]))
@@ -263,7 +250,7 @@ describe('the office activity taxonomy (P4-T1)', () => {
   });
 
   describe('the seeded taxonomy itself (AC-2, AC-3)', () => {
-    beforeEach(() => provisioning.seedActivityTaxonomy(KPM_A, COMPANY));
+    beforeEach(() => provisioning.seedActivityTaxonomy(KPM_A));
 
     it('is the twelve codes the flow doc names, in display order', async () => {
       const codes = (await service.list(ctx(KPM_A))).flatMap((c) => c.types).map((t) => t.code);
@@ -297,7 +284,7 @@ describe('the office activity taxonomy (P4-T1)', () => {
     });
   });
   describe('categories (P4-T12 coverage of the writes)', () => {
-    beforeEach(() => provisioning.seedActivityTaxonomy(KPM_A, COMPANY));
+    beforeEach(() => provisioning.seedActivityTaxonomy(KPM_A));
 
     it('appends a new category rather than inserting it', async () => {
       // Somebody adding one has not said where it goes, and guessing would renumber rows
@@ -340,7 +327,7 @@ describe('the office activity taxonomy (P4-T1)', () => {
     });
 
     it('refuses to rename another office’s category — 404, never 403', async () => {
-      await provisioning.seedActivityTaxonomy(KPM_B, COMPANY);
+      await provisioning.seedActivityTaxonomy(KPM_B);
       const theirs = (await service.list(ctx(KPM_B)))[0];
       await expect(service.renameCategory(ctx(KPM_A), theirs.id, 'mine'))
         .rejects.toThrow('Activity category');
@@ -384,7 +371,7 @@ describe('the office activity taxonomy (P4-T1)', () => {
     });
 
     it('refuses to restore a type from another office', async () => {
-      await provisioning.seedActivityTaxonomy(KPM_B, COMPANY);
+      await provisioning.seedActivityTaxonomy(KPM_B);
       const theirs = (await service.list(ctx(KPM_B))).flatMap((c) => c.types)[0];
       await expect(service.restoreType(ctx(KPM_A), theirs.id)).rejects.toThrow('Activity type');
     });
@@ -407,8 +394,8 @@ describe('the office activity taxonomy (P4-T1)', () => {
       await kpms().create({
         _id: KPM_A, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta',
       } as never);
-      const seeded = await provisioning.seedActivityTaxonomy(KPM_A, COMPANY);
-      await provisioning.seedRatioDefinitions(KPM_A, COMPANY, seeded.typeCodes);
+      const seeded = await provisioning.seedActivityTaxonomy(KPM_A);
+      await provisioning.seedRatioDefinitions(KPM_A, seeded.typeCodes);
     }
 
     beforeEach(() => office());
@@ -497,25 +484,26 @@ describe('the office activity taxonomy (P4-T1)', () => {
     });
 
     describe('archiving a section', () => {
+      // *Recruitment*: *Selling* and *Leads Generation* hold cascade types and cannot be archived.
       it('takes its types with it, because a live type in a retired section is loggable from nowhere', async () => {
-        const selling = (await service.list(ctx(KPM_A))).find((c) => c.code === 'SELLING')!;
-        await service.archiveCategory(ctx(KPM_A), selling.id);
+        const recruitment = (await service.list(ctx(KPM_A))).find((c) => c.code === 'RECRUITMENT')!;
+        await service.archiveCategory(ctx(KPM_A), recruitment.id);
 
         const all = await service.list(ctx(KPM_A), true);
-        const after = all.find((c) => c.code === 'SELLING')!;
+        const after = all.find((c) => c.code === 'RECRUITMENT')!;
         expect(after.status).toBe('archived');
         expect(after.types.every((t) => t.status === 'archived')).toBe(true);
         // And it is gone from the active view entirely.
-        expect((await service.list(ctx(KPM_A))).some((c) => c.code === 'SELLING')).toBe(false);
+        expect((await service.list(ctx(KPM_A))).some((c) => c.code === 'RECRUITMENT')).toBe(false);
       });
 
       it('brings the section back without its types, which is a separate decision', async () => {
-        const selling = (await service.list(ctx(KPM_A))).find((c) => c.code === 'SELLING')!;
-        await service.archiveCategory(ctx(KPM_A), selling.id);
-        const back = await service.restoreCategory(ctx(KPM_A), selling.id);
+        const recruitment = (await service.list(ctx(KPM_A))).find((c) => c.code === 'RECRUITMENT')!;
+        await service.archiveCategory(ctx(KPM_A), recruitment.id);
+        const back = await service.restoreCategory(ctx(KPM_A), recruitment.id);
 
         expect(back.status).toBe('active');
-        const after = (await service.list(ctx(KPM_A), true)).find((c) => c.code === 'SELLING')!;
+        const after = (await service.list(ctx(KPM_A), true)).find((c) => c.code === 'RECRUITMENT')!;
         expect(after.types.every((t) => t.status === 'archived')).toBe(true);
       });
 

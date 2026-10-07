@@ -3,7 +3,9 @@ import { RequestContext } from '@/common/context/request-context';
 import { defaultCampaignKinds } from '@/modules/campaigns/campaign-kinds-payload';
 import { defaultEventTypes } from '@/modules/events/event-types-payload';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
-import { configModule, provisionOffice } from '../../../test/config-module';
+import {
+  configModule, givenDefaultTemplate, provisionFrom, provisionOffice,
+} from '../../../test/config-module';
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 const PRUDENTIAL = '66f0000000000000000000c1';
@@ -58,6 +60,9 @@ describe('catalog publishing and the consolidated read (P5-T9)', () => {
         defaultLocale: 'id-ID', defaultTimezone: 'Asia/Jakarta', status: 'active', deletedAt: null,
       },
     ] as never);
+    // Each company's default template, as the migration and `createCompany` leave one (ADR-0115 §3).
+    await givenDefaultTemplate(wired, PRUDENTIAL, { name: 'Prudential template' });
+    await givenDefaultTemplate(wired, ALLIANZ, { name: 'Allianz Life template' });
   });
 
   /** Publish a template of one kind for a company, in one step. */
@@ -67,16 +72,20 @@ describe('catalog publishing and the consolidated read (P5-T9)', () => {
   };
 
   describe('every Phase 5 kind has the three things (AC-4)', () => {
-    it('hands back a starting payload rather than an empty object', async () => {
-      // `capability_ladder` had validation and a provisioning reader since P5-T8 and no starting
-      // payload, so opening its tab would have asked a Super Admin to retype four stages.
-      for (const kind of ['capability_ladder', 'event_types', 'campaign_kinds'] as const) {
+    it('reads nothing for a kind the template never published, and the company’s campaigns as before', async () => {
+      /*
+       * ADR-0115 §1: a kind a template never published is empty in an office made from it, and its
+       * tab says so rather than showing the platform's presets as if the template held them. A
+       * template made from the AgencyBoost defaults publishes them as version 1 of each kind.
+       * `campaign_kinds` is the company's, shared by every template, and keeps its starting payload.
+       */
+      for (const kind of ['capability_ladder', 'event_types'] as const) {
         const template = await wired.templateService.read(PRUDENTIAL, kind);
-        expect(Object.keys(template.payload).length).toBeGreaterThan(0);
+        expect(template).toMatchObject({ version: 0, payload: {} });
       }
-
-      const events = await wired.templateService.read(PRUDENTIAL, 'event_types');
-      expect((events.payload as { types: unknown[] }).types).toHaveLength(5);
+      const campaigns = await wired.templateService.read(PRUDENTIAL, 'campaign_kinds');
+      expect(campaigns.templateId).toBeNull();
+      expect(Object.keys(campaigns.payload).length).toBeGreaterThan(0);
     });
 
     it('refuses an event type set that would give an office nothing to file under', async () => {
@@ -118,7 +127,8 @@ describe('catalog publishing and the consolidated read (P5-T9)', () => {
         ],
       });
 
-      const seeded = await wired.provisioning.seedEventTypes(PRU_OFFICE, PRUDENTIAL);
+      const plan = await wired.provisioning.planFor(PRUDENTIAL);
+      const seeded = await wired.provisioning.seedEventTypes(PRU_OFFICE, plan.kinds.event_types);
       expect(seeded.rows).toBe(2);
 
       const types = await wired.events.listTypes(ctx(PRU_OFFICE));
@@ -126,11 +136,17 @@ describe('catalog publishing and the consolidated read (P5-T9)', () => {
       expect(types[1].label).toBe('Town hall');
     });
 
-    it('falls back to the platform defaults where a company has published nothing', async () => {
-      const seeded = await wired.provisioning.seedEventTypes(ALLIANZ_OFFICE, ALLIANZ);
+    it('gives an office no event types where its template published none — no fallback (ADR-0115 §1)', async () => {
+      const plan = await wired.provisioning.planFor(ALLIANZ);
+      const seeded = await wired.provisioning.seedEventTypes(ALLIANZ_OFFICE, plan.kinds.event_types);
 
-      expect(seeded.rows).toBe(defaultEventTypes().types.length);
+      expect(seeded.rows).toBe(0);
       expect(seeded.seededFrom.version).toBeNull();
+      expect(await wired.events.listTypes(ctx(ALLIANZ_OFFICE))).toEqual([]);
+      // The AgencyBoost defaults are a source a Super Admin chooses, not a fallback.
+      const defaults = await wired.provisioning.planFor(ALLIANZ, { kind: 'defaults' });
+      expect((defaults.kinds.event_types.payload as { types: unknown[] }).types)
+        .toHaveLength(defaultEventTypes().types.length);
     });
 
     it('applies campaign kinds at publish, because the rules are the company’s', async () => {
@@ -253,8 +269,8 @@ describe('catalog publishing and the consolidated read (P5-T9)', () => {
         ],
       });
 
-      await provisionOffice(wired, PRU_OFFICE, PRUDENTIAL);
-      await provisionOffice(wired, ALLIANZ_OFFICE, ALLIANZ);
+      await provisionFrom(wired, PRU_OFFICE, PRUDENTIAL);
+      await provisionFrom(wired, ALLIANZ_OFFICE, ALLIANZ);
 
       expect((await wired.events.listTypes(ctx(PRU_OFFICE))).map((t) => t.code))
         .toEqual(['TOWN_HALL']);
@@ -271,8 +287,8 @@ describe('catalog publishing and the consolidated read (P5-T9)', () => {
         grids: [{ code: 'PERSONAL', label: 'Personal selling', items: [{ code: 'APPROACH', label: 'Approach' }] }],
       });
 
-      await provisionOffice(wired, PRU_OFFICE, PRUDENTIAL);
-      await provisionOffice(wired, PRU_OFFICE_2, PRUDENTIAL);
+      await provisionFrom(wired, PRU_OFFICE, PRUDENTIAL);
+      await provisionFrom(wired, PRU_OFFICE_2, PRUDENTIAL);
 
       const one = await wired.capability.read(ctx(PRU_OFFICE));
       const two = await wired.capability.read(ctx(PRU_OFFICE_2));

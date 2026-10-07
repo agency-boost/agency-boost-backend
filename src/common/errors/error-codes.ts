@@ -97,6 +97,22 @@ export const ErrorCode = {
   // Tenant. Note there is deliberately NO cross-tenant code — see NOT_FOUND.
   TENANT_SUSPENDED: 'TENANT_SUSPENDED',
   TENANT_ARCHIVED: 'TENANT_ARCHIVED',
+  /**
+   * The office's subscription ended and it is not kept active (ADR-0112 §3, P13.2-T3). `403` on every
+   * request of a member, from 00:00 of the office day after its end date; `details` carry `endDate`,
+   * `kpmCode` and `branch`, which the app's page names. Raised in `ContextResolver` beside the
+   * suspension, which wins, as an archive does. Never to the Super Admin, and never in a support session.
+   */
+  TENANT_SUBSCRIPTION_ENDED: 'TENANT_SUBSCRIPTION_ENDED',
+  /**
+   * A support session refused at its start because the office of the person named is **suspended or
+   * archived** (P13.2 exit review): every request of the session would meet `TENANT_SUSPENDED` or
+   * `TENANT_ARCHIVED`. `409`, with `kpmCode`, `branch` and `reason` (`suspended` | `archived`) in its
+   * details. Its own code rather than the member's, so the console shows it on the support screen as
+   * the console's error — the member's codes replace the app with the office-unavailable page, which is
+   * a member's page and not the Super Admin's.
+   */
+  IMPERSONATION_OFFICE_UNAVAILABLE: 'IMPERSONATION_OFFICE_UNAVAILABLE',
   TENANT_NO_MEMBERSHIP: 'TENANT_NO_MEMBERSHIP',
   TENANT_CODE_TAKEN: 'TENANT_CODE_TAKEN',
   /**
@@ -128,6 +144,13 @@ export const ErrorCode = {
   // Organisation. The rest of the ORG_* family in the error catalog lands with the task
   // that can actually throw it — a code no path produces is a contract we do not honour.
   ORG_CYCLE_DETECTED: 'ORG_CYCLE_DETECTED',
+  /**
+   * A write that would take the office's *Leaders used* — its active ABs and AABs, the Owner
+   * included — above the subscription's maximum (ADR-0113 §2, P13.2-T4). `409`, raised in
+   * `HierarchyService.create` and `setLevel`, the two methods every path that makes a leader
+   * passes through; `details` carry `maxLeaders` and `leadersUsed`. AB to AAB is never refused.
+   */
+  LEADER_LIMIT_REACHED: 'LEADER_LIMIT_REACHED',
   ORG_LEADER_NOT_IN_KPM: 'ORG_LEADER_NOT_IN_KPM',
   ORG_AGENT_ALREADY_TAGGED: 'ORG_AGENT_ALREADY_TAGGED',
   /**
@@ -257,6 +280,26 @@ export const ErrorCode = {
   ACTIVATION_CLOSED: 'ACTIVATION_CLOSED',
   /** A graduation below 100%: every item, the linked ones included, is done first (OD-28). `409`. */
   ACTIVATION_INCOMPLETE: 'ACTIVATION_INCOMPLETE',
+
+  /*
+   * Templates and the cascade types (P13.2-T6; ADR-0115; `functional/tenant-config.md`).
+   */
+  /**
+   * Archiving `LEADS_CONTACTED`, `SELL_PRESENTATION` or `SELL_SUBMISSION`, or a category while it holds
+   * one (ADR-0115 §2): the goal cascade and the summary count them by code. `409`, `details.codes`.
+   */
+  ACTIVITY_TYPE_RESERVED: 'ACTIVITY_TYPE_RESERVED',
+  /** A name an active template of the same company already has. `409`, `details.name`. */
+  TEMPLATE_NAME_TAKEN: 'TEMPLATE_NAME_TAKEN',
+  /** Archiving the company's default template: make another the default first. `409`. */
+  TEMPLATE_IS_DEFAULT: 'TEMPLATE_IS_DEFAULT',
+  /**
+   * A copy into **another company** — *Import from another company*, or *Save as template* into a
+   * company other than the office's — naming rung codes the destination's ladder lacks or has archived
+   * (a ratio's or an activity section's `appliesToOrgLevelCodes`; ADR-0115 §6, P13.2-T7). `409`,
+   * `details.codes`; raised before anything is written or copied.
+   */
+  TEMPLATE_RUNG_UNKNOWN: 'TEMPLATE_RUNG_UNKNOWN',
 
   // Validation
   VALIDATION_FAILED: 'VALIDATION_FAILED',

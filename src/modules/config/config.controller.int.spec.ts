@@ -121,9 +121,9 @@ describe('the configuration controllers', () => {
     await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create({
       _id: KPM_A, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta',
     });
-    const seeded = await wired.provisioning.seedActivityTaxonomy(KPM_A, COMPANY);
-    await wired.provisioning.seedRatioDefinitions(KPM_A, COMPANY, seeded.typeCodes);
-    await wired.provisioning.seedLeadPipelines(KPM_A, COMPANY);
+    const seeded = await wired.provisioning.seedActivityTaxonomy(KPM_A);
+    await wired.provisioning.seedRatioDefinitions(KPM_A, seeded.typeCodes);
+    await wired.provisioning.seedLeadPipelines(KPM_A);
   });
 
   describe('every route declares what it needs', () => {
@@ -225,7 +225,7 @@ describe('the configuration controllers', () => {
 
   describe('GET /kpm/settings/training (P5-T1)', () => {
     it('reads the office\'s taxonomy nested, drafts included, archived rows on request', async () => {
-      await wired.provisioning.seedTrainingTaxonomy(KPM_A, COMPANY);
+      await wired.provisioning.seedTrainingTaxonomy(KPM_A);
       await request(app.getHttpServer())
         .post('/kpm/settings/changes')
         .send({ ops: [
@@ -270,8 +270,8 @@ describe('the configuration controllers', () => {
     });
 
     beforeEach(async () => {
-      const training = await wired.provisioning.seedTrainingTaxonomy(KPM_A, COMPANY);
-      await wired.provisioning.seedActivationChecklist(KPM_A, COMPANY, training.publishedModuleCodes);
+      const training = await wired.provisioning.seedTrainingTaxonomy(KPM_A);
+      await wired.provisioning.seedActivationChecklist(KPM_A, training.publishedModuleCodes);
     });
 
     it('reads the published version, its window, and every link resolved', async () => {

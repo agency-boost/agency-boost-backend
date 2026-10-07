@@ -41,8 +41,8 @@ describe('staged configuration changes (P4-T19)', () => {
     await kpms.create({
       _id: KPM_A, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta',
     } as never);
-    const seeded = await wired.provisioning.seedActivityTaxonomy(KPM_A, COMPANY);
-    await wired.provisioning.seedRatioDefinitions(KPM_A, COMPANY, seeded.typeCodes);
+    const seeded = await wired.provisioning.seedActivityTaxonomy(KPM_A);
+    await wired.provisioning.seedRatioDefinitions(KPM_A, seeded.typeCodes);
   });
 
   const typeNamed = async (code: string) =>
@@ -53,8 +53,8 @@ describe('staged configuration changes (P4-T19)', () => {
     await (wired.kpms as mongoose.Model<never>).create({
       _id: KPM_B, companyId: COMPANY, code: '0418', branchName: 'B', timezone: 'Asia/Jakarta',
     } as never);
-    const seeded = await wired.provisioning.seedActivityTaxonomy(KPM_B, COMPANY);
-    await wired.provisioning.seedRatioDefinitions(KPM_B, COMPANY, seeded.typeCodes);
+    const seeded = await wired.provisioning.seedActivityTaxonomy(KPM_B);
+    await wired.provisioning.seedRatioDefinitions(KPM_B, seeded.typeCodes);
   }
 
   describe('another office’s row', () => {
@@ -105,7 +105,8 @@ describe('staged configuration changes (P4-T19)', () => {
      * the wiring between them.
      */
     it('archives and restores a section', async () => {
-      const before = (await wired.activity.list(ctx(KPM_A), true))[0];
+      // *Recruitment*: a section holding a cascade type cannot be archived (ADR-0115 §2).
+      const before = (await wired.activity.list(ctx(KPM_A), true)).find((c) => c.code === 'RECRUITMENT')!;
       await wired.changes.apply(ctx(KPM_A), [
         { op: 'category.archive', id: before.id, expectedVersion: before.version },
       ]);
@@ -121,17 +122,51 @@ describe('staged configuration changes (P4-T19)', () => {
     });
 
     it('archives and restores an activity type', async () => {
-      const type = await typeNamed('SELL_SUBMISSION');
+      // Not a cascade type: those three cannot be archived (ADR-0115 §2).
+      const type = await typeNamed('SELL_FOLLOWUP');
       await wired.changes.apply(ctx(KPM_A), [
         { op: 'type.archive', id: type.id, expectedVersion: type.version },
       ]);
-      expect((await typeNamed('SELL_SUBMISSION')).status).toBe('archived');
+      expect((await typeNamed('SELL_FOLLOWUP')).status).toBe('archived');
 
-      const archived = await typeNamed('SELL_SUBMISSION');
+      const archived = await typeNamed('SELL_FOLLOWUP');
       await wired.changes.apply(ctx(KPM_A), [
         { op: 'type.restore', id: archived.id, expectedVersion: archived.version },
       ]);
+      expect((await typeNamed('SELL_FOLLOWUP')).status).toBe('active');
+    });
+
+    it('refuses archiving a cascade type in a batch before any of it is written, naming the change (ADR-0115 §2)', async () => {
+      const followUp = await typeNamed('SELL_FOLLOWUP');
+      const type = await typeNamed('SELL_SUBMISSION');
+      await expect(wired.changes.apply(ctx(KPM_A), [
+        { op: 'type.update', id: followUp.id, expectedVersion: followUp.version, body: { label: 'Tindak lanjut' } },
+        { op: 'type.archive', id: type.id, expectedVersion: type.version },
+      ])).rejects.toMatchObject({
+        code: 'ACTIVITY_TYPE_RESERVED', status: 409, details: { codes: ['SELL_SUBMISSION'] },
+        message: expect.stringMatching(/^Change 2 \(type\.archive\): “Submission polis” cannot be archived/),
+      });
       expect((await typeNamed('SELL_SUBMISSION')).status).toBe('active');
+      // The edit before it was not written either.
+      expect((await typeNamed('SELL_FOLLOWUP')).label).toBe(followUp.label);
+    });
+
+    it('archives a section once the batch has moved its cascade type out, and not before', async () => {
+      const sections = await wired.activity.list(ctx(KPM_A), true);
+      const leads = sections.find((c) => c.code === 'LEADS_GENERATION')!;
+      const contacted = await typeNamed('LEADS_CONTACTED');
+
+      await expect(wired.changes.apply(ctx(KPM_A), [
+        { op: 'category.archive', id: leads.id, expectedVersion: leads.version },
+      ])).rejects.toMatchObject({ code: 'ACTIVITY_TYPE_RESERVED', details: { codes: ['LEADS_CONTACTED'] } });
+
+      await wired.changes.apply(ctx(KPM_A), [
+        { op: 'type.update', id: contacted.id, expectedVersion: contacted.version, body: { categoryCode: 'SELLING' } },
+        { op: 'category.archive', id: leads.id, expectedVersion: leads.version },
+      ]);
+      expect((await wired.activity.list(ctx(KPM_A), true)).find((c) => c.code === 'LEADS_GENERATION')!.status)
+        .toBe('archived');
+      expect(await typeNamed('LEADS_CONTACTED')).toMatchObject({ categoryCode: 'SELLING', status: 'active' });
     });
 
     it('creates, archives and restores a ratio', async () => {
@@ -385,13 +420,13 @@ describe('staged configuration changes (P4-T19)', () => {
     });
 
     it('lets two ops touch one row, because the projection moves on', async () => {
-      const submission = await typeNamed('SELL_SUBMISSION');
+      const followUp = await typeNamed('SELL_FOLLOWUP');
       await wired.changes.apply(ctx(KPM_A), [
-        { op: 'type.update', id: submission.id, expectedVersion: submission.version, body: { label: 'Closing' } },
-        { op: 'type.archive', id: submission.id, expectedVersion: submission.version + 1 },
+        { op: 'type.update', id: followUp.id, expectedVersion: followUp.version, body: { label: 'Closing' } },
+        { op: 'type.archive', id: followUp.id, expectedVersion: followUp.version + 1 },
       ]);
 
-      const after = await typeNamed('SELL_SUBMISSION');
+      const after = await typeNamed('SELL_FOLLOWUP');
       expect(after).toMatchObject({ label: 'Closing', status: 'archived' });
     });
   });

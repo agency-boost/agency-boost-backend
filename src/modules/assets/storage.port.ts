@@ -48,6 +48,25 @@ export abstract class StoragePort {
   abstract describe(storageKey: string): Promise<StoredObject | null>;
 
   abstract remove(storageKey: string): Promise<void>;
+
+  /**
+   * **A second, independent copy of a stored object, under another owner's folder** (P13.2-T7,
+   * ADR-0115 §6, ADR-0032 as amended).
+   *
+   * A template copied across an owner boundary — an office's own replacement material into a
+   * company's template, or one company's material into another's — cannot reference the source's
+   * file: an asset has one owner, and the company's file read would refuse the other. So the bytes
+   * are duplicated, server side, into a key minted the way `createSignedUpload` mints one, and what
+   * storage then holds under it is returned: the caller registers it as the destination's asset.
+   *
+   * Throws when the source holds nothing, or the vendor refuses: a copy that half-happened is not
+   * reported as one that happened.
+   */
+  abstract copy(params: {
+    storageKey: string;
+    owner: AssetOwner;
+    folder: string;
+  }): Promise<StoredObject>;
 }
 
 

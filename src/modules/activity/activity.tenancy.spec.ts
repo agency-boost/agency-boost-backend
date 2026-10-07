@@ -149,18 +149,19 @@ describe('an agent’s activity log (P6)', () => {
        * Phase 4's exit criterion 4 has been `Partial` since 2026-09-12 — *"the renders in history
        * half needs Phase 6 activity logs"*. This is that half.
        */
-      await save(member(KPM_A), { SELL_SUBMISSION: 4 });
+      // Not a cascade type: those three cannot be archived (ADR-0115 §2).
+      await save(member(KPM_A), { SELL_FOLLOWUP: 4 });
       const type = (await wired.activity.list(member(KPM_A, { isKpmOwner: true })))
         .flatMap((category) => category.types)
-        .find((t) => t.code === 'SELL_SUBMISSION')!;
+        .find((t) => t.code === 'SELL_FOLLOWUP')!;
       await wired.activity.archiveType(member(KPM_A, { isKpmOwner: true }), type.id);
 
       const row = await stored(KPM_A, `mem-${KPM_A}`, TODAY);
       const entry = (row!.entries as { activityTypeCode: string; count: number }[])
-        .find((e) => e.activityTypeCode === 'SELL_SUBMISSION');
+        .find((e) => e.activityTypeCode === 'SELL_FOLLOWUP');
 
       // The stored row still names the code and the count, whatever the taxonomy now says.
-      expect(entry).toMatchObject({ activityTypeCode: 'SELL_SUBMISSION', count: 4 });
+      expect(entry).toMatchObject({ activityTypeCode: 'SELL_FOLLOWUP', count: 4 });
     });
 
     it('stores an all-zero day as a real row (AC-6, OD-30)', async () => {

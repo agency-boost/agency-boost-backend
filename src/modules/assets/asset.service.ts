@@ -113,7 +113,9 @@ export class AssetService {
    * Orphans: referenced by nothing for 30 days. Reported, never auto-deleted.
    *
    * Across every tenant, through the named unscoped read — storage accounting is a platform
-   * job, and a per-office sweep would never see the office that has been archived.
+   * job, and a per-office sweep would never see the office that has been archived. It reads the
+   * company's material too (no `kpmId` filter), which is how a file a failed template copy left
+   * behind is found (P13.2-T7 AC-5).
    */
   async findOrphans(ctx: RequestContext, olderThanDays = 30): Promise<AssetDocument[]> {
     const cutoff = new Date(this.clock.now().getTime() - olderThanDays * 86_400_000);
@@ -179,6 +181,45 @@ export class AssetService {
     }
     this.requireConfirmed(asset);
     return this.storage.createSignedUrl(storageKey, ASSET_LIMITS.SIGNED_URL_TTL_SECONDS);
+  }
+
+  /** One of the company's own files, or `null`: the named unscoped read, filtered by company (ADR-0032). */
+  async companyAsset(companyId: string, storageKey: string): Promise<AssetDocument | null> {
+    return this.assets.findCompanyAsset(companyId, storageKey);
+  }
+
+  /**
+   * **A file duplicated into a company's assets** (P13.2-T7 AC-3, ADR-0115 §6).
+   *
+   * A template copied across an owner boundary cannot reference the source's file — an asset has one
+   * owner (ADR-0032) — so storage copies the bytes into the company's folder and the copy is
+   * registered here as the company's: confirmed, because storage has just said what it holds, and
+   * **referenced by nothing yet** (`refCount: 0`). The caller retains it once the template naming it
+   * exists (`retainCompanyCopies`); a copy that fails before then leaves it at zero, for the sweep.
+   */
+  async duplicateIntoCompany(
+    companyId: string,
+    source: { storageKey: string; originalFilename: string | null },
+  ): Promise<StoredObject> {
+    const copied = await this.storage.copy({
+      storageKey: source.storageKey, owner: { kind: 'company', companyId }, folder: 'training',
+    });
+    await this.assets.createCompanyAsset({
+      companyId,
+      storageKey: copied.storageKey,
+      mimeType: copied.mimeType,
+      bytes: copied.bytes,
+      originalFilename: source.originalFilename,
+      uploadedByMembershipId: null,
+      refCount: 0,
+      uploadState: 'confirmed',
+    } as Partial<AssetDocument>);
+    return copied;
+  }
+
+  /** The copies a template now names: referenced once each, so the sweep no longer reports them. */
+  async retainCompanyCopies(companyId: string, storageKeys: string[]): Promise<void> {
+    await this.assets.retainCompanyAssets(companyId, storageKeys);
   }
 
   private async requireStored(storageKey: string): Promise<StoredObject> {

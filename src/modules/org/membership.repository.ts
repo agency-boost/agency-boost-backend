@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { FilterQuery, Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import { TenantScopedRepository } from '@/common/tenancy/tenant-scoped.repository';
 import { Membership, MembershipDocument } from './membership.schema';
 
@@ -72,6 +73,36 @@ export class MembershipRepository extends TenantScopedRepository<MembershipDocum
       userId: String(r.userId),
       agentCode: (r as { agentCode?: string | null }).agentCode ?? null,
     }));
+  }
+
+  /**
+   * How many memberships match one filter, **per office**, for the offices named.
+   *
+   * **Deliberately unscoped, and named so.** The Super Admin's offices list shows each office's
+   * *Leaders used* (ADR-0113, P13.2-T3 AC-3) and the Super Admin is in no office, so there is no
+   * tenant to ask within. Invariant §1 asks that such a read be an explicitly named method rather
+   * than an absent filter, and this is one: the caller must be a Super Admin, it is narrowed to the
+   * offices named, and it returns counts, never a row. `leader-limit.ts` passes the one filter that
+   * defines the metric, so the list and the check cannot count differently.
+   */
+  async countPerOfficeAcrossTenants(
+    ctx: RequestContext,
+    kpmIds: string[],
+    filter: FilterQuery<MembershipDocument>,
+  ): Promise<Map<string, number>> {
+    if (!ctx.isSuperAdmin) {
+      throw new MissingTenantContextError(this.collectionName, 'countPerOfficeAcrossTenants');
+    }
+    const counts = new Map<string, number>(kpmIds.map((id) => [id, 0]));
+    if (kpmIds.length === 0) return counts;
+    const rows = await this.model
+      .aggregate<{ _id: string; n: number }>([
+        { $match: { ...filter, kpmId: { $in: kpmIds }, deletedAt: null } },
+        { $group: { _id: '$kpmId', n: { $sum: 1 } } },
+      ])
+      .exec();
+    for (const row of rows) counts.set(String(row._id), row.n);
+    return counts;
   }
 
   async existsWithLeaderCode(code: string): Promise<boolean> {

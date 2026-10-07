@@ -5,6 +5,7 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { ContextResolver } from '@/modules/auth/context-resolver';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
 import { TokenSigner } from '@/modules/auth/token-signer';
+import { ALLOWED_WHILE_OFFICE_UNAVAILABLE } from './auth.decorators';
 import { AuthGuard } from './auth.guard';
 
 /**
@@ -104,7 +105,7 @@ describe('AuthGuard', () => {
     // Roles come from `resolve`, which reads the row — that is what makes revoking a
     // grant take effect on the next request rather than at the next sign-in.
     // `false`: a person acting as themselves is not being restrained (P4-T10).
-    expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false);
+    expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, false);
     expect((request.context as RequestContext).userId).toBe(USER);
   });
 
@@ -117,7 +118,33 @@ describe('AuthGuard', () => {
 
     await new AuthGuard(reflector, signer, resolver, live()).canActivate(context);
     // `true`: every session is read-only until a second Super Admin says otherwise.
-    expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, true);
+    expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, true, false);
     expect((request.context as RequestContext).isImpersonating).toBe(true);
+  });
+
+  /*
+   * **Ending a support session is never refused for the office** (P13.2 exit review): the route marked
+   * `AllowWhileOfficeUnavailable` asks the resolver to let a session out of an office suspended under
+   * it. Only a session: a member's own request to the same route is resolved as any other.
+   */
+  describe('leaving a support session in an office nobody can use', () => {
+    const OPERATOR = '65b1f0c2a4d3e5f6a7b8c9d1';
+    const marked = {
+      getAllAndOverride: (key: string) => key === ALLOWED_WHILE_OFFICE_UNAVAILABLE,
+    } as unknown as Reflector;
+
+    it('asks the resolver to let a session through on the marked route', async () => {
+      const signer = { verify: jest.fn(() => ({ sub: USER, sid: `imp:${OPERATOR}` })) } as unknown as TokenSigner;
+      const { context } = execution('Bearer impersonating.token');
+      await new AuthGuard(marked, signer, resolver, live()).canActivate(context);
+      expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, true, true);
+    });
+
+    it('never for somebody acting as themselves, on the same route', async () => {
+      const signer = { verify: jest.fn(() => ({ sub: USER, sid: 'session-1' })) } as unknown as TokenSigner;
+      const { context } = execution('Bearer good.token');
+      await new AuthGuard(marked, signer, resolver, live()).canActivate(context);
+      expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, false);
+    });
   });
 });

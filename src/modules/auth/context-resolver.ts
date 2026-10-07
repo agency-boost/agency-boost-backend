@@ -1,10 +1,12 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { Clock } from '@/common/clock/clock.port';
 import { RequestContext, TenantMembership } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
+import { isEnded } from '@/modules/tenants/subscription';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { Membership, MembershipDocument } from '@/modules/org/membership.schema';
 
@@ -23,6 +25,8 @@ export class ContextResolver {
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
     @InjectModel(Membership.name) private readonly memberships: Model<MembershipDocument>,
+    // The office's today, for the end of its subscription (ADR-0112 §3). Never `new Date()`.
+    private readonly clock: Clock,
   ) {}
 
   async resolve(
@@ -35,6 +39,12 @@ export class ContextResolver {
      * live — reading it a second time here would be a second question about the same row.
      */
     impersonationReadOnly = false,
+    /**
+     * A support session **leaving** — the one route marked `AllowWhileOfficeUnavailable` (P13.2 exit
+     * review): the office's suspension or archive is not refused, so an operator can end a session in
+     * an office suspended under it. Ignored outside a session.
+     */
+    leavingSupport = false,
   ): Promise<RequestContext> {
     const user = await this.users.findOne({ _id: userId, deletedAt: null }).exec();
     if (!user) {
@@ -58,18 +68,52 @@ export class ContextResolver {
     // distinct from a permission failure so the UI can explain it.
     if (membership) {
       const kpm = await this.kpms.findOne({ _id: membership.kpmId, deletedAt: null }).exec();
-      if (kpm?.status === 'suspended') {
+      /*
+       * **The office is named in each refusal** (ADR-0112 §4, P13.2-T3 AC-9): the app replaces
+       * itself with a page that says which office and what happened, and it has nothing else to
+       * read that from — every other request meets the same refusal. Code and branch only: what a
+       * member already knows about their own office.
+       *
+       * Each sentence is true for the Owner too, who reads it as well: *"Contact your KPM Owner"*
+       * was this refusal's advice to the one person it could not help.
+       */
+      const office = kpm ? { kpmCode: kpm.code, branch: kpm.branchName } : undefined;
+      const exempt = leavingSupport && impersonatorUserId !== null;
+      if (kpm?.status === 'suspended' && !exempt) {
         throw new DomainException(
           ErrorCode.TENANT_SUSPENDED,
-          'This office is suspended. Contact your KPM Owner.',
+          'This office is suspended, so nobody in it can use AgencyBoost until it is reactivated. '
+            + 'The office’s Owner can ask AgencyBoost about it.',
           HttpStatus.FORBIDDEN,
+          office,
         );
       }
-      if (kpm?.status === 'archived') {
+      if (kpm?.status === 'archived' && !exempt) {
         throw new DomainException(
           ErrorCode.TENANT_ARCHIVED,
-          'This office is archived and read-only.',
+          'This office is archived. Its records are kept, and nobody in it can use AgencyBoost.',
           HttpStatus.FORBIDDEN,
+          office,
+        );
+      }
+      /*
+       * **The end of a subscription, beside the suspension and after it** (ADR-0112 §3): a
+       * suspended or archived office keeps its own code, which wins. From 00:00 of the office day
+       * after the end date — the office's day, through the clock port, never the server's — unless
+       * the office is kept active.
+       *
+       * **Never in a support session.** An operator looking into an ended office is how somebody
+       * finds out why its members cannot get in; refusing them too would leave nobody able to look.
+       * A suspended office stays refused to them, as it always was. The Super Admin is nobody's
+       * member, so never reaches this branch at all.
+       */
+      if (kpm && impersonatorUserId === null && isEnded(kpm, this.clock)) {
+        throw new DomainException(
+          ErrorCode.TENANT_SUBSCRIPTION_ENDED,
+          `This office’s subscription ended on ${kpm.subscription?.endDate}. Nobody in it can use `
+            + 'AgencyBoost until it is renewed. Contact AgencyBoost.',
+          HttpStatus.FORBIDDEN,
+          { endDate: kpm.subscription?.endDate ?? null, ...office },
         );
       }
     }

@@ -12,6 +12,7 @@ import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { generateLeaderCode } from './leader-code';
+import { isLeaderRung, withLeaderSeat } from './leader-limit';
 import { DirectCounts, HierarchyRole, MembershipDocument } from './membership.schema';
 
 export interface CreateMembershipInput {
@@ -182,16 +183,118 @@ export class HierarchyService {
 
     const level = await this.orgLevels.resolveByCode(kpm.companyId, toRole);
     const role = level.code.toLowerCase() as HierarchyRole;
-    await this.members.updateById(ctx, membershipId, {
-      // All three together, always. `orgLevelCode` is what a permission grant reads and
-      // `role` is what the display services read; writing one without the others is how
-      // somebody comes to hold rights their badge does not show (P4-T9).
-      $set: { orgLevelId: String(level._id), orgLevelCode: level.code, role },
+    const write = async () => {
+      await this.members.updateById(ctx, membershipId, {
+        // All three together, always. `orgLevelCode` is what a permission grant reads and
+        // `role` is what the display services read; writing one without the others is how
+        // somebody comes to hold rights their badge does not show (P4-T9).
+        $set: { orgLevelId: String(level._id), orgLevelCode: level.code, role },
+      });
+      return { orgLevelId: String(level._id), role };
+    };
+
+    /*
+     * **The leader limit** (ADR-0113 §2, P13.2-T4): a move from a rung the limit does not count to
+     * one it does — an Agent to AAB or AB — adds a leader, and is refused when the office has none
+     * to add. AB to AAB, and anything downward, changes nothing and is never refused.
+     *
+     * A pending member is held to it here too, although a pending member is not counted: it costs
+     * nothing, and it refuses a promotion that could never be approved. The approval itself is what
+     * holds them to it ({@link activate}) — promoting two pending members at one below the limit
+     * passes both here, and only the first approval takes the seat (P13.2 exit review).
+     *
+     * **The member is read with the lease held** (exit review): two promotions of one Agent at once
+     * both read *Agent* before it, and the second was counted as a second leader. A move to Agent never
+     * adds one, so it takes no lease at all.
+     */
+    if (!isLeaderRung(level.code)) return write();
+    return withLeaderSeat(this.leaderLimit(), ctx, write, async () => {
+      const member = await this.members.findById(ctx, membershipId);
+      return member !== null && member.status !== 'removed' && !isLeaderRung(member.orgLevelCode);
     });
-    return { orgLevelId: String(level._id), role };
+  }
+
+  /**
+   * **Make a member who is not active, active** — an approval, a tag, an Owner assigned who had
+   * registered — under the leader limit (ADR-0113 §2, P13.2 exit review).
+   *
+   * *Leaders used* counts active members only, so a pending member promoted to AB or AAB was not
+   * counted, and the activation that made them count asked nobody: two pending members promoted at
+   * one below the limit, then approved, made it one over. The activation is the write that adds the
+   * leader, so it is the one that takes the seat — refused `409 LEADER_LIMIT_REACHED` with nothing
+   * written, and served as it always was for an Agent, whom the limit never counts.
+   *
+   * Whether it adds one is read with the lease held: the row as it stands at the write, not as the
+   * caller read it.
+   */
+  async activate(ctx: RequestContext, membershipId: string, fields: Record<string, unknown>): Promise<void> {
+    const write = () => this.members.updateById(ctx, membershipId, { $set: { ...fields, status: 'active' } });
+    await withLeaderSeat(this.leaderLimit(), ctx, write, async () => {
+      const member = await this.members.findById(ctx, membershipId);
+      return member !== null && member.status !== 'active' && isLeaderRung(member.orgLevelCode);
+    });
+  }
+
+  /** What the leader limit's check reads and holds (`leader-limit.ts`). */
+  private leaderLimit() {
+    return { kpms: this.kpms, members: this.members, clock: this.clock };
   }
 
   async create(ctx: RequestContext, input: CreateMembershipInput): Promise<MembershipDocument> {
+    const { leader, agentCode, level, status } = await this.admission(ctx, input, input.userId);
+
+    /*
+     * **The leader limit** (ADR-0113 §2, P13.2-T4): an **active** member made at AB or AAB adds a
+     * leader — a roster row's role column, or an Owner assigned who was not yet a member — and is
+     * refused when the office has none to add, before a number or a code is spent on them. Every
+     * join path makes a pending or active Agent, so none of them is ever refused here.
+     */
+    // `admission` read the agent code, since the account exists: it is never null here.
+    const write = () => this.insert(ctx, input, { leader, agentCode: agentCode as string, level, status });
+    if (status !== 'active' || !isLeaderRung(level.code)) return write();
+    return withLeaderSeat(this.leaderLimit(), ctx, write);
+  }
+
+  /**
+   * `create`, for somebody whose **account is made in the same step** — a roster row (P13.2 exit
+   * review).
+   *
+   * The roster import made the account and then the membership, and the leader limit refused the
+   * membership: the account stayed, a person with no office, and its email refused the same row when
+   * the file was imported again. Here the account is made by `makeAccount` only once the refusals that
+   * do not need it have been met — the leader, the rung, and the limit, **with the lease held** — so a
+   * row past the limit leaves nothing behind.
+   */
+  async createWithAccount(
+    ctx: RequestContext,
+    input: Omit<CreateMembershipInput, 'userId'>,
+    makeAccount: () => Promise<string>,
+  ): Promise<MembershipDocument> {
+    const { leader, companyId, level, status } = await this.admission(ctx, input, null);
+    const write = async () => {
+      const userId = await makeAccount();
+      const agentCode = await this.agentCodeOf(userId, companyId);
+      return this.insert(ctx, { ...input, userId }, { leader, agentCode, level, status });
+    };
+    if (status !== 'active' || !isLeaderRung(level.code)) return write();
+    return withLeaderSeat(this.leaderLimit(), ctx, write);
+  }
+
+  /**
+   * What `create` and `createWithAccount` both settle before their write: the office, the leader, the
+   * person's agent code when their account exists already (`userId`), and the rung.
+   */
+  private async admission(
+    ctx: RequestContext,
+    input: Omit<CreateMembershipInput, 'userId'>,
+    userId: string | null,
+  ): Promise<{
+    leader: MembershipDocument | null;
+    companyId: string;
+    agentCode: string | null;
+    level: Awaited<ReturnType<OrgLevelService['resolveByCode']>>;
+    status: 'active' | 'pending';
+  }> {
     const kpmId = ctx.kpmId;
     if (!kpmId) {
       throw new DomainException(
@@ -207,9 +310,7 @@ export class HierarchyService {
     // rejected join that had already taken a number would leave a gap in the office's
     // ordering for somebody who never arrived.
     const companyId = await this.companyOf(kpmId);
-    const agentCode = await this.agentCodeOf(input.userId, companyId);
-    const { agentSeq } = await this.nextMemberSeq(kpmId);
-    const leaderCode = await this.freshLeaderCode();
+    const agentCode = userId === null ? null : await this.agentCodeOf(userId, companyId);
 
     // **The level is resolved first, and `role` is taken from what came back.**
     //
@@ -217,7 +318,26 @@ export class HierarchyService {
     // beside a level resolved from it is how the two come to disagree. Taking the code
     // off the resolved rung means they cannot — there is only one source, and it is the
     // ladder (ADR-0012).
+    //
+    // Before the increment now, because the leader limit's refusal reads it (P13.2-T4).
     const level = await this.orgLevels.resolveByCode(companyId, input.role);
+    return { leader, companyId, agentCode, level, status: input.status ?? 'pending' };
+  }
+
+  /** `create`'s write, once every refusal it can meet has been met. */
+  private async insert(
+    ctx: RequestContext,
+    input: CreateMembershipInput,
+    resolved: {
+      leader: MembershipDocument | null;
+      agentCode: string;
+      level: { _id: unknown; code: string };
+      status: 'active' | 'pending';
+    },
+  ): Promise<MembershipDocument> {
+    const { leader, agentCode, level, status } = resolved;
+    const { agentSeq } = await this.nextMemberSeq(ctx.kpmId as string);
+    const leaderCode = await this.freshLeaderCode();
     const role = level.code.toLowerCase() as HierarchyRole;
 
     const membership = await this.members.create(ctx, {
@@ -231,8 +351,8 @@ export class HierarchyService {
       leaderId: leader ? String(leader._id) : null,
       ancestorIds: leader ? [...leader.ancestorIds, String(leader._id)] : [],
       depth: leader ? leader.depth + 1 : 0,
-      status: input.status ?? 'pending',
-      joinedAt: (input.status ?? 'pending') === 'active' ? this.clock.now() : null,
+      status,
+      joinedAt: status === 'active' ? this.clock.now() : null,
       recruitedByMembershipId: input.recruitedByMembershipId ?? null,
       sourceLeadId: input.sourceLeadId ?? null,
     });

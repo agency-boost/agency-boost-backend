@@ -35,6 +35,10 @@ class StubStorage extends StoragePort {
   async remove(key: string): Promise<void> {
     this.removed.push(key);
   }
+  /** A copy into another owner's folder (P13.2-T7). */
+  async copy(p: { storageKey: string; owner: AssetOwner; folder: string }): Promise<StoredObject> {
+    return { storageKey: `dev/${ownerFolder(p.owner)}/${p.folder}/copy-of-${p.storageKey.split('/').pop()}`, mimeType: 'application/pdf', bytes: 1024 };
+  }
 }
 
 const member = (kpmId: string) => new RequestContext('u1', 'none', {
@@ -153,5 +157,45 @@ describe('the asset registry’s tenant boundary', () => {
     // Reported, never removed: deleting somebody's file is a human decision.
     expect(storage.removed).toEqual([]);
     await expect(service.findOrphans(member(KPM_A), 30)).rejects.toThrow(MissingTenantContextError);
+  });
+
+  describe('a file duplicated into a company (P13.2-T7 AC-3, AC-5)', () => {
+    const COMPANY = '66f00000000000000000c0c2';
+
+    it('registers the copy as the company\u2019s own, confirmed and referenced by nothing, until retained', async () => {
+      const source = await upload(member(KPM_A));
+      const copy = await service.duplicateIntoCompany(COMPANY, {
+        storageKey: source.storageKey, originalFilename: 'module.pdf',
+      });
+
+      // The destination company's folder: one owner per asset (ADR-0032).
+      expect(copy.storageKey.startsWith(`dev/company/${COMPANY}/training/`)).toBe(true);
+      const row = await service.companyAsset(COMPANY, copy.storageKey);
+      expect(row).toMatchObject({
+        companyId: COMPANY, kpmId: null, uploadState: 'confirmed', refCount: 0, originalFilename: 'module.pdf',
+      });
+      // No office reads it through its own repository: it is not any office's.
+      await expect(service.urlFor(member(KPM_A), copy.storageKey)).rejects.toMatchObject({ status: 404 });
+
+      // Not yet named by a template: what the orphan sweep reports, once it has waited.
+      await mongoose.connection.collection('assets')
+        .updateMany({}, { $set: { createdAt: new Date('2026-01-01T00:00:00Z') } });
+      const before = await service.findOrphans(RequestContext.platform('root'), 30);
+      expect(before.map((o) => o.storageKey)).toContain(copy.storageKey);
+
+      await service.retainCompanyCopies(COMPANY, [copy.storageKey]);
+      expect(await service.companyAsset(COMPANY, copy.storageKey)).toMatchObject({ refCount: 1 });
+      const after = await service.findOrphans(RequestContext.platform('root'), 30);
+      expect(after.map((o) => o.storageKey)).not.toContain(copy.storageKey);
+      // Retaining nothing writes nothing.
+      await service.retainCompanyCopies(COMPANY, []);
+    });
+
+    it('retains only the named company\u2019s copies', async () => {
+      const source = await upload(member(KPM_A));
+      const copy = await service.duplicateIntoCompany(COMPANY, { storageKey: source.storageKey, originalFilename: null });
+      await service.retainCompanyCopies('66f00000000000000000c0c9', [copy.storageKey]);
+      expect(await service.companyAsset(COMPANY, copy.storageKey)).toMatchObject({ refCount: 0 });
+    });
   });
 });

@@ -29,6 +29,10 @@ import { ConfigChangeService } from '@/modules/config/changes.service';
 import { ProvisioningService } from '@/modules/config/provisioning.service';
 import { TemplateService } from '@/modules/config/template.service';
 import { KpmOfficeCounter } from '@/modules/config/office-counter';
+import { NamedTemplateSchema } from '@/modules/config/named-template.schema';
+import { NamedTemplateService } from '@/modules/config/named-template.service';
+import { OfficeSettingsSource } from '@/modules/config/office-settings.source';
+import { TemplateCopyService } from '@/modules/config/template-copy.service';
 import {
   TrainingCategory, TrainingCategorySchema,
 } from '@/modules/training/training-category.schema';
@@ -167,6 +171,8 @@ export function configModule(
   const trainingModules = model('TrainingModuleModel', TrainingModuleSchema);
   const activationTemplates = model('ActivationTemplateModel', ActivationTemplateSchema);
   const productRows = model('ProductModel', ProductSchema);
+  // ADR-0115: a company's named templates, which `companyTemplates` rows hang under.
+  const namedTemplateRows = model('NamedTemplateModel', NamedTemplateSchema);
 
   const clock: Clock = new FixedClock(now);
   const storage = new StubStorage();
@@ -507,6 +513,7 @@ export function configModule(
     model(QualificationRule.name, QualificationRuleSchema) as never,
     clock,
     config,
+    namedTemplateRows as never,
   );
 
   // `orgLevels` and `kpms` are exposed since P4-T15: a ratio's applicability validates
@@ -519,6 +526,14 @@ export function configModule(
    * Publishing `campaign_kinds` writes the company's carrier rules, so a spec that publishes one
    * and then reads the rules is exercising the whole path rather than a fake in the middle.
    */
+  const namedTemplates = new NamedTemplateService(
+    namedTemplateRows as never,
+    templates as never,
+    model('CompanyModelForConfig', CompanySchema) as never,
+    new KpmOfficeCounter(kpms as never),
+    audit,
+    clock,
+  );
   const templateService = new TemplateService(
     templates as never,
     model('CompanyModelForConfig', CompanySchema) as never,
@@ -526,6 +541,21 @@ export function configModule(
     clock,
     new KpmOfficeCounter(kpms as never),
     provisioning,
+    namedTemplates,
+  );
+  /*
+   * P13.2-T7: the copies across an owner boundary — an office's published settings read by name across
+   * tenants, files duplicated through the stub storage, rungs checked against the destination's ladder.
+   */
+  // The snapshot is the source of everything but the checklist and module content (P13.2's exit review).
+  const officeSettings = new OfficeSettingsSource(
+    new ConfigSnapshotRepository(snapshots as never),
+    new ActivationTemplateRepository(activationTemplates as never),
+    new TrainingModuleRepository(trainingModules as never),
+    new AssetRepository(assetRows as never),
+  );
+  const templateCopies = new TemplateCopyService(
+    namedTemplates, officeSettings, assets, orgLevels, provisioning, kpms as never, audit,
   );
   // P11-T9: the Leader Notes tab — one coachee's capability ticks, and the leaders' notes about them.
   const coachingProfiles = new CoachingProfileRepository(model(CoachingProfile.name, CoachingProfileSchema) as never);
@@ -555,6 +585,7 @@ export function configModule(
 
   return {
     activity, ratios, leads, config, provisioning, templates, templateService, audit, clock, changes,
+    namedTemplates, namedTemplateRows, officeSettings, templateCopies, assetRows,
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
     products, assets, storage, kpmProducts, events, campaigns, capability, activityLogs,
     leadRecords,
@@ -569,20 +600,57 @@ export function configModule(
   };
 }
 
-/** Copy a whole configuration into an office, the way creating one does. */
+/**
+ * Copy a whole configuration into an office, the way creating one from **the AgencyBoost defaults**
+ * does (ADR-0115 §4). `_companyId` is kept for the callers that pass one: since 13.2 a source is
+ * chosen, never looked up with a fallback, and the defaults are what these specs were always given.
+ */
 export async function provisionOffice(
   module: ReturnType<typeof configModule>,
   kpmId: string,
-  companyId: string,
+  _companyId?: string,
 ) {
-  const seeded = await module.provisioning.seedActivityTaxonomy(kpmId, companyId);
-  await module.provisioning.seedLeadPipelines(kpmId, companyId);
-  await module.provisioning.seedRatioDefinitions(kpmId, companyId, seeded.typeCodes);
-  const training = await module.provisioning.seedTrainingTaxonomy(kpmId, companyId);
-  await module.provisioning.seedActivationChecklist(kpmId, companyId, training.publishedModuleCodes);
-  await module.provisioning.seedEventTypes(kpmId, companyId);
-  await module.provisioning.seedCapabilityCatalog(kpmId, companyId);
+  // Each seed's source defaults to the AgencyBoost defaults.
+  const seeded = await module.provisioning.seedActivityTaxonomy(kpmId);
+  await module.provisioning.seedLeadPipelines(kpmId);
+  await module.provisioning.seedRatioDefinitions(kpmId, seeded.typeCodes);
+  const training = await module.provisioning.seedTrainingTaxonomy(kpmId);
+  await module.provisioning.seedActivationChecklist(kpmId, training.publishedModuleCodes);
+  await module.provisioning.seedEventTypes(kpmId);
+  await module.provisioning.seedCapabilityCatalog(kpmId);
   return seeded;
+}
+
+/**
+ * Build an office's configuration **from a chosen source**, the way `createKpm` does (ADR-0115 §4):
+ * the plan resolved and checked whole, then written. Absent, the company's default template.
+ */
+export async function provisionFrom(
+  module: ReturnType<typeof configModule>,
+  kpmId: string,
+  companyId: string,
+  startFrom?: { kind: 'template' | 'defaults' | 'empty'; templateId?: string },
+) {
+  return module.provisioning.provision(kpmId, await module.provisioning.planFor(companyId, startFrom));
+}
+
+/**
+ * **A company's default template, as migration `0023` or `createCompany` leaves one** (ADR-0115 §3),
+ * for a spec that reads or writes a template kind without naming a template. `origin: 'migration'`
+ * makes it answer for offices with no `startedFrom`, as the migration's does.
+ */
+export async function givenDefaultTemplate(
+  module: ReturnType<typeof configModule>,
+  companyId: string,
+  over: { name?: string; origin?: 'migration' | 'empty' | 'defaults' } = {},
+): Promise<string> {
+  const row = await (module.namedTemplateRows as unknown as {
+    create: (d: unknown) => Promise<{ _id: unknown }>;
+  }).create({
+    companyId, name: over.name ?? 'Company template', isDefault: true, status: 'active',
+    archivedAt: null, origin: { kind: over.origin ?? 'migration' }, deletedAt: null,
+  });
+  return String(row._id);
 }
 
 export {

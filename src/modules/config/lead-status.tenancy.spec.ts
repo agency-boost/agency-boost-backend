@@ -1,4 +1,3 @@
-import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { LeadStatusService } from './lead-status.service';
 import { ProvisioningService } from './provisioning.service';
@@ -17,24 +16,28 @@ function ctx(kpmId: string) {
   });
 }
 
+
+/** A published template row as provisioning is handed it: its payload and version, resolved first. */
+const asSource = (row: { payload: Record<string, unknown>; version: number; [field: string]: unknown }) => ({
+  payload: row.payload, seededFrom: { templateId: 'tpl-1', version: row.version },
+});
+
 describe('the office lead pipelines (P4-T3)', () => {
   let service: LeadStatusService;
   let provisioning: ProvisioningService;
-  let templates: mongoose.Model<never>;
 
   beforeAll(async () => {
     await startMongo();
     const wired = configModule(NOW);
     service = wired.leads;
     provisioning = wired.provisioning;
-    templates = wired.templates as never;
   });
 
   afterAll(stopMongo);
   beforeEach(clearCollections);
 
   describe('the seeded ladders (AC-2)', () => {
-    beforeEach(() => provisioning.seedLeadPipelines(KPM_A, COMPANY));
+    beforeEach(() => provisioning.seedLeadPipelines(KPM_A));
 
     it('is five sales stages and seven recruitment ones, by code', async () => {
       const [sales, recruitment] = await service.list(ctx(KPM_A));
@@ -70,7 +73,7 @@ describe('the office lead pipelines (P4-T3)', () => {
   });
 
   describe('the stages a lead is expected to close from (ADR-0043, AC-4)', () => {
-    beforeEach(() => provisioning.seedLeadPipelines(KPM_A, COMPANY));
+    beforeEach(() => provisioning.seedLeadPipelines(KPM_A));
 
     it('seeds the stages after which the work is the counterparty’s', async () => {
       /*
@@ -156,7 +159,7 @@ describe('the office lead pipelines (P4-T3)', () => {
     });
 
     it('cannot flag another office’s stage — 404, never 403', async () => {
-      await provisioning.seedLeadPipelines(KPM_B, COMPANY);
+      await provisioning.seedLeadPipelines(KPM_B);
       const [salesB] = await service.list(ctx(KPM_B));
       const theirs = salesB.statuses.find((s) => s.code === 'FOLLOW_UP')!;
 
@@ -176,7 +179,7 @@ describe('the office lead pipelines (P4-T3)', () => {
   });
 
   describe('changing a ladder', () => {
-    beforeEach(() => provisioning.seedLeadPipelines(KPM_A, COMPANY));
+    beforeEach(() => provisioning.seedLeadPipelines(KPM_A));
 
     it('renames a stage without touching the code every lead holds', async () => {
       const [sales] = await service.list(ctx(KPM_A));
@@ -256,7 +259,8 @@ describe('the office lead pipelines (P4-T3)', () => {
        * traces it back to a template — so it is refused at the moment of copying, where
        * the bad template is still the obvious suspect.
        */
-      await templates.create({
+      // A source as provisioning is handed it (ADR-0115 §4), from a template older than the check.
+      const source = asSource({
         companyId: COMPANY, kind: 'lead_pipeline', version: 1, status: 'published',
         publishedAt: NOW,
         payload: {
@@ -265,16 +269,17 @@ describe('the office lead pipelines (P4-T3)', () => {
             { pipeline: 'recruitment', code: 'TWO', label: 'Two', rank: 1, isTerminal: true },
           ],
         },
-      } as never);
+      });
 
-      await expect(provisioning.seedLeadPipelines(KPM_A, COMPANY))
-        .rejects.toThrow(/sales pipeline 0 terminal stages/);
+      await expect(provisioning.seedLeadPipelines(KPM_A, source))
+        .rejects.toThrow(/sales pipeline has 0 terminal stages/);
     });
 
     it('refuses a template whose stage both closes and is expected to close', async () => {
       // Copying it would make *Expected to close* double-count against *Last month*, and
       // the bad number would surface on the Owner's Overview weeks later (ADR-0043).
-      await templates.create({
+      // A source as provisioning is handed it (ADR-0115 §4), from a template older than the check.
+      const source = asSource({
         companyId: COMPANY, kind: 'lead_pipeline', version: 1, status: 'published',
         publishedAt: NOW,
         payload: {
@@ -283,15 +288,15 @@ describe('the office lead pipelines (P4-T3)', () => {
             { pipeline: 'recruitment', code: 'TWO', label: 'Two', rank: 1, isTerminal: true, isLateStage: false },
           ],
         },
-      } as never);
+      });
 
-      await expect(provisioning.seedLeadPipelines(KPM_A, COMPANY))
+      await expect(provisioning.seedLeadPipelines(KPM_A, source))
         .rejects.toThrow(/ONE.*both/s);
     });
 
     it('keeps two offices’ ladders apart', async () => {
-      await provisioning.seedLeadPipelines(KPM_A, COMPANY);
-      await provisioning.seedLeadPipelines(KPM_B, COMPANY);
+      await provisioning.seedLeadPipelines(KPM_A);
+      await provisioning.seedLeadPipelines(KPM_B);
       const [sales] = await service.list(ctx(KPM_A));
       await service.rename(ctx(KPM_A), sales.statuses[0].id, 'Only in A');
 
@@ -300,15 +305,15 @@ describe('the office lead pipelines (P4-T3)', () => {
     });
 
     it('cannot rename another office’s stage — 404, never 403', async () => {
-      await provisioning.seedLeadPipelines(KPM_A, COMPANY);
-      await provisioning.seedLeadPipelines(KPM_B, COMPANY);
+      await provisioning.seedLeadPipelines(KPM_A);
+      await provisioning.seedLeadPipelines(KPM_B);
       const [theirs] = await service.list(ctx(KPM_B));
       await expect(service.rename(ctx(KPM_A), theirs.statuses[0].id, 'mine'))
         .rejects.toThrow('Lead status');
     });
   });
   describe('the rest of the writes (P4-T12)', () => {
-    beforeEach(() => provisioning.seedLeadPipelines(KPM_A, COMPANY));
+    beforeEach(() => provisioning.seedLeadPipelines(KPM_A));
 
     it('normalises a new stage’s code', async () => {
       const created = await service.create(ctx(KPM_A), {
@@ -337,7 +342,7 @@ describe('the office lead pipelines (P4-T3)', () => {
     });
 
     it('refuses to archive, restore or make terminal a stage that is not this office’s', async () => {
-      await provisioning.seedLeadPipelines(KPM_B, COMPANY);
+      await provisioning.seedLeadPipelines(KPM_B);
       const [theirs] = await service.list(ctx(KPM_B));
       const stage = theirs.statuses.find((s) => !s.isTerminal)!;
 
@@ -356,7 +361,7 @@ describe('the office lead pipelines (P4-T3)', () => {
     });
 
     it('refuses to rename a stage that is not this office’s', async () => {
-      await provisioning.seedLeadPipelines(KPM_B, COMPANY);
+      await provisioning.seedLeadPipelines(KPM_B);
       const [theirs] = await service.list(ctx(KPM_B));
       await expect(service.rename(ctx(KPM_A), theirs.statuses[0].id, 'mine'))
         .rejects.toThrow('Lead status');

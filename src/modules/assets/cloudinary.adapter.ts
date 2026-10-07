@@ -92,9 +92,54 @@ export class CloudinaryAdapter extends StoragePort {
    * `null` means storage has nothing there: a signature was issued and the bytes never came.
    */
   async describe(storageKey: string): Promise<StoredObject | null> {
+    const found = await this.locate(storageKey);
+    return found ? found.object : null;
+  }
+
+  /**
+   * **Duplicate an object into another owner's folder** (P13.2-T7, ADR-0115 §6).
+   *
+   * Cloudinary has no copy call, so the copy is an upload **from the source's own delivery URL**:
+   * signed, of the source's resource and delivery type, into a key minted as an upload's is —
+   * `<prefix>/<owner>/<folder>/<ulid>` — so the copy is the destination's by its folder, exactly
+   * as if it had been uploaded there. `overwrite: false`: a fresh ULID never collides, and if it
+   * somehow did, replacing another owner's file would be the worst way to find out.
+   *
+   * The source is located first, by the same three probes `describe` makes; a key holding nothing
+   * throws rather than producing an empty copy.
+   */
+  async copy(params: { storageKey: string; owner: AssetOwner; folder: string }): Promise<StoredObject> {
+    const source = await this.locate(params.storageKey);
+    if (!source) {
+      throw new Error(`Storage holds nothing under ${params.storageKey}, so it cannot be copied.`);
+    }
+    const storageKey = `${this.prefix()}/${this.ownerFolder(params.owner)}/${params.folder}/${ulid()}`;
+    const from = cloudinary.url(params.storageKey, {
+      resource_type: source.resourceType,
+      type: source.deliveryType,
+      sign_url: true,
+      secure: true,
+    });
+    const copied = await cloudinary.uploader.upload(from, {
+      public_id: storageKey,
+      resource_type: source.resourceType,
+      type: source.deliveryType,
+      overwrite: false,
+    }) as { bytes?: number };
+    return {
+      storageKey,
+      mimeType: source.object.mimeType,
+      bytes: Number(copied.bytes ?? source.object.bytes),
+    };
+  }
+
+  /** Which of Cloudinary's three resource types holds the key, how it is delivered, and what it is. */
+  private async locate(storageKey: string): Promise<{
+    object: StoredObject; resourceType: 'image' | 'video' | 'raw'; deliveryType: string;
+  } | null> {
     for (const resourceType of ['image', 'video', 'raw'] as const) {
       const found = await this.resource(storageKey, resourceType);
-      if (found) return found;
+      if (found) return { ...found, resourceType };
     }
     return null;
   }
@@ -102,18 +147,22 @@ export class CloudinaryAdapter extends StoragePort {
   private async resource(
     storageKey: string,
     resourceType: 'image' | 'video' | 'raw',
-  ): Promise<StoredObject | null> {
+  ): Promise<{ object: StoredObject; deliveryType: string } | null> {
     try {
       const r = await cloudinary.api.resource(storageKey, { resource_type: resourceType }) as {
-        format?: string; bytes?: number;
+        format?: string; bytes?: number; type?: string;
       };
       const format = String(r.format ?? '').toLowerCase();
       return {
-        storageKey,
-        // Unmapped formats pass through as themselves, so the allow-list refuses them by name
-        // instead of this method inventing a media type for a file it does not recognise.
-        mimeType: FORMAT_TO_MIME_TYPE[format] ?? format,
-        bytes: Number(r.bytes ?? 0),
+        object: {
+          storageKey,
+          // Unmapped formats pass through as themselves, so the allow-list refuses them by name
+          // instead of this method inventing a media type for a file it does not recognise.
+          mimeType: FORMAT_TO_MIME_TYPE[format] ?? format,
+          bytes: Number(r.bytes ?? 0),
+        },
+        // `upload` unless the vendor says otherwise: the signed upload sets no type of its own.
+        deliveryType: r.type ?? 'upload',
       };
     } catch (err) {
       // 404 is the expected answer for two of the three probes above. Anything else is a real
