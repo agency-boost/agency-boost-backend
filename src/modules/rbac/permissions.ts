@@ -757,6 +757,46 @@ export const PERMISSIONS = {
     { grantee: AGENT, scope: 'own-downline' },
   ],
 
+  /*
+   * ---- The Unit Dashboard (Phase 15; roles §3.8, `functional/unit-dashboard.md`, *The permissions*). ----
+   *
+   * **The read is coaching's reach** (D-reach, ADR-0074, ADR-0087): a leader's unit is the leader and
+   * everybody `CoachResolver.coacheesOf` answers, the whole downline on the current edges. `own` is the
+   * reader's own row; `own-downline` everybody below them; written as two grants, as coaching's are. **The
+   * Agent holds both** (decided at the exit review, as activation's grants are, OD-122): an Agent with a
+   * direct report is a leader (ADR-0087), and `COACH` narrows the grant to nobody for one who leads nobody,
+   * who is answered an empty unit, never a 403. The service reads the scope actually held
+   * (`CoachResolver.unitOf`): `own` alone would be an empty unit, never a fallback to `COACH`. The
+   * Owner and the Admin read any leader's unit in the office (`own-kpm`), through their field view. The
+   * Super Admin's `all` is not access: the read resolves the office from the caller's membership, so one
+   * reaches a unit only inside a support session, as its member. `org_tree:drill_to_unit_dashboard`
+   * folds into this (roles §3.4): a link, not a permission.
+   *
+   * **The write is a correction of the office's figure** (OD-137, option 2; ADR-0121): the leader's
+   * *Update production*, for the reader and the unit below them, and for the Owner and the Admin any
+   * active member of the office. Not the Agent's, and not the Super Admin's. A write by its verb, so a
+   * read-only support session reads the dashboard and is refused the save.
+   */
+  'unit_dashboard:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
+  ],
+  'unit_dashboard:update_production': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AAB, scope: 'own-downline' },
+  ],
+
   // ---- Membership. ----
   'member:read_profile': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },

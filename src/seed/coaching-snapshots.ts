@@ -93,7 +93,7 @@ export async function backfillCoachingSnapshots(kpmId: string): Promise<number> 
   const summary = new SummaryService(
     goals, production, readings, days,
     new LeadReadings(new LeadRepository(model(Lead.name, LeadSchema)), new LeadStatusRepository(model(LeadStatus.name, LeadStatusSchema)), clock),
-    activity, coach, subjectReads,
+    activity, coach, subjectReads, new MemberNames(memberships, model(User.name, UserSchema)),
   );
   const builder = new CoachingSnapshotBuilder(summary, activity, goalRows, clock);
 

@@ -399,6 +399,39 @@ describe('COACH(actor, subject) — P11-T3', () => {
     });
   });
 
+  describe('unitOf — a leader’s unit, by the scope the grant holds (Phase 15)', () => {
+    const ids = (unit: { below: { membershipId: string }[] }) => named(unit.below.map((c) => c.membershipId));
+
+    it('Phase 15: a hierarchy token is COACH, and the caller is in it while they lead somebody', async () => {
+      const unit = await coach.unitOf(as(m.AAB, 'AAB'), 'unit_dashboard:update_production');
+      expect([unit.office, unit.self, ids(unit)]).toEqual([false, true, ['AGENT', 'DEEP', 'NESTED']]);
+      // A leader of nobody heads no unit, and may not name themselves in it.
+      const alone = await coach.unitOf(as(m.DIRECT, 'AGENT'), 'unit_dashboard:read');
+      expect([alone.office, alone.self, ids(alone)]).toEqual([false, false, []]);
+    });
+
+    it('Phase 15: the office’s own grant is the office for a write, and the caller’s downline for their unit', async () => {
+      const unit = await coach.unitOf(ownerOfA(), 'unit_dashboard:read');
+      expect([unit.office, unit.self]).toEqual([true, true]);
+      expect(ids(unit)).toEqual(named((await coach.coacheesOf(ownerOfA(), m.ROOT)).map((c) => c.membershipId)));
+    });
+
+    it('Phase 15: `own` alone is the caller and nobody below — never a fallback to COACH; no grant is nobody', async () => {
+      // `lead:read` holds `own` alone for an Agent; this one leads nobody, and COACH would answer nobody anyway,
+      // so the AB below, holding `own` alone by the same grant shape, is the case that matters.
+      expect(await coach.unitOf(as(m.AGENT, 'AGENT'), 'lead:read')).toEqual({ office: false, below: [], self: true });
+      const find = jest.spyOn(members, 'find');
+      try {
+        expect(await coach.unitOf(as(m.AB, 'AGENT'), 'lead:read')).toEqual({ office: false, below: [], self: true });
+        expect(find).not.toHaveBeenCalled();
+      } finally {
+        find.mockRestore();
+      }
+      expect(await coach.unitOf(as(m.AB, 'AB', { orgLevelCode: 'UNKNOWN_RUNG' }), 'lead:read'))
+        .toEqual({ office: false, below: [], self: false });
+    });
+  });
+
   describe('reach — whose data a grant reaches, for a list', () => {
     it('P11-T3: the caller and everybody they coach, for a hierarchy token', async () => {
       expect(named((await coach.reach(as(m.AB, 'AB'), 'lead:read'))!))

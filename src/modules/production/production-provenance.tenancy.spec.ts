@@ -140,7 +140,7 @@ describe('three writers, one visible answer (P9-T6)', () => {
       await importFile(file(['PRU-001', { 'ape.ytd': '80' }]), undefined, '2026-08');
       await importFile(file(['PRU-001', { 'ape.monthly': '5' }]));
       // September has no YTD, so August answers.
-      expect(await wired.productionReadings.apeYearToDate(A, RINA, '2026')).toEqual({ minor: rpM(80), provenance: 'imported', month: '2026-08' });
+      expect(await wired.productionReadings.apeYearToDate(A, RINA, '2026')).toEqual({ minor: rpM(80), provenance: 'imported', month: '2026-08', correctedBy: null, correctedAt: null });
       expect(await wired.productionReadings.apeYearToDate(A, RINA, '2025')).toBeNull();
       expect(await wired.productionReadings.apeYearToDate(A, RINA, 'soon')).toBeNull();
     });

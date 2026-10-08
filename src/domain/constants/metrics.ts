@@ -23,6 +23,13 @@
  * moved from 14 to 18.5 (P18.5-T1, P18.5-T5, P18.5-T8; were P14-T1, P14-T3, P14-T6). Phase 14 is
  * Sales tools now and computes none. `registry.spec.ts` pins this move by key too.
  *
+ * *Amended 2026-10-08 again (P15-T0, D-metrics):* the Unit Dashboard draws neither unit rollup the old
+ * plan gave it, so `MAA_COUNT_IN_UNIT` and `ACTIVITY_COMPLIANCE_RATE` moved from 15 to 18, the Owner's
+ * reporting, whose screens draw them (`KPM_Owner.html:1248`, `:982-985`) — still before campaigns are
+ * evaluated (18.5), so a requirement may still name them. Phase 15 registers the five figures its roster
+ * does draw instead, each computed once under `domain/metrics/`: the three lead counts, the potential
+ * active count and the touches.
+ *
  * A campaign requirement or a qualification rule may only name a metric this product can compute
  * (ADR-0035). The prototype's requirements are display strings — *"Net APE ≥ Rp 600 juta"* — which
  * nothing can evaluate and nothing can refuse, so a campaign could promise a reward against a number
@@ -57,11 +64,11 @@ export type MetricUnit = (typeof METRIC_UNITS)[number];
 
 export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'MONTHLY_ACTIVE_AGENT', name: 'Monthly Active Agent (MAA)', unit: 'tri_state', phase: 9 },
-  { key: 'MAA_COUNT_IN_UNIT', name: 'Active agents in unit', unit: 'count', phase: 15 },
+  { key: 'MAA_COUNT_IN_UNIT', name: 'Active agents in unit', unit: 'count', phase: 18 },
   { key: 'PACING_TO_MAA', name: 'Pacing to MAA', unit: 'boolean', phase: 11 },
   { key: 'ACTIVITY_COMPLIANCE_7D', name: 'Activity-logging compliance, last 7 days', unit: 'boolean', phase: 6 },
   { key: 'ACTIVITY_COMPLIANCE_MONTH', name: 'Activity-logging compliance, this month', unit: 'boolean', phase: 6 },
-  { key: 'ACTIVITY_COMPLIANCE_RATE', name: 'Activity-logging compliance rate', unit: 'percentage', phase: 15 },
+  { key: 'ACTIVITY_COMPLIANCE_RATE', name: 'Activity-logging compliance rate', unit: 'percentage', phase: 18 },
   { key: 'ACTIVITY_TOTAL_BY_CATEGORY', name: 'Logged touches by category', unit: 'count', phase: 6 },
   { key: 'COACHED_7D', name: 'Coached in the last 7 days', unit: 'boolean', phase: 11 },
   { key: 'COACHED_30D', name: 'Coached in the last 30 days', unit: 'boolean', phase: 11 },
@@ -107,6 +114,15 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   // Owner reporting, 18 now) until P10-T8.
   { key: 'RECRUITMENT_PIPELINE_NOW', name: 'Recruitment pipeline now', unit: 'count', phase: 7 },
   { key: 'RECRUITMENT_EXPECTED_TO_CLOSE', name: 'Expected to close', unit: 'count', phase: 7 },
+  /*
+   * Phase 15 (D-leads, D-metrics): the Unit Dashboard's roster, per person and summed by the rollup rule
+   * (`domain/metrics/unit-rollup.ts`, `domain/metrics/lead-counts.ts`).
+   */
+  { key: 'OPEN_SALES_LEADS', name: 'Open sales leads', unit: 'count', phase: 15 },
+  { key: 'SALES_LEADS_CLOSING_THIS_MONTH', name: 'Sales leads closing this month', unit: 'count', phase: 15 },
+  { key: 'RECRUITMENT_NOMINATED_THIS_MONTH', name: 'Recruitment candidates nominated this month', unit: 'count', phase: 15 },
+  { key: 'POTENTIAL_MAA_COUNT_IN_UNIT', name: 'Potential Monthly Active Agents in unit', unit: 'count', phase: 15 },
+  { key: 'CASCADE_ACTIVITY_TOUCHES', name: 'Touches on the goal activities', unit: 'count', phase: 15 },
   { key: 'NEW_ACTIVE_AGENTS', name: 'New active agents', unit: 'count', phase: 9 },
   { key: 'ROLLING_PERSISTENCY', name: 'Rolling persistency', unit: 'percentage', phase: 9 },
   // P13.2-T4 (ADR-0113): the office's active ABs and AABs, which its leader limit bounds. An office's

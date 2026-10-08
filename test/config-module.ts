@@ -136,6 +136,7 @@ import { ActivationProgressRepository } from '@/modules/activation/activation-pr
 import { ActivationLinkEngine } from '@/modules/activation/activation-links';
 import { ActivationProgressService } from '@/modules/activation/activation-progress.service';
 import { NewHiresService } from '@/modules/activation/new-hires.service';
+import { UnitDashboardService } from '@/modules/unit-dashboard/unit-dashboard.service';
 
 /**
  * The configuration module, wired the way the app wires it.
@@ -376,6 +377,8 @@ export function configModule(
     // P11-T4: `GET /summary?for=` resolves its subject through `COACH`, and records a read of somebody else's.
     coach,
     subjectReads,
+    // Phase 15: who corrected a figure, by name.
+    new MemberNames(memberships, users as never),
   );
   // P11-T5: the coaching sessions, and the coaching metrics read over them.
   const coachingSessions = new CoachingSessionRepository(
@@ -583,6 +586,21 @@ export function configModule(
   );
   const calendarLeave = new CalendarLeave(calendarEntries, calendarNotices, new TenantDay(kpms as never, clock), clock);
 
+  /*
+   * Phase 15: the Unit Dashboard — the roster read through the readings the person's own screens use, and a
+   * leader's corrections through the month table's own function.
+   */
+  const unitDashboard = new UnitDashboardService(
+    coach, new MemberNames(memberships, users as never), orgLevels, new TenantDay(kpms as never, clock),
+    coachingReadings, paceStatus, goals, productionReadings, productionMonths, productionCorrections, activityReadings,
+    new LeadReadings(
+      new LeadRepository(model(Lead.name, LeadSchema) as never),
+      new LeadStatusRepository(leadStatuses as never),
+      clock,
+    ),
+    subjectReads,
+  );
+
   return {
     activity, ratios, leads, config, provisioning, templates, templateService, audit, clock, changes,
     namedTemplates, namedTemplateRows, officeSettings, templateCopies, assetRows,
@@ -597,6 +615,7 @@ export function configModule(
     coachingRecord,
     calendarEntries, calendarNotices, calendar, calendarPeople, calendarLeave,
     activationRows, activationEngine, activationProgress, newHires,
+    unitDashboard,
   };
 }
 

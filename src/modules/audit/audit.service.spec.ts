@@ -74,6 +74,47 @@ describe('AuditService', () => {
     expect(logger).toHaveBeenCalled();
   });
 
+  it('Phase 15 D-audit writes many entries in one insert, each the row `record` would write', async () => {
+    const insertMany = jest.fn(async (rows: Record<string, unknown>[]) => rows);
+    const service = new AuditService({ insertMany } as never);
+    await service.recordMany(agentCtx, [
+      { action: 'activity_log.read_raw', targetCollection: 'memberships', targetMembershipId: 'mem-a' },
+      { action: 'activity_log.read_raw', targetCollection: 'memberships', targetMembershipId: 'mem-agent' },
+    ]);
+    expect(insertMany).toHaveBeenCalledTimes(1);
+    expect(insertMany.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ kpmId: 'kpm-a', actorMembershipId: 'mem-agent', targetMembershipId: 'mem-a', onBehalfOf: true }),
+      expect.objectContaining({ targetMembershipId: 'mem-agent', onBehalfOf: false }),
+    ]);
+  });
+
+  it('Phase 15 exit N3 an entry cannot say who acted, in which office, or for whom: the context’s fields win', async () => {
+    const insertMany = jest.fn(async (rows: Record<string, unknown>[]) => rows);
+    const { service, created } = makeService();
+    const forged = {
+      action: 'x', targetCollection: 'y', targetMembershipId: 'mem-agent',
+      kpmId: 'kpm-other', actorUserId: 'someone', effectiveUserId: 'else', actorMembershipId: 'mem-x', onBehalfOf: true,
+    } as never;
+    await service.record(agentCtx, forged);
+    expect(created[0]).toMatchObject({
+      kpmId: 'kpm-a', actorUserId: 'u1', effectiveUserId: null, actorMembershipId: 'mem-agent', onBehalfOf: false,
+    });
+    await new AuditService({ insertMany } as never).recordMany(agentCtx, [forged]);
+    expect(insertMany.mock.calls[0][0][0]).toMatchObject({ kpmId: 'kpm-a', actorUserId: 'u1', actorMembershipId: 'mem-agent' });
+  });
+
+  it('Phase 15 D-audit writes nothing for no entries, and a failed insert fails open', async () => {
+    const insertMany = jest.fn(async () => { throw new Error('mongo down'); });
+    const service = new AuditService({ insertMany } as never);
+    const logger = jest.spyOn(service['logger'], 'error').mockImplementation(() => undefined);
+
+    await service.recordMany(agentCtx, []);
+    expect(insertMany).not.toHaveBeenCalled();
+
+    await expect(service.recordMany(agentCtx, [{ action: 'x', targetCollection: 'y' }])).resolves.toBeUndefined();
+    expect(logger).toHaveBeenCalledWith(expect.objectContaining({ action: 'x', count: 1 }), 'failed to write audit entries');
+  });
+
   it('reads back tenant entries newest first', async () => {
     const { service, model } = makeService();
     await service.findForTenant('kpm-a', 10);

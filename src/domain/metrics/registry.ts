@@ -228,6 +228,26 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   PRODUCTION_CLUB_TIER: { period: 'CALENDAR_YEAR', threshold: null },
   RECRUITMENT_PIPELINE_NOW: { period: 'POINT_IN_TIME', threshold: null },
   RECRUITMENT_EXPECTED_TO_CLOSE: { period: 'CALENDAR_MONTH', threshold: null },
+
+  // ---- The Unit Dashboard (Phase 15, D-leads, D-metrics) ----
+  /*
+   * A lead's state now, and this office month's promises (P7-T5), whatever period the screen shows.
+   * Counted per person in `domain/metrics/lead-counts.ts`, summed by the rollup rule.
+   */
+  OPEN_SALES_LEADS: { period: 'POINT_IN_TIME', threshold: null },
+  SALES_LEADS_CLOSING_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
+  RECRUITMENT_NOMINATED_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
+  /*
+   * `PACING_TO_MAA` counted over a group, so its period is that metric's. No threshold of its own: the
+   * gate is `PACING_TO_MAA`'s. Computed in `domain/metrics/unit-rollup.ts`.
+   */
+  POTENTIAL_MAA_COUNT_IN_UNIT: { period: 'CALENDAR_MONTH', threshold: null },
+  /*
+   * The goal's three cascade codes logged against their summed targets, over the period the screen shows:
+   * the calendar month by default, `ROLLING_7D` and the year to date as its other views, as
+   * `SUMMARY_ACTIVITY_TARGET`'s *Yearly* view is the same definition. Computed in `unit-rollup.ts`.
+   */
+  CASCADE_ACTIVITY_TOUCHES: { period: 'CALENDAR_MONTH', threshold: null },
   NEW_ACTIVE_AGENTS: { period: 'CALENDAR_MONTH', threshold: null },
   ROLLING_PERSISTENCY: { period: 'ROLLING_12M', threshold: null },
 

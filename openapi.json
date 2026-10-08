@@ -19268,6 +19268,220 @@
         ],
         "x-required-permission": "billing:read_prices"
       }
+    },
+    "/api/v1/unit/dashboard": {
+      "get": {
+        "description": "The leader — you, or with `for` a leader below you — and everybody below them on the current leader edges, grouped as the coaching roster groups them: *Your Unit* (the leader and the agents who answer to them directly and lead nobody), then each unit below, nested. Every row carries the figures that person’s own screens show: the Summary’s goal figures for the period with where the achieved figure came from, the agency’s production for the month, four lead counts, the goal’s three activities against their targets, the last 1:1, the status and the pacing mark for the calendar month, and the next open action item. A total row per unit and four tiles, each the sum of the rows it covers, a percentage from the sums. **Somebody who leads nobody is answered an empty unit**, not an error. Computed on each read, not paginated. Every member shown other than you is recorded as read.\n\n**Requires `unit_dashboard:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "UnitDashboardController_read_v1",
+        "parameters": [
+          {
+            "name": "period",
+            "required": false,
+            "in": "query",
+            "description": "What the goal and activity figures measure. `month` (the default): this month. `year`: the year to date. `7d`: activity over the last 7 days against this month’s targets pro-rated, and this month’s goal figures — nobody reports a week’s APE. *Status*, the pacing mark and the lead counts are this month’s whatever the period.",
+            "schema": {
+              "default": "month",
+              "enum": [
+                "7d",
+                "month",
+                "year"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "for",
+            "required": false,
+            "in": "query",
+            "description": "The **membership** whose unit to read: somebody below you who leads somebody — or, for the agency’s owner and its administrators, any leader in the agency. Omitted, it is your own unit.",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitDashboardDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `unit_dashboard:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — `for` names yourself, somebody who leads nobody, somebody outside your reach or who has left, **or** somebody in another office. They are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A leader’s unit, with every figure on it",
+        "tags": [
+          "unit-dashboard"
+        ],
+        "x-required-permission": "unit_dashboard:read"
+      }
+    },
+    "/api/v1/unit/dashboard/production": {
+      "patch": {
+        "description": "*Update production*: this month’s APE and the year to date for each person sent, either or both, in IDR minor units. Each figure that changes is a **correction of the agency’s figure**, under your name, with the reason *Updated on the Unit Dashboard from the company report.*, audited figure by figure — the month table, the Summary and the next import’s preview show it, and it stands through the next upload unless whoever imports chooses to replace it. A figure cannot be cleared here. Only the agency’s current month. Everything is checked before anything is written: one figure out of range, one person out of reach, and nothing is saved. A figure already holding the value changes nothing and is not counted.\n\n**Requires `unit_dashboard:update_production`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "UnitDashboardController_updateProduction_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProductionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionUpdatedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `unit_dashboard:update_production`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — a row names somebody you may not update — outside your unit, somebody who has left, or yourself while you lead nobody — **or** somebody in another office. Indistinguishable on purpose: a `403` would confirm the id exists. Nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`UPLOAD_MONTH_LOCKED` — the agency has locked the month; its owner or an administrator reopens it. `VERSION_CONFLICT` — the month changed since you read it. Nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`UPLOAD_VALUE_OUT_OF_RANGE` — a figure, or the pair it would leave (the year to date below the month), is out of range. `details.membershipId` and `details.cadence` name it. Nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update production from the company report",
+        "tags": [
+          "unit-dashboard"
+        ],
+        "x-required-permission": "unit_dashboard:update_production"
+      }
     }
   },
   "info": {
@@ -19305,6 +19519,23 @@
           "savedAt"
         ]
       },
+      "FigureCorrectorDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Sari Puspita"
+          }
+        },
+        "required": [
+          "membershipId",
+          "name"
+        ]
+      },
       "FigureSourceDto": {
         "type": "object",
         "properties": {
@@ -19320,11 +19551,27 @@
             "type": "string",
             "nullable": true,
             "example": "2026-09"
+          },
+          "correctedBy": {
+            "nullable": true,
+            "description": "Who corrected the figure by hand — an owner or administrator at the month table, or a leader on the Unit Dashboard. `null` for the file’s figure and the agent’s own, and when they can no longer be named.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FigureCorrectorDto"
+              }
+            ]
+          },
+          "correctedAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "When, for a correction by hand. ISO."
           }
         },
         "required": [
           "provenance",
-          "month"
+          "month",
+          "correctedBy",
+          "correctedAt"
         ]
       },
       "MonthlyFiguresDto": {
@@ -25109,6 +25356,11 @@
               "PRODUCTION_CLUB_TIER",
               "RECRUITMENT_PIPELINE_NOW",
               "RECRUITMENT_EXPECTED_TO_CLOSE",
+              "OPEN_SALES_LEADS",
+              "SALES_LEADS_CLOSING_THIS_MONTH",
+              "RECRUITMENT_NOMINATED_THIS_MONTH",
+              "POTENTIAL_MAA_COUNT_IN_UNIT",
+              "CASCADE_ACTIVITY_TOUCHES",
               "NEW_ACTIVE_AGENTS",
               "ROLLING_PERSISTENCY"
             ],
@@ -28504,6 +28756,840 @@
         },
         "required": [
           "note"
+        ]
+      },
+      "WindowDto": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "example": "2026-09-01"
+          },
+          "to": {
+            "type": "string",
+            "example": "2026-09-14"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ]
+      },
+      "UnitHeadDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Rina Wijaya"
+          },
+          "isReader": {
+            "type": "boolean",
+            "description": "The unit is the reader’s own. Otherwise it is a leader’s below them, named."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "isReader"
+        ]
+      },
+      "TeamTileDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number",
+            "description": "Every row."
+          },
+          "direct": {
+            "type": "number",
+            "description": "*Your Unit*’s rows, the head included."
+          },
+          "units": {
+            "type": "number",
+            "description": "The units below the head."
+          },
+          "underUnits": {
+            "type": "number",
+            "description": "Everybody under those units’ heads."
+          }
+        },
+        "required": [
+          "total",
+          "direct",
+          "units",
+          "underUnits"
+        ]
+      },
+      "GroupProductionTileDto": {
+        "type": "object",
+        "properties": {
+          "targetMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "The rows’ targets summed; `null` when none holds one."
+          },
+          "actualMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "The rows’ actuals summed; `null` when none holds one."
+          },
+          "attainmentPct": {
+            "type": "number",
+            "nullable": true,
+            "description": "From the sums, never averaged."
+          },
+          "missing": {
+            "type": "number",
+            "description": "Rows holding no actual, which the sum leaves out."
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "month",
+              "year"
+            ]
+          }
+        },
+        "required": [
+          "targetMinor",
+          "actualMinor",
+          "attainmentPct",
+          "missing",
+          "period"
+        ]
+      },
+      "PotentialActiveDto": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "description": "`POTENTIAL_MAA_COUNT_IN_UNIT`."
+          },
+          "of": {
+            "type": "number",
+            "description": "Everybody the group holds."
+          }
+        },
+        "required": [
+          "count",
+          "of"
+        ]
+      },
+      "PotentialRecruitsTileDto": {
+        "type": "object",
+        "properties": {
+          "yourUnit": {
+            "type": "number",
+            "description": "Recruitment leads promised this month across *Your Unit*."
+          },
+          "aabs": {
+            "type": "number",
+            "description": "The same across every unit below the head."
+          }
+        },
+        "required": [
+          "yourUnit",
+          "aabs"
+        ]
+      },
+      "UnitTilesDto": {
+        "type": "object",
+        "properties": {
+          "team": {
+            "$ref": "#/components/schemas/TeamTileDto"
+          },
+          "directGroupProduction": {
+            "$ref": "#/components/schemas/GroupProductionTileDto"
+          },
+          "potentialActive": {
+            "$ref": "#/components/schemas/PotentialActiveDto"
+          },
+          "potentialRecruits": {
+            "$ref": "#/components/schemas/PotentialRecruitsTileDto"
+          }
+        },
+        "required": [
+          "team",
+          "directGroupProduction",
+          "potentialActive",
+          "potentialRecruits"
+        ]
+      },
+      "UnitRungDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "AGENT",
+            "description": "The rung’s stable code on the company’s ladder."
+          },
+          "label": {
+            "type": "string",
+            "example": "Agent",
+            "description": "The ladder’s own label for it."
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
+      "GoalCellDto": {
+        "type": "object",
+        "properties": {
+          "set": {
+            "type": "boolean",
+            "description": "A goal is saved for the year. Without one the row reads *No goal set*, never 0."
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "month",
+              "year"
+            ],
+            "description": "Which of the Summary’s figures these are: the month’s under `7d`."
+          },
+          "targetMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR minor units. `null` without a goal."
+          },
+          "actualMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "`null` when the agency holds no figure yet — not zero."
+          },
+          "attainmentPct": {
+            "type": "number",
+            "nullable": true,
+            "description": "`APE_ATTAINMENT_PCT`, capped at 999."
+          },
+          "gapMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "`APE_GAP_TO_TARGET`."
+          },
+          "overMinor": {
+            "type": "number",
+            "nullable": true
+          },
+          "policiesNeeded": {
+            "type": "number",
+            "nullable": true,
+            "description": "`POLICIES_NEEDED` at their average case size."
+          },
+          "caseSizeMinor": {
+            "type": "number",
+            "description": "Their average case size, IDR minor units."
+          },
+          "targetMet": {
+            "type": "boolean"
+          },
+          "source": {
+            "nullable": true,
+            "description": "Where the achieved figure came from; `null` until this month’s file arrives.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FigureSourceDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "set",
+          "period",
+          "targetMinor",
+          "actualMinor",
+          "attainmentPct",
+          "gapMinor",
+          "overMinor",
+          "policiesNeeded",
+          "caseSizeMinor",
+          "targetMet",
+          "source"
+        ]
+      },
+      "UnitPersonDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Rina Wijaya"
+          }
+        },
+        "required": [
+          "membershipId",
+          "name"
+        ]
+      },
+      "ProductionCellDto": {
+        "type": "object",
+        "properties": {
+          "valueMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR minor units. `null` is *Not uploaded yet*, never zero."
+          },
+          "provenance": {
+            "type": "string",
+            "enum": [
+              "imported",
+              "corrected",
+              "self_reported"
+            ],
+            "nullable": true
+          },
+          "correctedBy": {
+            "nullable": true,
+            "description": "Who corrected it, for a correction.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UnitPersonDto"
+              }
+            ]
+          },
+          "correctedAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "valueMinor",
+          "provenance",
+          "correctedBy",
+          "correctedAt"
+        ]
+      },
+      "ProductionCellsDto": {
+        "type": "object",
+        "properties": {
+          "monthly": {
+            "description": "This month’s APE, as the month table holds it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProductionCellDto"
+              }
+            ]
+          },
+          "ytd": {
+            "description": "The year to date’s APE, as the month table holds it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProductionCellDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "monthly",
+          "ytd"
+        ]
+      },
+      "LeadCountsDto": {
+        "type": "object",
+        "properties": {
+          "salesOpen": {
+            "type": "number",
+            "description": "`OPEN_SALES_LEADS`."
+          },
+          "salesClosing": {
+            "type": "number",
+            "description": "`SALES_LEADS_CLOSING_THIS_MONTH`: open sales leads promised for this month."
+          },
+          "recruitOpen": {
+            "type": "number",
+            "description": "`RECRUITMENT_PIPELINE_NOW`."
+          },
+          "recruitNominated": {
+            "type": "number",
+            "description": "`RECRUITMENT_NOMINATED_THIS_MONTH`: open recruitment leads promised for this month."
+          }
+        },
+        "required": [
+          "salesOpen",
+          "salesClosing",
+          "recruitOpen",
+          "recruitNominated"
+        ]
+      },
+      "CountAgainstDto": {
+        "type": "object",
+        "properties": {
+          "logged": {
+            "type": "number"
+          },
+          "target": {
+            "type": "number",
+            "nullable": true,
+            "description": "`null` without an APE target to derive it from."
+          }
+        },
+        "required": [
+          "logged",
+          "target"
+        ]
+      },
+      "UnitActivityDto": {
+        "type": "object",
+        "properties": {
+          "leads": {
+            "description": "Leads contacted: the goal’s leads code.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CountAgainstDto"
+              }
+            ]
+          },
+          "appointments": {
+            "$ref": "#/components/schemas/CountAgainstDto"
+          },
+          "closings": {
+            "$ref": "#/components/schemas/CountAgainstDto"
+          },
+          "touches": {
+            "description": "`CASCADE_ACTIVITY_TOUCHES`: the three summed; no target if any has none.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CountAgainstDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "leads",
+          "appointments",
+          "closings",
+          "touches"
+        ]
+      },
+      "UnitLastOneOnOneDto": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "number",
+            "description": "`DAYS_SINCE_LAST_COACHING`: whole calendar days, 0 being today."
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-09-28"
+          },
+          "overdue": {
+            "type": "boolean",
+            "description": "`days` is above `overdueAfterDays`."
+          },
+          "coach": {
+            "nullable": true,
+            "description": "Who led it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UnitPersonDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "days",
+          "date",
+          "overdue",
+          "coach"
+        ]
+      },
+      "FollowUpDto": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "dueDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "overdueDays": {
+            "type": "number",
+            "nullable": true,
+            "description": "Whole days past `dueDate`, when it is before today."
+          }
+        },
+        "required": [
+          "text",
+          "dueDate",
+          "overdueDays"
+        ]
+      },
+      "UnitRowDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Rina Wijaya"
+          },
+          "isReader": {
+            "type": "boolean",
+            "description": "The reader’s own row."
+          },
+          "coached": {
+            "type": "boolean",
+            "description": "You, or somebody you coach whose coaching pages you may open: the row links to them. `false` where those pages would not be found — the agency’s owner or an administrator reading a unit outside their own team, or a leader on the agent rung, who may not read anybody else’s Personal Summary."
+          },
+          "rung": {
+            "$ref": "#/components/schemas/UnitRungDto"
+          },
+          "depth": {
+            "type": "number",
+            "description": "Edges from the unit’s head: the head is 0."
+          },
+          "leads": {
+            "type": "boolean",
+            "description": "Leads somebody: a unit head."
+          },
+          "goal": {
+            "$ref": "#/components/schemas/GoalCellDto"
+          },
+          "production": {
+            "$ref": "#/components/schemas/ProductionCellsDto"
+          },
+          "leadsCounts": {
+            "$ref": "#/components/schemas/LeadCountsDto"
+          },
+          "activity": {
+            "$ref": "#/components/schemas/UnitActivityDto"
+          },
+          "lastOneOnOne": {
+            "nullable": true,
+            "description": "The coaching roster’s; `null` on the reader’s own row and before a first finalized session.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UnitLastOneOnOneDto"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "on_track",
+              "watch_closely",
+              "needs_attention",
+              "no_goal_set"
+            ],
+            "description": "`GOAL_PACE_STATUS` for the calendar month, whatever the period."
+          },
+          "pacingToMaa": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "`PACING_TO_MAA`; `null` without a target."
+          },
+          "followUp": {
+            "nullable": true,
+            "description": "The next open action item of their latest finalized coaching session.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FollowUpDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "isReader",
+          "coached",
+          "rung",
+          "depth",
+          "leads",
+          "goal",
+          "production",
+          "leadsCounts",
+          "activity",
+          "lastOneOnOne",
+          "status",
+          "pacingToMaa",
+          "followUp"
+        ]
+      },
+      "RolledUpGoalDto": {
+        "type": "object",
+        "properties": {
+          "targetMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "The rows’ targets summed; `null` when none holds one."
+          },
+          "actualMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "The rows’ actuals summed; `null` when none holds one."
+          },
+          "attainmentPct": {
+            "type": "number",
+            "nullable": true,
+            "description": "From the sums, never averaged."
+          },
+          "missing": {
+            "type": "number",
+            "description": "Rows holding no actual, which the sum leaves out."
+          }
+        },
+        "required": [
+          "targetMinor",
+          "actualMinor",
+          "attainmentPct",
+          "missing"
+        ]
+      },
+      "UnitTotalDto": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "$ref": "#/components/schemas/RolledUpGoalDto"
+          },
+          "leadsCounts": {
+            "$ref": "#/components/schemas/LeadCountsDto"
+          },
+          "touches": {
+            "$ref": "#/components/schemas/CountAgainstDto"
+          },
+          "potentialActive": {
+            "$ref": "#/components/schemas/PotentialActiveDto"
+          }
+        },
+        "required": [
+          "goal",
+          "leadsCounts",
+          "touches",
+          "potentialActive"
+        ]
+      },
+      "YourUnitDto": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "description": "The head first, then their direct reports on the agent rung who lead nobody, A to Z.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnitRowDto"
+            }
+          },
+          "total": {
+            "$ref": "#/components/schemas/UnitTotalDto"
+          }
+        },
+        "required": [
+          "rows",
+          "total"
+        ]
+      },
+      "UnitGroupDto": {
+        "type": "object",
+        "properties": {
+          "head": {
+            "$ref": "#/components/schemas/UnitRowDto"
+          },
+          "members": {
+            "description": "The head’s direct reports who lead nobody, A to Z.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnitRowDto"
+            }
+          },
+          "units": {
+            "description": "The head’s direct reports who lead somebody, A to Z, each with their own.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnitGroupDto"
+            }
+          },
+          "total": {
+            "description": "The head and everybody below them.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UnitTotalDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "head",
+          "members",
+          "units",
+          "total"
+        ]
+      },
+      "UnitProductionStateDto": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "example": "2026-09"
+          },
+          "revision": {
+            "type": "number",
+            "description": "The month’s revision: *Save all* sends it back."
+          },
+          "locked": {
+            "type": "boolean",
+            "description": "The agency has locked the month; its owner or an administrator reopens it."
+          },
+          "canUpdate": {
+            "type": "boolean",
+            "description": "The reader may save corrections here, in this session, over a unit with rows."
+          }
+        },
+        "required": [
+          "month",
+          "revision",
+          "locked",
+          "canUpdate"
+        ]
+      },
+      "UnitDashboardDto": {
+        "type": "object",
+        "properties": {
+          "today": {
+            "type": "string",
+            "example": "2026-09-14",
+            "description": "The agency’s today."
+          },
+          "month": {
+            "type": "string",
+            "example": "2026-09"
+          },
+          "year": {
+            "type": "string",
+            "example": "2026"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "7d",
+              "month",
+              "year"
+            ]
+          },
+          "window": {
+            "description": "The days the activity figures count, in the agency’s calendar.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WindowDto"
+              }
+            ]
+          },
+          "overdueAfterDays": {
+            "type": "number",
+            "description": "The agency’s `coachingOverdueDays`."
+          },
+          "head": {
+            "$ref": "#/components/schemas/UnitHeadDto"
+          },
+          "empty": {
+            "type": "boolean",
+            "description": "The head leads nobody: no rows."
+          },
+          "tiles": {
+            "$ref": "#/components/schemas/UnitTilesDto"
+          },
+          "yourUnit": {
+            "$ref": "#/components/schemas/YourUnitDto"
+          },
+          "units": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnitGroupDto"
+            }
+          },
+          "production": {
+            "$ref": "#/components/schemas/UnitProductionStateDto"
+          }
+        },
+        "required": [
+          "today",
+          "month",
+          "year",
+          "period",
+          "window",
+          "overdueAfterDays",
+          "head",
+          "empty",
+          "tiles",
+          "yourUnit",
+          "units",
+          "production"
+        ]
+      },
+      "ProductionRowDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The **membership** whose figures these are."
+          },
+          "apeMonthlyMinor": {
+            "type": "number",
+            "minimum": 0,
+            "description": "This month’s APE, in IDR minor units (the screen sends whole rupiah × 100). Omit to leave it."
+          },
+          "apeYtdMinor": {
+            "type": "number",
+            "minimum": 0,
+            "description": "The year to date’s APE, in IDR minor units. Omit to leave it."
+          }
+        },
+        "required": [
+          "membershipId"
+        ]
+      },
+      "UpdateProductionDto": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "example": "2026-09",
+            "description": "The agency’s current month, `YYYY-MM`. No other month is accepted."
+          },
+          "revision": {
+            "type": "number",
+            "minimum": 0,
+            "description": "The month’s revision as the dashboard read it (`production.revision`)."
+          },
+          "rows": {
+            "minItems": 1,
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionRowDto"
+            }
+          }
+        },
+        "required": [
+          "month",
+          "revision",
+          "rows"
+        ]
+      },
+      "ProductionUpdatedDto": {
+        "type": "object",
+        "properties": {
+          "updated": {
+            "type": "number",
+            "description": "People with at least one figure changed. A figure already holding the value changes nothing."
+          },
+          "state": {
+            "$ref": "#/components/schemas/MonthStateDto"
+          }
+        },
+        "required": [
+          "updated",
+          "state"
         ]
       },
       "CalendarPersonRowDto": {

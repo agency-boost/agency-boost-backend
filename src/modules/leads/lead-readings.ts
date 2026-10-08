@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { personLeadCounts, type CountedLead } from '@/domain/metrics/lead-counts';
+import type { LeadCountsRow } from '@/domain/metrics/unit-rollup';
 import { LeadStatusRepository } from '@/modules/config/activity.repository';
 import type { OfficeDay } from '@/modules/tenants/tenant-day.service';
 import { leadFlags, type LeadFlag } from './lead-attention';
@@ -86,6 +88,37 @@ export class LeadReadings {
           nextActionNote: row.nextActionNote,
         };
       });
+  }
+
+  /**
+   * **Each member's four lead counts, for many members at once** (Phase 15, D-leads): the Unit Dashboard's
+   * *Leads* column — open sales leads, those promised for the office's month, `RECRUITMENT_PIPELINE_NOW`
+   * and the recruitment leads promised for the month — by **`LeadService.summary`'s rules** over one owner
+   * each (`personLeadCounts`). The office's own recruitment ladder decides what *still running* is, as the
+   * summary's does.
+   *
+   * **Two reads for the whole list**, whatever its length: the office's recruitment stages, and the open
+   * leads of every member asked about — the four fields the counts read, over the `{kpmId,
+   * ownerMembershipId, deletedAt}` index the list uses. Counts, never rows: nothing about a lead leaves
+   * here. Every member asked about gets an entry, all zeros where they hold none.
+   */
+  async countsOfMany(
+    ctx: RequestContext, membershipIds: readonly string[], day: { month: string },
+  ): Promise<Map<string, LeadCountsRow>> {
+    const ids = [...new Set(membershipIds)];
+    if (ids.length === 0) return new Map();
+    const [stages, rows] = await Promise.all([
+      this.statuses.find(ctx, { pipeline: 'recruitment' }),
+      this.leads.find(
+        ctx,
+        { ownerMembershipId: { $in: ids }, outcome: null },
+        { projection: { ownerMembershipId: 1, type: 1, outcome: 1, statusCode: 1, commitments: 1 } },
+      ),
+    ]);
+    const terminalRecruitmentCodes = stages.filter((stage) => stage.isTerminal).map((stage) => stage.code);
+    const byOwner = new Map<string, CountedLead[]>(ids.map((id) => [id, []]));
+    for (const row of rows) byOwner.get(row.ownerMembershipId)!.push(row);
+    return new Map(ids.map((id) => [id, personLeadCounts(byOwner.get(id)!, { month: day.month, terminalRecruitmentCodes })]));
   }
 
   /**

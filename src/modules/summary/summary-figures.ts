@@ -163,6 +163,109 @@ export function summaryPlan(input: {
   };
 }
 
+/** Where a production figure came from, said with it (ADR-0008, P9-T6). */
+export interface FigureSource {
+  provenance: 'imported' | 'corrected' | 'self_reported';
+  /** `YYYY-MM` — the month the figure is for, or whose year to date it is; `null` for the agent's own. */
+  month: string | null;
+  /**
+   * **Who corrected it**, for a correction by hand — the Owner or an Admin at the month table, or a leader on
+   * the Unit Dashboard (OD-137, ADR-0121) — so a screen never says *your office* of a leader's figure. `null`
+   * for the file's figure and the agent's own, and when the corrector's membership can no longer be named.
+   */
+  correctedBy: { membershipId: string; name: string } | null;
+  /** When, for a correction; `null` otherwise. ISO. */
+  correctedAt: string | null;
+}
+
+/** A figure the office holds, as `ProductionReadings` answers it, with who corrected it. */
+interface HeldApe {
+  minor: number;
+  provenance: 'imported' | 'corrected';
+  month: string;
+  correctedBy: string | null;
+  correctedAt: Date | null;
+}
+
+/** Who corrected a figure, by name, and when — from the cell it came from. */
+function correctionOf(
+  held: Pick<HeldApe, 'provenance' | 'correctedBy' | 'correctedAt'> | null, names: ReadonlyMap<string, string>,
+): Pick<FigureSource, 'correctedBy' | 'correctedAt'> {
+  if (held?.provenance !== 'corrected') return { correctedBy: null, correctedAt: null };
+  const name = held.correctedBy === null ? undefined : names.get(held.correctedBy);
+  return {
+    correctedBy: name === undefined ? null : { membershipId: held.correctedBy as string, name },
+    correctedAt: held.correctedAt ? held.correctedAt.toISOString() : null,
+  };
+}
+
+/** A member's goal figures for the month and the year: the Summary's *Goal vs. actual* and *The gap*. */
+export interface GoalFigures {
+  /** Whether a goal has been **saved** for the year. The defaults a first-time reader sees are not one. */
+  set: boolean;
+  caseSizeMinor: number;
+  /** The month's and the year's targets, before anything is measured against them. */
+  plan: SummaryPlan;
+  /** *Monthly* (ADR-0056): this month's fixed target against this month's uploaded APE. */
+  monthly: PeriodFigures & { source: FigureSource | null };
+  /** *Yearly*: the annual target against the year to date, from whichever writer holds it (P9-T6). */
+  yearly: PeriodFigures & { source: FigureSource };
+}
+
+/**
+ * **A member's goal figures, from their plan and the office's production** (P10-T4, ADR-0056) — the one
+ * computation behind the Summary's *Monthly* and *Yearly* figures and the Unit Dashboard's goal cells
+ * (Phase 15, D-figures). `GET /summary` asks it for one member; the dashboard for every row of a unit, from
+ * readings it fetched in bulk. So a row on the dashboard and the person's own Summary are one answer.
+ *
+ * - **A year made before this month began**: the month needs nothing more (ADR-0047), which is not *no
+ *   target* — `madeFigures`.
+ * - **Where each figure came from** travels with it: this month's APE, until the month's file arrives
+ *   `null`; the year's, the office's year to date or the agent's own figure (P9-T6).
+ */
+export function goalFigures(input: {
+  goal: PlannedGoal;
+  /** The office's calendar month, `YYYY-MM`. */
+  month: string;
+  /** The office's year to date through last month; `null` when nothing is held, and in January. */
+  throughLastMonth: { minor: number } | null;
+  /** This month's own APE; `null` until the month's file arrives. */
+  thisMonth: HeldApe | null;
+  /** The year to date the office holds — the figure `goal.achieved` is, when it is the office's. */
+  yearToDate: HeldApe | null;
+  /** The names of whoever corrected either figure, by membership. */
+  names: ReadonlyMap<string, string>;
+}): GoalFigures {
+  const { goal, month, thisMonth, names } = input;
+  const plan = summaryPlan({
+    goal, month, throughLastMonthMinor: input.throughLastMonth?.minor ?? null, thisMonthMinor: thisMonth?.minor ?? null,
+  });
+  const monthly = plan.monthlyTargetMinor === 0
+    ? madeFigures(thisMonth?.minor ?? null)
+    : periodFigures(plan.monthlyTargetMinor, thisMonth?.minor ?? null, goal.caseSizeMinor);
+  const yearly = periodFigures(plan.annualTargetMinor, goal.achieved.minor, goal.caseSizeMinor);
+  return {
+    set: goal.savedAt !== null,
+    caseSizeMinor: goal.caseSizeMinor,
+    plan,
+    monthly: {
+      ...monthly,
+      source: thisMonth
+        ? { provenance: thisMonth.provenance, month: thisMonth.month, ...correctionOf(thisMonth, names) }
+        : null,
+    },
+    yearly: {
+      ...yearly,
+      source: {
+        provenance: goal.achieved.provenance as FigureSource['provenance'],
+        month: goal.achieved.month,
+        // The agent's own figure is nobody's correction, whatever the office holds beside it.
+        ...correctionOf(goal.achieved.provenance === 'corrected' ? input.yearToDate : null, names),
+      },
+    },
+  };
+}
+
 /**
  * The pace sentence's figures (ADR-0109, superseding ADR-0057) — the prototype's own arithmetic
  * (`Overall.html:6326-6347`): *"At your current pace, you're tracking to close **N** policies this month

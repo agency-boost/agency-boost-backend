@@ -14,6 +14,16 @@ export interface Coachee {
   membership: MembershipDocument;
 }
 
+/** A leader's unit as a grant reaches it (`CoachResolver.unitOf`). */
+export interface ReachedUnit {
+  /** The grant is the office's own (`own-kpm`, `all`): a write may name any active member of it. */
+  office: boolean;
+  /** Everybody below the caller the grant lets them list — their coachees, or nobody. */
+  below: Coachee[];
+  /** The caller may name themselves: always on `own`, and on a wider grant only while they lead somebody. */
+  self: boolean;
+}
+
 /** Whose data a subject read is about. */
 export interface Subject {
   membershipId: string;
@@ -152,6 +162,28 @@ export class CoachResolver {
       default:
         return [];
     }
+  }
+
+  /**
+   * **A leader's unit, by the scope the caller's grant on `permission` actually holds** (Phase 15, the Unit
+   * Dashboard; the branching `reach` makes, for a unit rather than a list of ids):
+   *
+   * - a hierarchy token (`own-unit`, `own-downline`) is `COACH`: everybody the caller coaches;
+   * - the office's own (`own-kpm`, `all`) is the office for a write, and the caller's own downline for the
+   *   unit they head, as an Owner who is also the root AB heads the whole office (roles §1.1);
+   * - `own` alone is the caller and nobody below them — an empty unit, never a fallback to `COACH`;
+   * - no grant is nobody at all.
+   *
+   * A unit of one is nobody's unit, so on a wider grant the caller names themselves only while somebody is
+   * below them (ADR-0087: a leader is anyone with a direct report).
+   */
+  async unitOf(ctx: RequestContext, permission: Permission): Promise<ReachedUnit> {
+    const me = requireMembership(ctx);
+    const scope = scopeFor(ctx, permission);
+    if (scope === null || scope === 'own') return { office: false, below: [], self: scope === 'own' };
+    const below = await this.coacheesOf(ctx, me);
+    const office = scope === 'own-kpm' || scope === 'all';
+    return { office, below, self: office || below.length > 0 };
   }
 
   /**

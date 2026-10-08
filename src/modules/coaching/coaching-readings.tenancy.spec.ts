@@ -186,4 +186,84 @@ describe('the coaching metrics (P11-T5 AC-8)', () => {
       expect((await recency()).get(RINA)).toMatchObject({ daysSinceLastCoaching: 31, coached30d: false });
     });
   });
+
+  describe('OD-140 — the next open action item of the latest 1:1, typed or from a lead (ADR-0124)', () => {
+    const item = (text: string, dueDate: string | null) => ({ itemId: text, text, dueDate, carriedFromItemId: null });
+    const leadAction = (leadName: string, dueDate: string) => ({ leadId: `l-${leadName}`, leadName, dueDate, text: `Call ${leadName}` });
+    /** The follow-ups for the coachees' latest 1:1s, as the Unit Dashboard asks for them. */
+    const followUps = async (ids: string[] = [RINA, BUDI], ctx = leader(), leadsShown = (_: string) => true) => {
+      const office = await days.office(ctx);
+      const latest = await wired.coachingReadings.recencyOf(ctx, ids, office);
+      return wired.coachingReadings.followUpsOf(
+        ctx, [...latest.values()].flatMap((r) => (r.last ? [r.last.sessionId] : [])), office, leadsShown,
+      );
+    };
+
+    it('P15-T2 AC-5 reads the latest finalized session only: an older one’s items and a draft’s are not follow-ups', async () => {
+      await session('2026-09-18', { actionItems: [item('Old item', '2026-09-20')] });
+      await session('2026-09-25', { actionItems: [item('Book two presentations', '2026-10-05'), item('   ', '2026-09-01')] });
+      await session(null, { actionItems: [item('A draft’s', '2026-09-01')] });
+
+      expect((await followUps()).get(RINA)).toEqual({ text: 'Book two presentations', dueDate: '2026-10-05', overdueDays: null });
+    });
+
+    it('P15-T2 AC-5 a lead action the session froze is a candidate too, and the earlier due date wins', async () => {
+      await session('2026-09-25', {
+        actionItems: [item('Practise the objection', '2026-09-30')],
+        leadActions: [leadAction('Pak Hendro', '2026-09-28')],
+      });
+      // Due on the 28th, four office days before the 2nd: Overdue 4d.
+      expect((await followUps()).get(RINA)).toEqual({ text: 'Call Pak Hendro', dueDate: '2026-09-28', overdueDays: 4 });
+    });
+
+    it('Phase 15 exit B1: to a reader who may not read the coachee’s leads, no lead action and no item carried from a lead', async () => {
+      await session('2026-09-25', {
+        actionItems: [
+          { itemId: 'c1', text: 'Note from Pak Hendro’s lead', dueDate: '2026-09-26', carriedFromItemId: 'lead-abc' },
+          item('Typed, later', '2026-10-04'),
+        ],
+        leadActions: [leadAction('Pak Hendro', '2026-09-27')],
+      });
+      const asked: string[] = [];
+      const hidden = await followUps([RINA], leader(), (id) => { asked.push(id); return false; });
+      expect(hidden.get(RINA)).toEqual({ text: 'Typed, later', dueDate: '2026-10-04', overdueDays: null });
+      expect(JSON.stringify([...hidden])).not.toMatch(/Hendro/);
+      expect(asked).toEqual([RINA]);
+      // The same session, to a reader who may: the carried item, earliest.
+      expect((await followUps([RINA])).get(RINA)?.text).toBe('Note from Pak Hendro’s lead');
+    });
+
+    it('P15-T2 AC-5 on the same due date the typed item comes before the lead action', async () => {
+      await session('2026-09-25', {
+        actionItems: [item('Typed', '2026-09-28')],
+        leadActions: [leadAction('Ibu Wulan', '2026-09-28')],
+      });
+      expect((await followUps()).get(RINA)?.text).toBe('Typed');
+    });
+
+    it('P15-T2 AC-5 a reopened session counts as the version it was finalized at, not the correction in progress', async () => {
+      await session('2026-09-27', {
+        status: 'reopened', version: 4,
+        actionItems: [item('Being rewritten', '2026-09-01')], leadActions: [],
+        corrections: [{
+          version: 3, lastWeekItems: [], tips: [],
+          actionItems: [item('As finalized', '2026-10-09')], leadActions: [leadAction('Ibu Kartika', '2026-10-10')],
+          finalizedAt: new Date('2026-09-27T03:00:00Z'), finalizedByMembershipId: AB,
+          at: new Date('2026-10-01T03:00:00Z'), byMembershipId: AB, reason: 'The wrong lead was on it.',
+        }],
+      });
+      expect((await followUps()).get(RINA)).toEqual({ text: 'As finalized', dueDate: '2026-10-09', overdueDays: null });
+    });
+
+    it('P15-T2 AC-5 nobody coached, a session with nothing to follow up, or no session asked about: no entry', async () => {
+      await session('2026-09-25', { actionItems: [], leadActions: [] });
+      expect([...(await followUps()).keys()]).toEqual([]);
+      expect(await wired.coachingReadings.followUpsOf(leader(), [], await days.office(leader()), () => true)).toEqual(new Map());
+    });
+
+    it('P15-T2 AC-5 another office’s session is never read, though its id is asked for', async () => {
+      const theirs = await session('2026-09-25', { actionItems: [item('Theirs', '2026-09-26')] }, leader(KPM_B));
+      expect(await wired.coachingReadings.followUpsOf(leader(), [String(theirs._id)], await days.office(leader()), () => true)).toEqual(new Map());
+    });
+  });
 });

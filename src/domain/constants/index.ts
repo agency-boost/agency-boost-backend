@@ -334,6 +334,13 @@ export {
 export { ASSET_LIMITS } from './assets';
 export { PRODUCTION, PRODUCTION_UPLOAD } from './production';
 
+// Phase 15: the Unit Dashboard's periods, its save's bound, and the reason a leader's correction carries.
+export {
+  UNIT_DASHBOARD,
+  UNIT_DASHBOARD_CORRECTION_REASON,
+  type UnitDashboardPeriod,
+} from './unit-dashboard';
+
 export {
   EVENT_ISSUERS,
   type EventIssuer,

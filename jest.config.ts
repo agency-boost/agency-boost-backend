@@ -182,6 +182,13 @@ const config: Config = {
     './src/modules/calendar/calendar-view.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/calendar/calendar.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/calendar/calendar-event.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    /*
+     * Phase 15: the Unit Dashboard — who reads which unit, every row's figures and the totals, and a leader's
+     * corrections. Business rules, so the domain floor at least (raised from 90 at the exit review, S3): its
+     * defensive reads — a rung the ladder does not name, a membership nobody can name, an office with no
+     * company — each have a test, and the reach it reads is `CoachResolver.unitOf`'s, pinned at 100 there.
+     */
+    './src/modules/unit-dashboard/': { lines: 98, branches: 95, functions: 95, statements: 98 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],

@@ -65,6 +65,7 @@ import { seedSubscriptionFixture } from './subscription-fixture';
 import { seedTemplateFixture } from './template-fixture';
 import { seedTemplateCopyFixture } from './template-copy-fixture';
 import { seedSalesToolsFixture } from './sales-tools-fixture';
+import { seedUnitDashboardFixture } from './unit-dashboard-fixture';
 import { LONG_PIPELINE } from './long-pipeline';
 import {
   ActivationProgress, ActivationProgressSchema,
@@ -2241,6 +2242,13 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     ownerUserId: String(ownerUser._id), superAdminUserId: String(superAdmin._id),
   });
 
+  // ------------------- the Unit Dashboard: Indah's nomination, Sari's correction (Phase 15; `unit-dashboard-fixture.ts`)
+
+  const unitDashboard = await seedUnitDashboardFixture({
+    clock, kpm0417: id0417, indah: cast.indah.id, budi: budi.id,
+    sari: { membershipId: sari.id, userId: String(sariUser._id) },
+  });
+
   // ------------------------------------------------- offices asking to exist
 
   /**
@@ -3134,7 +3142,7 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
 
   KPM 0999 · Suspended Branch
     owner@kpm0999.test                                 Signing in shows the page: the office is suspended
-${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guide}
+${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guide}${unitDashboard.guide}
   NO OFFICE
     newcomer@agencyboost.test                          Brand new — starts at Register KPM
 

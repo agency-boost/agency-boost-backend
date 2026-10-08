@@ -29,6 +29,10 @@ import type {
   CoachingSessionDocument, CoachingSessionStatus, CoachingSnapshot, CoachingTip,
 } from './coaching-session.schema';
 import { CoachingSnapshotBuilder } from './coaching-snapshot';
+import { knowsTheLeads, leadsReached, shownActionItems, shownLastWeekItems } from './lead-visibility';
+
+// Where every coaching reader found them before Phase 15 moved them to a module of their own.
+export { shownActionItems, shownLastWeekItems };
 
 /** A member, by the membership that identifies them. `name` is empty when it can no longer be named. */
 export interface SessionPerson {
@@ -195,28 +199,14 @@ export function readsFinalized(standing: Standing): boolean {
  * coachee: `coaching_session:read` reaches the office for them, `lead:read` does not.
  *
  * Such a reader reads the rest of the session — and the counts, which name no lead — but no lead action
- * and no item of last week's that came from a lead, its *Leads · {name}* tag with it.
+ * and no item of last week's that came from a lead, its *Leads · {name}* tag with it. The rule's two halves
+ * live in `lead-visibility.ts`, which the Unit Dashboard's follow-up reads too (Phase 15).
  */
 export async function showsLeadsTo(
   coach: CoachResolver, ctx: RequestContext, session: CoachingSessionDocument, standing: Standing,
 ): Promise<boolean> {
-  if (standing.isCoach || standing.coachesNow || standing.isCoachee) return true;
-  const reach = await coach.reach(ctx, 'lead:read');
-  return reach === null || reach.includes(session.coacheeMembershipId);
-}
-
-/** Last week's items as this reader reads them: every one, or — without the coachee's leads — the typed ones. */
-export function shownLastWeekItems<T extends { leadId: string | null }>(items: readonly T[], leadsShown: boolean): T[] {
-  return leadsShown ? [...items] : items.filter((item) => !item.leadId);
-}
-
-/**
- * The typed items as this reader reads them. An item *Start* carried forward from a lead-derived item of
- * last week keeps that lead's note as its text (`carriedFromItemId: 'lead-…'`), so a reader without the
- * coachee's leads reads every typed item but those (roles §3.7, the exit review's B1 residue).
- */
-export function shownActionItems<T extends { carriedFromItemId: string | null }>(items: readonly T[], leadsShown: boolean): T[] {
-  return leadsShown ? [...items] : items.filter((item) => !item.carriedFromItemId?.startsWith('lead-'));
+  if (knowsTheLeads(standing)) return true;
+  return leadsReached(await coach.reach(ctx, 'lead:read'), session.coacheeMembershipId);
 }
 
 /**

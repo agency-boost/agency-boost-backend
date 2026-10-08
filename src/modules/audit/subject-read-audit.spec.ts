@@ -11,13 +11,19 @@ const leader = new RequestContext('u-leader', 'none', {
 /** An `AuditService` that keeps what it is handed, or refuses it. */
 function seam(record: (ctx: RequestContext, entry: AuditEntry) => Promise<void> = async () => undefined) {
   const recorded: { ctx: RequestContext; entry: AuditEntry }[] = [];
+  const inserts: AuditEntry[][] = [];
   const audit = {
     record: jest.fn(async (ctx: RequestContext, entry: AuditEntry) => {
       recorded.push({ ctx, entry });
       return record(ctx, entry);
     }),
+    // Phase 15: many entries, one insert — refused the way `record` is told to refuse.
+    recordMany: jest.fn(async (ctx: RequestContext, entries: AuditEntry[]) => {
+      inserts.push(entries);
+      for (const entry of entries) await record(ctx, entry);
+    }),
   };
-  return { reads: new SubjectReadAudit(audit as never), recorded, audit };
+  return { reads: new SubjectReadAudit(audit as never), recorded, audit, inserts };
 }
 
 /**
@@ -64,5 +70,46 @@ describe('SubjectReadAudit (P11-T3 AC-8)', () => {
       expect.objectContaining({ action: 'activity_log.read_raw', surface: 'compliance' }),
       'failed to write audit entry',
     );
+  });
+
+  describe('recordMany — one insert for a read of many members (Phase 15, D-audit)', () => {
+    const week = { from: '2026-09-08', to: '2026-09-14' } as const;
+
+    it('P15-T1 AC-7 writes one entry per member other than the reader, all in one insert', async () => {
+      const { reads, inserts, audit } = seam();
+
+      await reads.recordMany(
+        leader,
+        [{ membershipId: 'mem-leader' }, { membershipId: 'mem-a' }, { membershipId: 'mem-b' }, { membershipId: 'mem-a' }],
+        'unit_dashboard',
+        week,
+      );
+
+      expect(audit.recordMany).toHaveBeenCalledTimes(1);
+      expect(audit.record).not.toHaveBeenCalled();
+      expect(inserts[0]).toEqual(['mem-a', 'mem-b'].map((id) => ({
+        action: 'activity_log.read_raw', targetCollection: 'memberships', targetId: id, targetMembershipId: id,
+        after: { surface: 'unit_dashboard', ...week },
+      })));
+    });
+
+    it('P15-T1 AC-7 the reader’s own row alone writes nothing', async () => {
+      const { reads, audit } = seam();
+      await reads.recordMany(leader, [{ membershipId: 'mem-leader' }], 'unit_dashboard', week);
+      await reads.recordMany(leader, [], 'unit_dashboard', week);
+      expect(audit.recordMany).not.toHaveBeenCalled();
+    });
+
+    it('P15-T1 AC-7 D-failopen: entries that cannot be written fail open, logged at error level', async () => {
+      const { reads } = seam(async () => { throw new Error('write concern timed out'); });
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+      await expect(reads.recordMany(leader, [{ membershipId: 'mem-a' }], 'unit_dashboard', week)).resolves.toBeUndefined();
+
+      expect(logged).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'activity_log.read_raw', surface: 'unit_dashboard' }),
+        'failed to write audit entries',
+      );
+    });
   });
 });

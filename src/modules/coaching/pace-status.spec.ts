@@ -14,7 +14,7 @@ const goal = (over: Partial<GoalPlan> = {}): GoalPlan => ({
 } as GoalPlan);
 
 const held = (minor: number, month: string, provenance: HeldFigure['provenance'] = 'imported'): HeldFigure =>
-  ({ minor, month, provenance });
+  ({ minor, month, provenance, correctedBy: null, correctedAt: null });
 
 /** September: Rp 160 M through August, Rp 20 M of its own, Rp 180 M for the year so far. */
 const SEPTEMBER: MonthStanding = {

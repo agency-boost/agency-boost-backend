@@ -3,15 +3,13 @@ import type { LeadFlag } from '@/modules/leads/lead-attention';
 import type { OpenLead } from '@/modules/leads/lead-readings';
 import type { LeadType } from '@/modules/leads/lead.schema';
 import { INSIGHT_RULES, type Insight, type InsightKind, type InsightRule } from './insights';
+import { FigureSourceDto } from './figure-source.dto';
 import type { FigureSource, SummaryActivity, SummaryView } from './summary.service';
+
+export { FigureSourceDto };
 import type { ActivityTarget, ActivityTargetKey, Pace, PeriodFigures, SectionChip } from './summary-figures';
 
 /** Declared for OpenAPI. The wire shapes live on `SummaryService`'s view types. */
-
-export class FigureSourceDto implements FigureSource {
-  @ApiProperty({ enum: ['imported', 'corrected', 'self_reported'] }) provenance!: 'imported' | 'corrected' | 'self_reported';
-  @ApiProperty({ type: String, nullable: true, example: '2026-09' }) month!: string | null;
-}
 
 class PeriodFiguresDto implements PeriodFigures {
   @ApiProperty({ type: Number, nullable: true, description: 'IDR minor units. `null` without a goal.' }) targetMinor!: number | null;

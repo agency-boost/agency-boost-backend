@@ -8,20 +8,16 @@ import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { GoalService } from '@/modules/goals/goal.service';
 import { LeadReadings, type OpenLead } from '@/modules/leads/lead-readings';
 import { CoachResolver, type Subject } from '@/modules/org/coach-resolver';
+import { MemberNames } from '@/modules/org/member-names.service';
 import { ProductionReadings } from '@/modules/production/production-readings';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { insightsFor, type Insight } from './insights';
 import {
-  activityTargets, madeFigures, paceFor, periodFigures, sectionChips, summaryPlan, totalLogged,
-  type ActivityTarget, type Pace, type PeriodFigures, type SectionChip,
+  activityTargets, goalFigures, paceFor, sectionChips, totalLogged,
+  type ActivityTarget, type FigureSource, type Pace, type PeriodFigures, type SectionChip,
 } from './summary-figures';
 
-/** Where a production figure came from, said with it (ADR-0008, P9-T6). */
-export interface FigureSource {
-  provenance: 'imported' | 'corrected' | 'self_reported';
-  /** `YYYY-MM` — the month the figure is for, or whose year to date it is; `null` for the agent's own. */
-  month: string | null;
-}
+export type { FigureSource };
 
 /** *Your sales activity targets* for one period (P10-T5, ADR-0056). */
 export interface SummaryActivity {
@@ -101,6 +97,8 @@ export class SummaryService {
     // Whose Summary it is, and the record a read of somebody else's leaves (P11-T4).
     private readonly coach: CoachResolver,
     private readonly subjectReads: SubjectReadAudit,
+    // Who corrected a figure, by name (Phase 15): the source says so on every screen.
+    private readonly names: MemberNames,
   ) {}
 
   async read(ctx: RequestContext, forMembershipId?: string): Promise<SummaryView> {
@@ -122,13 +120,9 @@ export class SummaryService {
     const member = subject.membershipId;
     const day = await this.days.for(ctx);
     const year = day.today.slice(0, 4);
-    const monthNumber = Number(day.month.slice(5, 7));
-    const previous = monthNumber === 1 ? null : `${year}-${String(monthNumber - 1).padStart(2, '0')}`;
 
     // Resolved once, above, on this route's own permission: the plan is read for that member.
     const goal = await this.goals.planOf(ctx, year, member);
-    // An unsaved default is an offer, not a goal: the Summary measures nobody against a plan they never made.
-    const set = goal.savedAt !== null;
 
     /*
      * **Lead rows only to a reader who may read that member's leads** (roles §3.7: lead records are not
@@ -143,9 +137,13 @@ export class SummaryService {
     const yearWindow = { from: `${year}-01-01` as LocalDate, to: day.today };
     // The pace sentence's *tracking to close N* (ADR-0109): the office's last 30 days, today included.
     const paceWindow = rollingWindow(day.today, SUMMARY.PACE_WINDOW_DAYS);
-    const [through, thisMonth, counts, yearCounts, recentCounts, sections, openLeads, compliance, ratios] = await Promise.all([
-      previous ? this.production.apeYearToDateThrough(ctx, member, previous) : Promise.resolve(null),
-      this.production.apeForMonth(ctx, member, day.month),
+    const [ledgers, counts, yearCounts, recentCounts, sections, openLeads, compliance, ratios] = await Promise.all([
+      /*
+       * The year to date through last month, this month's own APE and the year's latest year to date, with
+       * who corrected each, in one read — the reading the Unit Dashboard makes for a whole unit (Phase 15),
+       * so the two answer by one rule.
+       */
+      this.production.ledgersFor(ctx, [member], day.month),
       this.activity.countsOver(ctx, member, monthWindow),
       this.activity.countsOver(ctx, member, yearWindow),
       this.activity.countsOver(ctx, member, paceWindow),
@@ -160,17 +158,17 @@ export class SummaryService {
      * **No target is no target**: a saved goal of zero — which the goal form allows — or one whose stored
      * assumptions cannot produce a plan measures nothing, and gets no pace against *a target of 0*. The
      * targets are `summaryPlan`'s, which `GET /activity/summary` pro-rates to the last 7 days (P11-T4).
+     *
+     * **One computation for the figures** (Phase 15, D-figures): `goalFigures`, which the Unit Dashboard
+     * runs over every row of a unit from the same readings fetched in bulk. An unsaved default is an offer,
+     * not a goal, and `set` says so: the Summary measures nobody against a plan they never made.
      */
-    const plan = summaryPlan({
-      goal, month: day.month, throughLastMonthMinor: through?.minor ?? null, thisMonthMinor: thisMonth?.minor ?? null,
-    });
-    const annual = plan.annualTargetMinor;
+    const { throughLastMonth, thisMonth, yearToDate } = ledgers.get(member)!.standing;
+    const correctors = [thisMonth?.correctedBy, yearToDate?.correctedBy].filter((id): id is string => Boolean(id));
+    const names = correctors.length ? await this.names.byMembershipId(ctx, correctors) : new Map<string, string>();
+    const figures = goalFigures({ goal, month: day.month, throughLastMonth, thisMonth, yearToDate, names });
+    const { plan, monthly, yearly } = figures;
     const monthlyTarget = plan.monthlyTargetMinor;
-    // A year made before this month began: the month needs nothing more (ADR-0047), which is not *no target*.
-    const monthly = monthlyTarget === 0
-      ? madeFigures(thisMonth?.minor ?? null)
-      : periodFigures(monthlyTarget, thisMonth?.minor ?? null, goal.caseSizeMinor);
-    const yearly = periodFigures(annual, goal.achieved.minor, goal.caseSizeMinor);
 
     /*
      * **The chips' targets are the cascade run on the Summary's own APE targets** (ADR-0056, P10-T5).
@@ -215,10 +213,10 @@ export class SummaryService {
       year,
       month: day.month,
       today: day.today,
-      goal: { set, savedAt: goal.savedAt },
-      caseSizeMinor: goal.caseSizeMinor,
-      monthly: { ...monthly, source: thisMonth ? { provenance: thisMonth.provenance, month: thisMonth.month } : null },
-      yearly: { ...yearly, source: { provenance: goal.achieved.provenance, month: goal.achieved.month } },
+      goal: { set: figures.set, savedAt: goal.savedAt },
+      caseSizeMinor: figures.caseSizeMinor,
+      monthly,
+      yearly,
       pace,
       activity: {
         monthly: activityFor(monthWindow, counts, monthlyCounts),

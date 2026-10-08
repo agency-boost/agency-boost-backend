@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import { MonthlyAgentDataRepository } from './monthly-agent-data.repository';
+import type { MetricValue, Provenance } from './monthly-agent-data.schema';
 
 /** A production figure the office holds, and which writer it came from. */
 export interface HeldFigure {
@@ -8,6 +9,13 @@ export interface HeldFigure {
   provenance: 'imported' | 'corrected';
   /** `YYYY-MM` — the month whose year-to-date figure this is. */
   month: string;
+  /**
+   * A correction's membership and moment — who put the figure there by hand, an Owner at the month table or a
+   * leader on the Unit Dashboard (Phase 15, ADR-0121) — so every screen showing it can say who. `null` for
+   * the file's own figure.
+   */
+  correctedBy: string | null;
+  correctedAt: Date | null;
 }
 
 /**
@@ -46,11 +54,7 @@ export class ProductionReadings {
       { sort: { month: -1 }, limit: 1 },
     );
     if (!row) return null;
-    return {
-      minor: row.apeYtd.value as number,
-      provenance: row.apeYtd.provenance === 'corrected' ? 'corrected' : 'imported',
-      month: row.month,
-    };
+    return heldOf(row.apeYtd, row.month);
   }
 
   /**
@@ -60,11 +64,7 @@ export class ProductionReadings {
   async apeForMonth(ctx: RequestContext, membershipId: string, month: string): Promise<HeldFigure | null> {
     const row = await this.data.findOne(ctx, { membershipId, month, 'apeMonthly.value': { $ne: null } });
     if (!row) return null;
-    return {
-      minor: row.apeMonthly.value as number,
-      provenance: row.apeMonthly.provenance === 'corrected' ? 'corrected' : 'imported',
-      month: row.month,
-    };
+    return heldOf(row.apeMonthly, row.month);
   }
 
   /**
@@ -79,9 +79,25 @@ export class ProductionReadings {
   async standingsFor(
     ctx: RequestContext, membershipIds: readonly string[], month: string,
   ): Promise<Map<string, MonthStanding>> {
-    const out = new Map<string, MonthStanding>(
-      membershipIds.map((id) => [id, { yearToDate: null, throughLastMonth: null, thisMonth: null }]),
-    );
+    const ledgers = await this.ledgersFor(ctx, membershipIds, month);
+    return new Map([...ledgers].map(([id, ledger]) => [id, ledger.standing]));
+  }
+
+  /**
+   * **`standingsFor`, with the month's two APE cells and who corrected the figures it reads** (Phase 15,
+   * D-figures, P15-T3): from **the same one query**, so the Unit Dashboard reads production once for its
+   * goal cells and its production cells alike. `standingsFor` is this, with the standing alone.
+   *
+   * The cells are read as the month table reads them (`readCell`): a figure, its provenance, and — for a
+   * correction — who made it and when; `null` is not zero.
+   */
+  async ledgersFor(
+    ctx: RequestContext, membershipIds: readonly string[], month: string,
+  ): Promise<Map<string, MonthLedger>> {
+    const out = new Map<string, MonthLedger>(membershipIds.map((id) => [id, {
+      standing: { yearToDate: null, throughLastMonth: null, thisMonth: null },
+      thisMonthCells: { monthly: readCell(undefined), ytd: readCell(undefined) },
+    }]));
     if (membershipIds.length === 0 || !/^\d{4}-\d{2}$/.test(month)) return out;
 
     const year = month.slice(0, 4);
@@ -97,18 +113,58 @@ export class ProductionReadings {
     // Newest month first, so the first held figure a member meets is the latest one.
     for (const row of rows) {
       // Every row read is one of the members asked about: the query names no one else.
-      const standing = out.get(row.membershipId) as MonthStanding;
+      const ledger = out.get(row.membershipId) as MonthLedger;
+      const standing = ledger.standing;
       // Both cells are required with a default, so a hydrated row always has them (`cell()` in the schema).
       if (row.apeYtd.value !== null) {
         standing.yearToDate ??= heldOf(row.apeYtd, row.month);
         if (previous !== null && row.month <= previous) standing.throughLastMonth ??= heldOf(row.apeYtd, row.month);
       }
-      if (row.month === month && row.apeMonthly.value !== null) {
-        standing.thisMonth = heldOf(row.apeMonthly, row.month);
+      if (row.month === month) {
+        if (row.apeMonthly.value !== null) standing.thisMonth = heldOf(row.apeMonthly, row.month);
+        ledger.thisMonthCells = { monthly: readCell(row.apeMonthly), ytd: readCell(row.apeYtd) };
       }
     }
     return out;
   }
+}
+
+/** One cell of the month table, as every reader of it reads it (P9-T6). */
+export interface ReadCell {
+  /** `null` is nothing held — *Not uploaded yet* — never zero. */
+  value: number | null;
+  provenance: Provenance | null;
+  /** A correction's membership and moment; `null` for every other cell. */
+  correctedBy: string | null;
+  correctedAt: Date | null;
+  reason: string | null;
+}
+
+/**
+ * **A stored cell as the month table reads it** (P9-T6 AC-1): nothing held and nobody decided it is empty,
+ * whatever the row says; a figure emptied **by hand** keeps `corrected` and who did it, with a `null`
+ * value — nothing is held, and the table can say who decided that. `ProductionService.readMonth` and the
+ * Unit Dashboard read every cell through here, so the two cannot answer differently (exit criterion 2).
+ */
+export function readCell(stored: MetricValue | null | undefined): ReadCell {
+  const corrected = stored?.provenance === 'corrected';
+  if (!stored || (stored.value === null && !corrected)) {
+    return { value: null, provenance: null, correctedBy: null, correctedAt: null, reason: null };
+  }
+  return {
+    value: stored.value,
+    provenance: stored.provenance,
+    correctedBy: corrected ? stored.correctedBy ?? null : null,
+    correctedAt: corrected ? stored.correctedAt ?? null : null,
+    reason: corrected ? stored.reason ?? null : null,
+  };
+}
+
+/** What a member's month stands on, with the month's two APE cells. */
+export interface MonthLedger {
+  standing: MonthStanding;
+  /** This month's `apeMonthly` and `apeYtd`, as the month table reads them. */
+  thisMonthCells: { monthly: ReadCell; ytd: ReadCell };
 }
 
 /** What a member's month stands on: the three held figures the Summary and the roster read. */
@@ -121,11 +177,14 @@ export interface MonthStanding {
   thisMonth: HeldFigure | null;
 }
 
-/** A stored figure, with the writer it came from. */
-function heldOf(cell: { value: number | null; provenance: string | null }, month: string): HeldFigure {
+/** A stored figure, with the writer it came from — and who corrected it, for a correction. */
+function heldOf(cell: MetricValue, month: string): HeldFigure {
+  const corrected = cell.provenance === 'corrected';
   return {
     minor: cell.value as number,
-    provenance: cell.provenance === 'corrected' ? 'corrected' : 'imported',
+    provenance: corrected ? 'corrected' : 'imported',
     month,
+    correctedBy: corrected ? cell.correctedBy ?? null : null,
+    correctedAt: corrected ? cell.correctedAt ?? null : null,
   };
 }

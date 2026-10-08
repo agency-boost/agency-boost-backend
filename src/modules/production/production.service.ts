@@ -26,6 +26,7 @@ import { type MonthState, ProductionMonths } from './production-months.service';
 import type { ReadUpload } from './production-preview';
 import { requireMonth, requireOffice } from './production-guards';
 import { orgTreeOrder } from './production-roster-order';
+import { readCell } from './production-readings';
 
 export { requireMonth, requireOffice };
 
@@ -341,17 +342,17 @@ function metricsOf(
  * always carries `value: null` at the least. An arm for it would be one nothing could ever take.
  */
 function cellOf(stored: MetricValue | undefined, names: ReadonlyMap<string, string>): MetricCell {
-  const corrected = stored?.provenance === 'corrected';
-  // Nothing held, and nobody decided it: empty. A figure emptied **by hand** is not this case.
-  if (!stored || (stored.value === null && !corrected)) return EMPTY;
+  // Nothing held, and nobody decided it: empty. A figure emptied **by hand** is not this case (`readCell`).
+  const cell = readCell(stored);
+  if (cell.value === null && cell.provenance !== 'corrected') return EMPTY;
   return {
-    value: stored.value,
-    provenance: stored.provenance,
-    correction: corrected
+    value: cell.value,
+    provenance: cell.provenance,
+    correction: cell.provenance === 'corrected'
       ? {
-        by: stored.correctedBy ? names.get(stored.correctedBy) || null : null,
-        at: stored.correctedAt ? stored.correctedAt.toISOString() : null,
-        reason: stored.reason ?? null,
+        by: cell.correctedBy ? names.get(cell.correctedBy) || null : null,
+        at: cell.correctedAt ? cell.correctedAt.toISOString() : null,
+        reason: cell.reason,
       }
       : null,
   };

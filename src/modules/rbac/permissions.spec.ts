@@ -867,6 +867,92 @@ describe('permission matrix', () => {
     });
   });
 
+  /*
+   * **The Unit Dashboard's permissions, a positive and a negative per role** (P15-T1 AC-1, P15-T3 AC-4), at
+   * the level `can()` decides them. Who is inside a grant — `COACH`, and 404 outside it — is the module's
+   * own specs' question (`unit-dashboard.int.spec.ts`, `unit-dashboard.tenancy.spec.ts`).
+   */
+  describe('Phase 15 — the Unit Dashboard (roles §3.8, functional/unit-dashboard.md *The permissions*)', () => {
+    const UNIT = ['unit_dashboard:read', 'unit_dashboard:update_production'] as const satisfies readonly Permission[];
+    const officeOnly = (over: Parameters<typeof ctx>[0]) => {
+      const base = ctx(over);
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: 'agent' });
+    };
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: officeOnly({ owner: true }),
+      KPM_ADMIN: officeOnly({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+    /** The widest scope each role holds (contract, roles §3.8). */
+    const EXPECTED: Record<(typeof UNIT)[number], Record<string, Scope | null>> = {
+      'unit_dashboard:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-downline', AAB: 'own-downline', AGENT: 'own-downline',
+      },
+      'unit_dashboard:update_production': {
+        SUPER_ADMIN: null, KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-downline', AAB: 'own-downline', AGENT: null,
+      },
+    };
+    const cells = UNIT.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P15-T1 AC-1, P15-T3 AC-4 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P15-T3 AC-4 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it.each(UNIT)('P15-T1 AC-1 negative: %s is refused to a removed or pending member', (permission) => {
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role, status }), permission)).toBe(false);
+      }
+    });
+
+    it('P15-T1 AC-1 a leader holds `own` beside `own-downline` on both, as two grants; the Agent both on the read and neither on the write', () => {
+      const has = (permission: Permission, grantee: typeof AB, scope: Scope) =>
+        (PERMISSIONS[permission] as readonly { grantee: unknown; scope: Scope }[])
+          .some((g) => g.grantee === grantee && g.scope === scope);
+      for (const grantee of [AB, AAB]) {
+        for (const permission of UNIT) {
+          expect([permission, has(permission, grantee, 'own'), has(permission, grantee, 'own-downline')]).toEqual([permission, true, true]);
+        }
+      }
+      // ADR-0087: an Agent with a direct report is a leader; COACH narrows the downline grant for one who is not.
+      expect([has('unit_dashboard:read', AGENT, 'own'), has('unit_dashboard:read', AGENT, 'own-downline')]).toEqual([true, true]);
+      expect([has('unit_dashboard:update_production', AGENT, 'own'), has('unit_dashboard:update_production', AGENT, 'own-downline')])
+        .toEqual([false, false]);
+      // `org_tree:drill_to_unit_dashboard` folds into the read (roles §3.4): a link, never a permission.
+      expect(Object.keys(PERMISSIONS)).not.toContain('org_tree:drill_to_unit_dashboard');
+    });
+
+    it('P15-T3 AC-4 the read is read-like and the save is not: a read-only support session reads and is refused the save', () => {
+      expect(UNIT.filter((p) => isReadLike(p))).toEqual(['unit_dashboard:read']);
+      const readOnly = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: true });
+      expect(can(readOnly, 'unit_dashboard:read')).toBe(true);
+      expect(can(readOnly, 'unit_dashboard:update_production')).toBe(false);
+      // Not blocked outright: an elevated session corrects as the member, both actors on the audit row.
+      const elevated = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: false });
+      expect(isBlockedWhileImpersonating('unit_dashboard:update_production')).toBe(false);
+      expect(can(elevated, 'unit_dashboard:update_production')).toBe(true);
+    });
+
+    it('P15-T1 AC-1 an Owner or Admin who also stands on a rung reads as the office, its widest grant (§1.1)', () => {
+      expect(scopeFor(ctx({ role: 'ab', owner: true }), 'unit_dashboard:read')).toBe('own-kpm');
+      expect(scopeFor(ctx({ role: 'agent', admin: true }), 'unit_dashboard:update_production')).toBe('own-kpm');
+    });
+  });
+
   describe('Phase 14 — the sales tools (roles §3.10)', () => {
     it('P14 exit review N1: no attack_plan:* or sales_attack_plan:read permission exists (D-api, ADR-0117)', () => {
       expect(Object.keys(PERMISSIONS).filter((p) => p.startsWith('attack_plan:') || p === 'sales_attack_plan:read')).toEqual([]);

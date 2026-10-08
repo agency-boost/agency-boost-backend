@@ -47,6 +47,18 @@ function projectionOf(inputs: Record<string, unknown>): CascadeResult | null {
   }
 }
 
+/**
+ * **Which APE a plan is measured against** (P9-T6 AC-3): the office's year to date when it holds one,
+ * else the agent's own typed figure. One rule for `planOf`'s single read and `plansOf`'s bulk one.
+ */
+function achievedOf(
+  held: { minor: number; provenance: 'imported' | 'corrected'; month: string } | null, typed: number,
+): GoalAchieved {
+  return held
+    ? { minor: held.minor, provenance: held.provenance, month: held.month }
+    : { minor: typed, provenance: 'self_reported', month: null };
+}
+
 /** The inputs of a plan, current or replaced. One reader, so the two shapes cannot drift. */
 function inputsOf(plan: GoalRevisionInputs): GoalRevisionInputs {
   return {
@@ -264,10 +276,7 @@ export class GoalService {
   private async achievedFor(
     ctx: RequestContext, membershipId: string, period: string, typed: number,
   ): Promise<GoalAchieved> {
-    const held = await this.production.apeYearToDate(ctx, membershipId, period);
-    return held
-      ? { minor: held.minor, provenance: held.provenance, month: held.month }
-      : { minor: typed, provenance: 'self_reported', month: null };
+    return achievedOf(await this.production.apeYearToDate(ctx, membershipId, period), typed);
   }
 
   /**
@@ -441,6 +450,39 @@ export class GoalService {
     );
   }
 
+  /**
+   * **`planOf` for many members at once** (Phase 15, D-figures): what the Unit Dashboard's goal cells read
+   * for every row of a unit — each member's plan, or the office's defaults where they hold none, measured
+   * against the year to date the office holds for them — **by the same `view` and the same defaults** as
+   * `planOf`, from one read of the goals.
+   *
+   * `yearToDate` is each member's latest year-to-date figure for `period`, as `ProductionReadings` answers
+   * it in bulk (`ledgersFor`), so the caller reads production once for every figure it needs. Like `planOf`
+   * it checks nobody's reach: the caller resolved the members first. `measured` is `null` on every plan —
+   * it is the member's own read's alone (D-rates).
+   */
+  async plansOf(
+    ctx: RequestContext,
+    period: string,
+    membershipIds: readonly string[],
+    yearToDate: ReadonlyMap<string, { minor: number; provenance: 'imported' | 'corrected'; month: string } | null>,
+  ): Promise<Map<string, Omit<GoalView, 'id' | 'membershipId' | 'version'>>> {
+    const ids = [...new Set(membershipIds)];
+    if (ids.length === 0) return new Map();
+    const [day, goals] = await Promise.all([
+      this.days.for(ctx),
+      this.goals.find(ctx, { membershipId: { $in: ids }, period }),
+    ]);
+    const byMember = new Map(goals.map((goal) => [goal.membershipId, goal]));
+    return new Map(ids.map((id) => {
+      const goal = byMember.get(id);
+      const held = yearToDate.get(id) ?? null;
+      return [id, goal
+        ? this.view(goal, day, achievedOf(held, goal.apeAchievedMinor), null)
+        : this.defaultsView(period, day, achievedOf(held, 0), null)];
+    }));
+  }
+
   /** The caller's own goal for a period. 404 for another office's, never 403. */
   async read(ctx: RequestContext, period: string, forMembershipId?: string): Promise<GoalView> {
     const membershipId = await this.subject(ctx, forMembershipId, 'goal:read');
@@ -502,6 +544,13 @@ export class GoalService {
     const day = await this.days.for(ctx);
     // Nobody has typed anything yet, so the carrier's figure, if there is one, is the whole answer.
     const achieved = await this.achievedFor(ctx, membershipId, period, 0);
+    return this.defaultsView(period, day, achieved, await this.measuring(ctx, membershipId, day));
+  }
+
+  /** The defaults as a view, from what `defaults` read — and what `plansOf` read in bulk. */
+  private defaultsView(
+    period: string, day: OfficeDay, achieved: GoalAchieved, activity: ActivityWindow | null,
+  ): Omit<GoalView, 'id' | 'membershipId' | 'version'> {
     const inputs = {
       mode: 'direct' as const,
       annualApeTargetMinor: GOAL_DEFAULTS.ANNUAL_APE_TARGET_MINOR,
@@ -526,7 +575,7 @@ export class GoalService {
       snapshot: { ...EMPTY_SNAPSHOT },
       projected: computeCascade({ ...inputs, apeAchievedMinor: achieved.minor }),
       cascadeMapping: { ...CASCADE_ACTIVITY_CODES },
-      measured: this.measured(await this.measuring(ctx, membershipId, day), CASCADE_ACTIVITY_CODES),
+      measured: this.measured(activity, CASCADE_ACTIVITY_CODES),
       savedAt: null,
       savedByMembershipId: null,
     };

@@ -18,12 +18,14 @@ import { AuditService } from './audit.service';
  * `GET /new-hires/:membershipId`, a leader's or a coach's read of a hire's 90-day activation, once per read,
  * and `GET /new-hires`, once per hire the roster shows (P13-T5 AC-7, P13-T9 AC-5, D-audit);
  * `activity_dashboard`: `GET /activity/dashboard?for=`, coaching's *Activity* tab, a coachee's days over
- * the range read, once per read (P13.1-T9 AC-2). The action keeps its name on every one, so a single
+ * the range read, once per read (P13.1-T9 AC-2); `unit_dashboard`: `GET /unit/dashboard`, a leader's
+ * roster, once per member other than the reader whose figures it carries, the period's window as the
+ * range, all in one insert (Phase 15, D-audit). The action keeps its name on every one, so a single
  * query on `targetMembershipId` lists every disclosure of a member's data.
  */
 export type SubjectReadSurface =
   | 'log' | 'summary' | 'compliance' | 'personal_summary' | 'leads' | 'ratios' | 'coaching_session'
-  | 'coaching_session_print' | 'calendar' | 'activation' | 'activity_dashboard';
+  | 'coaching_session_print' | 'calendar' | 'activation' | 'activity_dashboard' | 'unit_dashboard';
 
 /** The action every subject read writes, whichever surface it came from. */
 export const SUBJECT_READ_ACTION = 'activity_log.read_raw';
@@ -70,6 +72,32 @@ export class SubjectReadAudit {
       });
     } catch (err) {
       this.logger.error({ err, action: SUBJECT_READ_ACTION, surface }, 'failed to write audit entry');
+    }
+  }
+
+  /**
+   * **One entry per subject, in one insert** (Phase 15, D-audit): `record`, for a read that discloses many
+   * members at once — the Unit Dashboard's roster. The same entry for each, the same self-read rule (the
+   * reader's own row writes nothing), and the same guarantee: it fails open.
+   */
+  async recordMany(
+    ctx: RequestContext,
+    subjects: readonly { membershipId: string }[],
+    surface: SubjectReadSurface,
+    range: { from: LocalDate | null; to: LocalDate },
+  ): Promise<void> {
+    const others = [...new Set(subjects.map((s) => s.membershipId))].filter((id) => id !== ctx.membershipId);
+    if (others.length === 0) return;
+    try {
+      await this.audit.recordMany(ctx, others.map((membershipId) => ({
+        action: SUBJECT_READ_ACTION,
+        targetCollection: 'memberships',
+        targetId: membershipId,
+        targetMembershipId: membershipId,
+        after: { surface, from: range.from, to: range.to },
+      })));
+    } catch (err) {
+      this.logger.error({ err, action: SUBJECT_READ_ACTION, surface }, 'failed to write audit entries');
     }
   }
 }

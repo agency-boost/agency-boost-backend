@@ -384,8 +384,10 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
       .filter((l) => KEYS.some((key) => ids[key] === l.ownerMembershipId));
     for (const key of KEYS) {
       const dated = promised.filter((l) => l.ownerMembershipId === ids[key] && l.nextActionDate !== null);
-      // Rina keeps the three Phase 7 promised her; everybody else holds exactly one.
-      expect({ key, dated: key === 'rina' ? dated.length >= 1 : dated.length === 1 }).toEqual({ key, dated: true });
+      // Rina keeps the three Phase 7 promised her; Indah a recruitment candidate besides (Phase 15,
+      // `unit-dashboard-fixture.ts`); everybody else holds exactly one.
+      const expected = key === 'indah' ? 2 : 1;
+      expect({ key, dated: key === 'rina' ? dated.length >= 1 : dated.length === expected }).toEqual({ key, dated: true });
     }
     const undated = promised.filter((l) => l.nextActionDate === null);
     expect(undated.map((l) => [l.name, l.ownerMembershipId])).toEqual([['Pak Fauzan Akbar', ids.siti]]);

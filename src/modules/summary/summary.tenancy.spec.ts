@@ -122,8 +122,47 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
     const view = await wired.summary.read(agent());
 
-    expect(view.monthly.source).toEqual({ provenance: 'corrected', month: '2026-09' });
-    expect(view.yearly.source).toEqual({ provenance: 'corrected', month: '2026-09' });
+    expect(view.monthly.source).toEqual({ provenance: 'corrected', month: '2026-09', correctedBy: null, correctedAt: null });
+    expect(view.yearly.source).toEqual({ provenance: 'corrected', month: '2026-09', correctedBy: null, correctedAt: null });
+  });
+
+  it('Phase 15 (OD-137, option 2): names who corrected each figure and when, from the cell it came from', async () => {
+    const db = mongoose.connection.db!;
+    const LEADER = '66f000000000000000000201';
+    const GONE = '66f000000000000000000299';
+    const userId = new mongoose.Types.ObjectId();
+    await db.collection('users').insertOne({ _id: userId, email: 's@k.test', fullName: 'Sari Puspita', deletedAt: null } as never);
+    await db.collection('memberships').insertOne({
+      _id: new mongoose.Types.ObjectId(LEADER), kpmId: KPM, userId: String(userId), status: 'active', deletedAt: null,
+    } as never);
+    await wired.goals.save(agent(), plan());
+    const by = (membershipId: string, at: string) => ({ correctedBy: membershipId, correctedAt: new Date(at), reason: 'From the report' });
+    await production('2026-09', {
+      apeMonthly: { ...cell(40 * M, 'corrected'), ...by(LEADER, '2026-09-13T04:00:00Z') },
+      // Corrected by somebody the office can no longer name: when, and not who.
+      apeYtd: { ...cell(90 * M, 'corrected'), ...by(GONE, '2026-09-12T04:00:00Z') },
+    });
+
+    const view = await wired.summary.read(agent());
+    expect(view.monthly.source).toEqual({
+      provenance: 'corrected', month: '2026-09',
+      correctedBy: { membershipId: LEADER, name: 'Sari Puspita' }, correctedAt: '2026-09-13T04:00:00.000Z',
+    });
+    expect(view.yearly.source).toEqual({
+      provenance: 'corrected', month: '2026-09', correctedBy: null, correctedAt: '2026-09-12T04:00:00.000Z',
+    });
+  });
+
+  it('Phase 15: the file’s figure and the agent’s own name nobody', async () => {
+    await wired.goals.save(agent(), plan({ apeAchievedMinor: 120 * M }));
+    let view = await wired.summary.read(agent());
+    expect(view.yearly.source).toEqual({ provenance: 'self_reported', month: null, correctedBy: null, correctedAt: null });
+    await production('2026-09', { apeMonthly: cell(40 * M), apeYtd: cell(90 * M) });
+    view = await wired.summary.read(agent());
+    expect([view.monthly.source, view.yearly.source]).toEqual([
+      { provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null },
+      { provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null },
+    ]);
   });
 
   it('AC-1: measures the year against the agent’s own figure until the office holds one (P9-T6)', async () => {
@@ -159,7 +198,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
     expect(view.monthly).toEqual({
       targetMinor: 0, actualMinor: 30 * M, attainmentPct: null, gapMinor: 0, overMinor: 30 * M, policiesNeeded: 0,
-      targetMet: true, source: { provenance: 'imported', month: '2026-09' },
+      targetMet: true, source: { provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null },
     });
     expect(view.pace).toMatchObject({ targetMet: true, neededPerWeek: 0 });
   });

@@ -210,15 +210,24 @@ describe('the metric registry (P4-T4)', () => {
       EVENT_ATTENDANCE_STATUS: { from: 14, to: 18.5 },
       CAMPAIGN_QUALIFICATION_STATUS: { from: 14, to: 18.5 },
     };
+    /**
+     * P15-T0 (D-metrics), the same day: the Unit Dashboard draws neither unit rollup, so both move to the
+     * Owner's reporting, whose screens draw them (`KPM_Owner.html:1248`, `:982-985`).
+     */
+    const MOVED_BY_P15: Record<string, { from: number; to: number }> = {
+      MAA_COUNT_IN_UNIT: { from: 15, to: 18 },
+      ACTIVITY_COMPLIANCE_RATE: { from: 15, to: 18 },
+    };
     /** Campaign evaluation under the 2026-09-29 plan; 18.5 since 2026-10-08 (P18.5-T7, P18.5-T8). */
     const SEPT_29_CAMPAIGN_EVALUATION_PHASE = 14;
-    /** A metric's phase under the 2026-09-29 plan: today's, with the 2026-10-08 move undone. */
-    const sept29Phase = (id: string): number => MOVED_2026_10_08[id]?.from ?? metric(id).phase;
+    /** A metric's phase under the 2026-09-29 plan: today's, with both of 2026-10-08's moves undone. */
+    const sept29Phase = (id: string): number =>
+      MOVED_2026_10_08[id]?.from ?? MOVED_BY_P15[id]?.from ?? metric(id).phase;
 
     const COACHING_SIX = [
       'COACHED_7D', 'COACHED_30D', 'DAYS_SINCE_LAST_COACHING', 'COACHING_COVERAGE', 'GOAL_PACE_STATUS', 'PACING_TO_MAA',
     ];
-    /** The unit rollups (15) and the Owner's reporting metrics (18). */
+    /** The unit rollups (15 under that plan, 18 since P15-T0) and the Owner's reporting metrics (18). */
     const ROLLUPS_AND_REPORTING = [
       'MAA_COUNT_IN_UNIT', 'ACTIVITY_COMPLIANCE_RATE', 'LEADER_COACHING_FREQUENCY',
       'EVENT_ATTENDANCE_RATE', 'EVENT_NPS', 'MOC_STATUS', 'PRODUCTION_CLUB_TIER',
@@ -235,6 +244,12 @@ describe('the metric registry (P4-T4)', () => {
       CLOSINGS_LAST_30_DAYS: 13.1,
       // P13.2-T4 (ADR-0113): the office's leaders, which its leader limit bounds.
       LEADERS_USED: 13.2,
+      // P15-T1 (D-leads, D-metrics): the Unit Dashboard's roster.
+      OPEN_SALES_LEADS: 15,
+      SALES_LEADS_CLOSING_THIS_MONTH: 15,
+      RECRUITMENT_NOMINATED_THIS_MONTH: 15,
+      POTENTIAL_MAA_COUNT_IN_UNIT: 15,
+      CASCADE_ACTIVITY_TOUCHES: 15,
     };
     const existedBefore = (id: string) => !(id in REGISTERED_SINCE);
 
@@ -306,7 +321,8 @@ describe('the metric registry (P4-T4)', () => {
       // The unit rollups (15) and the Owner's reporting metrics (18): refused before the move,
       // refused after it. `campaign.tenancy.spec.ts` proved it through the service for EVENT_NPS
       // until the 2026-10-08 re-plan put campaign evaluation after both (below).
-      expect(METRIC_IDS.filter((id) => sept29Phase(id) > SEPT_29_CAMPAIGN_EVALUATION_PHASE).sort())
+      // The Unit Dashboard's five, registered since, were not in that plan at all.
+      expect(METRIC_IDS.filter((id) => sept29Phase(id) > SEPT_29_CAMPAIGN_EVALUATION_PHASE).filter(existedBefore).sort())
         .toEqual([...ROLLUPS_AND_REPORTING].sort());
     });
 
@@ -346,6 +362,9 @@ describe('the metric registry (P4-T4)', () => {
         // measured by then and is about an office, so it is no requirement (the last test here).
         expect(computableAt(CAMPAIGN_EVALUATION_PHASE, (id) => metric(id).phase)
           .filter((id) => id !== 'LEADERS_USED')).toEqual([
+          // P15-T1: the Unit Dashboard's five, measured before campaigns are evaluated.
+          'CASCADE_ACTIVITY_TOUCHES', 'OPEN_SALES_LEADS', 'POTENTIAL_MAA_COUNT_IN_UNIT',
+          'RECRUITMENT_NOMINATED_THIS_MONTH', 'SALES_LEADS_CLOSING_THIS_MONTH',
           'ACTIVATION_COMPLETION_PCT', 'ACTIVATION_DAY_INDEX',
           'ACTIVITY_COMPLIANCE_7D', 'ACTIVITY_COMPLIANCE_MONTH', 'ACTIVITY_COMPLIANCE_RATE',
           'ACTIVITY_TARGET_ATTAINMENT_PCT', 'ACTIVITY_TOTAL_BY_CATEGORY',
@@ -377,8 +396,9 @@ describe('the metric registry (P4-T4)', () => {
          * pass. The three enablement metrics moved with campaign evaluation, so they stay on the
          * same side. A renumbering that moved anything else across the line fails here by name.
          */
-        const before = computableAt(SEPT_29_CAMPAIGN_EVALUATION_PHASE, sept29Phase);
-        const after = computableAt(CAMPAIGN_EVALUATION_PHASE, (id) => metric(id).phase);
+        // Over the metrics both plans had: the Unit Dashboard's five are registered since (below).
+        const before = computableAt(SEPT_29_CAMPAIGN_EVALUATION_PHASE, sept29Phase).filter(existedBefore);
+        const after = computableAt(CAMPAIGN_EVALUATION_PHASE, (id) => metric(id).phase).filter(existedBefore);
 
         expect(after.filter((id) => !before.includes(id))).toEqual([...ROLLUPS_AND_REPORTING].sort());
         expect(before.filter((id) => !after.includes(id))).toEqual([]);
@@ -391,6 +411,41 @@ describe('the metric registry (P4-T4)', () => {
         expect(REQUIREMENT_METRICS.map((m) => m.key).sort())
           .toEqual(METRIC_IDS.filter((id) => id !== 'LEADERS_USED').sort());
       });
+    });
+  });
+
+  describe('P15-T1 AC-6 — the Unit Dashboard’s metrics, and the two rollups it does not draw (D-metrics)', () => {
+    const P15 = [
+      'OPEN_SALES_LEADS', 'SALES_LEADS_CLOSING_THIS_MONTH', 'RECRUITMENT_NOMINATED_THIS_MONTH',
+      'POTENTIAL_MAA_COUNT_IN_UNIT', 'CASCADE_ACTIVITY_TOUCHES',
+    ];
+
+    it('P15-T1 AC-6 registers the five the roster draws, each a count, Phase 15, and no threshold of its own', () => {
+      expect(METRIC_IDS.filter((id) => metric(id).phase === 15).sort()).toEqual([...P15].sort());
+      for (const id of P15) {
+        expect({ id, unit: metric(id).unit, threshold: metric(id).threshold }).toEqual({ id, unit: 'count', threshold: null });
+      }
+      expect(metric('OPEN_SALES_LEADS').period).toBe('POINT_IN_TIME');
+      // This office month's promises, and PACING_TO_MAA's month: the calendar month, whatever the toggle.
+      for (const id of ['SALES_LEADS_CLOSING_THIS_MONTH', 'RECRUITMENT_NOMINATED_THIS_MONTH', 'POTENTIAL_MAA_COUNT_IN_UNIT']) {
+        expect({ id, period: metric(id).period }).toEqual({ id, period: metric('PACING_TO_MAA').period });
+      }
+      expect(metric('CASCADE_ACTIVITY_TOUCHES').period).toBe('CALENDAR_MONTH');
+    });
+
+    it('P15-T1 AC-6 moves MAA_COUNT_IN_UNIT and ACTIVITY_COMPLIANCE_RATE from 15 to 18, still before campaigns', () => {
+      expect(metric('MAA_COUNT_IN_UNIT').phase).toBe(18);
+      expect(metric('ACTIVITY_COMPLIANCE_RATE').phase).toBe(18);
+      expect(metric('MAA_COUNT_IN_UNIT').phase).toBeLessThan(CAMPAIGN_EVALUATION_PHASE);
+      // So a requirement may still name both, and every one of the five.
+      for (const id of ['MAA_COUNT_IN_UNIT', 'ACTIVITY_COMPLIANCE_RATE', ...P15]) {
+        expect([id, REQUIREMENT_METRICS.some((m) => m.key === id)]).toEqual([id, true]);
+      }
+    });
+
+    it('P15-T1 AC-6 keeps the potential count apart from the active one: a projection is never MAA', () => {
+      expect(metric('POTENTIAL_MAA_COUNT_IN_UNIT').label).toMatch(/^Potential /);
+      expect(metric('POTENTIAL_MAA_COUNT_IN_UNIT').label).not.toBe(metric('MAA_COUNT_IN_UNIT').label);
     });
   });
 

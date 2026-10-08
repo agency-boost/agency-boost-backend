@@ -69,18 +69,18 @@ describe('production readings, for many members at once (P11-T6)', () => {
 
     for (const id of ids) expect({ id, standing: batch.get(id) }).toEqual({ id, standing: await single(id, '2026-09') });
     expect(batch.get(RINA)).toEqual({
-      yearToDate: { minor: 240 * M, provenance: 'imported', month: '2026-09' },
-      throughLastMonth: { minor: 160 * M, provenance: 'imported', month: '2026-08' },
-      thisMonth: { minor: 80 * M, provenance: 'imported', month: '2026-09' },
+      yearToDate: { minor: 240 * M, provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null },
+      throughLastMonth: { minor: 160 * M, provenance: 'imported', month: '2026-08', correctedBy: null, correctedAt: null },
+      thisMonth: { minor: 80 * M, provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null },
     });
   });
 
   it('P11-T6 AC-9 falls back past a year to date emptied by hand, and keeps a correction’s provenance', async () => {
     const budi = (await wired.productionReadings.standingsFor(owner(), [BUDI], '2026-09')).get(BUDI);
     expect(budi).toEqual({
-      yearToDate: { minor: 90 * M, provenance: 'corrected', month: '2026-08' },
-      throughLastMonth: { minor: 90 * M, provenance: 'corrected', month: '2026-08' },
-      thisMonth: { minor: 15 * M, provenance: 'imported', month: '2026-09' },
+      yearToDate: { minor: 90 * M, provenance: 'corrected', month: '2026-08', correctedBy: null, correctedAt: null },
+      throughLastMonth: { minor: 90 * M, provenance: 'corrected', month: '2026-08', correctedBy: null, correctedAt: null },
+      thisMonth: { minor: 15 * M, provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null },
     });
   });
 
@@ -94,12 +94,43 @@ describe('production readings, for many members at once (P11-T6)', () => {
     const august = await wired.productionReadings.standingsFor(owner(), [RINA, DEWI], '2026-08');
     expect(august.get(RINA)).toEqual(await single(RINA, '2026-08'));
     // Dewi's only figure is September's: nothing through July, and nothing of August's own.
-    expect(august.get(DEWI)).toEqual({ yearToDate: { minor: 50 * M, provenance: 'imported', month: '2026-09' }, throughLastMonth: null, thisMonth: null });
+    expect(august.get(DEWI)).toEqual({ yearToDate: { minor: 50 * M, provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null }, throughLastMonth: null, thisMonth: null });
+  });
+
+  it('Phase 15 ledgersFor: the same standing from the same read, the month’s two cells, and who corrected each figure', async () => {
+    const at = new Date('2026-09-10T04:00:00Z');
+    await mongoose.connection.db!.collection('monthlyAgentData').updateOne(
+      { kpmId: KPM_A, membershipId: RINA, month: '2026-09' },
+      { $set: { 'apeMonthly.provenance': 'corrected', 'apeMonthly.correctedBy': BUDI, 'apeMonthly.correctedAt': at, 'apeMonthly.reason': 'Report' } },
+    );
+    const ledgers = await wired.productionReadings.ledgersFor(owner(), [RINA, NOBODY], '2026-09');
+    const standings = await wired.productionReadings.standingsFor(owner(), [RINA, NOBODY], '2026-09');
+
+    expect(ledgers.get(RINA)!.standing).toEqual(standings.get(RINA));
+    expect(ledgers.get(RINA)!.standing.thisMonth).toEqual({
+      minor: 80 * M, provenance: 'corrected', month: '2026-09', correctedBy: BUDI, correctedAt: at,
+    });
+    expect(ledgers.get(RINA)!.thisMonthCells).toEqual({
+      monthly: { value: 80 * M, provenance: 'corrected', correctedBy: BUDI, correctedAt: at, reason: 'Report' },
+      ytd: { value: 240 * M, provenance: 'imported', correctedBy: null, correctedAt: null, reason: null },
+    });
+    // The single reading names the corrector too.
+    expect(await wired.productionReadings.apeForMonth(owner(), RINA, '2026-09')).toEqual(ledgers.get(RINA)!.standing.thisMonth);
+    // Nobody's row: nothing held, which is not zero.
+    expect(ledgers.get(NOBODY)).toEqual({
+      standing: { yearToDate: null, throughLastMonth: null, thisMonth: null },
+      thisMonthCells: {
+        monthly: { value: null, provenance: null, correctedBy: null, correctedAt: null, reason: null },
+        ytd: { value: null, provenance: null, correctedBy: null, correctedAt: null, reason: null },
+      },
+    });
+    expect(await wired.productionReadings.ledgersFor(owner(), [], '2026-09')).toEqual(new Map());
+    expect((await wired.productionReadings.ledgersFor(owner(), [RINA], 'soon')).get(RINA)!.standing.thisMonth).toBeNull();
   });
 
   it('P11-T6 AC-9 never reads another office’s figures, filed against the same membership', async () => {
     const asB = await wired.productionReadings.standingsFor(owner(KPM_B), [RINA], '2026-09');
-    expect(asB.get(RINA)?.thisMonth).toEqual({ minor: 999 * M, provenance: 'imported', month: '2026-09' });
+    expect(asB.get(RINA)?.thisMonth).toEqual({ minor: 999 * M, provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null });
     const asA = await wired.productionReadings.standingsFor(owner(), [RINA], '2026-09');
     expect(asA.get(RINA)?.thisMonth?.minor).toBe(80 * M);
   });

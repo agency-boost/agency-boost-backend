@@ -236,6 +236,8 @@ import { CalendarPeopleService } from '@/modules/calendar/calendar-people.servic
 import { CalendarLeave } from '@/modules/calendar/calendar-leave';
 import { CalendarController } from '@/modules/calendar/calendar.controller';
 import { RoleChangeService } from '@/modules/org/role-change.service';
+import { UnitDashboardController } from '@/modules/unit-dashboard/unit-dashboard.controller';
+import { UnitDashboardService } from '@/modules/unit-dashboard/unit-dashboard.service';
 
 @Module({
   imports: [
@@ -352,6 +354,8 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     NewHiresController,
     // P13.2-T2: the quote tool's price read; it stores nothing (ADR-0111).
     BillingController,
+    // Phase 15: a leader's unit, and *Update production*.
+    UnitDashboardController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -531,6 +535,11 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     { provide: ActivationNav, useExisting: ActivationProgressService },
     GroupService,
     AdminDelegationService,
+    /*
+     * Phase 15: the Unit Dashboard — one roster read through the readings the person's own screens use, and
+     * a leader's corrections through the month table's own function. No collection of its own.
+     */
+    UnitDashboardService,
   ],
   exports: [Clock, AuditService],
 })

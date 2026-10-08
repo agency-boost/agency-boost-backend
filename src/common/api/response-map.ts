@@ -71,6 +71,7 @@ import {
   ActivityDashboardDto, ActivityDayDto, ActivityRatiosDto, ActivitySummaryDto,
 } from '@/modules/activity/activity.response.dto';
 import { CoacheeDto, CoachingRosterDto } from '@/modules/coaching/coaching.response.dto';
+import { ProductionUpdatedDto, UnitDashboardDto } from '@/modules/unit-dashboard/unit-dashboard.response.dto';
 import {
   CoachingSessionDto, SessionDraftSavedDto, SessionHistoryDto,
 } from '@/modules/coaching/coaching-session.response.dto';
@@ -92,6 +93,9 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   ActivityController_dashboard: { type: ActivityDashboardDto },
   ActivityController_ratios: { type: ActivityRatiosDto },
   SummaryController_read: { type: SummaryDto },
+  // Phase 15: a leader's unit, and *Update production*.
+  UnitDashboardController_read: { type: UnitDashboardDto },
+  UnitDashboardController_updateProduction: { type: ProductionUpdatedDto },
   // P11-T6: the coaching roster. P11-T7: the person a coaching page opens on.
   CoachingController_coachees: { type: CoachingRosterDto },
   CoachingController_coachee: { type: CoacheeDto },
