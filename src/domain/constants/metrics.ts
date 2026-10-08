@@ -18,6 +18,11 @@
  * and pacing (P11-T5 to P11-T10) — is 11; the unit rollups (P15-T1) are 15. `registry.spec.ts`
  * pins every moved phase by key, so a number from the old plan cannot come back unnoticed.
  *
+ * *Amended 2026-10-08 (the re-plan that puts training, events and campaigns last):* the three
+ * enablement metrics — training completion, event attendance status and campaign qualification —
+ * moved from 14 to 18.5 (P18.5-T1, P18.5-T5, P18.5-T8; were P14-T1, P14-T3, P14-T6). Phase 14 is
+ * Sales tools now and computes none. `registry.spec.ts` pins this move by key too.
+ *
  * A campaign requirement or a qualification rule may only name a metric this product can compute
  * (ADR-0035). The prototype's requirements are display strings — *"Net APE ≥ Rp 600 juta"* — which
  * nothing can evaluate and nothing can refuse, so a campaign could promise a reward against a number
@@ -91,11 +96,11 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'SUB_PERIOD_ACTIVITY_TARGET', name: 'Activity target for the last 7 days, pro-rated', unit: 'count', phase: 11 },
   { key: 'ACTIVATION_COMPLETION_PCT', name: 'Activation completion', unit: 'percentage', phase: 13 },
   { key: 'ACTIVATION_DAY_INDEX', name: 'Activation day', unit: 'days', phase: 13 },
-  { key: 'TRAINING_COMPLETION_PCT', name: 'Training completion', unit: 'percentage', phase: 14 },
-  { key: 'EVENT_ATTENDANCE_STATUS', name: 'Event attendance status', unit: 'enum', phase: 14 },
+  { key: 'TRAINING_COMPLETION_PCT', name: 'Training completion', unit: 'percentage', phase: 18.5 },
+  { key: 'EVENT_ATTENDANCE_STATUS', name: 'Event attendance status', unit: 'enum', phase: 18.5 },
   { key: 'EVENT_ATTENDANCE_RATE', name: 'Event attendance rate', unit: 'percentage', phase: 18 },
   { key: 'EVENT_NPS', name: 'Event NPS', unit: 'score', phase: 18 },
-  { key: 'CAMPAIGN_QUALIFICATION_STATUS', name: 'Campaign qualification', unit: 'enum', phase: 14 },
+  { key: 'CAMPAIGN_QUALIFICATION_STATUS', name: 'Campaign qualification', unit: 'enum', phase: 18.5 },
   { key: 'MOC_STATUS', name: 'Maintenance of Contract', unit: 'boolean', phase: 18 },
   { key: 'PRODUCTION_CLUB_TIER', name: 'Production club tier', unit: 'enum', phase: 18 },
   // Computed since P7-T6, in `LeadService.summary` — the document's index said 14 (the old plan's
@@ -135,8 +140,17 @@ export const REQUIREMENT_METRICS: readonly MetricDefinition[] = METRIC_REGISTRY
  * campaign may require one. Nothing else changed sides: the unit rollups (15) and the Owner's
  * reporting metrics (18) were refused before and are refused still. `registry.spec.ts` pins both
  * sets by key, and the difference between them.
+ *
+ * *Amended 2026-10-08 (the re-plan that puts training, events and campaigns last):* **18.5 is
+ * Phase 18.5, campaigns (P18.5-T7, P18.5-T8; were P14-T5, P14-T6)**, which comes after the Unit
+ * Dashboard (15) and the Owner's reporting (18). The move has one behavioural consequence, decided
+ * and recorded with the re-plan: the unit rollups (15) and the Owner's reporting metrics (18) are
+ * now measured before campaigns are evaluated, so a campaign may require one of those seven, and no
+ * metric registered today is refused as not measured yet. The refusal stays for a metric registered
+ * after campaign evaluation. `LEADERS_USED` stays out of every requirement: it is `requirable: false`
+ * whatever its phase. `registry.spec.ts` pins the new set by key, and the difference from the old.
  */
-export const CAMPAIGN_EVALUATION_PHASE = 14;
+export const CAMPAIGN_EVALUATION_PHASE = 18.5;
 
 /** How a requirement compares. */
 export const REQUIREMENT_COMPARATORS = ['gte', 'gt', 'lte', 'lt', 'eq'] as const;

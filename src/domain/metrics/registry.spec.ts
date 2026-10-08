@@ -156,13 +156,19 @@ describe('the metric registry (P4-T4)', () => {
     });
   });
 
-  describe('P10.1-T2 AC-6, AC-7 — the phases are the current plan’s, and what the move changed', () => {
+  describe('P10.1-T2 AC-6, AC-7 — the phases are the current plan’s, and what each move changed', () => {
     /*
      * The 2026-09-29 re-plan moved the old Phases 11–15 to 13, 14, 15, 18 and 19 and brought
      * coaching forward to 11 (`roadmap-and-phases.md`, *The 2026-09-29 re-plan*). `metrics.ts`
      * carried the old numbers until 2026-10-01. This is the crosswalk as applied, by key, so a
      * number from the old plan put back fails here by name rather than as a diff in a 47-row index.
      * Old 13 split by the task that first computes each metric.
+     *
+     * *Amended 2026-10-08:* that day's re-plan put training, events and campaigns last, in a new
+     * Phase 18.5, and moved four numbers a second time: the three enablement metrics and campaign
+     * evaluation, 14 → 18.5. The tests of the first move read the 2026-09-29 plan's phases — today's,
+     * with `MOVED_2026_10_08` undone — so they still say what that move did. The block at the end
+     * pins the second move, and the line campaigns are evaluated at today.
      */
     const MOVED: Record<string, { from: number; to: number }> = {
       // Coaching's six → 11: the session metrics (P11-T5, P11-T8), coverage (P11-T10), and the
@@ -179,22 +185,43 @@ describe('the metric registry (P4-T4)', () => {
       // Activation, 11 → 13 (P13-T1, P13-T2).
       ACTIVATION_COMPLETION_PCT: { from: 11, to: 13 },
       ACTIVATION_DAY_INDEX: { from: 11, to: 13 },
-      // Enablement, 12 → 14 (P14-T1, P14-T3, P14-T6).
+      // Enablement, 12 → 14 (then P14-T1, P14-T3, P14-T6; 18.5 since 2026-10-08, below).
       TRAINING_COMPLETION_PCT: { from: 12, to: 14 },
       EVENT_ATTENDANCE_STATUS: { from: 12, to: 14 },
       CAMPAIGN_QUALIFICATION_STATUS: { from: 12, to: 14 },
-      // Owner reporting, 14 → 18 (P18-T1 to P18-T3).
+      // Owner reporting, 14 → 18 (P18-T1 to P18-T3; P18-T3 is P18.5-T10 since 2026-10-08).
       LEADER_COACHING_FREQUENCY: { from: 14, to: 18 },
       EVENT_ATTENDANCE_RATE: { from: 14, to: 18 },
       EVENT_NPS: { from: 14, to: 18 },
       MOC_STATUS: { from: 14, to: 18 },
       PRODUCTION_CLUB_TIER: { from: 14, to: 18 },
     };
-    /** Campaigns were the old plan's Phase 12; they are 14 (P14-T5, P14-T6). */
+    /** Campaigns were the old plan's Phase 12; the 2026-09-29 plan made them 14 (then P14-T5, P14-T6). */
     const OLD_CAMPAIGN_EVALUATION_PHASE = 12;
+
+    /**
+     * The 2026-10-08 re-plan (`roadmap-and-phases.md`, *Amended 2026-10-08*): training, events and
+     * campaigns go last, at the product owner's priority. Phase 14 is Sales tools now, and the tasks
+     * that compute these are Phase 18.5's: P18.5-T1, P18.5-T5 and P18.5-T8 (were P14-T1, P14-T3,
+     * P14-T6).
+     */
+    const MOVED_2026_10_08: Record<string, { from: number; to: number }> = {
+      TRAINING_COMPLETION_PCT: { from: 14, to: 18.5 },
+      EVENT_ATTENDANCE_STATUS: { from: 14, to: 18.5 },
+      CAMPAIGN_QUALIFICATION_STATUS: { from: 14, to: 18.5 },
+    };
+    /** Campaign evaluation under the 2026-09-29 plan; 18.5 since 2026-10-08 (P18.5-T7, P18.5-T8). */
+    const SEPT_29_CAMPAIGN_EVALUATION_PHASE = 14;
+    /** A metric's phase under the 2026-09-29 plan: today's, with the 2026-10-08 move undone. */
+    const sept29Phase = (id: string): number => MOVED_2026_10_08[id]?.from ?? metric(id).phase;
 
     const COACHING_SIX = [
       'COACHED_7D', 'COACHED_30D', 'DAYS_SINCE_LAST_COACHING', 'COACHING_COVERAGE', 'GOAL_PACE_STATUS', 'PACING_TO_MAA',
+    ];
+    /** The unit rollups (15) and the Owner's reporting metrics (18). */
+    const ROLLUPS_AND_REPORTING = [
+      'MAA_COUNT_IN_UNIT', 'ACTIVITY_COMPLIANCE_RATE', 'LEADER_COACHING_FREQUENCY',
+      'EVENT_ATTENDANCE_RATE', 'EVENT_NPS', 'MOC_STATUS', 'PRODUCTION_CLUB_TIER',
     ];
 
     /**
@@ -215,9 +242,26 @@ describe('the metric registry (P4-T4)', () => {
     const computableAt = (evaluationPhase: number, phaseOf: (id: string) => number): string[] =>
       METRIC_IDS.filter((id) => phaseOf(id) <= evaluationPhase).sort();
 
+    /** What the 2026-09-29 plan's campaign evaluation could read: 41 metrics, Leaders used aside. */
+    const SEPT_29_COMPUTED = [
+      'ACTIVATION_COMPLETION_PCT', 'ACTIVATION_DAY_INDEX',
+      'ACTIVITY_COMPLIANCE_7D', 'ACTIVITY_COMPLIANCE_MONTH', 'ACTIVITY_TARGET_ATTAINMENT_PCT', 'ACTIVITY_TOTAL_BY_CATEGORY',
+      'APE_ACHIEVED', 'APE_ATTAINMENT_PCT', 'APE_GAP_TO_TARGET', 'APE_TARGET', 'APPOINTMENT_TARGET',
+      'CAMPAIGN_QUALIFICATION_STATUS', 'CLOSINGS_NEEDED_PER_WEEK',
+      'COACHED_30D', 'COACHED_7D', 'COACHING_COVERAGE', 'DAYS_SINCE_LAST_COACHING',
+      'EVENT_ATTENDANCE_STATUS', 'GOAL_PACE_STATUS',
+      'LEADS_PER_ACTIVITY', 'LEAD_TARGET',
+      'MEASURED_CLOSING_RATE', 'MEASURED_LEAD_TO_APPOINTMENT_RATE', 'MEETING_PER_APPROACH',
+      'MONTHLY_ACTIVE_AGENT', 'MONTHLY_APE_TARGET', 'MONTHS_LEFT_IN_YEAR', 'NEW_ACTIVE_AGENTS',
+      'PACING_TO_MAA', 'POLICIES_NEEDED', 'POLICY_COUNT_TARGET', 'CLOSINGS_LAST_30_DAYS',
+      'RECRUITMENT_EXPECTED_TO_CLOSE', 'RECRUITMENT_PIPELINE_NOW', 'RECRUITMENT_SUCCESS_RATE', 'ROLLING_PERSISTENCY',
+      'SELLING_RECRUITMENT_BALANCE', 'SELLING_SUCCESS_RATE', 'SUB_PERIOD_ACTIVITY_TARGET', 'SUMMARY_ACTIVITY_TARGET',
+      'TRAINING_COMPLETION_PCT',
+    ];
+
     it('moved every deferred metric by the crosswalk, and nothing that had shipped', () => {
       for (const [id, { to }] of Object.entries(MOVED)) {
-        expect({ id, phase: metric(id).phase }).toEqual({ id, phase: to });
+        expect({ id, phase: sept29Phase(id) }).toEqual({ id, phase: to });
       }
       // Nothing that shipped reopens: what Phases 4–10 computed keeps its number.
       for (const id of METRIC_IDS.filter((id) => !(id in MOVED) && existedBefore(id))) {
@@ -227,36 +271,25 @@ describe('the metric registry (P4-T4)', () => {
       for (const [id, phase] of Object.entries(REGISTERED_SINCE)) {
         expect({ id, phase: metric(id).phase }).toEqual({ id, phase });
       }
-      // And no phase the plan gives no metric to: an old-plan 12 left behind would now read as
-      // Calendar's, 16 is Billing, 17 Recruitment tools, 19 go-live.
-      const phases = [...new Set(METRIC_IDS.map((id) => metric(id).phase))].sort((a, b) => a - b);
+      // And no phase that plan gave no metric to: an old-plan 12 left behind would have read as
+      // Calendar's, 16 was Billing, 17 Recruitment tools, 19 go-live. Today's set is pinned below.
+      const phases = [...new Set(METRIC_IDS.map(sept29Phase))].sort((a, b) => a - b);
       expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 14, 15, 18]);
     });
 
-    it('evaluates campaigns in Phase 14, the old plan’s 12', () => {
-      expect(CAMPAIGN_EVALUATION_PHASE).toBe(14);
+    it('evaluated campaigns in Phase 14 under that plan, the old plan’s 12: where campaign qualification is computed', () => {
+      // Campaigns are evaluated by the task that computes their qualification, under every plan.
+      expect(sept29Phase('CAMPAIGN_QUALIFICATION_STATUS')).toBe(SEPT_29_CAMPAIGN_EVALUATION_PHASE);
+      expect(MOVED.CAMPAIGN_QUALIFICATION_STATUS.from).toBe(OLD_CAMPAIGN_EVALUATION_PHASE);
     });
 
-    it('pins, by key, every metric measured by the time a campaign is evaluated', () => {
-      // `GET /metrics` serves this comparison as `computed`, and `checkCampaign` refuses its
-      // complement — so this list is what an Owner may build a campaign on. Leaders used is
-      // measured by then and is about an office, so it is no requirement (the test after next).
-      expect(computableAt(CAMPAIGN_EVALUATION_PHASE, (id) => metric(id).phase)
-        .filter((id) => id !== 'LEADERS_USED')).toEqual([
-        'ACTIVATION_COMPLETION_PCT', 'ACTIVATION_DAY_INDEX',
-        'ACTIVITY_COMPLIANCE_7D', 'ACTIVITY_COMPLIANCE_MONTH', 'ACTIVITY_TARGET_ATTAINMENT_PCT', 'ACTIVITY_TOTAL_BY_CATEGORY',
-        'APE_ACHIEVED', 'APE_ATTAINMENT_PCT', 'APE_GAP_TO_TARGET', 'APE_TARGET', 'APPOINTMENT_TARGET',
-        'CAMPAIGN_QUALIFICATION_STATUS', 'CLOSINGS_NEEDED_PER_WEEK',
-        'COACHED_30D', 'COACHED_7D', 'COACHING_COVERAGE', 'DAYS_SINCE_LAST_COACHING',
-        'EVENT_ATTENDANCE_STATUS', 'GOAL_PACE_STATUS',
-        'LEADS_PER_ACTIVITY', 'LEAD_TARGET',
-        'MEASURED_CLOSING_RATE', 'MEASURED_LEAD_TO_APPOINTMENT_RATE', 'MEETING_PER_APPROACH',
-        'MONTHLY_ACTIVE_AGENT', 'MONTHLY_APE_TARGET', 'MONTHS_LEFT_IN_YEAR', 'NEW_ACTIVE_AGENTS',
-        'PACING_TO_MAA', 'POLICIES_NEEDED', 'POLICY_COUNT_TARGET', 'CLOSINGS_LAST_30_DAYS',
-        'RECRUITMENT_EXPECTED_TO_CLOSE', 'RECRUITMENT_PIPELINE_NOW', 'RECRUITMENT_SUCCESS_RATE', 'ROLLING_PERSISTENCY',
-        'SELLING_RECRUITMENT_BALANCE', 'SELLING_SUCCESS_RATE', 'SUB_PERIOD_ACTIVITY_TARGET', 'SUMMARY_ACTIVITY_TARGET',
-        'TRAINING_COMPLETION_PCT',
-      ].sort());
+    it('pinned, by key, every metric measured by the time a campaign was evaluated under that plan', () => {
+      // `GET /metrics` served this comparison as `computed`, and `checkCampaign` refused its
+      // complement — so this list was what an Owner could build a campaign on until 2026-10-08.
+      // Leaders used is measured by then and is about an office, so it is no requirement (the test
+      // after next).
+      expect(computableAt(SEPT_29_CAMPAIGN_EVALUATION_PHASE, sept29Phase)
+        .filter((id) => id !== 'LEADERS_USED')).toEqual([...SEPT_29_COMPUTED].sort());
     });
 
     it('P13.2-T4: keeps Leaders used, an office’s count, out of what a requirement may name', () => {
@@ -269,13 +302,12 @@ describe('the metric registry (P4-T4)', () => {
       expect(SERVED.filter((m) => !REQUIREMENT_METRICS.includes(m)).map((m) => m.key)).toEqual(['LEADERS_USED']);
     });
 
-    it('still refuses, by key, the seven nothing measures by then', () => {
+    it('refused, by key, the seven nothing measured by then under that plan', () => {
       // The unit rollups (15) and the Owner's reporting metrics (18): refused before the move,
-      // refused after it. `campaign.tenancy.spec.ts` proves it through the service for EVENT_NPS.
-      expect(METRIC_IDS.filter((id) => metric(id).phase > CAMPAIGN_EVALUATION_PHASE).sort()).toEqual([
-        'ACTIVITY_COMPLIANCE_RATE', 'EVENT_ATTENDANCE_RATE', 'EVENT_NPS', 'LEADER_COACHING_FREQUENCY',
-        'MAA_COUNT_IN_UNIT', 'MOC_STATUS', 'PRODUCTION_CLUB_TIER',
-      ].sort());
+      // refused after it. `campaign.tenancy.spec.ts` proved it through the service for EVENT_NPS
+      // until the 2026-10-08 re-plan put campaign evaluation after both (below).
+      expect(METRIC_IDS.filter((id) => sept29Phase(id) > SEPT_29_CAMPAIGN_EVALUATION_PHASE).sort())
+        .toEqual([...ROLLUPS_AND_REPORTING].sort());
     });
 
     it('changed that set in exactly one way, accepted: coaching precedes campaigns now, so a campaign may require a coaching metric (AC-7)', () => {
@@ -285,13 +317,80 @@ describe('the metric registry (P4-T4)', () => {
        * 14, and the six pass. Nothing else changes sides. A renumbering that moved anything else
        * across the line — or that put the six back — fails here by name.
        */
-      const before = computableAt(OLD_CAMPAIGN_EVALUATION_PHASE, (id) => MOVED[id]?.from ?? metric(id).phase)
+      const before = computableAt(OLD_CAMPAIGN_EVALUATION_PHASE, (id) => MOVED[id]?.from ?? sept29Phase(id))
         .filter(existedBefore);
-      const after = computableAt(CAMPAIGN_EVALUATION_PHASE, (id) => metric(id).phase).filter(existedBefore);
+      const after = computableAt(SEPT_29_CAMPAIGN_EVALUATION_PHASE, sept29Phase).filter(existedBefore);
 
       expect(after.filter((id) => !before.includes(id))).toEqual([...COACHING_SIX].sort());
       expect(before.filter((id) => !after.includes(id))).toEqual([]);
       expect(after.length).toBe(before.length + COACHING_SIX.length);
+    });
+
+    describe('the 2026-10-08 re-plan — training, events and campaigns go last', () => {
+      it('moved the three enablement metrics and campaign evaluation from 14 to 18.5', () => {
+        for (const [id, { to }] of Object.entries(MOVED_2026_10_08)) {
+          expect({ id, phase: metric(id).phase }).toEqual({ id, phase: to });
+        }
+        expect(CAMPAIGN_EVALUATION_PHASE).toBe(18.5);
+        // Still where campaign qualification is computed.
+        expect(metric('CAMPAIGN_QUALIFICATION_STATUS').phase).toBe(CAMPAIGN_EVALUATION_PHASE);
+        // And no phase the plan gives no metric to. Phase 14 is Sales tools now and computes none;
+        // 12 is Calendar's, 16 is retired, 17 Recruitment tools, 19 hardening.
+        const phases = [...new Set(METRIC_IDS.map((id) => metric(id).phase))].sort((a, b) => a - b);
+        expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 15, 18, 18.5]);
+      });
+
+      it('pins, by key, every metric measured by the time a campaign is evaluated: all of them', () => {
+        // `GET /metrics` serves this comparison as `computed`, and `checkCampaign` refuses its
+        // complement — so this list is what an Owner may build a campaign on. Leaders used is
+        // measured by then and is about an office, so it is no requirement (the last test here).
+        expect(computableAt(CAMPAIGN_EVALUATION_PHASE, (id) => metric(id).phase)
+          .filter((id) => id !== 'LEADERS_USED')).toEqual([
+          'ACTIVATION_COMPLETION_PCT', 'ACTIVATION_DAY_INDEX',
+          'ACTIVITY_COMPLIANCE_7D', 'ACTIVITY_COMPLIANCE_MONTH', 'ACTIVITY_COMPLIANCE_RATE',
+          'ACTIVITY_TARGET_ATTAINMENT_PCT', 'ACTIVITY_TOTAL_BY_CATEGORY',
+          'APE_ACHIEVED', 'APE_ATTAINMENT_PCT', 'APE_GAP_TO_TARGET', 'APE_TARGET', 'APPOINTMENT_TARGET',
+          'CAMPAIGN_QUALIFICATION_STATUS', 'CLOSINGS_LAST_30_DAYS', 'CLOSINGS_NEEDED_PER_WEEK',
+          'COACHED_30D', 'COACHED_7D', 'COACHING_COVERAGE', 'DAYS_SINCE_LAST_COACHING',
+          'EVENT_ATTENDANCE_RATE', 'EVENT_ATTENDANCE_STATUS', 'EVENT_NPS', 'GOAL_PACE_STATUS',
+          'LEADER_COACHING_FREQUENCY', 'LEADS_PER_ACTIVITY', 'LEAD_TARGET', 'MAA_COUNT_IN_UNIT',
+          'MEASURED_CLOSING_RATE', 'MEASURED_LEAD_TO_APPOINTMENT_RATE', 'MEETING_PER_APPROACH', 'MOC_STATUS',
+          'MONTHLY_ACTIVE_AGENT', 'MONTHLY_APE_TARGET', 'MONTHS_LEFT_IN_YEAR', 'NEW_ACTIVE_AGENTS',
+          'PACING_TO_MAA', 'POLICIES_NEEDED', 'POLICY_COUNT_TARGET', 'PRODUCTION_CLUB_TIER',
+          'RECRUITMENT_EXPECTED_TO_CLOSE', 'RECRUITMENT_PIPELINE_NOW', 'RECRUITMENT_SUCCESS_RATE', 'ROLLING_PERSISTENCY',
+          'SELLING_RECRUITMENT_BALANCE', 'SELLING_SUCCESS_RATE', 'SUB_PERIOD_ACTIVITY_TARGET', 'SUMMARY_ACTIVITY_TARGET',
+          'TRAINING_COMPLETION_PCT',
+        ].sort());
+      });
+
+      it('refuses none as not measured yet: no metric registered today is computed after campaign evaluation', () => {
+        // The refusal stays, for a metric registered later; `campaign-input.spec.ts` proves it
+        // with an evaluation placed earlier.
+        expect(METRIC_IDS.filter((id) => metric(id).phase > CAMPAIGN_EVALUATION_PHASE)).toEqual([]);
+      });
+
+      it('changed that set in exactly one way, decided: the unit rollups (15) and the Owner’s reporting metrics (18) precede campaigns now, so a campaign may require them', () => {
+        /*
+         * Decided with the re-plan, not inherited (`roadmap-and-phases.md`, *Amended 2026-10-08*).
+         * Under the 2026-09-29 plan campaigns were evaluated in 14, before the Unit Dashboard and
+         * the Owner's reporting, and those seven were refused; now campaigns are 18.5 and the seven
+         * pass. The three enablement metrics moved with campaign evaluation, so they stay on the
+         * same side. A renumbering that moved anything else across the line fails here by name.
+         */
+        const before = computableAt(SEPT_29_CAMPAIGN_EVALUATION_PHASE, sept29Phase);
+        const after = computableAt(CAMPAIGN_EVALUATION_PHASE, (id) => metric(id).phase);
+
+        expect(after.filter((id) => !before.includes(id))).toEqual([...ROLLUPS_AND_REPORTING].sort());
+        expect(before.filter((id) => !after.includes(id))).toEqual([]);
+        expect(after.length).toBe(before.length + ROLLUPS_AND_REPORTING.length);
+      });
+
+      it('keeps Leaders used out of every requirement although it is measured by then', () => {
+        // Its phase was never the reason: it is an office's count, `requirable: false`.
+        expect(computableAt(CAMPAIGN_EVALUATION_PHASE, (id) => metric(id).phase)).toContain('LEADERS_USED');
+        expect(REQUIREMENT_METRICS.map((m) => m.key).sort())
+          .toEqual(METRIC_IDS.filter((id) => id !== 'LEADERS_USED').sort());
+      });
     });
   });
 

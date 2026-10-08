@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { SEED_PRODUCTION_CLUB_TIERS } from '@/domain/constants';
+import * as metricsModule from '@/domain/constants/metrics';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 
@@ -52,6 +53,9 @@ describe('campaigns and carrier rules (P5-T7)', () => {
   });
 
   describe('a requirement names a metric this product can compute (AC-1)', () => {
+    // One test below moves `CAMPAIGN_EVALUATION_PHASE` with `replaceProperty`; this puts it back.
+    afterEach(() => jest.restoreAllMocks());
+
     it('takes one, and copies the unit from the registry rather than from the caller', async () => {
       const made = await wired.campaigns.create(member(KPM_A), aCampaign());
 
@@ -76,12 +80,22 @@ describe('campaigns and carrier rules (P5-T7)', () => {
     it('refuses a metric nothing measures yet, saying so and naming no phase', async () => {
       // Accepting it would be a campaign nobody could ever qualify for, failing silently. The
       // Owner reads the refusal, so it says what is true now, not our schedule (P10.1-T2 AC-3).
-      // Event NPS is the Owner's reporting metric (Phase 18), after campaign evaluation (14): it
-      // was refused under the old plan's numbers and is refused still (P10.1-T2 AC-7 — the set
-      // itself is pinned by key in `registry.spec.ts`).
+      // Event NPS is the Owner's reporting metric (Phase 18). It came after campaign evaluation
+      // (14) until the 2026-10-08 re-plan moved campaigns to 18.5, after it; no metric registered
+      // today is refused, and the rule stays for one registered later. So the evaluation is placed
+      // before Event NPS for this test alone (the sets are pinned by key in `registry.spec.ts`).
+      jest.replaceProperty(metricsModule as { CAMPAIGN_EVALUATION_PHASE: number }, 'CAMPAIGN_EVALUATION_PHASE', 17);
       await expect(wired.campaigns.create(member(KPM_A), aCampaign({
         requirements: [{ metricKey: 'EVENT_NPS', comparator: 'gte', value: 50 }],
       }))).rejects.toThrow(/Event NPS is not measured yet, so a campaign asking for it could never qualify anybody/);
+    });
+
+    it('takes Event NPS since the 2026-10-08 re-plan: the Owner’s reporting is measured before campaigns are evaluated', async () => {
+      const made = await wired.campaigns.create(member(KPM_A), aCampaign({
+        requirements: [{ metricKey: 'EVENT_NPS', comparator: 'gte', value: 50 }],
+      }));
+
+      expect(made.requirements[0]).toMatchObject({ metricKey: 'EVENT_NPS', metricName: 'Event NPS', unit: 'score' });
     });
 
     it('refuses money that is not whole sen (AC-2)', async () => {

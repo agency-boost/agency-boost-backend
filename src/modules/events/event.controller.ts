@@ -10,7 +10,8 @@ import { SaveEventDto, SaveEventTypeDto } from './event.dto';
  * The events an office runs (P5-T6, ADR-0034).
  *
  * **Nothing per-person is here.** RSVP, attendance and feedback are each their own per-member
- * record in Phase 14; this is the office deciding what is happening and who is invited.
+ * record in Phase 18.5 (P18.5-T5, P18.5-T6; were P14-T3, P14-T4); this is the office deciding what
+ * is happening and who is invited.
  */
 @ApiTags('tenant configuration')
 @ApiBearerAuth()

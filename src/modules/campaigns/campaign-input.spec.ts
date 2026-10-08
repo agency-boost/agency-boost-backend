@@ -1,4 +1,5 @@
 import { CAMPAIGN_EVALUATION_PHASE, METRIC_REGISTRY, metricByKey } from '@/domain/constants';
+import * as metricsModule from '@/domain/constants/metrics';
 import { checkCampaign } from './campaign-input';
 
 const whole = (over: Record<string, unknown> = {}) => ({
@@ -71,6 +72,9 @@ describe('reading one campaign (P5-T7)', () => {
   });
 
   describe('the requirements', () => {
+    // One test below moves `CAMPAIGN_EVALUATION_PHASE` with `replaceProperty`; this puts it back.
+    afterEach(() => jest.restoreAllMocks());
+
     it('refuses a requirements value that is not a list', () => {
       expect(refusal(whole({ requirements: { metricKey: 'APE_ACHIEVED' } })))
         .toMatch(/requirements must be a list/);
@@ -111,9 +115,17 @@ describe('reading one campaign (P5-T7)', () => {
     });
 
     it('refuses a metric nothing measures yet, naming it and no phase', () => {
-      const later = METRIC_REGISTRY.find((m) => m.phase > CAMPAIGN_EVALUATION_PHASE);
-      // If every metric is computed by now the rule has nothing to guard, and the test should
-      // say so rather than quietly pass on an empty search.
+      /*
+       * Since the 2026-10-08 re-plan campaigns are evaluated in 18.5, after every metric registered
+       * today, so nothing real is refused as not measured yet (`registry.spec.ts` pins the empty set).
+       * The rule stays for a metric registered after campaign evaluation, and is proven here with the
+       * evaluation placed before the latest metric. `CAMPAIGN_EVALUATION_PHASE` is read where it is
+       * declared, so this moves it for `checkCampaign` too; `restoreAllMocks` puts it back.
+       */
+      expect(METRIC_REGISTRY.find((m) => m.phase > CAMPAIGN_EVALUATION_PHASE)).toBeUndefined();
+      const latest = Math.max(...METRIC_REGISTRY.map((m) => m.phase));
+      jest.replaceProperty(metricsModule as { CAMPAIGN_EVALUATION_PHASE: number }, 'CAMPAIGN_EVALUATION_PHASE', latest - 1);
+      const later = METRIC_REGISTRY.find((m) => m.phase === latest && m.requirable !== false);
       expect(later).toBeTruthy();
 
       const said = refusal(whole({
@@ -129,12 +141,13 @@ describe('reading one campaign (P5-T7)', () => {
       expect(said.slice(said.indexOf(later!.name) + later!.name.length)).not.toMatch(/\d/);
     });
 
-    it('accepts a coaching metric: coaching (Phase 11) precedes campaign evaluation (14) now (P10.1-T2 AC-7)', () => {
+    it('accepts a coaching metric: coaching (Phase 11) precedes campaign evaluation (14 then, 18.5 now) (P10.1-T2 AC-7)', () => {
       /*
        * Decided, not inherited. The 2026-09-29 re-plan brought coaching forward from the old
        * plan's 13 to 11 and campaigns from 12 to 14, so these six are measured by the time a
        * campaign is evaluated. Under the old numbers each was refused as not measured yet.
        * `registry.spec.ts` pins the whole set and the difference; this proves the refusal reads it.
+       * The 2026-10-08 re-plan moved campaigns on to 18.5, which leaves the six where they were.
        */
       const coaching = [
         'COACHED_7D', 'COACHED_30D', 'DAYS_SINCE_LAST_COACHING', 'COACHING_COVERAGE', 'GOAL_PACE_STATUS', 'PACING_TO_MAA',
@@ -145,20 +158,23 @@ describe('reading one campaign (P5-T7)', () => {
       }
     });
 
-    it('still refuses the seven nothing measures by then, each by its name', () => {
-      // The unit rollups (Phase 15) and the Owner's reporting metrics (18): refused before the
-      // phases moved, refused after. Nothing but the coaching six changed sides.
-      const refused = [
+    it('accepts the seven the 2026-09-29 plan refused: the unit rollups and the Owner’s reporting precede campaigns since 2026-10-08', () => {
+      /*
+       * Decided with the 2026-10-08 re-plan. Under the 2026-09-29 plan the unit rollups (Phase 15)
+       * and the Owner's reporting metrics (18) came after campaign evaluation (14), and each of
+       * these was refused as not measured yet; campaigns are evaluated in 18.5 now, after both, so
+       * a campaign may require one. `registry.spec.ts` pins the whole set and the difference.
+       */
+      const nowAccepted = [
         'MAA_COUNT_IN_UNIT', 'ACTIVITY_COMPLIANCE_RATE', 'LEADER_COACHING_FREQUENCY',
         'EVENT_ATTENDANCE_RATE', 'EVENT_NPS', 'MOC_STATUS', 'PRODUCTION_CLUB_TIER',
       ];
-      for (const metricKey of refused) {
-        expect(refusal(whole({ requirements: [{ metricKey, comparator: 'gte', value: 1 }] })))
-          .toContain(`${metricByKey(metricKey)!.name} is not measured yet`);
+      for (const metricKey of nowAccepted) {
+        const read = checkCampaign(whole({ requirements: [{ metricKey, comparator: 'gte', value: 1 }] }));
+        expect(read.requirements![0]).toMatchObject({ metricKey, unit: metricByKey(metricKey)!.unit });
       }
-      // And those are all of them: the refusal and `GET /metrics` draw the same line.
-      expect(METRIC_REGISTRY.filter((m) => m.phase > CAMPAIGN_EVALUATION_PHASE).map((m) => m.key).sort())
-        .toEqual([...refused].sort());
+      // And nothing is left on the far side: the refusal and `GET /metrics` draw the same line.
+      expect(METRIC_REGISTRY.filter((m) => m.phase > CAMPAIGN_EVALUATION_PHASE)).toEqual([]);
     });
 
     it('P13.2-T4: refuses Leaders used — an office’s count, not anybody’s work — and never offers it', () => {

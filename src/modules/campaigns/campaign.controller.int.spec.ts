@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
+import * as metricsModule from '@/domain/constants/metrics';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import {
@@ -174,6 +175,9 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
   });
 
   describe('the metric registry', () => {
+    // One test below moves `CAMPAIGN_EVALUATION_PHASE` with `replaceProperty`; this puts it back.
+    afterEach(() => jest.restoreAllMocks());
+
     it('answers every member of the office, and the platform', async () => {
       for (const who of [...EVERY_MEMBER.map(([, w]) => w), SUPER_ADMIN]) {
         session.current = who;
@@ -190,12 +194,21 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
 
     it('says which metrics nothing computes yet, rather than implying they all do', async () => {
       session.current = AGENT;
+      type Served = { key: string; computed: boolean };
 
-      const res = await request(app.getHttpServer()).get('/metrics').expect(200);
+      // Since the 2026-10-08 re-plan campaigns are evaluated in 18.5, after every metric registered
+      // today, so every one answers `computed: true` (`registry.spec.ts` pins the set by key).
+      const today = await request(app.getHttpServer()).get('/metrics').expect(200);
+      expect(today.body.filter((m: Served) => !m.computed)).toEqual([]);
 
       // ADR-0035: a rule naming a metric whose phase has not shipped is recorded as waiting on
-      // it. A screen can only say so if the wire carries the distinction.
-      expect(res.body.some((m: { computed: boolean }) => !m.computed)).toBe(true);
+      // it. A screen can only say so if the wire carries the distinction, so it is proven with the
+      // evaluation placed before the latest metrics, as it stood for a metric registered later.
+      jest.replaceProperty(metricsModule as { CAMPAIGN_EVALUATION_PHASE: number }, 'CAMPAIGN_EVALUATION_PHASE', 18);
+      const res = await request(app.getHttpServer()).get('/metrics').expect(200);
+      expect(res.body.filter((m: Served) => !m.computed).map((m: Served) => m.key).sort()).toEqual([
+        'CAMPAIGN_QUALIFICATION_STATUS', 'EVENT_ATTENDANCE_STATUS', 'TRAINING_COMPLETION_PCT',
+      ]);
     });
   });
 });
