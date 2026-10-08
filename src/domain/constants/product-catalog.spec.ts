@@ -1,6 +1,8 @@
 import {
-  PRODUCT_AGE_BANDS, PRODUCT_AGE_BAND_LABELS, PRODUCT_BUDGET_BANDS, PRODUCT_BUDGET_BAND_LABELS,
-  PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRODUCT_LIFECYCLES, PRODUCT_NEEDS, SEED_PRODUCTS,
+  APPROVED_PRODUCT_FIELDS, OVERRIDABLE_PRODUCT_FIELDS, PRODUCT_AGE_BANDS, PRODUCT_AGE_BAND_LABELS,
+  PRODUCT_BUDGET_BANDS, PRODUCT_BUDGET_BAND_LABELS, PRODUCT_CATEGORIES, PRODUCT_CHANNELS,
+  PRODUCT_LIFECYCLES, PRODUCT_NEEDS, PRODUCT_TAGLINE_MAX_LENGTH, SCRIPT_OVERRIDE_FIELDS,
+  SEED_PRODUCTS, SEED_REPLY_BY_NEED,
 } from '@/domain/constants';
 
 /**
@@ -111,13 +113,51 @@ describe('the seeded product catalog (P5-T4)', () => {
 
       expect(plan.goodFit).toBe(product.bestFor);
       expect(plan.benefits).toEqual(product.benefits);
-      expect(plan.objectionYouSay).toBe(product.differentiator);
       // `extractOpening` is everything up to the first bold, `extractClosing` the last bolded
       // question — both of which have to be part of the script they were taken from.
       expect(plan.fullScript).toContain(plan.opening);
       expect(plan.fullScript).toContain(plan.nextAction);
       expect(plan.nextAction).toMatch(/\?$/);
       expect(plan.objectionTheySay).not.toBe('');
+    }
+  });
+
+  it('answers the push-back with the need’s reply Overall.html renders, not the differentiator (D-reply)', () => {
+    // `REPLY_BY_NEED` (`Overall.html:9497-9506`), keyed by the product's first need as the
+    // prototype keys it (`:9728`, `:10287`). The comment above the table says the differentiator,
+    // which is what P5-T4 seeded; the differentiator prints under *How it stands out* already.
+    for (const product of SEED_PRODUCTS) {
+      const need = product.primaryNeeds[0];
+      expect(product.defaultAttackPlan.objectionYouSay).toBe(SEED_REPLY_BY_NEED[need]);
+      expect(product.defaultAttackPlan.objectionYouSay).not.toBe(product.differentiator);
+    }
+    // Verbatim, and the same words the Owner's own modal ships for PRUmapan (`KPM_Owner.html:2326`).
+    expect(SEED_REPLY_BY_NEED.retirement).toBe(
+      "I hear that a lot — it doesn't feel urgent yet. But that's actually the best reason to start "
+      + 'now: the earlier you begin, the less it costs you each month to get to the same place later. '
+      + "This isn't about retiring tomorrow, it's about giving your future self a lot less to worry about.",
+    );
+  });
+
+  it('has a reply for every need, so no product is left without one', () => {
+    expect(Object.keys(SEED_REPLY_BY_NEED).sort()).toEqual([...PRODUCT_NEEDS].sort());
+    for (const reply of Object.values(SEED_REPLY_BY_NEED)) expect(reply.length).toBeGreaterThan(0);
+  });
+
+  it('holds the description for approval with the seven script fields, and the name for nobody (OD-136)', () => {
+    expect(SCRIPT_OVERRIDE_FIELDS).toEqual([
+      'goodFit', 'opening', 'benefits', 'fullScript', 'objectionTheySay', 'objectionYouSay',
+      'nextAction',
+    ]);
+    expect(APPROVED_PRODUCT_FIELDS).toEqual(['description', ...SCRIPT_OVERRIDE_FIELDS]);
+    expect(OVERRIDABLE_PRODUCT_FIELDS).toEqual(['displayName', ...APPROVED_PRODUCT_FIELDS]);
+    expect(APPROVED_PRODUCT_FIELDS).not.toContain('displayName');
+  });
+
+  it('bounds the office’s description by the company tagline’s own bound', () => {
+    expect(PRODUCT_TAGLINE_MAX_LENGTH).toBe(300);
+    for (const product of SEED_PRODUCTS) {
+      expect(product.tagline.length).toBeLessThanOrEqual(PRODUCT_TAGLINE_MAX_LENGTH);
     }
   });
 

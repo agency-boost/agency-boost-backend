@@ -17,6 +17,11 @@ import {
  * **Every route is the office's own settings permission** (`tenant_config:write`, ADR-0027): the
  * Owner and the Admin decide together, and a leader, an agent and a **Super Admin** are all
  * refused — a Super Admin writes the company's catalog, never an office's decisions about it.
+ *
+ * **The four reads are `product_settings:read`, the Owner's and the Admin's** (the Phase 14 exit
+ * review): they carry the office's drafts, its review state and a rejection's reason, which ADR-0037
+ * keeps from agents. They sat on `tenant_config:read`, which every member holds; a field member reads
+ * the office's approved words through `/product-catalog` and `/attack-plan` instead.
  */
 @ApiTags('tenant configuration')
 @ApiBearerAuth()
@@ -25,7 +30,7 @@ export class KpmProductController {
   constructor(private readonly products: KpmProductService) {}
 
   @Get()
-  @RequirePermission('tenant_config:read')
+  @RequirePermission('product_settings:read')
   @ApiOperation({
     summary: 'This office’s shelf',
     description:
@@ -61,10 +66,11 @@ export class KpmProductController {
   @ApiOperation({
     summary: 'Replace some of the company’s words with this office’s',
     description:
-      'Only the display name and the seven script fields. A body naming anything else is refused '
-      + '**by name** — an edit that half-saved leaves nobody able to find out which half. Touching '
-      + 'the script puts the override back to **pending**: the office approves its own before '
-      + 'agents read it (ADR-0037).',
+      'Only the display name, the description and the seven script fields. A body naming anything '
+      + 'else is refused **by name** — an edit that half-saved leaves nobody able to find out which '
+      + 'half. Touching the script or the description puts the override back to **pending**: the '
+      + 'office approves its own before agents read it (ADR-0037, ADR-0120). `description: null` '
+      + 'gives the description back to the company.',
   })
   @ApiResponse({ status: 200, type: KpmProductDto })
   async saveOverrides(
@@ -128,7 +134,7 @@ export class KpmProductController {
   }
 
   @Get(':productId/documents/:slot/url')
-  @RequirePermission('tenant_config:read')
+  @RequirePermission('product_settings:read')
   @ApiOperation({
     summary: 'A short-lived URL for one slot',
     description:
@@ -147,15 +153,16 @@ export class KpmProductController {
   // ------------------------------------------- the script approval gate (P5-T10, ADR-0037)
 
   @Get('script-reviews')
-  @RequirePermission('tenant_config:read')
+  @RequirePermission('product_settings:read')
   @ApiOperation({
     summary: 'The script overrides waiting on somebody here',
     description:
       'A queue rather than a hunt through the whole shelf: the point of a gate is that whoever '
-      + 'holds it can see what is behind it. **Reading it is `tenant_config:read`, not '
+      + 'holds it can see what is behind it. **Reading it is `product_settings:read`, not '
       + '`sales_script:approve`** — every row is already in `GET /kpm/settings/products`, so a '
       + 'stricter grant on the same data would be theatre, and somebody who wrote a script has '
-      + 'every reason to see it waiting. Deciding is the separate grant.',
+      + 'every reason to see it waiting. Deciding is the separate grant. A field member is refused: '
+      + 'the queue is the office\'s drafts.',
   })
   @ApiResponse({ status: 200, type: KpmProductDto, isArray: true })
   async pendingReviews(@Ctx() ctx: RequestContext) {
@@ -195,13 +202,14 @@ export class KpmProductController {
   }
 
   @Get(':productId/script/effective')
-  @RequirePermission('tenant_config:read')
+  @RequirePermission('product_settings:read')
   @ApiOperation({
-    summary: 'The script an agent is actually served',
+    summary: 'The script and the description an agent is actually served',
     description:
       'The office’s own words **only when approved**; otherwise the company’s, which the company '
-      + 'published and is therefore already the company’s word. This is the one read an agent’s '
-      + 'screen may use, which is what stops one rendering an override nobody approved.',
+      + 'published and is therefore already the company’s word — for the description, the '
+      + 'company’s tagline (OD-136). The settings screen’s comparison of what agents read today; '
+      + 'an agent’s own screens read the same rule through `/product-catalog` and `/attack-plan`.',
   })
   @ApiResponse({ status: 200, type: EffectiveScriptDto })
   async effectiveScript(

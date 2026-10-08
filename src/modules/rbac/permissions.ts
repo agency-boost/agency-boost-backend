@@ -185,22 +185,69 @@ export const PERMISSIONS = {
    * **read live** — withdrawing one stops every office of the company selling it on their next
    * read. The two have different blast radii, so they are different permissions.
    *
-   * `product_catalog:read` — the office-side read, held by every member — arrives with P5-T5,
-   * which is where an office's decisions about products live. Granting it here would be a grant
-   * no route exercises.
+   * The office-side read is `product_catalog:read`, below.
    */
   'product_catalog:crud': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   /*
-   * What somebody earns on a product (ADR-0038, closing OD-43).
+   * The office's shelf, as its field members read it (Phase 14, D-api; roles §3.10): the Product
+   * Catalog, one product's drawer, a document's link, and the Sales Attack Plan — into which
+   * `sales_attack_plan:read` and `attack_plan:generate` were folded, nothing being generated or stored
+   * (OD-133). **Field reads, apart from the settings routes**, which carry the office's drafts and
+   * review state and are `product_settings:read`, below.
+   *
+   * Every member of the office, `own-kpm`: the Owner and the Admin reach it through their field view
+   * (ADR-0114). The Super Admin's `all` is the matrix's, and reads nothing on its own — a Super Admin
+   * outside a support session belongs to no office, so the read refuses them as every scoped read
+   * does (`403 TENANT_NO_MEMBERSHIP`); inside one, the member's own grant answers. A read, so a
+   * read-only session holds it.
+   */
+  'product_catalog:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-kpm' },
+    { grantee: AAB, scope: 'own-kpm' },
+    { grantee: AGENT, scope: 'own-kpm' },
+  ],
+  /*
+   * **The settings reads of the office's products** (the Phase 14 exit review; roles §3.10):
+   * `GET /kpm/settings/products`, a slot's signed link there, the script-review queue and the effective
+   * read. They carry what ADR-0037 keeps from agents — the office's drafts (`overrides`), the review
+   * state and a rejection's reason — and they sat on `tenant_config:read`, which every member of the
+   * office holds because every agent screen renders the office's taxonomy. So an agent could read the
+   * Owner's unapproved script by asking the settings route for it.
+   *
+   * The Owner and the Admin, `own-kpm`: whoever writes the office's settings (`tenant_config:write`)
+   * reads them. The Super Admin's `all` mirrors `tenant_config:read`'s and reads nothing on its own — in
+   * no office, the shelf has no company to resolve and answers 404; inside a support session the
+   * member's own grant answers. A read by its verb, so a read-only session as an Owner keeps it.
+   */
+  'product_settings:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  /*
+   * What somebody earns on a product (ADR-0038, closing OD-43; OD-135).
    *
    * A figure an agent reads as their pay: the catalog read leaves `commissionSchedule` out
    * entirely for anybody without this, rather than sending it and hiding it on screen.
    *
-   * The matrix also gives it to the Owner, the Admin and — for the people they lead — a leader.
-   * Those wait for P5-T5 and Phase 14, where an office and an agent can read a product at all;
-   * `permissions.spec.ts` records each with the phase that settles it.
+   * **One schedule per product, every agent's** (OD-135, ADR-0119): the company's, the same for
+   * whoever sells it. So the leader's `own-downline` — ADR-0038's *"the rates of the people they
+   * lead"* — and their `own` read the same row, and the field reads ask only whether the reader holds
+   * the grant at all, at any scope. The scopes are the matrix's, kept for the day a rate is per agent.
    */
-  'commission_rates:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  'commission_rates:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own' },
+  ],
   /*
    * Approving an office's own sales-script override before agents read it (ADR-0037, P5-T10).
    *

@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { CanActivate, ExecutionContext, INestApplication } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
@@ -29,6 +30,17 @@ const ADMIN = new RequestContext('u-admin', 'none', member({
 const AGENT = new RequestContext('u-agent', 'none', member({
   membershipId: 'mem-b', orgLevelCode: 'AGENT', hierarchyRole: 'agent', isKpmOwner: false,
 }) as never);
+/** A plain AB and an AAB: leaders of the office, administrators of nothing. */
+const AB = new RequestContext('u-ab', 'none', member({ membershipId: 'mem-d', isKpmOwner: false }) as never);
+const AAB = new RequestContext('u-aab', 'none', member({
+  membershipId: 'mem-e', orgLevelCode: 'AAB', hierarchyRole: 'aab', isKpmOwner: false,
+}) as never);
+/**
+ * A Super Admin in a support session as the Owner — read-only, then elevated. Either way the context is
+ * the member's, which holds no platform grant: `product_catalog:crud` is the Super Admin's as themselves.
+ */
+const supportSession = (readOnly: boolean) =>
+  new RequestContext('u-owner', 'none', member() as never, 'root', null, false, readOnly);
 
 let current: RequestContext = SUPER_ADMIN;
 
@@ -221,5 +233,105 @@ describe('the product catalog controller (P5-T4)', () => {
       await request(app.getHttpServer())
         .get('/admin/companies/66f0000000000000000000ff/products').expect(404);
     });
+  });
+  describe('the commission schedule (OD-135, ADR-0119)', () => {
+    const mapanId = async () => (await shelf()).find((p) => p.code === 'PRUMAPAN')!.id;
+
+    it('takes a rate per year from year 1, stores it in year order, and audits it', async () => {
+      const id = await mapanId();
+
+      const res = await request(app.getHttpServer()).patch(`${url}/${id}`).send({
+        // Sent out of order: a schedule is a set of years, and it is stored as the drawer reads it.
+        commissionSchedule: [{ year: 2, rate: 0.2 }, { year: 1, rate: 0.4 }, { year: 3, rate: 0.125 }],
+      }).expect(200);
+
+      expect(res.body.commissionSchedule).toEqual([
+        { year: 1, rate: 0.4 }, { year: 2, rate: 0.2 }, { year: 3, rate: 0.125 },
+      ]);
+      // Only the schedule moved: nothing else on the product was written by a partial body.
+      expect(res.body).toMatchObject({ code: 'PRUMAPAN', name: 'PRUMapan', version: 2 });
+
+      const entry = await mongoose.connection.db!.collection('auditLog')
+        .findOne({ action: 'product.updated', targetId: id });
+      expect(entry!.after).toMatchObject({
+        commissionSchedule: [{ year: 1, rate: 0.4 }, { year: 2, rate: 0.2 }, { year: 3, rate: 0.125 }],
+      });
+      // N3 (the Phase 14 exit review): what it replaced, too — the fields written and nothing else.
+      expect(entry!.before).toEqual({ commissionSchedule: [] });
+    });
+
+    it('P14 exit review N3: a schedule changed and then cleared is audited with what each replaced', async () => {
+      const id = await mapanId();
+      await request(app.getHttpServer()).patch(`${url}/${id}`)
+        .send({ commissionSchedule: [{ year: 1, rate: 0.4 }] }).expect(200);
+      await request(app.getHttpServer()).patch(`${url}/${id}`)
+        .send({ commissionSchedule: [{ year: 1, rate: 0.35 }, { year: 2, rate: 0.1 }] }).expect(200);
+      await request(app.getHttpServer()).patch(`${url}/${id}`)
+        .send({ commissionSchedule: [] }).expect(200);
+
+      const entries = await mongoose.connection.db!.collection('auditLog')
+        .find({ action: 'product.updated', targetId: id }).sort({ _id: 1 }).toArray();
+      expect(entries.map((e) => [e.before, e.after])).toEqual([
+        [{ commissionSchedule: [] }, { commissionSchedule: [{ year: 1, rate: 0.4 }] }],
+        [{ commissionSchedule: [{ year: 1, rate: 0.4 }] }, { commissionSchedule: [{ year: 1, rate: 0.35 }, { year: 2, rate: 0.1 }] }],
+        [{ commissionSchedule: [{ year: 1, rate: 0.35 }, { year: 2, rate: 0.1 }] }, { commissionSchedule: [] }],
+      ]);
+    });
+
+    it('empties it back to not set', async () => {
+      const id = await mapanId();
+      await request(app.getHttpServer()).patch(`${url}/${id}`)
+        .send({ commissionSchedule: [{ year: 1, rate: 0.4 }] }).expect(200);
+
+      const res = await request(app.getHttpServer()).patch(`${url}/${id}`)
+        .send({ commissionSchedule: [] }).expect(200);
+
+      expect(res.body.commissionSchedule).toEqual([]);
+    });
+
+    it.each([
+      ['a gap', [{ year: 1, rate: 0.4 }, { year: 3, rate: 0.1 }]],
+      ['a year twice', [{ year: 1, rate: 0.4 }, { year: 1, rate: 0.3 }]],
+      ['no year 1', [{ year: 2, rate: 0.2 }]],
+    ])('refuses %s, naming the years, and writes nothing', async (_name, commissionSchedule) => {
+      const id = await mapanId();
+
+      const res = await request(app.getHttpServer()).patch(`${url}/${id}`)
+        .send({ commissionSchedule }).expect(400);
+
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      expect(res.body.error.message).toMatch(/from year 1, with no year missing and none twice/);
+      expect((await shelf()).find((p) => p.id === id)!.commissionSchedule).toEqual([]);
+    });
+
+    it.each([
+      ['over 100%', [{ year: 1, rate: 1.2 }]],
+      ['below 0%', [{ year: 1, rate: -0.1 }]],
+      ['a percentage where a proportion belongs', [{ year: 1, rate: 40 }]],
+      ['a year that is not a whole number', [{ year: 1.5, rate: 0.4 }]],
+      ['a rate that is not a number', [{ year: 1, rate: '40%' }]],
+    ])('refuses %s through the pipe', async (_name, commissionSchedule) => {
+      await request(app.getHttpServer()).patch(`${url}/${await mapanId()}`)
+        .send({ commissionSchedule }).expect(400);
+    });
+
+    it.each([
+      ['an Owner', () => OWNER], ['an Admin', () => ADMIN], ['an AB', () => AB], ['an AAB', () => AAB],
+      ['an agent', () => AGENT],
+      // P14 exit review S2: a support session is the member, never the platform — read-only or elevated.
+      ['a read-only support session', () => supportSession(true)],
+      ['an elevated support session', () => supportSession(false)],
+    ])(
+      'refuses %s a schedule, on the server and not only on the screen, and writes nothing', async (_name, who) => {
+        const id = await mapanId();
+        current = who();
+
+        await request(app.getHttpServer()).patch(`${url}/${id}`)
+          .send({ commissionSchedule: [{ year: 1, rate: 0.4 }] }).expect(403);
+
+        expect((await shelf()).find((p) => p.id === id)!).toMatchObject({ commissionSchedule: [], version: 1 });
+        expect(await mongoose.connection.db!.collection('auditLog').countDocuments({ targetId: id })).toBe(0);
+      },
+    );
   });
 });

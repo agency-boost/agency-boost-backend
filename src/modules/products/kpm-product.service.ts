@@ -4,8 +4,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import {
-  OVERRIDABLE_PRODUCT_FIELDS, PRODUCT_DOCUMENT_SLOTS, SCRIPT_OVERRIDE_FIELDS,
-  type ProductDocumentSlot, type ScriptReviewState,
+  APPROVED_PRODUCT_FIELDS, OVERRIDABLE_PRODUCT_FIELDS, PRODUCT_DOCUMENT_SLOTS,
+  SCRIPT_OVERRIDE_FIELDS, type ProductDocumentSlot, type ScriptReviewState,
 } from '@/domain/constants';
 import { plainText } from '@/common/validation/plain-text';
 import { AssetService } from '@/modules/assets/asset.service';
@@ -44,11 +44,81 @@ export interface KpmProductView {
   sellable: boolean;
   active: EffectiveField<boolean>;
   displayName: EffectiveField<string>;
+  /**
+   * *Short description (shown to agents)* (OD-136): this office's draft, else the company's
+   * tagline. **The draft, not what agents read** — that is {@link KpmProductService.effectiveScript}.
+   */
+  description: EffectiveField<string>;
   script: Record<string, EffectiveField<string | string[]>>;
   /** Whether this office's own script override may reach its agents yet (ADR-0037). */
   reviewState: ScriptReviewState;
   rejectionReason: string | null;
   documents: ProductDocumentView[];
+}
+
+/** One product of an office's shelf, as {@link KpmProductService.shelfOf} reads it. */
+export interface OfficeShelfEntry {
+  /** The company's row, read live (ADR-0033). */
+  readonly product: ProductDocument;
+  /** The office's decisions laid over it — what the settings screen lists for this product. */
+  readonly view: KpmProductView;
+  /**
+   * The office's **approved** words for it (`approvedOverrides`, ADR-0037), or `undefined` where it
+   * approved none. Never `overrides`: the drafts stay inside this service, so a field read built on
+   * this entry has no way to reach one.
+   */
+  readonly approved: Record<string, unknown> | undefined;
+}
+
+/** The office's whole shelf, read once: its company, and every product of it with the office's decisions. */
+export interface OfficeShelf {
+  /** The office's own company (`kpms.companyId`), never a value the caller sent. */
+  readonly companyId: string;
+  /** Every product of the company, in its `sortOrder`, withdrawn rows included. */
+  readonly entries: readonly OfficeShelfEntry[];
+}
+
+/**
+ * What an agent is served for one product: the office's **approved** words field by field, else
+ * the company's (ADR-0037, ADR-0120).
+ */
+export interface EffectiveWords {
+  /** `kpm` once the office has approved any of its own words for this product; else `company`. */
+  source: 'kpm' | 'company';
+  /** The seven script fields, each the effective value. No markup, ever. */
+  script: Record<string, string | string[]>;
+  /** The office's approved description (OD-136), else the company's tagline. */
+  description: string;
+}
+
+/**
+ * **The rule** every agent read applies: the approved copy, field by field, else the company's.
+ *
+ * Pure, so a read of a whole shelf can apply it to rows it read in one query. It takes the
+ * office's `approvedOverrides` and nothing else — never `overrides`, which holds drafts — so no
+ * caller can render an unapproved word by passing the wrong field: there is no parameter for it.
+ *
+ * | Office state | What an agent reads |
+ * |---|---|
+ * | approved | The office's own words, frozen at approval |
+ * | `pending`, `rejected`, `none` | The company's — which the company published, and is therefore already the company's word |
+ */
+export function effectiveWordsOf(
+  product: { defaultAttackPlan: unknown; tagline: string },
+  approvedOverrides: Record<string, unknown> | null | undefined,
+): EffectiveWords {
+  const plan = product.defaultAttackPlan as Record<string, string | string[]>;
+  const approved = (approvedOverrides ?? {}) as Record<string, string | string[]>;
+  const has = (field: string) => Object.prototype.hasOwnProperty.call(approved, field);
+
+  return {
+    source: APPROVED_PRODUCT_FIELDS.some(has) ? 'kpm' : 'company',
+    // Field by field: an office may have approved a rewrite of two fields and left the rest.
+    script: Object.fromEntries(
+      SCRIPT_OVERRIDE_FIELDS.map((field) => [field, has(field) ? approved[field] : plan[field]]),
+    ),
+    description: has('description') ? String(approved.description) : product.tagline,
+  };
 }
 
 const SLOT_KEYS = PRODUCT_DOCUMENT_SLOTS.map((s) => s.key) as readonly string[];
@@ -78,13 +148,36 @@ export class KpmProductService {
 
   /** This office's whole shelf: its company's products, with its own decisions laid over them. */
   async list(ctx: RequestContext): Promise<KpmProductView[]> {
+    return (await this.shelfOf(ctx)).entries.map((entry) => entry.view);
+  }
+
+  /**
+   * **The one read of an office's shelf** (P5-T5; the Phase 14 exit review): the office's company, the
+   * company's rows in order, and the office's rows — three queries, whatever the shelf's size — with
+   * each product's overlay and its approved words.
+   *
+   * The settings screen's list is this read's views. The field reads (`ProductCatalogService`) build
+   * the agent's shelf from the same entries, so the overlay is one rule rather than two, and the
+   * company filter is applied here, through {@link productsOf}, and nowhere in that service.
+   */
+  async shelfOf(ctx: RequestContext): Promise<OfficeShelf> {
     const companyId = await this.companyOf(ctx);
     const [products, rows] = await Promise.all([
-      this.products.find({ companyId, deletedAt: null }).sort({ sortOrder: 1 }).exec(),
+      this.productsOf(companyId).sort({ sortOrder: 1 }).exec(),
       this.configs.find(ctx, {}),
     ]);
     const byProduct = new Map(rows.map((row) => [row.productId, row]));
-    return products.map((product) => this.view(product, byProduct.get(String(product._id)) ?? null));
+    return {
+      companyId,
+      entries: products.map((product) => {
+        const row = byProduct.get(String(product._id)) ?? null;
+        return {
+          product,
+          view: this.view(product, row),
+          approved: (row?.approvedOverrides ?? undefined) as Record<string, unknown> | undefined,
+        };
+      }),
+    };
   }
 
   /**
@@ -116,12 +209,29 @@ export class KpmProductService {
    * Replace some of the company's words with this office's own (AC-2, AC-6).
    *
    * A script edit lands as **pending**: the office approves its own override before agents see it
-   * (ADR-0037), and until it does, agents keep reading the approved words — or the company's.
+   * (ADR-0037), and until it does, agents keep reading the approved words — or the company's. The
+   * description is held the same way since OD-136 (ADR-0120).
+   *
+   * **A `null` or blank description gives it back to the company**, exactly as
+   * {@link resetOverride} does: it is not new words, so nothing waits on an approval to stop
+   * agents reading the office's sentence.
    */
   async saveOverrides(
-    ctx: RequestContext, productId: string, input: Record<string, unknown>,
+    ctx: RequestContext, productId: string, body: Record<string, unknown>,
   ): Promise<KpmProductView> {
     const product = await this.requireProduct(ctx, productId);
+
+    /*
+     * Only the fields the caller sent.
+     *
+     * The DTO arrives from the pipe with **every** declared field as an own key, `undefined` where
+     * the body had none (ES2022 class fields), so `{ ...dto }` named all eight. This loop wrote
+     * each of them as `''`: saving the name over HTTP made every script line the office's, blank,
+     * and the row pending. No test sent a partial body through the pipe until OD-136's did.
+     */
+    const input = Object.fromEntries(
+      Object.entries(body).filter(([, value]) => value !== undefined),
+    );
 
     const unknown = Object.keys(input)
       .filter((key) => !(OVERRIDABLE_PRODUCT_FIELDS as readonly string[]).includes(key));
@@ -136,7 +246,15 @@ export class KpmProductService {
     if (Object.keys(input).length === 0) throw new BadRequestException('Nothing to change.');
 
     const set: Record<string, unknown> = {};
+    const unset: Record<string, ''> = {};
     for (const [key, value] of Object.entries(input)) {
+      if (key === 'description' && (value === null || plainText(value) === '')) {
+        // Given back, not blanked: an empty sentence on every card is nobody's intention, and the
+        // approved copy goes with the draft, as `resetOverride` takes it.
+        unset['overrides.description'] = '';
+        unset['approvedOverrides.description'] = '';
+        continue;
+      }
       // **Sanitised on write, the same as the company's half** (AC-6). Anybody who can write a
       // script could otherwise write a tag, and the prototype renders scripts with `innerHTML`.
       set[`overrides.${key}`] = Array.isArray(value)
@@ -144,8 +262,10 @@ export class KpmProductService {
         : plainText(value);
     }
 
-    const touchesScript = Object.keys(input).some((k) => SCRIPT_OVERRIDE_FIELDS.includes(k as never));
-    if (touchesScript) {
+    // Only new words wait for approval: a description given back is in `unset`, not here.
+    const touchesApproved = Object.keys(set)
+      .some((path) => APPROVED_PRODUCT_FIELDS.includes(path.slice('overrides.'.length) as never));
+    if (touchesApproved) {
       // **Editing an approved override returns it to pending** (ADR-0037, AC-2). The approved
       // copy stays readable, so agents keep reading words somebody approved while the next draft
       // is being looked at.
@@ -157,9 +277,14 @@ export class KpmProductService {
       set.rejectionReason = null;
     }
 
-    const row = await this.configs.upsert(ctx, productId, { $set: set, $inc: { version: 1 } });
+    const row = await this.configs.upsert(ctx, productId, {
+      $set: set,
+      ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}),
+      $inc: { version: 1 },
+    });
     await this.record(ctx, 'kpm_product.override_saved', row, {
       code: product.code, fields: Object.keys(input), reviewState: row.reviewState,
+      ...(Object.keys(unset).length > 0 ? { givenBack: ['description'] } : {}),
     });
     return this.view(product, row);
   }
@@ -257,17 +382,26 @@ export class KpmProductService {
    * unscoped method filtered by this office's company (ADR-0032).
    */
   async documentUrl(ctx: RequestContext, productId: string, slot: string): Promise<string> {
-    const product = await this.requireProduct(ctx, productId);
+    const companyId = await this.companyOf(ctx);
+    const product = await this.productOf(companyId, productId);
     this.requireSlot(slot);
 
-    const own = (await this.configs.findOne(ctx, { productId }))?.documents?.get(slot);
-    if (own) return this.assets.urlFor(ctx, own.storageKey);
+    const row = await this.configs.findOne(ctx, { productId });
+    const url = await this.signedUrl(ctx, companyId, this.view(product, row), slot);
+    if (url === null) throw new NotFoundException('Document');
+    return url;
+  }
 
-    const theirs = product.defaultDocuments?.get(slot) as { storageKey?: string } | undefined;
-    if (theirs?.storageKey) {
-      return this.assets.companyUrlFor(await this.companyOf(ctx), theirs.storageKey);
-    }
-    throw new NotFoundException('Document');
+  /**
+   * The same link for a product the caller has already read with {@link shelfOf} — its overlay and
+   * its company in hand, so nothing is read again but the asset itself. `null` for a slot nobody
+   * filled, which the caller says in its own words; a slot a product does not have is `400`.
+   */
+  async documentUrlOf(
+    ctx: RequestContext, shelf: OfficeShelf, entry: OfficeShelfEntry, slot: string,
+  ): Promise<string | null> {
+    this.requireSlot(slot);
+    return this.signedUrl(ctx, shelf.companyId, entry.view, slot);
   }
 
   // ------------------------------------------------- the script approval gate (P5-T10, ADR-0037)
@@ -308,7 +442,7 @@ export class KpmProductService {
         reviewedAt: this.clock.now(),
         rejectionReason: null,
         // Frozen: a later edit returns the row to pending and leaves this readable (AC-2).
-        approvedOverrides: this.scriptOf(row),
+        approvedOverrides: this.approvedOf(row),
         approvedOverrideVersion: row.version,
       },
     });
@@ -355,29 +489,23 @@ export class KpmProductService {
   }
 
   /**
-   * The script an agent is actually served (AC-5).
+   * The words an agent is actually served (AC-5): the script, and since OD-136 the description.
    *
-   * **Phase 14 reads this and nothing else**, which is what stops it bypassing the gate: an
-   * override that is `pending` or `rejected` is not in the answer at all, so a caller cannot
-   * accidentally render one by reading the wrong field.
+   * **Phase 14's field reads apply the same rule** ({@link effectiveWordsOf}) to the approved words
+   * {@link shelfOf} hands them, which is what stops them bypassing the gate: an override that is
+   * `pending` or `rejected` is not in the answer at all, so a caller cannot accidentally render one
+   * by reading the wrong field.
    *
    * | Office state | What an agent reads |
    * |---|---|
    * | `approved` | The office's own words, frozen at approval |
    * | `pending`, `rejected`, `none` | The company's — which the company published, and is therefore already the company's word |
+   *
+   * The description follows the same table: the approved one, else the company's tagline.
    */
-  async effectiveScript(
-    ctx: RequestContext, productId: string,
-  ): Promise<{ source: 'kpm' | 'company'; script: Record<string, string | string[]> }> {
+  async effectiveScript(ctx: RequestContext, productId: string): Promise<EffectiveWords> {
     const product = await this.requireProduct(ctx, productId);
     const row = await this.configs.findOne(ctx, { productId });
-    const company = SCRIPT_OVERRIDE_FIELDS.reduce<Record<string, string | string[]>>(
-      (acc, field) => ({
-        ...acc,
-        [field]: (product.defaultAttackPlan as unknown as Record<string, string | string[]>)[field],
-      }),
-      {},
-    );
 
     /*
      * What was approved, **not** what the row's state is today.
@@ -388,22 +516,7 @@ export class KpmProductService {
      * unapproved anything. `approvedOverrides` is written at approval and at no other time, so it
      * is the honest answer to *"what did this office approve?"*, whatever is being drafted over it.
      */
-    const approved = (row?.approvedOverrides ?? {}) as Record<string, string | string[]>;
-    if (Object.keys(approved).length === 0) return { source: 'company', script: company };
-
-    // Field by field: an office may have approved a rewrite of two fields and left the rest.
-    return {
-      source: 'kpm',
-      script: SCRIPT_OVERRIDE_FIELDS.reduce<Record<string, string | string[]>>(
-        (acc, field) => ({
-          ...acc,
-          [field]: Object.prototype.hasOwnProperty.call(approved, field)
-            ? approved[field]
-            : company[field],
-        }),
-        {},
-      ),
-    };
+    return effectiveWordsOf(product, row?.approvedOverrides as Record<string, unknown> | undefined);
   }
 
   private async requirePending(
@@ -419,11 +532,14 @@ export class KpmProductService {
     return row;
   }
 
-  /** Only the seven script fields — a display-name override is not a script. */
-  private scriptOf(row: KpmProductConfigDocument): Record<string, unknown> {
+  /**
+   * The fields held for approval: the seven script fields and the description (ADR-0120). A
+   * display-name override is a label, not words an agent says, so it is not frozen here.
+   */
+  private approvedOf(row: KpmProductConfigDocument): Record<string, unknown> {
     const overrides = (row.overrides ?? {}) as Record<string, unknown>;
     return Object.fromEntries(
-      SCRIPT_OVERRIDE_FIELDS
+      APPROVED_PRODUCT_FIELDS
         .filter((field) => Object.prototype.hasOwnProperty.call(overrides, field))
         .map((field) => [field, overrides[field]]),
     );
@@ -435,13 +551,40 @@ export class KpmProductService {
   private async requireProduct(
     ctx: RequestContext, productId: string,
   ): Promise<ProductDocument> {
-    const companyId = await this.companyOf(ctx);
-    const product = await this.products
-      .findOne({ _id: productId, companyId, deletedAt: null })
+    return this.productOf(await this.companyOf(ctx), productId);
+  }
+
+  private async productOf(companyId: string, productId: string): Promise<ProductDocument> {
+    const product = await this.productsOf(companyId)
+      .findOne({ _id: productId })
       .exec()
       .catch(() => null);
     if (!product) throw new NotFoundException('Product');
     return product;
+  }
+
+  /**
+   * **The company filter for every product this service reads**, applied here and nowhere else in it
+   * (as `ProductService.of` applies it for the company's own side): `products` is
+   * company-partitioned, so `companyId` — the office's own, from `companyOf` — is what scopes it.
+   */
+  private productsOf(companyId: string) {
+    return this.products.find({ companyId, deletedAt: null });
+  }
+
+  /**
+   * Which registry signs follows **which half holds the file**, never what the caller says: the
+   * office's own upload is read as the office's, and the company's document through the named
+   * unscoped method filtered by this office's company (ADR-0032). `null` when neither holds one.
+   */
+  private async signedUrl(
+    ctx: RequestContext, companyId: string, view: KpmProductView, slot: string,
+  ): Promise<string | null> {
+    const document = view.documents.find((d) => d.slot === slot);
+    if (!document?.storageKey) return null;
+    return document.source === 'kpm'
+      ? this.assets.urlFor(ctx, document.storageKey)
+      : this.assets.companyUrlFor(companyId, document.storageKey);
   }
 
   private requireSlot(slot: string): void {
@@ -506,6 +649,7 @@ export class KpmProductService {
         ? { value: product.activeByDefault, overridden: false }
         : { value: row.active, overridden: true },
       displayName: field('displayName', product.name),
+      description: field('description', product.tagline),
       script,
       reviewState: row?.reviewState ?? 'none',
       rejectionReason: row?.rejectionReason ?? null,

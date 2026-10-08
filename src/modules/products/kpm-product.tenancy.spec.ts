@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { SEED_PRODUCTS } from '@/domain/constants';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 
@@ -332,6 +333,129 @@ describe('an office’s product decisions (P5-T5)', () => {
       // still leaves `alert(1)` sitting in the middle of a sales script.
       expect(String(served.script.opening)).not.toMatch(/alert/);
       expect(served.script.opening).toBe('Halo Pak, boleh?');
+    });
+  });
+
+  describe('the office’s description, held for approval with the script (OD-136, ADR-0120)', () => {
+    const TAGLINE = 'Endowment-style life with guaranteed retirement payouts from age 55.';
+    const OURS = 'Dana pensiun yang cair rutin dari usia 55, mulai Rp200 ribu sebulan.';
+
+    it('reads the company’s tagline until the office writes its own, and writes no row by looking', async () => {
+      const row = await mine(member(KPM_A));
+
+      expect(row.description).toEqual({ value: TAGLINE, overridden: false });
+      expect((await wired.kpmProducts.effectiveScript(member(KPM_A), mapanId)).description)
+        .toBe(TAGLINE);
+      expect(await stored(KPM_A, mapanId)).toBeNull();
+    });
+
+    it('leaves agents on the company’s tagline while the office’s description is pending', async () => {
+      const ctx = member(KPM_A);
+      const row = await wired.kpmProducts.saveOverrides(ctx, mapanId, { description: OURS });
+
+      // The settings read shows the draft, marked as the office's, and the gate is shut.
+      expect(row.description).toEqual({ value: OURS, overridden: true });
+      expect(row.reviewState).toBe('pending');
+      // The one door agents read through does not have it.
+      const served = await wired.kpmProducts.effectiveScript(ctx, mapanId);
+      expect(served).toMatchObject({ source: 'company', description: TAGLINE });
+      // And it is on the queue, as a script rewrite would be.
+      expect((await wired.kpmProducts.pendingReviews(ctx)).map((p) => p.description.value))
+        .toEqual([OURS]);
+    });
+
+    it('replaces the tagline once approved, frozen as the script is', async () => {
+      const ctx = member(KPM_A);
+      await wired.kpmProducts.saveOverrides(ctx, mapanId, { description: OURS });
+      await wired.kpmProducts.approveScript(ctx, mapanId);
+
+      const served = await wired.kpmProducts.effectiveScript(ctx, mapanId);
+      expect(served).toMatchObject({ source: 'kpm', description: OURS });
+      // Only the description was approved: the script is still the company's, field by field.
+      const company = SEED_PRODUCTS.find((p) => p.code === 'PRUMAPAN')!.defaultAttackPlan;
+      expect(served.script.opening).toBe(company.opening);
+
+      // A new draft does not move what agents read until it is approved in its turn.
+      await wired.kpmProducts.saveOverrides(ctx, mapanId, { description: 'Kalimat baru.' });
+      expect((await wired.kpmProducts.effectiveScript(ctx, mapanId)).description).toBe(OURS);
+      await wired.kpmProducts.rejectScript(ctx, mapanId, 'Terlalu singkat.');
+      expect((await wired.kpmProducts.effectiveScript(ctx, mapanId)).description).toBe(OURS);
+    });
+
+    it('approves the description and a script line together, as one review', async () => {
+      const ctx = member(KPM_A);
+      await wired.kpmProducts.saveOverrides(ctx, mapanId, { description: OURS, opening: 'Halo!' });
+      await wired.kpmProducts.approveScript(ctx, mapanId);
+
+      expect((await stored(KPM_A, mapanId))!.approvedOverrides)
+        .toEqual({ description: OURS, opening: 'Halo!' });
+    });
+
+    it('gives it back to the company on reset, and agents read the tagline at once', async () => {
+      const ctx = member(KPM_A);
+      await wired.kpmProducts.saveOverrides(ctx, mapanId, { description: OURS });
+      await wired.kpmProducts.approveScript(ctx, mapanId);
+
+      const row = await wired.kpmProducts.resetOverride(ctx, mapanId, 'description');
+
+      expect(row.description).toEqual({ value: TAGLINE, overridden: false });
+      // An unset of both copies, not a copy of the company's sentence of the day.
+      const raw = (await stored(KPM_A, mapanId))!;
+      expect(raw.overrides).not.toHaveProperty('description');
+      expect(raw.approvedOverrides).not.toHaveProperty('description');
+      expect(await wired.kpmProducts.effectiveScript(ctx, mapanId))
+        .toMatchObject({ source: 'company', description: TAGLINE });
+    });
+
+    it.each([['null', null], ['a blank', '   ']])(
+      'treats %s as giving it back, not as new words to approve', async (_name, value) => {
+        const ctx = member(KPM_A);
+        await wired.kpmProducts.saveOverrides(ctx, mapanId, { description: OURS });
+        await wired.kpmProducts.approveScript(ctx, mapanId);
+
+        const row = await wired.kpmProducts.saveOverrides(ctx, mapanId, { description: value });
+
+        expect(row.description).toEqual({ value: TAGLINE, overridden: false });
+        // Nothing new waits on anybody: the approval stays as it was.
+        expect(row.reviewState).toBe('approved');
+        expect((await wired.kpmProducts.effectiveScript(ctx, mapanId)).description).toBe(TAGLINE);
+      },
+    );
+
+    it('follows a company edit to the tagline where the office has none of its own', async () => {
+      await wired.products.update(superAdmin(), PRUDENTIAL, mapanId, { tagline: 'A new tagline.' });
+
+      expect((await mine(member(KPM_A))).description)
+        .toEqual({ value: 'A new tagline.', overridden: false });
+      expect((await wired.kpmProducts.effectiveScript(member(KPM_A), mapanId)).description)
+        .toBe('A new tagline.');
+    });
+
+    it('strips markup from the description, as from every authored field', async () => {
+      const ctx = member(KPM_A);
+      await wired.kpmProducts.saveOverrides(ctx, mapanId, {
+        description: '<b>Pensiun</b> <script>alert(1)</script>tenang.',
+      });
+      await wired.kpmProducts.approveScript(ctx, mapanId);
+
+      expect((await wired.kpmProducts.effectiveScript(ctx, mapanId)).description)
+        .toBe('Pensiun tenang.');
+    });
+
+    it('keeps one office’s description out of another’s, and another company’s product a 404', async () => {
+      const ctx = member(KPM_A);
+      await wired.kpmProducts.saveOverrides(ctx, mapanId, { description: OURS });
+      await wired.kpmProducts.approveScript(ctx, mapanId);
+
+      // The sibling office of the same company reads the company's tagline.
+      expect((await mine(member(KPM_B))).description).toEqual({ value: TAGLINE, overridden: false });
+      expect((await wired.kpmProducts.effectiveScript(member(KPM_B), mapanId)).description)
+        .toBe(TAGLINE);
+      // Another company's office cannot write it, nor read it, and is told nothing exists.
+      await expect(wired.kpmProducts.saveOverrides(member(KPM_OTHER), mapanId, { description: 'x' }))
+        .rejects.toMatchObject({ status: 404 });
+      await expect(wired.kpmProducts.effectiveScript(member(KPM_OTHER), mapanId))
+        .rejects.toMatchObject({ status: 404 });
     });
   });
 

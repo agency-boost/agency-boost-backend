@@ -64,23 +64,40 @@ export type ProductDocumentSlot = (typeof PRODUCT_DOCUMENT_SLOTS)[number]['key']
 export const SCRIPT_REVIEW_STATES = ['none', 'pending', 'approved', 'rejected'] as const;
 export type ScriptReviewState = (typeof SCRIPT_REVIEW_STATES)[number];
 
-/**
- * What an office may replace on a product it sells (P5-T5 AC-6).
- *
- * The display name and the seven attack-plan fields — exactly what the prototype's override modal
- * offers (`KPM_Owner.html:1783-1793`). Everything else is the company's: a code, a channel, a
- * category, the bands and the commission are facts about the product rather than words about it,
- * and an office rewriting one would be describing a different product under the same code.
- */
-export const OVERRIDABLE_PRODUCT_FIELDS = [
-  'displayName',
+/** The seven that make up the script, so approving one approves a coherent whole. */
+export const SCRIPT_OVERRIDE_FIELDS = [
   'goodFit', 'opening', 'benefits', 'fullScript',
   'objectionTheySay', 'objectionYouSay', 'nextAction',
 ] as const;
+
+/**
+ * What an office may replace on a product it sells (P5-T5 AC-6; ADR-0120).
+ *
+ * The display name, the *Short description (shown to agents)* and the seven attack-plan fields —
+ * exactly what the prototype's product modal offers (`KPM_Owner.html:1781-1793`). Everything else
+ * is the company's: a code, a channel, a category, the bands and the commission are facts about the
+ * product rather than words about it, and an office rewriting one would be describing a different
+ * product under the same code.
+ */
+export const OVERRIDABLE_PRODUCT_FIELDS = [
+  'displayName', 'description', ...SCRIPT_OVERRIDE_FIELDS,
+] as const;
 export type OverridableProductField = (typeof OVERRIDABLE_PRODUCT_FIELDS)[number];
 
-/** The seven that make up the script, so approving one approves a coherent whole. */
-export const SCRIPT_OVERRIDE_FIELDS = OVERRIDABLE_PRODUCT_FIELDS.filter((f) => f !== 'displayName');
+/**
+ * The fields held for the office's own approval before agents read them (ADR-0037, ADR-0120).
+ *
+ * The seven script fields, and the **description** since OD-136: a tagline is a sentence an agent
+ * may repeat to a customer, which is what the approval is for. The display name is not here — it
+ * is a label, and it reaches agents as soon as it is saved.
+ */
+export const APPROVED_PRODUCT_FIELDS = ['description', ...SCRIPT_OVERRIDE_FIELDS] as const;
+
+/**
+ * The longest tagline a product carries, and so the longest description an office may put in its
+ * place (OD-136): the office's sentence stands where the company's does, on the same card.
+ */
+export const PRODUCT_TAGLINE_MAX_LENGTH = 300;
 
 /** `legacy: true` in the prototype, which could not say what replaced a product (P5-T4 AC-4). */
 export const PRODUCT_LIFECYCLES = ['active', 'closed_to_new_business', 'withdrawn'] as const;
@@ -129,6 +146,28 @@ export interface SeedProduct {
   readonly defaultAttackPlan: SeedAttackPlan;
 }
 
+/**
+ * *4b · If they push back — you say*, per primary need: the reply `Overall.html` renders
+ * (`REPLY_BY_NEED`, `:9497-9506`, and its twin at `:10086-10095`), paired with the need's
+ * objection, which is `objectionTheySay`.
+ *
+ * **Not the differentiator** (D-reply, Phase 14). P5-T4 took the differentiator from the stale
+ * comment above the table (`:9482-9484`) and the retired section file; the governing file renders
+ * this, and the differentiator already prints under *How it stands out* in the same drawer. The
+ * Owner's own modal ships the same words for PRUmapan (`KPM_Owner.html:2326`). Migration
+ * `0024-attack-plan-reply` rewrites the seeded differentiator a company still holds.
+ */
+export const SEED_REPLY_BY_NEED: Readonly<Record<ProductNeed, string>> = {
+  'life-protection': "I get that — nobody wants another bill. But this isn't really about adding insurance, it's about making sure the people who depend on you can keep going if you're suddenly not there. Can I show you what that would actually look like for your family, so you can decide for yourself if it's worth it?",
+  health: "That's great, and I'm glad you already have something. Can I ask — what happens to that coverage the day you leave that job, or once you retire? Most office plans are borrowed, not owned. This is about having something that's yours no matter where you work.",
+  ci: "I hope you never have to use it either — honestly, that's the whole point. This isn't about expecting the worst, it's about making sure that if it ever happened, money would be one less thing you'd have to think about while you focus on getting better.",
+  accident: "That's good to hear. Do you know exactly what it covers, though? A lot of people only find out the details once they're already filing a claim. This is just a way to make sure there are no surprises if something ever happens.",
+  education: "That's a great habit, and I really respect that. The one thing saving alone can't guarantee is what happens if something happens to you along the way. This just makes sure your child's education still happens, no matter what.",
+  investment: "That's a fair question — I'd want to understand that too before putting money in. Can I show you how the fund options actually work, so you can see exactly how much risk you're taking and choose what you're comfortable with?",
+  retirement: "I hear that a lot — it doesn't feel urgent yet. But that's actually the best reason to start now: the earlier you begin, the less it costs you each month to get to the same place later. This isn't about retiring tomorrow, it's about giving your future self a lot less to worry about.",
+  legacy: "That's great, being debt-free already puts you ahead. This isn't really about debt, though — it's about what you'd want to leave behind for the people you love, on your terms. Think of it less as insurance and more as a gift you're setting up now.",
+};
+
 export const SEED_PRODUCTS: readonly SeedProduct[] = [
   {
     code: 'PRUMAPAN',
@@ -163,7 +202,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "Setting up retirement income alongside daily expenses isn't easy, especially when you're supporting both kids and parents. PRUMapan was built exactly for that situation. From around Rp200K monthly, you build cover that pays you back annually from age 55 through 75. That's 21 installments of guaranteed income, up to roughly 5.8 times the annual premium you contributed. Compared with PRUAnugerah, which targets affluent customers wanting hybrid life-plus-pension at a higher tier, PRUMapan starts where most milenial and Gen Z professionals actually are today. Shall I prepare an illustration showing the exact Dana Mapan payouts for your specific premium level?",
       objectionTheySay: "Retirement is too far away to think about right now.",
-      objectionYouSay: "The accessible retirement-income option (~Rp200K entry). 21-installment Dana Mapan structure provides scheduled income from age 55 to 75, up to 5.8× annual premium. Companion product PRUAnugerah is the affluent-tier conventional retirement product with hybrid life + pension positioning.",
+      objectionYouSay: SEED_REPLY_BY_NEED['retirement'],
       nextAction: "Shall I prepare an illustration showing the exact Dana Mapan payouts for your specific premium level?",
     },
   },
@@ -200,7 +239,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "You mentioned wanting protection that also returns more than you put in. PRUSmart Plan is structured to do exactly that across a 20-year horizon. You pay for only 6 or 8 years; the policy covers you for 20. From year 7 or year 9, you start receiving annual cash benefits at around 25% of premium, escalating each year. At the end of the 20 years, you get an end-of-term payout that can reach 920% of your annual premium. So the maths works out: total payouts larger than total premiums paid. Compared with PRUFuture which covers you for life but doesn't pay out cash along the way, this one rewards you for sticking with the plan. Would you like an illustration with the exact cash schedule for your contribution level?",
       objectionTheySay: "That sounds like more than I already pay for insurance.",
-      objectionYouSay: "The cash-payout-focused life option: shortest premium term (6 or 8 years) for full 20-year cover, with maturity payout mathematically larger than total premiums paid. PRUFuture is the whole-life conventional alternative; PRUCinta is the sharia 20-year alternative.",
+      objectionYouSay: SEED_REPLY_BY_NEED['life-protection'],
       nextAction: "Would you like an illustration with the exact cash schedule for your contribution level?",
     },
   },
@@ -237,7 +276,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "The advantage of starting whole-life cover now, while you're healthy, is that the premium locks in and stays affordable. PRUFuture gives you protection to age 100 with a minimum sum assured of Rp500 million, or USD 50,000 if you prefer hard currency. You pay for 5, 10, or 15 years; the cover runs for life. There's also a Plan Waiver option: if you're diagnosed with a critical condition during the premium term, future premiums are waived but the cover continues. PRUSmart Plan is the 20-year cash-payout alternative; PRUFuture is for clients who prioritize lifelong protection certainty over scheduled cash returns. Would you like to see both side by side?",
       objectionTheySay: "That sounds like more than I already pay for insurance.",
-      objectionYouSay: "The whole-life conventional life option with USD currency choice and an optional CI premium waiver. Most cost-conscious whole-life on the shelf. PRUSmart Plan is the 20-year endowment alternative; PRUWarisan is the dedicated legacy alternative.",
+      objectionYouSay: SEED_REPLY_BY_NEED['life-protection'],
       nextAction: "Would you like to see both side by side?",
     },
   },
@@ -274,7 +313,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "What you're describing, ensuring something solid passes to your children, is exactly what PRUWarisan was designed for. The cover runs to age 99. You pay for just 5, 10, or 15 years; after that, the policy is paid-up for life. The unique feature is the PRUWarisan Booster: your sum assured progressively increases over time, so the inheritance grows rather than erodes with inflation. If you'd like sharia-compliant alternatives, PRUHeritage Syariah extends a year longer to age 100 and adds a USD option. Shall I prepare a projected legacy value at age 99 for your intended sum assured?",
       objectionTheySay: "I don't need life insurance — I don't have any debts.",
-      objectionYouSay: "The flagship conventional legacy product. PRUWarisan Booster compounds the inheritance value over time. Sharia counterpart PRUHeritage Syariah extends one year longer (to 100) with USD option. PRUAnugerah Syariah is the more accessible sharia legacy alternative (from ~Rp500K).",
+      objectionYouSay: SEED_REPLY_BY_NEED['legacy'],
       nextAction: "Shall I prepare a projected legacy value at age 99 for your intended sum assured?",
     },
   },
@@ -309,7 +348,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "Pre-retirement clients in your stage often want one product covering both life protection and structured retirement payouts, not two separate policies. PRUAnugerah is built around that combined need. Unlike pure-protection products, it builds toward retirement-stage income while keeping the family-protection layer in place throughout. Compared with PRUMapan, which is the entry-tier retirement option at around Rp200K monthly targeting milenial buyers, PRUAnugerah is the affluent-tier consolidated planning option. Would you like a projection showing how the protection and retirement payouts compound over your remaining working years?",
       objectionTheySay: "Retirement is too far away to think about right now.",
-      objectionYouSay: "The affluent-tier conventional retirement product. Hybrid life + pension positioning. More comprehensive than PRUMapan (which is the entry-level retirement option at ~Rp200K targeting milenial and Gen Z).",
+      objectionYouSay: SEED_REPLY_BY_NEED['retirement'],
       nextAction: "Would you like a projection showing how the protection and retirement payouts compound over your remaining working years?",
     },
   },
@@ -344,7 +383,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "Multi-generational legacy planning under sharia governance has specific requirements, and PRUHeritage Syariah is built to meet them. Cover extends to age 100, the longest tenor of any product in the catalog. The fund is managed under tabarru and ujrah principles, ensuring the structure remains sharia-compliant throughout. You can also denominate the policy in USD, useful if part of the inheritance is intended for children studying or settling abroad. If accessibility is more important than tenor, PRUAnugerah Syariah is the entry-tier sharia legacy option starting from around Rp500K monthly. Shall I prepare illustrations in both Rupiah and USD?",
       objectionTheySay: "I don't need life insurance — I don't have any debts.",
-      objectionYouSay: "The longest-tenor legacy product across both books (to age 100). Available in USD for hard-currency legacy planning. Sharia-managed. PRUAnugerah Syariah is the lower-tier sharia legacy alternative (from ~Rp500K); PRUWarisan is the conventional counterpart.",
+      objectionYouSay: SEED_REPLY_BY_NEED['legacy'],
       nextAction: "Shall I prepare illustrations in both Rupiah and USD?",
     },
   },
@@ -381,7 +420,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "For young muslim families, the Ramadan period brings both spiritual focus and a lot of mudik travel. PRUCinta acknowledges that reality with a 400% accidental death benefit during the six-week Ramadan window each year, on top of 300% in the rest of the year. The cover runs 20 years and is sharia-managed with tabarru contribution at 17%. Compared with PRUTahapan Cemerlang which structures payouts around life-stage milestones, PRUCinta is the straightforward sharia 20-year option with the strongest Ramadan-specific protection. Would you like an illustration that quantifies the accidental death benefit at your chosen sum assured?",
       objectionTheySay: "That sounds like more than I already pay for insurance.",
-      objectionYouSay: "The standard 20-year sharia life option, with a distinctive 4× accidental death payout in the Ramadan travel window not found anywhere else in the catalog. PRUTahapan Cemerlang is the milestone-staged sharia alternative; PRUTect Care is the digital-entry sharia alternative.",
+      objectionYouSay: SEED_REPLY_BY_NEED['life-protection'],
       nextAction: "Would you like an illustration that quantifies the accidental death benefit at your chosen sum assured?",
     },
   },
@@ -416,7 +455,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "Legacy planning shouldn't require waiting until you're affluent. PRUAnugerah Syariah brings inheritance protection within reach from around Rp500K monthly. The fund is managed under tabarru and mudharabah principles, and the cash value builds over time alongside the life cover. The eventual payout to your ahli waris is structured as sharia-compliant inheritance. The higher-tier option is PRUHeritage Syariah, which extends to age 100 and offers USD currency, but it's positioned for affluent customers. Would you like to compare the two side by side at your preferred contribution level?",
       objectionTheySay: "I don't need life insurance — I don't have any debts.",
-      objectionYouSay: "The accessible sharia legacy option (from ~Rp500K monthly). Brings inheritance planning within reach of mass-affluent muslim customers. Higher-tier PRUHeritage Syariah extends to age 100 with USD currency.",
+      objectionYouSay: SEED_REPLY_BY_NEED['legacy'],
       nextAction: "Would you like to compare the two side by side at your preferred contribution level?",
     },
   },
@@ -451,7 +490,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "You'd prefer to handle this digitally without a long agent meeting, and that's precisely what PRUTect Care offers. You buy it through the OVO app: sharia-compliant life cover with hospital cash benefit, set up in minutes. The underwriting is simplified, so onboarding friction is minimal. If you eventually want a more comprehensive sharia life policy with stronger accidental death cover, PRUCinta from your regular agent is the natural upgrade path. For now, would you like me to walk you through the OVO setup?",
       objectionTheySay: "That sounds like more than I already pay for insurance.",
-      objectionYouSay: "The digital-only sharia entry product. Lowest acquisition friction across the entire shelf; bought through OVO app rather than an agent. PRUCinta is the agent-distributed 20-year sharia alternative.",
+      objectionYouSay: SEED_REPLY_BY_NEED['life-protection'],
       nextAction: "For now, would you like me to walk you through the OVO setup?",
     },
   },
@@ -486,7 +525,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "Sharia protection that adapts as you move through marriage, having children, and other life events is what this product is structured for. PRUTahapan Cemerlang stages the benefits around milestones rather than treating the policy as static. The underlying fund is sharia-managed, and the structure ensures protection scales with the household's evolving needs. Compared with PRUCinta which is the straightforward 20-year sharia option, this one is for clients expecting their needs to change over the policy life. Would you like me to map this against your expected life milestones over the next 10 years?",
       objectionTheySay: "That sounds like more than I already pay for insurance.",
-      objectionYouSay: "The milestone-staged sharia life option with adaptive benefits across life events. PRUCinta is the standard 20-year sharia alternative; PRUTect Care is the digital-entry sharia alternative.",
+      objectionYouSay: SEED_REPLY_BY_NEED['life-protection'],
       nextAction: "Would you like me to map this against your expected life milestones over the next 10 years?",
     },
   },
@@ -525,7 +564,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "You want bill-payer health cover without complications, and PRUSehat delivers that cleanly. You pick from 8 plan tiers based on room type, room price ceiling, and region. Each claim-free year gives you a 10% boost to the annual limit, capped at 50%, so being healthy is directly rewarded. The annual limit can reach Rp65 billion with Limit Booster, and outpatient cancer or dialysis is covered without requiring prior inpatient. PRUWell Medical is the alternative if you want premium discounts for engaging with wellness; PRUSehat is the simpler bill-payer choice. Shall I run an illustration at the plan tier that matches your preferred hospital and room?",
       objectionTheySay: "I already have health coverage through my office.",
-      objectionYouSay: "The pure traditional health option with No Claim Bonus and 8 plan tiers (most flexibility on the shelf). Lowest entry barrier in health. PRUWell Medical is the wellness-rewarded alternative; PRUWell Health and PRUPrime Healthcare Plus Pro are PAYDI rider versions.",
+      objectionYouSay: SEED_REPLY_BY_NEED['health'],
       nextAction: "Shall I run an illustration at the plan tier that matches your preferred hospital and room?",
     },
   },
@@ -562,7 +601,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "You're health-conscious, and the wellness reward in PRUWell Medical converts that directly into premium savings. You can receive up to 20% premium discount the following year based on your healthy lifestyle and claims behavior. Annual benefit reaches Rp72.5 billion with Limit Booster, which is higher than PRUSehat. The plan range spans Bronze A to Diamond with telehealth in Indonesia and cancer telehealth in Malaysia and Singapore at select tiers. Compared with PRUWell Health which packages the same wellness mechanic as a unit-linked rider, PRUWell Medical is the pure traditional structure. Would you like an illustration showing your projected premium with the wellness discount applied?",
       objectionTheySay: "I already have health coverage through my office.",
-      objectionYouSay: "The wellness-priced traditional health option. Higher annual cap (Rp72.5B) than PRUSehat. Pure traditional structure, not a PAYDI rider. PRUSehat is the No-Claim-Bonus alternative; PRUWell Health is the unit-linked rider version.",
+      objectionYouSay: SEED_REPLY_BY_NEED['health'],
       nextAction: "Would you like an illustration showing your projected premium with the wellness discount applied?",
     },
   },
@@ -597,7 +636,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "Since you already have a PAYDI base policy, the smart move is to add health cover that draws from your existing cash value. PRUWell Health gives you the same wellness reward mechanism as PRUWell Medical, up to 20% premium discount, but the insurance cost is paid from your unit-linked cash value. After the cash value builds sufficiently, you can take a premium holiday. Annual benefit reaches Rp72.5 billion with Limit Booster. PRUWell Medical is the pure traditional alternative if you'd rather not link it to your investment policy. Shall I model how this would attach to your current PAYDI policy?",
       objectionTheySay: "I already have health coverage through my office.",
-      objectionYouSay: "The PAYDI rider version of PRUWell Medical. Adds cash-value flexibility (premium holiday) to the wellness pricing engine. Requires PAYDI base. PRUWell Medical is the pure traditional alternative; PRUPrime Healthcare Plus Pro is the premium-tier PAYDI rider.",
+      objectionYouSay: SEED_REPLY_BY_NEED['health'],
       nextAction: "Shall I model how this would attach to your current PAYDI policy?",
     },
   },
@@ -634,7 +673,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "For clients who want premium-tier hospital cover packaged with their unit-linked policy, this is the top of the PAYDI rider shelf. PRUPrime Healthcare Plus Pro spans Bronze A through Diamond plans with as-billed inpatient cover. The pro-rata claim mechanic kicks in if you stay in a higher room class or treat outside your covered region, so you have flexibility without losing all the cover. PRUPrime Limit Booster lifts the annual cap further. Compared with PRUWell Health which rewards wellness behavior, PRUPrime Healthcare Plus Pro focuses on plan depth and claim flexibility. Would you like to compare the two at your typical room and region preferences?",
       objectionTheySay: "I already have health coverage through my office.",
-      objectionYouSay: "The premium-tier PAYDI rider. Deeper plan range than PRUWell Health and a pro-rata claim mechanic for over-class room or out-of-region treatment. Two distinct pricing philosophies in the unit-linked health stack; PRUWell Health emphasizes wellness, this one emphasizes plan depth.",
+      objectionYouSay: SEED_REPLY_BY_NEED['health'],
       nextAction: "Would you like to compare the two at your typical room and region preferences?",
     },
   },
@@ -671,7 +710,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "For sharia-compliant bill-payer health, PRUSehat Syariah mirrors the conventional PRUSehat structure with the same 8 plan tiers and Rp65 billion annual cap. The two sharia-specific features are surplus underwriting potential and Manfaat Berkembang. Surplus underwriting means any unused tabarru fund may be returned to participants if no claims are made. Manfaat Berkembang grows your annual limit by 10% each claim-free year, capped at 50% of initial limit. The plan structure and economics are identical to conventional PRUSehat with the sharia governance overlay. Shall I model the projected surplus return at your preferred plan tier?",
       objectionTheySay: "I already have health coverage through my office.",
-      objectionYouSay: "The sharia counterpart of PRUSehat. Adds surplus underwriting and growing benefit on top of the standard No-Claim-Bonus mechanic. Same plan structure and economics as conventional PRUSehat with sharia governance overlay.",
+      objectionYouSay: SEED_REPLY_BY_NEED['health'],
       nextAction: "Shall I model the projected surplus return at your preferred plan tier?",
     },
   },
@@ -706,7 +745,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "The wellness reward mechanism in PRUWell Medical Syariah is sharia-compliant: up to 20% next-year contribution discount based on healthy lifestyle. The plan range, room and region flexibility, and Rp72.5 billion cap with Limit Booster mirror conventional PRUWell Medical. Sharia fund management runs under tabarru and ujrah structures. Compared with PRUWell Health Syariah which packages this as a rider with surplus underwriting potential, the standalone version doesn't require a PAYDI base. Shall I run an illustration showing the wellness contribution discount at your chosen plan?",
       objectionTheySay: "I already have health coverage through my office.",
-      objectionYouSay: "The sharia counterpart of PRUWell Medical. Adds sharia governance to the wellness-priced fairness engine. PRUWell Health Syariah is the PAYDI rider version with surplus underwriting potential.",
+      objectionYouSay: SEED_REPLY_BY_NEED['health'],
       nextAction: "Shall I run an illustration showing the wellness contribution discount at your chosen plan?",
     },
   },
@@ -741,7 +780,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "Since you have a sharia PAYDI base, this rider gives you the same wellness mechanic plus a sharia-specific feature unavailable on the conventional side: surplus underwriting potential each calendar year. The contribution is charged from your cash value, and once the cash value builds sufficiently, you can take a contribution holiday. The wellness fairness engine and the surplus return work together: healthy lifestyle reduces your contribution, and unused tabarru can come back to participants. Shall I model both the contribution discount and projected surplus return?",
       objectionTheySay: "I already have health coverage through my office.",
-      objectionYouSay: "The sharia rider version of PRUWell Medical. Wellness pricing plus sharia surplus return possibility unavailable to conventional buyers. PRUPrime Healthcare Plus Pro Syariah is the premium-tier sharia PAYDI health rider alternative.",
+      objectionYouSay: SEED_REPLY_BY_NEED['health'],
       nextAction: "Shall I model both the contribution discount and projected surplus return?",
     },
   },
@@ -776,7 +815,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "For premium sharia health cover attached to your PAYDI base, this is the top tier. The plan range spans Bronze A to Diamond with as-billed inpatient cover, and the pro-rata claim mechanic gives you flexibility on room class or region treatment without losing the cover entirely. PRUPrime Limit Booster lifts the annual cap to top-tier levels. Compared with PRUWell Health Syariah which emphasizes wellness rewards, this product emphasizes plan depth and claim flexibility. Shall I compare both options at your typical hospital and region preferences?",
       objectionTheySay: "I already have health coverage through my office.",
-      objectionYouSay: "The premium-tier sharia PAYDI rider. Plan-depth focused, with a pro-rata claim mechanic for over-class room or out-of-region treatment. PRUWell Health Syariah is the wellness-priced sharia rider alternative.",
+      objectionYouSay: SEED_REPLY_BY_NEED['health'],
       nextAction: "Shall I compare both options at your typical hospital and region preferences?",
     },
   },
@@ -813,7 +852,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "Given the lifestyle you described, the accident-specific risk is real and the cover should match it. PRUPersonal Accident D&D Plus is purpose-built for accident risk: accidental death, total and permanent disability, complex fractures, burns, and emergency outpatient costs. It doesn't cover illness, by design, which keeps the premium affordable. This product attaches as a rider on top of a base policy, so it complements rather than replaces your main health cover. Shall I show you the benefit amounts at different sum assured levels?",
       objectionTheySay: "I think I'm already covered for that.",
-      objectionYouSay: "The conventional accident-only product. Does not cover illness. Affordable, typically attached as a rider over a life or health policy. Sharia counterpart is PRUPersonal Accident D&D Plus Syariah with identical economic structure.",
+      objectionYouSay: SEED_REPLY_BY_NEED['accident'],
       nextAction: "Shall I show you the benefit amounts at different sum assured levels?",
     },
   },
@@ -844,7 +883,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "The sharia version of accident cover mirrors the conventional structure under sharia governance. Accidental death, total and permanent disability, complex fractures, burns, and emergency outpatient costs are all covered, with tabarru contribution. It doesn't cover illness, by design. This rider attaches over a sharia base policy. Shall I outline the benefit amounts at different sum assured tiers?",
       objectionTheySay: "I think I'm already covered for that.",
-      objectionYouSay: "The sharia accident-only product. Mirror of PRUPersonal Accident D&D Plus with sharia fund management overlay.",
+      objectionYouSay: SEED_REPLY_BY_NEED['accident'],
       nextAction: "Shall I outline the benefit amounts at different sum assured tiers?",
     },
   },
@@ -881,7 +920,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "Critical illness is the financial event that derails most working families: the income stops, the bills don't. PRUCritical Benefit 88 pays a lump-sum on diagnosis of a covered critical condition, giving you income replacement during treatment and recovery. There's also a death benefit, so if you never need the CI payout, the contribution isn't lost. You can pay regular premium or single premium, which is rare in CI and capital-efficient for clients with available capital. PRULady is the women-specific alternative focused on breast cancer; PRUCritical Benefit 88 is the broad-CI choice. Shall I prepare an illustration showing both regular and single premium structures?",
       objectionTheySay: "I hope I never have to use it.",
-      objectionYouSay: "The flagship conventional standalone CI product. Single-premium variant is rare and capital-efficient. Death benefit ensures the contribution is not lost if no CI ever triggers. PRULady is the women-specific breast-cancer alternative.",
+      objectionYouSay: SEED_REPLY_BY_NEED['ci'],
       nextAction: "Shall I prepare an illustration showing both regular and single premium structures?",
     },
   },
@@ -920,7 +959,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "For women, breast cancer is a real and well-documented risk, and PRULady is built specifically around it. The payouts are staged: early stage, late stage, surgery, and reconstructive surgery, with cumulative payouts up to 140% of sum assured. The reconstructive surgery cover specifically is unusual in the broader CI category. There's also a PRULady Save feature: premium discount for regular health check-ups. PRUCritical Benefit 88 is the alternative if you'd prefer broad-CI cover instead of dedicated breast-cancer protection. Shall I model the staged payouts at your preferred sum assured?",
       objectionTheySay: "I hope I never have to use it.",
-      objectionYouSay: "The only women-specific CI product on the shelf. Stage-based payouts and reconstructive surgery cover are unusual in the broader CI category. PRUCritical Benefit 88 is the broad-CI alternative if breast cancer is not the primary concern.",
+      objectionYouSay: SEED_REPLY_BY_NEED['ci'],
       nextAction: "Shall I model the staged payouts at your preferred sum assured?",
     },
   },
@@ -955,7 +994,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "For mass-affluent muslim customers wanting CI without a premium-tier contribution, this is the entry point. The stage-based payouts cover early and late stages, and the fund is tabarru-based with potential surplus underwriting return. The economics are positioned to broaden sharia CI penetration. Compared with PRUCritical Amanah which covers 61 conditions including early diagnoses at a premium-tier contribution, this one prioritizes affordability. Shall I show both contribution levels for comparison?",
       objectionTheySay: "I hope I never have to use it.",
-      objectionYouSay: "The entry-level sharia CI option. Positioned below PRUCritical Amanah on price; aimed at broadening sharia CI penetration in the mass-affluent segment.",
+      objectionYouSay: SEED_REPLY_BY_NEED['ci'],
       nextAction: "Shall I show both contribution levels for comparison?",
     },
   },
@@ -990,7 +1029,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "Comprehensive sharia CI with early-stage capture is what PRUCritical Amanah delivers. The product covers 61 critical conditions, including diagnoses at the early stage when treatment is most effective. The multi-stage payout structure gives you lump-sum on diagnosis at each covered stage. This is the sharia equivalent of conventional PRUCritical Benefit 88 in coverage depth. PRUSolusi Kondisi Kritis Syariah is the affordable entry-level sharia CI alternative. Shall I prepare a contribution illustration at the cover level appropriate for your income?",
       objectionTheySay: "I hope I never have to use it.",
-      objectionYouSay: "The premium-tier sharia CI option. 61 conditions, early-stage capture. Equivalent of conventional PRUCritical Benefit 88 on the sharia side. PRUSolusi Kondisi Kritis Syariah is the affordable entry-level sharia CI alternative.",
+      objectionYouSay: SEED_REPLY_BY_NEED['ci'],
       nextAction: "Shall I prepare a contribution illustration at the cover level appropriate for your income?",
     },
   },
@@ -1025,7 +1064,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "You want certainty that your child's college years are funded regardless of what happens to you. PRUCerah delivers exactly that: guaranteed sharia-compliant education fund disbursement during the four college years. Critically, if you as the parent die or are diagnosed with a critical illness, future contributions are waived but the fund continues to build for your child. It's the only dedicated education product across both books, conventional and sharia. If you're conventional, the typical alternative is to use PRULink NextGen as a long-term investment vehicle targeting the same goal. Shall I prepare an education fund projection based on your child's current age and target university tier?",
       objectionTheySay: "I'll just save for it myself.",
-      objectionYouSay: "The only dedicated education product across both books. Sharia-managed. No conventional alternative exists; conventional clients typically meet education funding through PAYDI (PRULink NextGen).",
+      objectionYouSay: SEED_REPLY_BY_NEED['education'],
       nextAction: "Shall I prepare an education fund projection based on your child's current age and target university tier?",
     },
   },
@@ -1062,7 +1101,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "You want long-term protection plus investment exposure, and PRULink NextGen is the current conventional PAYDI flagship. The acquisition cost is structured at around 40% spread over 10 years, much lower than the previous PGB structure which front-loaded around 70% over 5 years. Loyalty Bonus kicks in from policy year 11 through 20, giving you extra investment allocation just when the cash value is compounding most usefully. There's a 200% sum assured on accidental death, climbing to 300% during the New Year or Idulfitri holiday window. Life events like marriage or childbirth automatically add 10% sum assured, no medical check. PRULink Investor Account is the single-premium alternative if you'd rather contribute as a lump sum. Shall I prepare a projection at your chosen contribution and investment fund mix?",
       objectionTheySay: "Isn't unit-linked risky?",
-      objectionYouSay: "The current conventional PAYDI flagship. Compliant with SE OJK 5/SEOJK.05/2022. Better early cash-value formation than PGB. PRULink Investor Account is the single-premium alternative; PRULink Generasi Baru is the pre-2023 legacy product (in run-off).",
+      objectionYouSay: SEED_REPLY_BY_NEED['investment'],
       nextAction: "Shall I prepare a projection at your chosen contribution and investment fund mix?",
     },
   },
@@ -1097,7 +1136,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "For clients with available capital who want investment exposure without recurring premium obligations, the single-premium structure is the right fit. PRULink Investor Account accepts your lump-sum contribution, gives you 125% of premium as sum assured plus accumulated cash value as death benefit, and provides total and permanent disability cover for ages 6 to 60 with a 20%-then-80% payout structure. At maturity, you receive the cash value. Compared with PRULink NextGen which builds investment via regular premium discipline, this product is for lump-sum allocators. Shall I model fund performance scenarios at your contribution level?",
       objectionTheySay: "Isn't unit-linked risky?",
-      objectionYouSay: "The only single-premium PAYDI in the catalog. Investment-led with thin protection wrapper. Designed for lump-sum allocation rather than savings discipline. PRULink NextGen is the regular-premium flagship alternative.",
+      objectionYouSay: SEED_REPLY_BY_NEED['investment'],
       nextAction: "Shall I model fund performance scenarios at your contribution level?",
     },
   },
@@ -1134,7 +1173,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "",
       objectionTheySay: "Isn't unit-linked risky?",
-      objectionYouSay: "Pre-2023 conventional PAYDI, replaced by PRULink NextGen for new business post-6 March 2023. Higher upfront acquisition cost (~70%) but over a shorter 5-year amortization. In run-off; not actively issued.",
+      objectionYouSay: SEED_REPLY_BY_NEED['investment'],
       nextAction: "",
     },
   },
@@ -1171,7 +1210,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "For muslim clients planning Umroh or Haji, this product builds specifically around that life context. PRULink NextGen Syariah pays 300% sum assured on accidental death during the Umroh, Haji, or holiday windows, on top of the regular 200% accidental death cover. The NextGen structure, including Loyalty Bonus from year 11 through 20 and life-events benefit on marriage or childbirth, applies in sharia-compliant form. The fund management runs under sharia principles throughout. PRULink Syariah Investor Account is the single-contribution alternative for lump-sum investors. Shall I prepare a projection that accounts for your Umroh or Haji timing?",
       objectionTheySay: "Isn't unit-linked risky?",
-      objectionYouSay: "The current sharia PAYDI flagship. Same structure as PRULink NextGen with Umroh / Haji windows substituted for New Year / Idulfitri on the 300% accidental death enhancement. PRULink Syariah Investor Account is the single-contribution alternative; PRULink Syariah Generasi Baru is the legacy product (in run-off).",
+      objectionYouSay: SEED_REPLY_BY_NEED['investment'],
       nextAction: "Shall I prepare a projection that accounts for your Umroh or Haji timing?",
     },
   },
@@ -1206,7 +1245,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "The sharia single-contribution PAYDI is for muslim clients with available capital who want investment exposure with light life cover. You contribute once, receive 125% of the contribution as sum assured plus accumulated cash value, and the fund is managed under sharia principles. TPD and maturity benefits mirror the conventional structure. Compared with PRULink NextGen Syariah which builds investment via regular contribution, this product is for lump-sum allocators. Shall I walk through the sharia fund options at your intended contribution level?",
       objectionTheySay: "Isn't unit-linked risky?",
-      objectionYouSay: "The sharia mirror of PRULink Investor Account. Only single-contribution PAYDI on the sharia shelf.",
+      objectionYouSay: SEED_REPLY_BY_NEED['investment'],
       nextAction: "Shall I walk through the sharia fund options at your intended contribution level?",
     },
   },
@@ -1239,7 +1278,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
       ],
       fullScript: "",
       objectionTheySay: "Isn't unit-linked risky?",
-      objectionYouSay: "Pre-2023 sharia PAYDI. Replaced by PRULink NextGen Syariah for new business post-6 March 2023. In run-off.",
+      objectionYouSay: SEED_REPLY_BY_NEED['investment'],
       nextAction: "",
     },
   },

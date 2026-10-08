@@ -6,6 +6,7 @@ import {
 } from 'class-validator';
 import {
   PRODUCT_AGE_BANDS, PRODUCT_BUDGET_BANDS, PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRODUCT_NEEDS,
+  PRODUCT_TAGLINE_MAX_LENGTH,
 } from '@/domain/constants';
 
 const AGE_BAND_MAX = PRODUCT_AGE_BANDS.length;
@@ -42,7 +43,7 @@ export class AttackPlanDto {
 }
 
 export class CommissionYearDto {
-  @ApiProperty({ example: 1, description: 'Policy year, from 1.' })
+  @ApiProperty({ example: 1, minimum: 1, maximum: 50, description: 'Policy year, from 1; at most 50 years.' })
   @IsInt() @Min(1) @Max(50)
   year!: number;
 
@@ -61,7 +62,7 @@ export class ProductFieldsDto {
   name?: string;
 
   @ApiPropertyOptional({ example: 'Proteksi jiwa dengan premi tetap' })
-  @IsOptional() @IsString() @MaxLength(300)
+  @IsOptional() @IsString() @MaxLength(PRODUCT_TAGLINE_MAX_LENGTH)
   tagline?: string;
 
   @ApiPropertyOptional({ enum: PRODUCT_CHANNELS })
@@ -113,7 +114,9 @@ export class ProductFieldsDto {
 
   @ApiPropertyOptional({
     type: [CommissionYearDto],
-    description: 'Empty until the company states one. An empty list is shown as "not set", never as a default.',
+    description: 'Empty until the company states one. An empty list is shown as "not set", never as a default. '
+      + 'A rate per policy year from year 1, none missing and none twice (OD-135, ADR-0119); the '
+      + 'whole schedule is sent, and stored in year order.',
   })
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => CommissionYearDto)
   commissionSchedule?: CommissionYearDto[];
@@ -128,7 +131,7 @@ export class ProductFieldsDto {
 export class CreateProductDto extends ProductFieldsDto {
   /**
    * The identity, typed once. Immutable afterwards and never reused, because a policy, a lead and
-   * an attack-plan telemetry row all point at it (ADR-0006).
+   * a plan's address (`/attack-plan?product=…`) all point at it (ADR-0006).
    */
   @ApiProperty({ example: 'PRUMAPAN', description: 'Upper case, letters, digits and `_`. Immutable once created.' })
   @IsString() @MaxLength(60)

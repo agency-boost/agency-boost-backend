@@ -112,14 +112,23 @@ export class ProductService {
     const set = this.writable(input);
     if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
 
-    const updated = await this.products.findOneAndUpdate(
+    /*
+     * **The row as it was, taken by the write itself** (the Phase 14 exit review, N3): the audit row
+     * records the fields written before and after, so a commission schedule changed or cleared says
+     * what it replaced. Read separately first, a write in between would have been recorded as this
+     * one's starting point.
+     */
+    const previous = await this.products.findOneAndUpdate(
       { _id: productId, companyId, deletedAt: null },
       { $set: { ...set, updatedBy: ctx.userId }, $inc: { version: 1 } },
-      { new: true },
+      { new: false },
     ).exec();
-    if (!updated) throw new NotFoundException('Product');
+    if (!previous) throw new NotFoundException('Product');
+    const updated = await this.of(companyId).findOne({ _id: productId }).orFail().exec();
 
-    await this.record(ctx, 'product.updated', updated, set);
+    const was = previous.toObject() as unknown as Record<string, unknown>;
+    const before = Object.fromEntries(Object.keys(set).map((field) => [field, was[field] ?? null]));
+    await this.record(ctx, 'product.updated', updated, set, before);
     return this.view(updated, true);
   }
 
@@ -274,7 +283,9 @@ export class ProductService {
       set.benefits = (input.benefits as unknown[]).map(plain).filter((line) => line !== '');
     }
     if (input.activeByDefault !== undefined) set.activeByDefault = Boolean(input.activeByDefault);
-    if (input.commissionSchedule !== undefined) set.commissionSchedule = input.commissionSchedule;
+    if (input.commissionSchedule !== undefined) {
+      set.commissionSchedule = this.schedule(input.commissionSchedule as CommissionYearView[]);
+    }
     if (input.defaultAttackPlan !== undefined) {
       const plan = input.defaultAttackPlan as Record<string, unknown>;
       set.defaultAttackPlan = {
@@ -290,13 +301,36 @@ export class ProductService {
     return set;
   }
 
+  /**
+   * A commission schedule as the company states it (OD-135, ADR-0119): a rate for each policy
+   * year from year 1, **none missing and none twice**, stored in year order.
+   *
+   * The DTO bounds each row (a year from 1, a proportion from 0 to 1); this is the rule across
+   * rows, which no decorator sees. A gap is refused rather than filled: *"Y3"* with no *Y2* on an
+   * agent's drawer reads as a year with no commission, which nobody stated either.
+   */
+  private schedule(rows: CommissionYearView[]): CommissionYearView[] {
+    const sorted = rows
+      .map((row) => ({ year: row.year, rate: row.rate }))
+      .sort((a, b) => a.year - b.year);
+    if (sorted.some((row, index) => row.year !== index + 1)) {
+      throw new BadRequestException(
+        'A commission schedule is a rate for each policy year from year 1, with no year missing and '
+        + `none twice. This one has year ${sorted.map((row) => row.year).join(', ')}.`,
+      );
+    }
+    return sorted;
+  }
+
   private record(
     ctx: RequestContext, action: string, doc: ProductDocument, after: Record<string, unknown>,
+    before: Record<string, unknown> | null = null,
   ) {
     return this.audit.record(ctx, {
       action,
       targetCollection: 'products',
       targetId: String(doc._id),
+      before,
       after,
     });
   }

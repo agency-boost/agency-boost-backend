@@ -24,6 +24,7 @@ import { up as productionLockGrace } from './0020-kpm-production-lock-grace';
 import { up as activityCategorySummaryGroup } from './0021-activity-category-summary-group';
 import { up as activationBackfill } from './0022-activation-backfill';
 import { up as namedTemplates } from './0023-named-templates';
+import { up as attackPlanReply } from './0024-attack-plan-reply';
 
 /**
  * Every migration, in order. Forward-only and idempotent, so running this twice is a
@@ -53,6 +54,7 @@ const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Date) => P
   ['0021-activity-category-summary-group', activityCategorySummaryGroup],
   ['0022-activation-backfill', activationBackfill],
   ['0023-named-templates', namedTemplates],
+  ['0024-attack-plan-reply', attackPlanReply],
 ];
 
 async function main(): Promise<void> {

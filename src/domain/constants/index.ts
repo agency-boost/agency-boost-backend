@@ -316,7 +316,20 @@ export {
   OVERRIDABLE_PRODUCT_FIELDS,
   type OverridableProductField,
   SCRIPT_OVERRIDE_FIELDS,
+  // Phase 14: the office's description held for approval (OD-136), and the seeded reply (D-reply).
+  APPROVED_PRODUCT_FIELDS,
+  PRODUCT_TAGLINE_MAX_LENGTH,
+  SEED_REPLY_BY_NEED,
 } from './product-catalog';
+
+/** The Sales Attack Plan's scorer, and the words the two sales screens print (D-scoring, D-copy). */
+export {
+  ATTACK_PLAN,
+  PRODUCT_NEED_LABELS,
+  PRODUCT_CATEGORY_LABELS,
+  PRODUCT_CHANNEL_LABELS,
+  PRODUCT_RUN_OFF_NOTE,
+} from './attack-plan';
 
 export { ASSET_LIMITS } from './assets';
 export { PRODUCTION, PRODUCTION_UPLOAD } from './production';

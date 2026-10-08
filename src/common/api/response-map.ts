@@ -41,6 +41,9 @@ import { ProductResponseDto } from '@/modules/products/product.response.dto';
 import {
   EffectiveScriptDto, KpmProductDto, SignedUrlDto as ProductSignedUrlDto,
 } from '@/modules/products/kpm-product.response.dto';
+import {
+  AttackPlanDto, CatalogDocumentUrlDto, CatalogListDto, CatalogProductDto,
+} from '@/modules/products/product-catalog.response.dto';
 import { EventDto, EventTypeDto } from '@/modules/events/event.response.dto';
 import { CampaignDto, MetricDefinitionDto, QualificationRuleDto } from '@/modules/campaigns/campaign.response.dto';
 import { CapabilityCatalogDto } from '@/modules/capability/capability.response.dto';
@@ -267,6 +270,11 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   KpmProductController_approveScript: { type: KpmProductDto },
   KpmProductController_rejectScript: { type: KpmProductDto },
   KpmProductController_effectiveScript: { type: EffectiveScriptDto },
+  // Phase 14: the field reads — the office's shelf, one product, a document's link, the plan.
+  ProductCatalogController_list: { type: CatalogListDto },
+  ProductCatalogController_product: { type: CatalogProductDto },
+  ProductCatalogController_documentUrl: { type: CatalogDocumentUrlDto },
+  AttackPlanController_plan: { type: AttackPlanDto },
 
   // The events an office runs (P5-T6).
   EventController_listTypes: { type: EventTypeDto, isArray: true },

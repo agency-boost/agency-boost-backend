@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import { IsArray, IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import { PRODUCT_TAGLINE_MAX_LENGTH } from '@/domain/constants';
 
 export class SetProductActiveDto {
   @ApiPropertyOptional({
@@ -14,7 +16,7 @@ export class SetProductActiveDto {
 }
 
 /**
- * The display name and the seven script fields, and nothing else.
+ * The display name, the description and the seven script fields, and nothing else.
  *
  * `whitelist: true` strips unknown keys before this is read, so the service's by-name refusal is
  * what a caller actually meets — which is why the service refuses rather than trusting the pipe.
@@ -23,6 +25,23 @@ export class SaveProductOverridesDto {
   @ApiPropertyOptional({ description: 'What this office calls the product.' })
   @IsOptional() @IsString() @MaxLength(200)
   displayName?: string;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    maxLength: PRODUCT_TAGLINE_MAX_LENGTH,
+    description:
+      '*Short description (shown to agents)* (`KPM_Owner.html:1781`, OD-136): the office’s sentence '
+      + 'in place of the company’s tagline. Trimmed. **Held for approval with the script** '
+      + '(ADR-0037, ADR-0120): agents read the company’s tagline until the office approves it. '
+      + '`null`, or a blank, gives it back to the company — the same as `DELETE '
+      + '…/overrides/description`.',
+  })
+  // `@IsOptional` lets `null` through, and `null` is a request: give it back to the company.
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString() @MaxLength(PRODUCT_TAGLINE_MAX_LENGTH)
+  description?: string | null;
 
   @ApiPropertyOptional({ description: '0 · Good fit for' })
   @IsOptional() @IsString() @MaxLength(400)

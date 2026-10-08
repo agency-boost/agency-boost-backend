@@ -60,6 +60,15 @@ export class KpmProductDto {
   @ApiProperty({ type: EffectiveFieldDto })
   displayName!: EffectiveFieldDto;
 
+  @ApiProperty({
+    type: EffectiveFieldDto,
+    description:
+      '*Short description (shown to agents)* (OD-136): this office’s **draft**, else the company’s '
+      + 'tagline. Held for approval with the script, so what agents read is the effective read’s '
+      + '`description`, not this.',
+  })
+  description!: EffectiveFieldDto;
+
   @ApiProperty({ type: Object, description: 'The seven script fields, each with its own overridden flag.' })
   script!: Record<string, EffectiveFieldDto>;
 
@@ -82,8 +91,8 @@ export class EffectiveScriptDto {
   @ApiProperty({
     enum: ['kpm', 'company'],
     description:
-      'Whose words these are. `kpm` only when the office approved its own override; otherwise the '
-      + 'company’s, which the company published.',
+      'Whose words these are. `kpm` only when the office approved its own override — of the script '
+      + 'or the description; otherwise the company’s, which the company published.',
   })
   source!: string;
 
@@ -92,4 +101,12 @@ export class EffectiveScriptDto {
     description: 'The seven script fields, each the effective value. No markup, ever.',
   })
   script!: Record<string, unknown>;
+
+  @ApiProperty({
+    type: String,
+    description:
+      'What agents read in place of the tagline (OD-136, ADR-0120): the office’s **approved** '
+      + 'description, else the company’s tagline. A pending one is never here.',
+  })
+  description!: string;
 }

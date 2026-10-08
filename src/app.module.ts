@@ -128,6 +128,10 @@ import {
 import { KpmProductConfigRepository } from '@/modules/products/kpm-product.repository';
 import { KpmProductService } from '@/modules/products/kpm-product.service';
 import { KpmProductController } from '@/modules/products/kpm-product.controller';
+import { ProductCatalogService } from '@/modules/products/product-catalog.service';
+import {
+  AttackPlanController, ProductCatalogController,
+} from '@/modules/products/product-catalog.controller';
 import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events/event.schema';
 import { EventRepository, EventTypeRepository } from '@/modules/events/event.repository';
 import { EventService } from '@/modules/events/event.service';
@@ -329,6 +333,9 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ActivationController,
     ProductController,
     KpmProductController,
+    // Phase 14: the field reads of the office's shelf — the Product Catalog and the Sales Attack Plan.
+    ProductCatalogController,
+    AttackPlanController,
     EventController,
     ActivityController,
     CampaignController,
@@ -405,6 +412,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
     ProductService,
     KpmProductConfigRepository,
     KpmProductService,
+    ProductCatalogService,
     EventTypeRepository,
     EventRepository,
     EventService,

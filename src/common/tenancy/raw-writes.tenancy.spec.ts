@@ -46,7 +46,9 @@ const EXEMPT: Record<string, string> = {
   Product:
     'company-partitioned (ADR-0033). A product belongs to the insurer and is read live by every '
     + 'office of it, so `kpmId` would say the opposite of what it is. `companyId` is the filter '
-    + 'that matters, and `ProductService.of` is the one place it is applied.',
+    + 'that matters: `ProductService.of` applies it to the company\'s own reads, and '
+    + '`KpmProductService.productsOf` — behind `shelfOf`, the one read of an office\'s shelf — to an '
+    + 'office\'s. `ProductCatalogService` injects no model (the Phase 14 exit review).',
   QualificationRule:
     'company-partitioned (ADR-0026, ADR-0034), for the same reason as Product above. A carrier '
     + 'rule — MOC, a production club — belongs to the insurer and is read live by every office of '

@@ -12579,7 +12579,7 @@
     },
     "/api/v1/kpm/settings/products": {
       "get": {
-        "description": "Every product of this office’s company, in the company’s order, with this office’s decisions laid over it. Each value says whether this office chose it or inherited it, so a screen can offer *\"use my company’s again\"* on exactly the fields it applies to.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every product of this office’s company, in the company’s order, with this office’s decisions laid over it. Each value says whether this office chose it or inherited it, so a screen can offer *\"use my company’s again\"* on exactly the fields it applies to.\n\n**Requires `product_settings:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "KpmProductController_list_v1",
         "parameters": [],
         "responses": {
@@ -12607,7 +12607,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `product_settings:read`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12636,7 +12636,7 @@
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "tenant_config:read"
+        "x-required-permission": "product_settings:read"
       }
     },
     "/api/v1/kpm/settings/products/{productId}/active": {
@@ -12739,7 +12739,7 @@
     },
     "/api/v1/kpm/settings/products/{productId}/overrides": {
       "patch": {
-        "description": "Only the display name and the seven script fields. A body naming anything else is refused **by name** — an edit that half-saved leaves nobody able to find out which half. Touching the script puts the override back to **pending**: the office approves its own before agents read it (ADR-0037).\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Only the display name, the description and the seven script fields. A body naming anything else is refused **by name** — an edit that half-saved leaves nobody able to find out which half. Touching the script or the description puts the override back to **pending**: the office approves its own before agents read it (ADR-0037, ADR-0120). `description: null` gives the description back to the company.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "KpmProductController_saveOverrides_v1",
         "parameters": [
           {
@@ -13113,7 +13113,7 @@
     },
     "/api/v1/kpm/settings/products/{productId}/documents/{slot}/url": {
       "get": {
-        "description": "Signed, 300 seconds. Which registry answers follows which half holds the file, never what the caller asks for.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Signed, 300 seconds. Which registry answers follows which half holds the file, never what the caller asks for.\n\n**Requires `product_settings:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "KpmProductController_documentUrl_v1",
         "parameters": [
           {
@@ -13155,7 +13155,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `product_settings:read`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13194,12 +13194,12 @@
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "tenant_config:read"
+        "x-required-permission": "product_settings:read"
       }
     },
     "/api/v1/kpm/settings/products/script-reviews": {
       "get": {
-        "description": "A queue rather than a hunt through the whole shelf: the point of a gate is that whoever holds it can see what is behind it. **Reading it is `tenant_config:read`, not `sales_script:approve`** — every row is already in `GET /kpm/settings/products`, so a stricter grant on the same data would be theatre, and somebody who wrote a script has every reason to see it waiting. Deciding is the separate grant.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "A queue rather than a hunt through the whole shelf: the point of a gate is that whoever holds it can see what is behind it. **Reading it is `product_settings:read`, not `sales_script:approve`** — every row is already in `GET /kpm/settings/products`, so a stricter grant on the same data would be theatre, and somebody who wrote a script has every reason to see it waiting. Deciding is the separate grant. A field member is refused: the queue is the office's drafts.\n\n**Requires `product_settings:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "KpmProductController_pendingReviews_v1",
         "parameters": [],
         "responses": {
@@ -13227,7 +13227,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `product_settings:read`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13256,7 +13256,7 @@
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "tenant_config:read"
+        "x-required-permission": "product_settings:read"
       }
     },
     "/api/v1/kpm/settings/products/{productId}/script/approve": {
@@ -13437,7 +13437,7 @@
     },
     "/api/v1/kpm/settings/products/{productId}/script/effective": {
       "get": {
-        "description": "The office’s own words **only when approved**; otherwise the company’s, which the company published and is therefore already the company’s word. This is the one read an agent’s screen may use, which is what stops one rendering an override nobody approved.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The office’s own words **only when approved**; otherwise the company’s, which the company published and is therefore already the company’s word — for the description, the company’s tagline (OD-136). The settings screen’s comparison of what agents read today; an agent’s own screens read the same rule through `/product-catalog` and `/attack-plan`.\n\n**Requires `product_settings:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "KpmProductController_effectiveScript_v1",
         "parameters": [
           {
@@ -13471,7 +13471,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `product_settings:read`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13506,11 +13506,378 @@
             "bearer": []
           }
         ],
-        "summary": "The script an agent is actually served",
+        "summary": "The script and the description an agent is actually served",
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "tenant_config:read"
+        "x-required-permission": "product_settings:read"
+      }
+    },
+    "/api/v1/product-catalog": {
+      "get": {
+        "description": "Every product the office keeps on — the company’s default until the office decided, never a withdrawn one — in the company’s order, under the office’s display names, read live: a product the company withdraws is gone on the next read with no office action. A product in run-off the office keeps on is listed as `closed_to_new_business`. Empty for an office whose company has no catalog, or which keeps nothing on. Every member of the office — the Owner and the Admin through their field view, an AB, an AAB and an Agent — and a support session acting as one. A Super Admin outside a support session belongs to no office and is refused `403 TENANT_NO_MEMBERSHIP`.\n\n**Requires `product_catalog:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductCatalogController_list_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogListDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `product_catalog:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office’s product shelf",
+        "tags": [
+          "sales tools"
+        ],
+        "x-required-permission": "product_catalog:read"
+      }
+    },
+    "/api/v1/product-catalog/{productCode}": {
+      "get": {
+        "description": "Its details, the words to sell it with — the office’s **approved** words field by field, else the company’s — and which of its three documents can be opened. `commissionSchedule` is the company’s, and is left out entirely for a reader without `commission_rates:read`. A product of another company, one the office does not keep on and one the company withdrew all answer the same way — deliberately indistinguishable from one in another office: a `403` would confirm the code is somebody’s. Every member of the office — the Owner and the Admin through their field view, an AB, an AAB and an Agent — and a support session acting as one. A Super Admin outside a support session belongs to no office and is refused `403 TENANT_NO_MEMBERSHIP`.\n\n**Requires `product_catalog:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductCatalogController_product_v1",
+        "parameters": [
+          {
+            "name": "productCode",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProductDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `product_catalog:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One product, as the catalog’s drawer reads it",
+        "tags": [
+          "sales tools"
+        ],
+        "x-required-permission": "product_catalog:read"
+      }
+    },
+    "/api/v1/product-catalog/{productCode}/documents/{slot}/url": {
+      "get": {
+        "description": "The office’s own file in the slot, else the company’s; `404` when neither exists. Signed only for a product the office keeps on. A product of another company, one the office does not keep on and one the company withdrew all answer the same way — deliberately indistinguishable from one in another office: a `403` would confirm the code is somebody’s.\n\n**Requires `product_catalog:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ProductCatalogController_documentUrl_v1",
+        "parameters": [
+          {
+            "name": "productCode",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slot",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogDocumentUrlDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `product_catalog:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A product document’s link, valid 300 seconds",
+        "tags": [
+          "sales tools"
+        ],
+        "x-required-permission": "product_catalog:read"
+      }
+    },
+    "/api/v1/attack-plan": {
+      "get": {
+        "description": "The product the office keeps on, still issued and serving the brief’s need, that fits the brief best — an eligible age band scores 1 and an eligible budget band 2, highest first, ties in the company’s order, with no minimum — with its verdict (*Good fit* when both bands match, else *Check fit* and which bands it is outside), its words, and the brief’s other matches in score order, four of them and a count of the rest. `product: null` when nothing the office keeps on serves the need. With `product`, the reader switched to that alternative: it is shown, re-fitted against the brief, and the alternatives are the brief’s other matches. Nothing is stored. Every member of the office — the Owner and the Admin through their field view, an AB, an AAB and an Agent — and a support session acting as one. A Super Admin outside a support session belongs to no office and is refused `403 TENANT_NO_MEMBERSHIP`.\n\n**Requires `product_catalog:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AttackPlanController_plan_v1",
+        "parameters": [
+          {
+            "name": "need",
+            "required": true,
+            "in": "query",
+            "description": "*Primary need*.",
+            "schema": {
+              "enum": [
+                "life-protection",
+                "health",
+                "ci",
+                "accident",
+                "education",
+                "investment",
+                "retirement",
+                "legacy"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "age",
+            "required": true,
+            "in": "query",
+            "description": "*Age band*: 1 is < 25, 5 is 65+.",
+            "schema": {
+              "enum": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "type": "number"
+            }
+          },
+          {
+            "name": "budget",
+            "required": true,
+            "in": "query",
+            "description": "*Monthly premium budget*: 1 is < Rp500K, 7 is Lump-sum.",
+            "schema": {
+              "enum": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "type": "number"
+            }
+          },
+          {
+            "name": "product",
+            "required": false,
+            "in": "query",
+            "description": "The reader switched to this alternative: it is shown, re-fitted against the brief, and the alternatives are the brief’s other matches. A code that is not one of them is not found.",
+            "schema": {
+              "maxLength": 64,
+              "example": "PRUWELL_HEALTH",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttackPlanDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `product_catalog:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — `product` names nothing that matches this brief on the office’s shelf: deliberately indistinguishable from one in another office, so a code cannot be probed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The Sales Attack Plan for a customer brief",
+        "tags": [
+          "sales tools"
+        ],
+        "x-required-permission": "product_catalog:read"
       }
     },
     "/api/v1/kpm/settings/events/types": {
@@ -22555,47 +22922,67 @@
       "AttackPlanDto": {
         "type": "object",
         "properties": {
-          "goodFit": {
-            "type": "string",
-            "description": "0 · Good fit for",
-            "example": "Young families with a first mortgage"
+          "brief": {
+            "description": "The brief, as read.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AttackPlanBriefDto"
+              }
+            ]
           },
-          "opening": {
-            "type": "string",
-            "description": "1 · Opening line"
+          "product": {
+            "nullable": true,
+            "description": "The recommended product — or, with `product`, the one switched to — read as the drawer reads it. Null when no product the office keeps on, and still issues, serves the need.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CatalogProductDto"
+              }
+            ]
           },
-          "benefits": {
-            "description": "2 · Lead with these benefits",
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "good_fit",
+              "check_fit"
+            ],
+            "nullable": true,
+            "description": "*Good fit* when both bands match; *Check fit* otherwise. Null only when `product` is."
+          },
+          "outside": {
             "type": "array",
+            "description": "Which of the brief’s bands the product is outside, for the fit note. Empty for *Good fit*.",
             "items": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "age",
+                "budget"
+              ]
             }
           },
-          "fullScript": {
-            "type": "string",
-            "description": "3 · Full script"
+          "alternatives": {
+            "description": "The brief’s other matches in score order, the shown product left out: at most four.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttackPlanAlternativeDto"
+            }
           },
-          "objectionTheySay": {
-            "type": "string",
-            "description": "4a · If they push back — they say"
+          "moreCount": {
+            "type": "number",
+            "description": "How many more also match beyond the four."
           },
-          "objectionYouSay": {
-            "type": "string",
-            "description": "4b · If they push back — you say"
-          },
-          "nextAction": {
-            "type": "string",
-            "description": "5 · Next action"
+          "shelfEmpty": {
+            "type": "boolean",
+            "description": "True when the office keeps nothing on — its company has no catalog, or every product is turned off. The screen then draws the empty shelf, not *no product matches this need*; `product` is null."
           }
         },
         "required": [
-          "goodFit",
-          "opening",
-          "benefits",
-          "fullScript",
-          "objectionTheySay",
-          "objectionYouSay",
-          "nextAction"
+          "brief",
+          "product",
+          "verdict",
+          "outside",
+          "alternatives",
+          "moreCount",
+          "shelfEmpty"
         ]
       },
       "CommissionYearDto": {
@@ -22604,7 +22991,9 @@
           "year": {
             "type": "number",
             "example": 1,
-            "description": "Policy year, from 1."
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Policy year, from 1; at most 50 years."
           },
           "rate": {
             "type": "number",
@@ -22827,7 +23216,7 @@
             "$ref": "#/components/schemas/AttackPlanDto"
           },
           "commissionSchedule": {
-            "description": "Empty until the company states one. An empty list is shown as \"not set\", never as a default.",
+            "description": "Empty until the company states one. An empty list is shown as \"not set\", never as a default. A rate per policy year from year 1, none missing and none twice (OD-135, ADR-0119); the whole schedule is sent, and stored in year order.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CommissionYearDto"
@@ -22937,7 +23326,7 @@
             "$ref": "#/components/schemas/AttackPlanDto"
           },
           "commissionSchedule": {
-            "description": "Empty until the company states one. An empty list is shown as \"not set\", never as a default.",
+            "description": "Empty until the company states one. An empty list is shown as \"not set\", never as a default. A rate per policy year from year 1, none missing and none twice (OD-135, ADR-0119); the whole schedule is sent, and stored in year order.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CommissionYearDto"
@@ -23047,6 +23436,14 @@
           "displayName": {
             "$ref": "#/components/schemas/EffectiveFieldDto"
           },
+          "description": {
+            "description": "*Short description (shown to agents)* (OD-136): this office’s **draft**, else the company’s tagline. Held for approval with the script, so what agents read is the effective read’s `description`, not this.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveFieldDto"
+              }
+            ]
+          },
           "script": {
             "type": "object",
             "description": "The seven script fields, each with its own overridden flag."
@@ -23081,6 +23478,7 @@
           "sellable",
           "active",
           "displayName",
+          "description",
           "script",
           "reviewState",
           "rejectionReason",
@@ -23103,6 +23501,12 @@
           "displayName": {
             "type": "string",
             "description": "What this office calls the product."
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 300,
+            "description": "*Short description (shown to agents)* (`KPM_Owner.html:1781`, OD-136): the office’s sentence in place of the company’s tagline. Trimmed. **Held for approval with the script** (ADR-0037, ADR-0120): agents read the company’s tagline until the office approves it. `null`, or a blank, gives it back to the company — the same as `DELETE …/overrides/description`."
           },
           "goodFit": {
             "type": "string",
@@ -23175,16 +23579,422 @@
               "kpm",
               "company"
             ],
-            "description": "Whose words these are. `kpm` only when the office approved its own override; otherwise the company’s, which the company published."
+            "description": "Whose words these are. `kpm` only when the office approved its own override — of the script or the description; otherwise the company’s, which the company published."
           },
           "script": {
             "type": "object",
             "description": "The seven script fields, each the effective value. No markup, ever."
+          },
+          "description": {
+            "type": "string",
+            "description": "What agents read in place of the tagline (OD-136, ADR-0120): the office’s **approved** description, else the company’s tagline. A pending one is never here."
           }
         },
         "required": [
           "source",
-          "script"
+          "script",
+          "description"
+        ]
+      },
+      "CatalogCategoryDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "life",
+              "health",
+              "ci",
+              "education",
+              "investment"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "example": "Investment-linked",
+            "description": "The catalog’s own word for it."
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
+      "CatalogCardDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "PRUMAPAN",
+            "description": "The product’s permanent code: its address."
+          },
+          "name": {
+            "type": "string",
+            "example": "PRUMapan (nama kami)",
+            "description": "The office’s display name, else the company’s name."
+          },
+          "tagline": {
+            "type": "string",
+            "description": "The office’s **approved** description (*Short description (shown to agents)*), else the company’s tagline. A description waiting on approval is never here."
+          },
+          "category": {
+            "$ref": "#/components/schemas/CatalogCategoryDto"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "conventional",
+              "syariah"
+            ]
+          },
+          "lifecycle": {
+            "type": "string",
+            "enum": [
+              "active",
+              "closed_to_new_business"
+            ],
+            "description": "`closed_to_new_business` is *In run-off*. A withdrawn product is on no field read."
+          },
+          "needs": {
+            "type": "array",
+            "description": "The customer needs it serves.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "life-protection",
+                "health",
+                "ci",
+                "accident",
+                "education",
+                "investment",
+                "retirement",
+                "legacy"
+              ]
+            }
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "tagline",
+          "category",
+          "channel",
+          "lifecycle",
+          "needs"
+        ]
+      },
+      "CatalogListDto": {
+        "type": "object",
+        "properties": {
+          "products": {
+            "description": "Every product the office keeps on — the company’s `activeByDefault` until the office decided, never a withdrawn one — in the company’s order. Empty for an office whose company has no catalog, or which keeps nothing on.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogCardDto"
+            }
+          }
+        },
+        "required": [
+          "products"
+        ]
+      },
+      "CommissionRateDto": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "number",
+            "example": 1,
+            "description": "The policy year, from 1."
+          },
+          "rate": {
+            "type": "number",
+            "example": 0.4,
+            "description": "A proportion, not a percentage: `0.4` is 40%."
+          }
+        },
+        "required": [
+          "year",
+          "rate"
+        ]
+      },
+      "CatalogScriptDto": {
+        "type": "object",
+        "properties": {
+          "goodFit": {
+            "type": "string",
+            "description": "0 · Good fit for"
+          },
+          "opening": {
+            "type": "string",
+            "description": "1 · Opening line"
+          },
+          "benefits": {
+            "description": "2 · Lead with these benefits",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "fullScript": {
+            "type": "string",
+            "description": "3 · Full script. Blank for a product with no authored script."
+          },
+          "objectionTheySay": {
+            "type": "string",
+            "description": "4 · If they push back — they say"
+          },
+          "objectionYouSay": {
+            "type": "string",
+            "description": "4 · If they push back — you say"
+          },
+          "nextAction": {
+            "type": "string",
+            "description": "5 · Next action"
+          }
+        },
+        "required": [
+          "goodFit",
+          "opening",
+          "benefits",
+          "fullScript",
+          "objectionTheySay",
+          "objectionYouSay",
+          "nextAction"
+        ]
+      },
+      "CatalogDocumentDto": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "string",
+            "enum": [
+              "brochure",
+              "illustration",
+              "productDoc"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "example": "Illustration / Simulation"
+          },
+          "available": {
+            "type": "boolean",
+            "description": "Whether the office’s file, or else the company’s, is in this slot — so *Open link →* can be asked for."
+          }
+        },
+        "required": [
+          "slot",
+          "label",
+          "available"
+        ]
+      },
+      "CatalogProductDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "PRUMAPAN",
+            "description": "The product’s permanent code: its address."
+          },
+          "name": {
+            "type": "string",
+            "example": "PRUMapan (nama kami)",
+            "description": "The office’s display name, else the company’s name."
+          },
+          "tagline": {
+            "type": "string",
+            "description": "The office’s **approved** description (*Short description (shown to agents)*), else the company’s tagline. A description waiting on approval is never here."
+          },
+          "category": {
+            "$ref": "#/components/schemas/CatalogCategoryDto"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "conventional",
+              "syariah"
+            ]
+          },
+          "lifecycle": {
+            "type": "string",
+            "enum": [
+              "active",
+              "closed_to_new_business"
+            ],
+            "description": "`closed_to_new_business` is *In run-off*. A withdrawn product is on no field read."
+          },
+          "needs": {
+            "type": "array",
+            "description": "The customer needs it serves.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "life-protection",
+                "health",
+                "ci",
+                "accident",
+                "education",
+                "investment",
+                "retirement",
+                "legacy"
+              ]
+            }
+          },
+          "benefits": {
+            "description": "*Benefits*, the company’s.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "differentiator": {
+            "type": "string",
+            "description": "*How it stands out*."
+          },
+          "bestFit": {
+            "type": "string",
+            "description": "*Best-fit customer*."
+          },
+          "ageBands": {
+            "example": [
+              "25–34",
+              "35–49"
+            ],
+            "description": "The age bands it is eligible for, by label.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "budgetBands": {
+            "example": [
+              "Rp2M–Rp5M"
+            ],
+            "description": "The monthly budget bands it is eligible for, by label.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "runOffNote": {
+            "type": "string",
+            "nullable": true,
+            "description": "The drawer’s run-off note, for a product in run-off; else null."
+          },
+          "successorCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "The code of the product that replaced it, where the company named one."
+          },
+          "commissionSchedule": {
+            "description": "The company’s schedule, a row per year — **absent** for a reader without `commission_rates:read`, and empty while the company has not stated one. Never a default.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommissionRateDto"
+            }
+          },
+          "script": {
+            "description": "The seven script fields: the office’s approved words field by field, else the company’s.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CatalogScriptDto"
+              }
+            ]
+          },
+          "documents": {
+            "description": "The three slots, in their order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogDocumentDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "tagline",
+          "category",
+          "channel",
+          "lifecycle",
+          "needs",
+          "benefits",
+          "differentiator",
+          "bestFit",
+          "ageBands",
+          "budgetBands",
+          "runOffNote",
+          "successorCode",
+          "script",
+          "documents"
+        ]
+      },
+      "CatalogDocumentUrlDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Signed; the office’s file, else the company’s."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the link stops working: 300 seconds after it was signed."
+          }
+        },
+        "required": [
+          "url",
+          "expiresAt"
+        ]
+      },
+      "AttackPlanBriefDto": {
+        "type": "object",
+        "properties": {
+          "need": {
+            "type": "string",
+            "enum": [
+              "life-protection",
+              "health",
+              "ci",
+              "accident",
+              "education",
+              "investment",
+              "retirement",
+              "legacy"
+            ]
+          },
+          "age": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "The age band, 1 (< 25) to 5 (65+)."
+          },
+          "budget": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 7,
+            "description": "The monthly budget band, 1 (< Rp500K) to 7 (Lump-sum)."
+          }
+        },
+        "required": [
+          "need",
+          "age",
+          "budget"
+        ]
+      },
+      "AttackPlanAlternativeDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "The office’s display name."
+          }
+        },
+        "required": [
+          "code",
+          "name"
         ]
       },
       "EventTypeDto": {

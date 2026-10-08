@@ -154,15 +154,8 @@ describe('permission matrix', () => {
       'notification:receive/KPM_ADMIN': 'as KPM_OWNER',
       'notification:receive/AB': 'as KPM_OWNER — own-unit delivery is the routing phase',
       'notification:receive/AAB': 'as KPM_OWNER',
-      'commission_rates:read/KPM_OWNER': 'P5-T5 shipped the office\'s product read and did **not** '
-        + 'carry the commission schedule: `KpmProductView` has no such field, so the grant still '
-        + 'has no route exercising it. That fails closed — an Owner cannot see rates anywhere — '
-        + 'and the reader is Phase 14\'s member-scoped read (ADR-0038), not a catalog task.',
-      'commission_rates:read/KPM_ADMIN': 'as KPM_OWNER',
-      'commission_rates:read/AB': 'as KPM_OWNER — and a leader reads the rates of the people they '
-        + 'lead (ADR-0038), which needs the member-scoped read Phase 14 builds',
-      'commission_rates:read/AAB': 'as AB',
-      'commission_rates:read/AGENT': 'as KPM_OWNER',
+      // `commission_rates:read` for the field roles is granted since the catalog's field read carries
+      // the schedule (Phase 14, OD-135): its five deferrals are gone with it.
     };
 
     /**
@@ -871,6 +864,30 @@ describe('permission matrix', () => {
     it('P13-T5 AC-8 an Owner or Admin who also stands on a rung holds that rung’s grants (§1.1)', () => {
       expect(scopeFor(ctx({ role: 'ab', owner: true }), 'new_hires:read_roster')).toBe('own-downline');
       expect(scopeFor(ctx({ role: 'agent', admin: true }), 'activation:graduate')).toBe('own');
+    });
+  });
+
+  describe('Phase 14 — the sales tools (roles §3.10)', () => {
+    it('P14 exit review N1: no attack_plan:* or sales_attack_plan:read permission exists (D-api, ADR-0117)', () => {
+      expect(Object.keys(PERMISSIONS).filter((p) => p.startsWith('attack_plan:') || p === 'sales_attack_plan:read')).toEqual([]);
+    });
+
+    it('P14 exit review: product_settings:read is the Owner’s and the Admin’s, never a field member’s', () => {
+      // The settings reads carry the office's drafts (ADR-0037); `tenant_config:read`, every member's, no longer covers them.
+      expect(scopeFor(ctx({ owner: true }), 'product_settings:read')).toBe('own-kpm');
+      expect(scopeFor(ctx({ admin: true }), 'product_settings:read')).toBe('own-kpm');
+      expect(scopeFor(ctx({ superAdmin: true, noMembership: true }), 'product_settings:read')).toBe('all');
+      for (const role of ['ab', 'aab', 'agent'] as const) {
+        expect([role, can(ctx({ role }), 'product_settings:read')]).toEqual([role, false]);
+        // The field read of the same shelf is theirs.
+        expect([role, can(ctx({ role }), 'product_catalog:read')]).toEqual([role, true]);
+      }
+    });
+
+    it('P14 exit review: a read by its verb, so a read-only session as the Owner keeps it and as an agent does not gain it', () => {
+      expect(isReadLike('product_settings:read')).toBe(true);
+      expect(can(ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: true }), 'product_settings:read')).toBe(true);
+      expect(can(ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: true }), 'product_settings:read')).toBe(false);
     });
   });
 });
