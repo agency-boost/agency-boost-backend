@@ -1265,7 +1265,7 @@ describe('TenantService', () => {
 
       expect((await stored(kpm._id)).startedFrom).toEqual(startedFrom);
       const created = await col('auditLog').findOne({ action: 'kpm.created', targetId: kpm._id });
-      expect(created!.after).toMatchObject({ startedFrom, cascadeTypesAdded: [] });
+      expect(created!.after).toMatchObject({ startedFrom, cascadeTypesAdded: [], capabilityLadderSupplied: false });
       expect((await typesOf(kpm._id))).toHaveLength(12);
     });
 
@@ -1287,7 +1287,12 @@ describe('TenantService', () => {
       expect(office.seededFrom.event_types).toEqual({ templateId: lean.id, version: 1 });
       expect(office.seededFrom.ratio_set).toEqual({ templateId: lean.id, version: null });
       expect(Object.keys(office.seededFrom)).toHaveLength(7);
-      expect((await col('capabilityCatalogs').findOne({ kpmId: kpm._id }))).toMatchObject({ stages: [], grids: [] });
+      // ADR-0116: the one kind it never published that the office has all the same — the platform ladder.
+      const ladder = (await col('capabilityCatalogs').findOne({ kpmId: kpm._id }))!;
+      expect([ladder.stages.length, ladder.milestones.length, ladder.grids.length]).toEqual([4, 5, 4]);
+      expect(office.seededFrom.capability_ladder).toEqual({ templateId: lean.id, version: null, platformSupplied: true });
+      const created = await col('auditLog').findOne({ action: 'kpm.created', targetId: kpm._id });
+      expect(created!.after).toMatchObject({ capabilityLadderSupplied: true });
     });
 
     it('AC-2: the AgencyBoost defaults, chosen — the platform’s own, no template and no version', async () => {
@@ -1296,9 +1301,12 @@ describe('TenantService', () => {
       expect(office.startedFrom).toEqual({ source: 'defaults', templateId: null, templateName: null });
       expect(Object.values(office.seededFrom)).toEqual(Array(7).fill({ templateId: null, version: null }));
       expect(await counts(kpm._id)).toMatchObject({ activityTypes: 12, activationTemplates: 1 });
+      // The platform ladder is the source's own here, so nothing was supplied (ADR-0116).
+      const created = await col('auditLog').findOne({ action: 'kpm.created', targetId: kpm._id });
+      expect(created!.after).toMatchObject({ capabilityLadderSupplied: false });
     });
 
-    it('AC-2, AC-3: Empty — the three cascade types, active, in their platform sections, and nothing else', async () => {
+    it('AC-2, AC-3: Empty — the three cascade types, active, in their platform sections, the platform ladder, and nothing else', async () => {
       const kpm = await service.createKpm(sa(), { ...input(), startFrom: { kind: 'empty' } });
       expect(await counts(kpm._id)).toEqual({
         activityTypes: 3, leadStatuses: 0, ratioDefinitions: 0, trainingCategories: 0, activationTemplates: 0, eventTypes: 0,
@@ -1311,8 +1319,15 @@ describe('TenantService', () => {
       ]);
       expect((await col('activityCategories').find({ kpmId: kpm._id }).sort({ displayOrder: 1 }).toArray())
         .map((c) => [c.code, c.label])).toEqual([['LEADS_GENERATION', 'Leads Generation'], ['SELLING', 'Selling']]);
+      // ADR-0116: the platform capability ladder, recorded on the office and in kpm.created as supplied.
+      const ladder = (await col('capabilityCatalogs').findOne({ kpmId: kpm._id }))!;
+      expect([ladder.stages.length, ladder.milestones.length, ladder.grids.length]).toEqual([4, 5, 4]);
+      expect((await stored(kpm._id)).seededFrom.capability_ladder)
+        .toEqual({ templateId: null, version: null, platformSupplied: true });
       const created = await col('auditLog').findOne({ action: 'kpm.created', targetId: kpm._id });
-      expect(created!.after).toMatchObject({ startedFrom: { source: 'empty' }, cascadeTypesAdded: CASCADE });
+      expect(created!.after).toMatchObject({
+        startedFrom: { source: 'empty' }, cascadeTypesAdded: CASCADE, capabilityLadderSupplied: true,
+      });
     });
 
     it('AC-2: checks the whole source before the office row is written — a refusal leaves no office and no rows', async () => {

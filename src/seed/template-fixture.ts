@@ -9,7 +9,7 @@ import { ActivityCategory, ActivityCategorySchema } from '@/modules/config/activ
 import { ActivityType, ActivityTypeSchema } from '@/modules/config/activity-type.schema';
 import { CapabilityCatalog, CapabilityCatalogSchema } from '@/modules/capability/capability.schema';
 import { capabilitySeedDocument } from '@/modules/capability/capability-payload';
-import { OFFICE_TEMPLATE_KINDS, withCascadeTypes } from '@/modules/config/template-defaults';
+import { OFFICE_TEMPLATE_KINDS, withCascadeTypes, withPlatformLadder } from '@/modules/config/template-defaults';
 import { up as namedTemplates, type NamedTemplatesResult } from '@/migrations/0023-named-templates';
 import { seedObjectId } from './coaching-fixture';
 
@@ -23,7 +23,7 @@ import { seedObjectId } from './coaching-fixture';
  * | **Prudential** | holds **Prudential template**, its default — the template migration `0023` gives every company, holding the event types the seed published and each other kind as a published version 1 of the AgencyBoost defaults | `superadmin@agencyboost.test` at `/admin/companies/{Prudential}/template`: the picker, *Prudential template · Default*, its office count; at `/admin/tenants/new`, *Start from* offers it first, then *AgencyBoost defaults* and *Empty* |
  * | **Allianz Life** | **Allianz Life template**, the same way, with its own two event types | the picker on Allianz's template screen |
  * | **Sejahtera Baru Life** (new) | a company created **without** the defaults — *Started blank* — whose default template, *Sejahtera Baru Life template*, holds nothing | its template screen: every tab empty |
- * | **0701** Cempaka Putih (new), Sejahtera Baru Life | started ***Empty***: the three cascade activity types in *Leads Generation* and *Selling*, an empty capability catalog, and nothing else — no stages, ratios, training, checklist or event types — so **no activation** | `owner@kpm0701.test`: every settings screen opens empty and authors its first row; archiving one of the three is refused. `agent@kpm0701.test`: Log Activity with the three, the empty states elsewhere, no *New agent* section |
+ * | **0701** Cempaka Putih (new), Sejahtera Baru Life | started ***Empty***: the three cascade activity types in *Leads Generation* and *Selling*, the platform capability ladder (ADR-0116: four stages, five milestones, four grids), and nothing else — no lead stages, ratios, training, checklist or event types — so **no activation** | `owner@kpm0701.test`: every other settings screen opens empty and authors its first row, *Capability Mapping* shows the standard ladder; archiving one of the three is refused. `agent@kpm0701.test`: Log Activity with the three, the empty states elsewhere, no *New agent* section |
  *
  * A second Prudential template, *BSD City settings* saved from 0417, is the copies' fixture's (P13.2-T7,
  * `template-copy-fixture.ts`).
@@ -183,21 +183,25 @@ export async function seedTemplateFixture(deps: TemplateFixtureDeps): Promise<Te
       version: 1, status: 'active', archivedAt: null, deletedAt: null, createdBy: null, updatedBy: null,
     })));
   }
-  // An empty catalog, not none: none reads as the platform's ladder (`CapabilityService.read`).
+  // The platform ladder, by provisioning's own rule: the source has none, so it is supplied (ADR-0116).
+  const ladder = withPlatformLadder(null);
   if (!(await Catalogs.exists({ kpmId }))) {
-    await Catalogs.create(capabilitySeedDocument(kpmId, { stages: [], milestones: [], grids: [] }));
+    await Catalogs.create(capabilitySeedDocument(kpmId, ladder.payload as never));
   }
   // Published, as provisioning publishes a new office's first snapshot.
   await deps.publish(kpmId, deps.daysAgo(14));
   /*
    * The seed's `publish` records five kinds as the platform defaults, as provisioning did before 13.2;
-   * this office's record is all seven, each empty — written once, after it.
+   * this office's record is all seven, each empty, the ladder marked supplied — written once, after it.
    */
   await Kpms.updateOne(
     { _id: kpmId, 'seededFrom.event_types': { $exists: false } },
     {
       $set: {
-        seededFrom: Object.fromEntries(OFFICE_TEMPLATE_KINDS.map((kind) => [kind, { templateId: null, version: null }])),
+        seededFrom: Object.fromEntries(OFFICE_TEMPLATE_KINDS.map((kind) => [kind, {
+          templateId: null, version: null,
+          ...(kind === 'capability_ladder' && ladder.supplied ? { platformSupplied: true } : {}),
+        }])),
       },
     },
   ).exec();
@@ -225,9 +229,9 @@ export async function seedTemplateFixture(deps: TemplateFixtureDeps): Promise<Te
     Allianz Life                 "Allianz Life template", its default
     Sejahtera Baru Life          Started blank: "Sejahtera Baru Life template" holds nothing
     KPM 0701 · Cempaka Putih     Started Empty, Sejahtera Baru Life:
-      owner@kpm0701.test         Hadi, the Owner — the three cascade activity types and nothing else;
-                                 each settings screen authors its first row; archiving one of the three
-                                 is refused
+      owner@kpm0701.test         Hadi, the Owner — the three cascade activity types and the platform
+                                 capability ladder, nothing else; each other settings screen authors its
+                                 first row; archiving one of the three is refused
       agent@kpm0701.test         Nadia, an Agent — Log Activity with the three, empty states elsewhere,
                                  no activation and no New agent section
 `;

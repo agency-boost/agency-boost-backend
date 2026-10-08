@@ -35,10 +35,16 @@ export type TemplateKind = (typeof TEMPLATE_KINDS)[number];
  *
  * A record with `version: null` is a known answer, and it is different from **no record at all**,
  * which means the office was created before provisioning recorded this kind.
+ *
+ * **`platformSupplied: true`** (ADR-0116, 2026-10-08) marks a kind the source held none of and the office
+ * was given the platform's own all the same, because it is structural: only `capability_ladder`, whose
+ * stages *Leader Notes* places people on and no screen can add. `version` stays `null` — the source still
+ * held none — and the field is absent, never `false`, on every other record.
  */
 export interface SeedRecord {
   templateId: string | null;
   version: number | null;
+  platformSupplied?: true;
 }
 
 /**

@@ -320,7 +320,8 @@ describe('what archiving left behind is dropped, and listed (exit review, findin
     expect(kinds).not.toHaveProperty('capability_ladder');
     expect(dropped.map((d) => [d.kind, d.code])).toEqual([['capability_ladder', 'S1'], ['capability_ladder', null]]);
     expect(dropped[1].reason).toBe(
-      'The capability ladder was left out: it has no active stage left, so an office made from the template could place nobody on it.',
+      'The capability ladder was left out: it has no active stage left, so it could place nobody. '
+        + 'An office made from the template starts with AgencyBoost’s standard capability ladder instead.',
     );
   });
 

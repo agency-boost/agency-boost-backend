@@ -114,3 +114,23 @@ export function withCascadeTypes(
   }
   return { categories: outCategories, types: outTypes, added };
 }
+
+/**
+ * **A capability ladder, the platform's where the source has none** (ADR-0116).
+ *
+ * The ladder is structural, as the three cascade types are: *Leader Notes* places people on its stages,
+ * and *Capability Mapping* can add milestones and grid items but never a stage or a grid, so an office
+ * given no ladder could never build one. A source holding none — *Empty*, a template that never published
+ * the kind, an office saved as a template after every stage was archived — or a payload with no stage
+ * gives the four stages, five milestones and four grids of `platformDefaultPayload('capability_ladder')`,
+ * and `supplied` says so. A source with a ladder keeps its own, whole: nothing is merged into it.
+ */
+export function withPlatformLadder(
+  payload: Record<string, unknown> | null,
+): { payload: Record<string, unknown>; supplied: boolean } {
+  const stages = payload?.stages;
+  const none = !payload || stages === undefined || (Array.isArray(stages) && stages.length === 0);
+  return none
+    ? { payload: platformDefaultPayload('capability_ladder'), supplied: true }
+    : { payload, supplied: false };
+}

@@ -546,7 +546,8 @@ export class TenantService {
      * The office arrives with its configuration (P4-T1, ADR-0018, ADR-0115): **the chosen source
      * and nothing else** — a kind the source holds none of is empty here, and there is no fallback
      * to the platform defaults. Every office has the three cascade activity types whatever its
-     * source (ADR-0115 §2). An *Empty* office has those three and nothing else.
+     * source (ADR-0115 §2), and a capability ladder — the platform's where its source has none
+     * (ADR-0116). An *Empty* office has those three and the platform ladder, and nothing else.
      *
      * After the office row, not before: rows belonging to an office that failed to create would
      * be orphans nothing points at.
@@ -581,6 +582,8 @@ export class TenantService {
         seededFrom: kpm.seededFrom,
         activityTypes: provisioned.activityTypes,
         cascadeTypesAdded: provisioned.cascadeAdded,
+        // The source had no capability ladder, so the office was given the platform's (ADR-0116).
+        capabilityLadderSupplied: provisioned.capabilityLadderSupplied,
       },
     });
 

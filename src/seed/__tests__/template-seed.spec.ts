@@ -4,6 +4,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionFrom } from '../../../test/config-module';
 import { up as namedTemplates } from '@/migrations/0023-named-templates';
+import { SEED_CAPABILITY_STAGES } from '@/domain/constants';
 import { BLANK_COMPANY, EMPTY_OFFICE } from '../template-fixture';
 import { BSD_CITY_SETTINGS, seedTemplateCopyFixture } from '../template-copy-fixture';
 import { seedDemo } from '../demo';
@@ -75,17 +76,18 @@ describe('P13.2-T6 the template seed — a run at 10:00 on 7 October 2026 in Jak
   });
 
   describe('office 0701, started Empty', () => {
-    it('records where it started, and that every kind came empty', async () => {
+    it('records where it started, that every kind came empty, and that the ladder was supplied (ADR-0116)', async () => {
       const kpm = await col('kpms').findOne({ _id: new mongoose.Types.ObjectId(EMPTY_OFFICE._id) });
       expect(kpm).toMatchObject({
         code: '0701', companyId: BLANK_COMPANY._id,
         startedFrom: { source: 'empty', templateId: null, templateName: null },
       });
-      expect(Object.values(kpm!.seededFrom as Record<string, unknown>))
-        .toEqual(Array(7).fill({ templateId: null, version: null }));
+      const { capability_ladder: ladder, ...rest } = kpm!.seededFrom as Record<string, unknown>;
+      expect(Object.values(rest)).toEqual(Array(6).fill({ templateId: null, version: null }));
+      expect(ladder).toEqual({ templateId: null, version: null, platformSupplied: true });
     });
 
-    it('holds the three cascade activity types and nothing else', async () => {
+    it('holds the three cascade activity types and the platform capability ladder, and nothing else', async () => {
       const owner = await as('owner@kpm0701.test', true);
       const taxonomy = await wired.activity.list(owner);
       expect(taxonomy.map((c) => c.code)).toEqual(['LEADS_GENERATION', 'SELLING']);
@@ -97,7 +99,11 @@ describe('P13.2-T6 the template seed — a run at 10:00 on 7 October 2026 in Jak
       expect(await wired.ratios.list(owner)).toEqual([]);
       expect(await wired.training.list(owner)).toEqual([]);
       expect(await wired.events.listTypes(owner)).toEqual([]);
-      expect(await wired.capability.read(owner)).toMatchObject({ stages: [], milestones: [], grids: [] });
+      // ADR-0116: the platform ladder, the office's own — Capability Mapping and Leader Notes have it.
+      const ladder = await wired.capability.read(owner);
+      expect(ladder.stages.map((st) => st.code)).toEqual(SEED_CAPABILITY_STAGES.map((st) => st.code));
+      expect([ladder.milestones.length, ladder.grids.length]).toEqual([5, 4]);
+      expect(await wired.capability.own(owner)).not.toBeNull();
       // The checklist screen opens on nothing to author from, not on the platform's sixteen items.
       expect(await wired.activation.read(owner)).toMatchObject({ published: null, draft: null });
     });

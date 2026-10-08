@@ -12,7 +12,7 @@ import { NotFoundException } from '@/common/errors/domain.exception';
 import type { KpmStartedFrom } from '@/modules/tenants/kpm.schema';
 import { NamedTemplate, NamedTemplateDocument } from './named-template.schema';
 import {
-  OFFICE_TEMPLATE_KINDS, platformDefaultPayload, withCascadeTypes, type OfficeTemplateKind,
+  OFFICE_TEMPLATE_KINDS, platformDefaultPayload, withCascadeTypes, withPlatformLadder, type OfficeTemplateKind,
 } from './template-defaults';
 import { ActivityCategory, ActivityCategoryDocument } from './activity-category.schema';
 import { ActivityType, ActivityTypeDocument } from './activity-type.schema';
@@ -112,6 +112,14 @@ export interface Provisioned {
   seededFrom: Record<OfficeTemplateKind, SeedRecord>;
   activityTypes: number;
   cascadeAdded: string[];
+  /** The source had no capability ladder, so the office was given the platform's (ADR-0116). */
+  capabilityLadderSupplied: boolean;
+}
+
+/** What the capability seed wrote: its record, and whether the ladder was the platform's, supplied. */
+export interface ProvisionedLadder {
+  seededFrom: SeedRecord;
+  supplied: boolean;
 }
 
 const NO_RECORD: SeedRecord = { templateId: null, version: null };
@@ -173,8 +181,9 @@ export function leadPipelineProblems(statuses: readonly SeedLeadStatus[]): strin
  * templates, the AgencyBoost defaults, or *Empty*. **There is no fallback.** It fell back to the
  * platform defaults whenever a company had published nothing of a kind, which made a blank
  * company's offices anything but blank; a kind the source holds none of is now empty in the office,
- * and the AgencyBoost defaults are a source a Super Admin chooses. The one exception is structural:
- * every office has the three cascade activity types (ADR-0115 §2, {@link withCascadeTypes}).
+ * and the AgencyBoost defaults are a source a Super Admin chooses. The exceptions are structural:
+ * every office has the three cascade activity types (ADR-0115 §2, {@link withCascadeTypes}) and a
+ * capability ladder, the platform's where its source has none (ADR-0116, {@link withPlatformLadder}).
  * Which source was used is recorded on the office, so "who is on a stale taxonomy" stays answerable.
  *
  * **Written on the models, not through the tenant repository, and deliberately.** The
@@ -300,10 +309,11 @@ export class ProvisioningService {
         training_taxonomy: training.seededFrom,
         activation_checklist: activation.seededFrom,
         event_types: events.seededFrom,
-        capability_ladder: capability,
+        capability_ladder: capability.seededFrom,
       },
       activityTypes: taxonomy.types,
       cascadeAdded: taxonomy.cascadeAdded,
+      capabilityLadderSupplied: capability.supplied,
     };
   }
 
@@ -334,6 +344,8 @@ export class ProvisioningService {
    * **Every check each kind's seed makes, over the whole plan, before anything is written**
    * (ADR-0115 §4). The checklist's training links are checked against the plan's own modules, and the
    * ratios against the plan's taxonomy with the three cascade types in it — what the office will have.
+   * A capability ladder is checked only where the source has one: where it has none, the office is given
+   * the platform's (ADR-0116), which needs no check.
    */
   private refuseBrokenPlan(plan: ProvisioningPlan): void {
     const { kinds } = plan;
@@ -395,9 +407,8 @@ export class ProvisioningService {
       }
     }
     if (kinds.event_types.payload) say('Events', eventTypesProblems(kinds.event_types.payload));
-    if (kinds.capability_ladder.payload) {
-      say('Capability mapping', capabilityLadderProblems(kinds.capability_ladder.payload));
-    }
+    const ladder = withPlatformLadder(kinds.capability_ladder.payload);
+    if (!ladder.supplied) say('Capability mapping', capabilityLadderProblems(ladder.payload));
 
     if (problems.length) {
       const from = plan.startedFrom.templateName ?? (plan.startedFrom.source === 'defaults'
@@ -571,28 +582,41 @@ export class ProvisioningService {
    * The capability catalog a new office starts with (P5-T8, ADR-0025).
    *
    * From the source — and **refused when that payload would produce a broken office** (AC-5). A
-   * catalog with no stages, or two items sharing a code, reaches every office created afterwards and
-   * nothing says so until a leader opens an assessment and finds it cannot be scored.
+   * catalog with two items sharing a code, or a stage requiring a milestone nobody defined, reaches
+   * every office created afterwards and nothing says so until a leader opens an assessment and finds
+   * it cannot be scored.
    *
-   * **A source holding none gives the office an empty catalog** (ADR-0115 §1), not none: an office
-   * with no catalog row reads as the platform's ladder (`CapabilityService.read`, for offices made
-   * before catalogs existed), which is exactly the fallback an *Empty* office must not have.
+   * **A source with no ladder gives the office the platform's** (ADR-0116, {@link withPlatformLadder}):
+   * the four stages, five milestones and four grids, written as the office's own catalog and recorded
+   * `platformSupplied` — the source still held none, so its `version` stays `null`. The ladder is
+   * structural, as the three cascade types are: *Capability Mapping* adds milestones and grid items but
+   * never a stage or a grid, so an office given an empty catalog could never build one, and its
+   * leaders' *Leader Notes* would stay an empty state for good. It replaced, on 2026-10-08, the empty
+   * catalog an *Empty* office was given under ADR-0115 §1.
    *
    * Two offices seeded from the same version hold **identical item codes** (AC-3), because the
    * codes come from the payload rather than being minted per office.
    */
   async seedCapabilityCatalog(
     kpmId: string, source: KindSource = defaultSource('capability_ladder'),
-  ): Promise<SeedRecord> {
-    const payload = (source.payload ?? { stages: [], milestones: [], grids: [] }) as unknown as CapabilityLadderPayload;
-    const problems = source.payload ? capabilityLadderProblems(source.payload) : [];
+  ): Promise<ProvisionedLadder> {
+    const ladder = withPlatformLadder(source.payload);
+    const problems = capabilityLadderProblems(ladder.payload);
     if (problems.length) {
       throw new Error(
         `The capability catalog for office ${kpmId} would be broken: ${problems.join(' ')}`,
       );
     }
-    await this.capabilityCatalogs.create(capabilitySeedDocument(kpmId, payload));
-    return source.seededFrom;
+    if (ladder.supplied) {
+      this.logger.log(`Office ${kpmId} was given the platform capability ladder (ADR-0116).`);
+    }
+    await this.capabilityCatalogs.create(
+      capabilitySeedDocument(kpmId, ladder.payload as unknown as CapabilityLadderPayload),
+    );
+    return {
+      seededFrom: ladder.supplied ? { ...source.seededFrom, platformSupplied: true } : source.seededFrom,
+      supplied: ladder.supplied,
+    };
   }
 
   /**

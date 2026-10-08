@@ -4,6 +4,7 @@ import {
 import {
   defaultEventTypes, eventTypeSeedDocuments, eventTypesProblems,
 } from '@/modules/events/event-types-payload';
+import { platformDefaultPayload, withPlatformLadder } from './template-defaults';
 
 /**
  * What the two template kinds P5-T9 added refuse, one rule at a time (AC-4).
@@ -238,5 +239,46 @@ describe('the campaign kinds payload (P5-T9)', () => {
     });
 
     expect(row).toMatchObject({ appliesToOrgLevelCodes: [], groupMode: 'all', reward: '' });
+  });
+});
+
+/**
+ * **The capability ladder is structural** (ADR-0116): one rule, read by provisioning's check, its seed and
+ * the demo seed's office 0701, so the three cannot disagree about what *no ladder* is.
+ */
+describe('withPlatformLadder (ADR-0116)', () => {
+  const PLATFORM = platformDefaultPayload('capability_ladder');
+
+  it.each([
+    ['no payload — Empty, or a kind the template never published', null],
+    ['a payload with no stages key', { milestones: [], grids: [] }],
+    ['a payload with an empty stage list', { stages: [], milestones: [{ code: 'M', label: 'M' }], grids: [] }],
+  ])('supplies the platform’s four stages, five milestones and four grids for %s', (_what, payload) => {
+    const { payload: given, supplied } = withPlatformLadder(payload);
+    expect(supplied).toBe(true);
+    expect(given).toEqual(PLATFORM);
+    expect((given.stages as unknown[]).length).toBe(4);
+    expect((given.milestones as unknown[]).length).toBe(5);
+    expect((given.grids as unknown[]).length).toBe(4);
+  });
+
+  it('keeps a ladder of the source’s own, whole and untouched — nothing is merged', () => {
+    const own = {
+      stages: [{ code: 'ROOKIE', label: 'Rookie', requiredMilestoneCodes: ['FIRST_SALE'], stageOrder: 1 }],
+      milestones: [{ code: 'FIRST_SALE', label: 'First sale' }],
+      grids: [],
+    };
+    expect(withPlatformLadder(own)).toEqual({ payload: own, supplied: false });
+  });
+
+  it('keeps a malformed stage list, so the check refuses it rather than papering over it', () => {
+    const malformed = { stages: 'four', milestones: [], grids: [] };
+    expect(withPlatformLadder(malformed)).toEqual({ payload: malformed, supplied: false });
+  });
+
+  it('hands each caller a fresh copy of the platform ladder', () => {
+    const first = withPlatformLadder(null).payload;
+    (first.stages as { label: string }[])[0].label = 'Changed';
+    expect((withPlatformLadder(null).payload.stages as { label: string }[])[0].label).not.toBe('Changed');
   });
 });

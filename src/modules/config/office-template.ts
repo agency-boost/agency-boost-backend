@@ -368,8 +368,9 @@ function contentOf(rows: ContentRows | null): TrainingContentPayload | null {
  * An archived milestone takes no new tick, so a stage is not required to reach one: it leaves the
  * requirement, and a stage left requiring nothing is left out — an office made from the template would
  * otherwise put everybody on it. A grid whose every item is archived has nothing to assess and goes too.
- * A ladder left with no stage or no milestone could place nobody, so the whole kind is then left out.
- * Each is recorded.
+ * A ladder left with no stage or no milestone could place nobody, so the whole kind is then left out —
+ * and an office made from the template is given the platform's ladder instead, as one with no ladder
+ * always is (ADR-0116). Each is recorded.
  */
 function capabilityFrom(catalog: SnapshotCapability | null, dropped: DroppedSetting[]): Record<string, unknown> | null {
   if (!catalog) return null;
@@ -425,7 +426,8 @@ function capabilityFrom(catalog: SnapshotCapability | null, dropped: DroppedSett
       kind: 'capability_ladder',
       code: null,
       reason: `The capability ladder was left out: it has no active ${stages.length === 0 ? 'stage' : 'milestone'} `
-        + 'left, so an office made from the template could place nobody on it.',
+        + 'left, so it could place nobody. An office made from the template starts with AgencyBoost’s standard '
+        + 'capability ladder instead.',
     });
     return null;
   }

@@ -365,6 +365,31 @@ describe('template copies (P13.2-T7)', () => {
         await expect(provisionFrom(wired, NEW_KPM, PRUDENTIAL, { kind: 'template', templateId: saved.id })).resolves.toBeDefined();
       });
 
+      it('ADR-0116: every stage archived — the whole ladder left out, and an office made from it given the platform’s', async () => {
+        await col('configSnapshots').updateMany(
+          { kpmId: KPM }, { $set: { 'payload.capability.stages.$[].status': 'archived' } },
+        );
+
+        const saved = await wired.templateCopies.saveOffice(sa, KPM, { name: 'No stages', companyId: PRUDENTIAL });
+
+        expect(saved.dropped).toEqual(expect.arrayContaining([{
+          kind: 'capability_ladder', code: null,
+          reason: expect.stringContaining('An office made from the template starts with AgencyBoost’s standard capability ladder instead.'),
+        }]));
+        // The template leaves the kind unpublished, which is how a template says it holds none.
+        expect(await col('companyTemplates').countDocuments({ templateId: saved.id, kind: 'capability_ladder' })).toBe(0);
+
+        const done = await provisionFrom(wired, NEW_KPM, PRUDENTIAL, { kind: 'template', templateId: saved.id });
+
+        const catalog = (await col('capabilityCatalogs').findOne({ kpmId: NEW_KPM }))!;
+        expect(catalog.stages.map((st: { code: string; status: string }) => [st.code, st.status])).toEqual([
+          ['COMPETENT_PRODUCER', 'active'], ['INDEPENDENT_PRODUCER', 'active'],
+          ['PRODUCTIVE_TEAM_BUILDER', 'active'], ['TRANSFORMATIVE_TEAM_BUILDER', 'active'],
+        ]);
+        expect(done.seededFrom.capability_ladder).toEqual({ templateId: saved.id, version: null, platformSupplied: true });
+        expect(done.capabilityLadderSupplied).toBe(true);
+      });
+
       it('a published checklist item linking to a module archived since: kept, as a manual item', async () => {
         const module = (await col('trainingModules').findOne({ kpmId: KPM, code: 'PROSPECT_LIST' }))!;
         const published = (await col('activationTemplates').findOne({ kpmId: KPM, status: 'published' }))!;
