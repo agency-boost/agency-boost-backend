@@ -23,9 +23,9 @@ import { seedObjectId } from './coaching-fixture';
  * | **0555 Kelapa Gading** | the same five, no PGB and no description | `agent@kpm0555.test`: the other office of the same company |
  * | **0701 Cempaka Putih** (Sejahtera Baru Life, `template-fixture.ts`) | its company was created blank: no product at all | `agent@kpm0701.test`: the empty shelf on both screens |
  *
- * **Not seeded:** a product document — the seed writes no file to storage, so the walk uploads a
- * brochure on `/kpm/settings/products` as 0417's Owner first — and a product kept on with no script,
- * since every active seeded product has one; that layout is a test fixture.
+ * **Not seeded here:** a product document — since Phase 17, `recruitment-fixture.ts` stores 0417's own
+ * PRUMapan brochure where storage is configured (P17-T9) — and a product kept on with no script, since every
+ * active seeded product has one; that layout is a test fixture.
  *
  * **Migration `0024-attack-plan-reply` runs here**, as a deployed database meets it, so a database seeded
  * before the reply was corrected (D-reply) is corrected by a re-seed without `--reset`; a fresh seed has
@@ -267,8 +267,8 @@ export async function seedSalesToolsFixture(deps: SalesToolsFixtureDeps): Promis
 
   const guide = `
   SALES TOOLS at /product-catalog and /attack-plan  (from src/seed/sales-tools-fixture.ts; walk as an agent
-             of 0417, e.g. rina@kpm0417.test. Upload a brochure on /kpm/settings/products as the Owner first:
-             the seed writes no file)
+             of 0417, e.g. rina@kpm0417.test. PRUMapan's own brochure is RECRUITMENT's, below, where storage
+             is configured; otherwise upload one on /kpm/settings/products as the Owner first)
     KPM 0417 · BSD City          P5's five decisions: PRUMapan (nama kami); PRUSmart Plan off; PRUFuture's
                                  opening pending; PRUWarisan approved and edited again; PRUAnugerah sent back.
                                  New: PRULink Generasi Baru (PGB) kept on — an In run-off card. PRUMapan's own

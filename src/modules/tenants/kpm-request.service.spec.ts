@@ -48,6 +48,8 @@ import {
 import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
 import { CampaignService } from '@/modules/campaigns/campaign.service';
 import { ProductService } from '@/modules/products/product.service';
+import { RecruitmentPlaybookService } from '@/modules/recruitment/recruitment-playbook.service';
+import { RecruitmentPlaybook, RecruitmentPlaybookSchema } from '@/modules/recruitment/recruitment-playbook.schema';
 import {
   CompanyTemplate, CompanyTemplateSchema,
 } from '@/modules/config/company-template.schema';
@@ -133,6 +135,13 @@ describe('KpmRequestService (P3.5-T2)', () => {
         clock,
       ),
       namedTemplates,
+      // Phase 17: a company started from the defaults is given the recruitment playbook's words.
+      new RecruitmentPlaybookService(
+        mongoose.model(RecruitmentPlaybook.name, RecruitmentPlaybookSchema) as never,
+        companies as never,
+        users as never,
+        audit,
+      ),
     );
     service = new KpmRequestService(
       requests as never, companies as never, users as never, tenants, audit, clock,

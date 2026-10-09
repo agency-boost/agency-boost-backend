@@ -18,6 +18,7 @@ import { ProvisioningService, type StartFrom } from '@/modules/config/provisioni
 import { NamedTemplateService } from '@/modules/config/named-template.service';
 import { ProductService } from '@/modules/products/product.service';
 import { CampaignService } from '@/modules/campaigns/campaign.service';
+import { RecruitmentPlaybookService } from '@/modules/recruitment/recruitment-playbook.service';
 import { DEFAULT_KPM_SETTINGS, Kpm, KpmDocument, type KpmSubscription } from './kpm.schema';
 import { countLeadersUsedPerOffice } from '@/modules/org/leader-limit';
 import {
@@ -172,6 +173,8 @@ export class TenantService {
     private readonly campaigns: CampaignService,
     // A company's named templates (ADR-0115): its first one is made with it.
     private readonly namedTemplates: NamedTemplateService,
+    // Its recruitment playbook (Phase 17, OD-88): the company's, given with the defaults. Takes a companyId.
+    private readonly recruitmentPlaybooks: RecruitmentPlaybookService,
   ) {}
 
   private require(ctx: RequestContext, permission: Parameters<typeof can>[1]): void {
@@ -363,6 +366,9 @@ export class TenantService {
     if (usesPlatformDefaults) {
       await this.products.seedForCompany(String(company._id));
       await this.campaigns.seedForCompany(String(company._id));
+      // Phase 17 (OD-88, ADR-0125): the recruitment playbook's AgencyBoost words, version 1 — the company's
+      // to reword on the Company template's Recruitment tab. A blank company is given none.
+      await this.recruitmentPlaybooks.seedForCompany(String(company._id));
     }
 
     /*

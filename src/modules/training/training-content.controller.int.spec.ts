@@ -145,6 +145,14 @@ describe('a training module’s content over HTTP (P5-T2)', () => {
         .send({ mimeType: 'application/pdf', bytes: 1 }).expect(400);
     });
 
+    it('N5 (Phase 17 exit review) signs every type it accepts — no narrower list asked of the storage — and never an overwrite', async () => {
+      const res = await request(app.getHttpServer()).post(`${url}/uploads`)
+        .send({ filename: 'deck.mp4', mimeType: 'video/mp4', bytes: 1024 }).expect(201);
+      expect(wired.storage.signedWith.at(-1)).toEqual({ folder: 'training', mimeType: 'video/mp4', allowedMimeTypes: undefined });
+      expect(res.body.fields).toMatchObject({ overwrite: 'false' });
+      expect(res.body.fields).not.toHaveProperty('allowed_formats');
+    });
+
     it('refuses a body carrying a field the DTO never declared', async () => {
       const res = await request(app.getHttpServer()).post(`${url}/uploads`)
         .send({ filename: 'x.pdf', mimeType: 'application/pdf', bytes: 1, folder: 'elsewhere' })

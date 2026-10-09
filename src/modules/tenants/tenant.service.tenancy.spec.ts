@@ -8,6 +8,7 @@ import {
   ActivationTemplate, ActivationTemplateSchema,
 } from '@/modules/activation/activation-template.schema';
 import { FixedClock } from '@/common/clock/clock.port';
+import { SEED_RECRUITMENT_PLAYBOOK } from '@/domain/constants';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
@@ -46,6 +47,8 @@ import {
 import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
 import { CampaignService } from '@/modules/campaigns/campaign.service';
 import { ProductService } from '@/modules/products/product.service';
+import { RecruitmentPlaybookService } from '@/modules/recruitment/recruitment-playbook.service';
+import { RecruitmentPlaybook, RecruitmentPlaybookSchema } from '@/modules/recruitment/recruitment-playbook.schema';
 import {
   CompanyTemplate, CompanyTemplateSchema,
 } from '@/modules/config/company-template.schema';
@@ -157,6 +160,13 @@ describe('TenantService', () => {
         clock,
       ),
       namedTemplates,
+      // Phase 17: a company started from the defaults is given the recruitment playbook's words.
+      new RecruitmentPlaybookService(
+        mongoose.model(RecruitmentPlaybook.name, RecruitmentPlaybookSchema) as never,
+        companies as never,
+        users as never,
+        new AuditService(auditModel as never),
+      ),
     );
   });
   afterAll(stopMongo);
@@ -294,6 +304,17 @@ describe('TenantService', () => {
         expect(normal.usesPlatformDefaults).toBe(true);
         expect(await mongoose.model('Product')
           .countDocuments({ companyId: String(normal._id) })).toBeGreaterThan(0);
+      });
+
+      it('P17-T2 AC-3 gives a company started from the defaults version 1 of the recruitment playbook, and a blank one none', async () => {
+        const normal = await service.createCompany(ctx({ superAdmin: true }), { name: 'Defaults Co', slug: 'defaults-co' });
+        const blank = await service.createCompany(ctx({ superAdmin: true }), {
+          name: 'Blank Four', slug: 'blank-four', usesPlatformDefaults: false,
+        });
+
+        const given = await mongoose.model(RecruitmentPlaybook.name).findOne({ companyId: String(normal._id) }).lean().exec();
+        expect(given).toMatchObject({ version: 1, updatedBy: null, deletedAt: null, body: SEED_RECRUITMENT_PLAYBOOK });
+        expect(await mongoose.model(RecruitmentPlaybook.name).countDocuments({ companyId: String(blank._id) })).toBe(0);
       });
 
       it('records the choice, because it decides what nine screens show', async () => {

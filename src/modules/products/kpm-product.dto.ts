@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsArray, IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
-import { PRODUCT_TAGLINE_MAX_LENGTH } from '@/domain/constants';
+import { PRODUCT_DOCUMENT_LABEL_MAX_LENGTH, PRODUCT_TAGLINE_MAX_LENGTH } from '@/domain/constants';
 
 export class SetProductActiveDto {
   @ApiPropertyOptional({
@@ -73,12 +73,21 @@ export class SaveProductOverridesDto {
 }
 
 export class AttachProductDocumentDto {
-  @ApiProperty({ description: 'A key this office has already uploaded and confirmed.' })
+  @ApiProperty({
+    description:
+      'A key this office was signed by `POST /kpm/settings/products/uploads`, its bytes sent. The attach '
+      + 'confirms it against what storage holds itself — no separate confirm — and refuses anything but a PDF '
+      + 'of at most 25 MB there.',
+  })
   @IsString() @MaxLength(300)
   storageKey!: string;
 
-  @ApiProperty({ description: 'What the row calls it on screen.' })
-  @IsString() @MaxLength(200)
+  @ApiProperty({
+    maxLength: PRODUCT_DOCUMENT_LABEL_MAX_LENGTH,
+    description: `What the row calls it on screen. Trimmed, and cut to ${PRODUCT_DOCUMENT_LABEL_MAX_LENGTH} characters rather than refused.`,
+  })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().slice(0, PRODUCT_DOCUMENT_LABEL_MAX_LENGTH) : value))
+  @IsString() @MaxLength(PRODUCT_DOCUMENT_LABEL_MAX_LENGTH)
   label!: string;
 }
 

@@ -129,6 +129,8 @@ import {
 } from '@/modules/capability/capability.schema';
 import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
 import { CampaignService } from '@/modules/campaigns/campaign.service';
+import { RecruitmentPlaybookService } from '@/modules/recruitment/recruitment-playbook.service';
+import { RecruitmentPlaybook, RecruitmentPlaybookSchema } from '@/modules/recruitment/recruitment-playbook.schema';
 import { AssetRepository } from '@/modules/assets/asset.repository';
 import { AssetService } from '@/modules/assets/asset.service';
 import { StoragePort } from '@/modules/assets/storage.port';
@@ -224,6 +226,8 @@ describe('auth and admin over HTTP', () => {
         { name: Campaign.name, schema: CampaignSchema },
         { name: QualificationRule.name, schema: QualificationRuleSchema },
         { name: CapabilityCatalog.name, schema: CapabilityCatalogSchema },
+        // Phase 17: TenantService gives a company started from the defaults its recruitment playbook.
+        { name: RecruitmentPlaybook.name, schema: RecruitmentPlaybookSchema },
         ]),
       ],
       controllers: [
@@ -267,6 +271,7 @@ describe('auth and admin over HTTP', () => {
         // P5-T7: TenantService seeds a company's carrier rules at creation.
         CampaignRepository,
         CampaignService,
+        RecruitmentPlaybookService,
         { provide: StoragePort, useClass: StubStorage },
         AuditService, AuditReadService, NotificationRepository, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService, OrgLevelService,

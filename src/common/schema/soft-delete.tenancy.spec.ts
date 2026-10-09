@@ -80,6 +80,8 @@ import { CalendarAttendeeSchema, CalendarEventSchema } from '@/modules/calendar/
 import {
   ActivationItemStateSchema, ActivationNoteSchema, ActivationProgressSchema,
 } from '@/modules/activation/activation-progress.schema';
+import { RecruitmentPlaybookSchema } from '@/modules/recruitment/recruitment-playbook.schema';
+import { PitchConfirmationSchema, RecruitmentPitchSlotSchema } from '@/modules/recruitment/recruitment-pitch.schema';
 
 /**
  * P2-T8: soft delete everywhere.
@@ -139,6 +141,10 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['calendarEvents', CalendarEventSchema],
   // P13-T1 AC-8. No route deletes an activation; a graduated or expired one is kept, and P19-T1 reaches it.
   ['activationProgress', ActivationProgressSchema],
+  // Phase 17. A company's playbook is configuration, never hard-deleted (invariant §3); an office's pitch
+  // document is replaced, never removed — *Replace* is the only change (D-replace) — and P19-T1 reaches it.
+  ['recruitmentPlaybooks', RecruitmentPlaybookSchema],
+  ['kpmRecruitmentPitchDocuments', RecruitmentPitchSlotSchema],
 ];
 
 /**
@@ -349,6 +355,12 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     'the coaching note on a hire\'s activation: replaced by the next save, never removed apart from the '
       + 'activation, which P19-T1\'s erasure cascade reaches whole',
   ],
+  [
+    'pitchConfirmation (subdocument)',
+    PitchConfirmationSchema,
+    'one tick of a pitch slot\'s checklist: cleared by the next attach or an untick, inside the slot it '
+      + 'belongs to, which is soft-deleted whole',
+  ],
 ];
 
 const EXPORT_NAMES = new Map<Schema, string>([
@@ -433,6 +445,9 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [ActivationProgressSchema, 'ActivationProgressSchema'],
   [ActivationItemStateSchema, 'ActivationItemStateSchema'],
   [ActivationNoteSchema, 'ActivationNoteSchema'],
+  [RecruitmentPlaybookSchema, 'RecruitmentPlaybookSchema'],
+  [RecruitmentPitchSlotSchema, 'RecruitmentPitchSlotSchema'],
+  [PitchConfirmationSchema, 'PitchConfirmationSchema'],
 ]);
 
 describe('soft delete', () => {

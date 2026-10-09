@@ -23,6 +23,7 @@ class StubStorage extends StoragePort {
       // Unique per call, because `storageKey` is unique across the collection.
       storageKey: `dev/${ownerFolder(p.owner)}/${p.folder}/${Math.random().toString(36).slice(2)}`,
       signature: 'sig',
+      fields: { signature: 'sig' },
       expiresAt: NOW,
     };
   }
@@ -38,6 +39,10 @@ class StubStorage extends StoragePort {
   /** A copy into another owner's folder (P13.2-T7). */
   async copy(p: { storageKey: string; owner: AssetOwner; folder: string }): Promise<StoredObject> {
     return { storageKey: `dev/${ownerFolder(p.owner)}/${p.folder}/copy-of-${p.storageKey.split('/').pop()}`, mimeType: 'application/pdf', bytes: 1024 };
+  }
+  /** A server-held file (Phase 17's seed); nothing here stores one. */
+  async putObject(p: { owner: AssetOwner; folder: string; name: string; mimeType: string; body: Buffer }) {
+    return { storageKey: `dev/${ownerFolder(p.owner)}/${p.folder}/${p.name}`, mimeType: p.mimeType, bytes: p.body.length, sent: true };
   }
 }
 

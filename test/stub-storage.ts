@@ -20,9 +20,13 @@ export class StubStorage extends StoragePort {
   private objects = new Map<string, StoredObject>();
   private next = 0;
 
+  /** Every signature asked for, as the service asked — the route's narrower list included (Phase 17, N5). */
+  signedWith: { folder: string; mimeType: string; allowedMimeTypes?: readonly string[] }[] = [];
+
   async createSignedUpload(params: {
-    owner: AssetOwner; folder: string; filename: string; mimeType: string;
+    owner: AssetOwner; folder: string; filename: string; mimeType: string; allowedMimeTypes?: readonly string[];
   }): Promise<SignedUpload> {
+    this.signedWith.push({ folder: params.folder, mimeType: params.mimeType, allowedMimeTypes: params.allowedMimeTypes });
     const owner = params.owner.kind === 'kpm'
       ? params.owner.kpmId
       : `company/${params.owner.companyId}`;
@@ -37,6 +41,15 @@ export class StubStorage extends StoragePort {
       uploadUrl: 'https://upload.test',
       storageKey,
       signature: 'sig',
+      // Shaped as the adapter's: never overwrite, and a narrower list asked of the vendor too.
+      fields: {
+        public_id: storageKey,
+        overwrite: 'false',
+        ...(params.allowedMimeTypes
+          ? { allowed_formats: params.allowedMimeTypes.map((m) => m.split('/')[1]).join(',') }
+          : {}),
+        signature: 'sig',
+      },
       expiresAt: new Date('2026-09-18T02:10:00Z'),
     };
   }
@@ -70,6 +83,26 @@ export class StubStorage extends StoragePort {
     this.objects.set(storageKey, copied);
     this.copies.push({ from: params.storageKey, to: storageKey });
     return copied;
+  }
+
+  /** Every server-held file sent, by key, in order (Phase 17's seed). */
+  puts: string[] = [];
+
+  /**
+   * A server-held file (Phase 17, D-seed): under `<owner>/<folder>/<name>`, as the adapter keys one — and
+   * a key already held is answered as it is, `sent: false`, as the adapter answers it.
+   */
+  async putObject(params: {
+    owner: AssetOwner; folder: string; name: string; mimeType: string; body: Buffer;
+  }): Promise<StoredObject & { sent: boolean }> {
+    const owner = params.owner.kind === 'kpm' ? params.owner.kpmId : `company/${params.owner.companyId}`;
+    const storageKey = `dev/${owner}/${params.folder}/${params.name}`;
+    const held = this.objects.get(storageKey);
+    if (held) return { ...held, sent: false };
+    const object = { storageKey, mimeType: params.mimeType, bytes: params.body.length };
+    this.objects.set(storageKey, object);
+    this.puts.push(storageKey);
+    return { ...object, sent: true };
   }
 
   /** Forget every copy made and every failure planned — a spec's `beforeEach`. */

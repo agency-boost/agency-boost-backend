@@ -12921,9 +12921,108 @@
         "x-required-permission": "tenant_config:write"
       }
     },
+    "/api/v1/kpm/settings/products/uploads": {
+      "post": {
+        "description": "A PDF of at most 25 MB, into the office’s own `products` folder — refused before anything is signed otherwise. The bytes go from the browser straight to storage; `PUT …/documents/:slot` then attaches the key to a product’s slot, confirming it against what storage holds.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "KpmProductController_requestUpload_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestDocumentUploadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedUploadDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`ASSET_TOO_LARGE` — larger than 25 MB.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`ASSET_TYPE_NOT_ALLOWED` — not a PDF.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A signed upload for one of this office’s own product documents",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
     "/api/v1/kpm/settings/products/{productId}/documents/{slot}": {
       "put": {
-        "description": "Each of the three slots is independent: filling one leaves the other two on the company’s.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Each of the three slots is independent: filling one leaves the other two on the company’s. The key is one this office was signed (`POST …/uploads`); the file is confirmed against what storage holds, and must be a PDF of at most 25 MB there, or nothing is attached.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "KpmProductController_setDocument_v1",
         "parameters": [
           {
@@ -12996,6 +13095,36 @@
           },
           "404": {
             "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ASSET_NOT_UPLOADED` — the bytes never reached storage. Nothing is attached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`ASSET_TOO_LARGE` — storage holds more than 25 MB. Nothing is attached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`ASSET_TYPE_NOT_ALLOWED` — storage holds something other than a PDF. Nothing is attached.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19482,6 +19611,773 @@
         ],
         "x-required-permission": "unit_dashboard:update_production"
       }
+    },
+    "/api/v1/recruitment/attack-plan": {
+      "get": {
+        "description": "The brief’s three questions as chips, whether the office’s company has a recruitment playbook, and — with a brief — the plan built from that playbook: the profile, an opening per motivation, an objection per hesitation (the profile’s own where it has one, else the base), and the next action, each list in the chips’ order. No brief, or no playbook: `plan: null`. All three parameters or none; an unknown or repeated code, an empty list, a missing parameter or any other parameter is `400`. The words are the company’s, read live. Nothing about the candidate is stored. Every member of the office — the Owner and the Admin through their field view, an AB, an AAB and an Agent — and a support session acting as one, read-only included. A Super Admin outside a support session belongs to no office and is refused `403 TENANT_NO_MEMBERSHIP`.\n\n**Requires `recruitment:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "RecruitmentController_attackPlan_v1",
+        "parameters": [
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "description": "*Candidate type*: one of `fresh-grad`, `career-switch`, `business-owner`, `retiree`, `other-insurer`.",
+            "schema": {
+              "maxLength": 64,
+              "example": "retiree",
+              "type": "string"
+            }
+          },
+          {
+            "name": "motivation",
+            "required": false,
+            "in": "query",
+            "description": "*What's driving them*: one or more of `side-income`, `full-career`, `flexibility`, `leadership`, comma-separated, none twice. Answered in the chips’ order, whatever order they are sent in.",
+            "schema": {
+              "maxLength": 256,
+              "example": "flexibility,leadership",
+              "type": "string"
+            }
+          },
+          {
+            "name": "hesitation",
+            "required": false,
+            "in": "query",
+            "description": "*Their biggest hesitation*: one or more of `no-experience`, `stable-job`, `reputation`, `no-network`, `time`, comma-separated, none twice. Answered in the chips’ order.",
+            "schema": {
+              "maxLength": 256,
+              "example": "no-network,time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecruitmentAttackPlanDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `recruitment:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The Recruitment Attack Plan for a candidate brief",
+        "tags": [
+          "recruitment"
+        ],
+        "x-required-permission": "recruitment:read"
+      }
+    },
+    "/api/v1/recruitment/pitch-materials": {
+      "get": {
+        "description": "The four slots in order — each with its state (*missing*, *complete*, *partial*, *uploaded*), its file (name, size and upload day in the office’s calendar) or `null`, and whether each item of its checklist is ticked — and the banner’s counts. The agents’ tab and the settings page read the same answer. Every member of the office — the Owner and the Admin through their field view, an AB, an AAB and an Agent — and a support session acting as one, read-only included. A Super Admin outside a support session belongs to no office and is refused `403 TENANT_NO_MEMBERSHIP`.\n\n**Requires `recruitment:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "RecruitmentController_pitchMaterials_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PitchMaterialsDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `recruitment:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office’s four recruitment pitch documents",
+        "tags": [
+          "recruitment"
+        ],
+        "x-required-permission": "recruitment:read"
+      }
+    },
+    "/api/v1/recruitment/pitch-materials/{slot}/url": {
+      "get": {
+        "description": "Signed only for a slot the reader’s own office has filled, whatever its ticks. A slot with nothing in it and a slot that does not exist answer `404`, as another office’s does. Every member of the office — the Owner and the Admin through their field view, an AB, an AAB and an Agent — and a support session acting as one, read-only included. A Super Admin outside a support session belongs to no office and is refused `403 TENANT_NO_MEMBERSHIP`.\n\n**Requires `recruitment:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "RecruitmentController_pitchDocumentUrl_v1",
+        "parameters": [
+          {
+            "name": "slot",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PitchDocumentUrlDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `recruitment:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A pitch document’s link, valid 300 seconds",
+        "tags": [
+          "recruitment"
+        ],
+        "x-required-permission": "recruitment:read"
+      }
+    },
+    "/api/v1/kpm/settings/recruitment-pitch/uploads": {
+      "post": {
+        "description": "A PDF of at most 25 MB, into the office’s own `recruitment-pitch` folder — refused before anything is signed otherwise. The bytes go from the browser straight to storage; attach the key to a slot next.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "RecruitmentPitchController_requestUpload_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestDocumentUploadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedUploadDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`ASSET_TOO_LARGE` — larger than 25 MB.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`ASSET_TYPE_NOT_ALLOWED` — not a PDF.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A signed upload for a pitch document",
+        "tags": [
+          "recruitment"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/kpm/settings/recruitment-pitch/{slot}": {
+      "put": {
+        "description": "The upload is confirmed against what storage holds first; then, in one write, the file replaces what the slot held, **every confirmation of the slot is cleared**, and `version` moves by one. The file it replaced is released, never deleted. Audited (`recruitment_pitch.attached`) with the items it cleared. Attaching the file the slot already holds changes nothing.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "RecruitmentPitchController_attach_v1",
+        "parameters": [
+          {
+            "name": "slot",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachPitchDocumentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PitchSlotDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such slot, or a key this office was never signed — **or** one belonging to another office. They are deliberately indistinguishable: a `403` here would confirm it exists. Nothing is attached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ASSET_NOT_UPLOADED` — the bytes never reached storage. Nothing is attached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`ASSET_TOO_LARGE` — storage holds more than 25 MB. Nothing is attached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`ASSET_TYPE_NOT_ALLOWED` — storage holds something other than a PDF. Nothing is attached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Attach a PDF to a slot, or replace the one it holds",
+        "tags": [
+          "recruitment"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/kpm/settings/recruitment-pitch/{slot}/confirmations/{item}": {
+      "put": {
+        "description": "*\"Confirm this PDF actually includes\"*: tick or untick one item of the slot’s checklist, against the slot’s `version` — the file the reader saw. Idempotent. An item the slot does not have, or a slot with no file, is `400`. Audited with who and when (`recruitment_pitch.ticked`, `…unticked`); the version does not move.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "RecruitmentPitchController_setConfirmation_v1",
+        "parameters": [
+          {
+            "name": "slot",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "item",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPitchConfirmationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PitchSlotDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such slot. Indistinguishable from one in another office, which an office never reaches.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VERSION_CONFLICT` — the file was replaced since it was read. Nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Confirm that the PDF includes an item, or take the confirmation back",
+        "tags": [
+          "recruitment"
+        ],
+        "x-required-permission": "tenant_config:write"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/recruitment-playbook": {
+      "get": {
+        "description": "The company’s playbook with its version, or `null` for a company with none; the AgencyBoost words, to start one from; the brief’s vocabulary its words are keyed by; and the bounds a save is held to (`limits`).\n\n**Requires `company_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "RecruitmentPlaybookController_read_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecruitmentPlaybookAdminDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `company_template:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A company’s recruitment playbook",
+        "tags": [
+          "recruitment"
+        ],
+        "x-required-permission": "company_template:read"
+      },
+      "put": {
+        "description": "The whole playbook in one write, pinned to `version` — `null` only to create the first. Every profile and every hesitation answered, an opening for every motivation, each text 1 to 600 characters, 1 to 6 benefits a profile, no key the playbook does not have: otherwise `400 VALIDATION_FAILED` with every violation in `details.violations`, each `{ field, message }`, the field a path into the request — `body.profiles.retiree.benefits[1]`, `body.objections.time.youSay`, `body.nextAction`. Audited with the words before and after. Every office of the company reads it on its next plan.\n\n**Requires `recruitment_playbook:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "RecruitmentPlaybookController_save_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRecruitmentPlaybookDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecruitmentPlaybookDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `recruitment_playbook:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VERSION_CONFLICT` — the playbook changed since it was read, or `version: null` for a company that has one. Nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save a company’s recruitment playbook",
+        "tags": [
+          "recruitment"
+        ],
+        "x-required-permission": "recruitment_playbook:write"
+      }
     }
   },
   "info": {
@@ -22919,24 +23815,41 @@
         "properties": {
           "uploadUrl": {
             "type": "string",
-            "description": "Where the browser PUTs the bytes. They never transit this API."
+            "description": "Where the browser **POSTs** the bytes, as `multipart/form-data`: the file as `file`, and every entry of `fields` beside it. The bytes go straight to storage and never transit this API."
           },
           "storageKey": {
-            "type": "string"
+            "type": "string",
+            "description": "The key the file lands under, which the attach that follows names."
           },
           "signature": {
-            "type": "string"
+            "type": "string",
+            "description": "Also in `fields`; kept for the callers that read it here."
           },
           "expiresAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "example": {
+              "api_key": "123456789012345",
+              "timestamp": "1791511200",
+              "public_id": "dev/66f0…/recruitment-pitch/01J…",
+              "type": "authenticated",
+              "signature": "3f2a…"
+            },
+            "description": "The exact form fields storage needs beside `file`, every one sent as it is — the browser need not know which they are. Today: `api_key`, `timestamp`, `public_id`, `type` and `signature`."
           }
         },
         "required": [
           "uploadUrl",
           "storageKey",
           "signature",
-          "expiresAt"
+          "expiresAt",
+          "fields"
         ]
       },
       "ConfirmUploadDto": {
@@ -23788,16 +24701,45 @@
           }
         }
       },
+      "RequestDocumentUploadDto": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string",
+            "example": "Opportunity_Overview_v3.pdf",
+            "maxLength": 255
+          },
+          "mimeType": {
+            "type": "string",
+            "example": "application/pdf",
+            "maxLength": 255,
+            "description": "`application/pdf`, and nothing else: any other type is refused `415 ASSET_TYPE_NOT_ALLOWED`."
+          },
+          "bytes": {
+            "type": "number",
+            "example": 2516582,
+            "minimum": 0,
+            "maximum": 26214400,
+            "description": "What the browser is about to send. Above 25 MB is refused `413 ASSET_TOO_LARGE` before anything is signed, and checked again against what storage reports when the file is attached."
+          }
+        },
+        "required": [
+          "filename",
+          "mimeType",
+          "bytes"
+        ]
+      },
       "AttachProductDocumentDto": {
         "type": "object",
         "properties": {
           "storageKey": {
             "type": "string",
-            "description": "A key this office has already uploaded and confirmed."
+            "description": "A key this office was signed by `POST /kpm/settings/products/uploads`, its bytes sent. The attach confirms it against what storage holds itself — no separate confirm — and refuses anything but a PDF of at most 25 MB there."
           },
           "label": {
             "type": "string",
-            "description": "What the row calls it on screen."
+            "maxLength": 200,
+            "description": "What the row calls it on screen. Trimmed, and cut to 200 characters rather than refused."
           }
         },
         "required": [
@@ -29590,6 +30532,541 @@
         "required": [
           "updated",
           "state"
+        ]
+      },
+      "RecruitmentChoiceDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "retiree"
+          },
+          "label": {
+            "type": "string",
+            "example": "Retiree"
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
+      "RecruitmentVocabularyDto": {
+        "type": "object",
+        "properties": {
+          "types": {
+            "description": "*Candidate type*, in the chips’ order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecruitmentChoiceDto"
+            }
+          },
+          "motivations": {
+            "description": "*What’s driving them*, in the chips’ order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecruitmentChoiceDto"
+            }
+          },
+          "hesitations": {
+            "description": "*Their biggest hesitation*, in the chips’ order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecruitmentChoiceDto"
+            }
+          }
+        },
+        "required": [
+          "types",
+          "motivations",
+          "hesitations"
+        ]
+      },
+      "RecruitmentBriefDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/RecruitmentChoiceDto"
+          },
+          "motivations": {
+            "description": "In the chips’ order, whatever order they were sent in.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecruitmentChoiceDto"
+            }
+          },
+          "hesitations": {
+            "description": "In the chips’ order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecruitmentChoiceDto"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "motivations",
+          "hesitations"
+        ]
+      },
+      "RecruitmentProfileDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "retiree"
+          },
+          "label": {
+            "type": "string",
+            "description": "The profile’s own label — *Fresh graduate* for the chip *Fresh grad*."
+          },
+          "tagline": {
+            "type": "string"
+          },
+          "goodFitFor": {
+            "type": "string",
+            "description": "*Good fit for*."
+          },
+          "benefits": {
+            "description": "*Lead with these benefits*.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "tagline",
+          "goodFitFor",
+          "benefits"
+        ]
+      },
+      "RecruitmentOpeningDto": {
+        "type": "object",
+        "properties": {
+          "motivation": {
+            "description": "The motivation it opens on — tagged on screen only when there are several.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RecruitmentChoiceDto"
+              }
+            ]
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivation",
+          "text"
+        ]
+      },
+      "RecruitmentObjectionDto": {
+        "type": "object",
+        "properties": {
+          "hesitation": {
+            "$ref": "#/components/schemas/RecruitmentChoiceDto"
+          },
+          "theySay": {
+            "type": "string",
+            "description": "*They say*."
+          },
+          "youSay": {
+            "type": "string",
+            "description": "*You say*."
+          },
+          "profileOwn": {
+            "type": "boolean",
+            "description": "True when the words are the profile’s own for this hesitation, not the base."
+          }
+        },
+        "required": [
+          "hesitation",
+          "theySay",
+          "youSay",
+          "profileOwn"
+        ]
+      },
+      "RecruitmentPlanDto": {
+        "type": "object",
+        "properties": {
+          "brief": {
+            "$ref": "#/components/schemas/RecruitmentBriefDto"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/RecruitmentProfileDto"
+          },
+          "openings": {
+            "description": "One per motivation chosen, in the chips’ order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecruitmentOpeningDto"
+            }
+          },
+          "objections": {
+            "description": "One per hesitation chosen, in the chips’ order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecruitmentObjectionDto"
+            }
+          },
+          "nextAction": {
+            "type": "string",
+            "description": "*Next action*."
+          }
+        },
+        "required": [
+          "brief",
+          "profile",
+          "openings",
+          "objections",
+          "nextAction"
+        ]
+      },
+      "RecruitmentAttackPlanDto": {
+        "type": "object",
+        "properties": {
+          "hasPlaybook": {
+            "type": "boolean",
+            "description": "False when the office’s company has no recruitment playbook; `plan` is then null."
+          },
+          "vocabulary": {
+            "$ref": "#/components/schemas/RecruitmentVocabularyDto"
+          },
+          "plan": {
+            "nullable": true,
+            "description": "Null with no brief, or with no playbook.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RecruitmentPlanDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "hasPlaybook",
+          "vocabulary",
+          "plan"
+        ]
+      },
+      "PitchFileDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name it was uploaded under."
+          },
+          "bytes": {
+            "type": "number",
+            "description": "Its size as storage reported it."
+          },
+          "uploadedOn": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-09-12",
+            "description": "The day it was attached, in the office’s calendar."
+          }
+        },
+        "required": [
+          "name",
+          "bytes",
+          "uploadedOn"
+        ]
+      },
+      "PitchChecklistItemDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "career-path"
+          },
+          "label": {
+            "type": "string"
+          },
+          "ticked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "ticked"
+        ]
+      },
+      "PitchSlotDto": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "string",
+            "enum": [
+              "opportunity",
+              "proof",
+              "faq",
+              "howtojoin"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "line": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "missing",
+              "complete",
+              "partial",
+              "uploaded"
+            ]
+          },
+          "file": {
+            "nullable": true,
+            "description": "Null where the slot holds nothing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PitchFileDto"
+              }
+            ]
+          },
+          "checklist": {
+            "description": "Empty for a slot with no checklist. Never who ticked.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PitchChecklistItemDto"
+            }
+          },
+          "version": {
+            "type": "number",
+            "description": "0 while the slot has never held a file; moves with every file attached."
+          }
+        },
+        "required": [
+          "slot",
+          "title",
+          "line",
+          "state",
+          "file",
+          "checklist",
+          "version"
+        ]
+      },
+      "PitchSummaryDto": {
+        "type": "object",
+        "properties": {
+          "done": {
+            "type": "number",
+            "description": "Slots complete, or uploaded with nothing to confirm."
+          },
+          "total": {
+            "type": "number",
+            "example": 4
+          },
+          "missing": {
+            "type": "number",
+            "description": "Slots with no file."
+          },
+          "unconfirmed": {
+            "type": "number",
+            "description": "Slots with a file and an item still open."
+          }
+        },
+        "required": [
+          "done",
+          "total",
+          "missing",
+          "unconfirmed"
+        ]
+      },
+      "PitchMaterialsDto": {
+        "type": "object",
+        "properties": {
+          "slots": {
+            "description": "The four, in order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PitchSlotDto"
+            }
+          },
+          "summary": {
+            "$ref": "#/components/schemas/PitchSummaryDto"
+          }
+        },
+        "required": [
+          "slots",
+          "summary"
+        ]
+      },
+      "PitchDocumentUrlDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Valid for 300 seconds."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "url",
+          "expiresAt"
+        ]
+      },
+      "AttachPitchDocumentDto": {
+        "type": "object",
+        "properties": {
+          "storageKey": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "A key this office was signed by `POST /kpm/settings/recruitment-pitch/uploads`, its bytes sent."
+          }
+        },
+        "required": [
+          "storageKey"
+        ]
+      },
+      "SetPitchConfirmationDto": {
+        "type": "object",
+        "properties": {
+          "ticked": {
+            "type": "boolean",
+            "description": "True to tick the item, false to untick it."
+          },
+          "version": {
+            "type": "number",
+            "minimum": 1,
+            "description": "The slot’s `version` as read: the file the tick is about. A file replaced since is `409`."
+          }
+        },
+        "required": [
+          "ticked",
+          "version"
+        ]
+      },
+      "PlaybookUpdatedByDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "RecruitmentPlaybookDto": {
+        "type": "object",
+        "properties": {
+          "companyId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "number"
+          },
+          "body": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The whole playbook, as saved."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedBy": {
+            "nullable": true,
+            "description": "Null for the words the company was given.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PlaybookUpdatedByDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "companyId",
+          "version",
+          "body",
+          "updatedAt",
+          "updatedBy"
+        ]
+      },
+      "RecruitmentPlaybookLimitsDto": {
+        "type": "object",
+        "properties": {
+          "textMax": {
+            "type": "number",
+            "example": 600,
+            "description": "The most characters any text may hold, once trimmed (at least 1)."
+          },
+          "benefitsMax": {
+            "type": "number",
+            "example": 6,
+            "description": "The most benefits a profile may list (at least 1)."
+          }
+        },
+        "required": [
+          "textMax",
+          "benefitsMax"
+        ]
+      },
+      "RecruitmentPlaybookAdminDto": {
+        "type": "object",
+        "properties": {
+          "playbook": {
+            "nullable": true,
+            "description": "Null for a company with none.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RecruitmentPlaybookDto"
+              }
+            ]
+          },
+          "defaults": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The AgencyBoost words, to start from."
+          },
+          "vocabulary": {
+            "$ref": "#/components/schemas/RecruitmentVocabularyDto"
+          },
+          "limits": {
+            "description": "The bounds a save is held to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RecruitmentPlaybookLimitsDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "playbook",
+          "defaults",
+          "vocabulary",
+          "limits"
+        ]
+      },
+      "SaveRecruitmentPlaybookDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number",
+            "nullable": true,
+            "minimum": 1,
+            "description": "The version read. `null` only to create the company’s first playbook — `409` if it has one."
+          },
+          "body": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The whole playbook: `profiles` (every candidate type: `label`, `tagline`, `goodFitFor`, 1 to 6 `benefits`, and `openings` with one per motivation), `objections` (one `{ theySay, youSay }` per hesitation), `profileObjections` (a profile’s own, by type then hesitation, optional) and `nextAction`. Each text 1 to 600 characters once trimmed. Checked whole: every violation is named."
+          }
+        },
+        "required": [
+          "version",
+          "body"
         ]
       },
       "CalendarPersonRowDto": {

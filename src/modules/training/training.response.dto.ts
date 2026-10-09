@@ -163,19 +163,8 @@ export class ModuleContentDto {
   overridden!: boolean;
 }
 
-export class SignedUploadDto {
-  @ApiProperty({ type: String, description: 'Where the browser PUTs the bytes. They never transit this API.' })
-  uploadUrl!: string;
-
-  @ApiProperty({ type: String })
-  storageKey!: string;
-
-  @ApiProperty({ type: String })
-  signature!: string;
-
-  @ApiProperty({ type: String, format: 'date-time' })
-  expiresAt!: string;
-}
+/** The shared signed-upload shape, kept importable from here for the training routes that name it. */
+export { SignedUploadDto } from '@/modules/assets/asset.response.dto';
 
 export class SignedUrlDto {
   @ApiProperty({ type: String, description: 'Valid for 300 seconds.' })

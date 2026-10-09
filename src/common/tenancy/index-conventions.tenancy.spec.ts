@@ -81,6 +81,8 @@ import { CalendarAttendeeSchema, CalendarEventSchema } from '@/modules/calendar/
 import {
   ActivationItemStateSchema, ActivationNoteSchema, ActivationProgressSchema,
 } from '@/modules/activation/activation-progress.schema';
+import { RecruitmentPlaybookSchema } from '@/modules/recruitment/recruitment-playbook.schema';
+import { PitchConfirmationSchema, RecruitmentPitchSlotSchema } from '@/modules/recruitment/recruitment-pitch.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -128,6 +130,8 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['calendarEvents', CalendarEventSchema],
   // P13-T1 AC-8: one per hire; the open one unique per membership, and the reads, both `kpmId`-led.
   ['activationProgress', ActivationProgressSchema],
+  // P17-T4 AC-1: an office's four pitch documents, unique per (office, slot), `kpmId`-led.
+  ['kpmRecruitmentPitchDocuments', RecruitmentPitchSlotSchema],
 ];
 
 /**
@@ -381,6 +385,19 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     ActivationNoteSchema,
     'the leader\'s coaching note inside a hire\'s activation: no collection and no _id of its own',
   ],
+  [
+    'recruitmentPlaybooks',
+    RecruitmentPlaybookSchema,
+    'company-partitioned, not tenant-scoped (OD-88, ADR-0125): a company\'s recruitment playbook, written '
+      + 'only by the Super Admin and read **live** by every office of the company, as a product is (ADR-0033). '
+      + 'Read through the named company-filtered `RecruitmentPlaybookService.ofCompany`, never an office\'s '
+      + 'scoped repository',
+  ],
+  [
+    'pitchConfirmation (subdocument)',
+    PitchConfirmationSchema,
+    'one tick of a pitch slot\'s checklist, inside the slot it confirms: no collection and no _id of its own',
+  ],
 ];
 
 /**
@@ -497,6 +514,9 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [ActivationProgressSchema, 'ActivationProgressSchema'],
   [ActivationItemStateSchema, 'ActivationItemStateSchema'],
   [ActivationNoteSchema, 'ActivationNoteSchema'],
+  [RecruitmentPlaybookSchema, 'RecruitmentPlaybookSchema'],
+  [RecruitmentPitchSlotSchema, 'RecruitmentPitchSlotSchema'],
+  [PitchConfirmationSchema, 'PitchConfirmationSchema'],
 ]);
 
 function schemaExportName(schema: Schema): string {

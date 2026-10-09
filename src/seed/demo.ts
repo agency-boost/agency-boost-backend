@@ -66,6 +66,8 @@ import { seedTemplateFixture } from './template-fixture';
 import { seedTemplateCopyFixture } from './template-copy-fixture';
 import { seedSalesToolsFixture } from './sales-tools-fixture';
 import { seedUnitDashboardFixture } from './unit-dashboard-fixture';
+import { seedRecruitmentFixture, storageFromEnvironment, type RecruitmentFixture } from './recruitment-fixture';
+import type { StoragePort } from '@/modules/assets/storage.port';
 import { LONG_PIPELINE } from './long-pipeline';
 import {
   ActivationProgress, ActivationProgressSchema,
@@ -207,6 +209,9 @@ const OWNED_COLLECTIONS = [
   'calendarEvents',
   // Phase 13, with the writer that fills it: every hire's activation (`activation-fixture.ts`).
   'activationProgress',
+  // Phase 17, with the writer that fills them (`recruitment-fixture.ts`): the companies' playbooks and the
+  // offices' pitch documents. Their files are `assets` rows, above.
+  'recruitmentPlaybooks', 'kpmRecruitmentPitchDocuments',
 ] as const;
 
 /**
@@ -226,6 +231,12 @@ export interface SeedOptions {
   reset?: boolean;
   /** Where the printed guide goes; the seed's spec passes a sink. */
   log?: (text: string) => void;
+  /**
+   * Phase 17 (D-seed): the storage the demonstration PDFs are written through. The command passes the
+   * configured one, or `null` where none is; a spec passes a fake. Absent or `null`, the pitch documents and
+   * the brochure are skipped, and the run says so.
+   */
+  storage?: StoragePort | null;
 }
 
 export interface SeedResult {
@@ -239,6 +250,8 @@ export interface SeedResult {
   calendar: CalendarFixture;
   /** Every hire's activation, and the audit rows its stored writes left (`activation-fixture.ts`). */
   activation: ActivationFixture;
+  /** The playbooks, the pitch documents and the brochure, and whether their files were stored. */
+  recruitment: RecruitmentFixture;
 }
 
 async function countRows(): Promise<Record<string, number>> {
@@ -2249,6 +2262,27 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     sari: { membershipId: sari.id, userId: String(sariUser._id) },
   });
 
+  // ------------------- recruitment tools: the playbooks, the pitch, 0417's brochure (Phase 17; `recruitment-fixture.ts`)
+
+  const recruitment = await seedRecruitmentFixture({
+    clock,
+    storage: options.storage ?? null,
+    companies: { prudential: String(prudential._id), allianz: String(allianz._id) },
+    offices: {
+      '0417': {
+        kpmId: id0417,
+        owner: { membershipId: owner.id, userId: String(ownerUser._id) },
+        admin: { membershipId: admin.id, userId: String(adminUser._id) },
+      },
+      '0555': {
+        kpmId: id0555,
+        owner: { membershipId: owner0555.id, userId: String(owner0555User._id) },
+        admin: null,
+      },
+    },
+  });
+  if (recruitment.files !== 'stored') log(`Recruitment pitch documents and 0417's PRUMapan brochure ${recruitment.files}.`);
+
   // ------------------------------------------------- offices asking to exist
 
   /**
@@ -3142,7 +3176,7 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
 
   KPM 0999 · Suspended Branch
     owner@kpm0999.test                                 Signing in shows the page: the office is suspended
-${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guide}${unitDashboard.guide}
+${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guide}${unitDashboard.guide}${recruitment.guide}
   NO OFFICE
     newcomer@agencyboost.test                          Brand new — starts at Register KPM
 
@@ -3348,7 +3382,7 @@ Sign in at POST /api/v1/auth/login, then send the access token as
     ? 'This run wrote 0 rows: everything it seeds was already there.'
     : `This run wrote ${total} rows: ${Object.entries(written).map(([name, added]) => `${name} +${added}`).join(', ')}`);
 
-  return { written, pronounsSet, coaching, calendar, activation };
+  return { written, pronounsSet, coaching, calendar, activation, recruitment };
 }
 
 async function main(): Promise<void> {
@@ -3360,7 +3394,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   await mongoose.connect(uri, { dbName });
-  await seedDemo({ reset: process.argv.includes('--reset') });
+  // The storage the demonstration PDFs go through, where one is configured (D-seed); none, and they are skipped.
+  await seedDemo({ reset: process.argv.includes('--reset'), storage: storageFromEnvironment(process.env, new SystemClock()) });
   await mongoose.disconnect();
 }
 

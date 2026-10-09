@@ -55,6 +55,14 @@ export const PRODUCT_DOCUMENT_SLOTS = [
 export type ProductDocumentSlot = (typeof PRODUCT_DOCUMENT_SLOTS)[number]['key'];
 
 /**
+ * **An office's own product documents** (P17-T9): the office's folder they land in, fixed by the server
+ * (ADR-0032) as the pitch documents' `RECRUITMENT.PITCH_UPLOAD_FOLDER` is, and the longest label a slot
+ * carries — a longer one is cut to it rather than refused, since the screen offers the file's name.
+ */
+export const PRODUCT_DOCUMENT_FOLDER = 'products';
+export const PRODUCT_DOCUMENT_LABEL_MAX_LENGTH = 200;
+
+/**
  * Whether an office's own wording may reach its agents yet (ADR-0037).
  *
  * `none` is a row with no script override at all — most rows, most of the time. The approval is

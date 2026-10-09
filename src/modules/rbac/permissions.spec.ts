@@ -134,11 +134,8 @@ describe('permission matrix', () => {
      * reason is the thing it exists to prevent.
      */
     const DEFERRED: Record<string, string> = {
-      'kpm:read_profile/AB': 'branch info for a member is a later phase; the only route on ' +
-        'this permission today is GET /admin/tenants/:id, and granting it here would open ' +
-        'an /admin route to agents',
-      'kpm:read_profile/AAB': 'as AB',
-      'kpm:read_profile/AGENT': 'as AB',
+      // `kpm:read_profile` for the AB, the AAB and the Agent: no longer deferred (the Phase 17 exit review). The
+      // code is the truth — they do not hold it — and roles §3.2 says "—" for the three, pinned cell by cell.
       'member:change_role/SUPER_ADMIN': 'the member routes resolve kpmId from the caller\'s ' +
         'membership, which a Super Admin has none of — the grant would produce ' +
         'MissingTenantContextError, not access. A Super Admin reaches an office by ' +
@@ -950,6 +947,94 @@ describe('permission matrix', () => {
     it('P15-T1 AC-1 an Owner or Admin who also stands on a rung reads as the office, its widest grant (§1.1)', () => {
       expect(scopeFor(ctx({ role: 'ab', owner: true }), 'unit_dashboard:read')).toBe('own-kpm');
       expect(scopeFor(ctx({ role: 'agent', admin: true }), 'unit_dashboard:update_production')).toBe('own-kpm');
+    });
+  });
+
+  /*
+   * **Recruitment tools' permissions, a positive and a negative for each of the six roles** (P17-T2 AC-5,
+   * P17-T4 AC-7, P17-T8 AC-3; the contract's table): the field read every member holds, the office's writes
+   * on `tenant_config:write`, and the playbook — read on `company_template:read`, written on the new
+   * `recruitment_playbook:write` — the Super Admin's alone. Over HTTP, per route, is
+   * `recruitment.controller.int.spec.ts`.
+   */
+  describe('Phase 17 — recruitment tools (the contract’s permissions table)', () => {
+    const RECRUITMENT = [
+      'recruitment:read', 'tenant_config:write', 'company_template:read', 'recruitment_playbook:write',
+    ] as const satisfies readonly Permission[];
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: ctx({ owner: true }),
+      KPM_ADMIN: ctx({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+    const EXPECTED: Record<(typeof RECRUITMENT)[number], Record<string, Scope | null>> = {
+      'recruitment:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-kpm', AAB: 'own-kpm', AGENT: 'own-kpm',
+      },
+      'tenant_config:write': {
+        SUPER_ADMIN: null, KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null,
+      },
+      'company_template:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: null, KPM_ADMIN: null, AB: null, AAB: null, AGENT: null,
+      },
+      'recruitment_playbook:write': {
+        SUPER_ADMIN: 'all', KPM_OWNER: null, KPM_ADMIN: null, AB: null, AAB: null, AGENT: null,
+      },
+    };
+    const cells = RECRUITMENT.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P17-T2 AC-5, P17-T4 AC-7, P17-T8 AC-3 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P17-T2 AC-5, P17-T4 AC-7, P17-T8 AC-3 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it('P17-T2 AC-5 the field read is refused to a removed or pending member, and to somebody in no office', () => {
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role, status }), 'recruitment:read')).toBe(false);
+      }
+      expect(can(ctx({ noMembership: true }), 'recruitment:read')).toBe(false);
+    });
+
+    it('P17-T4 AC-7 a read-only support session reads the plan and the pitch, and is refused every write', () => {
+      expect(isReadLike('recruitment:read')).toBe(true);
+      expect(isReadLike('recruitment_playbook:write')).toBe(false);
+      for (const target of [{ role: 'agent' as const }, { owner: true }, { admin: true }]) {
+        const readOnly = ctx({ ...target, impersonatedBy: 'sa-1', readOnly: true });
+        expect(can(readOnly, 'recruitment:read')).toBe(true);
+        expect(can(readOnly, 'tenant_config:write')).toBe(false);
+      }
+    });
+
+    it('P17-T4 AC-7 an elevated session as the Owner writes the office’s pitch, as its member; no session writes the playbook', () => {
+      const elevated = ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: false });
+      expect(isBlockedWhileImpersonating('tenant_config:write')).toBe(false);
+      expect(can(elevated, 'tenant_config:write')).toBe(true);
+      expect(can(elevated, 'recruitment:read')).toBe(true);
+      // A session acts as its member, whose context holds no platform grant.
+      expect(can(elevated, 'recruitment_playbook:write')).toBe(false);
+      expect(can(elevated, 'company_template:read')).toBe(false);
+    });
+
+    it('P17-T8 AC-3 the playbook’s write is its own permission, not company_template:write nor product_catalog:crud', () => {
+      expect(Object.keys(PERMISSIONS)).toEqual(expect.arrayContaining(['recruitment:read', 'recruitment_playbook:write']));
+      // No office override of the playbook exists (OD-88), so no tenant grantee holds any recruitment write.
+      const tenantWrites = (Object.keys(PERMISSIONS) as Permission[])
+        .filter((p) => p.startsWith('recruitment') && !isReadLike(p))
+        .flatMap((p) => (PERMISSIONS[p] as readonly { grantee: { kind: string } }[]).filter((g) => g.grantee.kind !== 'platform'));
+      expect(tenantWrites).toEqual([]);
     });
   });
 

@@ -238,6 +238,17 @@ import { CalendarController } from '@/modules/calendar/calendar.controller';
 import { RoleChangeService } from '@/modules/org/role-change.service';
 import { UnitDashboardController } from '@/modules/unit-dashboard/unit-dashboard.controller';
 import { UnitDashboardService } from '@/modules/unit-dashboard/unit-dashboard.service';
+import {
+  RecruitmentController, RecruitmentPitchController, RecruitmentPlaybookController,
+} from '@/modules/recruitment/recruitment.controller';
+import {
+  RecruitmentPlaybook, RecruitmentPlaybookSchema,
+} from '@/modules/recruitment/recruitment-playbook.schema';
+import { RecruitmentPitchSlot, RecruitmentPitchSlotSchema } from '@/modules/recruitment/recruitment-pitch.schema';
+import { RecruitmentPitchRepository } from '@/modules/recruitment/recruitment-pitch.repository';
+import { RecruitmentPlaybookService } from '@/modules/recruitment/recruitment-playbook.service';
+import { RecruitmentPlanService } from '@/modules/recruitment/recruitment-plan.service';
+import { RecruitmentPitchService } from '@/modules/recruitment/recruitment-pitch.service';
 
 @Module({
   imports: [
@@ -311,6 +322,9 @@ import { UnitDashboardService } from '@/modules/unit-dashboard/unit-dashboard.se
       { name: CalendarEvent.name, schema: CalendarEventSchema },
       // Phase 13: one hire's 90-day activation.
       { name: ActivationProgress.name, schema: ActivationProgressSchema },
+      // Phase 17: a company's recruitment playbook, and an office's four pitch documents.
+      { name: RecruitmentPlaybook.name, schema: RecruitmentPlaybookSchema },
+      { name: RecruitmentPitchSlot.name, schema: RecruitmentPitchSlotSchema },
     ]),
   ],
   controllers: [
@@ -356,6 +370,10 @@ import { UnitDashboardService } from '@/modules/unit-dashboard/unit-dashboard.se
     BillingController,
     // Phase 15: a leader's unit, and *Update production*.
     UnitDashboardController,
+    // Phase 17: the agents' Recruitment, the office's pitch settings, and the company's playbook.
+    RecruitmentController,
+    RecruitmentPitchController,
+    RecruitmentPlaybookController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -540,6 +558,14 @@ import { UnitDashboardService } from '@/modules/unit-dashboard/unit-dashboard.se
      * a leader's corrections through the month table's own function. No collection of its own.
      */
     UnitDashboardService,
+    /*
+     * Phase 17: recruitment tools — the company's playbook (read live, written by the Super Admin, given to a
+     * company started from the defaults by `TenantService`), the plan built from it, and an office's pitch.
+     */
+    RecruitmentPlaybookService,
+    RecruitmentPlanService,
+    RecruitmentPitchRepository,
+    RecruitmentPitchService,
   ],
   exports: [Clock, AuditService],
 })

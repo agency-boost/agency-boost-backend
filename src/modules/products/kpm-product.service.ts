@@ -4,11 +4,13 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import {
-  APPROVED_PRODUCT_FIELDS, OVERRIDABLE_PRODUCT_FIELDS, PRODUCT_DOCUMENT_SLOTS,
+  APPROVED_PRODUCT_FIELDS, DOCUMENT_MIME_TYPES, OVERRIDABLE_PRODUCT_FIELDS, PRODUCT_DOCUMENT_FOLDER,
+  PRODUCT_DOCUMENT_LABEL_MAX_LENGTH, PRODUCT_DOCUMENT_SLOTS,
   SCRIPT_OVERRIDE_FIELDS, type ProductDocumentSlot, type ScriptReviewState,
 } from '@/domain/constants';
 import { plainText } from '@/common/validation/plain-text';
 import { AssetService } from '@/modules/assets/asset.service';
+import type { SignedUpload } from '@/modules/assets/storage.port';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Kpm } from '@/modules/tenants/kpm.schema';
 import { KpmProductConfigDocument } from './kpm-product-config.schema';
@@ -319,6 +321,17 @@ export class KpmProductService {
     return this.view(product, row);
   }
 
+  /**
+   * **A signed upload for an office's own product document** (P17-T9, D-productdocs): a PDF of at most
+   * 25 MB, into the office's own `products` folder, refused before anything is signed otherwise. The key is
+   * then attached to a slot by {@link setDocument}, as it always was.
+   */
+  async requestDocumentUpload(
+    ctx: RequestContext, params: { filename: string; mimeType: string; bytes: number },
+  ): Promise<SignedUpload> {
+    return this.assets.requestUpload(ctx, { folder: PRODUCT_DOCUMENT_FOLDER, ...params }, DOCUMENT_MIME_TYPES);
+  }
+
   /** Attach this office's own file to one slot, replacing the company's for this office alone. */
   async setDocument(
     ctx: RequestContext,
@@ -329,25 +342,36 @@ export class KpmProductService {
     const product = await this.requireProduct(ctx, productId);
     this.requireSlot(slot);
 
-    // The same check delivery makes: it exists, it is this office's, and its bytes arrived.
-    await this.assets.urlFor(ctx, file.storageKey);
-    const stored = await this.assets.confirmUpload(ctx, file.storageKey);
+    /*
+     * It exists, it is this office's, and its bytes arrived: **confirmed against storage here** (ADR-0040),
+     * what storage reports recorded. P17-T9: this asked for an already-confirmed upload first — the check
+     * delivery makes — and no product route confirms one, so an upload signed for this slot could never be
+     * attached. Confirming is that check and more: another office's key is still 404, bytes that never came
+     * are still `409 ASSET_NOT_UPLOADED` — and **a file storage holds as anything but a PDF is refused**
+     * (`415 ASSET_TYPE_NOT_ALLOWED`), whatever it was signed as, with nothing attached: a product document
+     * is a PDF (`DOCUMENT_MIME_TYPES`).
+     */
+    const stored = await this.assets.confirmUpload(ctx, file.storageKey, DOCUMENT_MIME_TYPES);
 
     const existing = (await this.configs.findOne(ctx, { productId }))?.documents?.get(slot);
     const row = await this.configs.upsert(ctx, productId, {
       $set: {
         [`documents.${slot}`]: {
           storageKey: stored.storageKey,
-          label: file.label.trim() || stored.originalFilename || slot,
+          // Cut, not refused, past the longest a slot carries — the pipe cuts it too; this is for any caller.
+          label: file.label.trim().slice(0, PRODUCT_DOCUMENT_LABEL_MAX_LENGTH) || stored.originalFilename || slot,
           mimeType: stored.mimeType,
           bytes: stored.bytes,
         },
       },
       $inc: { version: 1 },
     });
-    await this.assets.retain(ctx, stored.storageKey);
-    if (existing && existing.storageKey !== stored.storageKey) {
-      await this.assets.release(ctx, existing.storageKey);
+    // Referenced once more only when the slot did not already hold this file (the Phase 17 exit review): an
+    // attach of the same key again would otherwise count one reference twice, and the file would never read
+    // as unreferenced once released.
+    if (existing?.storageKey !== stored.storageKey) {
+      await this.assets.retain(ctx, stored.storageKey);
+      if (existing) await this.assets.release(ctx, existing.storageKey);
     }
 
     await this.record(ctx, 'kpm_product.document_set', row, { code: product.code, slot });

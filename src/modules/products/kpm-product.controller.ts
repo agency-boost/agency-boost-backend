@@ -2,6 +2,9 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
+import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
+import { RequestDocumentUploadDto } from '@/modules/assets/asset.dto';
+import { SignedUploadDto } from '@/modules/assets/asset.response.dto';
 import {
   AttachProductDocumentDto, RejectScriptDto, SetProductActiveDto, SaveProductOverridesDto,
 } from './kpm-product.dto';
@@ -10,6 +13,9 @@ import { KpmProductService } from './kpm-product.service';
 import {
   EffectiveScriptDto, KpmProductDto, SignedUrlDto,
 } from './kpm-product.response.dto';
+
+/** A refusal the derived descriptions cannot know, in the shared envelope. */
+const refusal = (status: number, description: string) => ({ status, description, type: ApiErrorEnvelope });
 
 /**
  * What this office sells, and the words it sells it with (P5-T5, ADR-0033).
@@ -99,14 +105,35 @@ export class KpmProductController {
     return this.products.resetOverride(ctx, productId, field);
   }
 
+  @Post('uploads')
+  @RequirePermission('tenant_config:write')
+  @ApiOperation({
+    summary: 'A signed upload for one of this office’s own product documents',
+    description:
+      'A PDF of at most 25 MB, into the office’s own `products` folder — refused before anything is signed '
+      + 'otherwise. The bytes go from the browser straight to storage; `PUT …/documents/:slot` then attaches '
+      + 'the key to a product’s slot, confirming it against what storage holds.',
+  })
+  @ApiResponse({ status: 201, type: SignedUploadDto })
+  @ApiResponse(refusal(413, '`ASSET_TOO_LARGE` — larger than 25 MB.'))
+  @ApiResponse(refusal(415, '`ASSET_TYPE_NOT_ALLOWED` — not a PDF.'))
+  async requestUpload(@Ctx() ctx: RequestContext, @Body() dto: RequestDocumentUploadDto) {
+    return this.products.requestDocumentUpload(ctx, dto);
+  }
+
   @Put(':productId/documents/:slot')
   @RequirePermission('tenant_config:write')
   @ApiOperation({
     summary: 'Attach this office’s own file to one slot',
     description:
-      'Each of the three slots is independent: filling one leaves the other two on the company’s.',
+      'Each of the three slots is independent: filling one leaves the other two on the company’s. The key is '
+      + 'one this office was signed (`POST …/uploads`); the file is confirmed against what storage holds, and '
+      + 'must be a PDF of at most 25 MB there, or nothing is attached.',
   })
   @ApiResponse({ status: 200, type: KpmProductDto })
+  @ApiResponse(refusal(409, '`ASSET_NOT_UPLOADED` — the bytes never reached storage. Nothing is attached.'))
+  @ApiResponse(refusal(413, '`ASSET_TOO_LARGE` — storage holds more than 25 MB. Nothing is attached.'))
+  @ApiResponse(refusal(415, '`ASSET_TYPE_NOT_ALLOWED` — storage holds something other than a PDF. Nothing is attached.'))
   async setDocument(
     @Ctx() ctx: RequestContext,
     @Param('productId') productId: string,

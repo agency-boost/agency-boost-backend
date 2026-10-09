@@ -311,6 +311,8 @@ export {
   // P5-T5: what an office decides about a product it sells.
   PRODUCT_DOCUMENT_SLOTS,
   type ProductDocumentSlot,
+  PRODUCT_DOCUMENT_FOLDER,
+  PRODUCT_DOCUMENT_LABEL_MAX_LENGTH,
   SCRIPT_REVIEW_STATES,
   type ScriptReviewState,
   OVERRIDABLE_PRODUCT_FIELDS,
@@ -331,7 +333,7 @@ export {
   PRODUCT_RUN_OFF_NOTE,
 } from './attack-plan';
 
-export { ASSET_LIMITS } from './assets';
+export { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from './assets';
 export { PRODUCTION, PRODUCTION_UPLOAD } from './production';
 
 // Phase 15: the Unit Dashboard's periods, its save's bound, and the reason a leader's correction carries.
@@ -405,3 +407,25 @@ export { SUBSCRIPTION, LEADER_RUNG_CODES } from './subscription';
 
 /** A named template's name bounds (ADR-0115 §3; P13.2-T6, T7), which the frontend's constant is pinned to. */
 export { TEMPLATE } from './templates';
+
+// Phase 17: the candidate brief's vocabulary, the office's four pitch slots and their completion rule, and
+// the playbook a company started from the defaults is given (D-vocabulary, D-slots, OD-88).
+export {
+  RECRUITMENT,
+  RECRUITMENT_CANDIDATE_TYPES,
+  RECRUITMENT_MOTIVATIONS,
+  RECRUITMENT_HESITATIONS,
+  RECRUITMENT_PITCH_SLOTS,
+  RECRUITMENT_PITCH_STATES,
+  SEED_RECRUITMENT_PLAYBOOK,
+  recruitmentPitchState,
+  recruitmentPitchDone,
+  type RecruitmentTypeCode,
+  type RecruitmentMotivationCode,
+  type RecruitmentHesitationCode,
+  type RecruitmentWords,
+  type RecruitmentProfileWords,
+  type RecruitmentPlaybookBody,
+  type RecruitmentPitchSlotCode,
+  type RecruitmentPitchState,
+} from './recruitment';

@@ -42,6 +42,10 @@ import {
   EffectiveScriptDto, KpmProductDto, SignedUrlDto as ProductSignedUrlDto,
 } from '@/modules/products/kpm-product.response.dto';
 import {
+  PitchDocumentUrlDto, PitchMaterialsDto, PitchSlotDto, RecruitmentAttackPlanDto, RecruitmentPlaybookAdminDto,
+  RecruitmentPlaybookDto,
+} from '@/modules/recruitment/recruitment.response.dto';
+import {
   AttackPlanDto, CatalogDocumentUrlDto, CatalogListDto, CatalogProductDto,
 } from '@/modules/products/product-catalog.response.dto';
 import { EventDto, EventTypeDto } from '@/modules/events/event.response.dto';
@@ -269,6 +273,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   KpmProductController_setDocument: { type: KpmProductDto },
   KpmProductController_resetDocument: { type: KpmProductDto },
   KpmProductController_documentUrl: { type: ProductSignedUrlDto },
+  // P17-T9: the signed upload an office's own product document is attached from.
+  KpmProductController_requestUpload: { type: SignedUploadDto },
   // The script approval gate (P5-T10, ADR-0037).
   KpmProductController_pendingReviews: { type: KpmProductDto, isArray: true },
   KpmProductController_approveScript: { type: KpmProductDto },
@@ -279,6 +285,16 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   ProductCatalogController_product: { type: CatalogProductDto },
   ProductCatalogController_documentUrl: { type: CatalogDocumentUrlDto },
   AttackPlanController_plan: { type: AttackPlanDto },
+
+  // Phase 17: recruitment tools — the agents' plan and pitch, the office's pitch settings, the company's playbook.
+  RecruitmentController_attackPlan: { type: RecruitmentAttackPlanDto },
+  RecruitmentController_pitchMaterials: { type: PitchMaterialsDto },
+  RecruitmentController_pitchDocumentUrl: { type: PitchDocumentUrlDto },
+  RecruitmentPitchController_requestUpload: { type: SignedUploadDto },
+  RecruitmentPitchController_attach: { type: PitchSlotDto },
+  RecruitmentPitchController_setConfirmation: { type: PitchSlotDto },
+  RecruitmentPlaybookController_read: { type: RecruitmentPlaybookAdminDto },
+  RecruitmentPlaybookController_save: { type: RecruitmentPlaybookDto },
 
   // The events an office runs (P5-T6).
   EventController_listTypes: { type: EventTypeDto, isArray: true },

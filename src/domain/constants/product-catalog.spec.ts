@@ -2,7 +2,7 @@ import {
   APPROVED_PRODUCT_FIELDS, OVERRIDABLE_PRODUCT_FIELDS, PRODUCT_AGE_BANDS, PRODUCT_AGE_BAND_LABELS,
   PRODUCT_BUDGET_BANDS, PRODUCT_BUDGET_BAND_LABELS, PRODUCT_CATEGORIES, PRODUCT_CHANNELS,
   PRODUCT_LIFECYCLES, PRODUCT_NEEDS, PRODUCT_TAGLINE_MAX_LENGTH, SCRIPT_OVERRIDE_FIELDS,
-  SEED_PRODUCTS, SEED_REPLY_BY_NEED,
+  SEED_PRODUCTS, SEED_REPLY_BY_NEED, PRODUCT_DOCUMENT_FOLDER, PRODUCT_DOCUMENT_LABEL_MAX_LENGTH, RECRUITMENT,
 } from '@/domain/constants';
 
 /**
@@ -186,5 +186,13 @@ describe('the seeded product catalog (P5-T4)', () => {
       expect(PRODUCT_CATEGORIES).toContain(product.category);
       expect(PRODUCT_LIFECYCLES).toContain(product.lifecycle);
     }
+  });
+});
+
+describe('an office’s own product documents (P17-T9)', () => {
+  it('land in the office’s own products folder, beside the pitch documents’ recruitment-pitch, and carry labels of at most 200', () => {
+    expect(PRODUCT_DOCUMENT_FOLDER).toBe('products');
+    expect(PRODUCT_DOCUMENT_FOLDER).not.toBe(RECRUITMENT.PITCH_UPLOAD_FOLDER);
+    expect(PRODUCT_DOCUMENT_LABEL_MAX_LENGTH).toBe(200);
   });
 });

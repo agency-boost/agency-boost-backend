@@ -137,6 +137,12 @@ import { ActivationLinkEngine } from '@/modules/activation/activation-links';
 import { ActivationProgressService } from '@/modules/activation/activation-progress.service';
 import { NewHiresService } from '@/modules/activation/new-hires.service';
 import { UnitDashboardService } from '@/modules/unit-dashboard/unit-dashboard.service';
+import { RecruitmentPlaybook, RecruitmentPlaybookSchema } from '@/modules/recruitment/recruitment-playbook.schema';
+import { RecruitmentPitchSlot, RecruitmentPitchSlotSchema } from '@/modules/recruitment/recruitment-pitch.schema';
+import { RecruitmentPitchRepository } from '@/modules/recruitment/recruitment-pitch.repository';
+import { RecruitmentPlaybookService } from '@/modules/recruitment/recruitment-playbook.service';
+import { RecruitmentPlanService } from '@/modules/recruitment/recruitment-plan.service';
+import { RecruitmentPitchService } from '@/modules/recruitment/recruitment-pitch.service';
 
 /**
  * The configuration module, wired the way the app wires it.
@@ -601,6 +607,23 @@ export function configModule(
     subjectReads,
   );
 
+  /*
+   * Phase 17: recruitment tools — the company's playbook (read through its named company-filtered method),
+   * the plan built from it, and an office's four pitch documents through the tenant-scoped repository.
+   */
+  const recruitmentPlaybookRows = model(RecruitmentPlaybook.name, RecruitmentPlaybookSchema);
+  const recruitmentPlaybooks = new RecruitmentPlaybookService(
+    recruitmentPlaybookRows as never,
+    model('CompanyModelForConfig', CompanySchema) as never,
+    users as never,
+    audit,
+  );
+  const recruitmentPlans = new RecruitmentPlanService(recruitmentPlaybooks, new TenantDay(kpms as never, clock));
+  const recruitmentPitch = new RecruitmentPitchService(
+    new RecruitmentPitchRepository(model(RecruitmentPitchSlot.name, RecruitmentPitchSlotSchema) as never),
+    assets, audit, new TenantDay(kpms as never, clock), clock,
+  );
+
   return {
     activity, ratios, leads, config, provisioning, templates, templateService, audit, clock, changes,
     namedTemplates, namedTemplateRows, officeSettings, templateCopies, assetRows,
@@ -616,6 +639,7 @@ export function configModule(
     calendarEntries, calendarNotices, calendar, calendarPeople, calendarLeave,
     activationRows, activationEngine, activationProgress, newHires,
     unitDashboard,
+    recruitmentPlaybookRows, recruitmentPlaybooks, recruitmentPlans, recruitmentPitch,
   };
 }
 

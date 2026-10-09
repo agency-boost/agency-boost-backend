@@ -24,6 +24,11 @@ export class AssetService {
   async requestUpload(
     ctx: RequestContext,
     params: { folder: string; filename: string; mimeType: string; bytes: number },
+    /**
+     * A narrower list than `ALLOWED_MIME_TYPES` for a route that takes one kind of file — a PDF for a
+     * pitch or product document (`DOCUMENT_MIME_TYPES`, Phase 17). Refused as any other type is.
+     */
+    allowed: readonly string[] = ASSET_LIMITS.ALLOWED_MIME_TYPES,
   ): Promise<SignedUpload> {
     const kpmId = ctx.kpmId;
     if (!kpmId) {
@@ -33,10 +38,13 @@ export class AssetService {
         HttpStatus.FORBIDDEN,
       );
     }
-    this.refuseBeyondLimits(params.mimeType, params.bytes);
+    this.refuseBeyondLimits(params.mimeType, params.bytes, allowed);
 
     const signed = await this.storage.createSignedUpload({
-      owner: { kind: 'kpm', kpmId }, ...params,
+      owner: { kind: 'kpm', kpmId },
+      ...params,
+      // A route's narrower list goes to the vendor too (Phase 17, N5); the whole allow-list is not sent.
+      ...(allowed === ASSET_LIMITS.ALLOWED_MIME_TYPES ? {} : { allowedMimeTypes: allowed }),
     });
     await this.assets.create(ctx, {
       storageKey: signed.storageKey,
@@ -63,13 +71,18 @@ export class AssetService {
    * Idempotent: confirming an already-confirmed asset re-reads storage and writes the same row,
    * because a retried request after a dropped response must not read as a failure.
    */
-  async confirmUpload(ctx: RequestContext, storageKey: string): Promise<AssetDocument> {
+  async confirmUpload(
+    ctx: RequestContext,
+    storageKey: string,
+    /** The narrower list the upload was signed under, checked again against what storage reports. */
+    allowed: readonly string[] = ASSET_LIMITS.ALLOWED_MIME_TYPES,
+  ): Promise<AssetDocument> {
     const asset = await this.assets.findOne(ctx, { storageKey });
     if (!asset) {
       throw new DomainException(ErrorCode.NOT_FOUND, 'Asset not found.', HttpStatus.NOT_FOUND);
     }
 
-    const stored = await this.requireStored(storageKey);
+    const stored = await this.requireStored(storageKey, allowed);
     const confirmed = await this.assets.updateById(ctx, String(asset._id), {
       $set: { mimeType: stored.mimeType, bytes: stored.bytes, uploadState: 'confirmed' },
     });
@@ -94,7 +107,7 @@ export class AssetService {
       throw new DomainException(ErrorCode.NOT_FOUND, 'Asset not found.', HttpStatus.NOT_FOUND);
     }
     this.requireConfirmed(asset);
-    return this.storage.createSignedUrl(storageKey, ASSET_LIMITS.SIGNED_URL_TTL_SECONDS);
+    return this.storage.createSignedUrl(storageKey, ASSET_LIMITS.SIGNED_URL_TTL_SECONDS, asset.mimeType);
   }
 
   async retain(ctx: RequestContext, storageKey: string): Promise<void> {
@@ -180,7 +193,7 @@ export class AssetService {
       throw new DomainException(ErrorCode.NOT_FOUND, 'Asset not found.', HttpStatus.NOT_FOUND);
     }
     this.requireConfirmed(asset);
-    return this.storage.createSignedUrl(storageKey, ASSET_LIMITS.SIGNED_URL_TTL_SECONDS);
+    return this.storage.createSignedUrl(storageKey, ASSET_LIMITS.SIGNED_URL_TTL_SECONDS, asset.mimeType);
   }
 
   /** One of the company's own files, or `null`: the named unscoped read, filtered by company (ADR-0032). */
@@ -222,7 +235,9 @@ export class AssetService {
     await this.assets.retainCompanyAssets(companyId, storageKeys);
   }
 
-  private async requireStored(storageKey: string): Promise<StoredObject> {
+  private async requireStored(
+    storageKey: string, allowed: readonly string[] = ASSET_LIMITS.ALLOWED_MIME_TYPES,
+  ): Promise<StoredObject> {
     const stored = await this.storage.describe(storageKey);
     if (!stored) {
       throw new DomainException(
@@ -232,7 +247,7 @@ export class AssetService {
         { storageKey },
       );
     }
-    this.refuseBeyondLimits(stored.mimeType, stored.bytes);
+    this.refuseBeyondLimits(stored.mimeType, stored.bytes, allowed);
     return stored;
   }
 
@@ -253,7 +268,9 @@ export class AssetService {
    * what storage reports, so a file that got past the first check by mis-declaring its own type
    * does not get past the second (ADR-0040).
    */
-  private refuseBeyondLimits(mimeType: string, bytes: number): void {
+  private refuseBeyondLimits(
+    mimeType: string, bytes: number, allowed: readonly string[] = ASSET_LIMITS.ALLOWED_MIME_TYPES,
+  ): void {
     if (bytes > ASSET_LIMITS.MAX_BYTES) {
       throw new DomainException(
         ErrorCode.ASSET_TOO_LARGE,
@@ -262,12 +279,12 @@ export class AssetService {
         { maxBytes: ASSET_LIMITS.MAX_BYTES, receivedBytes: bytes },
       );
     }
-    if (!(ASSET_LIMITS.ALLOWED_MIME_TYPES as readonly string[]).includes(mimeType)) {
+    if (!allowed.includes(mimeType)) {
       throw new DomainException(
         ErrorCode.ASSET_TYPE_NOT_ALLOWED,
         'That file type is not accepted.',
         HttpStatus.UNSUPPORTED_MEDIA_TYPE,
-        { mimeType, allowed: ASSET_LIMITS.ALLOWED_MIME_TYPES },
+        { mimeType, allowed },
       );
     }
   }

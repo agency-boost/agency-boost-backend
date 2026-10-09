@@ -189,6 +189,21 @@ const config: Config = {
      * company — each have a test, and the reach it reads is `CoachResolver.unitOf`'s, pinned at 100 there.
      */
     './src/modules/unit-dashboard/': { lines: 98, branches: 95, functions: 95, statements: 98 },
+    /*
+     * Phase 17: recruitment tools — the plan from a company's playbook, the playbook's save, and an office's four
+     * pitch documents. Business rules from the first task (the plan's one function, the completion rule, the
+     * replace that clears the ticks), so the domain floor at least; the module stood at 100 on every measure the
+     * day it landed. The four files that decide **whose** words and **whose** documents a reader reaches are
+     * isolation code, held where `calendar`'s three are: the plan's read (its office's own company, never one a
+     * caller names); the playbook's service (the named company-filtered read every plan goes through, and the
+     * console's write to the company in its address, pinned to its version — the exit review's S1); and the
+     * pitch's service and its tenant-scoped repository (an office's own four, 404 outside them).
+     */
+    './src/modules/recruitment/': { lines: 98, branches: 95, functions: 95, statements: 98 },
+    './src/modules/recruitment/recruitment-plan.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/recruitment/recruitment-playbook.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/recruitment/recruitment-pitch.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/recruitment/recruitment-pitch.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],

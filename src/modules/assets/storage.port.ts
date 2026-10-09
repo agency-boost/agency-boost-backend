@@ -3,10 +3,19 @@
  * Cloudinary; the adapter is stubbed at this boundary.
  */
 export interface SignedUpload {
+  /** Where the browser **POSTs** the bytes, multipart: `file`, and every entry of `fields`. */
   readonly uploadUrl: string;
   readonly storageKey: string;
+  /** Kept for the callers that read it; also one of `fields`. */
   readonly signature: string;
   readonly expiresAt: Date;
+  /**
+   * **The exact multipart fields the vendor needs beside `file`** (Phase 17): everything the signature
+   * covers, the signature itself and whatever else the vendor asks for — so a browser appends each entry
+   * and knows nothing about which vendor it is talking to. For Cloudinary: `api_key`, `timestamp`,
+   * `public_id`, `type` (`authenticated`) and `signature`.
+   */
+  readonly fields: Readonly<Record<string, string>>;
 }
 
 export interface StoredObject {
@@ -27,16 +36,25 @@ export type AssetOwner =
   | { kind: 'company'; companyId: string };
 
 export abstract class StoragePort {
-  /** A short-lived signed upload, so file bytes never transit the API. */
+  /**
+   * A short-lived signed upload, so file bytes never transit the API. `allowedMimeTypes` is a route's
+   * narrower list (a PDF-only route's), which the vendor is asked to enforce too where it can; absent, the
+   * route keeps the whole allow-list, checked on confirm.
+   */
   abstract createSignedUpload(params: {
     owner: AssetOwner;
     folder: string;
     filename: string;
     mimeType: string;
+    allowedMimeTypes?: readonly string[];
   }): Promise<SignedUpload>;
 
-  /** A signed, expiring delivery URL. Assets are private; there are no public URLs. */
-  abstract createSignedUrl(storageKey: string, ttlSeconds: number): Promise<string>;
+  /**
+   * A signed, expiring delivery URL. Assets are private; there are no public URLs. `mimeType` is what the
+   * registry recorded as stored (ADR-0040), so the vendor can be asked for the file as what it is — a PDF
+   * as a PDF.
+   */
+  abstract createSignedUrl(storageKey: string, ttlSeconds: number, mimeType?: string): Promise<string>;
 
   /**
    * What storage actually holds under this key, or `null` if it holds nothing.
@@ -67,6 +85,22 @@ export abstract class StoragePort {
     owner: AssetOwner;
     folder: string;
   }): Promise<StoredObject>;
+
+  /**
+   * **Bytes the server already holds, stored under a key named for them** (Phase 17, D-seed): the demo
+   * seed's one-page demonstration PDFs, which no browser uploads. The key is minted as an upload's is —
+   * `<owner>/<folder>/…` under the environment's prefix — but ends in `name` rather than a fresh id, so
+   * the same file of the same owner is the same key on every run: **a key storage already holds is
+   * described and returned, not sent again** (`sent: false`). What storage then holds is returned, so
+   * the caller registers what landed rather than what it sent (ADR-0040).
+   */
+  abstract putObject(params: {
+    owner: AssetOwner;
+    folder: string;
+    name: string;
+    mimeType: string;
+    body: Buffer;
+  }): Promise<StoredObject & { sent: boolean }>;
 }
 
 

@@ -28,3 +28,11 @@ export const ASSET_LIMITS = {
   /** 300 seconds. Nothing in storage is publicly readable, so every read is a signed, expiring URL. */
   SIGNED_URL_TTL_SECONDS: 300,
 } as const;
+
+/**
+ * **A document somebody opens for a customer or a candidate: a PDF, and nothing else** (Phase 17, D-slots,
+ * P17-T9). The office's recruitment pitch documents and its own product documents are uploaded under this
+ * narrower list, checked before a signature is issued and again against what storage reports (ADR-0040);
+ * every other upload keeps `ALLOWED_MIME_TYPES`.
+ */
+export const DOCUMENT_MIME_TYPES = ['application/pdf'] as const;

@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { INestApplication } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
@@ -27,6 +28,8 @@ const ROUTES: Record<string, string> = {
   setActive: 'tenant_config:write',
   saveOverrides: 'tenant_config:write',
   resetOverride: 'tenant_config:write',
+  // P17-T9 (D-productdocs): the signed upload an office's own product document is attached from.
+  requestUpload: 'tenant_config:write',
   setDocument: 'tenant_config:write',
   resetDocument: 'tenant_config:write',
   documentUrl: 'product_settings:read',
@@ -406,6 +409,139 @@ describe('an office’s products over HTTP (P5-T5, P5-T10)', () => {
       const given = await request(app.getHttpServer())
         .delete(`${url}/${mapanId}/documents/brochure`).expect(200);
       expect(given.body.documents[0].source).toBe('none');
+    });
+
+    describe('P17-T9 the office’s own product document, uploaded and attached over HTTP (D-productdocs)', () => {
+      const sign = (body: Record<string, unknown>) =>
+        request(app.getHttpServer()).post(`${url}/uploads`).send(body);
+
+      it('P17-T9 AC-1 signs a PDF into the office’s own products folder, and the existing route attaches it — no confirm step between', async () => {
+        const signed = await sign({ filename: 'Brosur PRUMapan.pdf', mimeType: 'application/pdf', bytes: 2_048_000 }).expect(201);
+        expect(Object.keys(signed.body).sort()).toEqual(['expiresAt', 'fields', 'signature', 'storageKey', 'uploadUrl']);
+        expect(signed.body.fields).toMatchObject({ public_id: signed.body.storageKey, signature: signed.body.signature });
+        expect(signed.body.storageKey).toMatch(new RegExp(`^dev/${KPM_A}/products/`));
+
+        // The browser sends the bytes to storage; the stub holds them from the signature on.
+        const filled = await request(app.getHttpServer()).put(`${url}/${mapanId}/documents/brochure`)
+          .send({ storageKey: signed.body.storageKey, label: 'Brosur kami' }).expect(200);
+        expect(filled.body.documents.find((d: { slot: string }) => d.slot === 'brochure'))
+          .toMatchObject({ source: 'kpm', filename: 'Brosur kami', storageKey: signed.body.storageKey });
+        // Confirmed against storage by the attach itself (ADR-0040): deliverable at once.
+        const link = await request(app.getHttpServer()).get(`${url}/${mapanId}/documents/brochure/url`).expect(200);
+        expect(link.body.url).toContain(signed.body.storageKey);
+      });
+
+      it('P17-T9 AC-1 replaces the office’s file with a second upload, the first released and never deleted', async () => {
+        const first = (await sign({ filename: 'a.pdf', mimeType: 'application/pdf', bytes: 10 }).expect(201)).body.storageKey;
+        const second = (await sign({ filename: 'b.pdf', mimeType: 'application/pdf', bytes: 10 }).expect(201)).body.storageKey;
+        await request(app.getHttpServer()).put(`${url}/${mapanId}/documents/brochure`).send({ storageKey: first, label: 'A' }).expect(200);
+        const replaced = await request(app.getHttpServer()).put(`${url}/${mapanId}/documents/brochure`)
+          .send({ storageKey: second, label: 'B' }).expect(200);
+
+        expect(replaced.body.documents.find((d: { slot: string }) => d.slot === 'brochure')).toMatchObject({ storageKey: second });
+        const assets = mongoose.connection.db!.collection('assets');
+        expect(await assets.findOne({ storageKey: first })).toMatchObject({ refCount: 0, deletedAt: null });
+        expect(await assets.findOne({ storageKey: second })).toMatchObject({ refCount: 1, uploadState: 'confirmed' });
+        expect(wired.storage.removed).not.toContain(first);
+      });
+
+      it.each([
+        ['a file that is not a PDF', { filename: 'brosur.png', mimeType: 'image/png', bytes: 10 }, 415, 'ASSET_TYPE_NOT_ALLOWED'],
+        ['a spreadsheet', { filename: 'x.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', bytes: 10 }, 415, 'ASSET_TYPE_NOT_ALLOWED'],
+        ['a PDF over 25 MB', { filename: 'big.pdf', mimeType: 'application/pdf', bytes: 25 * 1024 * 1024 + 1 }, 413, 'ASSET_TOO_LARGE'],
+        ['no size', { filename: 'x.pdf', mimeType: 'application/pdf' }, 400, 'VALIDATION_FAILED'],
+        ['a field nobody asked for', { filename: 'x.pdf', mimeType: 'application/pdf', bytes: 1, folder: 'training' }, 400, 'VALIDATION_FAILED'],
+      ])('P17-T9 AC-1 refuses %s before anything is signed', async (_name, body, status, code) => {
+        const res = await sign(body).expect(status);
+        expect(res.body.error.code).toBe(code);
+        expect(await mongoose.connection.db!.collection('assets').countDocuments({})).toBe(0);
+      });
+
+      it.each([
+        ['an AB', () => AB], ['an AAB', () => AAB], ['an agent', () => AGENT], ['a Super Admin', () => SUPER_ADMIN],
+        ['a read-only support session as the Owner', () => READ_ONLY_OWNER],
+      ])('P17-T9 AC-3 refuses %s the upload, at the guard', async (_n, who) => {
+        session.current = who();
+        await sign({ filename: 'x.pdf', mimeType: 'application/pdf', bytes: 10 }).expect(403);
+      });
+
+      it('the exit review: attaching the file a slot already holds references it once, not twice', async () => {
+        const key = (await sign({ filename: 'x.pdf', mimeType: 'application/pdf', bytes: 10 }).expect(201)).body.storageKey;
+        for (const label of ['Brosur', 'Brosur kami']) {
+          await request(app.getHttpServer()).put(`${url}/${mapanId}/documents/brochure`).send({ storageKey: key, label }).expect(200);
+        }
+        expect(await mongoose.connection.db!.collection('assets').findOne({ storageKey: key })).toMatchObject({ refCount: 1 });
+        // Given back to the company: no longer referenced at all.
+        await request(app.getHttpServer()).delete(`${url}/${mapanId}/documents/brochure`).expect(200);
+        expect(await mongoose.connection.db!.collection('assets').findOne({ storageKey: key })).toMatchObject({ refCount: 0 });
+      });
+
+      it('the exit review: a label over 200 characters is cut to 200, not refused', async () => {
+        const key = (await sign({ filename: 'x.pdf', mimeType: 'application/pdf', bytes: 10 }).expect(201)).body.storageKey;
+        const res = await request(app.getHttpServer()).put(`${url}/${mapanId}/documents/brochure`)
+          .send({ storageKey: key, label: `  ${'B'.repeat(250)}` }).expect(200);
+        expect(res.body.documents.find((d: { slot: string }) => d.slot === 'brochure').filename).toBe('B'.repeat(200));
+      });
+
+      it('N5 signs a PDF-only upload: the storage is asked for PDFs alone, and the fields say so', async () => {
+        const res = await sign({ filename: 'x.pdf', mimeType: 'application/pdf', bytes: 10 }).expect(201);
+        expect(wired.storage.signedWith.at(-1)).toEqual({ folder: 'products', mimeType: 'application/pdf', allowedMimeTypes: ['application/pdf'] });
+        expect(res.body.fields).toMatchObject({ overwrite: 'false', allowed_formats: 'pdf' });
+      });
+
+      it('N2 lets an elevated support session as the Owner sign and attach, as its member', async () => {
+        session.current = new RequestContext('u-owner', 'none', OWNER.membership, 'root', null, false, false);
+        const signed = (await sign({ filename: 'x.pdf', mimeType: 'application/pdf', bytes: 10 }).expect(201)).body.storageKey;
+        await request(app.getHttpServer()).put(`${url}/${mapanId}/documents/brochure`).send({ storageKey: signed, label: 'B' }).expect(200);
+        expect(await mongoose.connection.db!.collection('auditLog').findOne({ action: 'kpm_product.document_set' }))
+          .toMatchObject({ actorUserId: 'root', effectiveUserId: 'u-owner' });
+      });
+
+      it('P17-T9 AC-3 lets the Admin sign and attach, as the Owner does', async () => {
+        session.current = ADMIN;
+        const signed = (await sign({ filename: 'x.pdf', mimeType: 'application/pdf', bytes: 10 }).expect(201)).body.storageKey;
+        await request(app.getHttpServer()).put(`${url}/${mapanId}/documents/illustration`).send({ storageKey: signed, label: 'Ilustrasi' }).expect(200);
+      });
+
+      it('P17-T9 AC-1 a file signed as a PDF but stored as something else is refused, 415, nothing attached', async () => {
+        const signed = (await sign({ filename: 'x.pdf', mimeType: 'application/pdf', bytes: 10 }).expect(201)).body.storageKey;
+        wired.storage.setStored(signed, { storageKey: signed, mimeType: 'image/png', bytes: 10 });
+        const res = await request(app.getHttpServer()).put(`${url}/${mapanId}/documents/brochure`)
+          .send({ storageKey: signed, label: 'X' }).expect(415);
+        expect(res.body.error.code).toBe('ASSET_TYPE_NOT_ALLOWED');
+        expect(await mongoose.connection.db!.collection('kpmProductConfigs').countDocuments({})).toBe(0);
+        expect(await mongoose.connection.db!.collection('assets').findOne({ storageKey: signed }))
+          .toMatchObject({ uploadState: 'pending', refCount: 0 });
+      });
+
+      it('P17-T9 AC-1 a file storage holds over 25 MB is refused, 413, nothing attached', async () => {
+        const signed = (await sign({ filename: 'x.pdf', mimeType: 'application/pdf', bytes: 10 }).expect(201)).body.storageKey;
+        wired.storage.setStored(signed, { storageKey: signed, mimeType: 'application/pdf', bytes: 25 * 1024 * 1024 + 1 });
+        const res = await request(app.getHttpServer()).put(`${url}/${mapanId}/documents/brochure`)
+          .send({ storageKey: signed, label: 'X' }).expect(413);
+        expect(res.body.error.code).toBe('ASSET_TOO_LARGE');
+        expect(await mongoose.connection.db!.collection('kpmProductConfigs').countDocuments({})).toBe(0);
+      });
+
+      it('P17-T9 AC-3 another office’s key is 404, nothing attached', async () => {
+        const theirs = await wired.assets.requestUpload(
+          new RequestContext('u-b', 'none', { ...OWNER.membership!, membershipId: 'mem-b', kpmId: '66f0000000000000000000b9' }),
+          { folder: 'products', filename: 'b.pdf', mimeType: 'application/pdf', bytes: 10 },
+        );
+        const res = await request(app.getHttpServer()).put(`${url}/${mapanId}/documents/brochure`)
+          .send({ storageKey: theirs.storageKey, label: 'X' }).expect(404);
+        expect(res.body.error.code).toBe('NOT_FOUND');
+        expect(await mongoose.connection.db!.collection('kpmProductConfigs').countDocuments({})).toBe(0);
+      });
+
+      it('P17-T9 AC-3 an upload storage never received is not attached: 409, the slot left as it was', async () => {
+        const signed = (await sign({ filename: 'x.pdf', mimeType: 'application/pdf', bytes: 10 }).expect(201)).body.storageKey;
+        wired.storage.loseUpload(signed);
+        const res = await request(app.getHttpServer()).put(`${url}/${mapanId}/documents/brochure`)
+          .send({ storageKey: signed, label: 'X' }).expect(409);
+        expect(res.body.error.code).toBe('ASSET_NOT_UPLOADED');
+        expect(await mongoose.connection.db!.collection('kpmProductConfigs').countDocuments({})).toBe(0);
+      });
     });
 
     it('refuses a slot a product does not have', async () => {

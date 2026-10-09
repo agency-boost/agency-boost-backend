@@ -25,6 +25,7 @@ import { up as activityCategorySummaryGroup } from './0021-activity-category-sum
 import { up as activationBackfill } from './0022-activation-backfill';
 import { up as namedTemplates } from './0023-named-templates';
 import { up as attackPlanReply } from './0024-attack-plan-reply';
+import { up as recruitmentPlaybook } from './0025-recruitment-playbook';
 
 /**
  * Every migration, in order. Forward-only and idempotent, so running this twice is a
@@ -55,6 +56,7 @@ const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Date) => P
   ['0022-activation-backfill', activationBackfill],
   ['0023-named-templates', namedTemplates],
   ['0024-attack-plan-reply', attackPlanReply],
+  ['0025-recruitment-playbook', recruitmentPlaybook],
 ];
 
 async function main(): Promise<void> {

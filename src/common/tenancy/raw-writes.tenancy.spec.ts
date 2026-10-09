@@ -21,7 +21,15 @@ import { join } from 'node:path';
  */
 
 const SRC = join(__dirname, '../..');
-const WRITES = ['updateMany', 'updateOne', 'deleteMany', 'deleteOne'] as const;
+/**
+ * Every write a model offers. The four plain ones until the Phase 17 exit review (S2): a `findOneAndUpdate`,
+ * a `findByIdAndUpdate`, a `findOneAndDelete`, a `replaceOne` or a `bulkWrite` on an injected model writes as
+ * surely as an `updateOne` does, and went unexamined.
+ */
+const WRITES = [
+  'updateMany', 'updateOne', 'deleteMany', 'deleteOne',
+  'findOneAndUpdate', 'findByIdAndUpdate', 'findOneAndDelete', 'replaceOne', 'bulkWrite',
+] as const;
 
 /** Model classes whose documents belong to exactly one tenant. */
 const TENANT_SCOPED = new Set([
@@ -54,6 +62,11 @@ const EXEMPT: Record<string, string> = {
     + 'rule — MOC, a production club — belongs to the insurer and is read live by every office of '
     + 'it, so a carrier changing MOC does not wait on fifty Owners republishing. P5-T9 writes it '
     + 'from the published `campaign_kinds` template, filtered by `companyId` on every query.',
+  RecruitmentPlaybook:
+    'company-partitioned (OD-88, ADR-0125), for the same reason as Product above: a company\'s recruitment '
+    + 'playbook belongs to the insurer, is written only by the Super Admin and is read live by every office of '
+    + 'it. `RecruitmentPlaybookService.ofCompany` applies `companyId` to every read, and its one write filters '
+    + 'by `companyId` and the version read.',
   NamedTemplate:
     'company-partitioned (ADR-0115 §3), for the same reason as Product above: a company\'s named '
     + 'template belongs to the insurer, is written only by Super Admin, and is read before the office '

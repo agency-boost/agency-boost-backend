@@ -210,6 +210,35 @@ export const PERMISSIONS = {
     { grantee: AGENT, scope: 'own-kpm' },
   ],
   /*
+   * **Recruitment tools, as the field reads them** (Phase 17, D-api; roles §3.x): the Recruitment Attack
+   * Plan for a candidate brief, the office's four pitch documents with their states and ticks, and a
+   * document's link signed for 300 seconds. **Both screens read one answer** — the agents' tab and the
+   * Owner's and the Admin's settings page — since nothing in it is the office's draft: the ticks are what
+   * the banner already counts for agents (`:797-820`). The office's writes are `tenant_config:write`
+   * (ADR-0027); the playbook's, `recruitment_playbook:write`, below.
+   *
+   * Every member of the office, `own-kpm`: the Owner and the Admin reach the agents' tabs through their
+   * field view (ADR-0114). The Super Admin's `all` reads nothing on its own — outside a support session
+   * there is no office to read, and the read refuses them `403 TENANT_NO_MEMBERSHIP` as every scoped read
+   * does; inside one, the member's own grant answers. A read by its verb, so a read-only session holds it.
+   */
+  'recruitment:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-kpm' },
+    { grantee: AAB, scope: 'own-kpm' },
+    { grantee: AGENT, scope: 'own-kpm' },
+  ],
+  /*
+   * **Saving a company's recruitment playbook** (OD-88 → option 5, ADR-0125; P17-T8): the words every
+   * office of the company reads live on its next plan. The Super Admin's alone, and apart from
+   * `company_template:write` for the reason `product_catalog:crud` is apart from it: a template is copied
+   * into an office once, while the playbook — like a product — reaches every office at once. Read on the
+   * console under `company_template:read`. No office edits it (OD-88: no office override).
+   */
+  'recruitment_playbook:write': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
    * **The settings reads of the office's products** (the Phase 14 exit review; roles §3.10):
    * `GET /kpm/settings/products`, a slot's signed link there, the script-review queue and the effective
    * read. They carry what ADR-0037 keeps from agents — the office's drafts (`overrides`), the review
