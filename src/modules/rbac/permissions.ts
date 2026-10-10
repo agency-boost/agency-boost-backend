@@ -787,6 +787,63 @@ export const PERMISSIONS = {
   ],
 
   /*
+   * ---- Training progress (P18.5-T1, T4; roles §3.7; `functional/training.md`, *The permissions*). ----
+   *
+   * **The read is the Personal Summary's shape** (`personal_summary:read`): the reader's own at `own`, and with
+   * `?for=` another member through `CoachResolver.subject` — the Owner's and the Admin's `own-kpm` the whole office
+   * (leavers included), an AB's and an AAB's their COACH reach, as campaigns and the Unit Dashboard read it (the exit
+   * review, 2026-10-10). An Agent's `own` reaches nobody else. The Super Admin's `all` reads nothing on its own: outside a support session there
+   * is no office, and inside one the member's own grant answers. A read, so a read-only session holds it — and
+   * opening an item (`POST …/open`) is under it, answered in a support session and recorded only under `update`.
+   *
+   * **The write is the learner's own, on every field rung** — the AB and the AAB learn too (the matrix's defect,
+   * `Overall.html:4400`, `:7760`); the Owner and the Admin learn through the rung they stand on (ADR-0114). No
+   * route takes a subject: nobody sets another person's status. On `BLOCKED_WHILE_IMPERSONATING`, below
+   * (D-support): the status is the member's own declaration (OD-149), and the metric measures exactly that.
+   * `training_progress:verify` is struck (OD-149): nothing verifies the member's word.
+   */
+  'training_progress:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-unit' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  'training_progress:update': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /*
+   * **The settings reads of the office's training** (P18.5-T1 AC-8, the leak): `GET /kpm/settings/training`, a
+   * module's content there, and an item's signed address. They carry what agents are not offered — drafts, archived
+   * rows, a draft module's files — and sat on `tenant_config:read`, which every member holds, so an agent could read
+   * a draft module's material by asking the settings route. The Owner and the Admin, `own-kpm`: whoever writes the
+   * office's settings reads them, as `product_settings:read` (Phase 14) is. The learner reads through
+   * `training_progress:read`, which checks *offered* itself. The Super Admin's `all` mirrors `tenant_config:read`'s
+   * and reads nothing on its own. A read by its verb, so a read-only session as an Owner keeps it.
+   */
+  'training_settings:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  /*
+   * **The settings read of the office's activation checklist** (the Phase 18.5 exit review, permission review B2):
+   * `GET /kpm/settings/activation-checklist`. It answers the office's **draft** checklist and names each training
+   * link by the module's working title — a draft module's included — and it sat on `tenant_config:read`, which every
+   * member holds. The Owner and the Admin, `own-kpm`, as `training_settings:read`; a field member reads their own
+   * activation (`activation:read`), whose links are named from what the office offers. The Super Admin's `all`
+   * reads nothing on its own. A read by its verb, so a read-only session as an Owner keeps it.
+   */
+  'activation_settings:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+
+  /*
    * ---- The Unit Dashboard (Phase 15; roles §3.8, `functional/unit-dashboard.md`, *The permissions*). ----
    *
    * **The read is coaching's reach** (D-reach, ADR-0074, ADR-0087): a leader's unit is the leader and
@@ -1166,6 +1223,138 @@ export const PERMISSIONS = {
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
+  /*
+   * **Events: the member's side** (P18.5-T5, P18.5-T6; roles §3.11 as OD-31 and OD-151 answered it).
+   *
+   * Every member reads the events whose audience holds them (`GET /events`, the audience resolved server-side as at
+   * the event's start, ADR-0039); the Owner and the Admin read them in their field view **as the AB they are**
+   * (ADR-0114), and RSVP, claim and answer through that rung's grant. The Super Admin's `all` reads nothing on its
+   * own — outside a support session there is no office, and the read answers `TENANT_NO_MEMBERSHIP`.
+   */
+  'event:read_list': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-kpm' },
+    { grantee: AAB, scope: 'own-kpm' },
+    { grantee: AGENT, scope: 'own-kpm' },
+  ],
+  'event:rsvp': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  'event:cancel_rsvp': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /*
+   * *"I actually attended this event"* (`Overall.html:8732-8741`): the member's own word, which unlocks the feedback
+   * form and **never makes `attended`** (OD-31, exit test 2). On `BLOCKED_WHILE_IMPERSONATING`, below, with the RSVP
+   * pair above it.
+   */
+  'event_attendance:self_claim': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /*
+   * **The roll call** (OD-31, D-rollcall): the Owner and the Admins, and **nobody for their own row** — the service
+   * refuses the caller's own membership `400 EVENT_ATTENDANCE_SELF`, so an Admin confirms the Owner. No leader: a
+   * confirmation is a fact about the office's event, not a judgement about one's own downline, and a leader
+   * confirming would let a unit inflate its own number. No designated host (OD-31's option 2, not taken).
+   */
+  'event_attendance:confirm': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  /* The member's answer, once. On `BLOCKED_WHILE_IMPERSONATING`, below: an opinion is the member's own. */
+  'event_feedback:submit': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /*
+   * **The *Feedback Summary* is the office's administration's** (OD-151: names shown to the Owner and the Admins),
+   * and a member reads their own answer — the AB and the AAB too, who answer like everybody (roles corrected,
+   * P18.5-T6 AC-1). No leader reads another's: `own` reaches only the reader's own row on `GET /events`, and the
+   * summary route refuses anything narrower than `own-kpm`.
+   */
+  'event_feedback:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /*
+   * **The settings reads of the office's events** (P18.5-T5 AC-2, the leak): `GET /kpm/settings/events` and the
+   * picker's people. (The roll call's read is `event_attendance:confirm`'s, the write it serves.) The list carries leader-only events and invitee lists, which ADR-0039 keeps from
+   * members, and it sat on `tenant_config:read`, which every member holds — so an agent could read who was invited
+   * to a meeting they were not. As `product_settings:read` (the Phase 14 exit review): the Owner and the Admin; the
+   * Super Admin's `all` reads only through a support session. A read by its verb, so a read-only session as the
+   * Owner keeps it.
+   */
+  'event_settings:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  /*
+   * **Campaigns: the member's side** (P18.5-T7, T8, T9; roles §3.11).
+   *
+   * `campaign:read_list` — the office's active campaigns and one campaign's dialog (`GET /campaigns`,
+   * `GET /campaigns/:code`), every member; the Owner and the Admin in their field view (ADR-0114). The Super Admin's
+   * `all` reads only inside a support session, as its member: outside one the read answers `TENANT_NO_MEMBERSHIP`.
+   */
+  'campaign:read_list': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-kpm' },
+    { grantee: AAB, scope: 'own-kpm' },
+    { grantee: AGENT, scope: 'own-kpm' },
+  ],
+  /*
+   * *☆ Chase* / *⭐ Chasing* — the member's own enrolment (OD-153). The Owner and the Admin chase by the rung they hold.
+   * **Refused in every support session**, read-only or elevated (`BLOCKED_WHILE_IMPERSONATING`, ADR-0143), which draws
+   * no chase.
+   */
+  'campaign:chase': [
+    { grantee: AB, scope: 'own' },
+    { grantee: AAB, scope: 'own' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /*
+   * **Whose chases and standings a reader sees** (P18.5-T9, `GET /campaigns/chasing?for=`; the 18.6 port): the
+   * reader's own always, and as far as coaching reaches — an AB their downline, an AAB their unit read as the subtree
+   * (roles §2 rule 2, ADR-0074), resolved through `CoachResolver`; the Owner and the Admin the office. 404 beyond it.
+   * The Unit Dashboard serves chases inside this reach and no further (`unit-dashboard.service.ts`).
+   */
+  'campaign_qualification:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-unit' },
+    { grantee: AGENT, scope: 'own' },
+  ],
+  /*
+   * **The settings reads of the office's campaigns** (the phase file's *Found while preparing* 15, closed by P18.5-T7):
+   * `GET /kpm/settings/campaigns` — archived campaigns and requirements outside the evaluable set included — and the
+   * carrier rules beside it sat on `tenant_config:read`, which every member holds: the shape of the training and events
+   * leaks. As `training_settings:read` and `event_settings:read`: the Owner and the Admin; the Super Admin's `all` reads
+   * only through a support session. A member reads campaigns through `campaign:read_list`, which answers active ones.
+   * A read by its verb, so a read-only session as the Owner keeps it.
+   */
+  'campaign_settings:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
   'notification:read_inbox': [{ grantee: AUTHENTICATED, scope: 'own' }],
   'notification:mark_read': [{ grantee: AUTHENTICATED, scope: 'own' }],
   'notification:receive': [
@@ -1256,6 +1445,28 @@ export const BLOCKED_WHILE_IMPERSONATING: readonly Permission[] = [
    * verb already. The operator reproduces a failing graduation on a test office, as a note's save is.
    */
   'activation:graduate',
+  /*
+   * D-support (P18.5-T1 AC-1): **a training status is the member's own word** (OD-149) — *I have done this
+   * module* — and an elevated session would declare it in their name; a read-only one refuses it by its verb
+   * already. Opening an item in a session is answered and records nothing (`TrainingProgressService.open`).
+   */
+  'training_progress:update',
+  /*
+   * P18.5-T5, T6: **the member's own word about an event** — *Join event*, *Cancel RSVP*, *"I actually attended this
+   * event"* and their score. A read-only session refuses all four by their verbs already; an elevated one would say
+   * it in the member's name, and the roll call's *RSVP'd* / *Said they came* and the NPS measure exactly that word
+   * (D-support's reasoning, ADR-0100's; the RSVP pair added at the phase's exit review).
+   */
+  'event:rsvp',
+  'event:cancel_rsvp',
+  'event_attendance:self_claim',
+  'event_feedback:submit',
+  /*
+   * ADR-0143 (the Phase 18.5 permission review): **a chase is enrolment** — the member's own declaration that they
+   * are taking part, which only a chaser's standing records. A read-only session refuses it by its verb already; an
+   * elevated one would enrol the member in their name. The operator reproduces a failing chase on a test office.
+   */
+  'campaign:chase',
 ];
 
 const BLOCKED = new Set<string>(BLOCKED_WHILE_IMPERSONATING);

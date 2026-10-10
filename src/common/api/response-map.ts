@@ -33,6 +33,9 @@ import {
 import {
   ModuleContentDto, SignedUploadDto, SignedUrlDto, TrainingCategoryDto,
 } from '@/modules/training/training.response.dto';
+import {
+  TrainingModulePageDto, TrainingOpenDto, TrainingProgressDto,
+} from '@/modules/training/training-progress.response.dto';
 import { ActivationChecklistDto } from '@/modules/activation/activation.response.dto';
 import {
   ActivationNoteSavedDto, ActivationViewDto, NewHiresRosterDto,
@@ -48,8 +51,13 @@ import {
 import {
   AttackPlanDto, CatalogDocumentUrlDto, CatalogListDto, CatalogProductDto,
 } from '@/modules/products/product-catalog.response.dto';
-import { EventDto, EventTypeDto } from '@/modules/events/event.response.dto';
+import {
+  EventDto, EventInviteeListDto, EventTypeDto, FeedbackSummaryDto, GuestEventDto, GuestEventListDto, RollCallDto,
+} from '@/modules/events/event.response.dto';
 import { CampaignDto, MetricDefinitionDto, QualificationRuleDto } from '@/modules/campaigns/campaign.response.dto';
+import {
+  CampaignCardDto, CampaignDetailDto, CampaignListDto, ChasingDto,
+} from '@/modules/campaigns/campaign-agent.response.dto';
 import { CapabilityCatalogDto } from '@/modules/capability/capability.response.dto';
 import { BillingPricesDto } from '@/modules/billing/billing.response.dto';
 
@@ -281,6 +289,11 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TrainingController_saveContent: { type: ModuleContentDto },
   TrainingController_resetContent: { type: ModuleContentDto },
   TrainingController_contentUrl: { type: SignedUrlDto },
+  // P18.5-T1, T4: the learner's training — the offered catalog with a member's statuses, a module, an open, a status.
+  TrainingProgressController_read: { type: TrainingProgressDto },
+  TrainingProgressController_module: { type: TrainingModulePageDto },
+  TrainingProgressController_open: { type: TrainingOpenDto },
+  TrainingProgressController_setStatus: { type: TrainingModulePageDto },
   ActivationController_read: { type: ActivationChecklistDto },
   ActivationController_saveDraft: { type: ActivationChecklistDto },
   ActivationController_publish: { type: ActivationChecklistDto },
@@ -337,6 +350,18 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   EventController_update: { type: EventDto },
   EventController_archive: { type: EventDto },
   EventController_restore: { type: EventDto },
+  // P18.5-T5, T6: the roll call, the picker's people and the Feedback Summary, the office's administration's.
+  EventController_invitees: { type: EventInviteeListDto },
+  EventController_rollCall: { type: RollCallDto },
+  EventController_saveRollCall: { type: RollCallDto },
+  EventController_feedbackSummary: { type: FeedbackSummaryDto },
+  // P18.5-T5, T6: the agent's *KPM Events* — the list, the modal, RSVP, the claim and the answer.
+  EventGuestController_list: { type: GuestEventListDto },
+  EventGuestController_read: { type: GuestEventDto },
+  EventGuestController_rsvp: { type: GuestEventDto },
+  EventGuestController_cancelRsvp: { type: GuestEventDto },
+  EventGuestController_claim: { type: GuestEventDto },
+  EventGuestController_submitFeedback: { type: GuestEventDto },
 
   // Campaigns, and the carrier rules an office is measured against (P5-T7).
   MetricRegistryController_list: { type: MetricDefinitionDto, isArray: true },
@@ -346,6 +371,12 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   CampaignController_update: { type: CampaignDto },
   CampaignController_archive: { type: CampaignDto },
   CampaignController_restore: { type: CampaignDto },
+  // Phase 18.5: the agent's campaigns — the list, one campaign with its progress, the chase, and whose chases.
+  CampaignAgentController_list: { type: CampaignListDto },
+  CampaignAgentController_chasing: { type: ChasingDto },
+  CampaignAgentController_detail: { type: CampaignDetailDto },
+  CampaignAgentController_chase: { type: CampaignCardDto },
+  CampaignAgentController_unchase: { type: CampaignCardDto },
 
   // The office's capability catalog (P5-T8). No delete route, by design.
   CapabilityController_read: { type: CapabilityCatalogDto },

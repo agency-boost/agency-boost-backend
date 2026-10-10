@@ -19,6 +19,17 @@
 export const TRAINING_PUBLISH_STATES = ['draft', 'published'] as const;
 export type TrainingPublishState = (typeof TRAINING_PUBLISH_STATES)[number];
 
+/**
+ * **A member's status on one module** (P18.5-T1, `trainingProgress.status`): the prototype's three, in its
+ * order (`Overall.html:7657-7661`) — *Not started*, *In progress*, *Done*.
+ *
+ * **The member's own word** (OD-149, answered 2026-10-10 as recommended): the three-way toggle they set, and
+ * nothing that verifies it — no quiz, no certificate, no leader's mark. `in_progress` is not done, and *Done*
+ * back to *Not started* is allowed (`Overall.html:7905-7911`). `TRAINING_COMPLETION_PCT` counts `done` only.
+ */
+export const TRAINING_STATUSES = ['not_started', 'in_progress', 'done'] as const;
+export type TrainingStatus = (typeof TRAINING_STATUSES)[number];
+
 export interface SeedTrainingCategory {
   readonly code: string;
   readonly label: string;
@@ -45,12 +56,24 @@ export interface SeedTrainingModule {
   readonly displayOrder: number;
 }
 
-/** `KPM_Owner.html:4267`. Sales's subtitle is `Training Section.html:1201`. */
+/**
+ * Sales's subtitle as seeded before OD-150 (ADR-0029's *"the Skill tracker stays separate"*): the prototype's promise
+ * of a link nothing builds (`Overall.html:7865`). Kept only so migration `0029` can recognise the words an office
+ * never changed; no office is given it any more.
+ */
+export const SEEDED_SALES_SUBTITLE_BEFORE_OD_150 = 'Structured modules — tracked here, and later in your Skill Tracker.';
+
+/**
+ * `KPM_Owner.html:4267`. Sales's subtitle is `Training Section.html:1201` **less its promise** (OD-150, answered
+ * 2026-10-10 as recommended): *"…and later in your Skill Tracker"* names a link no feature makes — the only Skill
+ * tracker is the leader's private grid (ADR-0073) — so a new office is given *"Structured modules — tracked here."*,
+ * and migration `0029` rewrites an existing office's only where it still holds the seeded words.
+ */
 export const SEED_TRAINING_CATEGORIES: readonly SeedTrainingCategory[] = [
   {
     code: 'SALES',
     label: 'Sales',
-    description: 'Structured modules — tracked here, and later in your Skill Tracker.',
+    description: 'Structured modules — tracked here.',
     displayOrder: 1,
   },
   { code: 'PRODUCT', label: 'Product', description: null, displayOrder: 2 },

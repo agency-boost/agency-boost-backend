@@ -18,3 +18,26 @@ import { RequestContext } from '@/common/context/request-context';
 export abstract class MemberDeparture {
   abstract left(ctx: RequestContext, membershipId: string): Promise<void>;
 }
+
+/**
+ * **Every module's answer to one departure** (P18.5-T7 AC-5): the calendar's future entries and the campaigns' chases,
+ * each a `MemberDeparture`, called in turn behind the one port `RemovalService` holds. Each runs whatever another
+ * throws, and the first failure is rethrown once all have run — `RemovalService` logs it, as it always has.
+ */
+export class MemberDepartures extends MemberDeparture {
+  constructor(private readonly each: readonly MemberDeparture[]) {
+    super();
+  }
+
+  async left(ctx: RequestContext, membershipId: string): Promise<void> {
+    const failures: unknown[] = [];
+    for (const departure of this.each) {
+      try {
+        await departure.left(ctx, membershipId);
+      } catch (err) {
+        failures.push(err);
+      }
+    }
+    if (failures.length > 0) throw failures[0];
+  }
+}

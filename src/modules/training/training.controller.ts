@@ -28,8 +28,13 @@ import {
 export class TrainingController {
   constructor(private readonly training: TrainingService) {}
 
+  /*
+   * **The three reads are `training_settings:read`, the Owner's and the Admins'** (P18.5-T1 AC-8). They sat on
+   * `tenant_config:read`, which every member holds, and answer drafts, archived rows and a draft module's files —
+   * so an agent could read what the office has not offered. The learner reads `/training`, which checks *offered*.
+   */
   @Get()
-  @RequirePermission('tenant_config:read')
+  @RequirePermission('training_settings:read')
   @ApiOperation({
     summary: 'The office\'s training taxonomy',
     description:
@@ -73,7 +78,7 @@ export class TrainingController {
   }
 
   @Get('modules/:code/content')
-  @RequirePermission('tenant_config:read')
+  @RequirePermission('training_settings:read')
   @ApiOperation({
     summary: 'What this office shows for a module, and what the company gave it',
     description:
@@ -118,7 +123,7 @@ export class TrainingController {
   }
 
   @Get('modules/:code/content/url')
-  @RequirePermission('tenant_config:read')
+  @RequirePermission('training_settings:read')
   @ApiOperation({
     summary: 'A short-lived URL for one item',
     description:

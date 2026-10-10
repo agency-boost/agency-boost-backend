@@ -9,7 +9,8 @@ import {
 } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Kpm } from '@/modules/tenants/kpm.schema';
-import { TrainingService } from '@/modules/training/training.service';
+import { TrainingService, type TrainingCategoryView } from '@/modules/training/training.service';
+import { OfferedTraining } from '@/modules/training/offered-training';
 import { ActivationTemplateDocument } from './activation-template.schema';
 import {
   checkActivationChecklist, trainingLinkModuleCode, type CheckedActivationAspect,
@@ -19,11 +20,40 @@ import {
 } from './activation-payload';
 import { ActivationTemplateRepository } from './activation.repository';
 
+/** A module a training link names: its title, the category its page is under, and whether that page answers. */
+interface LinkedModule {
+  title: string;
+  categoryCode: string;
+  /** Offered to the reader of this view, so its page answers; `false` for one named only for its title. */
+  routable: boolean;
+}
+
+/**
+ * **Where a training link's title is read from, by who reads it** (the Phase 18.5 exit review, B2):
+ *
+ * - `settings` — the office's working taxonomy, drafts included: the Owner's and the Admins' settings read
+ *   (`activation_settings:read`), which names what they are editing;
+ * - `snapshot` — the modules the office's **next** snapshot will carry (`TrainingService.offered`: live, active,
+ *   published): the checklist `GET /kpm/config` publishes to every member;
+ * - `offered` — the office's **published** snapshot (`OfferedTraining`): a hire's activation and a leader's view of
+ *   it, so a field reader is never told a draft module's title.
+ *
+ * For `snapshot` and `offered`, **a module not offered** (withdrawn since, or published only in the working copy) is
+ * named by the working copy's title **only when that module is published** — archived since or not, a title once
+ * offered — **never a draft's** (an archived draft included), which reads as its code; and it has **no route** (`null`), so no *Go to* is drawn to a page
+ * that would not answer (the exit review, training review: *"Completed from CLOSING_TECHNIQUES"*).
+ */
+export type LinkTitleSource = 'settings' | 'snapshot' | 'offered';
+
 /** What an item's link waits for, resolved — the one place Phase 13's *"Go to {label} →"* reads. */
 export interface ActivationLinkView {
   kind: string;
   label: string;
-  route: string;
+  /**
+   * Where *"Go to {label} →"* sends a reader, or `null` for a training link to a module the reader is not offered —
+   * withdrawn, or not yet published — whose page would be a 404: draw no *Go to* (the Phase 18.5 exit review).
+   */
+  route: string | null;
   completesWhen: string;
   /**
    * Whether an evaluator exists yet. While it does not, a leader ticks the item by hand. **Whether,
@@ -87,6 +117,8 @@ export class ActivationService {
     @InjectModel(Kpm.name) private readonly kpms: Model<Kpm>,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    // The Phase 18.5 exit review (B2): a field reader's link titles come from what the office offers.
+    private readonly offered: OfferedTraining,
   ) {}
 
   /** The office's published version, its draft, and the window both are read against. */
@@ -116,10 +148,20 @@ export class ActivationService {
     }
 
     return {
-      published: published ? await this.view(ctx, published) : null,
-      draft: draft ? await this.view(ctx, draft) : null,
+      published: published ? await this.view(ctx, published, 'settings') : null,
+      draft: draft ? await this.view(ctx, draft, 'settings') : null,
       windowDays,
     };
+  }
+
+  /**
+   * **The published version as `GET /kpm/config` carries it to every member** (the Phase 18.5 exit review, B2): its
+   * training links named from the modules that snapshot will offer, never from a draft. `null` before the first
+   * publish.
+   */
+  async publishedForSnapshot(ctx: RequestContext): Promise<ActivationVersionView | null> {
+    const found = await this.newestPublished(ctx);
+    return found ? this.view(ctx, found, 'snapshot') : null;
   }
 
   /** The seed, as an unsaved draft. Not written: saving it is the Owner's act, not a read's. */
@@ -151,7 +193,8 @@ export class ActivationService {
    */
   async findVersion(ctx: RequestContext, version: number): Promise<ActivationVersionView | null> {
     const found = await this.templates.findOne(ctx, { version, status: 'published' });
-    return found ? this.view(ctx, found) : null;
+    // A hire's or a leader's read: titles from what the office offers (B2).
+    return found ? this.view(ctx, found, 'offered') : null;
   }
 
   /**
@@ -160,7 +203,7 @@ export class ActivationService {
    */
   async publishedNow(ctx: RequestContext): Promise<ActivationVersionView | null> {
     const found = await this.newestPublished(ctx);
-    return found ? this.view(ctx, found) : null;
+    return found ? this.view(ctx, found, 'offered') : null;
   }
 
   /**
@@ -296,10 +339,10 @@ export class ActivationService {
   }
 
   private async view(
-    ctx: RequestContext, doc: ActivationTemplateDocument,
+    ctx: RequestContext, doc: ActivationTemplateDocument, source: LinkTitleSource,
   ): Promise<ActivationVersionView> {
     const aspects = doc.aspects as unknown as CheckedActivationAspect[];
-    const titles = await this.moduleTitles(ctx, aspects);
+    const titles = await this.moduleTitles(ctx, aspects, source);
 
     return {
       id: String(doc._id),
@@ -325,29 +368,51 @@ export class ActivationService {
     };
   }
 
-  /** A training link reads as the module's own title, so the screen names what it is waiting for. */
+  /**
+   * A training link reads as the module's own title, so the screen names what it is waiting for, and goes to the
+   * module's own page — under its category, which is its skill's (ADR-0029), so the address is resolved here.
+   */
   private async moduleTitles(
-    ctx: RequestContext, aspects: readonly CheckedActivationAspect[],
-  ): Promise<Map<string, string>> {
+    ctx: RequestContext, aspects: readonly CheckedActivationAspect[], source: LinkTitleSource,
+  ): Promise<Map<string, LinkedModule>> {
     const wanted = activationTrainingLinks(aspects);
     if (wanted.length === 0) return new Map();
 
-    const tree = await this.training.list(ctx, true);
-    return new Map(
-      tree.flatMap((c) => c.skills.flatMap((s) => s.modules.map((m) => [m.code, m.title] as const))),
-    );
+    const entries = (tree: TrainingCategoryView[], routable: boolean, keep: (m: TrainingCategoryView['skills'][number]['modules'][number]) => boolean = () => true) =>
+      tree.flatMap((c) => c.skills.flatMap((s) => s.modules.filter(keep).map(
+        (m) => [m.code, { title: m.title, categoryCode: c.code, routable }] as const,
+      )));
+    if (source === 'settings') return new Map(entries(await this.training.list(ctx, true), true));
+
+    const offered = new Map(entries(
+      source === 'snapshot' ? await this.training.offered(ctx) : await this.offered.tree(ctx), true,
+    ));
+    if (wanted.every((code) => offered.has(code))) return offered;
+    // A module not offered: its working title only if it is published (archived since or not), never a draft's.
+    const named = new Map(entries(
+      await this.training.list(ctx, true), false, (m) => m.publishState === 'published',
+    ));
+    for (const code of wanted) {
+      if (!offered.has(code) && named.has(code)) offered.set(code, named.get(code)!);
+    }
+    return offered;
   }
 
-  private linkView(link: string | null, titles: Map<string, string>): ActivationLinkView | null {
+  private linkView(link: string | null, titles: Map<string, LinkedModule>): ActivationLinkView | null {
     if (link === null) return null;
 
     const moduleCode = trainingLinkModuleCode(link);
     if (moduleCode !== null) {
+      const module = titles.get(moduleCode);
       return {
         ...ACTIVATION_TRAINING_LINK,
         kind: link,
         // The module's own title, or its code where the module has since been removed from view.
-        label: titles.get(moduleCode) ?? moduleCode,
+        label: module?.title ?? moduleCode,
+        // *Go to {module} →* lands on the module's page (P18.5-T3 AC-5); nowhere for a module the reader is not offered.
+        route: module?.routable
+          ? `/training/${encodeURIComponent(module.categoryCode)}/${encodeURIComponent(moduleCode)}`
+          : null,
       };
     }
 

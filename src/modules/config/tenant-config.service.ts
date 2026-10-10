@@ -328,7 +328,9 @@ export class TenantConfigService {
         this.ratios.list(ctx),
         this.leadStatuses.list(ctx),
         this.training.offered(ctx),
-        this.activation.read(ctx),
+        // The published version, its training links named from the modules this copy offers — never a draft's
+        // title, which every member would read here (the Phase 18.5 exit review, B2).
+        this.activation.publishedForSnapshot(ctx),
         this.events.listTypes(ctx),
         // Whole: archived rows included, each with its status (P11-T9 AC-3).
         this.capability.own(ctx),
@@ -350,7 +352,7 @@ export class TenantConfigService {
      * - **Events and campaigns themselves** are live records with dates that pass on their own.
      *   An event's audience also differs per member, so it fails ADR-0039's test outright.
      */
-    const activationChecklist = activation.published;
+    const activationChecklist = activation;
     const versions = [
       ...activity.map((c) => c.version),
       ...activity.flatMap((c) => c.types.map((t) => t.version)),

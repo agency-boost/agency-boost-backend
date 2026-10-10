@@ -252,7 +252,6 @@ describe('permission matrix', () => {
     const STRUCK = 'struck in §3: the row stays as the dated record of a permission that was removed or folded';
     const DENIAL = 'a denial row, granted to nobody: there is no route for it to guard';
     const DERIVED = 'derived from the read it inherits: no route of its own, and the reads answer for it';
-    const NOT_YET = 'Phase 18.5 — events, campaigns and training are built last (the product owner, 2026-10-08)';
     const UNDECLARED = 'documented, and no route declares it: what it describes is guarded by another permission or not built';
     /** Documented in §3 and deliberately not in `PERMISSIONS`. Adding to it without a reason is what it exists to prevent. */
     const DOCUMENTED_NOT_IN_CODE: Record<string, string> = {
@@ -274,26 +273,15 @@ describe('permission matrix', () => {
       'campaign_qualification:evaluate': `${DENIAL} (qualification is computed by the system)`,
       'leader_request:decline': 'the decline route is guarded by `leader_request:approve`, which the same row names',
       'impersonation:stop': 'ending a support session needs only the session: `POST /admin/impersonate/end` declares no permission',
-      'campaign:chase': NOT_YET,
-      'campaign:read_list': NOT_YET,
-      'campaign_payout:mark': NOT_YET,
-      'campaign_payout:reverse_paid': NOT_YET,
-      'campaign_qualification:override': NOT_YET,
-      'campaign_qualification:read': NOT_YET,
-      'company_campaign:crud': NOT_YET,
-      'company_campaign:hide': NOT_YET,
-      'company_event:crud': NOT_YET,
-      'company_event:hide': NOT_YET,
-      'event:read_list': NOT_YET,
-      'event:rsvp': NOT_YET,
-      'event:cancel_rsvp': NOT_YET,
-      'event_attendance:self_claim': NOT_YET,
-      'event_attendance:confirm': NOT_YET,
-      'event_feedback:submit': NOT_YET,
-      'event_feedback:read': NOT_YET,
-      'training_progress:read': NOT_YET,
-      'training_progress:update': NOT_YET,
-      'training_progress:verify': NOT_YET,
+      'campaign_payout:mark': `${STRUCK} (OD-155: no payouts in v1 — the final standing is the record, the office pays outside the product)`,
+      'campaign_payout:reverse_paid': `${STRUCK} (OD-155)`,
+      'campaign_qualification:override': 'Phase 18.6 — the override ships with its only control, the compliance tree\'s *Achieved* cell (D-tasks)',
+      'company_campaign:crud': 'OD-156: company campaigns are deferred beyond v1 — every campaign is the office\'s',
+      'company_campaign:hide': 'OD-156: deferred beyond v1, with `company_campaign:crud`',
+      // OD-156 (answered 2026-10-10, ADR-0034's second half): company-wide events are deferred beyond v1.
+      'company_event:crud': 'deferred beyond v1 (OD-156): an office records a company event it hosts as its own, `issuer: company`',
+      'company_event:hide': 'deferred beyond v1 (OD-156): with no company-wide event there is nothing for an office to hide',
+      'training_progress:verify': `${STRUCK} (OD-149: completion is the member’s own word, and nothing verifies it)`,
       'member:list_directory': UNDECLARED,
       'member:add_leader_by_code': UNDECLARED,
       'member:reassign_leader': UNDECLARED,
@@ -958,6 +946,85 @@ describe('permission matrix', () => {
    * the level `can()` decides them. Who is inside a grant — `COACH`, and 404 outside it — is the module's
    * own specs' question (`unit-dashboard.int.spec.ts`, `unit-dashboard.tenancy.spec.ts`).
    */
+  describe('Phase 18.5 — campaigns, the member’s side (roles §3.11)', () => {
+    const CAMPAIGN = [
+      'campaign:read_list', 'campaign:chase', 'campaign_qualification:read', 'campaign_settings:read',
+    ] as const satisfies readonly Permission[];
+    const officeOnly = (over: Parameters<typeof ctx>[0]) => {
+      const base = ctx(over);
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: 'agent' });
+    };
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: officeOnly({ owner: true }),
+      KPM_ADMIN: officeOnly({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+    /** The widest scope each role holds (roles §3.11). */
+    const EXPECTED: Record<(typeof CAMPAIGN)[number], Record<string, Scope | null>> = {
+      'campaign:read_list': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-kpm', AAB: 'own-kpm', AGENT: 'own-kpm',
+      },
+      'campaign:chase': { SUPER_ADMIN: null, KPM_OWNER: null, KPM_ADMIN: null, AB: 'own', AAB: 'own', AGENT: 'own' },
+      'campaign_qualification:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-downline', AAB: 'own-unit', AGENT: 'own',
+      },
+      // Leak 15: the settings reads, the Owner's and the Admins' — never a field rung.
+      'campaign_settings:read': { SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null },
+    };
+    const cells = CAMPAIGN.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P18.5-T7 AC-1, P18.5-T9 AC-2 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P18.5-T7 AC-1 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it('P18.5-T7 AC-1 the Owner and the Admin chase by the rung they hold, in their field view (ADR-0114)', () => {
+      expect(can(ctx({ role: 'ab', owner: true }), 'campaign:chase')).toBe(true);
+      expect(can(ctx({ role: 'agent', admin: true }), 'campaign:chase')).toBe(true);
+    });
+
+    it('P18.5-T7 AC-1 a support session reads campaigns and is refused the chase, read-only or elevated (ADR-0143)', () => {
+      const readOnly = ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: true });
+      expect(can(readOnly, 'campaign:read_list')).toBe(true);
+      expect(can(readOnly, 'campaign_qualification:read')).toBe(true);
+      expect(can(readOnly, 'campaign:chase')).toBe(false);
+      expect(isBlockedWhileImpersonating('campaign:chase')).toBe(true);
+      expect(can(ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: false }), 'campaign:chase')).toBe(false);
+      // Outside a session the member chases.
+      expect(can(ctx({ role: 'agent' }), 'campaign:chase')).toBe(true);
+    });
+
+    it.each(CAMPAIGN)('P18.5-T7 AC-1 negative: %s is refused to a removed or pending member', (permission) => {
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role, status }), permission)).toBe(false);
+      }
+    });
+
+    it('P18.5-T7 AC-1 only the reads are read-like', () => {
+      expect(CAMPAIGN.filter((p) => isReadLike(p))).toEqual(['campaign:read_list', 'campaign_qualification:read', 'campaign_settings:read']);
+    });
+
+    it('P18.5-T7 leak 15 the settings read is refused to every field rung, the Owner and the Admin keeping it as the rung they hold', () => {
+      for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role }), 'campaign_settings:read')).toBe(false);
+      expect(can(ctx({ role: 'agent', owner: true }), 'campaign_settings:read')).toBe(true);
+      expect(can(ctx({ role: 'ab', admin: true, impersonatedBy: 'sa-1', readOnly: true }), 'campaign_settings:read')).toBe(true);
+    });
+  });
+
   describe('Phase 15 — the Unit Dashboard (roles §3.8, functional/unit-dashboard.md *The permissions*)', () => {
     const UNIT = ['unit_dashboard:read', 'unit_dashboard:update_production'] as const satisfies readonly Permission[];
     const officeOnly = (over: Parameters<typeof ctx>[0]) => {
@@ -1304,6 +1371,178 @@ describe('permission matrix', () => {
       expect(isReadLike('product_settings:read')).toBe(true);
       expect(can(ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: true }), 'product_settings:read')).toBe(true);
       expect(can(ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: true }), 'product_settings:read')).toBe(false);
+    });
+  });
+
+  /*
+   * **Events** (P18.5-T5 AC-1, AC-2; P18.5-T6 AC-1; roles §3.10, §3.11 as OD-31 and OD-151 answered them): a positive
+   * and a negative for each of the six roles, at the level `can()` decides — the API refusing what a screen hides.
+   * Who is inside an event's audience, and the 404 outside it, is `event-guest.tenancy.spec.ts`'s question.
+   */
+  describe('Phase 18.5 — events (roles §3.10, §3.11)', () => {
+    const OWNER_AB = ctx({ owner: true, role: 'ab' });
+    const ADMIN_AB = ctx({ admin: true, role: 'ab' });
+    const SA = ctx({ superAdmin: true, noMembership: true });
+    const FIELD = (['ab', 'aab', 'agent'] as const).map((role) => [role, ctx({ role })] as const);
+
+    it('P18.5-T5 AC-1 every member reads the events list; the Super Admin only through a support session', () => {
+      for (const [role, who] of [...FIELD, ['owner', OWNER_AB], ['admin', ADMIN_AB]] as const) {
+        expect([role, scopeFor(who, 'event:read_list')]).toEqual([role, 'own-kpm']);
+      }
+      expect(scopeFor(SA, 'event:read_list')).toBe('all');
+      expect(can(ctx({ role: 'agent', status: 'pending' }), 'event:read_list')).toBe(false);
+    });
+
+    it('P18.5-T5 AC-1 RSVP, cancel and the claim are a field member’s own — the Owner and the Admin hold them as the AB they are', () => {
+      for (const permission of ['event:rsvp', 'event:cancel_rsvp', 'event_attendance:self_claim'] as const) {
+        for (const [role, who] of FIELD) expect([permission, role, scopeFor(who, permission)]).toEqual([permission, role, 'own']);
+        expect([permission, scopeFor(OWNER_AB, permission)]).toEqual([permission, 'own']);
+        // An Owner who held no rung would hold none of them: the grant is the rung's, not the office's.
+        expect([permission, can(ctx({ owner: true, role: 'agent', noMembership: true }), permission)]).toEqual([permission, false]);
+        expect([permission, can(SA, permission)]).toEqual([permission, false]);
+      }
+    });
+
+    it('P18.5-T5 AC-1 only the Owner and the Admins confirm attendance; no leader, no agent (OD-31)', () => {
+      expect(scopeFor(ctx({ owner: true }), 'event_attendance:confirm')).toBe('own-kpm');
+      expect(scopeFor(ctx({ admin: true }), 'event_attendance:confirm')).toBe('own-kpm');
+      for (const [role, who] of FIELD) expect([role, can(who, 'event_attendance:confirm')]).toEqual([role, false]);
+      expect(isReadLike('event_attendance:confirm')).toBe(false);
+    });
+
+    it('P18.5-T6 AC-1 feedback: every field rung submits; the AB and the AAB read their own, the office reads every row', () => {
+      for (const [role, who] of FIELD) {
+        expect([role, scopeFor(who, 'event_feedback:submit')]).toEqual([role, 'own']);
+        expect([role, scopeFor(who, 'event_feedback:read')]).toEqual([role, 'own']);
+      }
+      expect(scopeFor(ctx({ owner: true }), 'event_feedback:read')).toBe('own-kpm');
+      expect(scopeFor(ctx({ admin: true }), 'event_feedback:read')).toBe('own-kpm');
+      expect(can(ctx({ owner: true, noMembership: true }), 'event_feedback:submit')).toBe(false);
+    });
+
+    it('P18.5-T5 AC-2 the events settings read is the Owner’s and the Admin’s, never a field member’s (the leak)', () => {
+      expect(scopeFor(ctx({ owner: true }), 'event_settings:read')).toBe('own-kpm');
+      expect(scopeFor(ctx({ admin: true }), 'event_settings:read')).toBe('own-kpm');
+      expect(scopeFor(SA, 'event_settings:read')).toBe('all');
+      for (const [role, who] of FIELD) {
+        expect([role, can(who, 'event_settings:read')]).toEqual([role, false]);
+        expect([role, can(who, 'event:read_list')]).toEqual([role, true]);
+      }
+    });
+
+    it('P18.5-T5 AC-1 a read-only session reads and writes nothing; an elevated one never RSVPs, claims or answers for the member', () => {
+      const readOnlyAgent = ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: true });
+      expect(can(readOnlyAgent, 'event:read_list')).toBe(true);
+      for (const write of ['event:rsvp', 'event:cancel_rsvp', 'event_attendance:self_claim', 'event_feedback:submit'] as const) {
+        expect([write, can(readOnlyAgent, write)]).toEqual([write, false]);
+      }
+      const readOnlyOwner = ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: true });
+      expect(can(readOnlyOwner, 'event_settings:read')).toBe(true);
+      expect(can(readOnlyOwner, 'event_feedback:read')).toBe(true);
+      expect(can(readOnlyOwner, 'event_attendance:confirm')).toBe(false);
+
+      const elevatedAgent = ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: false });
+      expect(can(elevatedAgent, 'event:read_list')).toBe(true);
+      for (const own of ['event:rsvp', 'event:cancel_rsvp', 'event_attendance:self_claim', 'event_feedback:submit'] as const) {
+        expect([own, isBlockedWhileImpersonating(own)]).toEqual([own, true]);
+        expect([own, can(elevatedAgent, own)]).toEqual([own, false]);
+        // The member themselves, outside any session, still holds it.
+        expect([own, can(ctx({ role: 'agent' }), own)]).toEqual([own, true]);
+      }
+      expect(can(ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: false }), 'event_attendance:confirm')).toBe(true);
+    });
+  });
+
+  /*
+   * **Training** (P18.5-T1 AC-1, AC-8; P18.5-T2 AC-1; P18.5-T4 AC-1; roles §3.7 as OD-149 and D-support answered it):
+   * a positive and a negative for each of the six roles, at the level `can()` decides — the API refusing what a
+   * screen hides. Who `?for=` reaches (`COACH`, and 404 outside it) is `training-progress.tenancy.spec.ts`'s question.
+   */
+  describe('Phase 18.5 — training (roles §3.7)', () => {
+    const TRAINING = [
+      'training_progress:read', 'training_progress:update', 'training_settings:read', 'activation_settings:read',
+    ] as const satisfies readonly Permission[];
+    const officeOnly = (over: Parameters<typeof ctx>[0]) => {
+      const base = ctx(over);
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: 'agent' });
+    };
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: officeOnly({ owner: true }),
+      KPM_ADMIN: officeOnly({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+    const EXPECTED: Record<(typeof TRAINING)[number], Record<string, Scope | null>> = {
+      'training_progress:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-downline', AAB: 'own-unit', AGENT: 'own',
+      },
+      // The AB and the AAB learn too (the matrix's defect, fixed); the Owner and the Admin through a rung only.
+      'training_progress:update': {
+        SUPER_ADMIN: null, KPM_OWNER: null, KPM_ADMIN: null, AB: 'own', AAB: 'own', AGENT: 'own',
+      },
+      // The leak (AC-8): the settings reads are the office's administration's.
+      'training_settings:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null,
+      },
+      // The exit review's B2: the activation checklist's settings read, the same shape.
+      'activation_settings:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null,
+      },
+    };
+    const cells = TRAINING.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P18.5-T1 AC-1 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P18.5-T1 AC-1 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it('P18.5-T1 AC-1 an Owner or Admin standing on a rung learns as that rung (ADR-0114)', () => {
+      expect(scopeFor(ctx({ owner: true, role: 'ab' }), 'training_progress:update')).toBe('own');
+      expect(scopeFor(ctx({ admin: true, role: 'agent' }), 'training_progress:update')).toBe('own');
+      // …and still reads the office's settings as its administration.
+      expect(scopeFor(ctx({ owner: true, role: 'ab' }), 'training_settings:read')).toBe('own-kpm');
+    });
+
+    it('P18.5-T1 AC-1 a removed or pending member neither reads nor sets their training', () => {
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) {
+          expect([status, role, can(ctx({ role, status }), 'training_progress:read')]).toEqual([status, role, false]);
+          expect([status, role, can(ctx({ role, status }), 'training_progress:update')]).toEqual([status, role, false]);
+        }
+      }
+    });
+
+    it('P18.5-T1 AC-1 D-support: no support session sets a status, read-only or elevated; both read', () => {
+      expect(isBlockedWhileImpersonating('training_progress:update')).toBe(true);
+      expect(isReadLike('training_progress:read')).toBe(true);
+      expect(isReadLike('training_settings:read')).toBe(true);
+      for (const role of ['ab', 'aab', 'agent'] as const) {
+        for (const readOnly of [true, false]) {
+          const session = ctx({ role, impersonatedBy: 'sa-1', readOnly });
+          expect([role, readOnly, can(session, 'training_progress:update')]).toEqual([role, readOnly, false]);
+          expect([role, readOnly, can(session, 'training_progress:read')]).toEqual([role, readOnly, true]);
+        }
+        expect([role, can(ctx({ role }), 'training_progress:update')]).toEqual([role, true]);
+      }
+      // A read-only session as the Owner keeps the settings read (AC-8).
+      expect(can(ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: true }), 'training_settings:read')).toBe(true);
+    });
+
+    it('P18.5-T2 AC-1 `verify` is struck (OD-149): no code grants it', () => {
+      expect(Object.keys(PERMISSIONS)).not.toContain('training_progress:verify');
     });
   });
 });

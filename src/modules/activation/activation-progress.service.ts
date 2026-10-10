@@ -5,7 +5,7 @@ import { DomainException, NotFoundException, VersionConflictException } from '@/
 import { ErrorCode } from '@/common/errors/error-codes';
 import { isLocalDate, type LocalDate } from '@/common/time/local-day';
 import { refuseWith } from '@/common/validation/fields';
-import { mayTickByHand, type ActivationFeatureLink } from '@/domain/constants';
+import { mayTickByHand } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
@@ -14,6 +14,9 @@ import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
 import type { MembershipDocument } from '@/modules/org/membership.schema';
 import { can } from '@/modules/rbac/permissions';
 import { TenantDay, type Office } from '@/modules/tenants/tenant-day.service';
+import { OfferedTraining } from '@/modules/training/offered-training';
+import type { ActivationSignal } from './activation-events.port';
+import { trainingLinkModuleCode } from './activation-input';
 import {
   ActivationService, type ActivationItemView, type ActivationVersionView,
 } from './activation.service';
@@ -44,6 +47,11 @@ export interface ResolvedActivation {
   window: number;
   overdue: boolean;
   progress: Progress<ActivationItemView>;
+  /**
+   * D-orphan (P18.5-T3 AC-4): whether the module a `training:` link binds is offered now. Always true for any
+   * other link. While it is not, the item is ticked by hand and served `live: false`.
+   */
+  offered: (link: string | null) => boolean;
 }
 
 /** A change to one item: done or not, and — the hire's own only — their note and date. */
@@ -96,6 +104,8 @@ export class ActivationProgressService {
     private readonly days: TenantDay,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    // P18.5-T3, D-orphan: which training modules are offered now, read once per resolve that binds one.
+    private readonly training: OfferedTraining,
   ) {}
 
   // ------------------------------------------------------------------ creation
@@ -227,6 +237,21 @@ export class ActivationProgressService {
     const ends = docs.map((doc) => activationEndsOn(office.timezone, doc.startDate));
     const states = docs.map((doc, i) => activationState(doc.graduatedAt, office.today, ends[i]));
 
+    /*
+     * D-orphan: what is offered is asked only when an **open** activation has a training item **not yet done** — the
+     * one case it decides (a hand tick, and the link drawn live or not). Otherwise nothing is read (the exit review,
+     * training review 3), and every module counts as offered: a closed activation refuses every write, and an item
+     * already done is not ticked again.
+     */
+    const waitsOnTraining = docs.some((doc, i) => states[i] === 'open' && pinned[i].aspects.some((a) => a.items.some(
+      (item) => trainingLinkModuleCode(item.autoLink) !== null && !doc.items.some((s) => s.code === item.code && s.done),
+    )));
+    const offeredCodes = waitsOnTraining ? await this.training.moduleCodes(ctx) : null;
+    const offered = (link: string | null): boolean => {
+      const code = trainingLinkModuleCode(link);
+      return code === null || offeredCodes === null || offeredCodes.has(code);
+    };
+
     const open = docs.map((doc, i) => ({ doc, i })).filter(({ i }) => states[i] === 'open');
     const evaluated = await this.engine.evaluate(
       ctx, open.map(({ doc, i }) => ({ doc, items: pinned[i].aspects.flatMap((a) => a.items) })), office.timezone,
@@ -240,7 +265,7 @@ export class ActivationProgressService {
       const day = activationDay(this.clock, office.timezone, doc.startDate, office.today);
       return {
         doc, version: pinned[i], state: states[i], endsOn: ends[i], day, window,
-        overdue: isOverdue(day, window, progress.pct, states[i]), progress,
+        overdue: isOverdue(day, window, progress.pct, states[i]), progress, offered,
       };
     });
   }
@@ -293,10 +318,13 @@ export class ActivationProgressService {
         total: aspect.total,
         items: aspect.items.map(({ item, done }): ActivationItemProgressView => {
           const state: ActivationItemState = states.get(item.code) ?? freshItemState(item.code);
+          // D-orphan: a training link to a module no longer offered is ticked by hand, so it is not served live —
+          // unless its link already completed it, which nobody hand-edits (`mayTickByHand`).
+          const orphan = !r.offered(item.autoLink) && !(done && state.source === 'link');
           return {
             code: item.code,
             label: item.label,
-            link: item.link,
+            link: item.link && orphan ? { ...item.link, live: false } : item.link,
             done,
             doneAt: done && state.doneAt ? state.doneAt.toISOString() : null,
             source: done ? state.source : null,
@@ -331,7 +359,8 @@ export class ActivationProgressService {
    * **Set one manual item** (P13-T2 AC-2, AC-3): the hire's own, or a leader's on a hire they coach. A
    * write **sets** the item rather than toggling it, so two people ticking at once cannot conflict and the
    * last write is the one named. An item the pinned version lacks is 404; one whose link is live is
-   * nobody's to tick, by any route (`mayTickByHand`, by the link and never by position); a graduated or
+   * nobody's to tick, by any route (`mayTickByHand`, by the link and never by position) — except a training
+   * link whose module is no longer offered, which is ticked by hand (D-orphan, P18.5-T3 AC-4); a graduated or
    * expired activation refuses every write. One audit row per write, ids only.
    */
   async setItem(
@@ -345,7 +374,13 @@ export class ActivationProgressService {
     const [resolved] = await this.resolve(ctx, [doc], office);
     const item = resolved.version.aspects.flatMap((a) => a.items).find((i) => i.code === code);
     if (!item) throw new NotFoundException('Activation item');
-    if (!mayTickByHand(item.autoLink)) {
+    // Evaluated first (`resolve`), so a `done` progress row for the bound module has already completed it by its link.
+    const byLink = completedByLink(resolved.doc, code);
+    // D-orphan, asked of this item itself: `resolve` reads what is offered only while a training item waits, and an
+    // item hand-ticked while its module was withdrawn may be unticked while it still is.
+    const moduleCode = trainingLinkModuleCode(item.autoLink);
+    const offeredNow = moduleCode === null || (await this.training.moduleCodes(ctx)).has(moduleCode);
+    if (!mayTickByHand(item.autoLink, offeredNow, byLink)) {
       throw new DomainException(
         ErrorCode.ACTIVATION_ITEM_AUTOMATIC,
         `This item completes on its own, when ${item.link!.completesWhen}. Nobody ticks it by hand.`,
@@ -437,11 +472,12 @@ export class ActivationProgressService {
   // ------------------------------------------------------------------ the ports
 
   /**
-   * **`ActivationEvents`** (P13-T3 AC-5): a goal, a lead or a day was written for this member. Their open
+   * **`ActivationEvents`** (P13-T3 AC-5): a goal, a lead or a day was written for this member — or, since
+   * P18.5-T3, they marked a training module *Done*. Their open
    * activation, if any, is evaluated now — every kind still waiting, not only this one, so a call missed
    * earlier heals here too.
    */
-  async recorded(ctx: RequestContext, membershipId: string, _kind: ActivationFeatureLink): Promise<void> {
+  async recorded(ctx: RequestContext, membershipId: string, _kind: ActivationSignal): Promise<void> {
     const [doc] = await this.progress.find(ctx, { membershipId, graduatedAt: null }, { limit: 1 });
     if (!doc) return;
     await this.resolve(ctx, [doc], await this.days.office(ctx));
@@ -471,6 +507,12 @@ export class ActivationProgressService {
     const coachees = await this.coach.coacheesOf(ctx, ctx.membershipId!);
     return (await this.openOf(ctx, coachees.map((c) => c.membershipId), office)).length > 0;
   }
+}
+
+/** Whether an item's stored state says its link completed it: done, attributed to the link. */
+function completedByLink(doc: ActivationProgressDocument, code: string): boolean {
+  const state = doc.items.find((i) => i.code === code);
+  return state?.done === true && state.source === 'link';
 }
 
 /** Every member an activation names: the hire, whoever ticked or wrote what, corrected, graduated, noted. */

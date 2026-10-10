@@ -149,9 +149,32 @@ describe('the link registry (P5-T3 AC-7)', () => {
    * ADR-0031. An item bound to a link nobody evaluates must stay tickable — otherwise nobody bound to
    * one could ever reach 100%. The moment a kind goes live the answer flips, for every role.
    */
-  it('P13-T3 AC-1 lets anybody tick a manual item, and a training-linked one until its evaluator exists', () => {
+  it('P13-T3 AC-1 lets anybody tick a manual item', () => {
     expect(mayTickByHand(null)).toBe(true);
-    expect(mayTickByHand('training:PROSPECT_LIST')).toBe(true);
+    expect(mayTickByHand(null, false)).toBe(true);
+  });
+
+  it('P18.5-T3 AC-1 lets nobody tick a training-linked item while its module is offered: the evaluator exists', () => {
+    expect(mayTickByHand('training:PROSPECT_LIST')).toBe(false);
+    expect(mayTickByHand('training:PROSPECT_LIST', true)).toBe(false);
+  });
+
+  it('P18.5-T3 AC-4 D-orphan: a training-linked item is ticked by hand while its module is not offered', () => {
+    expect(mayTickByHand('training:CLIENT_RETENTION', false)).toBe(true);
+    // `offered` is a training link's question alone: a feature link binds no module.
+    expect(mayTickByHand('feature:goals', false)).toBe(false);
+  });
+
+  it('P18.5 exit review (training review 1) an item its link completed is never hand-edited, whatever its link now', () => {
+    expect(mayTickByHand('training:CLIENT_RETENTION', false, true)).toBe(false);
+    expect(mayTickByHand('training:', true, true)).toBe(false);
+    expect(mayTickByHand(null, true, true)).toBe(false);
+    expect(mayTickByHand('training:CLIENT_RETENTION', false, false)).toBe(true);
+  });
+
+  it('P18.5-T3 AC-1 an item linked to a kind nothing declares is ticked by hand, offered or not', () => {
+    expect(mayTickByHand('training:', true)).toBe(true);
+    expect(mayTickByHand('feature:whatever', false)).toBe(true);
   });
 
   it('P13-T3 AC-1 lets nobody tick an item whose link is live: the three feature kinds', () => {
@@ -188,11 +211,13 @@ describe('the link registry (P5-T3 AC-7)', () => {
     });
   });
 
-  it('P13-T3 AC-1 declares the three feature kinds live and the training link not', () => {
+  it('P18.5-T3 AC-1 declares every kind live: the three feature kinds, and the training link since its evaluator', () => {
     for (const kind of Object.values(ACTIVATION_LINK_KINDS)) {
       expect(kind.live).toBe(true);
     }
-    expect(ACTIVATION_TRAINING_LINK.live).toBe(false);
+    expect(ACTIVATION_TRAINING_LINK).toMatchObject({
+      live: true, route: '/training', completesWhen: 'the hire has completed that training module',
+    });
   });
 
   /*

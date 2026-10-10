@@ -12,8 +12,11 @@ export class ActivationLinkDto implements ActivationLinkView {
   @ApiProperty({ type: String, example: 'Goal Settings', description: 'What the new hire\'s "Go to {label} →" names.' })
   label!: string;
 
-  @ApiProperty({ type: String, example: '/goals' })
-  route!: string;
+  @ApiProperty({
+    type: String, nullable: true, example: '/goals',
+    description: '`null` for a training link to a module you are not offered — withdrawn, or not yet published: draw no *Go to*.',
+  })
+  route!: string | null;
 
   @ApiProperty({ type: String, example: 'the hire has saved any goal since joining' })
   completesWhen!: string;

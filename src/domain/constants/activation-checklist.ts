@@ -53,7 +53,7 @@ export interface ActivationLinkKind {
  *
  * **The three feature kinds are live** (P13-T3 AC-1): a goal, a lead or an activity day written through
  * its own module completes the item bound to it, by code (`activation-links.ts`), and nobody ticks it by
- * hand. The training kind is not, until its evaluator exists; until then its item is ticked by hand.
+ * hand. **So is the training kind, since P18.5-T3** (`ACTIVATION_TRAINING_LINK`, below).
  */
 export const ACTIVATION_LINK_KINDS: Readonly<Record<ActivationFeatureLink, ActivationLinkKind>> = {
   'feature:goals': {
@@ -76,13 +76,30 @@ export const ACTIVATION_LINK_KINDS: Readonly<Record<ActivationFeatureLink, Activ
   },
 } as const;
 
-/** A training link's shape, for the screens that offer one and the manual that explains it. */
+/**
+ * A training link's shape, for the screens that offer one and the manual that explains it.
+ *
+ * **Live since P18.5-T3** (ADR-0031): an item bound to `training:<moduleCode>` completes when its hire marks that
+ * module *Done* (`trainingProgress.status`), attributed to the hire, at the progress's `completedAt`, and nobody
+ * ticks it by hand while the module is offered. `route` is the catalog's; each served link resolves it to the
+ * module's own page, `/training/{categoryCode}/{moduleCode}` (`ActivationService.linkView`).
+ */
 export const ACTIVATION_TRAINING_LINK: ActivationLinkKind = {
   label: 'Training module',
   route: '/training',
   completesWhen: 'the hire has completed that training module',
-  live: false,
+  live: true,
 };
+
+/**
+ * **Every link kind, as a screen with no office to resolve against reads it** (P18.5-T3 AC-6, I-80): the three
+ * feature kinds by their own name, and `training` for every `training:<moduleCode>` link. The Company template's
+ * *Activation checklist* tab draws its *Auto* badge from this, served with the template's read, so the frontend
+ * never re-declares the registry (invariant §7) and the badge says *Auto* only for a kind the server says is live.
+ */
+export function activationLinkKinds(): Readonly<Record<ActivationFeatureLink | 'training', ActivationLinkKind>> {
+  return { ...ACTIVATION_LINK_KINDS, training: ACTIVATION_TRAINING_LINK };
+}
 
 /**
  * How many consecutive weeks of logged activity `feature:activity` waits for (ADR-0031).
@@ -171,8 +188,20 @@ export function activationLinkKind(link: string | null): ActivationLinkKind | un
  * A manual item, always. A linked item **only while its evaluator does not exist** — otherwise an
  * item bound to a kind no phase has built yet could never complete, and nobody bound to it could
  * reach 100% (ADR-0031). The moment a kind goes live, the answer flips to no, for every role.
+ *
+ * **`offered`** is D-orphan's (P18.5-T3 AC-4): whether the training module a `training:` link binds is offered
+ * now, in the office's published snapshot. While it is not — archived or unpublished since the hire's version
+ * was published — nobody could mark it *Done*, so the item is ticked by hand, for ADR-0031's own reason; a
+ * `done` record made earlier still completes it. It says nothing about a feature link, which binds no module.
+ *
+ * **`completedByLink`** (the Phase 18.5 exit review, training review 1): an item its link already completed is never
+ * hand-edited — not unticked, and not re-ticked over the link's attribution — whatever its link's state now. Without
+ * it, D-orphan reopened such an item to a hand tick the moment its module was withdrawn.
  */
-export function mayTickByHand(link: string | null): boolean {
+export function mayTickByHand(link: string | null, offered = true, completedByLink = false): boolean {
+  if (completedByLink) return false;
   const kind = activationLinkKind(link);
-  return kind === undefined ? true : !kind.live;
+  if (kind === undefined) return true;
+  if (kind === ACTIVATION_TRAINING_LINK && !offered) return true;
+  return !kind.live;
 }

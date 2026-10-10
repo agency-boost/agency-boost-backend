@@ -248,9 +248,14 @@ describe('the configuration controllers', () => {
         .toContainEqual(['WIP', 'draft']);
     });
 
-    it('is readable by every member, and the batch refuses them its writes', async () => {
+    /*
+     * P18.5-T1 AC-8 (the leak): this asserted the opposite until 2026-10-10 — *"readable by every member"* — and
+     * the read answers drafts and archived rows. The settings read is the office's administration's
+     * (`training_settings:read`); an agent reads what is offered, at `/training`.
+     */
+    it('P18.5-T1 AC-8 refuses a field member the settings read, as the batch refuses them its writes', async () => {
       current = AGENT;
-      await request(app.getHttpServer()).get('/kpm/settings/training').expect(200);
+      await request(app.getHttpServer()).get('/kpm/settings/training').expect(403);
       await request(app.getHttpServer())
         .post('/kpm/settings/changes')
         .send({ ops: [{ op: 'trainingCategory.create', body: { code: 'MINE_NOW', label: 'Mine' } }] })
@@ -312,15 +317,57 @@ describe('the configuration controllers', () => {
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
     });
 
-    it('is readable by every member, and refuses them both writes', async () => {
-      current = AGENT;
-      await request(app.getHttpServer()).get('/kpm/settings/activation-checklist').expect(200);
+    /*
+     * The Phase 18.5 exit review (permission review B2): this asserted *"readable by every member"* until 2026-10-10,
+     * and the read answers the draft and names each training link by its working title, a draft module's included. The
+     * settings read is the office's administration's (`activation_settings:read`); a field member reads their own
+     * activation, named from what the office offers.
+     */
+    it.each([
+      ['an agent', AGENT],
+      ['an AB', new RequestContext('u-ab', 'none', member({ membershipId: 'mem-d', isKpmOwner: false }) as never)],
+      ['an AAB', new RequestContext('u-aab', 'none', member({
+        membershipId: 'mem-e', orgLevelCode: 'AAB', hierarchyRole: 'aab', isKpmOwner: false,
+      }) as never)],
+    ])('P18.5 exit review B2 refuses %s the settings read, as it refuses them both writes', async (_name, who) => {
+      current = who;
+      const res = await request(app.getHttpServer()).get('/kpm/settings/activation-checklist').expect(403);
+      expect(res.body.error.code).toBe('PERM_DENIED');
       await request(app.getHttpServer())
         .put('/kpm/settings/activation-checklist')
         .send({ aspects: [{ code: 'MINE', label: 'Mine', items: [{ code: 'M_ITEM', label: 'Item' }] }] })
         .expect(403);
       await request(app.getHttpServer())
         .post('/kpm/settings/activation-checklist/publish').expect(403);
+    });
+
+    it('P18.5 exit review B2 the Owner, the Admin and a read-only session as the Owner read it; a Super Admin in no office is refused', async () => {
+      for (const who of [OWNER, ADMIN, new RequestContext(OWNER.userId, 'none', OWNER.membership, 'u-support', null, false, true)]) {
+        current = who;
+        await request(app.getHttpServer()).get('/kpm/settings/activation-checklist').expect(200);
+      }
+      current = RequestContext.platform('root');
+      const res = await request(app.getHttpServer()).get('/kpm/settings/activation-checklist').expect(403);
+      expect(res.body.error.code).toBe('TENANT_NO_MEMBERSHIP');
+    });
+
+    it('P18.5 exit review B2 names a training link by the module’s working title here, a draft’s included — the settings read alone', async () => {
+      const module = (await wired.training.list(OWNER, true))
+        .flatMap((c) => c.skills.flatMap((s) => s.modules)).find((m) => m.code === 'CLOSING_TECHNIQUES')!;
+      const read = await request(app.getHttpServer()).get('/kpm/settings/activation-checklist');
+      const next = draftOf(read.body);
+      next.aspects[2].items[0].autoLink = 'training:CLOSING_TECHNIQUES';
+      await request(app.getHttpServer()).put('/kpm/settings/activation-checklist').send(next).expect(200);
+      await request(app.getHttpServer()).post('/kpm/settings/activation-checklist/publish').expect(201);
+      await wired.training.updateModule(OWNER, module.id, { title: 'Closing, the draft rename', publishState: 'draft' });
+
+      const settings = await request(app.getHttpServer()).get('/kpm/settings/activation-checklist').expect(200);
+      const bound = settings.body.published.aspects[2].items[0];
+      expect(bound.link).toMatchObject({ kind: 'training:CLOSING_TECHNIQUES', label: 'Closing, the draft rename' });
+
+      // What `/kpm/config` would publish to every member names no draft: the module is not offered, so its code.
+      const snapshot = await wired.activation.publishedForSnapshot(OWNER);
+      expect(snapshot!.aspects[2].items[0].link).toMatchObject({ label: 'CLOSING_TECHNIQUES', route: null });
     });
   });
 

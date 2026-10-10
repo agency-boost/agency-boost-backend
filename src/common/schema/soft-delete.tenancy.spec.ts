@@ -47,6 +47,8 @@ import {
 import {
   EventAudienceSchema, EventSchema, EventTypeSchema,
 } from '@/modules/events/event.schema';
+import { EventRsvpSchema } from '@/modules/events/event-rsvp.schema';
+import { EventFeedbackSchema } from '@/modules/events/event-feedback.schema';
 import {
   ActivityLogCorrectionSchema, ActivityLogEntrySchema, ActivityLogSchema,
 } from '@/modules/activity/activity-log.schema';
@@ -66,6 +68,8 @@ import {
 import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
 } from '@/modules/campaigns/campaign.schema';
+import { CampaignChaseSchema } from '@/modules/campaigns/campaign-chase.schema';
+import { CampaignStandingSchema } from '@/modules/campaigns/campaign-standing.schema';
 import {
   CapabilityCatalogSchema, CapabilityEntrySchema, CapabilityGridRowSchema,
   CapabilityStageRowSchema,
@@ -86,6 +90,7 @@ import {
   LeaderMeetingActionItemSchema, LeaderMeetingAgendaItemSchema, LeaderMeetingAgendaSchema, LeaderMeetingSchema,
 } from '@/modules/leader-meetings/leader-meeting.schema';
 import { LeaderMeetingShareLinkSchema } from '@/modules/leader-meetings/leader-meeting-share-link.schema';
+import { TrainingProgressSchema } from '@/modules/training/training-progress.schema';
 import { KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
 
 /**
@@ -125,6 +130,9 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['kpmProductConfigs', KpmProductConfigSchema],
   ['eventTypes', EventTypeSchema],
   ['events', EventSchema],
+  // P18.5-T5, T6: a member's RSVP, claim and confirmation, and their answer — PDP erasure is P19-T1's cascade, never a delete.
+  ['eventRsvps', EventRsvpSchema],
+  ['eventFeedback', EventFeedbackSchema],
   ['activityLogs', ActivityLogSchema],
   ['leads', LeadSchema],
   ['goals', GoalSchema],
@@ -134,6 +142,8 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['dataUploadBatches', DataUploadBatchSchema],
   ['dataUploadRows', DataUploadRowSchema],
   ['campaigns', CampaignSchema],
+  ['campaignChases', CampaignChaseSchema],
+  ['campaignStandings', CampaignStandingSchema],
   ['capabilityCatalogs', CapabilityCatalogSchema],
   // Company-partitioned carrier rules (ADR-0035), soft-deleted like every other row.
   ['qualificationRules', QualificationRuleSchema],
@@ -156,6 +166,8 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   // of who shared what (ADR-0131 §4). P19-T1's erasure cascade reaches both.
   ['leaderMeetings', LeaderMeetingSchema],
   ['leaderMeetingShareLinks', LeaderMeetingShareLinkSchema],
+  // P18.5-T1 AC-2. No route deletes a member's progress; P19-T1's erasure cascade and export reach it.
+  ['trainingProgress', TrainingProgressSchema],
 ];
 
 /**
@@ -421,6 +433,8 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [KpmProductConfigSchema, 'KpmProductConfigSchema'],
   [EventTypeSchema, 'EventTypeSchema'],
   [EventSchema, 'EventSchema'],
+  [EventRsvpSchema, 'EventRsvpSchema'],
+  [EventFeedbackSchema, 'EventFeedbackSchema'],
   [EventAudienceSchema, 'EventAudienceSchema'],
   [ActivityLogSchema, 'ActivityLogSchema'],
   [LeadSchema, 'LeadSchema'],
@@ -440,6 +454,8 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
   [ActivityLogCorrectionSchema, 'ActivityLogCorrectionSchema'],
   [CampaignSchema, 'CampaignSchema'],
+  [CampaignChaseSchema, 'CampaignChaseSchema'],
+  [CampaignStandingSchema, 'CampaignStandingSchema'],
   [QualificationRuleSchema, 'QualificationRuleSchema'],
   [RequirementSchema, 'RequirementSchema'],
   [CriteriaGroupSchema, 'CriteriaGroupSchema'],
@@ -482,6 +498,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [LeaderMeetingAgendaItemSchema, 'LeaderMeetingAgendaItemSchema'],
   [LeaderMeetingActionItemSchema, 'LeaderMeetingActionItemSchema'],
   [LeaderMeetingShareLinkSchema, 'LeaderMeetingShareLinkSchema'],
+  [TrainingProgressSchema, 'TrainingProgressSchema'],
 ]);
 
 describe('soft delete', () => {

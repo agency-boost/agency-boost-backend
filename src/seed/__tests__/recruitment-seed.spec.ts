@@ -142,8 +142,9 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
           kpmId: row.kpmId, uploadState: 'confirmed', refCount: 1, originalFilename: row.fileName, mimeType: 'application/pdf',
         });
       }
-      // Every slot record names a file storage holds: none written without one.
-      expect(storage.puts).toHaveLength(rows.length + 1);
+      // Every slot record names a file storage holds: none written without one. (Phase 18.5's training PDFs are the
+      // company's, in its own folder, and `training-seed.spec.ts`'s to count.)
+      expect(storage.puts.filter((key) => !key.includes('/training/'))).toHaveLength(rows.length + 1);
     });
 
     it('D-seed a link opens for an uploaded slot, and a missing one is 404', async () => {

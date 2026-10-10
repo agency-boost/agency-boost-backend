@@ -124,13 +124,27 @@ const config: Config = {
     // the four entries above follow, and the same bargain. The threshold is the debt made
     // visible, not the debt hidden.
     './src/modules/activation/': { lines: 95, branches: 90, functions: 95, statements: 95 },
-    './src/modules/campaigns/': { lines: 95, branches: 89, functions: 95, statements: 95 },
-    './src/modules/events/': { lines: 95, branches: 83, functions: 95, statements: 95 },
+    // Phase 18.5 (the permission review, item 18): the agent's campaigns brought the module to the domain floor, and
+    // the two files that decide what a member sees of a chase are pinned whole.
+    './src/modules/campaigns/': { lines: 95, branches: 95, functions: 95, statements: 95 },
+    './src/modules/campaigns/campaign-agent.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/campaigns/campaign-chase-readings.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    // Phase 18.5 (the exit review, 14): the members' events brought the module to the domain floor — 99.1 / 95.9 / 100
+    // / 99.1 over its own specs alone — and the four files that decide who an event is for, what a member writes, and
+    // what the Owner reads and confirms are pinned whole.
+    './src/modules/events/': { lines: 95, branches: 95, functions: 95, statements: 95 },
+    './src/modules/events/event-audience.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/events/event-guest.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/events/event-roll-call.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/events/event-readings.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/products/': { lines: 95, branches: 84, functions: 95, statements: 95 },
-    // Statements sit just under 95 on `training-content.ts`, which is the one file here whose
-    // gap is neither a rule nor a fallback: it is the Cloudinary-backed upload paths, and an
-    // adapter that is stubbed in every test reports its error handling as unreached.
-    './src/modules/training/': { lines: 95, branches: 83, functions: 91, statements: 94 },
+    // Raised at Phase 18.5 (training progress, a business-rule module now; the exit review's B3): `training-content.ts`,
+    // the gap this note used to explain, has its own spec, and the module measured 99.6 / 96.0 / 97.6 / 99.2 over its
+    // own and activation's specs. The two files that decide what a learner is offered and who may set or read a status
+    // — what is offered, and the progress service — are pinned whole.
+    './src/modules/training/': { lines: 98, branches: 95, functions: 97, statements: 98 },
+    './src/modules/training/offered-training.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/training/training-progress.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     // The lowest floor in this file, and named rather than rounded up to look better: what
     // remains in `capability` is `capability-payload.ts`'s and `capability.service.ts`'s
     // defensive reads — a null payload, a row with no `code` key, a catalog belonging to an

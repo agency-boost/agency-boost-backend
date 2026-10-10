@@ -311,6 +311,32 @@ export const ErrorCode = {
   /** A delete of a meeting somebody has written in — a meeting with minutes is never removed (ADR-0130 §5). `409`. */
   LEADER_MEETING_HAS_MINUTES: 'LEADER_MEETING_HAS_MINUTES',
 
+  /*
+   * Campaigns (Phase 18.5; `functional/campaigns.md`, *Errors*). Another office's, an archived or an unknown campaign
+   * is `NOT_FOUND`, never a campaign code.
+   */
+  /** A chase or a drop on a campaign that has ended (D-lists): an upcoming one is chaseable, as drawn. `409`. */
+  CAMPAIGN_NOT_OPEN: 'CAMPAIGN_NOT_OPEN',
+  /** A chase by a rung the campaign does not apply to (`appliesToOrgLevelCodes`). `403`. */
+  CAMPAIGN_NOT_ELIGIBLE: 'CAMPAIGN_NOT_ELIGIBLE',
+
+  /*
+   * Events (Phase 18.5, P18.5-T5 and T6; `functional/events.md`; OD-31). Outside a reader's audience or office, an
+   * archived event and a membership outside the audience are `NOT_FOUND`, never one of these.
+   */
+  /** RSVP or cancel once the event has ended (`now >= endsAt`); a running event still takes both. `409`. */
+  EVENT_RSVP_CLOSED: 'EVENT_RSVP_CLOSED',
+  /** A claim, feedback or a roll-call save before the event has ended. `409`. */
+  EVENT_NOT_ENDED: 'EVENT_NOT_ENDED',
+  /** Feedback from a member who neither RSVP'd, said they came nor was confirmed (OD-31: either unlocks it). `409`. */
+  EVENT_NOT_ATTENDED: 'EVENT_NOT_ATTENDED',
+  /** A second answer to the same event: feedback is single-submit (`Overall.html:8758-8763`). `409`. */
+  EVENT_FEEDBACK_ALREADY_SUBMITTED: 'EVENT_FEEDBACK_ALREADY_SUBMITTED',
+  /** A roll-call save naming the caller's own membership: nobody confirms their own attendance (OD-31). `400`. */
+  EVENT_ATTENDANCE_SELF: 'EVENT_ATTENDANCE_SELF',
+  /** Moving an ended event that has an RSVP, a claim, a confirmation or feedback back into the future. `409`. */
+  EVENT_HAS_RESPONSES: 'EVENT_HAS_RESPONSES',
+
   // Validation
   VALIDATION_FAILED: 'VALIDATION_FAILED',
   VALIDATION_UNKNOWN_FIELD: 'VALIDATION_UNKNOWN_FIELD',

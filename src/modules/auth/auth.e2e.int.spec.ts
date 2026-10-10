@@ -115,8 +115,13 @@ import { Product, ProductSchema } from '@/modules/products/product.schema';
 import { ProductService } from '@/modules/products/product.service';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
 import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events/event.schema';
-import { EventRepository, EventTypeRepository } from '@/modules/events/event.repository';
+import {
+  EventFeedbackRepository, EventRepository, EventRsvpRepository, EventTypeRepository,
+} from '@/modules/events/event.repository';
+import { EventRsvp, EventRsvpSchema } from '@/modules/events/event-rsvp.schema';
+import { EventFeedback, EventFeedbackSchema } from '@/modules/events/event-feedback.schema';
 import { EventService } from '@/modules/events/event.service';
+import { OfferedTraining } from '@/modules/training/offered-training';
 import { ActivationTemplateRepository } from '@/modules/activation/activation.repository';
 import { ActivationService } from '@/modules/activation/activation.service';
 import { CapabilityCatalogRepository } from '@/modules/capability/capability.repository';
@@ -232,6 +237,9 @@ describe('auth and admin over HTTP', () => {
         { name: Asset.name, schema: AssetSchema },
         { name: EventType.name, schema: EventTypeSchema },
         { name: Event.name, schema: EventSchema },
+        // Phase 18.5: an edit that moves an ended event back reads its members' rows (P18.5-T5 AC-9).
+        { name: EventRsvp.name, schema: EventRsvpSchema },
+        { name: EventFeedback.name, schema: EventFeedbackSchema },
         { name: Campaign.name, schema: CampaignSchema },
         { name: QualificationRule.name, schema: QualificationRuleSchema },
         { name: CapabilityCatalog.name, schema: CapabilityCatalogSchema },
@@ -272,8 +280,9 @@ describe('auth and admin over HTTP', () => {
         TrainingCategoryRepository, TrainingSkillRepository, TrainingModuleRepository, TrainingService,
         // P5-T9: `/kpm/config` carries the office's own Phase 5 catalogs too, so the three
         // services that read them are part of the graph now.
-        ActivationTemplateRepository, ActivationService,
-        EventTypeRepository, EventRepository, EventService,
+        // Phase 18.5: a training link's label comes from the offered snapshot (P18.5-T3, the exit review).
+        ActivationTemplateRepository, ActivationService, OfferedTraining,
+        EventTypeRepository, EventRepository, EventRsvpRepository, EventFeedbackRepository, EventService,
         CapabilityCatalogRepository, CapabilityService,
         { provide: OfficeCounter, useClass: KpmOfficeCounter },
         ProvisioningService,

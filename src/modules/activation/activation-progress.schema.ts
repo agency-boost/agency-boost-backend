@@ -12,8 +12,11 @@ export type ActivationItemSource = (typeof ACTIVATION_ITEM_SOURCES)[number];
 export const ACTIVATION_ORIGINS = ['joined', 'backfill'] as const;
 export type ActivationOrigin = (typeof ACTIVATION_ORIGINS)[number];
 
-/** The collections a linked item completes from: a goal, a lead, or the day that made the fourth week. */
-export const ACTIVATION_RECORD_COLLECTIONS = ['goals', 'leads', 'activityLogs'] as const;
+/**
+ * The collections a linked item completes from: a goal, a lead, the day that made the fourth week — and, since
+ * P18.5-T3, the hire's progress row of the training module the item binds.
+ */
+export const ACTIVATION_RECORD_COLLECTIONS = ['goals', 'leads', 'activityLogs', 'trainingProgress'] as const;
 export type ActivationRecordCollection = (typeof ACTIVATION_RECORD_COLLECTIONS)[number];
 
 /**

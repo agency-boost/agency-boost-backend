@@ -9,6 +9,7 @@ import { listenOnLoopback } from '../test/listen';
 import { ActivationEvents } from './modules/activation/activation-events.port';
 import { ActivationNav } from './modules/activation/activation-nav.port';
 import { ActivationProgressService } from './modules/activation/activation-progress.service';
+import { TrainingProgressService } from '@/modules/training/training-progress.service';
 import { ActivityService } from './modules/activity/activity.service';
 import { TenantConfigService } from './modules/config/tenant-config.service';
 import { AuthController } from './modules/auth/auth.controller';
@@ -18,7 +19,8 @@ import { LeadService } from './modules/leads/lead.service';
 import { ApprovalsService } from './modules/org/approvals.service';
 import { ActivationStarter } from './modules/org/activation-starter.port';
 import { LeaderCodeService } from './modules/org/leader-code.service';
-import { MemberDeparture } from './modules/org/member-departure.port';
+import { MemberDeparture, MemberDepartures } from './modules/org/member-departure.port';
+import { CampaignChaseDeparture } from './modules/campaigns/campaign-departure';
 import { RemovalService } from './modules/org/removal.service';
 
 /**
@@ -85,7 +87,13 @@ describe('AppModule boots', () => {
     expect(port(ApprovalsService, 'activations')).toBe(activation);
     expect(port(LeaderCodeService, 'activations')).toBe(activation);
     expect(port(AuthController, 'activationNav')).toBe(activation);
-    expect(port(RemovalService, 'departures')).toBe(app.get(CalendarLeave, { strict: false }));
+    // P18.5-T7 AC-5: leaving answers the calendar and the campaigns' chases, both behind the one port.
+    const departures = port(RemovalService, 'departures') as { each: unknown[] };
+    expect(departures).toBe(app.get(MemberDeparture as never, { strict: false }));
+    expect(departures.each[0] === app.get(CalendarLeave, { strict: false })).toBe(true);
+    expect(departures.each[1] === app.get(CampaignChaseDeparture, { strict: false })).toBe(true);
+    // P18.5-T3 AC-2: a module marked done reaches the hire's activation through the same port.
+    expect(port(TrainingProgressService, 'activation')).toBe(activation);
   });
 
   /*
@@ -120,7 +128,7 @@ describe('AppModule boots', () => {
     for (const token of [ActivationStarter, ActivationEvents, ActivationNav]) {
       expect([token.name, app.get(token as never, { strict: false }) === activation]).toEqual([token.name, true]);
     }
-    expect(app.get(MemberDeparture as never, { strict: false })).toBe(app.get(CalendarLeave, { strict: false }));
+    expect(app.get(MemberDeparture as never, { strict: false })).toBeInstanceOf(MemberDepartures);
   });
 
   it('serves health without a token', async () => {

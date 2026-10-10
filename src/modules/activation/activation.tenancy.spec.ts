@@ -255,13 +255,13 @@ describe('the office activation checklist (P5-T3)', () => {
       const item = saved.draft!.aspects[2].items[0];
 
       expect(item.autoLink).toBe('training:PROSPECT_LIST');
-      // The link reads as the module's own title, not its code.
+      // The link reads as the module's own title, not its code, and goes to the module's own page (P18.5-T3 AC-1, AC-5).
       expect(item.link).toEqual({
         kind: 'training:PROSPECT_LIST',
         label: 'Building Your Prospect List',
-        route: '/training',
+        route: '/training/SALES/PROSPECT_LIST',
         completesWhen: 'the hire has completed that training module',
-        live: false,
+        live: true,
       });
     });
 

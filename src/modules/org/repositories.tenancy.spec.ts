@@ -34,7 +34,13 @@ const TENANT_SCOPED_MODELS = [
   'KpmProductConfig',
   'EventType',
   'Event',
+  // P18.5-T5, T6: members' RSVPs, claims and confirmations, and their answers, from the day the collections exist.
+  'EventRsvp',
+  'EventFeedback',
   'Campaign',
+  // P18.5-T7, T8: a member's chase of a campaign, and a final standing, from the day the collections exist.
+  'CampaignChase',
+  'CampaignStanding',
   'CapabilityCatalog',
   // P11-T5: listed from the day the collection exists, rather than a phase later.
   'CoachingSession',
@@ -47,6 +53,8 @@ const TENANT_SCOPED_MODELS = [
   // Phase 18.1 (D-forum-model, D-share): an office's leader meetings and their shared links, from the day they exist.
   'LeaderMeeting',
   'LeaderMeetingShareLink',
+  // P18.5-T1 AC-2: a member's progress on a training module, from the day the collection exists.
+  'TrainingProgress',
 ];
 
 /**
@@ -87,12 +95,15 @@ const ALLOWED = new Map<string, string>([
   ['products/kpm-product.repository.ts', 'the repository for that model'],
   ['events/event.repository.ts', 'the repositories for those models'],
   ['campaigns/campaign.repository.ts', 'the repository for that model'],
+  ['campaigns/campaign-chase.repository.ts', 'the repository for that model'],
+  ['campaigns/campaign-standing.repository.ts', 'the repository for that model'],
   ['capability/capability.repository.ts', 'the repository for that model'],
   ['coaching/coaching-session.repository.ts', 'the repository for that model'],
   ['recruitment/recruitment-pitch.repository.ts', 'the repository for that model'],
   ['reporting/kpm-recruit-target.repository.ts', 'the repository for that model'],
   ['leader-meetings/leader-meeting.repository.ts', 'the repository for that model'],
   ['leader-meetings/leader-meeting-share-link.repository.ts', 'the repository for that model'],
+  ['training/training-progress.repository.ts', 'the repository for that model'],
   [
     'config/provisioning.service.ts',
     'writes into an office being created, before any context is scoped to it',

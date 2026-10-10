@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { RATIO_DISPLAY_UNITS, type RatioDisplayUnit } from '@/domain/constants';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { RATIO_DISPLAY_UNITS, type ActivationLinkKind, type RatioDisplayUnit } from '@/domain/constants';
 import type { ActivityCategoryView, ActivityTypeView } from './activity.service';
 import type { LeadPipelineView, LeadStatusView } from './lead-status.service';
 import { LEAD_PIPELINES, type LeadPipeline } from './lead-status.schema';
@@ -351,6 +351,36 @@ export class TenantConfigDto implements TenantConfigView {
   version!: number;
 }
 
+/** One link kind, as the Company template's *Activation checklist* tab reads it (P18.5-T3 AC-6). */
+export class ActivationLinkKindDto implements ActivationLinkKind {
+  @ApiProperty({ type: String, example: 'Training module' })
+  label!: string;
+
+  @ApiProperty({ type: String, example: '/training' })
+  route!: string;
+
+  @ApiProperty({ type: String, example: 'the hire has completed that training module', description: 'The badge’s tooltip.' })
+  completesWhen!: string;
+
+  @ApiProperty({ type: Boolean, description: 'An item bound to it completes on its own: draw *Auto*.' })
+  live!: boolean;
+}
+
+/** The link registry, by kind: the three feature links, and `training` for every training link. */
+export class ActivationLinkKindsDto {
+  @ApiProperty({ type: ActivationLinkKindDto })
+  'feature:goals'!: ActivationLinkKindDto;
+
+  @ApiProperty({ type: ActivationLinkKindDto })
+  'feature:leads'!: ActivationLinkKindDto;
+
+  @ApiProperty({ type: ActivationLinkKindDto })
+  'feature:activity'!: ActivationLinkKindDto;
+
+  @ApiProperty({ type: ActivationLinkKindDto })
+  training!: ActivationLinkKindDto;
+}
+
 /** A company's KPM template, as a Super Admin sees it (P4-T8, ADR-0018). */
 export class CompanyTemplateDto implements TemplateView {
   @ApiProperty({ type: String, description: 'Empty when nothing has been saved yet.' })
@@ -408,6 +438,14 @@ export class CompanyTemplateDto implements TemplateView {
       + 'known to be behind.',
   })
   officesUnrecorded!: number;
+
+  @ApiPropertyOptional({
+    type: ActivationLinkKindsDto,
+    description:
+      '`activation_checklist` only: what each link kind does and whether it completes on its own — the badge '
+      + 'reads *Auto* only where `live`. `training` answers for every `training:<moduleCode>` link.',
+  })
+  linkKinds?: ActivationLinkKindsDto;
 }
 
 /** Whether the office has edited anything since agents last had a copy (P4-T6). */

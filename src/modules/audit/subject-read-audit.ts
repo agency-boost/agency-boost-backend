@@ -24,13 +24,15 @@ import { AuditService } from './audit.service';
  * /kpm/overview/not-logged`, once per member it lists, the first three (their latest day logged), never the rest
  * it counts, and `GET /kpm/overview`, once per leader on the coaching-frequency leaderboard (Phase 18, D-audit);
  * `directory`: `GET /members`, once per active member on the page, whose *Last activity* and *Last coached* it
- * carries — a pending or removed row carries neither and writes nothing (D-directory). The action keeps its
+ * carries — a pending or removed row carries neither and writes nothing (D-directory); `training`: `GET
+ * /training/progress?for=`, coaching's *Training* tab, a coachee's training record read whole, once per read,
+ * `from: null` (P18.5-T4 AC-1). The action keeps its
  * name on every one, so a single query on `targetMembershipId` lists every disclosure of a member's data.
  */
 export type SubjectReadSurface =
   | 'log' | 'summary' | 'compliance' | 'personal_summary' | 'leads' | 'ratios' | 'coaching_session'
   | 'coaching_session_print' | 'calendar' | 'activation' | 'activity_dashboard' | 'unit_dashboard'
-  | 'kpm_overview' | 'directory';
+  | 'kpm_overview' | 'directory' | 'training';
 
 /** The action every subject read writes, whichever surface it came from. */
 export const SUBJECT_READ_ACTION = 'activity_log.read_raw';

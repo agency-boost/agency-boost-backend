@@ -4,7 +4,7 @@ import { DomainException, NoMembershipException, NotFoundException } from '@/com
 import { ErrorCode } from '@/common/errors/error-codes';
 import { rollingWindow, type LocalDate } from '@/common/time/local-day';
 import {
-  PERIOD, UNIT_DASHBOARD, UNIT_DASHBOARD_CORRECTION_REASON, type UnitDashboardPeriod,
+  MDRT_CAMPAIGN_CODE, PERIOD, UNIT_DASHBOARD, UNIT_DASHBOARD_CORRECTION_REASON, type UnitDashboardPeriod,
 } from '@/domain/constants';
 import { oneOnOneOverdue } from '@/domain/metrics/coaching-recency';
 import type { GoalPaceStatus } from '@/domain/metrics/goal-pace-status';
@@ -15,6 +15,7 @@ import {
 } from '@/domain/metrics/unit-rollup';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
+import { CampaignChaseReadings, type ChaseReading } from '@/modules/campaigns/campaign-chase-readings';
 import { CoachingReadings } from '@/modules/coaching/coaching-readings';
 import type { FollowUp } from '@/modules/coaching/follow-up';
 import { knowsTheLeads, leadsReached } from '@/modules/coaching/lead-visibility';
@@ -99,6 +100,13 @@ export interface UnitRow extends UnitPerson {
   pacingToMaa: boolean | null;
   /** The next open action item of their latest finalized session (OD-140). */
   followUp: FollowUp | null;
+  /**
+   * ***Chasing MDRT*** (P18.5-T7 AC-7, ADR-0122): chasing the office's `MDRT_QUALIFICATION`, not ended. `null` for a
+   * row beyond the reader's `campaign_qualification:read` — an Agent-rung leader's coachees — drawn as —.
+   */
+  chasingMdrt: boolean | null;
+  /** ***Campaigns they're chasing*** (AC-8): their chases of campaigns not ended, by title; `null` as above. */
+  campaigns: { code: string; title: string }[] | null;
 }
 
 /** A total row: the rows' figures by the rollup rule (`unit-rollup.ts`). */
@@ -139,6 +147,11 @@ export interface UnitDashboardView {
   yourUnit: { rows: UnitRow[]; total: UnitTotal };
   units: UnitGroup[];
   production: { month: string; revision: number; locked: boolean; canUpdate: boolean };
+  /**
+   * *Chasing MDRT*'s header (P18.5-T7 AC-7, OD-152): whether the office runs an `MDRT_QUALIFICATION` campaign not
+   * ended, and the tooltip composed from its requirement — or saying none is running.
+   */
+  mdrt: { running: boolean; tooltip: string };
 }
 
 /** What *Save all* answers: how many rows changed, and the month as it now stands. */
@@ -177,7 +190,9 @@ interface Head {
  * **The read is recorded** (D-audit): one §3.5 entry per member other than the reader whose figures it
  * carries, in one insert, the period's window as the range; it fails open.
  *
- * **Nothing here reads training, events or campaigns** — the module imports none of them, and a test says so.
+ * **Nothing here reads training or events, and of campaigns only the chases** (P18.5-T7 AC-8): *Chasing MDRT* and
+ * *Campaigns they're chasing* through the campaigns module's one named reader, `CampaignChaseReadings`, in the same
+ * read — two queries for any roster — and nothing else of that module, which a test says.
  */
 @Injectable()
 export class UnitDashboardService {
@@ -195,6 +210,8 @@ export class UnitDashboardService {
     private readonly activity: ActivityReadings,
     private readonly leads: LeadReadings,
     private readonly subjectReads: SubjectReadAudit,
+    /** P18.5-T7 AC-8: the campaigns module's one named reader of chases, and nothing else of it. */
+    private readonly chaseReadings: CampaignChaseReadings,
   ) {}
 
   async read(
@@ -212,7 +229,15 @@ export class UnitDashboardService {
     // Coaching's *Last 1:1* is about somebody coached: the reader's own row has none (P15-T4 AC-1).
     const coached = ids.filter((id) => id !== me);
 
-    const [recency, paces, ledgers, counts, leadCounts, ladder, state] = await Promise.all([
+    /*
+     * **Chases only inside `campaign_qualification:read`'s reach** (P18.5-T7 AC-8): the reader's own row always; the
+     * office's own grant every row; a hierarchy token the people the reader coaches; `own` nobody else — so an
+     * Agent-rung leader sees their own ✓ and a — for each coachee. The dashboard's reach is unchanged.
+     */
+    const campaignScope = scopeFor(ctx, 'campaign_qualification:read');
+    const chaseReach = new Set(ids.filter((id) => id === me || campaignScope === 'own-kpm' || campaignScope === 'all'
+      || ((campaignScope === 'own-downline' || campaignScope === 'own-unit') && head.coachedByReader.has(id))));
+    const [recency, paces, ledgers, counts, leadCounts, ladder, state, chases] = await Promise.all([
       this.sessions.recencyOf(ctx, coached, office),
       this.paces.paceOf(ctx, ids, { today: office.today, month: office.month, onTrackRatio: office.settings.onTrackPaceThreshold }),
       this.production.ledgersFor(ctx, ids, office.month),
@@ -220,6 +245,7 @@ export class UnitDashboardService {
       this.leads.countsOfMany(ctx, ids, office),
       office.companyId ? this.orgLevels.list(ctx, office.companyId) : Promise.resolve([]),
       this.months.state(ctx, office.month),
+      this.chaseReadings.ofMany(ctx, [...chaseReach]),
     ]);
     const latest = [...recency.values()].flatMap((r) => (r.last ? [r.last] : []));
     /*
@@ -314,6 +340,7 @@ export class UnitDashboardService {
         status: pace.status,
         pacingToMaa: pace.pacingToMaa,
         followUp: followUps.get(id) ?? null,
+        ...chaseCells(chases, chaseReach, id),
       };
     };
 
@@ -366,6 +393,7 @@ export class UnitDashboardService {
       },
       yourUnit: { rows: yourUnitRows, total: totalOf(yourUnitRows) },
       units,
+      mdrt: chases.mdrt,
     };
 
     // Last, once the answer exists: one entry per member shown other than the reader, in one insert.
@@ -479,9 +507,10 @@ export class UnitDashboardService {
   private async empty(
     ctx: RequestContext, office: Office, period: UnitDashboardPeriod, window: { from: LocalDate; to: LocalDate }, head: Head,
   ): Promise<UnitDashboardView> {
-    const [state, names] = await Promise.all([
+    const [state, names, chases] = await Promise.all([
       this.months.state(ctx, office.month),
       this.names.byMembershipId(ctx, [head.membershipId]),
+      this.chaseReadings.ofMany(ctx, []),
     ]);
     const nothing = totalOf([]);
     return {
@@ -495,12 +524,26 @@ export class UnitDashboardService {
       },
       yourUnit: { rows: [], total: nothing },
       units: [],
+      mdrt: chases.mdrt,
     };
   }
 }
 
 /** The grants on `personal_summary:read` that reach somebody else: the ones the coaching tabs read through. */
 const OPENS_A_SUBJECT: readonly (Scope | null)[] = ['own-unit', 'own-downline', 'own-kpm', 'all'];
+
+/** A row's two campaign cells: from the chases read, or `null` beyond the reader's reach. Chips by title, A to Z. */
+function chaseCells(
+  chases: ChaseReading, reach: ReadonlySet<string>, id: string,
+): Pick<UnitRow, 'chasingMdrt' | 'campaigns'> {
+  if (!reach.has(id)) return { chasingMdrt: null, campaigns: null };
+  const mine = chases.byMember.get(id) ?? [];
+  return {
+    chasingMdrt: mine.some((c) => c.code === MDRT_CAMPAIGN_CODE),
+    campaigns: mine.map((c) => ({ code: c.code, title: c.title }))
+      .sort((a, b) => a.title.localeCompare(b.title) || a.code.localeCompare(b.code)),
+  };
+}
 
 /** Every row of a group, in the order drawn: its head, its members, then its units'. */
 function rowsOf(group: UnitGroup): UnitRow[] {

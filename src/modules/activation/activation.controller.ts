@@ -19,8 +19,14 @@ import { ActivationService } from './activation.service';
 export class ActivationController {
   constructor(private readonly activation: ActivationService) {}
 
+  /*
+   * **The Owner's and the Admins' read** (`activation_settings:read`; the Phase 18.5 exit review, B2): it answers the
+   * draft and names each training link by the module's working title, a draft's included. It sat on
+   * `tenant_config:read`, which every member holds. A field member reads their own activation, named from what the
+   * office offers.
+   */
   @Get()
-  @RequirePermission('tenant_config:read')
+  @RequirePermission('activation_settings:read')
   @ApiOperation({
     summary: 'The office\'s activation checklist',
     description:

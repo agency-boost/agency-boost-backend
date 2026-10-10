@@ -6,8 +6,9 @@ import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
+import { RequestContext } from '@/common/context/request-context';
 import {
-  ADMIN, EVERY_MEMBER, FIXTURE_KPM, NOT_ADMINISTRATORS, OWNER, productionPipe, session, StubAuth,
+  AAB, AB, ADMIN, AGENT, FIXTURE_KPM, NOT_ADMINISTRATORS, OWNER, productionPipe, session, StubAuth,
 } from '../../../test/http-permissions';
 import { TrainingController } from './training.controller';
 import { TrainingService } from './training.service';
@@ -16,6 +17,8 @@ import { listenOnLoopback } from '../../../test/listen';
 const NOW = new Date('2026-09-18T02:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
 const MODULE = 'PROSPECT_LIST';
+/** The field rungs: they learn at `/training`, and read nothing under Settings (P18.5-T1 AC-8). */
+const FIELD_MEMBERS: [string, RequestContext][] = [['an AB', AB], ['an AAB', AAB], ['an agent', AGENT]];
 
 /**
  * A training module's content, over HTTP (P5-T2, ADR-0032).
@@ -79,7 +82,7 @@ describe('a training module’s content over HTTP (P5-T2)', () => {
   };
 
   describe('who may reach it', () => {
-    it.each(EVERY_MEMBER)('shows %s the module’s material', async (_name, who) => {
+    it.each([['the Owner', OWNER], ['the Admin', ADMIN]])('shows %s the module’s material', async (_name, who) => {
       session.current = who;
 
       const res = await request(app.getHttpServer())
@@ -89,6 +92,28 @@ describe('a training module’s content over HTTP (P5-T2)', () => {
       // Both halves on the wire: the office's own, and the company's underneath it, so a screen
       // can offer "use my company's again" without a second request.
       expect(res.body.companyContent).toBeTruthy();
+    });
+
+    /*
+     * P18.5-T1 AC-8 (the leak). Every member read this until 2026-10-10, a draft module's material included. A field
+     * member reads a module through `/training/modules/:code`, which answers only what the office offers.
+     */
+    it.each(FIELD_MEMBERS)('P18.5-T1 AC-8 refuses %s every settings read, with nothing in the body', async (_name, who) => {
+      session.current = who;
+      const server = app.getHttpServer();
+      for (const path of [url, `${url}/modules/${MODULE}/content`, `${url}/modules/${MODULE}/content/url?storageKey=x`]) {
+        const res = await request(server).get(path).expect(403);
+        expect([path, Object.keys(res.body)]).toEqual([path, ['error']]);
+        expect(res.body.error.code).toBe('PERM_DENIED');
+      }
+    });
+
+    it('P18.5-T1 AC-8 a read-only support session as the Owner reads them', async () => {
+      session.current = new RequestContext(
+        OWNER.userId, 'none', OWNER.membership, 'u-support', null, false, true,
+      );
+      await request(app.getHttpServer()).get(url).expect(200);
+      await request(app.getHttpServer()).get(`${url}/modules/${MODULE}/content`).expect(200);
     });
 
     it.each(NOT_ADMINISTRATORS)('refuses %s every write', async (_name, who) => {
@@ -184,20 +209,26 @@ describe('a training module’s content over HTTP (P5-T2)', () => {
         .query({ storageKey: 'dev/nobody/training/NOPE' }).expect(404);
     });
 
-    it('is a read, so everybody in the office may ask for one', async () => {
+    it('P18.5-T1 AC-8 is the office administration’s read: a draft module’s file is unreachable for a field member', async () => {
+      // A module nobody is offered yet, with a file the Owner has attached to it.
+      await wired.training.createModule(OWNER, {
+        code: 'DRAFT_DECK', skillCode: 'CLOSING', title: 'Not yet', publishState: 'draft',
+      });
       const storageKey = await upload();
-      await request(app.getHttpServer()).put(`${url}/modules/${MODULE}/content`)
-        .send({
-          files: [{
-            label: 'Prospecting deck', storageKey, mimeType: 'application/pdf', bytes: 1024,
-          }],
-        })
+      await request(app.getHttpServer()).put(`${url}/modules/DRAFT_DECK/content`)
+        .send({ files: [{ label: 'Unreleased deck', storageKey, mimeType: 'application/pdf', bytes: 1024 }] })
         .expect(200);
 
-      for (const [, who] of EVERY_MEMBER) {
+      for (const [, who] of [['the Owner', OWNER], ['the Admin', ADMIN]] as const) {
         session.current = who;
-        await request(app.getHttpServer()).get(`${url}/modules/${MODULE}/content/url`)
+        await request(app.getHttpServer()).get(`${url}/modules/DRAFT_DECK/content/url`)
           .query({ storageKey }).expect(200);
+      }
+      for (const [, who] of FIELD_MEMBERS) {
+        session.current = who;
+        const res = await request(app.getHttpServer()).get(`${url}/modules/DRAFT_DECK/content/url`)
+          .query({ storageKey }).expect(403);
+        expect(JSON.stringify(res.body)).not.toContain('http');
       }
     });
   });

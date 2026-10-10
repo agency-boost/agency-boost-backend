@@ -27,6 +27,8 @@ import { up as namedTemplates } from './0023-named-templates';
 import { up as attackPlanReply } from './0024-attack-plan-reply';
 import { up as recruitmentPlaybook } from './0025-recruitment-playbook';
 import { up as mocPersistency } from './0026-moc-persistency';
+import { up as campaignKinds } from './0027-campaign-kinds';
+import { up as trainingSalesSubtitle } from './0029-training-sales-subtitle';
 
 /**
  * Every migration, in order. Forward-only and idempotent, so running this twice is a
@@ -59,6 +61,9 @@ const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Date) => P
   ['0024-attack-plan-reply', attackPlanReply],
   ['0025-recruitment-playbook', recruitmentPlaybook],
   ['0026-moc-persistency', mocPersistency],
+  ['0027-campaign-kinds', campaignKinds],
+  // There is no 0028: Phase 18.5's contract held it for events, which needed none. 0029 is training's (OD-150).
+  ['0029-training-sales-subtitle', trainingSalesSubtitle],
 ];
 
 async function main(): Promise<void> {

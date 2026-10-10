@@ -100,6 +100,12 @@ import {
 } from '@/modules/training/training.repository';
 import { TrainingService } from '@/modules/training/training.service';
 import { TrainingController } from '@/modules/training/training.controller';
+import { TrainingProgress, TrainingProgressSchema } from '@/modules/training/training-progress.schema';
+import { TrainingProgressRepository } from '@/modules/training/training-progress.repository';
+import { OfferedTraining } from '@/modules/training/offered-training';
+import { TrainingProgressReadings } from '@/modules/training/training-progress-readings';
+import { TrainingProgressService } from '@/modules/training/training-progress.service';
+import { TrainingProgressController } from '@/modules/training/training-progress.controller';
 import {
   ActivationTemplate, ActivationTemplateSchema,
 } from '@/modules/activation/activation-template.schema';
@@ -133,9 +139,19 @@ import {
   AttackPlanController, ProductCatalogController,
 } from '@/modules/products/product-catalog.controller';
 import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events/event.schema';
-import { EventRepository, EventTypeRepository } from '@/modules/events/event.repository';
+import {
+  EventFeedbackRepository, EventRepository, EventRsvpRepository, EventTypeRepository,
+} from '@/modules/events/event.repository';
 import { EventService } from '@/modules/events/event.service';
 import { EventController } from '@/modules/events/event.controller';
+// P18.5-T5, T6: members' RSVPs, claims, confirmations and answers, and the readings over them.
+import { EventRsvp, EventRsvpSchema } from '@/modules/events/event-rsvp.schema';
+import { EventFeedback, EventFeedbackSchema } from '@/modules/events/event-feedback.schema';
+import { EventAudienceReader } from '@/modules/events/event-audience';
+import { EventReadings } from '@/modules/events/event-readings';
+import { EventGuestService } from '@/modules/events/event-guest.service';
+import { EventRollCallService } from '@/modules/events/event-roll-call.service';
+import { EventGuestController } from '@/modules/events/event-guest.controller';
 import { ActivityLog, ActivityLogSchema } from '@/modules/activity/activity-log.schema';
 import { ActivityLogRepository } from '@/modules/activity/activity-log.repository';
 import { ActivityService } from '@/modules/activity/activity.service';
@@ -147,6 +163,16 @@ import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
 import { CampaignService } from '@/modules/campaigns/campaign.service';
 import { CampaignController } from '@/modules/campaigns/campaign.controller';
 import { MetricRegistryController } from '@/modules/campaigns/metric-registry.controller';
+import { CampaignChase, CampaignChaseSchema } from '@/modules/campaigns/campaign-chase.schema';
+import { CampaignStanding, CampaignStandingSchema } from '@/modules/campaigns/campaign-standing.schema';
+import { CampaignChaseRepository } from '@/modules/campaigns/campaign-chase.repository';
+import { CampaignStandingRepository } from '@/modules/campaigns/campaign-standing.repository';
+import { CampaignChaseReadings } from '@/modules/campaigns/campaign-chase-readings';
+import { CampaignEvaluation } from '@/modules/campaigns/campaign-evaluation';
+import { CampaignAgentService } from '@/modules/campaigns/campaign-agent.service';
+import { CampaignAgentController } from '@/modules/campaigns/campaign-agent.controller';
+import { CampaignStandingsReader } from '@/modules/campaigns/campaign-standings-reader';
+import { CampaignChaseDeparture } from '@/modules/campaigns/campaign-departure';
 import {
   CapabilityCatalog, CapabilityCatalogSchema,
 } from '@/modules/capability/capability.schema';
@@ -227,7 +253,7 @@ import { CoachingProfileController } from '@/modules/coaching/coaching-profile.c
 import { CoachingRecordService } from '@/modules/coaching/coaching-record.service';
 import { CoachingRecordController } from '@/modules/coaching/coaching-record.controller';
 import { RemovalService } from '@/modules/org/removal.service';
-import { MemberDeparture } from '@/modules/org/member-departure.port';
+import { MemberDeparture, MemberDepartures } from '@/modules/org/member-departure.port';
 import { CalendarEvent, CalendarEventSchema } from '@/modules/calendar/calendar-event.schema';
 import { CalendarEventRepository } from '@/modules/calendar/calendar-event.repository';
 import { CalendarNotices } from '@/modules/calendar/calendar-notices';
@@ -327,14 +353,21 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
       { name: TrainingCategory.name, schema: TrainingCategorySchema },
       { name: TrainingSkill.name, schema: TrainingSkillSchema },
       { name: TrainingModule.name, schema: TrainingModuleSchema },
+      // P18.5-T1: one member's progress on one training module.
+      { name: TrainingProgress.name, schema: TrainingProgressSchema },
       { name: ActivationTemplate.name, schema: ActivationTemplateSchema },
       { name: Product.name, schema: ProductSchema },
       { name: KpmProductConfig.name, schema: KpmProductConfigSchema },
       { name: EventType.name, schema: EventTypeSchema },
       { name: Event.name, schema: EventSchema },
+      { name: EventRsvp.name, schema: EventRsvpSchema },
+      { name: EventFeedback.name, schema: EventFeedbackSchema },
       { name: ActivityLog.name, schema: ActivityLogSchema },
       { name: Campaign.name, schema: CampaignSchema },
       { name: QualificationRule.name, schema: QualificationRuleSchema },
+      // Phase 18.5: a member's chase of a campaign, and a final standing once its window is final.
+      { name: CampaignChase.name, schema: CampaignChaseSchema },
+      { name: CampaignStanding.name, schema: CampaignStandingSchema },
       { name: CapabilityCatalog.name, schema: CapabilityCatalogSchema },
       // P11-T5: a 1:1 between a coach and a coachee.
       { name: CoachingSession.name, schema: CoachingSessionSchema },
@@ -374,6 +407,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     TenantConfigController,
     TenantConfigReadController,
     TrainingController,
+    // P18.5-T1, T4: the learner's training, and the coach's read of it.
+    TrainingProgressController,
     ActivationController,
     ProductController,
     KpmProductController,
@@ -381,9 +416,12 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     ProductCatalogController,
     AttackPlanController,
     EventController,
+    EventGuestController,
     ActivityController,
     CampaignController,
     MetricRegistryController,
+    // Phase 18.5: the agent's campaigns — the list, one campaign with its progress, the chase, whose chases.
+    CampaignAgentController,
     CapabilityController,
     CoachingController,
     CoachingProfileController,
@@ -463,6 +501,14 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     TrainingSkillRepository,
     TrainingModuleRepository,
     TrainingService,
+    /*
+     * P18.5-T1, T2: each member's progress, what the published snapshot offers, the one read every reader of
+     * progress goes through (the activation engine's training kind among them), and the learner's routes.
+     */
+    TrainingProgressRepository,
+    OfferedTraining,
+    TrainingProgressReadings,
+    TrainingProgressService,
     ActivationTemplateRepository,
     ActivationService,
     ProductService,
@@ -472,12 +518,29 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     EventTypeRepository,
     EventRepository,
     EventService,
+    EventRsvpRepository,
+    EventFeedbackRepository,
+    EventAudienceReader,
+    EventReadings,
+    EventGuestService,
+    EventRollCallService,
     ActivityLogRepository,
     ActivityService,
     ActivityReadings,
     SummaryService,
     CampaignRepository,
     CampaignService,
+    /*
+     * Phase 18.5: campaigns, the member's side — the chases and the frozen standings, the one named reader of chases
+     * (the Summary, the coachee's chips, the Unit Dashboard), the evaluation through production's and activity's own
+     * readings, the agent's service, and the bulk standings port Phase 18.6's tree reads.
+     */
+    CampaignChaseRepository,
+    CampaignStandingRepository,
+    CampaignChaseReadings,
+    CampaignEvaluation,
+    CampaignAgentService,
+    CampaignStandingsReader,
     CapabilityCatalogRepository,
     CapabilityService,
     /*
@@ -571,7 +634,16 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     CalendarService,
     CalendarPeopleService,
     CalendarLeave,
-    { provide: MemberDeparture, useExisting: CalendarLeave },
+    /*
+     * P18.5-T7 AC-5: leaving answers two modules — the calendar's future entries and the campaigns' chases — behind the
+     * one port `RemovalService` holds.
+     */
+    CampaignChaseDeparture,
+    {
+      provide: MemberDeparture,
+      inject: [CalendarLeave, CampaignChaseDeparture],
+      useFactory: (calendar: CalendarLeave, campaigns: CampaignChaseDeparture) => new MemberDepartures([calendar, campaigns]),
+    },
     /*
      * Phase 13: each hire's activation, the engine that completes its linked items, and a leader's new
      * hires — and the three ports through which other modules reach it without depending on it: joining

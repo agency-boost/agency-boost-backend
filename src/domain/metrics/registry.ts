@@ -222,10 +222,21 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   ACTIVATION_COMPLETION_PCT: { period: 'PROGRAMME_WINDOW', threshold: null },
   ACTIVATION_DAY_INDEX: { period: 'PROGRAMME_WINDOW', threshold: ACTIVATION.WINDOW_DAYS },
   TRAINING_COMPLETION_PCT: { period: 'POINT_IN_TIME', threshold: null },
+  /*
+   * P18.5-T5, T6 — **per event, never per member**, so none of the three is campaign-evaluable (D-evaluable). Each is
+   * computed in one place: the status (with D-status's `unconfirmed`; only a confirmation makes `attended`, OD-31) and
+   * the rate over the audience as at the start in `event-attendance.ts`; the NPS — the prototype's single rounding over
+   * confirmed attendees, `null` with none — in `event-nps.ts`. `EventReadings` is their one reader.
+   */
   EVENT_ATTENDANCE_STATUS: { period: 'POINT_IN_TIME', threshold: null },
   EVENT_ATTENDANCE_RATE: { period: 'POINT_IN_TIME', threshold: null },
   EVENT_NPS: { period: 'POINT_IN_TIME', threshold: null },
-  CAMPAIGN_QUALIFICATION_STATUS: { period: 'CALENDAR_MONTH', threshold: null },
+  /*
+   * **The campaign's own window** (§A.6's definition; D-period, carry #3): it read `CALENDAR_MONTH` until P18.5-T8, the
+   * first task to compute it, against its own definition. A campaign's window is its dates, a calendar year, or the
+   * last twelve months held (D-windows) — `campaign-window.ts`.
+   */
+  CAMPAIGN_QUALIFICATION_STATUS: { period: 'PROGRAMME_WINDOW', threshold: null },
 
   // ---- Carrier contract ----
   MOC_STATUS: { period: 'ROLLING_12M', threshold: null },
@@ -254,6 +265,8 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   CASCADE_ACTIVITY_TOUCHES: { period: 'CALENDAR_MONTH', threshold: null },
   NEW_ACTIVE_AGENTS: { period: 'CALENDAR_MONTH', threshold: null },
   ROLLING_PERSISTENCY: { period: 'ROLLING_12M', threshold: null },
+  // OD-152 → option 3: the file's `recruitment` column, monthly and year to date, as `NEW_ACTIVE_AGENTS` (P18.5-T8).
+  NEW_HIRES: { period: 'CALENDAR_MONTH', threshold: null },
 
   // ---- The office (P13.2-T4, ADR-0113) ----
   /*

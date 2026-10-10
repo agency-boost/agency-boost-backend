@@ -155,6 +155,43 @@ export class ProductionReadings {
   }
 
   /**
+   * **Every cell a campaign requirement reads, for many members over a range of months** (Phase 18.5, P18.5-T8;
+   * D-evaluable): the month's own APE, persistency, new active agents and recruitment count, the policy count
+   * `MONTHLY_ACTIVE_AGENT` reads beside APE, and the year-to-date cells of the three a calendar year sums — each **as the month table reads it** (`readCell`), so a campaign's
+   * figure is the table's figure for the same months, imported or corrected (exit test 1). One query for the whole
+   * list; every member asked about gets an entry, a month absent where the office holds no row of theirs.
+   */
+  async campaignFiguresFor(
+    ctx: RequestContext, membershipIds: readonly string[], range: { from: string; to: string },
+  ): Promise<Map<string, Map<string, CampaignMonthFigures>>> {
+    const out = new Map<string, Map<string, CampaignMonthFigures>>(membershipIds.map((id) => [id, new Map()]));
+    if (membershipIds.length === 0) return out;
+    const rows = await this.data.find(
+      ctx,
+      { membershipId: { $in: [...new Set(membershipIds)] }, month: { $gte: range.from, $lte: range.to } },
+      {
+        projection: {
+          membershipId: 1, month: 1, apeMonthly: 1, apeYtd: 1, persistencyMonthly: 1, newActiveAgentsMonthly: 1,
+          newActiveAgentsYtd: 1, recruitmentMonthly: 1, recruitmentYtd: 1, policyCountMonthly: 1,
+        },
+      },
+    );
+    for (const row of rows) {
+      (out.get(row.membershipId) as Map<string, CampaignMonthFigures>).set(row.month, {
+        apeMonthly: readCell(row.apeMonthly).value,
+        apeYtd: readCell(row.apeYtd).value,
+        persistencyMonthly: readCell(row.persistencyMonthly).value,
+        newActiveAgentsMonthly: readCell(row.newActiveAgentsMonthly).value,
+        newActiveAgentsYtd: readCell(row.newActiveAgentsYtd).value,
+        recruitmentMonthly: readCell(row.recruitmentMonthly).value,
+        recruitmentYtd: readCell(row.recruitmentYtd).value,
+        policyCountMonthly: readCell(row.policyCountMonthly).value,
+      });
+    }
+    return out;
+  }
+
+  /**
    * **The office's file, month by month, over a range** (Phase 18, D-figures, T2 AC-6): each month's APE —
    * the sum of every figure the office holds for it, a member who has since left included (OD-74: their
    * production stays the office's) — and whether the month is held at all. One aggregate over the office's
@@ -187,6 +224,19 @@ export interface MonthCells {
   apeMonthly: number | null;
   policyCountMonthly: number | null;
   persistencyMonthly: number | null;
+}
+
+/** A member's month as a campaign reads it (Phase 18.5): each cell as the month table reads it — `null` is nothing held. */
+export interface CampaignMonthFigures {
+  apeMonthly: number | null;
+  apeYtd: number | null;
+  persistencyMonthly: number | null;
+  newActiveAgentsMonthly: number | null;
+  newActiveAgentsYtd: number | null;
+  recruitmentMonthly: number | null;
+  recruitmentYtd: number | null;
+  /** What `MONTHLY_ACTIVE_AGENT` reads beside the month's APE, for a Direct Unit's active agents. */
+  policyCountMonthly: number | null;
 }
 
 /** One month of the office's file, summed: what *Monthly production* draws, and whether the month is held at all. */

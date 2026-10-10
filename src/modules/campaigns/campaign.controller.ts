@@ -20,11 +20,12 @@ export class CampaignController {
   constructor(private readonly campaigns: CampaignService) {}
 
   @Get('rules')
-  @RequirePermission('tenant_config:read')
+  @RequirePermission('campaign_settings:read')
   @ApiOperation({
     summary: 'The carrier rules this office is measured against',
     description:
-      'MOC and the production club tiers, the insurer’s. **Read only for every office role** — '
+      'MOC and the production club tiers, the insurer’s, as the agency’s Campaigns settings show them — read by its '
+      + 'owner and its administrators. **Read only** — '
       + 'there is no write route here at all. A rule waiting on a metric this product does not '
       + 'compute yet says so, rather than being shown as an ordinary rule nobody can ever pass.',
   })
@@ -34,12 +35,13 @@ export class CampaignController {
   }
 
   @Get()
-  @RequirePermission('tenant_config:read')
+  @RequirePermission('campaign_settings:read')
   @ApiOperation({
     summary: 'The office’s own campaigns',
     description:
       'Newest first, each with its phase **derived now** — upcoming, running or ended. The '
-      + 'prototype labels one campaign *Running* in the list while its own data says `past`.',
+      + 'prototype labels one campaign *Running* in the list while its own data says `past`. The agency’s owner and '
+      + 'its administrators: a member reads the active campaigns at `GET /campaigns`.',
   })
   @ApiResponse({ status: 200, type: CampaignDto, isArray: true })
   async list(@Ctx() ctx: RequestContext, @Query('includeArchived') archived?: string) {

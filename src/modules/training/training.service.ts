@@ -407,9 +407,13 @@ export class TrainingService {
     const after = storageKeysOf(next);
     await this.moveReferences(ctx, before, after);
 
+    /*
+     * **No version moves** (the Phase 18.5 exit review): a module's `version` is what the office's publish bar compares
+     * (`TenantConfigService.fingerprint`), and its content is not snapshot material — it reaches agents at once, read
+     * live. Moving it here told an Owner who had only replaced a file that the office had something to publish.
+     */
     await this.modules.updateById(ctx, String(module._id), {
       $set: { officeContent: next },
-      $inc: { version: 1 },
     });
     await this.record(ctx, 'training_module.content_saved', 'trainingModules', module, {
       code: module.code,
@@ -432,9 +436,9 @@ export class TrainingService {
     if (module.officeContent === null) return this.readContent(ctx, code);
 
     await this.moveReferences(ctx, storageKeysOf(asContent(module.officeContent)), []);
+    // No version moves, as a save's does not: content is read live, not published (the Phase 18.5 exit review).
     await this.modules.updateById(ctx, String(module._id), {
       $set: { officeContent: null },
-      $inc: { version: 1 },
     });
     await this.record(ctx, 'training_module.content_reset', 'trainingModules', module, {
       code: module.code,
@@ -610,7 +614,7 @@ export class TrainingService {
  * none of its fields, so `storageKey` came back `undefined` and a file the office had just
  * attached read as one the module did not hold.
  */
-function asContent(raw: unknown): CheckedContent {
+export function asContent(raw: unknown): CheckedContent {
   const plain = <T>(value: unknown): T => {
     const doc = value as { toObject?: () => unknown };
     return (typeof doc?.toObject === 'function' ? doc.toObject() : { ...(value as object) }) as T;

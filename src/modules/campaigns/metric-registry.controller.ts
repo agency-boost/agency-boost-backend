@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '@/common/auth/auth.decorators';
-import { CAMPAIGN_EVALUATION_PHASE, REQUIREMENT_METRICS } from '@/domain/constants';
+import { CAMPAIGN_EVALUATION_PHASE, REQUIREMENT_METRICS, isCampaignMetric } from '@/domain/constants';
 import { MetricDefinitionDto } from './campaign.response.dto';
 
 /**
@@ -30,7 +30,8 @@ export class MetricRegistryController {
       + 'is measured by the time campaigns are evaluated. A screen says so from `computed` and '
       + 'never from `phase`, which is the roadmap\'s. A carrier rule naming a metric that is not '
       + 'is recorded as waiting on it, and a campaign requirement naming one is refused, rather '
-      + 'than either silently never qualifying anybody (ADR-0035).',
+      + 'than either silently never qualifying anybody (ADR-0035). `campaign`: whether a **campaign** requirement may '
+      + 'name it — the small evaluable set; a carrier rule may name any of these.',
   })
   @ApiResponse({ status: 200, type: MetricDefinitionDto, isArray: true })
   list(): MetricDefinitionDto[] {
@@ -44,6 +45,8 @@ export class MetricRegistryController {
        * than imply it is.
        */
       computed: metric.phase <= CAMPAIGN_EVALUATION_PHASE,
+      // P18.5-T8 AC-1, D-evaluable: a campaign requirement may name it. Separate from `requirable`, which is this list.
+      campaign: isCampaignMetric(metric.key),
     }));
   }
 }

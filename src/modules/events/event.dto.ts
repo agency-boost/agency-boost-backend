@@ -108,3 +108,47 @@ export class SaveEventDto {
   @Allow()
   audience?: EventAudienceDto;
 }
+
+/** No body: an RSVP, its cancellation and a claim carry nothing but the event in the address. */
+export class NoEventBodyDto {}
+
+/** No query: `GET /events` and the settings reads of Phase 18.5 take no parameter, and refuse one they do not know. */
+export class NoEventQueryDto {}
+
+/**
+ * The member's answer (P18.5-T6 AC-3). Declared for OpenAPI; the rules are `checkFeedback`'s
+ * (`event-guest.service.ts`), which collects every violation before refusing (ADR-0030).
+ */
+export class SubmitEventFeedbackDto {
+  @ApiProperty({ type: Number, minimum: 0, maximum: 10, example: 9, description: 'A whole number from 0 to 10.' })
+  @Allow()
+  score!: number;
+
+  @ApiPropertyOptional({ type: String, description: '*Why?* — trimmed, at most `EVENT_FEEDBACK_TEXT_MAX` (1000) characters.' })
+  @Allow()
+  why?: string;
+
+  @ApiPropertyOptional({ type: String, description: '*How can we improve?* — trimmed, at most 1000 characters. Stored.' })
+  @Allow()
+  improve?: string;
+}
+
+export class RollCallEntryDto {
+  @ApiProperty({ type: String, description: 'A membership of the audience as at the start — never the caller’s own.' })
+  @Allow()
+  membershipId!: string;
+
+  @ApiProperty({
+    type: Boolean, nullable: true,
+    description: '`true` attended, `false` marked absent, `null` cleared back to unconfirmed.',
+  })
+  @Allow()
+  attended!: boolean | null;
+}
+
+/** The roll call's save (P18.5-T5 AC-7). The rules are `checkRollCall`'s (`event-roll-call.service.ts`). */
+export class SaveRollCallDto {
+  @ApiProperty({ type: RollCallEntryDto, isArray: true, description: '1 to 500 rows, no membership twice.' })
+  @Allow()
+  entries!: RollCallEntryDto[];
+}

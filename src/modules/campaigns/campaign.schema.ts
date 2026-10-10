@@ -1,13 +1,20 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import { Prop, Schema, SchemaFactory, raw } from '@nestjs/mongoose';
+import { HydratedDocument, Schema as MongooseSchema } from 'mongoose';
 import { configSchemaOptions } from '@/common/schema/base.schema';
 import {
-  CRITERIA_MODES, QUALIFICATION_RULE_KINDS, QUALIFICATION_RULE_SCOPES,
-  REQUIREMENT_COMPARATORS, type CriteriaMode, type QualificationRuleKind,
-  type QualificationRuleScope, type RequirementComparator,
+  CAMPAIGN_KINDS, CAMPAIGN_POSTER_COLORS, CAMPAIGN_SUBTYPES, CAMPAIGN_WINDOWS, CRITERIA_MODES, DEFAULT_CAMPAIGN_POSTER,
+  QUALIFICATION_RULE_KINDS, QUALIFICATION_RULE_SCOPES, REQUIREMENT_COMPARATORS,
+  type CampaignKind, type CampaignPosterColor, type CampaignSubtype, type CampaignWindow, type CriteriaMode,
+  type QualificationRuleKind, type QualificationRuleScope, type RequirementComparator,
 } from '@/domain/constants';
 
 export type CampaignDocument = HydratedDocument<Campaign>;
+
+/** A frozen window's record on its campaign: part of the row, no `_id` of its own. */
+const FROZEN_WINDOW = new MongooseSchema({
+  key: { type: String, required: true },
+  at: { type: Date, required: true },
+}, { _id: false });
 export type QualificationRuleDocument = HydratedDocument<QualificationRule>;
 
 /**
@@ -62,8 +69,54 @@ export class Campaign {
   @Prop({ type: Date, required: true })
   startsAt!: Date;
 
-  @Prop({ type: Date, required: true })
-  endsAt!: Date;
+  /**
+   * The last instant it runs. **`null` for a structural campaign with no end** — a promotion path or an ongoing
+   * incentive, drawn *Ongoing* (P18.5-T7, D-fields); a seasonal campaign always has one (`campaign-input.ts`).
+   */
+  @Prop({ type: Date, default: null })
+  endsAt!: Date | null;
+
+  /**
+   * *Seasonal* or *Structural* (P18.5-T7, D-fields; `Overall.html:3667-3670`). Every campaign written before the
+   * field is seasonal (migration `0027-campaign-kinds`).
+   */
+  @Prop({ type: String, enum: CAMPAIGN_KINDS, required: true, default: 'seasonal' })
+  kind!: CampaignKind;
+
+  /** A structural campaign's section — *Promotion Criteria* or *Production Clubs*; `null` for a seasonal one. */
+  @Prop({ type: String, enum: [...CAMPAIGN_SUBTYPES, null], default: null })
+  subtype!: CampaignSubtype | null;
+
+  /** What its requirements are read over (D-windows): its dates, the calendar year, or the last twelve months held. */
+  @Prop({ type: String, enum: CAMPAIGN_WINDOWS, required: true, default: 'campaign_dates' })
+  window!: CampaignWindow;
+
+  /**
+   * Which rungs may chase it, **by code** (ADR-0035's shape, as a carrier rule's): empty means everybody. A promotion
+   * path to AB is the AAB's; an agent sees it with the chase disabled.
+   */
+  @Prop({ type: [String], default: [] })
+  appliesToOrgLevelCodes!: string[];
+
+  /** The card's poster: one emoji and a token colour — never the prototype's raw hex (D-fields, row 44). */
+  @Prop(raw({
+    emoji: { type: String, required: true, default: DEFAULT_CAMPAIGN_POSTER.emoji },
+    color: { type: String, enum: CAMPAIGN_POSTER_COLORS, required: true, default: DEFAULT_CAMPAIGN_POSTER.color },
+  }))
+  poster!: { emoji: string; color: CampaignPosterColor };
+
+  /** The card's one line under the title (`Overall.html:8040-8074`). Plain text, rendered as text. */
+  @Prop({ type: String, default: '', trim: true })
+  blurb!: string;
+
+  /**
+   * **The windows whose standings have been frozen** (P18.5-T8 AC-5; the review, item 1): a window's key and when,
+   * pushed once — atomically, so of two first reads at once one freezes — **even when nobody chased it**, so a chase
+   * made later never enters a window already decided. Written only by the evaluation (`markFrozen`), never by the
+   * Owner's form; not part of the campaign's `version`.
+   */
+  @Prop({ type: [FROZEN_WINDOW], default: [] })
+  frozenWindows!: { key: string; at: Date }[];
 
   @Prop({ type: [RequirementSchema], default: [] })
   requirements!: Requirement[];

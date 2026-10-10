@@ -186,9 +186,14 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
       expect(await audit()).toEqual([]);
     });
 
-    it('P13-T2 AC-3 a training-linked item stays tickable by hand until its evaluator exists', async () => {
+    /*
+     * P18.5-T3 AC-3: this asserted the opposite until 2026-10-10 — *"stays tickable by hand until its evaluator
+     * exists"*. The evaluator exists: a module the office offers is done when the hire marks it *Done*, and nobody
+     * ticks it — the hire included. D-orphan's exception is `training-progress.int.spec.ts`'s (its T3 block).
+     */
+    it('P18.5-T3 AC-3 a training-linked item is ticked by nobody now its evaluator exists, the hire included', async () => {
       const doc = await h.start('BUDI', '2026-07-15');
-      // An office that bound item 9 to a training module (`KPM_Owner.html:1546`): the link is not live.
+      // An office that bound item 9 to a training module (`KPM_Owner.html:1546`).
       await h.col('activationTemplates').updateOne(
         { _id: new mongoose.Types.ObjectId(doc.templateId), 'aspects.items.code': 'MANDATORY_TRAINING' },
         { $set: { 'aspects.$[a].items.$[i].autoLink': 'training:PROSPECT_LIST' } },
@@ -196,8 +201,12 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
       );
       try {
         h.as('BUDI');
-        const view = (await h.http().put('/activation/me/items/MANDATORY_TRAINING').send({ done: true }).expect(200)).body;
-        expect(item(view, 'MANDATORY_TRAINING')).toMatchObject({ done: true, source: 'hire', link: { kind: 'training:PROSPECT_LIST', live: false } });
+        const refused = await h.http().put('/activation/me/items/MANDATORY_TRAINING').send({ done: true }).expect(409);
+        expect(refused.body.error.code).toBe('ACTIVATION_ITEM_AUTOMATIC');
+        const view = (await h.http().get('/activation/me').expect(200)).body;
+        expect(item(view, 'MANDATORY_TRAINING')).toMatchObject({
+          done: false, link: { kind: 'training:PROSPECT_LIST', live: true, route: '/training/SALES/PROSPECT_LIST' },
+        });
       } finally {
         await h.col('activationTemplates').updateOne(
           { _id: new mongoose.Types.ObjectId(doc.templateId) },

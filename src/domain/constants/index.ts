@@ -267,6 +267,8 @@ export {
 export {
   TRAINING_PUBLISH_STATES,
   type TrainingPublishState,
+  TRAINING_STATUSES,
+  type TrainingStatus,
   SEED_TRAINING_CATEGORIES,
   SEED_TRAINING_SKILLS,
   SEED_TRAINING_MODULES,
@@ -289,6 +291,7 @@ export {
   type SeedActivationAspect,
   type SeedActivationItem,
   activationLinkKind,
+  activationLinkKinds,
   mayTickByHand,
 } from './activation-checklist';
 
@@ -352,6 +355,11 @@ export {
   EVENT_PHASES,
   type EventPhase,
   SEED_EVENT_TYPES,
+  // P18.5-T5, T6: the attendance statuses (D-status), the NPS scale and the feedback text's limit.
+  EVENT_ATTENDANCE_STATUSES,
+  type EventAttendanceStatus,
+  NPS,
+  EVENT_FEEDBACK_TEXT_MAX,
 } from './events';
 
 export {
@@ -361,6 +369,9 @@ export {
   METRIC_REGISTRY,
   metricByKey,
   REQUIREMENT_METRICS,
+  CAMPAIGN_METRICS,
+  isCampaignMetric,
+  type CampaignReading,
   CAMPAIGN_EVALUATION_PHASE,
   REQUIREMENT_COMPARATORS,
   type RequirementComparator,
@@ -374,6 +385,28 @@ export {
   SEED_MOC_RULES,
   MOC_PERSISTENCY_MIN_PCT,
 } from './metrics';
+
+// Phase 18.5: an office's campaigns as the agent reads them — kinds, windows, the poster palette, MDRT's code.
+export {
+  CAMPAIGN_KINDS,
+  type CampaignKind,
+  CAMPAIGN_SUBTYPES,
+  type CampaignSubtype,
+  CAMPAIGN_WINDOWS,
+  type CampaignWindow,
+  STRUCTURAL_CAMPAIGN_WINDOWS,
+  CAMPAIGN_POSTER_COLORS,
+  type CampaignPosterColor,
+  DEFAULT_CAMPAIGN_POSTER,
+  CAMPAIGN_LIMITS,
+  MDRT_CAMPAIGN_CODE,
+  CAMPAIGN_DURATION_WORDS,
+  CAMPAIGN_ROLLING_MONTHS,
+  MDRT_TOOLTIP,
+  CAMPAIGN_QUALIFICATION_STATUSES,
+  type CampaignQualificationStatus,
+  RESERVED_CAMPAIGN_CODES,
+} from './campaigns';
 
 // Phase 18: the Owner's reporting — the analytics' periods, the monthly chart's length and MOC's two months.
 export {

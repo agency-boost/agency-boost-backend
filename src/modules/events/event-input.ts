@@ -1,3 +1,4 @@
+import { isValidObjectId } from 'mongoose';
 import { Fields, refuseWith } from '@/common/validation/fields';
 import {
   EVENT_AUDIENCE_SCOPES, EVENT_ISSUERS, SELECT_AUDIENCE_SCOPES,
@@ -34,6 +35,13 @@ const TITLE = { min: 1, max: 200 } as const;
 
 /** A hex colour, because the poster is an emoji on a background and a token would not travel. */
 const HEX = /^#[0-9A-Fa-f]{6}$/;
+
+/**
+ * **A location link is a web address** (the exit review): `http` or `https` and nothing else. The card renders it as
+ * a link with ↗ (`Overall.html:8493-8498`), and a `javascript:` or `data:` link there would run in the member's
+ * session on a click.
+ */
+const WEB_LINK = /^https?:\/\/\S+$/i;
 
 export function checkEventType(
   body: unknown, opts: { partial?: boolean } = {},
@@ -90,6 +98,9 @@ export function checkEvent(body: unknown, opts: { partial?: boolean } = {}): Che
   // a body missing its code refused for its dates and said nothing about the code.
   const violations = [...f.violations];
   const locationUrl = optionalText(source.locationUrl, 'locationUrl', 500, violations);
+  if (locationUrl && !WEB_LINK.test(locationUrl)) {
+    violations.push('locationUrl must be a web address starting with http:// or https://.');
+  }
 
   const startsAt = instant(source.startsAt, 'startsAt', required, violations);
   const endsAt = instant(source.endsAt, 'endsAt', required, violations);
@@ -170,6 +181,11 @@ function readAudience(
     : [];
   if (row.inviteeMembershipIds !== undefined && !Array.isArray(row.inviteeMembershipIds)) {
     violations.push('audience.inviteeMembershipIds must be a list.');
+  }
+  // A membership id is an id: anything else is a malformed body, never a lookup (the exit review).
+  const malformed = ids.filter((id) => !isValidObjectId(id));
+  if (malformed.length > 0) {
+    violations.push(`audience.inviteeMembershipIds holds ${malformed.length} value(s) that are not membership ids.`);
   }
   // A list on a scope that does not take one is a body meaning two things at once.
   if (ids.length > 0 && !SELECT_AUDIENCE_SCOPES.includes(scope as EventAudienceScope)) {

@@ -24,6 +24,7 @@ import 'reflect-metadata';
 import mongoose from 'mongoose';
 import { config as loadEnv } from 'dotenv';
 import { Clock, SystemClock } from '@/common/clock/clock.port';
+import { addDays as addLocalDays } from '@/common/time/local-day';
 import { PasswordService } from '@/modules/auth/password.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
@@ -73,6 +74,9 @@ import {
 } from './reporting-fixture';
 import { seedActivationCohort } from './cohort-fixture';
 import { seedLeaderForumFixture, type LeaderForumFixture } from './leader-forum-fixture';
+import { seedTrainingFixture, type TrainingFixture } from './training-fixture';
+import { seedEventsFixture, type EventsFixture } from './events-fixture';
+import { seedCampaignsFixture, type CampaignsFixture } from './campaigns-fixture';
 import type { StoragePort } from '@/modules/assets/storage.port';
 import { LONG_PIPELINE } from './long-pipeline';
 import {
@@ -223,6 +227,12 @@ const OWNED_COLLECTIONS = [
   'kpmRecruitTargets',
   // Phase 18.1, with the writer that fills them (`leader-forum-fixture.ts`): the offices' leader meetings and their links.
   'leaderMeetings', 'leaderMeetingShareLinks',
+  // Phase 18.5, with the writer that fills it (`training-fixture.ts`): each member's progress on each module.
+  'trainingProgress',
+  // Phase 18.5, with the writer that fills them (`events-fixture.ts`): members' RSVPs, claims, confirmations and answers.
+  'eventRsvps', 'eventFeedback',
+  // Phase 18.5, with the writer that fills them (`campaigns-fixture.ts`): members' chases, and the standings frozen once final.
+  'campaignChases', 'campaignStandings',
 ] as const;
 
 /**
@@ -265,6 +275,12 @@ export interface SeedResult {
   recruitment: RecruitmentFixture;
   /** The Strategic Leader Forum's meetings and links (`leader-forum-fixture.ts`). */
   forum: LeaderForumFixture;
+  /** Phase 18.5: training progress, the company's material, 0555's bound item 9 (`training-fixture.ts`). */
+  training: TrainingFixture;
+  /** Phase 18.5: the events' RSVPs, claims, confirmations and answers (`events-fixture.ts`). */
+  events: EventsFixture;
+  /** Phase 18.5: the campaigns' new rows and the chases across the cast (`campaigns-fixture.ts`). */
+  campaigns: CampaignsFixture;
 }
 
 async function countRows(): Promise<Record<string, number>> {
@@ -640,22 +656,30 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
      * running and something past. A fixed date would drift into all-past within a month and the
      * phase badge — the thing this task exists to get right — would stop being demonstrable.
      */
-    const day = 86_400_000;
-    const at = (offsetDays: number, hours: number) =>
-      new Date(clock.now().getTime() + offsetDays * day + hours * 3_600_000);
+    /*
+     * *Phase 18.5 (the exit review):* at plausible hours of the office's day — Kickoff 09:00–13:00, PRULink 10:00–13:00
+     * in Jakarta — where they were the run's own minute plus whole hours. Only the running huddle stays relative to the
+     * run: from an hour before it to six hours after, so a walk finds it still running (it ended two hours in).
+     */
+    const hour = 3_600_000;
+    const today = clock.localDateFor(DEFAULT_TENANT_TIMEZONE);
+    const at = (offsetDays: number, localHour: number) => new Date(
+      clock.startOfLocalDay(DEFAULT_TENANT_TIMEZONE, addLocalDays(today, offsetDays)).getTime() + localHour * hour,
+    );
+    const fromNow = (hours: number) => new Date(clock.now().getTime() + hours * hour);
     if (await missing(Events as never)) {
     await Events.insertMany([
       {
         kpmId, code: 'KICKOFF', typeCode: 'TRAINING', title: 'Kickoff 2026',
         blurb: 'What the year looks like, and what we are measured on.',
-        description: '', startsAt: at(14, 2), endsAt: at(14, 6), location: 'Kantor KPM',
+        description: '', startsAt: at(14, 9), endsAt: at(14, 13), location: 'Kantor KPM',
         locationUrl: null,
         audience: { issuer: 'kpm', scope: 'all_agents', inviteeMembershipIds: [] },
       },
       {
         kpmId, code: 'LEADERS_HUDDLE', typeCode: 'RECOGNITION',
         title: 'Leaders’ huddle', blurb: 'Unit numbers, and who needs help this month.',
-        description: '', startsAt: at(0, -1), endsAt: at(0, 2), location: 'Ruang rapat',
+        description: '', startsAt: fromNow(-1), endsAt: fromNow(6), location: 'Ruang rapat',
         locationUrl: null,
         // Leaders by the graph, never by job title — which is what makes this row worth seeding.
         audience: { issuer: 'kpm', scope: 'leaders', inviteeMembershipIds: [] },
@@ -663,7 +687,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       {
         kpmId, code: 'PRULINK_BRIEFING', typeCode: 'PRODUCT_LAUNCH',
         title: 'PRULink briefing', blurb: 'The new rider, and how to position it.',
-        description: '', startsAt: at(-21, 2), endsAt: at(-21, 5), location: 'Online',
+        description: '', startsAt: at(-21, 10), endsAt: at(-21, 13), location: 'Online',
         locationUrl: 'https://meet.example.test/prulink',
         audience: { issuer: 'company', scope: 'all_agents', inviteeMembershipIds: [] },
       },
@@ -3156,6 +3180,52 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     },
     '0555': { kpmId: String(kpm0555._id), owner: { membershipId: owner0555.id, userId: String(owner0555User._id) } },
   });
+  // ------------------- Phase 18.5 — training, as its learners live it (`training-fixture.ts`): 0417's coaching cast's
+  // progress, the company's material by reference, and 0555's item 9 bound for Lina (D-seed-link a). After the
+  // activations, whose 0555 version it repins Lina from; before events and campaigns.
+
+  const yantiFirstMembership = await Memberships.findOne({
+    kpmId: id0417, userId: String(removedUser._id), status: 'removed',
+  }).sort({ joinedAt: 1 }).lean().exec();
+  if (!yantiFirstMembership) throw new Error('Yanti’s first membership is missing: the training fixture keeps her three modules with it');
+  const training = await seedTrainingFixture({
+    clock,
+    storage: options.storage ?? null,
+    companyId: String(prudential._id),
+    office0417: {
+      kpmId: id0417,
+      cast: {
+        rina: rina.id, agus: ab.id, indah: cast.indah.id, dimas: cast.dimas.id, novi: cast.novi.id, wahyu: cast.wahyu.id,
+        siti: cast.siti.id, yantiFirst: String(yantiFirstMembership._id), yanti: yanti.id, budi: budi.id, dewi: dewi.id,
+        maya: admin.id,
+      },
+    },
+    office0555: { kpmId: String(kpm0555._id), lina: agent0555.id },
+  });
+  if (training.files !== 'stored') log(`Training: Prudential's demonstration PDFs ${training.files}.`);
+  // ------------------- Phase 18.5 — events, as their audience lives them (`events-fixture.ts`): 0417's RSVPs, claims,
+  // confirmations and answers over configure()'s three events and four new ones. After the forum; before campaigns.
+
+  const yantiFirst = await Memberships.findOne({
+    kpmId: id0417, userId: String(removedUser._id), status: 'removed',
+  }).sort({ joinedAt: 1 }).lean().exec();
+  if (!yantiFirst) throw new Error('Yanti’s first membership is missing: the events fixture keeps her Bootcamp answer with it');
+  const events = await seedEventsFixture({
+    clock,
+    kpmId: id0417,
+    cast: {
+      owner: owner.id, admin: admin.id, agus: ab.id, sari: sari.id, dewi: dewi.id, rina: rina.id, budi: budi.id,
+      indah: cast.indah.id, dimas: cast.dimas.id, siti: cast.siti.id, novi: cast.novi.id, yantiFirst: String(yantiFirst._id),
+    },
+  });
+  // ------------------- Phase 18.5 — campaigns, as their chasers live them (`campaigns-fixture.ts`): 0417's seasonal and
+  // structural campaigns and the chases across the coaching cast, 0555's one. After training and events.
+
+  const campaigns = await seedCampaignsFixture({
+    clock,
+    office0417: { kpmId: id0417, cast: { rina: rina.id, budi: budi.id, agus: ab.id, dimas: cast.dimas.id, sari: sari.id } },
+    office0555: { kpmId: String(kpm0555._id) },
+  });
   const storedActivations = await ActivationRows.countDocuments({ deletedAt: null }).exec();
 
   /** What each long inbox holds now, as the bell counts it, for the summary below. */
@@ -3219,7 +3289,7 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
 
   KPM 0999 · Suspended Branch
     owner@kpm0999.test                                 Signing in shows the page: the office is suspended
-${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guide}${unitDashboard.guide}${recruitment.guide}${reporting.guide}${cohort.guide}${forum.guide}
+${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guide}${unitDashboard.guide}${recruitment.guide}${reporting.guide}${cohort.guide}${forum.guide}${training.guide}${events.guide}${campaigns.guide}
   NO OFFICE
     newcomer@agencyboost.test                          Brand new — starts at Register KPM
 
@@ -3425,7 +3495,7 @@ Sign in at POST /api/v1/auth/login, then send the access token as
     ? 'This run wrote 0 rows: everything it seeds was already there.'
     : `This run wrote ${total} rows: ${Object.entries(written).map(([name, added]) => `${name} +${added}`).join(', ')}`);
 
-  return { written, pronounsSet, coaching, calendar, activation, recruitment, forum };
+  return { written, pronounsSet, coaching, calendar, activation, recruitment, forum, training, events, campaigns };
 }
 
 async function main(): Promise<void> {

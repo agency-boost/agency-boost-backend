@@ -44,3 +44,34 @@ export const SEED_EVENT_TYPES = [
   { code: 'RECRUITMENT', label: 'Recruitment', emoji: '🤝', color: '#9B51E0' },
   { code: 'COMMUNITY', label: 'Community', emoji: '🎉', color: '#EB5757' },
 ] as const;
+
+/**
+ * **What a member is to an event they were invited to** — `EVENT_ATTENDANCE_STATUS` (P18.5-T5 AC-8; D-status, OD-31).
+ *
+ * `unconfirmed` is D-status's value: a member who RSVP'd or said they came, after the event ended, whom no confirmer
+ * has marked yet. Calling them a *no-show* because nobody has checked is the dishonesty exit test 2 guards against from
+ * the other side, so `no_show` is only ever a confirmer's mark. Computed in one place, `domain/metrics/event-attendance.ts`.
+ */
+export const EVENT_ATTENDANCE_STATUSES = [
+  'attended', 'registered', 'unconfirmed', 'no_show', 'not_registered',
+] as const;
+export type EventAttendanceStatus = (typeof EVENT_ATTENDANCE_STATUSES)[number];
+
+/**
+ * **The NPS scale and its buckets** (`metrics-and-definitions.md` §B, `NPS_*`; `KPM_Owner.html:3754-3761`,
+ * `Overall.html:8658-8664`). A score is a whole number from `SCALE_MIN` to `SCALE_MAX`; a promoter scores at least
+ * `PROMOTER_MIN`, a detractor at most `DETRACTOR_MAX`, a passive between. Fixed: the platform's, not an office's.
+ * Served to the screens (`limits.nps`, `constants`), never re-declared there (invariant §7).
+ */
+export const NPS = {
+  SCALE_MIN: 0,
+  SCALE_MAX: 10,
+  PROMOTER_MIN: 9,
+  DETRACTOR_MAX: 6,
+} as const;
+
+/**
+ * The longest *Why?* or *How can we improve?* answer, in characters after trimming (P18.5-T6 AC-3). Either beyond it
+ * is refused `400`, never cut. Served as `limits.feedbackTextMax`.
+ */
+export const EVENT_FEEDBACK_TEXT_MAX = 1000;

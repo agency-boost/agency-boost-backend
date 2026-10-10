@@ -6,28 +6,42 @@ import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
+import { RequestContext } from '@/common/context/request-context';
 import {
-  ADMIN, AGENT, declaredPermissions, EVERY_MEMBER, NOT_ADMINISTRATORS, OWNER, session,
+  AAB, AB, ADMIN, AGENT, declaredPermissions, NOT_ADMINISTRATORS, OWNER, session,
   productionPipe, StubAuth,
 } from '../../../test/http-permissions';
 import { EventController } from './event.controller';
 import { EventService } from './event.service';
+import { EventRollCallService } from './event-roll-call.service';
 import { listenOnLoopback } from '../../../test/listen';
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 
+/** A read-only support session as the Owner (P4-T10): reads what the Owner reads, writes nothing. */
+const READ_ONLY_OWNER = new RequestContext(
+  OWNER.userId, 'none', OWNER.membership, 'u-support', null, false, true,
+);
+
 /** Every route, and the permission it must declare. */
 const ROUTES: Record<string, string> = {
-  listTypes: 'tenant_config:read',
+  // The Phase 18.5 exit review (B1): archived types and per-type counts are the office's administration's.
+  listTypes: 'event_settings:read',
   createType: 'tenant_config:write',
   updateType: 'tenant_config:write',
   archiveType: 'tenant_config:write',
   restoreType: 'tenant_config:write',
-  list: 'tenant_config:read',
+  // P18.5-T5 AC-2: the list is the office's administration's (the leak), with the roll call and the picker's people.
+  list: 'event_settings:read',
   create: 'tenant_config:write',
   update: 'tenant_config:write',
   archive: 'tenant_config:write',
   restore: 'tenant_config:write',
+  invitees: 'event_settings:read',
+  // The roll call's read is guarded by the confirm it serves (the phase file's *Settled already*).
+  rollCall: 'event_attendance:confirm',
+  saveRollCall: 'event_attendance:confirm',
+  feedbackSummary: 'event_feedback:read',
 };
 
 const anEvent = (over: Record<string, unknown> = {}) => ({
@@ -58,7 +72,10 @@ describe('an office’s events over HTTP (P5-T6)', () => {
 
     const moduleRef = await Test.createTestingModule({
       controllers: [EventController],
-      providers: [{ provide: EventService, useValue: wired.events }],
+      providers: [
+        { provide: EventService, useValue: wired.events },
+        { provide: EventRollCallService, useValue: wired.eventRollCalls },
+      ],
     }).compile();
 
     app = moduleRef.createNestApplication();
@@ -85,14 +102,56 @@ describe('an office’s events over HTTP (P5-T6)', () => {
   });
 
   describe('who may reach it', () => {
-    it.each(EVERY_MEMBER)('shows %s the types and the events', async (_name, who) => {
-      session.current = who;
+    it.each([['the Owner', OWNER], ['the Admin', ADMIN], ['a read-only session as the Owner', READ_ONLY_OWNER]])(
+      'shows %s the types with their counts, archived ones on request', async (_name, who) => {
+        session.current = who;
 
-      const types = await request(app.getHttpServer()).get(`${url}/types`).expect(200);
-      await request(app.getHttpServer()).get(url).expect(200);
+        const types = await request(app.getHttpServer()).get(`${url}/types?includeArchived=true`).expect(200);
 
-      expect(types.body).toHaveLength(5);
-    });
+        expect(types.body).toHaveLength(5);
+        expect(types.body[0]).toHaveProperty('events');
+      },
+    );
+
+    /*
+     * The Phase 18.5 exit review (B1): every member read archived types and how many events — leader-only and
+     * chosen-people ones included — named each. Members read the active types, with no counts, in `/kpm/config`.
+     */
+    it.each([['an AB', AB], ['an AAB', AAB], ['an agent', AGENT]])(
+      'P18.5-T5 AC-2 refuses %s the types, archived ones and counts included', async (_name, who) => {
+        session.current = who;
+        const res = await request(app.getHttpServer()).get(`${url}/types?includeArchived=true`).expect(403);
+        expect(res.body.error.code).toBe('PERM_DENIED');
+        expect(JSON.stringify(res.body)).not.toContain('TRAINING');
+      },
+    );
+
+    /*
+     * P18.5-T5 AC-2 — **the leak, closed.** This test asserted the opposite until Phase 18.5: every member read the
+     * office's events, leader-only ones and their invitee lists included, against ADR-0039 and the Owner's own manual.
+     */
+    it.each([['an AB', AB], ['an AAB', AAB], ['an agent', AGENT]])(
+      'P18.5-T5 AC-2 refuses %s the events list, 403 with no event in the body', async (_name, who) => {
+        session.current = OWNER;
+        await request(app.getHttpServer()).post(url).send(anEvent({
+          audience: { issuer: 'kpm', scope: 'leaders' },
+        })).expect(201);
+
+        session.current = who;
+        const res = await request(app.getHttpServer()).get(url).expect(403);
+
+        expect(res.body.error.code).toBe('PERM_DENIED');
+        expect(JSON.stringify(res.body)).not.toContain('KICKOFF');
+        expect(JSON.stringify(res.body)).not.toContain('inviteeMembershipIds');
+      },
+    );
+
+    it.each([['the Owner', OWNER], ['the Admin', ADMIN], ['a read-only session as the Owner', READ_ONLY_OWNER]])(
+      'P18.5-T5 AC-2 shows %s the events list', async (_name, who) => {
+        session.current = who;
+        await request(app.getHttpServer()).get(url).expect(200);
+      },
+    );
 
     it.each(NOT_ADMINISTRATORS)('refuses %s every write', async (_name, who) => {
       session.current = who;

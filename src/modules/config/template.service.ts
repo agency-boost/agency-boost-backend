@@ -5,7 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
-import { resolveDisplayUnit } from '@/domain/constants';
+import { activationLinkKinds, resolveDisplayUnit } from '@/domain/constants';
 import {
   CompanyTemplate, CompanyTemplateDocument, TemplateKind,
 } from './company-template.schema';
@@ -57,6 +57,13 @@ export interface TemplateView {
    * is not known (P5-T12). Counted apart from `officesBehind` rather than folded into it.
    */
   officesUnrecorded: number;
+  /**
+   * **`activation_checklist` only: what each link kind does, and whether it completes on its own** (P18.5-T3
+   * AC-6, I-80) — the registry, served, so the tab's *Auto* badge reads `live` from the server as the office's
+   * screen does, and never re-declares it. `training` answers for every `training:<moduleCode>` link. Absent for
+   * every other kind.
+   */
+  linkKinds?: ReturnType<typeof activationLinkKinds>;
 }
 
 /**
@@ -153,6 +160,7 @@ export class TemplateService {
       publishedVersion: null,
       officesBehind: standing.behind,
       officesUnrecorded: standing.unrecorded,
+      ...linkKindsOf(kind),
     };
   }
 
@@ -519,6 +527,12 @@ export class TemplateService {
       publishedVersion,
       officesBehind: standing.behind,
       officesUnrecorded: standing.unrecorded,
+      ...linkKindsOf(doc.kind),
     };
   }
+}
+
+/** The link registry an `activation_checklist` read carries (P18.5-T3 AC-6); nothing for any other kind. */
+function linkKindsOf(kind: TemplateKind): Pick<TemplateView, 'linkKinds'> {
+  return kind === 'activation_checklist' ? { linkKinds: activationLinkKinds() } : {};
 }

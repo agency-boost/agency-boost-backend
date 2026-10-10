@@ -1,4 +1,5 @@
 import { metricByKey } from '@/domain/constants';
+import { combine, criterionMet } from './criteria';
 
 /**
  * `MOC_STATUS` — Maintenance of Contract (`metrics-and-definitions.md` §A.7; Phase 18, OD-22 → option 1,
@@ -64,31 +65,11 @@ export function mocRuleFor<R extends MocRule>(rules: readonly R[], orgLevelCode:
   return rules.find((rule) => rule.appliesToOrgLevelCodes.includes(orgLevelCode)) ?? null;
 }
 
-function compare(value: number, comparator: string, threshold: number): boolean {
-  switch (comparator) {
-    case 'gte': return value >= threshold;
-    case 'gt': return value > threshold;
-    case 'lte': return value <= threshold;
-    case 'lt': return value < threshold;
-    default: return value === threshold;
-  }
-}
-
-/** One criterion: decided over its input, or `null` while the input is not uploaded — never ✕ on a guess. */
-export function criterionMet(input: MocInput | undefined, comparator: string, threshold: number): boolean | null {
-  if (input === undefined || input.current === null) return null;
-  return compare(input.current, comparator, threshold);
-}
-
-/** Three-valued AND (`all`) or OR (`any`) — Kleene's. */
-export function combine(values: readonly (boolean | null)[], mode: string): boolean | null {
-  if (mode === 'any') {
-    if (values.includes(true)) return true;
-    return values.includes(null) ? null : false;
-  }
-  if (values.includes(false)) return false;
-  return values.includes(null) ? null : true;
-}
+/*
+ * The three-valued rule itself is `criteria.ts`'s since P18.5-T8 (AC-4): one rule for MOC and a campaign's
+ * requirements alike. Re-exported here so this module's callers and its spec read it where they always did.
+ */
+export { combine, criterionMet };
 
 /** The dialog's labels (`KPM_Owner.html:3302-3313`), verbatim; a criterion the prototype never drew, by its registry name. */
 export function criterionLabel(metricKey: string, rule: Pick<MocRule, 'appliesToOrgLevelCodes'>): string {

@@ -48,6 +48,8 @@ import {
 import {
   EventAudienceSchema, EventSchema, EventTypeSchema,
 } from '@/modules/events/event.schema';
+import { EventRsvpSchema } from '@/modules/events/event-rsvp.schema';
+import { EventFeedbackSchema } from '@/modules/events/event-feedback.schema';
 import {
   ActivityLogCorrectionSchema, ActivityLogEntrySchema, ActivityLogSchema,
 } from '@/modules/activity/activity-log.schema';
@@ -67,6 +69,8 @@ import {
 import {
   CampaignSchema, CriteriaGroupSchema, QualificationRuleSchema, RequirementSchema,
 } from '@/modules/campaigns/campaign.schema';
+import { CampaignChaseSchema } from '@/modules/campaigns/campaign-chase.schema';
+import { CampaignStandingSchema } from '@/modules/campaigns/campaign-standing.schema';
 import {
   CapabilityCatalogSchema, CapabilityEntrySchema, CapabilityGridRowSchema,
   CapabilityStageRowSchema,
@@ -88,6 +92,7 @@ import {
   LeaderMeetingActionItemSchema, LeaderMeetingAgendaItemSchema, LeaderMeetingAgendaSchema, LeaderMeetingSchema,
 } from '@/modules/leader-meetings/leader-meeting.schema';
 import { LeaderMeetingShareLinkSchema } from '@/modules/leader-meetings/leader-meeting-share-link.schema';
+import { TrainingProgressSchema } from '@/modules/training/training-progress.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -118,6 +123,9 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['kpmProductConfigs', KpmProductConfigSchema],
   ['eventTypes', EventTypeSchema],
   ['events', EventSchema],
+  // P18.5-T5, T6: one row per (event, membership) each — the RSVP, the claim and the confirmation; the answer.
+  ['eventRsvps', EventRsvpSchema],
+  ['eventFeedback', EventFeedbackSchema],
   ['activityLogs', ActivityLogSchema],
   ['leads', LeadSchema],
   ['goals', GoalSchema],
@@ -127,6 +135,9 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['dataUploadBatches', DataUploadBatchSchema],
   ['dataUploadRows', DataUploadRowSchema],
   ['campaigns', CampaignSchema],
+  // P18.5-T7, T8: a member's chase, one per campaign; a final standing, one per campaign, window and member.
+  ['campaignChases', CampaignChaseSchema],
+  ['campaignStandings', CampaignStandingSchema],
   ['capabilityCatalogs', CapabilityCatalogSchema],
   ['coachingSessions', CoachingSessionSchema],
   ['coachingProfiles', CoachingProfileSchema],
@@ -143,6 +154,8 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   // and the links that share one, opened by `(kpmId, tokenHash)`. Every index `kpmId`-led.
   ['leaderMeetings', LeaderMeetingSchema],
   ['leaderMeetingShareLinks', LeaderMeetingShareLinkSchema],
+  // P18.5-T1 AC-2: one member's progress on one module, unique per (office, member, module), every index `kpmId`-led.
+  ['trainingProgress', TrainingProgressSchema],
 ];
 
 /**
@@ -478,6 +491,8 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [EventTypeSchema, 'EventTypeSchema'],
   [EventSchema, 'EventSchema'],
   [EventAudienceSchema, 'EventAudienceSchema'],
+  [EventRsvpSchema, 'EventRsvpSchema'],
+  [EventFeedbackSchema, 'EventFeedbackSchema'],
   [ActivityLogSchema, 'ActivityLogSchema'],
   [LeadSchema, 'LeadSchema'],
   [LeadContactSchema, 'LeadContactSchema'],
@@ -496,6 +511,8 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
   [ActivityLogCorrectionSchema, 'ActivityLogCorrectionSchema'],
   [CampaignSchema, 'CampaignSchema'],
+  [CampaignChaseSchema, 'CampaignChaseSchema'],
+  [CampaignStandingSchema, 'CampaignStandingSchema'],
   [QualificationRuleSchema, 'QualificationRuleSchema'],
   [RequirementSchema, 'RequirementSchema'],
   [CriteriaGroupSchema, 'CriteriaGroupSchema'],
@@ -549,6 +566,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [LeaderMeetingAgendaItemSchema, 'LeaderMeetingAgendaItemSchema'],
   [LeaderMeetingActionItemSchema, 'LeaderMeetingActionItemSchema'],
   [LeaderMeetingShareLinkSchema, 'LeaderMeetingShareLinkSchema'],
+  [TrainingProgressSchema, 'TrainingProgressSchema'],
 ]);
 
 function schemaExportName(schema: Schema): string {

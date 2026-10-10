@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ACTIVATION, PERFORMANCE, RATIO_BENCHMARKS } from '@/domain/constants';
 import {
-  CAMPAIGN_EVALUATION_PHASE, METRIC_REGISTRY as SERVED, REQUIREMENT_METRICS,
+  CAMPAIGN_EVALUATION_PHASE, CAMPAIGN_METRICS, METRIC_REGISTRY as SERVED, REQUIREMENT_METRICS, isCampaignMetric,
 } from '@/domain/constants/metrics';
 import { METRIC_IDS, METRIC_REGISTRY, metric, define, join as joinLists } from './registry';
 
@@ -283,6 +283,8 @@ describe('the metric registry (P4-T4)', () => {
       MAA_MONTHLY_AVG: 18.1,
       CASE_SUBMISSIONS: 18.1,
       AVERAGE_CASE_SIZE_REALISED: 18.1,
+      // P18.5-T8 (OD-152 → option 3): the file's `recruitment` column, the campaigns' *New Hire*.
+      NEW_HIRES: 18.5,
     };
     const existedBefore = (id: string) => !(id in REGISTERED_SINCE);
 
@@ -322,7 +324,8 @@ describe('the metric registry (P4-T4)', () => {
       // And no phase that plan gave no metric to: an old-plan 12 left behind would have read as
       // Calendar's, 16 was Billing, 17 Recruitment tools, 19 go-live. Today's set is pinned below.
       const phases = [...new Set(METRIC_IDS.map(sept29Phase))].sort((a, b) => a - b);
-      expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 14, 15, 18, 18.1]);
+      // 18.5 since P18.5-T8 registered *New Hire* (`NEW_HIRES`), a metric that plan never had.
+      expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 14, 15, 18, 18.1, 18.5]);
     });
 
     it('evaluated campaigns in Phase 14 under that plan, the old plan’s 12: where campaign qualification is computed', () => {
@@ -422,6 +425,8 @@ describe('the metric registry (P4-T4)', () => {
           'RECRUITMENT_EXPECTED_TO_CLOSE', 'RECRUITMENT_PIPELINE_NOW', 'RECRUITMENT_SUCCESS_RATE', 'ROLLING_PERSISTENCY',
           'SELLING_RECRUITMENT_BALANCE', 'SELLING_SUCCESS_RATE', 'SUB_PERIOD_ACTIVITY_TARGET', 'SUMMARY_ACTIVITY_TARGET',
           'TRAINING_COMPLETION_PCT',
+          // P18.5-T8 (OD-152): the campaigns' *New Hire*, registered at campaign evaluation.
+          'NEW_HIRES',
         ].sort());
       });
 
@@ -577,6 +582,74 @@ describe('the metric registry (P4-T4)', () => {
       expect(metric('AVERAGE_CASE_SIZE_REALISED').unit).toBe(metric('APE_ACHIEVED').unit);
       expect(metric('NEW_ACTIVE_AGENTS_MONTHLY_AVG').label).toMatch(/avg\. monthly/);
       expect(metric('MAA_MONTHLY_AVG').label).toMatch(/^Avg\. Monthly AA$/);
+    });
+  });
+
+  describe('P18.5-T5 AC-8, P18.5-T6 AC-6 — the events’ three metrics, per event (D-status, D-evaluable)', () => {
+    it('P18.5-T5 AC-8 registers the status, the rate and the NPS at 18.5, point in time, with no threshold', () => {
+      expect(metric('EVENT_ATTENDANCE_STATUS')).toMatchObject({ unit: 'enum', period: 'POINT_IN_TIME', threshold: null, phase: 18.5 });
+      expect(metric('EVENT_ATTENDANCE_RATE')).toMatchObject({ unit: 'percentage', period: 'POINT_IN_TIME', threshold: null, phase: 18.5 });
+      expect(metric('EVENT_NPS')).toMatchObject({ unit: 'score', period: 'POINT_IN_TIME', threshold: null, phase: 18.5 });
+    });
+
+    it('P18.5-T6 AC-6 none of the three is campaign-evaluable: two figures per event, and a status, never a member’s reading', () => {
+      for (const key of ['EVENT_ATTENDANCE_STATUS', 'EVENT_ATTENDANCE_RATE', 'EVENT_NPS']) {
+        expect([key, isCampaignMetric(key)]).toEqual([key, false]);
+        expect(CAMPAIGN_METRICS.map((m) => m.key)).not.toContain(key);
+      }
+    });
+  });
+
+  describe('P18.5-T8 AC-1, AC-7 — what a campaign may name, and over what (D-evaluable, D-period)', () => {
+    /** The evaluable set, by key: a member's own production over months, their logged activity, the five ratios, their unit's active agents. */
+    const EVALUABLE = [
+      'APE_ACHIEVED', 'ROLLING_PERSISTENCY', 'NEW_ACTIVE_AGENTS', 'MAA_COUNT_IN_UNIT', 'NEW_HIRES', 'CASCADE_ACTIVITY_TOUCHES',
+      'SELLING_RECRUITMENT_BALANCE', 'SELLING_SUCCESS_RATE', 'RECRUITMENT_SUCCESS_RATE', 'LEADS_PER_ACTIVITY', 'MEETING_PER_APPROACH',
+    ];
+
+    it('P18.5-T8 AC-1 flags exactly the evaluable set, a second flag beside `requirable`', () => {
+      expect(CAMPAIGN_METRICS.map((m) => m.key).sort()).toEqual([...EVALUABLE].sort());
+      // Every one is also requirable: the campaign set is a subset of what a carrier rule may name.
+      for (const id of EVALUABLE) expect([id, REQUIREMENT_METRICS.some((m) => m.key === id)]).toEqual([id, true]);
+      // `requirable` is untouched: still every metric but the office's counts.
+      expect(REQUIREMENT_METRICS.length).toBeGreaterThan(CAMPAIGN_METRICS.length);
+    });
+
+    it('P18.5-T8 AC-1 leaves out a self-declared toggle, the per-event rates, every target, enum and boolean', () => {
+      for (const id of [
+        'TRAINING_COMPLETION_PCT', 'EVENT_ATTENDANCE_RATE', 'EVENT_NPS', 'EVENT_ATTENDANCE_STATUS',
+        'SUB_PERIOD_ACTIVITY_TARGET', 'APE_TARGET', 'LEAD_TARGET', 'GOAL_PACE_STATUS', 'PACING_TO_MAA',
+        'CAMPAIGN_QUALIFICATION_STATUS', 'MOC_STATUS', 'PRODUCTION_CLUB_TIER', 'MONTHLY_ACTIVE_AGENT', 'LEADERS_USED',
+      ]) {
+        expect([id, isCampaignMetric(id)]).toEqual([id, false]);
+      }
+      expect(isCampaignMetric('NOT_A_METRIC')).toBe(false);
+    });
+
+    it('P18.5-T8 AC-1 reads the file for production, the log for activity, and the unit only for active agents', () => {
+      const reading = (id: string) => SERVED.find((m) => m.key === id)?.campaign;
+      for (const id of ['APE_ACHIEVED', 'NEW_ACTIVE_AGENTS', 'NEW_HIRES']) {
+        expect([id, reading(id)]).toEqual([id, { source: 'file', aggregate: 'sum', subject: 'self' }]);
+      }
+      expect(reading('ROLLING_PERSISTENCY')).toEqual({ source: 'file', aggregate: 'latest', subject: 'self' });
+      expect(reading('MAA_COUNT_IN_UNIT')).toEqual({ source: 'file', aggregate: 'latest', subject: 'unit' });
+      expect(reading('CASCADE_ACTIVITY_TOUCHES')).toEqual({ source: 'activity', aggregate: 'sum', subject: 'self' });
+      for (const id of ['SELLING_RECRUITMENT_BALANCE', 'SELLING_SUCCESS_RATE', 'RECRUITMENT_SUCCESS_RATE', 'LEADS_PER_ACTIVITY', 'MEETING_PER_APPROACH']) {
+        expect([id, reading(id)]).toEqual([id, { source: 'activity', aggregate: 'ratio', subject: 'self' }]);
+      }
+    });
+
+    it('P18.5-T8 AC-1 registers New Hire over the file’s recruitment column: a count, 18.5, no threshold', () => {
+      expect(metric('NEW_HIRES')).toMatchObject({ label: 'New Hire', unit: 'count', phase: 18.5, period: 'CALENDAR_MONTH', threshold: null });
+      // The same shape as the file's other count a campaign reads.
+      expect(metric('NEW_HIRES').period).toBe(metric('NEW_ACTIVE_AGENTS').period);
+    });
+
+    it('P18.5-T8 AC-7 reads CAMPAIGN_QUALIFICATION_STATUS over the campaign’s own window (carry #3)', () => {
+      expect(metric('CAMPAIGN_QUALIFICATION_STATUS').period).toBe('PROGRAMME_WINDOW');
+      // `CALENDAR_YEAR` stays the code's token for a year; there is no `CALENDAR_YTD` (D-period).
+      expect(metric('APE_ACHIEVED').period).toBe('CALENDAR_YEAR');
+      expect(METRIC_IDS.map((id) => metric(id).period)).not.toContain('CALENDAR_YTD');
     });
   });
 

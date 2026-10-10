@@ -11117,7 +11117,7 @@
     },
     "/api/v1/kpm/settings/training": {
       "get": {
-        "description": "Categories, each with its skills, each with its modules, in display order. **Drafts are included**: this is the office's configuration, not what agents are offered, which is `GET /kpm/config`. `includeArchived=true` is the settings screen's, so an Owner can bring a row back.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Categories, each with its skills, each with its modules, in display order. **Drafts are included**: this is the office's configuration, not what agents are offered, which is `GET /kpm/config`. `includeArchived=true` is the settings screen's, so an Owner can bring a row back.\n\n**Requires `training_settings:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TrainingController_list_v1",
         "parameters": [
           {
@@ -11164,7 +11164,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `training_settings:read`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11193,7 +11193,7 @@
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "tenant_config:read"
+        "x-required-permission": "training_settings:read"
       }
     },
     "/api/v1/kpm/settings/training/uploads": {
@@ -11356,7 +11356,7 @@
     },
     "/api/v1/kpm/settings/training/modules/{code}/content": {
       "get": {
-        "description": "Both halves. A screen offering *\"use the company's material again\"* has to say what that restores, and an Owner replacing something needs to see what they are replacing.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Both halves. A screen offering *\"use the company's material again\"* has to say what that restores, and an Owner replacing something needs to see what they are replacing.\n\n**Requires `training_settings:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TrainingController_readContent_v1",
         "parameters": [
           {
@@ -11390,7 +11390,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `training_settings:read`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11429,7 +11429,7 @@
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "tenant_config:read"
+        "x-required-permission": "training_settings:read"
       },
       "put": {
         "description": "The whole document, not a patch — every edit is held until Save and sent together, which is what makes Cancel mean something. It lands on the office's half; the company's row is never touched, so no other office changes.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -11606,7 +11606,7 @@
     },
     "/api/v1/kpm/settings/training/modules/{code}/content/url": {
       "get": {
-        "description": "Signed and expiring in 300 seconds; nothing here is publicly readable. Which registry answers depends on which half of the module the item is in, never on what the caller says — a key in neither half is a 404, so knowing one buys nothing.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Signed and expiring in 300 seconds; nothing here is publicly readable. Which registry answers depends on which half of the module the item is in, never on what the caller says — a key in neither half is a 404, so knowing one buys nothing.\n\n**Requires `training_settings:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TrainingController_contentUrl_v1",
         "parameters": [
           {
@@ -11658,7 +11658,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `training_settings:read`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11697,12 +11697,405 @@
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "tenant_config:read"
+        "x-required-permission": "training_settings:read"
+      }
+    },
+    "/api/v1/training/progress": {
+      "get": {
+        "description": "Every category the office offers, in order, each with its skills and their published modules, your status and the counts at every level (`TRAINING_COMPLETION_PCT`: offered modules only, *Done* only). With `for`, the same for somebody your grant reaches — the people you coach, or the office for its Owner and Admins — with the modules they did that are no longer offered; a read of somebody else’s writes one entry to the audit log, your own none.\n\n**Requires `training_progress:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TrainingProgressController_read_v1",
+        "parameters": [
+          {
+            "name": "for",
+            "required": false,
+            "in": "query",
+            "description": "The **membership** whose training to read. Omitted, or your own, it is yours. Anybody else is read as far as your grant reaches: the people you coach, or the whole office for its Owner and Admins. Every read of somebody else’s is recorded.",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingProgressDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `training_progress:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — `for` names nobody your grant reaches: a peer’s agent for a leader, anybody else for an agent, or somebody in another office. The cases are deliberately indistinguishable. Your own membership reads your own.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The training offered, with your status on each module — or a coachee’s",
+        "tags": [
+          "training"
+        ],
+        "x-required-permission": "training_progress:read"
+      }
+    },
+    "/api/v1/training/modules/{code}": {
+      "get": {
+        "description": "Its title, category and skill, its items — files, videos, links — your status, and the items you have opened. Content is what the office shows now; a title waits for the office’s publish.\n\n**Requires `training_progress:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TrainingProgressController_module_v1",
+        "parameters": [
+          {
+            "name": "code",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingModulePageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a query parameter: the route takes none.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `training_progress:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — the module is not offered to you: a draft, withdrawn since the office last published, not yet published by the office, or no such module here. Answered exactly as a module in another office is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One module, as offered to you",
+        "tags": [
+          "training"
+        ],
+        "x-required-permission": "training_progress:read"
+      }
+    },
+    "/api/v1/training/modules/{code}/items/{itemId}/open": {
+      "post": {
+        "description": "A file or a video is answered an address signed for 300 seconds; a link, its own address. The first open is recorded, so the *Opened* mark survives a reload. Nothing is recorded in a support session.\n\n**Requires `training_progress:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TrainingProgressController_open_v1",
+        "parameters": [
+          {
+            "name": "code",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "itemId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenTrainingItemDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingOpenDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `training_progress:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — the module is not offered to you: a draft, withdrawn since the office last published, not yet published by the office, or no such module here. Answered exactly as a module in another office is. Or the item is not one of the module’s now.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ASSET_NOT_CONFIRMED` — the file has not finished uploading.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Open one item of a module",
+        "tags": [
+          "training"
+        ],
+        "x-required-permission": "training_progress:read"
+      }
+    },
+    "/api/v1/training/modules/{code}/progress": {
+      "put": {
+        "description": "*Not started*, *In progress* or *Done* — set, never toggled, and your own word (nothing verifies it). *Done* back to *Not started* is allowed. A change is audited; marking a module *Done* completes an activation item bound to it. Refused in a support session.\n\n**Requires `training_progress:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TrainingProgressController_setStatus_v1",
+        "parameters": [
+          {
+            "name": "code",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTrainingStatusDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingModulePageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `training_progress:update`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — the module is not offered to you: a draft, withdrawn since the office last published, not yet published by the office, or no such module here. Answered exactly as a module in another office is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set your status on a module",
+        "tags": [
+          "training"
+        ],
+        "x-required-permission": "training_progress:update"
       }
     },
     "/api/v1/kpm/settings/activation-checklist": {
       "get": {
-        "description": "The published version hires starting now are given, the working draft if there is one, and the office's activation window. Each item carries its link, resolved: what it waits for, where that sends a reader, and whether an evaluator exists yet.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The published version hires starting now are given, the working draft if there is one, and the office's activation window. Each item carries its link, resolved: what it waits for, where that sends a reader, and whether an evaluator exists yet.\n\n**Requires `activation_settings:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ActivationController_read_v1",
         "parameters": [],
         "responses": {
@@ -11727,7 +12120,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `activation_settings:read`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11756,7 +12149,7 @@
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "tenant_config:read"
+        "x-required-permission": "activation_settings:read"
       },
       "put": {
         "description": "The whole checklist, not a patch: order is the order of the lists sent. Refuses a duplicate code, a link this product does not have, and a training link to a module the office does not offer — naming every problem at once. Nothing reaches a hire until it is published.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -14011,7 +14404,7 @@
     },
     "/api/v1/kpm/settings/events/types": {
       "get": {
-        "description": "Each with how many events name it, so *Archive* can say what it affects.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Each with how many events name it, so *Archive* can say what it affects, archived ones on request. The Owner’s and the Admins’ alone: the counts include leader-only and chosen-people events, and no field screen reads this — members read the active types in `/kpm/config`.\n\n**Requires `event_settings:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "EventController_listTypes_v1",
         "parameters": [
           {
@@ -14058,7 +14451,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `event_settings:read`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14087,7 +14480,7 @@
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "tenant_config:read"
+        "x-required-permission": "event_settings:read"
       },
       "post": {
         "operationId": "EventController_createType_v1",
@@ -14423,7 +14816,7 @@
     },
     "/api/v1/kpm/settings/events": {
       "get": {
-        "description": "In start order, each with its phase **derived now** — upcoming, running or past — and the calendar day in the office’s own timezone, so no browser re-derives it in its own.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "In start order, each with its phase **derived now** — upcoming, running or past — and the calendar day in the office’s own timezone, so no browser re-derives it in its own. The Owner’s and the Admins’ alone: it carries leader-only events and invitee lists.\n\n**Requires `event_settings:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "EventController_list_v1",
         "parameters": [
           {
@@ -14470,7 +14863,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `event_settings:read`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14499,7 +14892,7 @@
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "tenant_config:read"
+        "x-required-permission": "event_settings:read"
       },
       "post": {
         "description": "`endsAt` is required and must be after `startsAt`: without an end, *\"is it running now?\"* has no answer and a status has to be typed in by hand, which is the prototype’s defect.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -14581,6 +14974,7 @@
     },
     "/api/v1/kpm/settings/events/{id}": {
       "patch": {
+        "description": "An event that has ended and that somebody has answered — an RSVP, a claim, a confirmation or feedback — cannot be moved so that it ends in the future.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "EventController_update_v1",
         "parameters": [
           {
@@ -14653,6 +15047,16 @@
               }
             }
           },
+          "409": {
+            "description": "`EVENT_HAS_RESPONSES` — an answered event moved back into the future.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "500": {
             "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
             "content": {
@@ -14673,8 +15077,7 @@
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "tenant_config:write",
-        "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
+        "x-required-permission": "tenant_config:write"
       }
     },
     "/api/v1/kpm/settings/events/{id}/archive": {
@@ -14831,6 +15234,896 @@
         ],
         "x-required-permission": "tenant_config:write",
         "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
+      }
+    },
+    "/api/v1/kpm/settings/events/invitees": {
+      "get": {
+        "description": "Every active member of the office, with the rung and whether they lead somebody now — *Chosen leaders* lists only those. Searched on the screen; takes no parameter.\n\n**Requires `event_settings:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "EventController_invitees_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventInviteeListDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `event_settings:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The audience picker’s people (D-picker)",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "event_settings:read"
+      }
+    },
+    "/api/v1/kpm/settings/events/{id}/attendance": {
+      "get": {
+        "description": "The audience as at the event’s start, each with their RSVP or claim, the confirmation, the status and whether they answered; the attendance rate; and whether the reader may confirm now. Guarded by the confirm it serves (as `leader_request:approve` guards its decline), so a read-only support session is refused it by its verb. Readable at any phase; another office’s event is `404`.\n\n**Requires `event_attendance:confirm`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "EventController_rollCall_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RollCallDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `event_attendance:confirm`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The roll call (D-rollcall)",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "event_attendance:confirm"
+      },
+      "put": {
+        "description": "`true` attended, `false` marked absent, `null` cleared. Only a confirmation makes *attended*; nobody confirms their own. Changed rows only, each audited with before, after and the confirmer.\n\n**Requires `event_attendance:confirm`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "EventController_saveRollCall_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRollCallDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RollCallDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`EVENT_ATTENDANCE_SELF` — the caller’s own membership; nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `event_attendance:confirm`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`EVENT_NOT_ENDED` — before the event ends.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Confirm attendance (OD-31)",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "event_attendance:confirm"
+      }
+    },
+    "/api/v1/kpm/settings/events/{id}/feedback": {
+      "get": {
+        "description": "Every answer from the audience with its author’s name, the NPS over confirmed attendees (`null` with none), and how many await confirmation. The office’s administration’s alone: a member’s own grant is refused `403`.\n\n**Requires `event_feedback:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "EventController_feedbackSummary_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackSummaryDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `event_feedback:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The *Feedback Summary* (OD-151)",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "event_feedback:read"
+      }
+    },
+    "/api/v1/events": {
+      "get": {
+        "description": "Active events whose audience holds the reader as at the event’s start (an upcoming one: the office now), in start order, each with the reader’s own RSVP, claim and answer, the day and time in the office’s zone, the limits the form needs and what the reader may do. Takes no parameter.\n\n**Requires `event:read_list`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "EventGuestController_list_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestEventListDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `event:read_list`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The reader’s events",
+        "tags": [
+          "events"
+        ],
+        "x-required-permission": "event:read_list"
+      }
+    },
+    "/api/v1/events/{eventId}": {
+      "get": {
+        "description": "Another office’s event, an archived one and one whose audience did not hold the reader **as at its start** all answer `404`, deliberately indistinguishable: a `403` would confirm the event exists.\n\n**Requires `event:read_list`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "EventGuestController_read_v1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestEventDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `event:read_list`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One event, as the modal reads it",
+        "tags": [
+          "events"
+        ],
+        "x-required-permission": "event:read_list"
+      }
+    },
+    "/api/v1/events/{eventId}/rsvp": {
+      "post": {
+        "description": "Idempotent. A running event still takes it; from `endsAt` it is refused. Another office’s event, an archived one and one whose audience did not hold the reader **as at its start** all answer `404`, deliberately indistinguishable: a `403` would confirm the event exists.\n\n**Requires `event:rsvp`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "EventGuestController_rsvp_v1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoEventBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestEventDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `event:rsvp`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`EVENT_RSVP_CLOSED` — the event has ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "*Join event*",
+        "tags": [
+          "events"
+        ],
+        "x-required-permission": "event:rsvp"
+      }
+    },
+    "/api/v1/events/{eventId}/rsvp/cancel": {
+      "post": {
+        "description": "Idempotent; refused from `endsAt`. Another office’s event, an archived one and one whose audience did not hold the reader **as at its start** all answer `404`, deliberately indistinguishable: a `403` would confirm the event exists.\n\n**Requires `event:cancel_rsvp`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "EventGuestController_cancelRsvp_v1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoEventBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestEventDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `event:cancel_rsvp`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`EVENT_RSVP_CLOSED` — the event has ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "*Cancel RSVP*",
+        "tags": [
+          "events"
+        ],
+        "x-required-permission": "event:cancel_rsvp"
+      }
+    },
+    "/api/v1/events/{eventId}/attendance/claim": {
+      "post": {
+        "description": "Writes the member’s claim and **never attendance** (OD-31): it unlocks the feedback form, and only the Owner or an Admin confirms. Idempotent; refused before `endsAt` and inside any support session. Another office’s event, an archived one and one whose audience did not hold the reader **as at its start** all answer `404`, deliberately indistinguishable: a `403` would confirm the event exists.\n\n**Requires `event_attendance:self_claim`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "EventGuestController_claim_v1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoEventBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestEventDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `event_attendance:self_claim`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`EVENT_NOT_ENDED` — the event has not ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "*I actually attended this event*",
+        "tags": [
+          "events"
+        ],
+        "x-required-permission": "event_attendance:self_claim"
+      }
+    },
+    "/api/v1/events/{eventId}/feedback": {
+      "post": {
+        "description": "Once (single-submit), from `endsAt`, for a member who RSVP’d, said they came or was confirmed. Both texts are trimmed and stored; refused inside any support session. Another office’s event, an archived one and one whose audience did not hold the reader **as at its start** all answer `404`, deliberately indistinguishable: a `403` would confirm the event exists.\n\n**Requires `event_feedback:submit`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "EventGuestController_submitFeedback_v1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitEventFeedbackDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestEventDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `event_feedback:submit`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`EVENT_NOT_ENDED`, `EVENT_NOT_ATTENDED` or `EVENT_FEEDBACK_ALREADY_SUBMITTED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The member’s answer: a score, *Why?* and *How can we improve?*",
+        "tags": [
+          "events"
+        ],
+        "x-required-permission": "event_feedback:submit"
       }
     },
     "/api/v1/activity/log": {
@@ -15415,7 +16708,7 @@
     },
     "/api/v1/kpm/settings/campaigns/rules": {
       "get": {
-        "description": "MOC and the production club tiers, the insurer’s. **Read only for every office role** — there is no write route here at all. A rule waiting on a metric this product does not compute yet says so, rather than being shown as an ordinary rule nobody can ever pass.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "MOC and the production club tiers, the insurer’s, as the agency’s Campaigns settings show them — read by its owner and its administrators. **Read only** — there is no write route here at all. A rule waiting on a metric this product does not compute yet says so, rather than being shown as an ordinary rule nobody can ever pass.\n\n**Requires `campaign_settings:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "CampaignController_listRules_v1",
         "parameters": [
           {
@@ -15462,7 +16755,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `campaign_settings:read`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15491,12 +16784,12 @@
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "tenant_config:read"
+        "x-required-permission": "campaign_settings:read"
       }
     },
     "/api/v1/kpm/settings/campaigns": {
       "get": {
-        "description": "Newest first, each with its phase **derived now** — upcoming, running or ended. The prototype labels one campaign *Running* in the list while its own data says `past`.\n\n**Requires `tenant_config:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Newest first, each with its phase **derived now** — upcoming, running or ended. The prototype labels one campaign *Running* in the list while its own data says `past`. The agency’s owner and its administrators: a member reads the active campaigns at `GET /campaigns`.\n\n**Requires `campaign_settings:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "CampaignController_list_v1",
         "parameters": [
           {
@@ -15543,7 +16836,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `tenant_config:read`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — the caller does not hold `campaign_settings:read`. `details.permission` names it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15572,7 +16865,7 @@
         "tags": [
           "tenant configuration"
         ],
-        "x-required-permission": "tenant_config:read"
+        "x-required-permission": "campaign_settings:read"
       },
       "post": {
         "description": "A requirement is a **metric, a comparator and a number**. A metric this product does not measure is refused by name; one it does not measure yet is refused saying so, because a campaign asking for it could never qualify anybody.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -15908,7 +17201,7 @@
     },
     "/api/v1/metrics": {
       "get": {
-        "description": "Every metric this product defines but those about an office rather than a member, which no campaign or qualification rule may name (Leaders used, an office capacity count). The key, the name a screen shows, the unit its number is in, and `computed`: whether it is measured by the time campaigns are evaluated. A screen says so from `computed` and never from `phase`, which is the roadmap's. A carrier rule naming a metric that is not is recorded as waiting on it, and a campaign requirement naming one is refused, rather than either silently never qualifying anybody (ADR-0035).\n\n**Requires `metric_registry:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every metric this product defines but those about an office rather than a member, which no campaign or qualification rule may name (Leaders used, an office capacity count). The key, the name a screen shows, the unit its number is in, and `computed`: whether it is measured by the time campaigns are evaluated. A screen says so from `computed` and never from `phase`, which is the roadmap's. A carrier rule naming a metric that is not is recorded as waiting on it, and a campaign requirement naming one is refused, rather than either silently never qualifying anybody (ADR-0035). `campaign`: whether a **campaign** requirement may name it — the small evaluable set; a carrier rule may name any of these.\n\n**Requires `metric_registry:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "MetricRegistryController_list_v1",
         "parameters": [],
         "responses": {
@@ -15966,6 +17259,407 @@
           "tenant configuration"
         ],
         "x-required-permission": "metric_registry:read"
+      }
+    },
+    "/api/v1/campaigns": {
+      "get": {
+        "description": "Every active campaign of your agency, archived ones never: seasonal and structural, each with its phase derived now, its window in words, its poster, its requirements with the registry’s names, whether you are chasing it, and whether — and why not — you may. In the order the page draws them.\n\n**Requires `campaign:read_list`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CampaignAgentController_list_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignListDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `campaign:read_list`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The campaigns you may chase",
+        "tags": [
+          "campaigns"
+        ],
+        "x-required-permission": "campaign:read_list"
+      }
+    },
+    "/api/v1/campaigns/chasing": {
+      "get": {
+        "description": "Yours, or with `for` somebody your coaching reaches — campaigns not ended, in the order the page draws them. The Personal Summary’s card and a coachee’s chips read this one answer. Nothing is recorded.\n\n**Requires `campaign_qualification:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CampaignAgentController_chasing_v1",
+        "parameters": [
+          {
+            "name": "for",
+            "required": false,
+            "in": "query",
+            "description": "The **membership** whose chases to read. Omitted, or your own, it is yours; anybody else as far as your coaching reaches, or the whole agency for its owner and its administrators.",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChasingDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `campaign_qualification:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — `for` names somebody you may not read, somebody in another agency, or a member of another office: deliberately indistinguishable, since a `403` would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The campaigns somebody is chasing",
+        "tags": [
+          "campaigns"
+        ],
+        "x-required-permission": "campaign_qualification:read"
+      }
+    },
+    "/api/v1/campaigns/{code}": {
+      "get": {
+        "description": "The card’s fields, its description, and — once it has begun — your progress in each requirement row: the figure over its window from the agency’s production file or your log, its target, and whether it is met, still open, *Not uploaded yet* (a month not held is never a miss) or *Not measured yet*.\n\n**Requires `campaign:read_list`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CampaignAgentController_detail_v1",
+        "parameters": [
+          {
+            "name": "code",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `campaign:read_list`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One campaign, and how far you are",
+        "tags": [
+          "campaigns"
+        ],
+        "x-required-permission": "campaign:read_list"
+      }
+    },
+    "/api/v1/campaigns/{code}/chase": {
+      "put": {
+        "description": "Mark it as one you are chasing. Again changes nothing. An upcoming campaign may be chased; an ended one not.\n\n**Requires `campaign:chase`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CampaignAgentController_chase_v1",
+        "parameters": [
+          {
+            "name": "code",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignCardDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`CAMPAIGN_NOT_ELIGIBLE` — it is not open to your role. Nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CAMPAIGN_NOT_OPEN` — the campaign has ended. Nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Chase a campaign",
+        "tags": [
+          "campaigns"
+        ],
+        "x-required-permission": "campaign:chase"
+      },
+      "delete": {
+        "description": "Take it off your list. Again changes nothing. Refused once the campaign has ended: the list it was on is closed.\n\n**Requires `campaign:chase`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CampaignAgentController_unchase_v1",
+        "parameters": [
+          {
+            "name": "code",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignCardDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `campaign:chase`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CAMPAIGN_NOT_OPEN` — the campaign has ended. Nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Stop chasing a campaign",
+        "tags": [
+          "campaigns"
+        ],
+        "x-required-permission": "campaign:chase"
       }
     },
     "/api/v1/kpm/settings/capability-mapping": {
@@ -25800,6 +27494,428 @@
           "url"
         ]
       },
+      "TrainingModuleRowDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "PROSPECT_LIST"
+          },
+          "title": {
+            "type": "string",
+            "example": "Building Your Prospect List"
+          },
+          "formats": {
+            "type": "array",
+            "description": "The kinds its content holds now, File · Video · Link order. Empty: the module holds nothing yet.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "file",
+                "video",
+                "link"
+              ]
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_started",
+              "in_progress",
+              "done"
+            ],
+            "description": "`not_started` for a module never touched."
+          },
+          "completedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "The last move to *Done*, while it is done."
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "formats",
+          "status",
+          "completedAt"
+        ]
+      },
+      "TrainingArchivedModuleDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "CLIENT_RETENTION"
+          },
+          "title": {
+            "type": "string",
+            "example": "Client Retention Best Practices"
+          },
+          "formats": {
+            "type": "array",
+            "description": "The kinds its content holds, File · Video · Link order, as an offered row’s.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "file",
+                "video",
+                "link"
+              ]
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "done"
+            ]
+          },
+          "completedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "formats",
+          "status",
+          "completedAt"
+        ]
+      },
+      "TrainingSkillProgressDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "PROSPECTING"
+          },
+          "label": {
+            "type": "string",
+            "example": "Prospecting"
+          },
+          "offered": {
+            "type": "boolean",
+            "description": "`false` only for a skill no longer offered that still holds this member’s history."
+          },
+          "done": {
+            "type": "number",
+            "description": "Offered modules in this scope marked *Done*."
+          },
+          "total": {
+            "type": "number",
+            "description": "Offered modules in this scope. A draft, or a module withdrawn since the office last published, is in neither number."
+          },
+          "pct": {
+            "type": "number",
+            "nullable": true,
+            "description": "`done / total` as a whole percent (`TRAINING_COMPLETION_PCT`); `null` when the scope offers nothing — draw (0/0), never 0%."
+          },
+          "modules": {
+            "description": "The offered modules, in display order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrainingModuleRowDto"
+            }
+          },
+          "archived": {
+            "description": "Modules this member marked done that are no longer offered: their history, outside every count.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrainingArchivedModuleDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "offered",
+          "done",
+          "total",
+          "pct",
+          "modules",
+          "archived"
+        ]
+      },
+      "TrainingCategoryProgressDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SALES"
+          },
+          "label": {
+            "type": "string",
+            "example": "Sales"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "description": "The office’s subtitle for the category."
+          },
+          "offered": {
+            "type": "boolean",
+            "description": "`false` only for a category no longer offered that still holds this member’s history."
+          },
+          "done": {
+            "type": "number",
+            "description": "Offered modules in this scope marked *Done*."
+          },
+          "total": {
+            "type": "number",
+            "description": "Offered modules in this scope. A draft, or a module withdrawn since the office last published, is in neither number."
+          },
+          "pct": {
+            "type": "number",
+            "nullable": true,
+            "description": "`done / total` as a whole percent (`TRAINING_COMPLETION_PCT`); `null` when the scope offers nothing — draw (0/0), never 0%."
+          },
+          "skills": {
+            "description": "In display order. A skill with nothing offered and no history is left out.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrainingSkillProgressDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "description",
+          "offered",
+          "done",
+          "total",
+          "pct",
+          "skills"
+        ]
+      },
+      "TrainingProgressDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "Whose training this is."
+          },
+          "done": {
+            "type": "number",
+            "description": "Offered modules in this scope marked *Done*. The whole catalog."
+          },
+          "total": {
+            "type": "number",
+            "description": "Offered modules in this scope. A draft, or a module withdrawn since the office last published, is in neither number. The whole catalog."
+          },
+          "pct": {
+            "type": "number",
+            "nullable": true,
+            "description": "`done / total` as a whole percent (`TRAINING_COMPLETION_PCT`); `null` when the scope offers nothing — draw (0/0), never 0%."
+          },
+          "categories": {
+            "description": "Every offered category in display order — an empty one included — then any no longer offered that hold history.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrainingCategoryProgressDto"
+            }
+          },
+          "allOfferedDone": {
+            "type": "boolean",
+            "description": "Every offered module done; `false` when nothing is offered."
+          }
+        },
+        "required": [
+          "membershipId",
+          "done",
+          "total",
+          "pct",
+          "categories",
+          "allOfferedDone"
+        ]
+      },
+      "TrainingPlaceDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
+      "TrainingItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The content item’s stable id."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "file",
+              "video",
+              "link"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "example": "Prospect list worksheet.pdf",
+            "description": "The item’s own name."
+          },
+          "mimeType": {
+            "type": "string",
+            "nullable": true,
+            "example": "application/pdf"
+          },
+          "bytes": {
+            "type": "number",
+            "nullable": true
+          },
+          "url": {
+            "type": "string",
+            "nullable": true,
+            "description": "A link’s own `https` address, so it opens at once; `null` for a file or a video, whose address is signed on open."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "mimeType",
+          "bytes",
+          "url"
+        ]
+      },
+      "TrainingModuleCanDto": {
+        "type": "object",
+        "properties": {
+          "update": {
+            "type": "boolean",
+            "description": "You may set the status: never in a support session, never without a field rung."
+          }
+        },
+        "required": [
+          "update"
+        ]
+      },
+      "TrainingModulePageDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "CLOSING_TECHNIQUES"
+          },
+          "title": {
+            "type": "string",
+            "example": "Closing Techniques That Work"
+          },
+          "category": {
+            "$ref": "#/components/schemas/TrainingPlaceDto"
+          },
+          "skill": {
+            "$ref": "#/components/schemas/TrainingPlaceDto"
+          },
+          "items": {
+            "description": "Files, then videos, then links, each in its stored order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrainingItemDto"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_started",
+              "in_progress",
+              "done"
+            ]
+          },
+          "startedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "The first move away from *Not started*."
+          },
+          "completedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "The last move to *Done*, while it is done."
+          },
+          "openedItemIds": {
+            "description": "Items you have opened at least once.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "can": {
+            "$ref": "#/components/schemas/TrainingModuleCanDto"
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "category",
+          "skill",
+          "items",
+          "status",
+          "startedAt",
+          "completedAt",
+          "openedItemIds",
+          "can"
+        ]
+      },
+      "OpenTrainingItemDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "TrainingOpenDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Signed for 300 seconds for a file or a video; a link’s own address for a link."
+          },
+          "openedItemIds": {
+            "description": "Items you have opened at least once, after this call.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "recorded": {
+            "type": "boolean",
+            "description": "This call recorded the item’s first open. Nothing is recorded in a support session."
+          }
+        },
+        "required": [
+          "url",
+          "openedItemIds",
+          "recorded"
+        ]
+      },
+      "SetTrainingStatusDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_started",
+              "in_progress",
+              "done"
+            ],
+            "example": "done"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
       "ActivationItemDraftDto": {
         "type": "object",
         "properties": {
@@ -27204,6 +29320,683 @@
           }
         }
       },
+      "EventInviteeDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "orgLevelCode": {
+            "type": "string"
+          },
+          "rung": {
+            "type": "string"
+          },
+          "leads": {
+            "type": "boolean",
+            "description": "Leads somebody now (the graph): *Chosen leaders* lists only these."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "orgLevelCode",
+          "rung",
+          "leads"
+        ]
+      },
+      "EventInviteeListDto": {
+        "type": "object",
+        "properties": {
+          "people": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventInviteeDto"
+            }
+          }
+        },
+        "required": [
+          "people"
+        ]
+      },
+      "RollCallRowDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "orgLevelCode": {
+            "type": "string"
+          },
+          "rung": {
+            "type": "string"
+          },
+          "said": {
+            "type": "string",
+            "enum": [
+              "rsvp",
+              "claimed"
+            ],
+            "nullable": true,
+            "description": "*RSVP’d* / *Said they came* / —."
+          },
+          "attended": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "The confirmation: attended, marked absent, or not yet."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "attended",
+              "registered",
+              "unconfirmed",
+              "no_show",
+              "not_registered"
+            ]
+          },
+          "self": {
+            "type": "boolean",
+            "description": "The caller’s own row: nobody confirms their own."
+          },
+          "confirmedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "confirmedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "gaveFeedback": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "orgLevelCode",
+          "rung",
+          "said",
+          "attended",
+          "status",
+          "self",
+          "confirmedBy",
+          "confirmedAt",
+          "gaveFeedback"
+        ]
+      },
+      "RollCallCountsDto": {
+        "type": "object",
+        "properties": {
+          "audience": {
+            "type": "number"
+          },
+          "attended": {
+            "type": "number"
+          },
+          "noShow": {
+            "type": "number"
+          },
+          "unconfirmed": {
+            "type": "number"
+          },
+          "registered": {
+            "type": "number"
+          },
+          "notRegistered": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "audience",
+          "attended",
+          "noShow",
+          "unconfirmed",
+          "registered",
+          "notRegistered"
+        ]
+      },
+      "RollCallCanDto": {
+        "type": "object",
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "description": "Holds the confirm, is not read-only, and the event has ended."
+          }
+        },
+        "required": [
+          "confirm"
+        ]
+      },
+      "RollCallDto": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "upcoming",
+              "running",
+              "past"
+            ]
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "startsOn": {
+            "type": "string"
+          },
+          "people": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RollCallRowDto"
+            }
+          },
+          "counts": {
+            "$ref": "#/components/schemas/RollCallCountsDto"
+          },
+          "attendanceRate": {
+            "type": "number",
+            "nullable": true,
+            "description": "`EVENT_ATTENDANCE_RATE`, one decimal; null before the end or for nobody."
+          },
+          "can": {
+            "$ref": "#/components/schemas/RollCallCanDto"
+          }
+        },
+        "required": [
+          "eventId",
+          "title",
+          "phase",
+          "ended",
+          "startsOn",
+          "people",
+          "counts",
+          "attendanceRate",
+          "can"
+        ]
+      },
+      "RollCallEntryDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "A membership of the audience as at the start — never the caller’s own."
+          },
+          "attended": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "`true` attended, `false` marked absent, `null` cleared back to unconfirmed."
+          }
+        },
+        "required": [
+          "membershipId",
+          "attended"
+        ]
+      },
+      "SaveRollCallDto": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "description": "1 to 500 rows, no membership twice.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RollCallEntryDto"
+            }
+          }
+        },
+        "required": [
+          "entries"
+        ]
+      },
+      "FeedbackRowDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "Shown to the Owner and the Admins (OD-151)."
+          },
+          "score": {
+            "type": "number"
+          },
+          "bucket": {
+            "type": "string",
+            "enum": [
+              "promoter",
+              "passive",
+              "detractor"
+            ]
+          },
+          "why": {
+            "type": "string"
+          },
+          "improve": {
+            "type": "string"
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "attendance": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "unconfirmed",
+              "absent"
+            ]
+          },
+          "counted": {
+            "type": "boolean",
+            "description": "In the official NPS: the author was confirmed attended."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "score",
+          "bucket",
+          "why",
+          "improve",
+          "submittedAt",
+          "attendance",
+          "counted"
+        ]
+      },
+      "NpsConstantsDto": {
+        "type": "object",
+        "properties": {
+          "scaleMin": {
+            "type": "number",
+            "example": 0
+          },
+          "scaleMax": {
+            "type": "number",
+            "example": 10
+          },
+          "promoterMin": {
+            "type": "number",
+            "example": 9,
+            "description": "A promoter scores at least this."
+          },
+          "detractorMax": {
+            "type": "number",
+            "example": 6,
+            "description": "A detractor scores at most this."
+          }
+        },
+        "required": [
+          "scaleMin",
+          "scaleMax",
+          "promoterMin",
+          "detractorMax"
+        ]
+      },
+      "FeedbackSummaryDto": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "nps": {
+            "type": "number",
+            "nullable": true,
+            "description": "`EVENT_NPS` over confirmed attendees; null with none (*—*)."
+          },
+          "counted": {
+            "type": "number",
+            "description": "n, the NPS’s denominator."
+          },
+          "responses": {
+            "type": "number",
+            "description": "Every answer from the audience."
+          },
+          "awaitingConfirmation": {
+            "type": "number",
+            "description": "k: answers whose author nobody has confirmed yet."
+          },
+          "promoters": {
+            "type": "number"
+          },
+          "passives": {
+            "type": "number"
+          },
+          "detractors": {
+            "type": "number"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeedbackRowDto"
+            }
+          },
+          "constants": {
+            "$ref": "#/components/schemas/NpsConstantsDto"
+          }
+        },
+        "required": [
+          "eventId",
+          "title",
+          "nps",
+          "counted",
+          "responses",
+          "awaitingConfirmation",
+          "promoters",
+          "passives",
+          "detractors",
+          "rows",
+          "constants"
+        ]
+      },
+      "GuestEventTypeDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "emoji": {
+            "type": "string",
+            "nullable": true
+          },
+          "color": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "emoji",
+          "color"
+        ]
+      },
+      "GuestEventAudienceDto": {
+        "type": "object",
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "enum": [
+              "company",
+              "kpm",
+              "group"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all_agents",
+              "select_agents",
+              "leaders",
+              "select_leaders"
+            ]
+          }
+        },
+        "required": [
+          "issuer",
+          "scope"
+        ]
+      },
+      "MyEventFeedbackDto": {
+        "type": "object",
+        "properties": {
+          "score": {
+            "type": "number"
+          },
+          "why": {
+            "type": "string"
+          },
+          "improve": {
+            "type": "string"
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "score",
+          "why",
+          "improve",
+          "submittedAt"
+        ]
+      },
+      "MyEventPartDto": {
+        "type": "object",
+        "properties": {
+          "rsvp": {
+            "type": "string",
+            "enum": [
+              "going",
+              "cancelled"
+            ],
+            "nullable": true
+          },
+          "claimed": {
+            "type": "boolean",
+            "description": "*\"I actually attended this event\"* pressed. Never attendance."
+          },
+          "feedback": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MyEventFeedbackDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "rsvp",
+          "claimed",
+          "feedback"
+        ]
+      },
+      "GuestEventDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "blurb": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/GuestEventTypeDto"
+          },
+          "audience": {
+            "$ref": "#/components/schemas/GuestEventAudienceDto"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startsOn": {
+            "type": "string",
+            "example": "2026-10-15",
+            "description": "The day it starts, in the office’s zone."
+          },
+          "startTime": {
+            "type": "string",
+            "example": "14:00",
+            "description": "`HH:mm` (24-hour), in the office’s zone."
+          },
+          "location": {
+            "type": "string"
+          },
+          "locationUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "upcoming",
+              "running",
+              "past"
+            ]
+          },
+          "ended": {
+            "type": "boolean",
+            "description": "`now >= endsAt`: RSVP closed; the claim and the feedback open."
+          },
+          "me": {
+            "$ref": "#/components/schemas/MyEventPartDto"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "title",
+          "blurb",
+          "description",
+          "type",
+          "audience",
+          "startsAt",
+          "endsAt",
+          "startsOn",
+          "startTime",
+          "location",
+          "locationUrl",
+          "phase",
+          "ended",
+          "me"
+        ]
+      },
+      "GuestEventLimitsDto": {
+        "type": "object",
+        "properties": {
+          "feedbackTextMax": {
+            "type": "number",
+            "example": 1000
+          },
+          "nps": {
+            "$ref": "#/components/schemas/NpsConstantsDto"
+          }
+        },
+        "required": [
+          "feedbackTextMax",
+          "nps"
+        ]
+      },
+      "GuestEventCanDto": {
+        "type": "object",
+        "properties": {
+          "rsvp": {
+            "type": "boolean"
+          },
+          "cancelRsvp": {
+            "type": "boolean"
+          },
+          "claim": {
+            "type": "boolean"
+          },
+          "feedback": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rsvp",
+          "cancelRsvp",
+          "claim",
+          "feedback"
+        ]
+      },
+      "GuestEventListDto": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuestEventDto"
+            }
+          },
+          "companyName": {
+            "type": "string",
+            "description": "For *\"{company} Event\"*."
+          },
+          "timezone": {
+            "type": "string",
+            "example": "Asia/Jakarta"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/GuestEventLimitsDto"
+          },
+          "can": {
+            "description": "False in a read-only support session: draw no write control.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GuestEventCanDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "events",
+          "companyName",
+          "timezone",
+          "limits",
+          "can"
+        ]
+      },
+      "NoEventBodyDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "SubmitEventFeedbackDto": {
+        "type": "object",
+        "properties": {
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10,
+            "example": 9,
+            "description": "A whole number from 0 to 10."
+          },
+          "why": {
+            "type": "string",
+            "description": "*Why?* — trimmed, at most `EVENT_FEEDBACK_TEXT_MAX` (1000) characters."
+          },
+          "improve": {
+            "type": "string",
+            "description": "*How can we improve?* — trimmed, at most 1000 characters. Stored."
+          }
+        },
+        "required": [
+          "score"
+        ]
+      },
       "ActivityCountDto": {
         "type": "object",
         "properties": {
@@ -27963,6 +30756,65 @@
           "waitingOnMetrics"
         ]
       },
+      "CampaignRequirementDto": {
+        "type": "object",
+        "properties": {
+          "metricKey": {
+            "type": "string"
+          },
+          "metricName": {
+            "type": "string",
+            "description": "The registry’s own name, so no screen holds a second copy."
+          },
+          "comparator": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string",
+            "description": "`idr_minor` means integer sen."
+          },
+          "measured": {
+            "type": "boolean",
+            "description": "Whether a campaign can measure it. `false` for one stored before the evaluable set existed: the screen reads it *Not measured yet*."
+          }
+        },
+        "required": [
+          "metricKey",
+          "metricName",
+          "comparator",
+          "value",
+          "unit",
+          "measured"
+        ]
+      },
+      "CampaignPosterDto": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string",
+            "enum": [
+              "amber",
+              "amber-dark",
+              "navy",
+              "navy-soft",
+              "muted",
+              "success",
+              "gold"
+            ],
+            "description": "A design-token name, never a hex."
+          }
+        },
+        "required": [
+          "emoji",
+          "color"
+        ]
+      },
       "CampaignDto": {
         "type": "object",
         "properties": {
@@ -27984,7 +30836,9 @@
           },
           "endsAt": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "nullable": true,
+            "description": "`null`: a structural campaign with no end."
           },
           "phase": {
             "type": "string",
@@ -27998,8 +30852,44 @@
           "requirements": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/RequirementViewDto"
+              "$ref": "#/components/schemas/CampaignRequirementDto"
             }
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "seasonal",
+              "structural"
+            ]
+          },
+          "subtype": {
+            "type": "string",
+            "enum": [
+              "promotion",
+              "ongoing"
+            ],
+            "nullable": true
+          },
+          "window": {
+            "type": "string",
+            "enum": [
+              "campaign_dates",
+              "calendar_year",
+              "rolling_12m"
+            ]
+          },
+          "appliesToOrgLevelCodes": {
+            "description": "Rungs by code. Empty means everybody.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "poster": {
+            "$ref": "#/components/schemas/CampaignPosterDto"
+          },
+          "blurb": {
+            "type": "string"
           },
           "reward": {
             "type": "string"
@@ -28024,6 +30914,12 @@
           "endsAt",
           "phase",
           "requirements",
+          "kind",
+          "subtype",
+          "window",
+          "appliesToOrgLevelCodes",
+          "poster",
+          "blurb",
           "reward",
           "status",
           "version"
@@ -28035,70 +30931,19 @@
           "metricKey": {
             "type": "string",
             "enum": [
-              "MONTHLY_ACTIVE_AGENT",
               "MAA_COUNT_IN_UNIT",
-              "PACING_TO_MAA",
-              "ACTIVITY_COMPLIANCE_7D",
-              "ACTIVITY_COMPLIANCE_MONTH",
-              "ACTIVITY_COMPLIANCE_RATE",
-              "ACTIVITY_TOTAL_BY_CATEGORY",
-              "COACHED_7D",
-              "COACHED_30D",
-              "DAYS_SINCE_LAST_COACHING",
-              "COACHING_COVERAGE",
-              "LEADER_COACHING_FREQUENCY",
               "APE_ACHIEVED",
-              "APE_TARGET",
-              "APE_ATTAINMENT_PCT",
-              "APE_GAP_TO_TARGET",
-              "POLICIES_NEEDED",
-              "MONTHS_LEFT_IN_YEAR",
-              "POLICY_COUNT_TARGET",
-              "APPOINTMENT_TARGET",
-              "LEAD_TARGET",
-              "GOAL_PACE_STATUS",
               "SELLING_RECRUITMENT_BALANCE",
               "SELLING_SUCCESS_RATE",
               "RECRUITMENT_SUCCESS_RATE",
               "LEADS_PER_ACTIVITY",
               "MEETING_PER_APPROACH",
-              "MEASURED_LEAD_TO_APPOINTMENT_RATE",
-              "MEASURED_CLOSING_RATE",
-              "MONTHLY_APE_TARGET",
-              "CLOSINGS_LAST_30_DAYS",
-              "CLOSINGS_NEEDED_PER_WEEK",
-              "SUMMARY_ACTIVITY_TARGET",
-              "ACTIVITY_TARGET_ATTAINMENT_PCT",
-              "SUB_PERIOD_ACTIVITY_TARGET",
-              "ACTIVATION_COMPLETION_PCT",
-              "ACTIVATION_DAY_INDEX",
-              "TRAINING_COMPLETION_PCT",
-              "EVENT_ATTENDANCE_STATUS",
-              "EVENT_ATTENDANCE_RATE",
-              "EVENT_NPS",
-              "CAMPAIGN_QUALIFICATION_STATUS",
-              "MOC_STATUS",
-              "PRODUCTION_CLUB_TIER",
-              "RECRUITMENT_PIPELINE_NOW",
-              "RECRUITMENT_EXPECTED_TO_CLOSE",
-              "OPEN_SALES_LEADS",
-              "SALES_LEADS_CLOSING_THIS_MONTH",
-              "RECRUITMENT_NOMINATED_THIS_MONTH",
-              "POTENTIAL_MAA_COUNT_IN_UNIT",
               "CASCADE_ACTIVITY_TOUCHES",
               "NEW_ACTIVE_AGENTS",
               "ROLLING_PERSISTENCY",
-              "ACTIVITY_LOGGED_THIS_MONTH",
-              "RECRUITMENT_CLOSED_LAST_MONTH",
-              "APE_YEAR_PROJECTION",
-              "NET_APE",
-              "MONTHLY2_AA",
-              "MONTHLY2_AA_DU",
-              "MONTHLY2_AA_DG",
-              "DIRECT_AB_COUNT",
-              "MOC_PERSISTENCY"
+              "NEW_HIRES"
             ],
-            "description": "A key from the metric registry. Anything else is refused at write time, by name."
+            "description": "A key a campaign may name — `campaign: true` in `GET /metrics`. Anything else is refused at write time, by name."
           },
           "comparator": {
             "type": "string",
@@ -28139,9 +30984,56 @@
             "format": "date-time"
           },
           "endsAt": {
-            "type": "string",
+            "type": "object",
             "format": "date-time",
-            "description": "After `startsAt`."
+            "nullable": true,
+            "description": "After `startsAt`. Required for a seasonal campaign; `null` for a structural one with no end. Where a requirement reads the monthly file, the dates are whole office months: from 00:00 on a 1st to 23:59 on a month's last day, Asia/Jakarta."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "seasonal",
+              "structural"
+            ],
+            "description": "Seasonal (default) or structural."
+          },
+          "subtype": {
+            "type": "string",
+            "enum": [
+              "promotion",
+              "ongoing"
+            ],
+            "nullable": true,
+            "description": "A structural campaign's section."
+          },
+          "window": {
+            "type": "string",
+            "enum": [
+              "campaign_dates",
+              "calendar_year",
+              "rolling_12m"
+            ],
+            "description": "Seasonal: `campaign_dates`. Structural: `calendar_year` or `rolling_12m` (D-windows)."
+          },
+          "appliesToOrgLevelCodes": {
+            "description": "The rungs that may chase it, by code. Empty means everybody.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "poster": {
+            "type": "object",
+            "description": "The card's poster: `{ emoji, color }`, the colour one of amber, amber-dark, navy, navy-soft, muted, success, gold.",
+            "example": {
+              "emoji": "🚀",
+              "color": "amber"
+            }
+          },
+          "blurb": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "The card's one line. Plain text."
           },
           "requirements": {
             "type": "array",
@@ -28190,6 +31082,10 @@
           "computed": {
             "type": "boolean",
             "description": "Whether it is measured by the time campaigns are evaluated. A rule naming one that is not is recorded as waiting on it rather than never passing in silence."
+          },
+          "campaign": {
+            "type": "boolean",
+            "description": "Whether a **campaign** requirement may name it: a member's production over whole months, their logged activity, the five ratios, their unit's active agents. The Owner's picker offers only these; a carrier rule may name any metric listed here."
           }
         },
         "required": [
@@ -28197,7 +31093,501 @@
           "name",
           "unit",
           "phase",
-          "computed"
+          "computed",
+          "campaign"
+        ]
+      },
+      "AgentCampaignPosterDto": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string",
+            "description": "One emoji. Decorative: the screen hides it from assistive technology."
+          },
+          "color": {
+            "type": "string",
+            "enum": [
+              "amber",
+              "amber-dark",
+              "navy",
+              "navy-soft",
+              "muted",
+              "success",
+              "gold"
+            ],
+            "description": "A design-token name, never a hex."
+          }
+        },
+        "required": [
+          "emoji",
+          "color"
+        ]
+      },
+      "AgentCampaignRequirementDto": {
+        "type": "object",
+        "properties": {
+          "metricKey": {
+            "type": "string"
+          },
+          "metricName": {
+            "type": "string",
+            "description": "The registry’s name, so no screen holds a second copy."
+          },
+          "comparator": {
+            "type": "string",
+            "enum": [
+              "gte",
+              "gt",
+              "lte",
+              "lt",
+              "eq"
+            ]
+          },
+          "value": {
+            "type": "number",
+            "description": "Integer sen when `unit` is `idr_minor`; the screen prints rupiah."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "boolean",
+              "tri_state",
+              "count",
+              "percentage",
+              "percentage_points",
+              "ratio",
+              "days",
+              "months",
+              "idr_minor",
+              "enum",
+              "score"
+            ]
+          },
+          "measured": {
+            "type": "boolean",
+            "description": "`false`: a requirement no campaign can measure, stored before the evaluable set existed — *Not measured yet*."
+          }
+        },
+        "required": [
+          "metricKey",
+          "metricName",
+          "comparator",
+          "value",
+          "unit",
+          "measured"
+        ]
+      },
+      "CampaignCardDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The stable code: the address `/campaigns/{code}`."
+          },
+          "title": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "seasonal",
+              "structural"
+            ]
+          },
+          "subtype": {
+            "type": "string",
+            "enum": [
+              "promotion",
+              "ongoing"
+            ],
+            "nullable": true,
+            "description": "*Promotion Criteria* or *Production Clubs*; `null` when seasonal."
+          },
+          "window": {
+            "type": "string",
+            "enum": [
+              "campaign_dates",
+              "calendar_year",
+              "rolling_12m"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "upcoming",
+              "running",
+              "ended"
+            ],
+            "description": "Derived now from its dates. A structural campaign with no end, once begun, is `running` — its card reads *Ongoing*."
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "duration": {
+            "type": "string",
+            "description": "Composed in the office’s calendar — *Jul 1 – Sep 30, 2026* — or the window’s own words: *Rolling 12-month window*, *Standing — evaluated per calendar year (Jan 1 – Dec 31)*."
+          },
+          "poster": {
+            "$ref": "#/components/schemas/AgentCampaignPosterDto"
+          },
+          "blurb": {
+            "type": "string",
+            "description": "Plain text: render it as text, never markup."
+          },
+          "reward": {
+            "type": "string",
+            "description": "The prize line. Plain text."
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentCampaignRequirementDto"
+            }
+          },
+          "chasing": {
+            "type": "boolean",
+            "description": "The reader is chasing it."
+          },
+          "eligible": {
+            "type": "boolean",
+            "description": "The reader’s rung is one it applies to (or it applies to everybody)."
+          },
+          "chaseBlocked": {
+            "type": "string",
+            "enum": [
+              "ended",
+              "not_eligible"
+            ],
+            "nullable": true,
+            "description": "Why the chase control is disabled: the campaign has ended, or it is not open to the reader’s role. `null` when it is live."
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "kind",
+          "subtype",
+          "window",
+          "phase",
+          "startsAt",
+          "endsAt",
+          "duration",
+          "poster",
+          "blurb",
+          "reward",
+          "requirements",
+          "chasing",
+          "eligible",
+          "chaseBlocked"
+        ]
+      },
+      "CampaignCanDto": {
+        "type": "object",
+        "properties": {
+          "chase": {
+            "type": "boolean",
+            "description": "The reader may chase at all — `false` in a read-only support session, which draws no chase control."
+          }
+        },
+        "required": [
+          "chase"
+        ]
+      },
+      "CampaignListDto": {
+        "type": "object",
+        "properties": {
+          "campaigns": {
+            "description": "In order: seasonal running (ending soonest first), upcoming (starting soonest first), ended (latest first); then structural by title.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CampaignCardDto"
+            }
+          },
+          "can": {
+            "$ref": "#/components/schemas/CampaignCanDto"
+          }
+        },
+        "required": [
+          "campaigns",
+          "can"
+        ]
+      },
+      "ChasedCampaignDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "seasonal",
+              "structural"
+            ]
+          },
+          "subtype": {
+            "type": "string",
+            "enum": [
+              "promotion",
+              "ongoing"
+            ],
+            "nullable": true
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "upcoming",
+              "running"
+            ],
+            "description": "Never ended: an ended campaign leaves every chasing list."
+          },
+          "duration": {
+            "type": "string"
+          },
+          "poster": {
+            "$ref": "#/components/schemas/AgentCampaignPosterDto"
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "kind",
+          "subtype",
+          "phase",
+          "duration",
+          "poster"
+        ]
+      },
+      "ChasingDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "Whose chases these are."
+          },
+          "campaigns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChasedCampaignDto"
+            }
+          }
+        },
+        "required": [
+          "membershipId",
+          "campaigns"
+        ]
+      },
+      "CampaignProgressRowDto": {
+        "type": "object",
+        "properties": {
+          "metricKey": {
+            "type": "string"
+          },
+          "current": {
+            "type": "number",
+            "nullable": true,
+            "description": "Over the window: sen for money, 0–100 for persistency, the ratio card’s value for a ratio. `null` when nothing is held."
+          },
+          "target": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "boolean",
+              "tri_state",
+              "count",
+              "percentage",
+              "percentage_points",
+              "ratio",
+              "days",
+              "months",
+              "idr_minor",
+              "enum",
+              "score"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "met",
+              "in_progress",
+              "not_met",
+              "not_uploaded",
+              "nothing_logged",
+              "not_measured"
+            ],
+            "description": "`met` — *\"{current} of {target}\"* with ✓; `in_progress` and `not_met` — *\"{current} of {target}\"*; `not_uploaded` — *Not uploaded yet*, never ✕; `nothing_logged` — an activity requirement with nothing logged, *Nothing logged yet*; `not_measured` — *Not measured yet*."
+          }
+        },
+        "required": [
+          "metricKey",
+          "current",
+          "target",
+          "unit",
+          "state"
+        ]
+      },
+      "CampaignProgressDto": {
+        "type": "object",
+        "properties": {
+          "windowLabel": {
+            "type": "string",
+            "description": "The months or days read: *Jul – Sep 2026*, *Oct 2025 – Sep 2026*."
+          },
+          "final": {
+            "type": "boolean",
+            "description": "The result is final: the last month it reads has locked, and it no longer moves."
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CampaignProgressRowDto"
+            }
+          }
+        },
+        "required": [
+          "windowLabel",
+          "final",
+          "rows"
+        ]
+      },
+      "CampaignDetailDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The stable code: the address `/campaigns/{code}`."
+          },
+          "title": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "seasonal",
+              "structural"
+            ]
+          },
+          "subtype": {
+            "type": "string",
+            "enum": [
+              "promotion",
+              "ongoing"
+            ],
+            "nullable": true,
+            "description": "*Promotion Criteria* or *Production Clubs*; `null` when seasonal."
+          },
+          "window": {
+            "type": "string",
+            "enum": [
+              "campaign_dates",
+              "calendar_year",
+              "rolling_12m"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "upcoming",
+              "running",
+              "ended"
+            ],
+            "description": "Derived now from its dates. A structural campaign with no end, once begun, is `running` — its card reads *Ongoing*."
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "duration": {
+            "type": "string",
+            "description": "Composed in the office’s calendar — *Jul 1 – Sep 30, 2026* — or the window’s own words: *Rolling 12-month window*, *Standing — evaluated per calendar year (Jan 1 – Dec 31)*."
+          },
+          "poster": {
+            "$ref": "#/components/schemas/AgentCampaignPosterDto"
+          },
+          "blurb": {
+            "type": "string",
+            "description": "Plain text: render it as text, never markup."
+          },
+          "reward": {
+            "type": "string",
+            "description": "The prize line. Plain text."
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentCampaignRequirementDto"
+            }
+          },
+          "chasing": {
+            "type": "boolean",
+            "description": "The reader is chasing it."
+          },
+          "eligible": {
+            "type": "boolean",
+            "description": "The reader’s rung is one it applies to (or it applies to everybody)."
+          },
+          "chaseBlocked": {
+            "type": "string",
+            "enum": [
+              "ended",
+              "not_eligible"
+            ],
+            "nullable": true,
+            "description": "Why the chase control is disabled: the campaign has ended, or it is not open to the reader’s role. `null` when it is live."
+          },
+          "description": {
+            "type": "string",
+            "description": "Plain text."
+          },
+          "can": {
+            "$ref": "#/components/schemas/CampaignCanDto"
+          },
+          "progress": {
+            "nullable": true,
+            "description": "The reader’s progress, one row per requirement, in the order of `requirements`. `null` while upcoming.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CampaignProgressDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "kind",
+          "subtype",
+          "window",
+          "phase",
+          "startsAt",
+          "endsAt",
+          "duration",
+          "poster",
+          "blurb",
+          "reward",
+          "requirements",
+          "chasing",
+          "eligible",
+          "chaseBlocked",
+          "description",
+          "can",
+          "progress"
         ]
       },
       "CapabilityStageDto": {
@@ -31053,7 +34443,9 @@
           },
           "route": {
             "type": "string",
-            "example": "/goals"
+            "nullable": true,
+            "example": "/goals",
+            "description": "`null` for a training link to a module you are not offered — withdrawn, or not yet published: draw no *Go to*."
           },
           "completesWhen": {
             "type": "string",
@@ -31958,6 +35350,21 @@
           "overdueDays"
         ]
       },
+      "UnitChasedCampaignDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "title"
+        ]
+      },
       "UnitRowDto": {
         "type": "object",
         "properties": {
@@ -32031,6 +35438,19 @@
                 "$ref": "#/components/schemas/FollowUpDto"
               }
             ]
+          },
+          "chasingMdrt": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "*Chasing MDRT*: chasing the agency’s `MDRT_QUALIFICATION` campaign, not ended. `null` where your reading does not reach their campaigns — a leader on the agent rung reading a coachee: drawn —."
+          },
+          "campaigns": {
+            "nullable": true,
+            "description": "*Campaigns they’re chasing*: campaigns not ended, by title. `null` as `chasingMdrt`.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnitChasedCampaignDto"
+            }
           }
         },
         "required": [
@@ -32048,7 +35468,9 @@
           "lastOneOnOne",
           "status",
           "pacingToMaa",
-          "followUp"
+          "followUp",
+          "chasingMdrt",
+          "campaigns"
         ]
       },
       "RolledUpGoalDto": {
@@ -32186,6 +35608,24 @@
           "canUpdate"
         ]
       },
+      "UnitMdrtDto": {
+        "type": "object",
+        "properties": {
+          "running": {
+            "type": "boolean",
+            "description": "The agency’s `MDRT_QUALIFICATION` campaign is running now."
+          },
+          "tooltip": {
+            "type": "string",
+            "example": "Chasing MDRT (Million Dollar Round Table) this year — APE of Rp 2.400.000.000 or more.",
+            "description": "The header tooltip, composed from that campaign’s requirement, or saying none is running."
+          }
+        },
+        "required": [
+          "running",
+          "tooltip"
+        ]
+      },
       "UnitDashboardDto": {
         "type": "object",
         "properties": {
@@ -32243,6 +35683,9 @@
           },
           "production": {
             "$ref": "#/components/schemas/UnitProductionStateDto"
+          },
+          "mdrt": {
+            "$ref": "#/components/schemas/UnitMdrtDto"
           }
         },
         "required": [
@@ -32257,7 +35700,8 @@
           "tiles",
           "yourUnit",
           "units",
-          "production"
+          "production",
+          "mdrt"
         ]
       },
       "ProductionRowDto": {
@@ -36348,7 +39792,7 @@
           "description": {
             "type": "string",
             "nullable": true,
-            "example": "Structured modules — tracked here, and later in your Skill Tracker.",
+            "example": "Structured modules — tracked here.",
             "description": "The subtitle an agent's category page shows."
           },
           "displayOrder": {
@@ -36595,6 +40039,57 @@
           "version"
         ]
       },
+      "ActivationLinkKindDto": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "example": "Training module"
+          },
+          "route": {
+            "type": "string",
+            "example": "/training"
+          },
+          "completesWhen": {
+            "type": "string",
+            "example": "the hire has completed that training module",
+            "description": "The badge’s tooltip."
+          },
+          "live": {
+            "type": "boolean",
+            "description": "An item bound to it completes on its own: draw *Auto*."
+          }
+        },
+        "required": [
+          "label",
+          "route",
+          "completesWhen",
+          "live"
+        ]
+      },
+      "ActivationLinkKindsDto": {
+        "type": "object",
+        "properties": {
+          "feature:goals": {
+            "$ref": "#/components/schemas/ActivationLinkKindDto"
+          },
+          "feature:leads": {
+            "$ref": "#/components/schemas/ActivationLinkKindDto"
+          },
+          "feature:activity": {
+            "$ref": "#/components/schemas/ActivationLinkKindDto"
+          },
+          "training": {
+            "$ref": "#/components/schemas/ActivationLinkKindDto"
+          }
+        },
+        "required": [
+          "feature:goals",
+          "feature:leads",
+          "feature:activity",
+          "training"
+        ]
+      },
       "CompanyTemplateDto": {
         "type": "object",
         "properties": {
@@ -36655,6 +40150,14 @@
           "officesUnrecorded": {
             "type": "number",
             "description": "How many were created before provisioning recorded this kind, so whether they are current is not known. Counted apart from `officesBehind`, which only counts offices known to be behind."
+          },
+          "linkKinds": {
+            "description": "`activation_checklist` only: what each link kind does and whether it completes on its own — the badge reads *Auto* only where `live`. `training` answers for every `training:<moduleCode>` link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationLinkKindsDto"
+              }
+            ]
           }
         },
         "required": [

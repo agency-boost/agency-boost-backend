@@ -42,6 +42,11 @@ import {
   TrainingCategoryRepository, TrainingModuleRepository, TrainingSkillRepository,
 } from '@/modules/training/training.repository';
 import { TrainingService } from '@/modules/training/training.service';
+import { TrainingProgress, TrainingProgressSchema } from '@/modules/training/training-progress.schema';
+import { TrainingProgressRepository } from '@/modules/training/training-progress.repository';
+import { OfferedTraining } from '@/modules/training/offered-training';
+import { TrainingProgressReadings } from '@/modules/training/training-progress-readings';
+import { TrainingProgressService } from '@/modules/training/training-progress.service';
 import {
   ActivationTemplate, ActivationTemplateSchema,
 } from '@/modules/activation/activation-template.schema';
@@ -52,8 +57,16 @@ import { KpmProductConfigSchema } from '@/modules/products/kpm-product-config.sc
 import { KpmProductConfigRepository } from '@/modules/products/kpm-product.repository';
 import { KpmProductService } from '@/modules/products/kpm-product.service';
 import { Event, EventSchema, EventType, EventTypeSchema } from '@/modules/events/event.schema';
-import { EventRepository, EventTypeRepository } from '@/modules/events/event.repository';
+import {
+  EventFeedbackRepository, EventRepository, EventRsvpRepository, EventTypeRepository,
+} from '@/modules/events/event.repository';
 import { EventService } from '@/modules/events/event.service';
+import { EventRsvp, EventRsvpSchema } from '@/modules/events/event-rsvp.schema';
+import { EventFeedback, EventFeedbackSchema } from '@/modules/events/event-feedback.schema';
+import { EventAudienceReader } from '@/modules/events/event-audience';
+import { EventReadings } from '@/modules/events/event-readings';
+import { EventGuestService } from '@/modules/events/event-guest.service';
+import { EventRollCallService } from '@/modules/events/event-roll-call.service';
 import { ActivityLog, ActivityLogSchema } from '@/modules/activity/activity-log.schema';
 import { ActivityLogRepository } from '@/modules/activity/activity-log.repository';
 import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
@@ -68,6 +81,15 @@ import {
 } from '@/modules/campaigns/campaign.schema';
 import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
 import { CampaignService } from '@/modules/campaigns/campaign.service';
+import { CampaignChase, CampaignChaseSchema } from '@/modules/campaigns/campaign-chase.schema';
+import { CampaignStanding, CampaignStandingSchema } from '@/modules/campaigns/campaign-standing.schema';
+import { CampaignChaseRepository } from '@/modules/campaigns/campaign-chase.repository';
+import { CampaignStandingRepository } from '@/modules/campaigns/campaign-standing.repository';
+import { CampaignChaseReadings } from '@/modules/campaigns/campaign-chase-readings';
+import { CampaignEvaluation } from '@/modules/campaigns/campaign-evaluation';
+import { CampaignAgentService } from '@/modules/campaigns/campaign-agent.service';
+import { CampaignStandingsReader } from '@/modules/campaigns/campaign-standings-reader';
+import { CampaignChaseDeparture } from '@/modules/campaigns/campaign-departure';
 import {
   CapabilityCatalog, CapabilityCatalogSchema,
 } from '@/modules/capability/capability.schema';
@@ -244,6 +266,20 @@ export function configModule(
     assets,
     kpms as never,
   );
+  /*
+   * P18.5-T1, T2: each member's progress, what the published snapshot offers, and the one read every reader of
+   * progress goes through. Before the activation engine, which completes a training-linked item from them.
+   */
+  const trainingProgressRows = new TrainingProgressRepository(
+    model(TrainingProgress.name, TrainingProgressSchema) as never,
+  );
+  const offeredTraining = new OfferedTraining(new ConfigSnapshotRepository(snapshots as never), training);
+  const trainingReadings = new TrainingProgressReadings(
+    trainingProgressRows, offeredTraining,
+    new TrainingModuleRepository(trainingModules as never),
+    new TrainingSkillRepository(trainingSkills as never),
+    new TrainingCategoryRepository(trainingCategories as never),
+  );
   // P5-T3. After `training`, whose modules its links are checked against.
   const activation = new ActivationService(
     new ActivationTemplateRepository(activationTemplates as never),
@@ -251,6 +287,8 @@ export function configModule(
     kpms as never,
     audit,
     clock,
+    // The Phase 18.5 exit review (B2): a hire's link titles come from what the office offers.
+    offeredTraining,
   );
   // P5-T4. Company-partitioned: it takes a companyId, and never a kpmId.
   const products = new ProductService(
@@ -270,13 +308,29 @@ export function configModule(
     audit,
     clock,
   );
-  // P5-T6: the events an office runs. Nothing per-person lives here.
+  // P5-T6: the events an office runs. Nothing per-person lives on one.
+  // P18.5-T5, T6: the members' rows beside them (RSVPs, claims, confirmations, answers), the audience as at the
+  // start, the readings, the agent's side and the office's roll call and summary.
+  const eventTypeRows = new EventTypeRepository(model(EventType.name, EventTypeSchema) as never);
+  const eventRows = new EventRepository(model(Event.name, EventSchema) as never);
+  const eventRsvps = new EventRsvpRepository(model(EventRsvp.name, EventRsvpSchema) as never);
+  const eventFeedback = new EventFeedbackRepository(model(EventFeedback.name, EventFeedbackSchema) as never);
   const events = new EventService(
-    new EventTypeRepository(model(EventType.name, EventTypeSchema) as never),
-    new EventRepository(model(Event.name, EventSchema) as never),
-    new MembershipRepository(model(Membership.name, MembershipSchema) as never),
-    audit,
-    clock,
+    eventTypeRows, eventRows, memberships, audit, clock, new TenantDay(kpms as never, clock), eventRsvps, eventFeedback,
+  );
+  const eventAudiences = new EventAudienceReader(
+    memberships, new MembershipHistoryRepository(model(MembershipHistory.name, MembershipHistorySchema) as never),
+  );
+  const eventReadings = new EventReadings(
+    eventRows, eventRsvps, eventFeedback, eventAudiences, new TenantDay(kpms as never, clock), clock,
+  );
+  const eventGuests = new EventGuestService(
+    eventRows, eventTypeRows, eventRsvps, eventFeedback, eventAudiences, eventReadings,
+    new TenantDay(kpms as never, clock), model('CompanyModelForConfig', CompanySchema) as never, audit, clock,
+  );
+  const eventRollCalls = new EventRollCallService(
+    eventReadings, eventRsvps, memberships, new MemberNames(memberships, users as never), orgLevels,
+    new TenantDay(kpms as never, clock), audit, clock,
   );
   /*
    * **A recorder, not a second implementation.** `NotificationService` needs a preferences model,
@@ -328,11 +382,20 @@ export function configModule(
     ),
     activityReadings,
     clock,
+    // P18.5-T3: a training-linked item completes from the hire's progress.
+    trainingReadings,
   );
   const activationProgress = new ActivationProgressService(
     activationRows, activation, activationEngine, memberships,
     new MembershipHistoryRepository(model(MembershipHistory.name, MembershipHistorySchema) as never), coach,
     new MemberNames(memberships, users as never), new TenantDay(kpms as never, clock), audit, clock,
+    // P18.5-T3, D-orphan: which modules are offered now.
+    offeredTraining,
+  );
+  // P18.5-T1, T4: the learner's training and the coach's read; a module marked done signals the activation above.
+  const trainingProgress = new TrainingProgressService(
+    trainingProgressRows, trainingReadings, offeredTraining, training, coach, subjectReads,
+    new TenantDay(kpms as never, clock), audit, clock, activationProgress,
   );
   const newHires = new NewHiresService(
     activationProgress, activationRows, coach, new MemberNames(memberships, users as never),
@@ -464,6 +527,8 @@ export function configModule(
     kpms as never,
     audit,
     clock,
+    // P18.5-T7: a campaign's rungs are checked against the company's ladder.
+    orgLevels,
   );
   // P5-T8: the office's capability catalog.
   const capability = new CapabilityService(
@@ -604,6 +669,26 @@ export function configModule(
    * Phase 15: the Unit Dashboard — the roster read through the readings the person's own screens use, and a
    * leader's corrections through the month table's own function.
    */
+  /*
+   * Phase 18.5: campaigns, the member's side — the chases and the frozen standings through their tenant repositories,
+   * the one named reader of chases, the evaluation through production's and activity's own readings, the agent's
+   * service, the 18.6 port, and what leaving does to a member's chases.
+   */
+  const campaignRows = new CampaignRepository(model(Campaign.name, CampaignSchema) as never);
+  const campaignChases = new CampaignChaseRepository(model(CampaignChase.name, CampaignChaseSchema) as never);
+  const campaignStandings = new CampaignStandingRepository(model(CampaignStanding.name, CampaignStandingSchema) as never);
+  const campaignChaseReadings = new CampaignChaseReadings(campaignRows, campaignChases, clock);
+  const campaignEvaluation = new CampaignEvaluation(
+    productionReadings, productionMonths, activityReadings, new RatioDefinitionRepository(ratioDefinitions as never),
+    memberships, campaignChases, campaignStandings, campaignRows, new TenantDay(kpms as never, clock), clock, audit,
+  );
+  const campaignAgent = new CampaignAgentService(
+    campaignRows, campaignChases, campaignChaseReadings, campaignEvaluation, coach, memberships, audit,
+    new TenantDay(kpms as never, clock), clock,
+  );
+  const campaignStandingsReader = new CampaignStandingsReader(campaignRows, memberships, campaignEvaluation, clock);
+  const campaignDeparture = new CampaignChaseDeparture(campaignChases, clock, audit);
+
   const unitDashboard = new UnitDashboardService(
     coach, new MemberNames(memberships, users as never), orgLevels, new TenantDay(kpms as never, clock),
     coachingReadings, paceStatus, goals, productionReadings, productionMonths, productionCorrections, activityReadings,
@@ -613,6 +698,7 @@ export function configModule(
       clock,
     ),
     subjectReads,
+    campaignChaseReadings,
   );
 
   /*
@@ -677,10 +763,14 @@ export function configModule(
     coachingRecord,
     calendarEntries, calendarNotices, calendar, calendarPeople, calendarLeave,
     activationRows, activationEngine, activationProgress, newHires,
+    trainingProgressRows, offeredTraining, trainingReadings, trainingProgress,
     unitDashboard,
+    campaignRows, campaignChases, campaignStandings, campaignChaseReadings, campaignEvaluation, campaignAgent,
+    campaignStandingsReader, campaignDeparture,
     recruitmentPlaybookRows, recruitmentPlaybooks, recruitmentPlans, recruitmentPitch,
     leadReadings, recruitTargets, officePeople, carrierRules, kpmOverview, kpmAnalytics, platformAnalytics,
     directoryColumns, memberships, users,
+    eventRsvps, eventFeedback, eventAudiences, eventReadings, eventGuests, eventRollCalls,
   };
 }
 

@@ -102,6 +102,12 @@ class FollowUpDto implements FollowUp {
   @ApiProperty({ type: Number, nullable: true, description: 'Whole days past `dueDate`, when it is before today.' }) overdueDays!: number | null;
 }
 
+/** A campaign a row's person is chasing: the chip's words, and its address (P18.5-T7 AC-8). */
+class UnitChasedCampaignDto {
+  @ApiProperty() code!: string;
+  @ApiProperty() title!: string;
+}
+
 export class UnitRowDto implements UnitRow {
   @ApiProperty() membershipId!: string;
   @ApiProperty({ example: 'Rina Wijaya' }) name!: string;
@@ -138,6 +144,19 @@ export class UnitRowDto implements UnitRow {
     description: 'The next open action item of their latest finalized coaching session.',
   })
   followUp!: FollowUp | null;
+
+  @ApiProperty({
+    type: Boolean, nullable: true,
+    description: '*Chasing MDRT*: chasing the agency’s `MDRT_QUALIFICATION` campaign, not ended. `null` where your '
+      + 'reading does not reach their campaigns — a leader on the agent rung reading a coachee: drawn —.',
+  })
+  chasingMdrt!: boolean | null;
+
+  @ApiProperty({
+    type: [UnitChasedCampaignDto], nullable: true,
+    description: '*Campaigns they’re chasing*: campaigns not ended, by title. `null` as `chasingMdrt`.',
+  })
+  campaigns!: { code: string; title: string }[] | null;
 }
 
 class RolledUpGoalDto implements RolledUpGoal {
@@ -204,6 +223,16 @@ class UnitProductionStateDto {
   @ApiProperty({ description: 'The reader may save corrections here, in this session, over a unit with rows.' }) canUpdate!: boolean;
 }
 
+/** *Chasing MDRT*'s header (P18.5-T7 AC-7). */
+class UnitMdrtDto {
+  @ApiProperty({ description: 'The agency’s `MDRT_QUALIFICATION` campaign is running now.' }) running!: boolean;
+  @ApiProperty({
+    example: 'Chasing MDRT (Million Dollar Round Table) this year — APE of Rp 2.400.000.000 or more.',
+    description: 'The header tooltip, composed from that campaign’s requirement, or saying none is running.',
+  })
+  tooltip!: string;
+}
+
 class WindowDto {
   @ApiProperty({ example: '2026-09-01' }) from!: string;
   @ApiProperty({ example: '2026-09-14' }) to!: string;
@@ -222,6 +251,7 @@ export class UnitDashboardDto implements UnitDashboardView {
   @ApiProperty({ type: YourUnitDto }) yourUnit!: { rows: UnitRow[]; total: UnitTotal };
   @ApiProperty({ type: [UnitGroupDto] }) units!: UnitGroup[];
   @ApiProperty({ type: UnitProductionStateDto }) production!: UnitDashboardView['production'];
+  @ApiProperty({ type: UnitMdrtDto }) mdrt!: UnitDashboardView['mdrt'];
 }
 
 export class ProductionUpdatedDto implements ProductionUpdated {

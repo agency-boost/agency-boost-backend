@@ -3,16 +3,23 @@ import { RequestContext } from '@/common/context/request-context';
 import type { ActivationFeatureLink } from '@/domain/constants';
 
 /**
+ * Which kind of link a write can complete: one of the three feature links, or — since P18.5-T3 — `training`,
+ * any `training:<moduleCode>` link, signalled when a member marks a module *Done*.
+ */
+export type ActivationSignal = ActivationFeatureLink | 'training';
+
+/**
  * **A write a linked activation item waits for has happened** (P13-T3 AC-5, D-links).
  *
  * `GoalService.save`, `LeadService.create`, `ActivityService.saveDay` and `correctDay` call it once, at
- * their end, naming whose record it was and which kind of link it can complete. The activation module
+ * their end, naming whose record it was and which kind of link it can complete — and, since P18.5-T3,
+ * `TrainingProgressService.setStatus` on a move to *Done*. The activation module
  * evaluates that member's open activation — **synchronously, with no event bus and no scheduler**, since
  * nothing in the backend emits or schedules events. A port rather than an import, as the calendar reaches
  * removal through `MemberDeparture`: goals, leads and activity do not depend on activation.
  */
 export abstract class ActivationEvents {
-  abstract recorded(ctx: RequestContext, membershipId: string, kind: ActivationFeatureLink): Promise<void>;
+  abstract recorded(ctx: RequestContext, membershipId: string, kind: ActivationSignal): Promise<void>;
 }
 
 const logger = new Logger('ActivationEvents');
@@ -25,7 +32,7 @@ export async function signalActivation(
   events: ActivationEvents | null | undefined,
   ctx: RequestContext,
   membershipId: string,
-  kind: ActivationFeatureLink,
+  kind: ActivationSignal,
 ): Promise<void> {
   if (!events) return;
   try {

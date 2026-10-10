@@ -47,6 +47,33 @@ export interface MetricDefinition {
    * on every metric a requirement may name. `REQUIREMENT_METRICS` below is the list without them.
    */
   readonly requirable?: false;
+  /**
+   * **What a campaign requirement reads, on the small set a campaign may name** (Phase 18.5, D-evaluable).
+   * Present only on that set and absent everywhere else: **a second flag, separate from `requirable`**, which
+   * stays what a carrier rule may name. A target, an enum, a boolean, a per-event rate or a self-declared toggle
+   * is not something anybody *achieves* over a window, so none carries one. `CAMPAIGN_METRICS` below is the set.
+   */
+  readonly campaign?: CampaignReading;
+}
+
+/**
+ * How a campaign requirement reads a metric over its window (D-evaluable, D-windows), through the owning
+ * module's own functions — never a second copy:
+ *
+ * - `source`: `file` — the office's monthly production file (`monthlyAgentData`), read in whole office months;
+ *   `activity` — the member's logged days, any days.
+ * - `aggregate`: `sum` — the months' or days' figures added (a year to date, for a calendar year, the file's own
+ *   year-to-date cell); `latest` — the latest month held in the window; `ratio` — the office's ratio definition
+ *   over the window's counts.
+ * - `subject`: `self` — the member's own figure; `unit` — over the member's Direct Unit (their direct reports on
+ *   the Agent rung) and themselves.
+ *
+ * The evaluator asserts each `aggregate` agrees with the metric's `period` (D-period, `campaign-evaluation.ts`).
+ */
+export interface CampaignReading {
+  readonly source: 'file' | 'activity';
+  readonly aggregate: 'sum' | 'latest' | 'ratio';
+  readonly subject: 'self' | 'unit';
 }
 
 /**
@@ -64,7 +91,7 @@ export type MetricUnit = (typeof METRIC_UNITS)[number];
 
 export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'MONTHLY_ACTIVE_AGENT', name: 'Monthly Active Agent (MAA)', unit: 'tri_state', phase: 9 },
-  { key: 'MAA_COUNT_IN_UNIT', name: 'Active agents in unit', unit: 'count', phase: 18 },
+  { key: 'MAA_COUNT_IN_UNIT', name: 'Active agents in unit', unit: 'count', phase: 18, campaign: { source: 'file', aggregate: 'latest', subject: 'unit' } },
   { key: 'PACING_TO_MAA', name: 'Pacing to MAA', unit: 'boolean', phase: 11 },
   { key: 'ACTIVITY_COMPLIANCE_7D', name: 'Activity-logging compliance, last 7 days', unit: 'boolean', phase: 6 },
   { key: 'ACTIVITY_COMPLIANCE_MONTH', name: 'Activity-logging compliance, this month', unit: 'boolean', phase: 6 },
@@ -75,7 +102,7 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'DAYS_SINCE_LAST_COACHING', name: 'Days since last 1:1', unit: 'days', phase: 11 },
   { key: 'COACHING_COVERAGE', name: 'Coaching coverage', unit: 'percentage', phase: 11 },
   { key: 'LEADER_COACHING_FREQUENCY', name: 'AB / AAB coaching frequency', unit: 'percentage', phase: 18 },
-  { key: 'APE_ACHIEVED', name: 'APE achieved', unit: 'idr_minor', phase: 9 },
+  { key: 'APE_ACHIEVED', name: 'APE achieved', unit: 'idr_minor', phase: 9, campaign: { source: 'file', aggregate: 'sum', subject: 'self' } },
   { key: 'APE_TARGET', name: 'APE target', unit: 'idr_minor', phase: 8 },
   { key: 'APE_ATTAINMENT_PCT', name: 'APE achieved vs target', unit: 'percentage', phase: 10 },
   { key: 'APE_GAP_TO_TARGET', name: 'Gap to target', unit: 'idr_minor', phase: 10 },
@@ -85,11 +112,11 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'APPOINTMENT_TARGET', name: 'Appointments to hold this month', unit: 'count', phase: 8 },
   { key: 'LEAD_TARGET', name: 'Leads to contact this month', unit: 'count', phase: 8 },
   { key: 'GOAL_PACE_STATUS', name: 'On-track / pace status', unit: 'enum', phase: 11 },
-  { key: 'SELLING_RECRUITMENT_BALANCE', name: 'Selling vs Recruitment balance', unit: 'percentage_points', phase: 6 },
-  { key: 'SELLING_SUCCESS_RATE', name: 'Selling success rate', unit: 'ratio', phase: 6 },
-  { key: 'RECRUITMENT_SUCCESS_RATE', name: 'Recruitment success rate', unit: 'ratio', phase: 6 },
-  { key: 'LEADS_PER_ACTIVITY', name: 'Leads per activity', unit: 'ratio', phase: 6 },
-  { key: 'MEETING_PER_APPROACH', name: 'Meeting per approach', unit: 'ratio', phase: 6 },
+  { key: 'SELLING_RECRUITMENT_BALANCE', name: 'Selling vs Recruitment balance', unit: 'percentage_points', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
+  { key: 'SELLING_SUCCESS_RATE', name: 'Selling success rate', unit: 'ratio', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
+  { key: 'RECRUITMENT_SUCCESS_RATE', name: 'Recruitment success rate', unit: 'ratio', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
+  { key: 'LEADS_PER_ACTIVITY', name: 'Leads per activity', unit: 'ratio', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
+  { key: 'MEETING_PER_APPROACH', name: 'Meeting per approach', unit: 'ratio', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
   { key: 'MEASURED_LEAD_TO_APPOINTMENT_RATE', name: 'Your logged leads-to-appointment rate', unit: 'ratio', phase: 10 },
   { key: 'MEASURED_CLOSING_RATE', name: 'Your logged closing rate', unit: 'ratio', phase: 10 },
   { key: 'MONTHLY_APE_TARGET', name: 'This month’s APE target', unit: 'idr_minor', phase: 10 },
@@ -127,9 +154,15 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'SALES_LEADS_CLOSING_THIS_MONTH', name: 'Sales leads closing this month', unit: 'count', phase: 15 },
   { key: 'RECRUITMENT_NOMINATED_THIS_MONTH', name: 'Recruitment candidates nominated this month', unit: 'count', phase: 15 },
   { key: 'POTENTIAL_MAA_COUNT_IN_UNIT', name: 'Potential Monthly Active Agents in unit', unit: 'count', phase: 15 },
-  { key: 'CASCADE_ACTIVITY_TOUCHES', name: 'Touches on the goal activities', unit: 'count', phase: 15 },
-  { key: 'NEW_ACTIVE_AGENTS', name: 'New active agents', unit: 'count', phase: 9 },
-  { key: 'ROLLING_PERSISTENCY', name: 'Rolling persistency', unit: 'percentage', phase: 9 },
+  { key: 'CASCADE_ACTIVITY_TOUCHES', name: 'Touches on the goal activities', unit: 'count', phase: 15, campaign: { source: 'activity', aggregate: 'sum', subject: 'self' } },
+  { key: 'NEW_ACTIVE_AGENTS', name: 'New active agents', unit: 'count', phase: 9, campaign: { source: 'file', aggregate: 'sum', subject: 'self' } },
+  { key: 'ROLLING_PERSISTENCY', name: 'Rolling persistency', unit: 'percentage', phase: 9, campaign: { source: 'file', aggregate: 'latest', subject: 'self' } },
+  /*
+   * Phase 18.5 (OD-152 → option 3): **the file's `recruitment` column, as a campaign reads it**
+   * — the prototype's *New Hire* requirement (`Overall.html:7930`, `:7941`, `:7984`). The carrier's count, monthly
+   * and year to date, as `NEW_ACTIVE_AGENTS` is; **not** the glossary's *New hire*, a person in their activation.
+   */
+  { key: 'NEW_HIRES', name: 'New Hire', unit: 'count', phase: 18.5, campaign: { source: 'file', aggregate: 'sum', subject: 'self' } },
   // P13.2-T4 (ADR-0113): the office's active ABs and AABs, which its leader limit bounds. An office's
   // seats, not anybody's work: no campaign or qualification rule may name it.
   { key: 'LEADERS_USED', name: 'Leaders used', unit: 'count', phase: 13.2, requirable: false },
@@ -184,6 +217,22 @@ export const metricByKey = (key: string): MetricDefinition | undefined =>
  */
 export const REQUIREMENT_METRICS: readonly MetricDefinition[] = METRIC_REGISTRY
   .filter((m) => m.requirable !== false);
+
+/**
+ * **What a campaign requirement may name** (Phase 18.5, D-evaluable): the metrics carrying a `campaign` reading —
+ * a member's own production over whole months, their logged activity, the office's five ratios, and their Direct
+ * Unit's active agents. `GET /metrics` serves the flag, the Owner's picker offers only these, `checkCampaign`
+ * refuses anything else by name, and a requirement stored before the set existed reads *Not measured yet*.
+ *
+ * **Not in it, and why**: `TRAINING_COMPLETION_PCT` (a self-declared toggle), `EVENT_ATTENDANCE_RATE` and
+ * `EVENT_NPS` (two figures per event, not per member), every target and pro-rated target —
+ * `SUB_PERIOD_ACTIVITY_TARGET` among them, which answers Phase 11's carried question — every enum and boolean,
+ * `CAMPAIGN_QUALIFICATION_STATUS` itself, and every office count.
+ */
+export const CAMPAIGN_METRICS: readonly MetricDefinition[] = METRIC_REGISTRY.filter((m) => m.campaign !== undefined);
+
+/** Is this key one a campaign requirement may name? */
+export const isCampaignMetric = (key: string): boolean => metricByKey(key)?.campaign !== undefined;
 
 /**
  * The phase that evaluates a campaign, which is what a requirement has to be computable by.

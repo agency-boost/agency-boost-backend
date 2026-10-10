@@ -3,11 +3,13 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import type { LocalDate } from '@/common/time/local-day';
 import {
-  ACTIVATION_LINK_KINDS, type ActivationFeatureLink,
+  ACTIVATION_LINK_KINDS, ACTIVATION_TRAINING_LINK, type ActivationFeatureLink,
 } from '@/domain/constants';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { GoalRepository } from '@/modules/goals/goal.repository';
 import { LeadReadings } from '@/modules/leads/lead-readings';
+import { TrainingProgressReadings } from '@/modules/training/training-progress-readings';
+import { trainingLinkModuleCode } from './activation-input';
 import { activityWeeksCompletedOn, freshItemState, officeMondayOf } from './activation-rules';
 import type {
   ActivationProgressDocument, ActivationRecordCollection,
@@ -50,16 +52,27 @@ function withCompletions(
   return copy;
 }
 
-/** A feature link whose evaluator exists: the only kinds this engine completes (P13-T3 AC-1). */
+/** A feature link whose evaluator exists (P13-T3 AC-1). */
 export function isLiveFeatureLink(link: string | null): link is ActivationFeatureLink {
   return link !== null
     && Object.prototype.hasOwnProperty.call(ACTIVATION_LINK_KINDS, link)
     && ACTIVATION_LINK_KINDS[link as ActivationFeatureLink].live;
 }
 
+/** The module a live training link binds, or `null` for anything else (P18.5-T3 AC-1). */
+export function liveTrainingModule(link: string | null): string | null {
+  const code = trainingLinkModuleCode(link);
+  return code && ACTIVATION_TRAINING_LINK.live ? code : null;
+}
+
+/** A link this engine completes: a live feature link, or a live training link. */
+function isEvaluated(link: string | null): boolean {
+  return isLiveFeatureLink(link) || liveTrainingModule(link) !== null;
+}
+
 /**
- * **The auto-completion engine** (P13-T3; ADR-0031, D-links): the three feature links, evaluated against
- * the records the hire's office holds.
+ * **The auto-completion engine** (P13-T3; ADR-0031, D-links): the three feature links and — since P18.5-T3 —
+ * every training link, evaluated against the records the hire's office holds.
  *
  * - **`feature:goals`** — any goal saved on the hire's membership, by them or by a leader with `?for=`
  *   (ADR-0046), attributed to whoever saved it.
@@ -68,6 +81,10 @@ export function isLiveFeatureLink(link: string | null): link is ActivationFeatur
  * - **`feature:activity`** — `ACTIVATION_ACTIVITY_WEEKS` consecutive Monday-to-Sunday office weeks from
  *   the start date, each with a day logged above zero; an all-zero day counts for none, a corrected day
  *   as corrected (ADR-0042).
+ * - **`training:<moduleCode>`** (P18.5-T3 AC-2) — the hire's `trainingProgress` row for that module is `done`,
+ *   attributed to the hire (only they write it), at its `completedAt`. Whether the module is still offered
+ *   does not matter here: a `done` record made earlier still completes it (D-orphan); being offered decides
+ *   only whether the item may also be ticked by hand (`mayTickByHand`).
  *
  * **By code, never by position** (invariant §4): whichever items of the pinned version bind a kind are the
  * items it completes, so an office that moves `feature:goals` to another item sees that one complete.
@@ -76,8 +93,9 @@ export function isLiveFeatureLink(link: string | null): link is ActivationFeatur
  * passes nothing else.
  *
  * **Bounded reads** (AC-7): one query per kind for every target at once, through the seams that exist —
- * `LeadReadings`, `ActivityReadings`, and the goals repository — within the office, and none at all for a
- * kind no target is still waiting on.
+ * `LeadReadings`, `ActivityReadings`, `TrainingProgressReadings` and the goals repository — within the office,
+ * and none at all for a kind no target is still waiting on (P18.5-T3 AC-7: one progress query for every
+ * training item waiting, skipped when none is).
  *
  * **A read-only support session writes nothing** (the Phase 13 exit review, N3): it is answered the links
  * met, applied to a copy of the stored row in memory, so its page shows what its member's would; the row
@@ -91,6 +109,8 @@ export class ActivationLinkEngine {
     private readonly leads: LeadReadings,
     private readonly activity: ActivityReadings,
     private readonly clock: Clock,
+    // P18.5-T3: the training kind's records, through training's own port.
+    private readonly training: TrainingProgressReadings,
   ) {}
 
   /** Each target, as it stands after its newly met links are written — the same order, and the same document when nothing changed. */
@@ -99,7 +119,7 @@ export class ActivationLinkEngine {
   ): Promise<ActivationProgressDocument[]> {
     const waiting = targets.map(({ doc, items }) => {
       const done = new Set(doc.items.filter((i) => i.done).map((i) => i.code));
-      return items.filter((item) => isLiveFeatureLink(item.autoLink) && !done.has(item.code));
+      return items.filter((item) => isEvaluated(item.autoLink) && !done.has(item.code));
     });
     const whoWaitsOn = (kind: ActivationFeatureLink) => targets
       .filter((_, i) => waiting[i].some((item) => item.autoLink === kind))
@@ -108,7 +128,12 @@ export class ActivationLinkEngine {
     const onGoals = whoWaitsOn('feature:goals');
     const onLeads = whoWaitsOn('feature:leads');
     const onActivity = whoWaitsOn('feature:activity');
-    const [goals, leads, days] = await Promise.all([
+    // Every training item still waiting, across every target: one query for their modules' `done` rows.
+    const trainingWaits = waiting.flatMap((items, i) => items
+      .map((item) => liveTrainingModule(item.autoLink))
+      .filter((code): code is string => code !== null)
+      .map((code) => ({ membershipId: targets[i].doc.membershipId, code })));
+    const [goals, leads, days, trainingDone] = await Promise.all([
       this.latestGoals(ctx, onGoals.map((d) => d.membershipId)),
       this.leads.latestOfMany(ctx, onLeads.map((d) => d.membershipId)),
       onActivity.length === 0
@@ -116,12 +141,27 @@ export class ActivationLinkEngine {
         : this.activity.activeDaysOfMany(
           ctx, onActivity.map((d) => d.membershipId), onActivity.map((d) => d.startDate).sort()[0],
         ),
+      trainingWaits.length === 0
+        ? []
+        : this.training.rowsOf(
+          ctx, trainingWaits.map((w) => w.membershipId),
+          { moduleCodes: trainingWaits.map((w) => w.code), status: 'done' },
+        ),
     ]);
+    const doneModule = new Map(trainingDone.map((row) => [`${row.membershipId}|${row.moduleCode}`, row]));
 
     const mondayOf = officeMondayOf(this.clock, timezone);
     const now = this.clock.now();
-    const completionOf = (kind: ActivationFeatureLink, doc: ActivationProgressDocument): Completion | null => {
-      switch (kind) {
+    const completionOf = (link: string, doc: ActivationProgressDocument): Completion | null => {
+      const moduleCode = liveTrainingModule(link);
+      if (moduleCode !== null) {
+        const row = doneModule.get(`${doc.membershipId}|${moduleCode}`);
+        // Only the hire writes their own progress (no route takes a subject), so the hire is who completed it.
+        return row
+          ? { at: row.completedAt ?? now, byMembershipId: doc.membershipId, recordCollection: 'trainingProgress', recordId: row.id }
+          : null;
+      }
+      switch (link as ActivationFeatureLink) {
         case 'feature:goals': {
           const goal = goals.get(doc.membershipId);
           return goal ? { at: goal.at, byMembershipId: goal.byMembershipId, recordCollection: 'goals', recordId: goal.id } : null;
@@ -140,7 +180,7 @@ export class ActivationLinkEngine {
 
     return Promise.all(targets.map(async ({ doc }, i) => {
       const met = waiting[i]
-        .map((item) => ({ code: item.code, completion: completionOf(item.autoLink as ActivationFeatureLink, doc) }))
+        .map((item) => ({ code: item.code, completion: completionOf(item.autoLink!, doc) }))
         .filter((m): m is { code: string; completion: Completion } => m.completion !== null);
       if (met.length === 0) return doc;
       if (ctx.impersonationReadOnly) return withCompletions(doc, met);
