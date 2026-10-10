@@ -285,6 +285,9 @@ describe('the metric registry (P4-T4)', () => {
       AVERAGE_CASE_SIZE_REALISED: 18.1,
       // P18.5-T8 (OD-152 → option 3): the file's `recruitment` column, the campaigns' *New Hire*.
       NEW_HIRES: 18.5,
+      // P18.6-T1 (OD-159, OD-160): the Owner's compliance tree's two chips that needed a definition.
+      ACTIVATION_COMPLETION_RATE: 18.6,
+      GOAL_SET_RATE: 18.6,
     };
     const existedBefore = (id: string) => !(id in REGISTERED_SINCE);
 
@@ -324,8 +327,8 @@ describe('the metric registry (P4-T4)', () => {
       // And no phase that plan gave no metric to: an old-plan 12 left behind would have read as
       // Calendar's, 16 was Billing, 17 Recruitment tools, 19 go-live. Today's set is pinned below.
       const phases = [...new Set(METRIC_IDS.map(sept29Phase))].sort((a, b) => a - b);
-      // 18.5 since P18.5-T8 registered *New Hire* (`NEW_HIRES`), a metric that plan never had.
-      expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 14, 15, 18, 18.1, 18.5]);
+      // 18.5 since P18.5-T8 registered *New Hire* (`NEW_HIRES`), a metric that plan never had; 18.6 since P18.6-T1.
+      expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 14, 15, 18, 18.1, 18.5, 18.6]);
     });
 
     it('evaluated campaigns in Phase 14 under that plan, the old plan’s 12: where campaign qualification is computed', () => {
@@ -356,6 +359,8 @@ describe('the metric registry (P4-T4)', () => {
         // Since Phase 18.1 the forum's seven, each computed over an office alone (P18.1-T1 AC-4).
         'ACTIVATION_COHORT', 'AVERAGE_CASE_SIZE_REALISED', 'CASE_SUBMISSIONS', 'MAA_MONTHLY_AVG',
         'NEW_ACTIVE_AGENTS_MONTHLY_AVG', 'NEW_AGENT_3M_ACTIVE_PCT', 'PRODUCING_AGENTS',
+        // Since Phase 18.6 the compliance tree's two shares of a set (P18.6-T1 AC-5, AC-7).
+        'ACTIVATION_COMPLETION_RATE', 'GOAL_SET_RATE',
       ].sort());
     });
 
@@ -395,7 +400,8 @@ describe('the metric registry (P4-T4)', () => {
         // And no phase the plan gives no metric to. Phase 14 is Sales tools now and computes none;
         // 12 is Calendar's, 16 is retired, 17 Recruitment tools, 19 hardening.
         const phases = [...new Set(METRIC_IDS.map((id) => metric(id).phase))].sort((a, b) => a - b);
-        expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 15, 18, 18.1, 18.5]);
+        // 18.6 since P18.6-T1: the compliance tree's two, after campaign evaluation and no requirement's (below).
+        expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 15, 18, 18.1, 18.5, 18.6]);
       });
 
       it('pins, by key, every metric measured by the time a campaign is evaluated: all of them', () => {
@@ -430,10 +436,13 @@ describe('the metric registry (P4-T4)', () => {
         ].sort());
       });
 
-      it('refuses none as not measured yet: no metric registered today is computed after campaign evaluation', () => {
-        // The refusal stays, for a metric registered later; `campaign-input.spec.ts` proves it
+      it('refuses none as not measured yet: no metric a requirement may name is computed after campaign evaluation', () => {
+        // The refusal stays, for a requirable metric registered later; `campaign-input.spec.ts` proves it
         // with an evaluation placed earlier.
-        expect(METRIC_IDS.filter((id) => metric(id).phase > CAMPAIGN_EVALUATION_PHASE)).toEqual([]);
+        expect(METRIC_IDS.filter((id) => metric(id).phase > CAMPAIGN_EVALUATION_PHASE && !NOT_REQUIRABLE.includes(id))).toEqual([]);
+        // P18.6-T1: the two registered after it are shares of a set, which no requirement may name whatever its phase.
+        expect(METRIC_IDS.filter((id) => metric(id).phase > CAMPAIGN_EVALUATION_PHASE).sort())
+          .toEqual(['ACTIVATION_COMPLETION_RATE', 'GOAL_SET_RATE']);
       });
 
       it('changed that set in exactly one way, decided: the unit rollups (15) and the Owner’s reporting metrics (18) precede campaigns now, so a campaign may require them', () => {
@@ -650,6 +659,35 @@ describe('the metric registry (P4-T4)', () => {
       // `CALENDAR_YEAR` stays the code's token for a year; there is no `CALENDAR_YTD` (D-period).
       expect(metric('APE_ACHIEVED').period).toBe('CALENDAR_YEAR');
       expect(METRIC_IDS.map((id) => metric(id).period)).not.toContain('CALENDAR_YTD');
+    });
+  });
+
+  describe('P18.6-T1 AC-5, AC-7 — the compliance tree registers its two shares before it serves them (OD-159, OD-160)', () => {
+    it('P18.6-T1 AC-7 registers ACTIVATION_COMPLETION_RATE at 18.6: a percentage, point in time, no threshold', () => {
+      expect(metric('ACTIVATION_COMPLETION_RATE')).toEqual({
+        id: 'ACTIVATION_COMPLETION_RATE', label: 'Activation completion rate', unit: 'percentage', period: 'POINT_IN_TIME',
+        threshold: null, phase: 18.6,
+      });
+    });
+
+    it('P18.6-T1 AC-5 registers GOAL_SET_RATE at 18.6: a percentage of the office’s calendar year, no threshold', () => {
+      expect(metric('GOAL_SET_RATE')).toEqual({
+        id: 'GOAL_SET_RATE', label: 'Goal set', unit: 'percentage', period: 'CALENDAR_YEAR', threshold: null, phase: 18.6,
+      });
+    });
+
+    it('P18.6-T1 AC-7 keeps the set’s graduations apart from one hire’s items: two names, two scopes', () => {
+      expect(metric('ACTIVATION_COMPLETION_PCT').label).not.toBe(metric('ACTIVATION_COMPLETION_RATE').label);
+      expect(metric('ACTIVATION_COMPLETION_PCT').period).toBe('PROGRAMME_WINDOW');
+    });
+
+    it('P18.6-T1 AC-5, AC-7 keeps both out of every requirement and every campaign: nobody qualifies by a share of a set', () => {
+      for (const id of ['ACTIVATION_COMPLETION_RATE', 'GOAL_SET_RATE']) {
+        expect([id, SERVED.find((m) => m.key === id)?.requirable, REQUIREMENT_METRICS.some((m) => m.key === id), isCampaignMetric(id)])
+          .toEqual([id, false, false, false]);
+      }
+      // And nothing else is Phase 18.6's.
+      expect(METRIC_IDS.filter((id) => metric(id).phase === 18.6).sort()).toEqual(['ACTIVATION_COMPLETION_RATE', 'GOAL_SET_RATE']);
     });
   });
 

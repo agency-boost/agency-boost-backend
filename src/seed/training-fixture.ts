@@ -49,7 +49,7 @@ const RECOMPILE = { overwriteModels: true } as const;
 const DAY_MS = 86_400_000;
 
 /** Sales's ten modules, in the catalog's order: the codes every row below names. */
-const SALES = [
+export const SALES = [
   'PROSPECT_LIST', 'REFERRAL_GENERATION', 'COLD_APPROACH_SCRIPTS', 'FINANCIAL_NEEDS_ANALYSIS', 'DISCOVERY_QUESTIONS',
   'OBJECTION_FUNDAMENTALS', 'CLOSING_TECHNIQUES', 'PRICE_OBJECTIONS', 'CROSS_SELL_OPPORTUNITIES', 'CLIENT_RETENTION',
 ] as const;

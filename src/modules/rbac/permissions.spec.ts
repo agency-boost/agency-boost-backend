@@ -275,7 +275,6 @@ describe('permission matrix', () => {
       'impersonation:stop': 'ending a support session needs only the session: `POST /admin/impersonate/end` declares no permission',
       'campaign_payout:mark': `${STRUCK} (OD-155: no payouts in v1 — the final standing is the record, the office pays outside the product)`,
       'campaign_payout:reverse_paid': `${STRUCK} (OD-155)`,
-      'campaign_qualification:override': 'Phase 18.6 — the override ships with its only control, the compliance tree\'s *Achieved* cell (D-tasks)',
       'company_campaign:crud': 'OD-156: company campaigns are deferred beyond v1 — every campaign is the office\'s',
       'company_campaign:hide': 'OD-156: deferred beyond v1, with `company_campaign:crud`',
       // OD-156 (answered 2026-10-10, ADR-0034's second half): company-wide events are deferred beyond v1.
@@ -939,6 +938,28 @@ describe('permission matrix', () => {
       expect(scopeFor(ctx({ role: 'ab', owner: true }), 'new_hires:read_roster')).toBe('own-downline');
       expect(scopeFor(ctx({ role: 'agent', admin: true }), 'activation:graduate')).toBe('own');
     });
+
+    /*
+     * **OD-158 → option 1 (P18.6-T1 AC-7, exit test 2)**: the Owner and the Admins read a hire's activation as the
+     * compliance tree's status alone — under `kpm_analytics:read` — and hold no activation grant of their own: no
+     * checklist, no start-date correction, no reversal of a graduation. Every permission of the two families, today's
+     * and any added later, is granted to no office role and no platform role; one who stands on a rung holds that
+     * rung's, as the member they are (§1.1), which reaches only the hires they coach.
+     */
+    it('P18.6-T1 AC-7 OD-158: no activation or new-hires permission is granted to the Owner, the Admin or the Super Admin', () => {
+      const families = (Object.keys(PERMISSIONS) as Permission[])
+        .filter((p) => /^(activation|activation_note|new_hires):/.test(p));
+      expect(families.sort()).toEqual([...ACTIVATION].sort());
+      for (const permission of families) {
+        const roles = (PERMISSIONS[permission] as readonly { grantee: { kind: string } }[]).map((g) => g.grantee.kind);
+        expect([permission, roles.filter((kind) => kind !== 'hierarchy')]).toEqual([permission, []]);
+        for (const role of ['KPM_OWNER', 'KPM_ADMIN', 'SUPER_ADMIN']) {
+          expect([permission, role, can(ROLES[role], permission)]).toEqual([permission, role, false]);
+        }
+      }
+      // What they read of a hire instead: the tree, under the analytics' own permission.
+      expect([can(ROLES.KPM_OWNER, 'kpm_analytics:read'), can(ROLES.KPM_ADMIN, 'kpm_analytics:read')]).toEqual([true, true]);
+    });
   });
 
   /*
@@ -1022,6 +1043,57 @@ describe('permission matrix', () => {
       for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role }), 'campaign_settings:read')).toBe(false);
       expect(can(ctx({ role: 'agent', owner: true }), 'campaign_settings:read')).toBe(true);
       expect(can(ctx({ role: 'ab', admin: true, impersonatedBy: 'sa-1', readOnly: true }), 'campaign_settings:read')).toBe(true);
+    });
+  });
+
+  /*
+   * **The override of a final standing** (P18.6-T2 AC-5; roles §3.11, D-override): the Owner and the Admins `own-kpm`,
+   * the Super Admin `all` — which writes only inside an elevated support session, as its member — and no field rung.
+   */
+  describe('Phase 18.6 — the override of a final standing (roles §3.11)', () => {
+    const officeOnly = (over: Parameters<typeof ctx>[0]) => {
+      const base = ctx(over);
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: 'agent' });
+    };
+    const ROLES: [string, RequestContext, Scope | null][] = [
+      ['SUPER_ADMIN', ctx({ superAdmin: true, noMembership: true }), 'all'],
+      ['KPM_OWNER', officeOnly({ owner: true }), 'own-kpm'],
+      ['KPM_ADMIN', officeOnly({ admin: true }), 'own-kpm'],
+      ['AB', ctx({ role: 'ab' }), null],
+      ['AAB', ctx({ role: 'aab' }), null],
+      ['AGENT', ctx({ role: 'agent' }), null],
+    ];
+
+    it.each(ROLES.filter(([, , scope]) => scope !== null))(
+      'P18.6-T2 AC-5 positive: campaign_qualification:override is held by %s',
+      (_role, context, scope) => {
+        expect(can(context, 'campaign_qualification:override')).toBe(true);
+        expect(scopeFor(context, 'campaign_qualification:override')).toBe(scope);
+      },
+    );
+
+    it.each(ROLES.filter(([, , scope]) => scope === null))(
+      'P18.6-T2 AC-5 negative: campaign_qualification:override is refused to %s',
+      (_role, context) => {
+        expect(can(context, 'campaign_qualification:override')).toBe(false);
+      },
+    );
+
+    it('P18.6-T2 AC-5 the Owner and the Admin hold it whatever rung they stand on; a removed or pending member never', () => {
+      expect(can(ctx({ role: 'ab', owner: true }), 'campaign_qualification:override')).toBe(true);
+      expect(can(ctx({ role: 'agent', admin: true }), 'campaign_qualification:override')).toBe(true);
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role, status }), 'campaign_qualification:override')).toBe(false);
+      }
+    });
+
+    it('P18.6-T2 AC-5 a write: refused in a read-only support session, held in an elevated one as the member', () => {
+      expect(isReadLike('campaign_qualification:override')).toBe(false);
+      expect(isBlockedWhileImpersonating('campaign_qualification:override')).toBe(false);
+      expect(can(ctx({ role: 'ab', owner: true, impersonatedBy: 'sa-1', readOnly: true }), 'campaign_qualification:override')).toBe(false);
+      expect(can(ctx({ role: 'ab', owner: true, impersonatedBy: 'sa-1', readOnly: false }), 'campaign_qualification:override')).toBe(true);
+      // An elevated session as a field member holds what the member holds: nothing.
+      expect(can(ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: false }), 'campaign_qualification:override')).toBe(false);
     });
   });
 

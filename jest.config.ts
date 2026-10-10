@@ -129,6 +129,12 @@ const config: Config = {
     './src/modules/campaigns/': { lines: 95, branches: 95, functions: 95, statements: 95 },
     './src/modules/campaigns/campaign-agent.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/campaigns/campaign-chase-readings.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    // Phase 18.6 (P18.6-T2): the override of a final standing and the port the compliance tree reads, pinned whole.
+    './src/modules/campaigns/campaign-standing-overrides.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/campaigns/campaign-standings-reader.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    // Phase 18.6 (P18.6-T2): the compliance tree's Events and Campaigns categories, 100 / 100 / 100 / 100 over their own specs.
+    './src/modules/reporting/compliance/events.category.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/reporting/compliance/campaigns.category.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     // Phase 18.5 (the exit review, 14): the members' events brought the module to the domain floor — 99.1 / 95.9 / 100
     // / 99.1 over its own specs alone — and the four files that decide who an event is for, what a member writes, and
     // what the Owner reads and confirms are pinned whole.
@@ -232,6 +238,14 @@ const config: Config = {
     // the two named `…AcrossTenants` reads the platform's adoption makes (invariant §1: tenancy at 100% branch).
     './src/modules/reporting/kpm-recruit-target.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/org/membership.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    /*
+     * Phase 18.6: the Owner's compliance tree — who is listed where, every category's status and chip, and what a read
+     * discloses. Business rules over other modules' readers, so the reporting floor (P18.6-T1 asks ≥95% branch); it
+     * measured 100 on every figure the day it landed. Activation's bulk reader answers every hire's activation of an
+     * office in one read — what the tree discloses of them — so it is held whole, as the partition is.
+     */
+    './src/modules/reporting/compliance/': { lines: 98, branches: 95, functions: 95, statements: 98 },
+    './src/modules/activation/activation-readings.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     // Phase 18.1: who reads the forum and who edits it — the tag is the list, and a field member not tagged meets 404.
     // It decides access, so it is held where the permissions are.
     './src/modules/leader-meetings/leader-meeting-people.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },

@@ -1,4 +1,5 @@
 import { PERFORMANCE, TIME } from '@/domain/constants';
+import { goalSet } from '@/domain/metrics/goal-set';
 import { cascadeCounts, type CascadeCounts } from '@/modules/goals/goal-cascade';
 
 /**
@@ -143,7 +144,8 @@ export function summaryPlan(input: {
   const { goal, month } = input;
   const monthNumber = Number(month.slice(5, 7));
   const planned = goal.projected?.annualApeTargetMinor ?? 0;
-  const annual = goal.savedAt !== null && planned > 0 ? planned : null;
+  // OD-160: *a goal set* is one registered predicate (`goal-set.ts`) — saved, and a target above zero.
+  const annual = goalSet(goal) ? planned : null;
 
   const before = ytdBeforeThisMonth({
     month: monthNumber,

@@ -318,6 +318,17 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   NEW_ACTIVE_AGENTS_MONTHLY_AVG: { period: 'CALENDAR_MONTH', threshold: null },
   MAA_MONTHLY_AVG: { period: 'CALENDAR_MONTH', threshold: null },
   CASE_SUBMISSIONS: { period: 'CALENDAR_MONTH', threshold: null },
+
+  // ---- The Owner's compliance tree (Phase 18.6, P18.6-T1; OD-159, OD-160) ----
+  /*
+   * **Graduated now, over the activations of a set** (OD-159): each activation's state as `activationState` derives it
+   * on the read, so `POINT_IN_TIME`. The PRD's figure is the same definition over `ACTIVATION_COHORT`'s calendar year
+   * (`activation-completion-rate.ts`). No threshold here: the PRD's *≥60%* is the client's target, confirmed at the
+   * phase's review, not a platform benchmark a screen judges by.
+   */
+  ACTIVATION_COMPLETION_RATE: { period: 'POINT_IN_TIME', threshold: null },
+  // A goal saved for the office's calendar year with an annual target above zero (OD-160; `goal-set.ts`).
+  GOAL_SET_RATE: { period: 'CALENDAR_YEAR', threshold: null },
 };
 
 export const METRIC_REGISTRY = define(join(SERVED, COMPUTATIONS));

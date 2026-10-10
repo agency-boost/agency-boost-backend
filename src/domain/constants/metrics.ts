@@ -205,6 +205,14 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'MAA_MONTHLY_AVG', name: 'Avg. Monthly AA', unit: 'count', phase: 18.1, requirable: false },
   { key: 'CASE_SUBMISSIONS', name: 'Case submission', unit: 'count', phase: 18.1, requirable: false },
   { key: 'AVERAGE_CASE_SIZE_REALISED', name: 'Average Case Size', unit: 'idr_minor', phase: 18.1, requirable: false },
+  /*
+   * Phase 18.6 (P18.6-T1 AC-5, AC-7; OD-159, OD-160): the Owner's compliance tree's two chips that needed a definition,
+   * each computed once under `domain/metrics/` (`activation-completion-rate.ts`, `goal-set.ts`). **Both are
+   * `requirable: false`**: each is a share of a set of members, and nobody qualifies by one. `ACTIVATION_COMPLETION_RATE`
+   * is a set's graduations, never `ACTIVATION_COMPLETION_PCT` — one hire's items.
+   */
+  { key: 'ACTIVATION_COMPLETION_RATE', name: 'Activation completion rate', unit: 'percentage', phase: 18.6, requirable: false },
+  { key: 'GOAL_SET_RATE', name: 'Goal set', unit: 'percentage', phase: 18.6, requirable: false },
 ];
 
 export const metricByKey = (key: string): MetricDefinition | undefined =>

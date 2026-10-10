@@ -109,3 +109,25 @@ export class SaveCampaignDto {
   @Allow()
   reward?: string;
 }
+
+/**
+ * `PUT /kpm/settings/campaigns/:code/standings/:membershipId/override` (P18.6-T2 AC-5, D-override). Declared for
+ * OpenAPI; the rules are `checkStandingOverride`'s (ADR-0030), so every property carries `@Allow()` — see
+ * `SaveCampaignDto`.
+ */
+export class OverrideStandingDto {
+  @ApiProperty({ enum: ['qualified', 'not_met'], description: '*Achieved* or *Not achieved*. Not the status it already reads.' })
+  @Allow()
+  status!: string;
+
+  @ApiProperty({ minLength: 1, maxLength: 500, description: 'Why the result is corrected. Required; trimmed, 1–500 characters. Plain text.' })
+  @Allow()
+  reason!: string;
+}
+
+/** `DELETE /kpm/settings/campaigns/:code/standings/:membershipId/override`: clearing needs a reason too. */
+export class ClearStandingOverrideDto {
+  @ApiProperty({ minLength: 1, maxLength: 500, description: 'Why the override is cleared. Required; trimmed, 1–500 characters.' })
+  @Allow()
+  reason!: string;
+}

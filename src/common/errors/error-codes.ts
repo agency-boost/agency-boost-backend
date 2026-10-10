@@ -319,6 +319,16 @@ export const ErrorCode = {
   CAMPAIGN_NOT_OPEN: 'CAMPAIGN_NOT_OPEN',
   /** A chase by a rung the campaign does not apply to (`appliesToOrgLevelCodes`). `403`. */
   CAMPAIGN_NOT_ELIGIBLE: 'CAMPAIGN_NOT_ELIGIBLE',
+  /**
+   * An override, or its clearing, before the campaign's window is final (P18.6-T2; ADR-0144 §4): the last month it
+   * reads has not locked, it is still running, or it never is (`rolling_12m`). `409`, `details.code`.
+   */
+  CAMPAIGN_STANDING_NOT_FINAL: 'CAMPAIGN_STANDING_NOT_FINAL',
+  /**
+   * An override, or its clearing, of the caller's own standing (P18.6 exit review, round 1; ADR-0138's rule, as
+   * `EVENT_ATTENDANCE_SELF`): nobody corrects their own result. `400`, `details.membershipId`; nothing is written.
+   */
+  CAMPAIGN_OVERRIDE_SELF: 'CAMPAIGN_OVERRIDE_SELF',
 
   /*
    * Events (Phase 18.5, P18.5-T5 and T6; `functional/events.md`; OD-31). Outside a reader's audience or office, an

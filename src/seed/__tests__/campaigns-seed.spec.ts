@@ -42,7 +42,7 @@ describe('Phase 18.5 the campaigns seed — a run at 10:00 on 10 October 2026 in
   }, RUN_MS);
   afterAll(stopMongo);
 
-  it('P18.5-T7 AC-11 writes eight campaigns and eight chases in 0417, one campaign in 0555, and no standing yet', async () => {
+  it('P18.5-T7 AC-11 writes eight campaigns and eight chases in 0417, one campaign in 0555, and no standing of its own', async () => {
     const codes = (await col('campaigns').find({ kpmId: kpm0417 }).toArray()).map((c) => c.code).sort();
     expect(codes).toEqual([
       'APE_CHALLENGE_NEXT', 'APE_SPRINT', 'ARCHIVED_DRIVE', 'MDRT_QUALIFICATION', 'NEW_HIRE_BLITZ', 'PERSISTENCY_PUSH',
@@ -51,7 +51,10 @@ describe('Phase 18.5 the campaigns seed — a run at 10:00 on 10 October 2026 in
     expect(await col('campaignChases').countDocuments({ kpmId: kpm0417 })).toBe(8);
     const kpm0555 = String((await col('kpms').findOne({ code: '0555' }))!._id);
     expect(await col('campaigns').countDocuments({ kpmId: kpm0555, code: 'GADING_PUSH' })).toBe(1);
-    expect(await col('campaignStandings').countDocuments({})).toBe(0);
+    // *Amended 2026-10-10 (P18.6-T3, D-seed a):* the compliance fixture runs after this one and overrides Budi's final
+    // standing in the push, through the campaigns module's own write — the first read after September locked, which
+    // freezes the push's window: its two chasers, and nothing else.
+    expect((await col('campaignStandings').find({}).toArray()).map((s) => s.campaignCode)).toEqual(['PERSISTENCY_PUSH', 'PERSISTENCY_PUSH']);
     expect(seeded.campaigns.written).toBe(8 + 1 + 8);
     // Phase 5's two, given the card's fields by the migration; the drive snapped to whole office months.
     const drive = (await col('campaigns').findOne({ kpmId: kpm0417, code: 'YEAR_END_DRIVE' }))!;
@@ -92,7 +95,11 @@ describe('Phase 18.5 the campaigns seed — a run at 10:00 on 10 October 2026 in
     const read = await wired.campaignStandingsReader.ofOffice(rina, { codes: ['PERSISTENCY_PUSH'] });
     const of = (id: string) => read.standings.find((s) => s.membershipId === id)!;
     expect(of(rina.membershipId!)).toMatchObject({ chasing: true, status: 'qualified', final: true });
-    expect(of(budi.membershipId!)).toMatchObject({ chasing: true, status: 'not_met', final: true });
+    // *Amended 2026-10-10 (P18.6-T3, D-seed a):* Budi's frozen *Not met* is overridden *Achieved* by the Owner; every
+    // reader reads the override, and the stored status stays the frozen one. His dialog's rows do not change.
+    expect(of(budi.membershipId!)).toMatchObject({ chasing: true, status: 'qualified', final: true, overridden: { status: 'qualified' } });
+    expect((await col('campaignStandings').findOne({ campaignCode: 'PERSISTENCY_PUSH', membershipId: budi.membershipId }))!.status)
+      .toBe('not_met');
     expect((await col('campaignStandings').find({ campaignCode: 'PERSISTENCY_PUSH' }).toArray()).map((s) => s.membershipId).sort())
       .toEqual([rina.membershipId, budi.membershipId].sort());
   });

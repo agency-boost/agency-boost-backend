@@ -90,6 +90,7 @@ import { CampaignEvaluation } from '@/modules/campaigns/campaign-evaluation';
 import { CampaignAgentService } from '@/modules/campaigns/campaign-agent.service';
 import { CampaignStandingsReader } from '@/modules/campaigns/campaign-standings-reader';
 import { CampaignChaseDeparture } from '@/modules/campaigns/campaign-departure';
+import { CampaignStandingOverrides } from '@/modules/campaigns/campaign-standing-overrides';
 import {
   CapabilityCatalog, CapabilityCatalogSchema,
 } from '@/modules/capability/capability.schema';
@@ -686,8 +687,14 @@ export function configModule(
     campaignRows, campaignChases, campaignChaseReadings, campaignEvaluation, coach, memberships, audit,
     new TenantDay(kpms as never, clock), clock,
   );
-  const campaignStandingsReader = new CampaignStandingsReader(campaignRows, memberships, campaignEvaluation, clock);
+  const campaignStandingsReader = new CampaignStandingsReader(
+    campaignRows, memberships, campaignEvaluation, new TenantDay(kpms as never, clock), clock,
+  );
   const campaignDeparture = new CampaignChaseDeparture(campaignChases, clock, audit);
+  // P18.6-T2: the override of a final standing.
+  const campaignStandingOverrides = new CampaignStandingOverrides(
+    campaignRows, memberships, campaignStandings, campaignEvaluation, new MemberNames(memberships, users as never), audit, clock,
+  );
 
   const unitDashboard = new UnitDashboardService(
     coach, new MemberNames(memberships, users as never), orgLevels, new TenantDay(kpms as never, clock),
@@ -766,7 +773,7 @@ export function configModule(
     trainingProgressRows, offeredTraining, trainingReadings, trainingProgress,
     unitDashboard,
     campaignRows, campaignChases, campaignStandings, campaignChaseReadings, campaignEvaluation, campaignAgent,
-    campaignStandingsReader, campaignDeparture,
+    campaignStandingsReader, campaignDeparture, campaignStandingOverrides,
     recruitmentPlaybookRows, recruitmentPlaybooks, recruitmentPlans, recruitmentPitch,
     leadReadings, recruitTargets, officePeople, carrierRules, kpmOverview, kpmAnalytics, platformAnalytics,
     directoryColumns, memberships, users,

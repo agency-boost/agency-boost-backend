@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { TenantScopedRepository } from '@/common/tenancy/tenant-scoped.repository';
-import { CampaignStanding, CampaignStandingDocument } from './campaign-standing.schema';
+import { CampaignStanding, CampaignStandingDocument, type StandingOverride } from './campaign-standing.schema';
 
 /** The final standings (P18.5-T8 AC-5). Through the chokepoint; written in one insert when a window becomes final. */
 @Injectable()
@@ -32,5 +32,22 @@ export class CampaignStandingRepository extends TenantScopedRepository<CampaignS
       const codes = errors.writeErrors?.map((e) => e.code ?? e.err?.code) ?? [errors.code];
       if (codes.length === 0 || codes.some((code) => code !== 11000)) throw err;
     }
+  }
+
+  /**
+   * **Set or clear a final standing's override, only where the row is still as it was read** (P18.6-T2 AC-5): one
+   * conditional update on the row's own `version`, which it moves — so of two writes from one reading only the first
+   * lands, and the caller audits exactly the write that happened (`false`: somebody changed it first). Scoped like
+   * every write here; the frozen `status` is not touched. Stamped with the clock port's instant.
+   */
+  async setOverride(
+    ctx: RequestContext, id: string, version: number | null, override: StandingOverride | null, at: Date,
+  ): Promise<boolean> {
+    const result = await this.model.updateOne(
+      this.scope(ctx, 'setOverride', { _id: id, version }),
+      { $set: { override, updatedAt: at }, $inc: { version: 1 } },
+      { timestamps: false },
+    ).exec();
+    return result.modifiedCount === 1;
   }
 }

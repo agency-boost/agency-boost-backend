@@ -164,6 +164,21 @@ describe('campaigns, measured (P18.5-T8 AC-9)', () => {
     expect(new Set(july.map((s) => s.status))).toEqual(new Set(['qualified', 'not_joined']));
   }, 60_000);
 
+  it('P18.6-T2 AC-9 the tree’s path — the members asked for, over the year — is the same queries for 50 as for 500', async () => {
+    const year = { start: new Date('2026-01-01T00:00:00+07:00'), end: new Date('2027-01-01T00:00:00+07:00') };
+    const membersOf = async (kpmId: string) => (await mongoose.connection.db!.collection('memberships')
+      .find({ kpmId, status: 'active' }).toArray()).map((m) => String(m._id));
+    const [idsSmall, idsBig] = [await membersOf(SMALL), await membersOf(BIG)];
+    const small = await counted(() => wired.campaignStandingsReader.ofOffice(owner(SMALL), { memberIds: idsSmall, window: year }));
+    const large = await counted(() => wired.campaignStandingsReader.ofOffice(owner(BIG), { memberIds: idsBig, window: year }));
+    expect(large.result.standings).toHaveLength(large.result.campaigns.length * 501);
+    expect(large.queries.sort()).toEqual(small.queries.sort());
+    // eslint-disable-next-line no-console
+    console.log(`  standings port, the tree's path: ${large.queries.length} queries`);
+    // One fewer than the office-wide read: the office's memberships are not listed.
+    expect(large.queries.length).toBeLessThanOrEqual(24);
+  }, 60_000);
+
   it('P18.5-T8 AC-9 the dialog and the list are a fixed number of queries for any office', async () => {
     const ctxSmall = owner(SMALL);
     const ctxBig = owner(BIG);

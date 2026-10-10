@@ -1355,6 +1355,19 @@ export const PERMISSIONS = {
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
+  /*
+   * **The override of a final standing** (P18.6-T2 AC-5; ADR-0144 §4, roles §3.11; D-override): `PUT` and `DELETE
+   * /kpm/settings/campaigns/:code/standings/:membershipId/override`, a result set to *Achieved* or *Not achieved* with a
+   * reason, and cleared with one. The Owner and the Admins, their own office (ADR-0028). The Super Admin's `all`
+   * writes nothing on its own — outside a support session there is no office (`TENANT_NO_MEMBERSHIP`), and inside one
+   * the member's own grant answers — so it reaches an override only in an **elevated** session, both actors on the
+   * entry; a read-only session is refused by the verb (`override` is not read-like). No field rung holds it.
+   */
+  'campaign_qualification:override': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
   'notification:read_inbox': [{ grantee: AUTHENTICATED, scope: 'own' }],
   'notification:mark_read': [{ grantee: AUTHENTICATED, scope: 'own' }],
   'notification:receive': [

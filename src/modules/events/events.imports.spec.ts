@@ -48,4 +48,19 @@ describe('the events module reaches its data through repositories (invariant §1
   it('allows nothing it no longer needs', () => {
     expect([...ALLOWED.keys()].filter((file) => !files.includes(file))).toEqual([]);
   });
+
+  /*
+   * **The readings' importers, guarded** (P18.6-T1 AC-3; the phase file's *Risks*, 1): `EventReadings` — the roll
+   * call's computation, `attendanceOfMany` among it — is a service port with no route. Outside this module exactly
+   * one file reads it: the compliance tree's *Events* category (`app.module.ts` registers the provider, and reads
+   * nothing). Another reader is a decision, written down here.
+   */
+  it('P18.6-T1 AC-3 outside the events module, only the compliance tree’s Events category imports the readings', () => {
+    const SRC = join(MODULE, '../..');
+    const importers = globSync('**/*.ts', { cwd: SRC })
+      .map((f) => f.replace(/\\/g, '/'))
+      .filter((f) => !f.endsWith('.spec.ts') && !f.startsWith('modules/events/') && f !== 'app.module.ts')
+      .filter((f) => /from '[^']*events\/event-readings'/.test(readFileSync(join(SRC, f), 'utf8')));
+    expect(importers).toEqual(['modules/reporting/compliance/events.category.ts']);
+  });
 });

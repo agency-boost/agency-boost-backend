@@ -1,10 +1,15 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
-import { SaveCampaignDto } from './campaign.dto';
-import { CampaignDto, QualificationRuleDto } from './campaign.response.dto';
+import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
+import { ClearStandingOverrideDto, OverrideStandingDto, SaveCampaignDto } from './campaign.dto';
+import { CampaignDto, QualificationRuleDto, StandingOverrideResultDto } from './campaign.response.dto';
 import { CampaignService } from './campaign.service';
+import { CampaignStandingOverrides } from './campaign-standing-overrides';
+
+/** A refusal the derived descriptions cannot know, in the shared envelope. */
+const refusal = (status: number, description: string) => ({ status, description, type: ApiErrorEnvelope });
 
 /**
  * An office's campaigns, and the carrier rules it is measured against (P5-T7, ADR-0026).
@@ -17,7 +22,10 @@ import { CampaignService } from './campaign.service';
 @ApiBearerAuth()
 @Controller('kpm/settings/campaigns')
 export class CampaignController {
-  constructor(private readonly campaigns: CampaignService) {}
+  constructor(
+    private readonly campaigns: CampaignService,
+    private readonly overrides: CampaignStandingOverrides,
+  ) {}
 
   @Get('rules')
   @RequirePermission('campaign_settings:read')
@@ -86,5 +94,74 @@ export class CampaignController {
   @ApiResponse({ status: 201, type: CampaignDto })
   async restore(@Ctx() ctx: RequestContext, @Param('id') id: string) {
     return this.campaigns.restore(ctx, id);
+  }
+
+  // ---------------------------------------------------------------- Phase 18.6 (P18.6-T2): the override
+
+  @Put(':code/standings/:membershipId/override')
+  @RequirePermission('campaign_qualification:override')
+  @ApiOperation({
+    summary: 'Override a final campaign result',
+    description:
+      'Set a member’s final result in a campaign to *Achieved* (`qualified`) or *Not achieved* (`not_met`), with a '
+      + 'reason — the correction of a result the evaluation could not see. Only once the campaign’s result is final, '
+      + 'and only for a member who was chasing it when it ended (a stored standing). The frozen result is kept beside '
+      + 'the override, so clearing it restores that result. Audited with before, after, the reason and the previous '
+      + 'result. The member’s own campaign dialog does not change. Nobody overrides their own result: an Admin '
+      + 'corrects the Owner’s, the Owner an Admin’s.',
+  })
+  @ApiResponse({ status: 200, type: StandingOverrideResultDto })
+  @ApiResponse(refusal(
+    409,
+    '`CAMPAIGN_STANDING_NOT_FINAL` — the campaign’s result is not final yet. `VERSION_CONFLICT` — somebody changed the '
+    + 'result at the same moment; read it again. Nothing is written.',
+  ))
+  @ApiResponse(refusal(
+    404,
+    '`NOT_FOUND` — the campaign is unknown, archived or another office’s; the member is not this office’s; or the '
+    + 'member has no final result to correct (they were not chasing it when it ended). Indistinguishable from another '
+    + 'office’s.',
+  ))
+  @ApiResponse(refusal(
+    400,
+    '`VALIDATION_FAILED` — a blank or over-long reason, another status, or the result it already reads (`details.status`). '
+    + '`CAMPAIGN_OVERRIDE_SELF` — your own result (`details.membershipId`). Nothing is written.',
+  ))
+  async override(
+    @Ctx() ctx: RequestContext, @Param('code') code: string, @Param('membershipId') membershipId: string,
+    @Body() body: OverrideStandingDto,
+  ) {
+    return this.overrides.override(ctx, code, membershipId, body);
+  }
+
+  @Delete(':code/standings/:membershipId/override')
+  @RequirePermission('campaign_qualification:override')
+  @ApiOperation({
+    summary: 'Clear an override of a final campaign result',
+    description:
+      'Remove the override, with a reason: the result reads what was frozen when the campaign’s result became final. '
+      + 'Audited with before, after, the reason and the previous result.',
+  })
+  @ApiResponse({ status: 200, type: StandingOverrideResultDto })
+  @ApiResponse(refusal(
+    409,
+    '`CAMPAIGN_STANDING_NOT_FINAL` — the campaign’s result is not final yet. `VERSION_CONFLICT` — somebody changed the '
+    + 'result at the same moment; read it again.',
+  ))
+  @ApiResponse(refusal(
+    404,
+    '`NOT_FOUND` — as for setting one (another office’s campaign or member, or no final result), and a result with '
+    + 'no override to clear.',
+  ))
+  @ApiResponse(refusal(
+    400,
+    '`VALIDATION_FAILED` — a blank or over-long reason, or any other field. `CAMPAIGN_OVERRIDE_SELF` — your own result '
+    + '(`details.membershipId`). Nothing is written.',
+  ))
+  async clearOverride(
+    @Ctx() ctx: RequestContext, @Param('code') code: string, @Param('membershipId') membershipId: string,
+    @Body() body: ClearStandingOverrideDto,
+  ) {
+    return this.overrides.clear(ctx, code, membershipId, body);
   }
 }

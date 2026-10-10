@@ -66,11 +66,15 @@ describe('Phase 18.5 the training seed — a run at 10:00 on 10 October 2026 in 
   it('P18.5-T1 AC-11 writes forty-nine rows in 0417 and three in 0555, nowhere else; the PDFs skipped without storage', async () => {
     const kpm0417 = String((await col('kpms').findOne({ code: '0417' }))!._id);
     const kpm0555 = String((await col('kpms').findOne({ code: '0555' }))!._id);
-    expect(await col('trainingProgress').countDocuments({ kpmId: kpm0417 })).toBe(49);
+    // *Amended 2026-10-10 (P18.6-T3 AC-1):* the compliance fixture adds twenty-five rows for Phase 18's cast in 0417
+    // (`compliance-seed.spec.ts`), beside this fixture's forty-nine for the coaching cast.
+    const compliance = 25;
+    expect(await col('trainingProgress').countDocuments({ kpmId: kpm0417 })).toBe(49 + compliance);
     expect(await col('trainingProgress').countDocuments({ kpmId: kpm0555 })).toBe(3);
-    expect(await col('trainingProgress').countDocuments({})).toBe(52);
+    expect(await col('trainingProgress').countDocuments({})).toBe(52 + compliance);
     expect(seeded.training.files).toBe('skipped: storage is not configured');
-    expect(seeded.written.trainingProgress).toBe(52);
+    expect(seeded.written.trainingProgress).toBe(52 + compliance);
+    expect(seeded.compliance.written - 1).toBe(compliance);
   });
 
   it('P18.5-T1 AC-11 Rina: four Sales modules Done, Discovery Questions In progress, the Closing link already opened', async () => {

@@ -54,7 +54,9 @@ import {
 import {
   EventDto, EventInviteeListDto, EventTypeDto, FeedbackSummaryDto, GuestEventDto, GuestEventListDto, RollCallDto,
 } from '@/modules/events/event.response.dto';
-import { CampaignDto, MetricDefinitionDto, QualificationRuleDto } from '@/modules/campaigns/campaign.response.dto';
+import {
+  CampaignDto, MetricDefinitionDto, QualificationRuleDto, StandingOverrideResultDto,
+} from '@/modules/campaigns/campaign.response.dto';
 import {
   CampaignCardDto, CampaignDetailDto, CampaignListDto, ChasingDto,
 } from '@/modules/campaigns/campaign-agent.response.dto';
@@ -87,6 +89,7 @@ import { ProductionUpdatedDto, UnitDashboardDto } from '@/modules/unit-dashboard
 import {
   AdoptionDto, KpmAnalyticsDto, KpmOverviewDto, NotLoggedDto, PlatformAnalyticsDto, RecruitTargetDto,
 } from '@/modules/reporting/reporting.response.dto';
+import { ComplianceViewDto } from '@/modules/reporting/compliance/compliance.response.dto';
 import {
   CoachingSessionDto, SessionDraftSavedDto, SessionHistoryDto,
 } from '@/modules/coaching/coaching-session.response.dto';
@@ -121,6 +124,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   KpmOverviewController_setRecruitTarget: { type: RecruitTargetDto },
   KpmAnalyticsController_read: { type: KpmAnalyticsDto },
   PlatformAnalyticsController_read: { type: PlatformAnalyticsDto },
+  // P18.6-T1: the Owner's compliance tree — the six chips, the catalog, the selection and the tree.
+  ComplianceController_read: { type: ComplianceViewDto },
   // Phase 18.1: the Strategic Leader Forum — the meetings, their minutes, and their shared links.
   LeaderMeetingsController_list: { type: MeetingListViewDto },
   LeaderMeetingsController_create: { type: MeetingCardDto },
@@ -371,6 +376,9 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   CampaignController_update: { type: CampaignDto },
   CampaignController_archive: { type: CampaignDto },
   CampaignController_restore: { type: CampaignDto },
+  // P18.6-T2: the override of a final standing, set and cleared.
+  CampaignController_override: { type: StandingOverrideResultDto },
+  CampaignController_clearOverride: { type: StandingOverrideResultDto },
   // Phase 18.5: the agent's campaigns — the list, one campaign with its progress, the chase, and whose chases.
   CampaignAgentController_list: { type: CampaignListDto },
   CampaignAgentController_chasing: { type: ChasingDto },

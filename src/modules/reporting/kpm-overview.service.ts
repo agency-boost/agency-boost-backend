@@ -8,6 +8,7 @@ import { KPM_REPORTING, PERIOD } from '@/domain/constants';
 import { activityComplianceRate, activityLogged, lastMonthToSameDay } from '@/domain/metrics/activity-logged';
 import { apeYearProjection } from '@/domain/metrics/ape-year-projection';
 import { coachingCoverage } from '@/domain/metrics/coaching-coverage';
+import { goalSet } from '@/domain/metrics/goal-set';
 import { leaderCoachingFrequency } from '@/domain/metrics/leader-coaching-frequency';
 import { memberAt, officeHeadcount, officeNewMembers } from '@/domain/metrics/office-headcount';
 import { rateOver, type Rate } from '@/domain/metrics/rate';
@@ -234,7 +235,8 @@ export class KpmOverviewService {
           // held, before this one. A gap before it is not waiting on anything: the held month's year to date
           // already covers it, and this month's file is not due yet.
           missingMonths: monthsOfYear.filter((m) => m < month && (held.length === 0 || m > held[held.length - 1])),
-          membersWithoutGoal: memberIds.filter((id) => figure.get(id)!.targetMinor === null).length,
+          // OD-160: *a goal set* is one registered predicate, the compliance tree's Goal Setting chip's too (P18.6-T1 AC-5).
+          membersWithoutGoal: memberIds.filter((id) => !goalSet(plans.get(id))).length,
         },
         // The months the year to date covers: the latest held month's number, a month with no file included.
         projectionMinor: apeYearProjection(ytd.actualMinor, held.length === 0 ? 0 : Number(held[held.length - 1].slice(5, 7))),

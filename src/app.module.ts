@@ -172,6 +172,7 @@ import { CampaignEvaluation } from '@/modules/campaigns/campaign-evaluation';
 import { CampaignAgentService } from '@/modules/campaigns/campaign-agent.service';
 import { CampaignAgentController } from '@/modules/campaigns/campaign-agent.controller';
 import { CampaignStandingsReader } from '@/modules/campaigns/campaign-standings-reader';
+import { CampaignStandingOverrides } from '@/modules/campaigns/campaign-standing-overrides';
 import { CampaignChaseDeparture } from '@/modules/campaigns/campaign-departure';
 import {
   CapabilityCatalog, CapabilityCatalogSchema,
@@ -285,6 +286,15 @@ import { KpmOverviewService } from '@/modules/reporting/kpm-overview.service';
 import { KpmAnalyticsService } from '@/modules/reporting/kpm-analytics.service';
 import { PlatformAnalyticsService } from '@/modules/reporting/platform-analytics.service';
 import { DirectoryColumns } from '@/modules/reporting/directory-columns';
+import { ComplianceController } from '@/modules/reporting/compliance/compliance.controller';
+import { ComplianceService } from '@/modules/reporting/compliance/compliance.service';
+import { TrainingComplianceCategory } from '@/modules/reporting/compliance/training.category';
+import { GoalsComplianceCategory } from '@/modules/reporting/compliance/goals.category';
+import { ActivityComplianceCategory } from '@/modules/reporting/compliance/activity.category';
+import { ActivationComplianceCategory } from '@/modules/reporting/compliance/activation.category';
+import { EventsComplianceCategory } from '@/modules/reporting/compliance/events.category';
+import { CampaignsComplianceCategory } from '@/modules/reporting/compliance/campaigns.category';
+import { ActivationReadings } from '@/modules/activation/activation-readings';
 import { CarrierRules } from '@/modules/campaigns/carrier-rules';
 import { LeaderMeeting, LeaderMeetingSchema } from '@/modules/leader-meetings/leader-meeting.schema';
 import {
@@ -444,6 +454,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     KpmOverviewController,
     KpmAnalyticsController,
     PlatformAnalyticsController,
+    // Phase 18.6: the Owner's compliance tree, the analytics' third tab.
+    ComplianceController,
     // Phase 18.1: the Strategic Leader Forum — the meetings, their minutes, and their shared links.
     LeaderMeetingsController,
   ],
@@ -541,6 +553,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     CampaignEvaluation,
     CampaignAgentService,
     CampaignStandingsReader,
+    // P18.6-T2: the override of a final standing, behind `PUT`/`DELETE …/standings/:membershipId/override`.
+    CampaignStandingOverrides,
     CapabilityCatalogRepository,
     CapabilityService,
     /*
@@ -684,6 +698,18 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     KpmAnalyticsService,
     PlatformAnalyticsService,
     DirectoryColumns,
+    /*
+     * Phase 18.6: the Owner's compliance tree — the read, its six categories (each through the module that owns its
+     * records), and activation's bulk reader the Activation category reads every hire's activation through.
+     */
+    ActivationReadings,
+    TrainingComplianceCategory,
+    GoalsComplianceCategory,
+    ActivityComplianceCategory,
+    ActivationComplianceCategory,
+    EventsComplianceCategory,
+    CampaignsComplianceCategory,
+    ComplianceService,
     /*
      * Phase 18.1: the Strategic Leader Forum — the meetings' and the links' tenant repositories, who reads and edits
      * (the tag is the list), the meetings, their minutes and their links, and the scorecard computed through Phase 18's

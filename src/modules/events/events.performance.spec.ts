@@ -211,6 +211,26 @@ describe('events, measured (P18.5-T11 AC-3)', () => {
     expect(sumLarge.queries.length).toBeLessThanOrEqual(10);
   }, 60_000);
 
+  it('P18.6-T1 AC-3 attendanceOfMany reads a dozen events over 501 people in the same queries as over 51', async () => {
+    const all = async (o: Office) => (await wired.events.list(o.owner, false)).map((e: { id: string }) => e.id);
+    const idsSmall = await all(offices.small);
+    const idsBig = await all(offices.big);
+    const small = await counted(() => wired.eventReadings.attendanceOfMany(offices.small.owner, idsSmall));
+    const large = await counted(() => wired.eventReadings.attendanceOfMany(offices.big.owner, idsBig));
+    expect(large.result.size).toBe(12);
+    expect(small.result.size).toBe(12);
+    expect(large.result.get(offices.big.biggest)!.rows).toHaveLength(501);
+    expect(large.queries.sort()).toEqual(small.queries.sort());
+    // eslint-disable-next-line no-console
+    console.log(`  attendanceOfMany, 12 events: ${large.queries.length} queries — ${large.queries.join(', ')}`);
+    // The events, the office's zone, the people, the leader edges (two started *Leaders* events), the RSVPs, the answers.
+    expect(large.queries.length).toBeLessThanOrEqual(6);
+    const time = await p95(() => wired.eventReadings.attendanceOfMany(offices.big.owner, idsBig));
+    // eslint-disable-next-line no-console
+    console.log(`  attendanceOfMany p95 of 20 at 501 people, 12 events: ${time.toFixed(1)} ms`);
+    expect(time).toBeLessThan(2000);
+  }, 120_000);
+
   it('P18.5-T11 AC-3 records the ceiling’s cost', async () => {
     const list = await p95(() => wired.eventGuests.list(offices.big.agent));
     const call = await p95(() => wired.eventRollCalls.rollCall(offices.big.owner, offices.big.biggest));

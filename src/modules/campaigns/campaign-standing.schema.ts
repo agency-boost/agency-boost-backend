@@ -13,6 +13,27 @@ export interface FrozenRequirement {
   met: boolean | null;
 }
 
+/**
+ * **An override of a final standing** (P18.6-T2 AC-5; ADR-0144 §4, D-override): the Owner's or an Admin's correction
+ * of a result the evaluator could not see, with its reason. The frozen `status` beside it is never rewritten, so
+ * clearing the override restores it. `previousStatus` is what the standing read just before this override was set.
+ */
+export interface StandingOverride {
+  status: 'qualified' | 'not_met';
+  reason: string;
+  byMembershipId: string;
+  at: Date;
+  previousStatus: 'qualified' | 'not_met' | 'unknown';
+}
+
+const STANDING_OVERRIDE = new MongooseSchema({
+  status: { type: String, enum: ['qualified', 'not_met'], required: true },
+  reason: { type: String, required: true },
+  byMembershipId: { type: String, required: true },
+  at: { type: Date, required: true },
+  previousStatus: { type: String, enum: ['qualified', 'not_met', 'unknown'], required: true },
+}, { _id: false });
+
 const FROZEN_REQUIREMENT = new MongooseSchema({
   metricKey: { type: String, required: true },
   comparator: { type: String, required: true },
@@ -27,8 +48,8 @@ const FROZEN_REQUIREMENT = new MongooseSchema({
  * **Written once, when the result is final, and never again**: on the first read after the last month the
  * window reads has locked (ADR-0050) — for a window of activity alone, after its last day's backdating grace — and
  * frozen there. A reopen and a correction afterwards change nothing in it: a rewarded result cannot silently flip
- * (OD-154). The correction is the override, which is Phase 18.6's with its only control (D-tasks), and lands on
- * this row then. **A running standing is never stored**: it is computed on every read, through the production and
+ * (OD-154). The correction is the override (`override`, P18.6-T2), set and cleared with a reason beside the frozen
+ * `status`, which it never rewrites. **A running standing is never stored**: it is computed on every read, through the production and
  * activity modules' own functions, so an import, a correction or a revert needs no trigger.
  *
  * **No rank**: nothing draws one (*Q3 APE Sprint*'s *"Top 10 unit-wide"* is prize text). `rolling_12m` is never
@@ -72,6 +93,14 @@ export class CampaignStanding {
 
   @Prop({ type: Date, required: true })
   finalisedAt!: Date;
+
+  /**
+   * **The override, or `null`** (P18.6-T2 AC-5, D-override) — additive: a row frozen before it existed reads the
+   * default, so no migration. Written only by `CampaignStandingRepository.setOverride`; applied in one place,
+   * `fromFrozen`, so every reader of a standing reads the overridden status.
+   */
+  @Prop({ type: STANDING_OVERRIDE, default: null })
+  override!: StandingOverride | null;
 
   @Prop({ type: Date, default: null })
   deletedAt!: Date | null;

@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import {
   CAMPAIGN_KINDS, CAMPAIGN_POSTER_COLORS, CAMPAIGN_SUBTYPES, CAMPAIGN_WINDOWS, METRIC_UNITS, QUALIFICATION_RULE_KINDS,
 } from '@/domain/constants';
+import type { StandingOverrideResult, StandingOverrideView } from './campaign-standing-overrides';
 
 export class RequirementViewDto {
   @ApiProperty({ type: String })
@@ -179,4 +180,46 @@ export class MetricDefinitionDto {
       + 'these; a carrier rule may name any metric listed here.',
   })
   campaign!: boolean;
+}
+
+/** Who set an override: the membership and the name it is listed under. */
+export class StandingOverrideByDto {
+  @ApiProperty({ type: String })
+  membershipId!: string;
+
+  @ApiProperty({ type: String })
+  name!: string;
+}
+
+/** A final standing's override — the *Achieved* cell's icon names who, when and why (P18.6-T2 AC-8). */
+export class StandingOverrideViewDto implements StandingOverrideView {
+  @ApiProperty({ enum: ['qualified', 'not_met'] })
+  status!: 'qualified' | 'not_met';
+
+  @ApiProperty({ type: String })
+  reason!: string;
+
+  @ApiProperty({ type: StandingOverrideByDto })
+  by!: StandingOverrideByDto;
+
+  @ApiProperty({ type: String, format: 'date-time' })
+  at!: string;
+}
+
+/** What setting or clearing an override answers (P18.6-T2 AC-5). The screen reads the tree again after either. */
+export class StandingOverrideResultDto implements StandingOverrideResult {
+  @ApiProperty({ type: String })
+  campaignCode!: string;
+
+  @ApiProperty({ type: String })
+  membershipId!: string;
+
+  @ApiProperty({
+    enum: ['qualified', 'not_met', 'unknown'],
+    description: 'The status the standing reads now: the override’s, or — with none — the one frozen when it became final.',
+  })
+  status!: 'qualified' | 'not_met' | 'unknown';
+
+  @ApiProperty({ type: StandingOverrideViewDto, nullable: true, description: '`null` once cleared.' })
+  override!: StandingOverrideViewDto | null;
 }

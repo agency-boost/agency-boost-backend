@@ -34,6 +34,11 @@ function reached(entries: readonly string[]): Set<string> {
  * configuration, not a campaign — with the schema it reads. Nothing else of that module, nor anything of
  * training or events, at any depth, so a dependency cannot bring one in behind it. That no `campaigns` row is
  * read at run time is `reporting.performance.spec.ts`'s query log.
+ *
+ * *Scoped 2026-10-10 (P18.6-T1 AC-12):* this holds **Phase 18's files — the module's top level** (`readdirSync` reads
+ * no subfolder). The Owner's compliance tree, which reads training, events and campaigns by design, lives in
+ * `compliance/` with an imports spec of its own (`compliance/compliance.imports.spec.ts`), allowing exactly the readers
+ * it calls; nothing at this level imports it.
  */
 describe('P18-T1 AC-12, P18-T2 AC-5 the reporting module reads no training, event or campaign', () => {
   const MODULE = __dirname;

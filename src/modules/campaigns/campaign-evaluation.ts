@@ -40,14 +40,25 @@ export interface EvaluatedCampaignInput {
   frozenWindows: readonly string[];
 }
 
+/** A final standing's override as a reader sees it: who set what, when, and why (P18.6-T2 AC-7). */
+export interface AppliedOverride {
+  status: 'qualified' | 'not_met';
+  reason: string;
+  byMembershipId: string;
+  at: Date;
+}
+
 /** One member's standing in one campaign, as of now — live, or as frozen. */
 export interface MemberStanding {
   membershipId: string;
   chasing: boolean;
   eligible: boolean;
+  /** The status as read: a frozen one's override, when it carries one, applied (`fromFrozen`). */
   status: QualificationStatus;
   final: boolean;
   rows: RequirementProgress[];
+  /** The override on the stored final standing, or `null` — always `null` while the standing is live. */
+  override: AppliedOverride | null;
 }
 
 /** One campaign, evaluated for the members asked about. */
@@ -275,7 +286,9 @@ export class CampaignEvaluation {
       const isChasing = chasingIn(j, person.id);
       const eligible = isEligible(j.campaign.appliesToOrgLevelCodes, person.orgLevelCode);
       const q = qualify(reqRows, { chasing: isChasing, eligible, final: j.final });
-      return { membershipId: person.id, chasing: isChasing, eligible, status: q.status, final: j.final, rows: q.rows };
+      return {
+        membershipId: person.id, chasing: isChasing, eligible, status: q.status, final: j.final, rows: q.rows, override: null,
+      };
     };
 
     // ---- Freeze what became final: its chasers' standings at the window's end, in one insert (ADR-0143 §4, OD-154).
@@ -451,13 +464,23 @@ function frozenRow(s: MemberStanding): CampaignStanding {
   } as CampaignStanding;
 }
 
-/** A standing read back as frozen: each row's state from its verdict, a requirement outside the set as it was. */
-function fromFrozen(row: CampaignStanding): MemberStanding {
+/**
+ * A standing read back as frozen: each row's state from its verdict, a requirement outside the set as it was — and
+ * **its override applied, here and nowhere else** (P18.6-T2 AC-7; D-override): the status read is the override's
+ * when there is one, so `ofOffice`, the compliance tree and every evaluating reader read the corrected result, while
+ * the frozen `status` stays as it was frozen. The requirement rows are the frozen ones either way: the agent's
+ * dialog, which reads only them (ADR-0147), does not change.
+ */
+export function fromFrozen(row: CampaignStanding): MemberStanding {
+  const override = row.override ?? null;
   return {
     membershipId: row.membershipId,
     chasing: row.chasing,
     eligible: row.eligible,
-    status: row.status,
+    status: override?.status ?? row.status,
+    override: override === null ? null : {
+      status: override.status, reason: override.reason, byMembershipId: override.byMembershipId, at: override.at,
+    },
     final: true,
     rows: row.requirements.map((r): RequirementProgress => ({
       metricKey: r.metricKey,

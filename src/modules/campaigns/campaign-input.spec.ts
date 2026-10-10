@@ -125,8 +125,11 @@ describe('reading one campaign (P5-T7)', () => {
        * evaluation placed before the latest metric. `CAMPAIGN_EVALUATION_PHASE` is read where it is
        * declared, so this moves it for `checkCampaign` too; `restoreAllMocks` puts it back.
        */
-      expect(METRIC_REGISTRY.find((m) => m.phase > CAMPAIGN_EVALUATION_PHASE)).toBeUndefined();
-      const latest = Math.max(...METRIC_REGISTRY.map((m) => m.phase));
+      // *Amended 2026-10-10 (P18.6-T1):* over the metrics a campaign may require — Phase 18.6 registers two reporting
+      // rates after campaign evaluation, `requirable: false`, which no requirement names and the refusal never reaches.
+      const requirable = METRIC_REGISTRY.filter((m) => m.requirable !== false);
+      expect(requirable.find((m) => m.phase > CAMPAIGN_EVALUATION_PHASE)).toBeUndefined();
+      const latest = Math.max(...requirable.map((m) => m.phase));
       jest.replaceProperty(metricsModule as { CAMPAIGN_EVALUATION_PHASE: number }, 'CAMPAIGN_EVALUATION_PHASE', latest - 1);
       const later = METRIC_REGISTRY.find((m) => m.phase === latest && m.requirable !== false);
       expect(later).toBeTruthy();
@@ -170,8 +173,9 @@ describe('reading one campaign (P5-T7)', () => {
         expect(said).toContain(metricByKey('APE_ACHIEVED')!.name);
         expect(said).not.toMatch(/phase/i);
       }
-      // And nothing is left on the far side of the phase line: the refusal and `GET /metrics` draw the same one.
-      expect(METRIC_REGISTRY.filter((m) => m.phase > CAMPAIGN_EVALUATION_PHASE)).toEqual([]);
+      // And nothing a campaign may require is left on the far side of the phase line: the refusal and `GET /metrics`
+      // (which lists the requirable metrics) draw the same one.
+      expect(METRIC_REGISTRY.filter((m) => m.requirable !== false && m.phase > CAMPAIGN_EVALUATION_PHASE)).toEqual([]);
     });
 
     it('P13.2-T4: refuses Leaders used — an office’s count, not anybody’s work — and never offers it', () => {

@@ -77,6 +77,7 @@ import { seedLeaderForumFixture, type LeaderForumFixture } from './leader-forum-
 import { seedTrainingFixture, type TrainingFixture } from './training-fixture';
 import { seedEventsFixture, type EventsFixture } from './events-fixture';
 import { seedCampaignsFixture, type CampaignsFixture } from './campaigns-fixture';
+import { seedComplianceFixture, type ComplianceFixture } from './compliance-fixture';
 import type { StoragePort } from '@/modules/assets/storage.port';
 import { LONG_PIPELINE } from './long-pipeline';
 import {
@@ -281,6 +282,8 @@ export interface SeedResult {
   events: EventsFixture;
   /** Phase 18.5: the campaigns' new rows and the chases across the cast (`campaigns-fixture.ts`). */
   campaigns: CampaignsFixture;
+  /** Phase 18.6: training for Phase 18's cast and D-seed's override (`compliance-fixture.ts`). */
+  compliance: ComplianceFixture;
 }
 
 async function countRows(): Promise<Record<string, number>> {
@@ -3226,6 +3229,16 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     office0417: { kpmId: id0417, cast: { rina: rina.id, budi: budi.id, agus: ab.id, dimas: cast.dimas.id, sari: sari.id } },
     office0555: { kpmId: String(kpm0555._id) },
   });
+  // ------------------- Phase 18.6 — the Owner's compliance tree (`compliance-fixture.ts`): training for Phase 18's
+  // cast, and D-seed's override of Budi's final persistency standing as the Owner. After campaigns, whose push it reads.
+
+  const compliance = await seedComplianceFixture({
+    clock,
+    kpmId: id0417,
+    owner: { membershipId: owner.id, userId: String(ownerUser._id) },
+    budi: budi.id,
+    cast: Object.fromEntries((Object.entries(reportingCast) as [ReportingKey, Placed][]).map(([key, placed]) => [key, placed.id])),
+  });
   const storedActivations = await ActivationRows.countDocuments({ deletedAt: null }).exec();
 
   /** What each long inbox holds now, as the bell counts it, for the summary below. */
@@ -3289,7 +3302,7 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
 
   KPM 0999 · Suspended Branch
     owner@kpm0999.test                                 Signing in shows the page: the office is suspended
-${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guide}${unitDashboard.guide}${recruitment.guide}${reporting.guide}${cohort.guide}${forum.guide}${training.guide}${events.guide}${campaigns.guide}
+${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guide}${unitDashboard.guide}${recruitment.guide}${reporting.guide}${cohort.guide}${forum.guide}${training.guide}${events.guide}${campaigns.guide}${compliance.guide}
   NO OFFICE
     newcomer@agencyboost.test                          Brand new — starts at Register KPM
 
@@ -3495,7 +3508,7 @@ Sign in at POST /api/v1/auth/login, then send the access token as
     ? 'This run wrote 0 rows: everything it seeds was already there.'
     : `This run wrote ${total} rows: ${Object.entries(written).map(([name, added]) => `${name} +${added}`).join(', ')}`);
 
-  return { written, pronounsSet, coaching, calendar, activation, recruitment, forum, training, events, campaigns };
+  return { written, pronounsSet, coaching, calendar, activation, recruitment, forum, training, events, campaigns, compliance };
 }
 
 async function main(): Promise<void> {

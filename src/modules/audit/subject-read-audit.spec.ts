@@ -93,6 +93,30 @@ describe('SubjectReadAudit (P11-T3 AC-8)', () => {
       })));
     });
 
+    it('P18.6-T1 AC-9 a range per subject: each entry from its own day, still one insert, the reader still skipped', async () => {
+      const { reads, inserts, audit } = seam();
+      const starts: Record<string, string> = { 'mem-a': '2026-07-01', 'mem-b': '2026-08-15' };
+
+      await reads.recordMany(
+        leader,
+        [{ membershipId: 'mem-leader' }, { membershipId: 'mem-a' }, { membershipId: 'mem-b' }],
+        'activation',
+        (membershipId) => ({ from: starts[membershipId], to: '2026-09-14' }),
+      );
+
+      expect(audit.recordMany).toHaveBeenCalledTimes(1);
+      expect(inserts[0]).toEqual(['mem-a', 'mem-b'].map((id) => ({
+        action: 'activity_log.read_raw', targetCollection: 'memberships', targetId: id, targetMembershipId: id,
+        after: { surface: 'activation', from: starts[id], to: '2026-09-14' },
+      })));
+    });
+
+    it('P18.6-T1 AC-9 the compliance tree’s own surface, `kpm_compliance`, beside the retired `compliance`', async () => {
+      const { reads, inserts } = seam();
+      await reads.recordMany(leader, [{ membershipId: 'mem-a' }], 'kpm_compliance', { from: null, to: '2026-09-14' });
+      expect(inserts[0][0].after).toEqual({ surface: 'kpm_compliance', from: null, to: '2026-09-14' });
+    });
+
     it('P15-T1 AC-7 the reader’s own row alone writes nothing', async () => {
       const { reads, audit } = seam();
       await reads.recordMany(leader, [{ membershipId: 'mem-leader' }], 'unit_dashboard', week);

@@ -17199,6 +17199,236 @@
         "description": "**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`."
       }
     },
+    "/api/v1/kpm/settings/campaigns/{code}/standings/{membershipId}/override": {
+      "put": {
+        "description": "Set a member’s final result in a campaign to *Achieved* (`qualified`) or *Not achieved* (`not_met`), with a reason — the correction of a result the evaluation could not see. Only once the campaign’s result is final, and only for a member who was chasing it when it ended (a stored standing). The frozen result is kept beside the override, so clearing it restores that result. Audited with before, after, the reason and the previous result. The member’s own campaign dialog does not change. Nobody overrides their own result: an Admin corrects the Owner’s, the Owner an Admin’s.\n\n**Requires `campaign_qualification:override`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CampaignController_override_v1",
+        "parameters": [
+          {
+            "name": "code",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OverrideStandingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandingOverrideResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a blank or over-long reason, another status, or the result it already reads (`details.status`). `CAMPAIGN_OVERRIDE_SELF` — your own result (`details.membershipId`). Nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `campaign_qualification:override`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — the campaign is unknown, archived or another office’s; the member is not this office’s; or the member has no final result to correct (they were not chasing it when it ended). Indistinguishable from another office’s.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CAMPAIGN_STANDING_NOT_FINAL` — the campaign’s result is not final yet. `VERSION_CONFLICT` — somebody changed the result at the same moment; read it again. Nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Override a final campaign result",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "campaign_qualification:override"
+      },
+      "delete": {
+        "description": "Remove the override, with a reason: the result reads what was frozen when the campaign’s result became final. Audited with before, after, the reason and the previous result.\n\n**Requires `campaign_qualification:override`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CampaignController_clearOverride_v1",
+        "parameters": [
+          {
+            "name": "code",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearStandingOverrideDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandingOverrideResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a blank or over-long reason, or any other field. `CAMPAIGN_OVERRIDE_SELF` — your own result (`details.membershipId`). Nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `campaign_qualification:override`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — as for setting one (another office’s campaign or member, or no final result), and a result with no override to clear.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CAMPAIGN_STANDING_NOT_FINAL` — the campaign’s result is not final yet. `VERSION_CONFLICT` — somebody changed the result at the same moment; read it again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Clear an override of a final campaign result",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "campaign_qualification:override"
+      }
+    },
     "/api/v1/metrics": {
       "get": {
         "description": "Every metric this product defines but those about an office rather than a member, which no campaign or qualification rule may name (Leaders used, an office capacity count). The key, the name a screen shows, the unit its number is in, and `computed`: whether it is measured by the time campaigns are evaluated. A screen says so from `computed` and never from `phase`, which is the roadmap's. A carrier rule naming a metric that is not is recorded as waiting on it, and a campaign requirement naming one is refused, rather than either silently never qualifying anybody (ADR-0035). `campaign`: whether a **campaign** requirement may name it — the small evaluable set; a carrier rule may name any of these.\n\n**Requires `metric_registry:read`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -22441,6 +22671,115 @@
           "admin"
         ],
         "x-required-permission": "platform_analytics:read"
+      }
+    },
+    "/api/v1/kpm/analytics/compliance": {
+      "get": {
+        "description": "Every AB agency’s members — one section per AB, A to Z, its own card and one per AAB who leads somebody — with each member’s status on the item selected: a training module, this year’s goal, logging in the last 7 days, the 90-day activation, an event of this year, or a campaign of this year. Six counts, one per category, each done over those it applies to, computed on every read; what the office offers and lists, for the tabs and pickers. Not paginated. A training, activity or activation read records each member listed as read, in one entry each.\n\n**Requires `kpm_analytics:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ComplianceController_read_v1",
+        "parameters": [
+          {
+            "name": "category",
+            "required": false,
+            "in": "query",
+            "description": "The category whose tree is read, in the summary’s order. Every chip is computed whatever it is.",
+            "schema": {
+              "default": "training",
+              "enum": [
+                "training",
+                "goals",
+                "activity",
+                "activation",
+                "events",
+                "campaigns"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "item",
+            "required": false,
+            "in": "query",
+            "description": "The item whose statuses the tree shows: a training module’s **code**, an event’s **id**, a campaign’s **code**. Absent, the first the office lists. Refused on `goals`, `activity` and `activation`, which hold one item; an item the office does not list — another office’s, archived, outside this year — is 404.",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 100,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComplianceViewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a category it does not know; an empty or over-long item; an item on `goals`, `activity` or `activation`, which hold one; or a parameter of any other name. `details` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no office. `PERM_DENIED` — a role without the permission: every field role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — an item the office does not list: another office’s module, event or campaign, an archived one, or one outside this year. Indistinguishable from another office’s.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Who has done what, across the office",
+        "tags": [
+          "kpm-reporting"
+        ],
+        "x-required-permission": "kpm_analytics:read"
       }
     },
     "/api/v1/leader-meetings": {
@@ -31047,6 +31386,121 @@
           }
         }
       },
+      "OverrideStandingDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "qualified",
+              "not_met"
+            ],
+            "description": "*Achieved* or *Not achieved*. Not the status it already reads."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Why the result is corrected. Required; trimmed, 1–500 characters. Plain text."
+          }
+        },
+        "required": [
+          "status",
+          "reason"
+        ]
+      },
+      "StandingOverrideByDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "membershipId",
+          "name"
+        ]
+      },
+      "StandingOverrideViewDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "qualified",
+              "not_met"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "by": {
+            "$ref": "#/components/schemas/StandingOverrideByDto"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "by",
+          "at"
+        ]
+      },
+      "StandingOverrideResultDto": {
+        "type": "object",
+        "properties": {
+          "campaignCode": {
+            "type": "string"
+          },
+          "membershipId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "qualified",
+              "not_met",
+              "unknown"
+            ],
+            "description": "The status the standing reads now: the override’s, or — with none — the one frozen when it became final."
+          },
+          "override": {
+            "nullable": true,
+            "description": "`null` once cleared.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StandingOverrideViewDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "campaignCode",
+          "membershipId",
+          "status",
+          "override"
+        ]
+      },
+      "ClearStandingOverrideDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Why the override is cleared. Required; trimmed, 1–500 characters."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
       "MetricDefinitionDto": {
         "type": "object",
         "properties": {
@@ -37713,6 +38167,551 @@
           "offices",
           "companies",
           "platform"
+        ]
+      },
+      "ComplianceChipDto": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "training",
+              "goals",
+              "activity",
+              "activation",
+              "events",
+              "campaigns"
+            ]
+          },
+          "count": {
+            "type": "number",
+            "example": 12,
+            "description": "Done, among those the category applies to (D-chips)."
+          },
+          "of": {
+            "type": "number",
+            "example": 19,
+            "description": "Those the category applies to: every member listed; for *Activation* those with an activation, for *Events* those in a listed event’s audience, for *Campaigns* those eligible for a listed campaign. **0 draws *—*** — nobody to count, or nothing offered or listed."
+          }
+        },
+        "required": [
+          "category",
+          "count",
+          "of"
+        ]
+      },
+      "ComplianceTrainingModuleDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "PROSPECT_LIST"
+          },
+          "title": {
+            "type": "string",
+            "example": "Building Your Prospect List"
+          }
+        },
+        "required": [
+          "code",
+          "title"
+        ]
+      },
+      "ComplianceTrainingSkillDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "PROSPECTING"
+          },
+          "label": {
+            "type": "string",
+            "example": "Prospecting"
+          },
+          "modules": {
+            "description": "Its published modules, in order: never empty.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComplianceTrainingModuleDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "modules"
+        ]
+      },
+      "ComplianceTrainingCategoryDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SALES"
+          },
+          "label": {
+            "type": "string",
+            "example": "Sales"
+          },
+          "skills": {
+            "description": "The skills holding a published module, in order. Empty: the category has no module yet.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComplianceTrainingSkillDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "skills"
+        ]
+      },
+      "ComplianceGoalsCatalogDto": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "string",
+            "example": "2026",
+            "description": "The office’s calendar year: *\"{year} goals\"*."
+          }
+        },
+        "required": [
+          "year"
+        ]
+      },
+      "ComplianceEventEntryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "example": "Town Hall"
+          },
+          "startsAt": {
+            "type": "string",
+            "description": "ISO instant."
+          },
+          "endsAt": {
+            "type": "string",
+            "description": "ISO instant."
+          },
+          "startsOn": {
+            "type": "string",
+            "example": "2026-10-15",
+            "description": "The office’s day it starts on."
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "upcoming",
+              "running",
+              "past"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "startsAt",
+          "endsAt",
+          "startsOn",
+          "phase"
+        ]
+      },
+      "ComplianceCampaignEntryDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "PERSISTENCY_PUSH"
+          },
+          "title": {
+            "type": "string",
+            "example": "Persistency Push"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "structural",
+              "seasonal"
+            ]
+          },
+          "subtype": {
+            "type": "string",
+            "nullable": true
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "upcoming",
+              "running",
+              "ended"
+            ]
+          },
+          "startsAt": {
+            "type": "string",
+            "description": "ISO instant."
+          },
+          "endsAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "ISO instant; `null` while it runs on with no end."
+          },
+          "final": {
+            "type": "boolean",
+            "description": "Its result can no longer change: the last month its window reads is locked."
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "kind",
+          "subtype",
+          "phase",
+          "startsAt",
+          "endsAt",
+          "final"
+        ]
+      },
+      "ComplianceCatalogDto": {
+        "type": "object",
+        "properties": {
+          "training": {
+            "description": "What the office offers, from its published configuration: every category in order, an empty one included.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComplianceTrainingCategoryDto"
+            }
+          },
+          "goals": {
+            "$ref": "#/components/schemas/ComplianceGoalsCatalogDto"
+          },
+          "events": {
+            "description": "This year’s events, archived ones never: not ended first, soonest first, then past, latest first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComplianceEventEntryDto"
+            }
+          },
+          "campaigns": {
+            "description": "This year’s campaigns, archived ones never: structural, then seasonal ongoing, then seasonal past.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComplianceCampaignEntryDto"
+            }
+          }
+        },
+        "required": [
+          "training",
+          "goals",
+          "events",
+          "campaigns"
+        ]
+      },
+      "ComplianceSelectionDto": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "training",
+              "goals",
+              "activity",
+              "activation",
+              "events",
+              "campaigns"
+            ]
+          },
+          "item": {
+            "type": "string",
+            "nullable": true,
+            "description": "The item read: the one asked, or the first listed. `null` for a single-item category, or when nothing is listed."
+          }
+        },
+        "required": [
+          "category",
+          "item"
+        ]
+      },
+      "CompliancePersonDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this office, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Agus Salim"
+          },
+          "leads": {
+            "type": "boolean",
+            "description": "Leads somebody now: the name opens their Unit Dashboard."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "leads"
+        ]
+      },
+      "ComplianceOverridePersonDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "membershipId",
+          "name"
+        ]
+      },
+      "ComplianceOverrideDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "qualified",
+              "not_met"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "by": {
+            "$ref": "#/components/schemas/ComplianceOverridePersonDto"
+          },
+          "at": {
+            "type": "string",
+            "description": "ISO instant."
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "by",
+          "at"
+        ]
+      },
+      "ComplianceCellDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "nullable": true,
+            "description": "A code, never a word: *training* `done` · `in_progress` · `not_started`; *goals* `set` · `not_set`; *activity* `logged` · `missed`; *activation* `completed` · `in_progress` · `overdue`; *events* `registered` · `not_registered` · `attended` · `no_show` · `unconfirmed`; *campaigns* `chasing` · `not_chasing`. `null` draws *—*: the item does not apply to them."
+          },
+          "done": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Counts as done. `null` — the item does not apply — is out of every *done / of*."
+          },
+          "on": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-10",
+            "description": "The office’s day the date column shows, or `null`."
+          },
+          "second": {
+            "type": "string",
+            "nullable": true,
+            "description": "*Events* and *campaigns* only: the second column’s code — feedback `shared` · `not_shared`; achieved `qualified` · `not_met` · `not_joined` · `in_progress` · `unknown`. `null` draws *—*."
+          },
+          "endedOn": {
+            "type": "string",
+            "nullable": true,
+            "description": "*Activation* only: the day an expired activation ended — its *Overdue* says so. `null` otherwise."
+          },
+          "override": {
+            "nullable": true,
+            "description": "*Campaigns* only: the override on the standing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ComplianceOverrideDto"
+              }
+            ]
+          },
+          "overridable": {
+            "type": "boolean",
+            "description": "*Campaigns* only: the standing is stored and final, so its result may be overridden."
+          }
+        },
+        "required": [
+          "status",
+          "done",
+          "on"
+        ]
+      },
+      "ComplianceRowDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this office, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Agus Salim"
+          },
+          "leads": {
+            "type": "boolean",
+            "description": "Leads somebody now: the name opens their Unit Dashboard."
+          },
+          "personal": {
+            "type": "boolean",
+            "description": "The card’s head’s own row: *Personal*, always first."
+          },
+          "cell": {
+            "$ref": "#/components/schemas/ComplianceCellDto"
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "leads",
+          "personal",
+          "cell"
+        ]
+      },
+      "ComplianceUnitDto": {
+        "type": "object",
+        "properties": {
+          "head": {
+            "$ref": "#/components/schemas/CompliancePersonDto"
+          },
+          "rung": {
+            "type": "string",
+            "enum": [
+              "AB",
+              "AAB"
+            ],
+            "description": "`AB`: the agency’s own card — the AB and those in no AAB’s unit."
+          },
+          "done": {
+            "type": "number",
+            "description": "Rows done."
+          },
+          "of": {
+            "type": "number",
+            "description": "Rows the item applies to."
+          },
+          "rows": {
+            "description": "The head’s own row first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComplianceRowDto"
+            }
+          }
+        },
+        "required": [
+          "head",
+          "rung",
+          "done",
+          "of",
+          "rows"
+        ]
+      },
+      "ComplianceSectionDto": {
+        "type": "object",
+        "properties": {
+          "head": {
+            "description": "The AB whose agency it is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CompliancePersonDto"
+              }
+            ]
+          },
+          "done": {
+            "type": "number"
+          },
+          "of": {
+            "type": "number"
+          },
+          "units": {
+            "description": "The AB’s own card, then one per AAB who leads somebody, A to Z.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComplianceUnitDto"
+            }
+          }
+        },
+        "required": [
+          "head",
+          "done",
+          "of",
+          "units"
+        ]
+      },
+      "ComplianceCanDto": {
+        "type": "object",
+        "properties": {
+          "override": {
+            "type": "boolean",
+            "description": "May override a final campaign standing: never in a read-only support session."
+          }
+        },
+        "required": [
+          "override"
+        ]
+      },
+      "ComplianceViewDto": {
+        "type": "object",
+        "properties": {
+          "today": {
+            "type": "string",
+            "example": "2026-10-10",
+            "description": "The office’s day."
+          },
+          "people": {
+            "type": "number",
+            "description": "The members listed: the office’s active members, each in an AB agency."
+          },
+          "units": {
+            "type": "number",
+            "description": "The AB agencies: one section each."
+          },
+          "summary": {
+            "description": "Six, in the summary’s order, every one computed on every read.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComplianceChipDto"
+            }
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/ComplianceCatalogDto"
+          },
+          "selected": {
+            "$ref": "#/components/schemas/ComplianceSelectionDto"
+          },
+          "tree": {
+            "description": "One per AB agency, A to Z by the AB’s name.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComplianceSectionDto"
+            }
+          },
+          "can": {
+            "$ref": "#/components/schemas/ComplianceCanDto"
+          }
+        },
+        "required": [
+          "today",
+          "people",
+          "units",
+          "summary",
+          "catalog",
+          "selected",
+          "tree",
+          "can"
         ]
       },
       "ForumRungDto": {

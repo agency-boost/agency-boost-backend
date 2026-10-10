@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { addDays } from '@/common/time/local-day';
+import { cohortCompletionRate, lastFinishedYear } from '@/domain/metrics/activation-completion-rate';
+import { activationEndsOn, activationState } from '@/modules/activation/activation-rules';
 import { MonthlyAgentData } from '@/modules/production/monthly-agent-data.schema';
 import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
 import { LeaderScorecardService } from '@/modules/leader-meetings/scorecard/scorecard.service';
@@ -107,6 +109,25 @@ describe('P18.1-T1 the cohort seed — a run at 10:00 on 10 October 2026 in Jaka
     expect(COHORT_HIRES.filter((k) => first.starts[k]!.startsWith('2025')).sort())
       .toEqual(['arini', 'bonar', 'cahya', 'damar', 'elsa', 'gilang', 'ikhsan', 'jihan', 'oscar']);
     expect(COHORT_HIRES.filter((k) => first.starts[k]!.startsWith('2026')).sort()).toEqual(['kemal', 'pandu', 'raka']);
+  });
+
+  /*
+   * P18.6-T1 AC-7, exit test 3 (OD-159): the PRD's *"New hires completing the 90-day activation — ≥60% of the cohort"*
+   * is `ACTIVATION_COMPLETION_RATE` over `ACTIVATION_COHORT` of the last finished calendar year — computed here over
+   * every activation the seeded office holds, each in its state on the run's day, as the tree reads them. Drawn nowhere.
+   */
+  it('P18.6-T1 AC-7 exit test 3: the PRD’s figure on the seed — FY 2025’s cohort, every one graduated — and this year’s open hires outside it', async () => {
+    const rows = await col('activationProgress').find({ kpmId, deletedAt: null }).toArray();
+    const activations = rows.map((row) => ({
+      membershipId: row.membershipId as string,
+      startDate: row.startDate as string,
+      state: activationState((row.graduatedAt as Date | null) ?? null, today, activationEndsOn(TZ, row.startDate as string)),
+    }));
+    expect(lastFinishedYear(today)).toEqual({ from: '2025-01-01', to: '2025-12-31' });
+    expect(cohortCompletionRate(activations, lastFinishedYear(today))).toEqual({ count: 9, of: 9, pct: 100 });
+    // This year's cohort holds Phase 13's open and overdue hires: the same function reads lower over it.
+    const thisYear = cohortCompletionRate(activations, { from: '2026-01-01', to: '2026-12-31' });
+    expect(thisYear.of).toBeGreaterThan(thisYear.count);
   });
 
   it('P18.1-T1 each hire reads their own activation, complete and graduated', async () => {

@@ -13,6 +13,7 @@ import {
 } from '../../../test/http-permissions';
 import { CampaignController } from './campaign.controller';
 import { CampaignService } from './campaign.service';
+import { CampaignStandingOverrides } from './campaign-standing-overrides';
 import { MetricRegistryController } from './metric-registry.controller';
 import { listenOnLoopback } from '../../../test/listen';
 
@@ -28,6 +29,9 @@ const ROUTES: Record<string, string> = {
   update: 'tenant_config:write',
   archive: 'tenant_config:write',
   restore: 'tenant_config:write',
+  // P18.6-T2 AC-5: the override of a final standing (its own spec: `campaign-standing-overrides.int.spec.ts`).
+  override: 'campaign_qualification:override',
+  clearOverride: 'campaign_qualification:override',
 };
 
 const aCampaign = (over: Record<string, unknown> = {}) => ({
@@ -61,7 +65,10 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
 
     const moduleRef = await Test.createTestingModule({
       controllers: [CampaignController, MetricRegistryController],
-      providers: [{ provide: CampaignService, useValue: wired.campaigns }],
+      providers: [
+        { provide: CampaignService, useValue: wired.campaigns },
+        { provide: CampaignStandingOverrides, useValue: wired.campaignStandingOverrides },
+      ],
     }).compile();
 
     app = moduleRef.createNestApplication();
