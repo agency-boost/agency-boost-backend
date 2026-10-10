@@ -83,13 +83,14 @@ describe('the subscription seed', () => {
     expect(plan['0602'].endDate).toBe('2026-10-02');
   });
 
-  it('0417: three months to run, Rp 350,000 a leader, 6 of 10 leaders used', async () => {
+  it('0417: three months to run, Rp 350,000 a leader, 9 of 10 leaders used', async () => {
     const kpm = await office('0417');
     expect(kpm.subscription).toEqual(plan['0417']);
     expect(kpm.subscription).toMatchObject({ pricePerLeaderMinor: 350_000_00, maxLeaders: 10, keepActiveAfterEnd: false });
     expect(subscriptionStateOf(kpm as never, clock)).toBe('active');
-    // The Owner, the Admin, Agus, Sari, Dewi and Arief.
-    expect(await used('0417')).toBe(6);
+    // The Owner, the Admin, Agus, Sari, Dewi and Arief — and since Phase 18's reporting fixture, the two new ABs,
+    // Yosef and Satria, and Winda, Yosef's AAB.
+    expect(await used('0417')).toBe(9);
   });
 
   it('0555: five days to run and no limit — the list’s near end', async () => {

@@ -116,6 +116,30 @@ export class CoachingReadings {
   }
 
   /**
+   * **Every 1:1 that counts, about the coachees given, from a day on** (Phase 18, D-coverage): what
+   * `COACHING_COVERAGE` (`coachingCoverage`) and `LEADER_COACHING_FREQUENCY` read for an office — each session's
+   * coachee, its coach, its status and its `date`, finalized at least once (`COUNTED`). One read for the whole
+   * list, on the `(kpmId, coacheeMembershipId, date)` index. A 1:1 older than the widest window read changes no
+   * figure that reads this, so `from` bounds it.
+   */
+  async countedSince(
+    ctx: RequestContext, coacheeIds: readonly string[], from: LocalDate,
+  ): Promise<{ coacheeMembershipId: string; coachMembershipId: string; status: 'finalized' | 'reopened'; date: LocalDate }[]> {
+    if (coacheeIds.length === 0) return [];
+    const rows = await this.sessions.find(
+      ctx,
+      { coacheeMembershipId: { $in: [...new Set(coacheeIds)] }, status: COUNTED.status, date: { $ne: null, $gte: from } },
+      { projection: { coacheeMembershipId: 1, coachMembershipId: 1, status: 1, date: 1 } },
+    );
+    return rows.map((row) => ({
+      coacheeMembershipId: row.coacheeMembershipId,
+      coachMembershipId: row.coachMembershipId,
+      status: row.status as 'finalized' | 'reopened',
+      date: row.date as LocalDate,
+    }));
+  }
+
+  /**
    * `DAYS_SINCE_LAST_COACHING`, `COACHED_7D` and `COACHED_30D` for each coachee, **in the office's
    * calendar** (invariant §9): whole days by `Clock.daysBetween` in the office's zone, from the latest
    * 1:1's `date` to the office's today. Every id asked about gets an entry.

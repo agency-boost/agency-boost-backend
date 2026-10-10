@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { personLeadCounts, type CountedLead } from '@/domain/metrics/lead-counts';
+import { personLeadCounts, personLeadCountsAt, type CountedLead, type DatedLead } from '@/domain/metrics/lead-counts';
+import { recruitmentClosedIn } from '@/domain/metrics/recruitment-closed';
 import type { LeadCountsRow } from '@/domain/metrics/unit-rollup';
 import { LeadStatusRepository } from '@/modules/config/activity.repository';
 import type { OfficeDay } from '@/modules/tenants/tenant-day.service';
@@ -41,6 +42,38 @@ export function byNextAction(
   }
   if (a.registeredAt !== b.registeredAt) return a.registeredAt - b.registeredAt;
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/**
+ * **`RECRUITMENT_PIPELINE_NOW` and `RECRUITMENT_EXPECTED_TO_CLOSE`, defined once** (P7-T6, ADR-0043): the two
+ * `$facet` branches that count an office's open recruitment leads not on a terminal stage, and those on a stage
+ * the office ticked *Expected to close*. `LeadService.summary` and the Owner's Overview (`recruitmentPipeline`,
+ * Phase 18, D-recruit) build their counts from this one function, so the two cannot disagree. The office's own
+ * ladder decides both, by code (invariant §4).
+ */
+export function recruitmentPipelineFacets(
+  stages: readonly { code: string; isTerminal?: boolean; isLateStage?: boolean }[],
+): { recruitmentPipelineNow: Record<string, unknown>[]; recruitmentExpectedToClose: Record<string, unknown>[] } {
+  const terminal = stages.filter((s) => s.isTerminal).map((s) => s.code);
+  const late = stages.filter((s) => s.isLateStage).map((s) => s.code);
+  const openWhen = (when: unknown) => [
+    { $match: { $expr: { $and: [{ $eq: ['$outcome', null] }, when] } } },
+    { $count: 'n' },
+  ];
+  return {
+    recruitmentPipelineNow: openWhen({
+      $and: [
+        { $eq: ['$type', 'recruitment'] },
+        { $not: [{ $in: [{ $ifNull: ['$statusCode', ''] }, terminal] }] },
+      ],
+    }),
+    recruitmentExpectedToClose: openWhen({
+      $and: [
+        { $eq: ['$type', 'recruitment'] },
+        { $in: [{ $ifNull: ['$statusCode', ''] }, late] },
+      ],
+    }),
+  };
 }
 
 /**
@@ -119,6 +152,71 @@ export class LeadReadings {
     const byOwner = new Map<string, CountedLead[]>(ids.map((id) => [id, []]));
     for (const row of rows) byOwner.get(row.ownerMembershipId)!.push(row);
     return new Map(ids.map((id) => [id, personLeadCounts(byOwner.get(id)!, { month: day.month, terminalRecruitmentCodes })]));
+  }
+
+  /**
+   * **The office's recruitment pipeline** (Phase 18, D-recruit): *Expected to close* and *Pipeline now* on the
+   * Overview — `LeadService.summary`'s two counts over every owner in the office, from the same facets
+   * (`recruitmentPipelineFacets`). Two reads: the office's recruitment stages, and one aggregate. Counts, never
+   * a lead: the Owner and the Admin hold counts (roles §3.6).
+   */
+  async recruitmentPipeline(ctx: RequestContext): Promise<{ pipelineNow: number; expectedToClose: number }> {
+    const stages = await this.statuses.find(ctx, { pipeline: 'recruitment' });
+    const [facets] = await this.leads.aggregate(ctx, [{ $match: {} }, { $facet: recruitmentPipelineFacets(stages) }]);
+    const n = (key: string) => (facets?.[key] as { n?: number }[] | undefined)?.[0]?.n ?? 0;
+    return { pipelineNow: n('recruitmentPipelineNow'), expectedToClose: n('recruitmentExpectedToClose') };
+  }
+
+  /**
+   * **`countsOfMany` as the leads stood at the end of a month** (Phase 18, D-period): the unit comparison's
+   * *Total leads* under *Previous month* — each member's four counts over their leads **as they were then**
+   * (`personLeadCountsAt`: registered by then, closed only if closed by then, on the stage their last move by
+   * then names), with *promised* meaning promised for that month. Two reads for the whole list, as
+   * `countsOfMany`: the office's recruitment stages, and every lead of the members asked about that was still
+   * open at `at` or is still open now. Counts, never rows.
+   */
+  async countsOfManyAt(
+    ctx: RequestContext, membershipIds: readonly string[], day: { month: string; at: Date },
+  ): Promise<Map<string, LeadCountsRow>> {
+    const ids = [...new Set(membershipIds)];
+    if (ids.length === 0) return new Map();
+    const [stages, rows] = await Promise.all([
+      this.statuses.find(ctx, { pipeline: 'recruitment' }),
+      this.leads.find(
+        ctx,
+        { ownerMembershipId: { $in: ids }, $or: [{ outcome: null }, { outcomeAt: { $gte: day.at } }] },
+        {
+          projection: {
+            ownerMembershipId: 1, type: 1, outcome: 1, outcomeAt: 1, statusCode: 1, commitments: 1,
+            transitions: 1, dateRegistered: 1, createdAt: 1,
+          },
+        },
+      ),
+    ]);
+    const terminalRecruitmentCodes = stages.filter((stage) => stage.isTerminal).map((stage) => stage.code);
+    const byOwner = new Map<string, DatedLead[]>(ids.map((id) => [id, []]));
+    for (const row of rows) {
+      byOwner.get(row.ownerMembershipId)!.push({
+        type: row.type, outcome: row.outcome, statusCode: row.statusCode, commitments: row.commitments,
+        outcomeAt: row.outcomeAt ?? null, transitions: row.transitions,
+        registeredAt: row.dateRegistered ?? (row as unknown as { createdAt?: Date }).createdAt ?? null,
+      });
+    }
+    return new Map(ids.map((id) => [id, personLeadCountsAt(byOwner.get(id)!, { ...day, terminalRecruitmentCodes })]));
+  }
+
+  /**
+   * **`RECRUITMENT_CLOSED_LAST_MONTH` for the office** (Phase 18, D-recruit): the recruitment leads closed won in
+   * a month, whoever owns them — the office's, as `LeadService.summary` counts the pipeline. One read of the
+   * month's won recruitment leads, three fields each; a count leaves here, never a lead.
+   */
+  async recruitmentClosed(ctx: RequestContext, month: { start: Date; endExclusive: Date }): Promise<number> {
+    const rows = await this.leads.find(
+      ctx,
+      { type: 'recruitment', outcome: 'won', outcomeAt: { $gte: month.start, $lt: month.endExclusive } },
+      { projection: { type: 1, outcome: 1, outcomeAt: 1 } },
+    );
+    return recruitmentClosedIn(rows, month);
   }
 
   /**

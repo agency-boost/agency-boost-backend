@@ -143,6 +143,14 @@ import { RecruitmentPitchRepository } from '@/modules/recruitment/recruitment-pi
 import { RecruitmentPlaybookService } from '@/modules/recruitment/recruitment-playbook.service';
 import { RecruitmentPlanService } from '@/modules/recruitment/recruitment-plan.service';
 import { RecruitmentPitchService } from '@/modules/recruitment/recruitment-pitch.service';
+import { CarrierRules } from '@/modules/campaigns/carrier-rules';
+import { KpmRecruitTarget, KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
+import { KpmRecruitTargetRepository } from '@/modules/reporting/kpm-recruit-target.repository';
+import { OfficePeople } from '@/modules/reporting/office-people';
+import { KpmOverviewService } from '@/modules/reporting/kpm-overview.service';
+import { KpmAnalyticsService } from '@/modules/reporting/kpm-analytics.service';
+import { PlatformAnalyticsService } from '@/modules/reporting/platform-analytics.service';
+import { DirectoryColumns } from '@/modules/reporting/directory-columns';
 
 /**
  * The configuration module, wired the way the app wires it.
@@ -624,6 +632,37 @@ export function configModule(
     assets, audit, new TenantDay(kpms as never, clock), clock,
   );
 
+  /*
+   * Phase 18: the Owner's reporting — the Overview, the analytics and the platform's adoption, every figure through
+   * the readings above; the recruitment target's tenant repository; the campaigns module's one named reader of the
+   * carrier rules; and the directory's two columns.
+   */
+  const leadReadings = new LeadReadings(
+    new LeadRepository(model(Lead.name, LeadSchema) as never),
+    new LeadStatusRepository(leadStatuses as never),
+    clock,
+  );
+  const recruitTargets = new KpmRecruitTargetRepository(model(KpmRecruitTarget.name, KpmRecruitTargetSchema) as never);
+  const officePeople = new OfficePeople(
+    memberships, new MemberNames(memberships, users as never), kpms as never,
+    model('CompanyModelForConfig', CompanySchema) as never, orgLevels,
+  );
+  const carrierRules = new CarrierRules(model(QualificationRule.name, QualificationRuleSchema) as never, kpms as never);
+  const kpmOverview = new KpmOverviewService(
+    officePeople, new TenantDay(kpms as never, clock), clock, activityReadings, coachingReadings,
+    leadReadings, recruitTargets, productionReadings, goals, subjectReads, audit,
+  );
+  const kpmAnalytics = new KpmAnalyticsService(
+    officePeople, new TenantDay(kpms as never, clock), clock, coachingReadings, leadReadings,
+    productionReadings, goals, carrierRules,
+  );
+  const platformAnalytics = new PlatformAnalyticsService(
+    kpms as never, model('CompanyModelForConfig', CompanySchema) as never, memberships, orgLevels, clock,
+  );
+  const directoryColumns = new DirectoryColumns(
+    activityReadings, coachingReadings, new TenantDay(kpms as never, clock), clock, subjectReads,
+  );
+
   return {
     activity, ratios, leads, config, provisioning, templates, templateService, audit, clock, changes,
     namedTemplates, namedTemplateRows, officeSettings, templateCopies, assetRows,
@@ -640,6 +679,8 @@ export function configModule(
     activationRows, activationEngine, activationProgress, newHires,
     unitDashboard,
     recruitmentPlaybookRows, recruitmentPlaybooks, recruitmentPlans, recruitmentPitch,
+    leadReadings, recruitTargets, officePeople, carrierRules, kpmOverview, kpmAnalytics, platformAnalytics,
+    directoryColumns, memberships, users,
   };
 }
 

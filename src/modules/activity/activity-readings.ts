@@ -95,6 +95,41 @@ export class ActivityReadings {
   }
 
   /**
+   * **Each member's latest day logged within a range, for many members at once** (Phase 18, D-figures,
+   * D-directory): the Overview's engagement cards and its not-logged list, and the directory's *Last activity*.
+   * `ACTIVITY_COMPLIANCE_7D`'s and `_MONTH`'s own fact — *did this person report*, any saved day, an all-zero
+   * one included (ADR-0042). One aggregate for the whole list, within the office, on the
+   * `(kpmId, membershipId, localDate)` index walked newest first; a member with no day in the range is absent.
+   *
+   * **Bounded where the question is** (the Phase 18 exit review, item 5): `from` and `to` are inclusive and each
+   * optional. A card that asks *did they log this month, or this week* passes the earliest day it asks about, so
+   * the read walks weeks of a member's log rather than years of it; only *"Last logged n days ago"* — the
+   * not-logged list and the directory's column — needs the whole history, and passes neither.
+   */
+  async lastLoggedOnMany(
+    ctx: RequestContext, membershipIds: readonly string[], range: { from?: LocalDate; to?: LocalDate } = {},
+  ): Promise<Map<string, LocalDate>> {
+    const out = new Map<string, LocalDate>();
+    if (membershipIds.length === 0) return out;
+    const localDate = {
+      ...(range.from === undefined ? {} : { $gte: range.from }),
+      ...(range.to === undefined ? {} : { $lte: range.to }),
+    };
+    const rows = await this.logs.aggregate(ctx, [
+      {
+        $match: {
+          membershipId: { $in: [...new Set(membershipIds)] },
+          ...(Object.keys(localDate).length === 0 ? {} : { localDate }),
+        },
+      },
+      { $sort: { membershipId: -1, localDate: -1 } },
+      { $group: { _id: '$membershipId', last: { $first: '$localDate' } } },
+    ]);
+    for (const row of rows) out.set(String(row._id), row.last as LocalDate);
+    return out;
+  }
+
+  /**
    * **The sections a rung is shown**, in the office's order, each with every type it holds — archived ones
    * included, so a reader can keep what was logged against them (P10-T5).
    *

@@ -826,6 +826,39 @@ export const PERMISSIONS = {
     { grantee: AAB, scope: 'own-downline' },
   ],
 
+  /*
+   * ---- The Owner's reporting (Phase 18; roles §3.9, `functional/kpm-analytics.md`, *The permissions*). ----
+   *
+   * **The office's console, the Owner's and the Admin's alike** (ADR-0028): the KPM Overview, its not-logged
+   * list and the recruitment target's write, and KPM analytics — every figure over the office, `own-kpm`. No
+   * field role holds any of them: a leader's own reporting is the Unit Dashboard. The Super Admin's `all` on the
+   * two reads is not access on its own: both resolve the office from the caller's membership, so one reads an
+   * office only inside a support session, as its member, and is answered `TENANT_NO_MEMBERSHIP` outside one.
+   * **The target is a write by its verb**: a read-only session reads the Overview and is refused it; an elevated
+   * one writes it as its member, both actors on the audit row. Not the Super Admin's own.
+   */
+  'kpm_overview:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  'kpm_overview:set_recruit_target': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  'kpm_analytics:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  /*
+   * *Cross-platform analytics* (P18-T8; OD-148 → option 1, D-admin): adoption across offices, inside ADR-0011's
+   * line — composition, joiners, leavers and sign-ins, counted; no member, no business figure. **The Super
+   * Admin's alone.** A support session acts as its member, whose context holds no platform grant, so it is
+   * refused too.
+   */
+  'platform_analytics:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+
   // ---- Membership. ----
   'member:read_profile': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },

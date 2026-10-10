@@ -204,6 +204,20 @@ const config: Config = {
     './src/modules/recruitment/recruitment-playbook.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/recruitment/recruitment-pitch.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/recruitment/recruitment-pitch.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    /*
+     * Phase 18: the Owner's reporting — the Overview, the analytics, the platform's adoption and the directory's two
+     * columns. Arithmetic over other modules' readings, every branch a figure an Owner reads as their office's, so the
+     * domain floor at least from the day it lands. The two files that decide **who is counted where** are held at
+     * 100: the agency partition (D-units — which row a member is in, so a total is the sum of its rows) and the one
+     * headcount every denominator reads (OD-24, OD-74 — who is a member on a day).
+     */
+    './src/modules/reporting/': { lines: 98, branches: 95, functions: 95, statements: 98 },
+    './src/modules/reporting/agency-partition.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/domain/metrics/office-headcount.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    // Tenancy-bearing: the target's one atomic write and its carry-forward, and the membership repository that holds
+    // the two named `…AcrossTenants` reads the platform's adoption makes (invariant §1: tenancy at 100% branch).
+    './src/modules/reporting/kpm-recruit-target.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/org/membership.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],

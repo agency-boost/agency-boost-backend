@@ -77,6 +77,9 @@ import {
 import { CoacheeDto, CoachingRosterDto } from '@/modules/coaching/coaching.response.dto';
 import { ProductionUpdatedDto, UnitDashboardDto } from '@/modules/unit-dashboard/unit-dashboard.response.dto';
 import {
+  AdoptionDto, KpmAnalyticsDto, KpmOverviewDto, NotLoggedDto, PlatformAnalyticsDto, RecruitTargetDto,
+} from '@/modules/reporting/reporting.response.dto';
+import {
   CoachingSessionDto, SessionDraftSavedDto, SessionHistoryDto,
 } from '@/modules/coaching/coaching-session.response.dto';
 import {
@@ -100,6 +103,12 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // Phase 15: a leader's unit, and *Update production*.
   UnitDashboardController_read: { type: UnitDashboardDto },
   UnitDashboardController_updateProduction: { type: ProductionUpdatedDto },
+  // Phase 18: the Owner's reporting — the Overview, its not-logged list and target, the analytics, the platform's.
+  KpmOverviewController_read: { type: KpmOverviewDto },
+  KpmOverviewController_notLogged: { type: NotLoggedDto },
+  KpmOverviewController_setRecruitTarget: { type: RecruitTargetDto },
+  KpmAnalyticsController_read: { type: KpmAnalyticsDto },
+  PlatformAnalyticsController_read: { type: PlatformAnalyticsDto },
   // P11-T6: the coaching roster. P11-T7: the person a coaching page opens on.
   CoachingController_coachees: { type: CoachingRosterDto },
   CoachingController_coachee: { type: CoacheeDto },
@@ -379,7 +388,13 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   BillingController_prices: { type: BillingPricesDto },
 };
 
+/**
+ * Shapes no operation names whole but a client pairs by name: the adoption every row of *Cross-platform analytics*
+ * extends (Phase 18), so the frontend's contract spec can pair its `Adoption` with one schema.
+ */
+const SHARED_SHAPES: Type<unknown>[] = [AdoptionDto];
+
 /** Every class the table names, so Swagger emits a schema for each. */
 export const RESPONSE_MODELS: Type<unknown>[] = [
-  ...new Set(Object.values(RESPONSE_SHAPES).map((s) => s.type)),
+  ...new Set([...Object.values(RESPONSE_SHAPES).map((s) => s.type), ...SHARED_SHAPES]),
 ];

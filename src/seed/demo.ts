@@ -67,6 +67,10 @@ import { seedTemplateCopyFixture } from './template-copy-fixture';
 import { seedSalesToolsFixture } from './sales-tools-fixture';
 import { seedUnitDashboardFixture } from './unit-dashboard-fixture';
 import { seedRecruitmentFixture, storageFromEnvironment, type RecruitmentFixture } from './recruitment-fixture';
+import { monthField, seedMonthFigures } from './production-figures';
+import {
+  placeReportingCast, reportingMonthFigures, seedReportingFixture, type ReportingKey,
+} from './reporting-fixture';
 import type { StoragePort } from '@/modules/assets/storage.port';
 import { LONG_PIPELINE } from './long-pipeline';
 import {
@@ -125,7 +129,6 @@ import { DataUploadBatch, DataUploadBatchSchema } from '@/modules/production/dat
 import { DataUploadRow, DataUploadRowSchema } from '@/modules/production/data-upload-row.schema';
 import { MonthlyAgentData, MonthlyAgentDataSchema, PRODUCTION_METRICS } from '@/modules/production/monthly-agent-data.schema';
 import { ProductionMonth, ProductionMonthSchema } from '@/modules/production/production-month.schema';
-import { MINOR_UNITS_PER_RP_MILLION } from '@/modules/production/production-units';
 import { templateFilename } from '@/modules/production/production-template';
 import {
   CompanyTemplate, CompanyTemplateSchema,
@@ -159,6 +162,8 @@ const RECOMPILE = { overwriteModels: true } as const;
 const OWNER_ASSIGNED_DAYS_AGO = 109;
 const RINA_JOINED_DAYS_AGO = 58;
 const BUDI_JOINED_DAYS_AGO = 61;
+/** When 0555's Owner and Lina joined: before 0555's two months of files, its logging and its 1:1 — and Lina's activation start. */
+const OFFICE_0555_JOINED_DAYS_AGO = 60;
 
 type Role = 'ab' | 'aab' | 'agent';
 
@@ -212,6 +217,8 @@ const OWNED_COLLECTIONS = [
   // Phase 17, with the writer that fills them (`recruitment-fixture.ts`): the companies' playbooks and the
   // offices' pitch documents. Their files are `assets` rows, above.
   'recruitmentPlaybooks', 'kpmRecruitmentPitchDocuments',
+  // Phase 18, with the writer that fills it (`reporting-fixture.ts`): an office's recruitment target per month.
+  'kpmRecruitTargets',
 ] as const;
 
 /**
@@ -1308,6 +1315,18 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
 
   for (const id of [owner.id, ab.id, sari.id, cast.arief.id]) await recount(id0417, id);
 
+  /*
+   * **The Owner's reporting's two new agencies (Phase 18, *Seed*; `reporting-fixture.ts`)**: Yosef's and Satria's,
+   * under the Owner, outside every documented leader's downline, each member joined over six months ago. Placed
+   * after the coaching cast — so every earlier member keeps the agent sequence a fresh seed has always given them,
+   * with codes of their own — and before the month files, which list them as they list everybody.
+   */
+  const reportingCast = await placeReportingCast({
+    clock, kpmId: id0417, office0417, owner, recount,
+    user: (email, fullName, opts) => user(email, fullName, opts),
+    place: (kpm, userId, role, leader, opts) => place(kpm, userId, role, leader, opts),
+  });
+
   /**
    * Informal groups, and the Core Leader tag.
    *
@@ -1902,42 +1921,18 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     const castKeyOf = new Map<string, CastKey>(
       (Object.entries(cast) as [CastKey, Placed][]).map(([key, placed]) => [placed.id, key]),
     );
+    // The reporting cast's months are planned (`reporting-fixture.ts`), as the coaching cast's are.
+    const reportingKeyOf = new Map<string, ReportingKey>(
+      (Object.entries(reportingCast) as [ReportingKey, Placed][]).map(([key, placed]) => [placed.id, key]),
+    );
     // Everybody the seed had before the coaching cast, in the order their figures have always followed.
-    const earlier = roster.filter((member) => !castKeyOf.has(String(member._id)));
+    const earlier = roster.filter((member) => !castKeyOf.has(String(member._id)) && !reportingKeyOf.has(String(member._id)));
 
-    const field = (metric: string, cadence: 'monthly' | 'ytd') => `${metric}${cadence === 'monthly' ? 'Monthly' : 'Ytd'}`;
+    const field = monthField;
     const EMPTY = { value: null, provenance: null, sourceBatchId: null };
 
-    /**
-     * Believable, different per person and per month, and YTD never below the month.
-     *
-     * **One member in six had a quiet month**: no APE, no policy. That is the *not active* ✕ of the
-     * Monthly Active Agent column (ADR-0054) — without it every row the seed imports is ✓ and the
-     * column's middle answer cannot be seen. Their year to date still holds the months before.
-     */
-    const figures = (i: number, month: string, scale = 1): Record<string, number> => {
-      const m = Number(month.slice(5));
-      const apeM = (8 + ((i * 13 + m * 5) % 55)) * scale;
-      const usual: Record<string, number> = {
-        ape: Math.round(apeM * MINOR_UNITS_PER_RP_MILLION),
-        persistency: 80 + ((i * 7 + m) % 20),
-        recruitment: (i + m) % 3,
-        newActiveAgents: (i + m) % 2,
-        fyp: Math.round(apeM * 0.6 * MINOR_UNITS_PER_RP_MILLION),
-        policyCount: 1 + ((i * 3 + m) % 5),
-      };
-      const quiet = i % 6 === 3;
-      const sold = ['ape', 'fyp', 'policyCount'];
-      const monthly = quiet ? { ...usual, ape: 0, fyp: 0, policyCount: 0 } : usual;
-      const ytd = (metric: string) => {
-        if (metric === 'persistency') return monthly[metric] - 2;
-        return quiet && sold.includes(metric) ? usual[metric] * (m - 1) : monthly[metric] * m;
-      };
-      return Object.fromEntries(PRODUCTION_METRICS.flatMap((metric) => [
-        [field(metric, 'monthly'), monthly[metric]],
-        [field(metric, 'ytd'), ytd(metric)],
-      ]));
-    };
+    // Everybody else's month: `production-figures.ts`, which the reporting fixture's history months read too.
+    const figures = seedMonthFigures;
 
     /**
      * **A coaching cast member's month** (P11-T2 AC-4): last month the plan's base; this month the planned
@@ -1980,15 +1975,24 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       ]));
     };
 
-    const figuresFor = async (member: RosterRow, month: string, scale = 1) => {
+    const figuresFor = async (member: RosterRow, month: string, scale = 1): Promise<Record<string, number> | null> => {
       const key = castKeyOf.get(String(member._id));
+      const reporting = reportingKeyOf.get(String(member._id));
+      if (reporting) {
+        const values = reportingMonthFigures(reporting, month, thisMonth);
+        return values && Object.fromEntries(Object.entries(values).map(([k, v]) => [k, k.startsWith('persistency') ? v : v * scale]));
+      }
       return key
         ? castFigures(key, String(member._id), month, scale)
         : figures(earlier.indexOf(member), month, scale);
     };
+    // A member a month's file leaves out is not on it: no row (`reportingMonthFigures`).
     const rowsFor = async (members: readonly RosterRow[], month: string, scale = 1) => {
       const rows: { member: RosterRow; values: Record<string, number> }[] = [];
-      for (const member of members) rows.push({ member, values: await figuresFor(member, month, scale) });
+      for (const member of members) {
+        const values = await figuresFor(member, month, scale);
+        if (values) rows.push({ member, values });
+      }
       return rows;
     };
 
@@ -2177,9 +2181,11 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     });
   }
 
-  const owner0555 = await place(office0555, String(owner0555User._id), 'ab', null);
+  // Both joined about two months ago (the Phase 18 exit review): before their files, their logging and their 1:1,
+  // so 0555's reports read a membership that was there for what it holds. Lina's activation starts on the same day.
+  const owner0555 = await place(office0555, String(owner0555User._id), 'ab', null, { joinedDaysAgo: OFFICE_0555_JOINED_DAYS_AGO });
   const agent0555User = await user('agent@kpm0555.test', 'Lina Marlina', { pronoun: 'she' });
-  const agent0555 = await place(office0555, String(agent0555User._id), 'agent', owner0555);
+  const agent0555 = await place(office0555, String(agent0555User._id), 'agent', owner0555, { joinedDaysAgo: OFFICE_0555_JOINED_DAYS_AGO });
   await recount(String(kpm0555._id), owner0555.id);
 
   /*
@@ -2282,6 +2288,17 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     },
   });
   if (recruitment.files !== 'stored') log(`Recruitment pitch documents and 0417's PRUMapan brochure ${recruitment.files}.`);
+
+  // ------------------- the Owner's reporting: a year of files, two agencies, sign-ins (Phase 18; `reporting-fixture.ts`)
+
+  const reporting = await seedReportingFixture({
+    clock, kpmId: id0417,
+    owner: { membershipId: owner.id, userId: String(ownerUser._id) },
+    admin: { membershipId: admin.id },
+    cast: reportingCast,
+    coachingCastIds: new Set(Object.values(cast).map((placed) => placed.id)),
+    office0555: { kpmId: id0555, owner: owner0555.id, agent: agent0555.id },
+  });
 
   // ------------------------------------------------- offices asking to exist
 
@@ -3103,7 +3120,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     users: { sari: String(sariUser._id), arief: await userOf(cast.arief.id), siti: await userOf(cast.siti.id) },
     joinedDaysAgo: {
       rina: RINA_JOINED_DAYS_AGO, budi: BUDI_JOINED_DAYS_AGO, yanti: 28, novi: joinedOf('novi'), wahyu: joinedOf('wahyu'),
-      siti: joinedOf('siti'), dimas: joinedOf('dimas'), indah: joinedOf('indah'), lina: 0,
+      siti: joinedOf('siti'), dimas: joinedOf('dimas'), indah: joinedOf('indah'), lina: OFFICE_0555_JOINED_DAYS_AGO,
     },
     sitiRecords: {
       goal: sitiGoal ? String(sitiGoal._id) : null,
@@ -3176,14 +3193,14 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
 
   KPM 0999 · Suspended Branch
     owner@kpm0999.test                                 Signing in shows the page: the office is suspended
-${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guide}${unitDashboard.guide}${recruitment.guide}
+${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guide}${unitDashboard.guide}${recruitment.guide}${reporting.guide}
   NO OFFICE
     newcomer@agencyboost.test                          Brand new — starts at Register KPM
 
   GROUPS in KPM 0417, at /people/members → Groups
     New Agent Mentoring Circle   owned by Sari · Rina and Budi tagged
     Top Producers 2026           owned by the Owner · Agus and Sari tagged
-    Agus and Sari also carry the Core Leader tag
+    Agus, Sari and Yosef also carry the Core Leader tag
 
   KPM REQUESTS at /admin/kpm-requests  (Super Admin)
     Bandung Kota Branch          pending, with a note — ade@agencyboost.test
@@ -3344,7 +3361,7 @@ ${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guid
                                  Dewi leads nobody and has no card. Every hire shown is a recorded read
     sari@kpm0417.test            her own Direct Unit; ticks and the note on a hire's detail
     arief@kpm0417.test           his own Direct Unit; Wahyu's Start date is his correction
-    agent@kpm0555.test           Lina, office 0555, day 1: the other office's hire
+    agent@kpm0555.test           Lina, office 0555, day 61 (joined two months ago): the other office's hire
     Sari, Dewi and Arief joined as Agents and were promoted: none of them has an activation.
     Activations stored           ${storedActivations} (${activation.activations.length} in this run's fixture). A row is
                                  written only where its id is absent: run with --reset to date

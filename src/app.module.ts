@@ -249,6 +249,17 @@ import { RecruitmentPitchRepository } from '@/modules/recruitment/recruitment-pi
 import { RecruitmentPlaybookService } from '@/modules/recruitment/recruitment-playbook.service';
 import { RecruitmentPlanService } from '@/modules/recruitment/recruitment-plan.service';
 import { RecruitmentPitchService } from '@/modules/recruitment/recruitment-pitch.service';
+import {
+  KpmAnalyticsController, KpmOverviewController, PlatformAnalyticsController,
+} from '@/modules/reporting/reporting.controller';
+import { KpmRecruitTarget, KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
+import { KpmRecruitTargetRepository } from '@/modules/reporting/kpm-recruit-target.repository';
+import { OfficePeople } from '@/modules/reporting/office-people';
+import { KpmOverviewService } from '@/modules/reporting/kpm-overview.service';
+import { KpmAnalyticsService } from '@/modules/reporting/kpm-analytics.service';
+import { PlatformAnalyticsService } from '@/modules/reporting/platform-analytics.service';
+import { DirectoryColumns } from '@/modules/reporting/directory-columns';
+import { CarrierRules } from '@/modules/campaigns/carrier-rules';
 
 @Module({
   imports: [
@@ -325,6 +336,8 @@ import { RecruitmentPitchService } from '@/modules/recruitment/recruitment-pitch
       // Phase 17: a company's recruitment playbook, and an office's four pitch documents.
       { name: RecruitmentPlaybook.name, schema: RecruitmentPlaybookSchema },
       { name: RecruitmentPitchSlot.name, schema: RecruitmentPitchSlotSchema },
+      // Phase 18: an office's recruitment target, month by month.
+      { name: KpmRecruitTarget.name, schema: KpmRecruitTargetSchema },
     ]),
   ],
   controllers: [
@@ -374,6 +387,10 @@ import { RecruitmentPitchService } from '@/modules/recruitment/recruitment-pitch
     RecruitmentController,
     RecruitmentPitchController,
     RecruitmentPlaybookController,
+    // Phase 18: the Owner's reporting — the KPM Overview, KPM analytics, and the platform's adoption.
+    KpmOverviewController,
+    KpmAnalyticsController,
+    PlatformAnalyticsController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -566,6 +583,18 @@ import { RecruitmentPitchService } from '@/modules/recruitment/recruitment-pitch
     RecruitmentPlanService,
     RecruitmentPitchRepository,
     RecruitmentPitchService,
+    /*
+     * Phase 18: the Owner's reporting — every figure through its owner's readings, the office's people read once,
+     * the recruitment target's tenant repository, the campaigns module's one named reader of the carrier rules,
+     * and the directory's two columns.
+     */
+    KpmRecruitTargetRepository,
+    OfficePeople,
+    CarrierRules,
+    KpmOverviewService,
+    KpmAnalyticsService,
+    PlatformAnalyticsService,
+    DirectoryColumns,
   ],
   exports: [Clock, AuditService],
 })

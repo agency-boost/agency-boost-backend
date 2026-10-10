@@ -389,6 +389,19 @@ describe('organisation', () => {
 
         expect(await members.byIdsAnywhereForAudit([String(removed.id)])).toHaveLength(1);
       });
+
+      it('says no code, rather than failing, for a row older than the agent code', async () => {
+        const old = await hierarchy.create(ctx(KPM_A), {
+          userId: await person(), role: 'agent', status: 'active',
+        });
+        await mongoose.connection.collection('memberships').updateOne(
+          { _id: new mongoose.Types.ObjectId(String(old.id)) }, { $unset: { agentCode: '' } },
+        );
+
+        expect(await members.byIdsAnywhereForAudit([String(old.id)])).toEqual([
+          expect.objectContaining({ _id: String(old.id), agentCode: null }),
+        ]);
+      });
     });
   });
 

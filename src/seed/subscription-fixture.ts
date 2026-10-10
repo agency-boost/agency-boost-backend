@@ -12,7 +12,7 @@ import { seedObjectId } from './coaching-fixture';
  *
  * | Office | Its subscription | Who to sign in as, and what they see |
  * |---|---|---|
- * | **0417** BSD City | ends **three months** after the seed's today; Rp 350,000 a leader; at most **10** leaders, **6** used (the Owner, the Admin, Agus, Sari, Dewi and Arief) | `superadmin@agencyboost.test` at `/admin/tenants`: the row reads *6 / 10*, its end date three months on |
+ * | **0417** BSD City | ends **three months** after the seed's today; Rp 350,000 a leader; at most **10** leaders, **9** used (the Owner, the Admin, Agus, Sari, Dewi and Arief; and since Phase 18's reporting fixture, Yosef, Winda and Satria) | `superadmin@agencyboost.test` at `/admin/tenants`: the row reads *9 / 10*, its end date three months on |
  * | **0555** Kelapa Gading | ends **five days** after today; Rp 400,000 a leader; **no limit** | the list's near end: *Active*, its end five days away, *2* leaders |
  * | **0601** Cikarang (new) | **ended ten days ago**, not kept active | `owner@kpm0601.test` and `agent@kpm0601.test`: the page saying the subscription ended and to contact AgencyBoost, at whatever address they open. The list reads *Ended* |
  * | **0602** Bekasi Barat (new) | **ended three days ago, kept active**; at its limit of **2** leaders (the Owner and Sinta, an AAB) | `owner@kpm0602.test`: everything works; at `/people/members`, promoting Joko (Agent) to AAB is refused with the limit's words. The list reads *Ended — kept active* and *2 / 2* |
@@ -184,8 +184,8 @@ export async function seedSubscriptionFixture(deps: SubscriptionFixtureDeps): Pr
   SUBSCRIPTIONS at /admin/tenants  (Super Admin; from src/seed/subscription-fixture.ts, dated from the
              office's today ${today}. A subscription is written only where an office has none, so one
              edited in a walk is kept: run with --reset to date them from today)
-    KPM 0417 · BSD City          ends ${plan['0417'].endDate}, Rp 350,000 a leader, Leaders 6 / 10 — the Owner,
-                                 the Admin, Agus, Sari, Dewi and Arief
+    KPM 0417 · BSD City          ends ${plan['0417'].endDate}, Rp 350,000 a leader, Leaders 9 / 10 — the Owner,
+                                 the Admin, Agus, Sari, Dewi, Arief, Yosef, Winda and Satria
     KPM 0555 · Kelapa Gading     ends ${plan['0555'].endDate}, five days on; no limit, so Leaders reads the count
     KPM 0601 · Cikarang          Ended ${plan['0601'].endDate}, not kept active:
       owner@kpm0601.test         Rudi, the Owner — the page, "contact AgencyBoost", at any address

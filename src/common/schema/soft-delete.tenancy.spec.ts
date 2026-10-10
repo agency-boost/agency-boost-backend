@@ -82,6 +82,7 @@ import {
 } from '@/modules/activation/activation-progress.schema';
 import { RecruitmentPlaybookSchema } from '@/modules/recruitment/recruitment-playbook.schema';
 import { PitchConfirmationSchema, RecruitmentPitchSlotSchema } from '@/modules/recruitment/recruitment-pitch.schema';
+import { KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
 
 /**
  * P2-T8: soft delete everywhere.
@@ -145,6 +146,8 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   // document is replaced, never removed — *Replace* is the only change (D-replace) — and P19-T1 reaches it.
   ['recruitmentPlaybooks', RecruitmentPlaybookSchema],
   ['kpmRecruitmentPitchDocuments', RecruitmentPitchSlotSchema],
+  // Phase 18 (D-recruit): an office's recruitment target per month, unique per (office, month), `kpmId`-led.
+  ['kpmRecruitTargets', KpmRecruitTargetSchema],
 ];
 
 /**
@@ -447,6 +450,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [ActivationNoteSchema, 'ActivationNoteSchema'],
   [RecruitmentPlaybookSchema, 'RecruitmentPlaybookSchema'],
   [RecruitmentPitchSlotSchema, 'RecruitmentPitchSlotSchema'],
+  [KpmRecruitTargetSchema, 'KpmRecruitTargetSchema'],
   [PitchConfirmationSchema, 'PitchConfirmationSchema'],
 ]);
 

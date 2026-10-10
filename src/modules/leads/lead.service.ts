@@ -18,6 +18,7 @@ import { ActivationEvents, signalActivation } from '@/modules/activation/activat
 import { leadFlags, type LeadFlag } from './lead-attention';
 import { checkLead, type CheckedLead } from './lead-input';
 import { isInMemorySort, ladderRanks, leadOrder, type LeadSortKey } from './lead-order';
+import { recruitmentPipelineFacets } from './lead-readings';
 import { LeadRepository } from './lead.repository';
 import type { LeadDocument, LeadType } from './lead.schema';
 
@@ -751,8 +752,6 @@ export class LeadService {
     // The office's own recruitment ladder decides which stages mean *still running* and *nearly
     // there*. Reading the codes rather than hardcoding them is invariant §4.
     const stages = await this.statuses.find(ctx, { pipeline: 'recruitment' });
-    const terminal = stages.filter((s) => s.isTerminal).map((s) => s.code);
-    const late = stages.filter((s) => s.isLateStage).map((s) => s.code);
 
     // `kpmId` and `deletedAt` are the repository's to add — see `aggregate`.
     const match: Record<string, unknown> = {};
@@ -770,18 +769,8 @@ export class LeadService {
         $facet: {
           open: [{ $match: { outcome: null } }, { $count: 'n' }],
           committedThisMonth: countWhen({ $in: [day.month, { $ifNull: ['$commitments.month', []] }] }),
-          recruitmentPipelineNow: countWhen({
-            $and: [
-              { $eq: ['$type', 'recruitment'] },
-              { $not: [{ $in: [{ $ifNull: ['$statusCode', ''] }, terminal] }] },
-            ],
-          }),
-          recruitmentExpectedToClose: countWhen({
-            $and: [
-              { $eq: ['$type', 'recruitment'] },
-              { $in: [{ $ifNull: ['$statusCode', ''] }, late] },
-            ],
-          }),
+          // One definition, which the Owner's Overview reads too (Phase 18, D-recruit).
+          ...recruitmentPipelineFacets(stages),
           // The three rules `flagsFor` applies, in the order it applies them: a lead with no date
           // is *no next action* and cannot also be *overdue*.
           overdue: countWhen({

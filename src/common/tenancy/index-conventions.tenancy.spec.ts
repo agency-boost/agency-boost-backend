@@ -83,6 +83,7 @@ import {
 } from '@/modules/activation/activation-progress.schema';
 import { RecruitmentPlaybookSchema } from '@/modules/recruitment/recruitment-playbook.schema';
 import { PitchConfirmationSchema, RecruitmentPitchSlotSchema } from '@/modules/recruitment/recruitment-pitch.schema';
+import { KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -132,6 +133,8 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['activationProgress', ActivationProgressSchema],
   // P17-T4 AC-1: an office's four pitch documents, unique per (office, slot), `kpmId`-led.
   ['kpmRecruitmentPitchDocuments', RecruitmentPitchSlotSchema],
+  // Phase 18 (D-recruit): an office's recruitment target per month, unique per (office, month), `kpmId`-led.
+  ['kpmRecruitTargets', KpmRecruitTargetSchema],
 ];
 
 /**
@@ -516,6 +519,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [ActivationNoteSchema, 'ActivationNoteSchema'],
   [RecruitmentPlaybookSchema, 'RecruitmentPlaybookSchema'],
   [RecruitmentPitchSlotSchema, 'RecruitmentPitchSlotSchema'],
+  [KpmRecruitTargetSchema, 'KpmRecruitTargetSchema'],
   [PitchConfirmationSchema, 'PitchConfirmationSchema'],
 ]);
 

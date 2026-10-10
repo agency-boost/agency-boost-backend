@@ -6932,7 +6932,7 @@
     },
     "/api/v1/members": {
       "get": {
-        "description": "Cursor-paginated by agent code. Filter by role and status, or search by name, email or agent code. Removed members are excluded unless asked for.\n\n**Requires `member:read_profile`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Cursor-paginated by agent code. Filter by role and status, or search by name, email or agent code. Removed members are excluded unless asked for. Each **active** row carries the member's latest day logged and the days since their last 1:1, and every active member on the page other than you is recorded as read; a pending or removed row carries neither and is not.\n\n**Requires `member:read_profile`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "OrgController_list_v1",
         "parameters": [
           {
@@ -20378,6 +20378,376 @@
         ],
         "x-required-permission": "recruitment_playbook:write"
       }
+    },
+    "/api/v1/kpm/overview": {
+      "get": {
+        "description": "Five sections, every figure computed on the read from the agency’s own records through the function that already computes it: team composition (the headcount, new this month, one tile per rung of the company’s ladder); engagement (members who logged an activity this calendar month, beside last month to the same day, and over the last 7 days); coaching coverage over 7 and 30 days with each AB’s own coaching, lowest first; the recruitment pipeline as counts, with the month’s target; and production this year against the sum of the members’ goals, its projection, and every AB agency, furthest behind first. A figure without data is `null`, never 0. Not paginated. Each leader on the coaching ranking is recorded as read.\n\n**Requires `kpm_overview:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "KpmOverviewController_read_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KpmOverviewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — this read takes no query parameter. One sent, of any name, is refused, and `details` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency. `PERM_DENIED` — a role without the permission: every field role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The agency’s overview",
+        "tags": [
+          "kpm-reporting"
+        ],
+        "x-required-permission": "kpm_overview:read"
+      }
+    },
+    "/api/v1/kpm/overview/not-logged": {
+      "get": {
+        "description": "How many members have no day logged in the last 7 days, and the first three of them — never-logged first, then the longest silent: name, rung, their latest day logged and the days since. Read when *View who hasn’t logged* is opened; the three listed are recorded as read, the rest counted are not.\n\n**Requires `kpm_overview:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "KpmOverviewController_notLogged_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotLoggedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — this read takes no query parameter. One sent, of any name, is refused, and `details` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency. `PERM_DENIED` — a role without the permission: every field role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Who has not logged lately",
+        "tags": [
+          "kpm-reporting"
+        ],
+        "x-required-permission": "kpm_overview:read"
+      }
+    },
+    "/api/v1/kpm/overview/recruit-target": {
+      "put": {
+        "description": "The agency’s target for its current month: stored, and read by every later month that sets none. Audited with the value before and after. Another month is refused. The same target again changes nothing.\n\n**Requires `kpm_overview:set_recruit_target`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "KpmOverviewController_setRecruitTarget_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRecruitTargetDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecruitTargetDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — `month` is not the agency’s current month (`details.month` names it), or `target` is not a whole number from 0.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `kpm_overview:set_recruit_target`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set this month’s recruitment target",
+        "tags": [
+          "kpm-reporting"
+        ],
+        "x-required-permission": "kpm_overview:set_recruit_target"
+      }
+    },
+    "/api/v1/kpm/analytics": {
+      "get": {
+        "description": "One row per AB agency — the AB and everybody below them down to the next AB, so an AB under an AB is its own row and the rows add up to the agency — each with its *(Direct)* row and a row per AAB unit: APE this month against the targets fixed when it began, APE this year against the annual goals, coached in the last 7 days, active agents for the period’s month, total and promised leads, and manpower by rung. Each AB’s and AAB’s Maintenance of Contract against the company’s carrier rules, criterion by criterion, a criterion without uploaded input `null` rather than failed; each agency’s production club. The total row, and the agency’s production for the six months before this one. Computed on the read, not paginated; nothing is recorded.\n\n**Requires `kpm_analytics:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "KpmAnalyticsController_read_v1",
+        "parameters": [
+          {
+            "name": "period",
+            "required": false,
+            "in": "query",
+            "description": "Which month the month-bound columns read: *APE — This Month* and its target as fixed when that month began, *Active this month* / *Active last month*, and *Total leads* now or as they stood at last month’s end. *APE — Annual*, *Coached (7d)*, *Manpower*, MOC and the clubs are today’s whatever the period.",
+            "schema": {
+              "default": "this_month",
+              "enum": [
+                "this_month",
+                "previous_month"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KpmAnalyticsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency. `PERM_DENIED` — a role without the permission: every field role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The agency’s unit comparison",
+        "tags": [
+          "kpm-reporting"
+        ],
+        "x-required-permission": "kpm_analytics:read"
+      }
+    },
+    "/api/v1/admin/analytics": {
+      "get": {
+        "description": "Per agency, per company and for the platform: active members by rung, joined and left this calendar month, and signed in within the last 7 and 30 days. Counts only — no member, lead, activity, coaching or production figure — read across agencies through named reads. Nothing is recorded.\n\n**Requires `platform_analytics:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "PlatformAnalyticsController_read_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformAnalyticsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — this read takes no query parameter. One sent, of any name, is refused, and `details` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `platform_analytics:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Adoption across agencies",
+        "tags": [
+          "admin"
+        ],
+        "x-required-permission": "platform_analytics:read"
+      }
     }
   },
   "info": {
@@ -26304,7 +26674,16 @@
               "POTENTIAL_MAA_COUNT_IN_UNIT",
               "CASCADE_ACTIVITY_TOUCHES",
               "NEW_ACTIVE_AGENTS",
-              "ROLLING_PERSISTENCY"
+              "ROLLING_PERSISTENCY",
+              "ACTIVITY_LOGGED_THIS_MONTH",
+              "RECRUITMENT_CLOSED_LAST_MONTH",
+              "APE_YEAR_PROJECTION",
+              "NET_APE",
+              "MONTHLY2_AA",
+              "MONTHLY2_AA_DU",
+              "MONTHLY2_AA_DG",
+              "DIRECT_AB_COUNT",
+              "MOC_PERSISTENCY"
             ],
             "description": "A key from the metric registry. Anything else is refused at write time, by name."
           },
@@ -31069,6 +31448,1416 @@
           "body"
         ]
       },
+      "OfficeHeaderDto": {
+        "type": "object",
+        "properties": {
+          "companyName": {
+            "type": "string",
+            "example": "Prudential"
+          },
+          "code": {
+            "type": "string",
+            "example": "0417"
+          },
+          "branch": {
+            "type": "string",
+            "example": "BSD City Branch"
+          }
+        },
+        "required": [
+          "companyName",
+          "code",
+          "branch"
+        ]
+      },
+      "ReportingThresholdsDto": {
+        "type": "object",
+        "properties": {
+          "statusSplitPct": {
+            "type": "number",
+            "example": 70,
+            "description": "The attainment a row is coloured *success* at, and *alert* below (`KPM_Owner.html:3150`, `:3220`)."
+          }
+        },
+        "required": [
+          "statusSplitPct"
+        ]
+      },
+      "RungCountDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "AB",
+            "description": "The rung’s stable code on the company’s ladder."
+          },
+          "label": {
+            "type": "string",
+            "example": "AB",
+            "description": "The ladder’s own label for it."
+          },
+          "count": {
+            "type": "number",
+            "example": 8
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "count"
+        ]
+      },
+      "OverviewCompositionDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number",
+            "description": "`OFFICE_HEADCOUNT`: the active memberships now, every rung (OD-24)."
+          },
+          "newThisMonth": {
+            "type": "number",
+            "description": "`OFFICE_NEW_MEMBERS_THIS_MONTH`: of them, the memberships that began this calendar month."
+          },
+          "rungs": {
+            "description": "One per rung of the company’s ladder, senior first as drawn; an archived rung only while somebody stands on it. They sum to `total`.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RungCountDto"
+            }
+          }
+        },
+        "required": [
+          "total",
+          "newThisMonth",
+          "rungs"
+        ]
+      },
+      "LoggedThisMonthDto": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "example": 112
+          },
+          "of": {
+            "type": "number",
+            "example": 187,
+            "description": "The group: one headcount for every denominator (OD-24)."
+          },
+          "pct": {
+            "type": "number",
+            "nullable": true,
+            "example": 60,
+            "description": "A whole percent; `null` over nobody, never 0%."
+          },
+          "lastMonthToDate": {
+            "type": "number",
+            "nullable": true,
+            "description": "The same count for last month, from its first day to the same day of the month; `null` when the agency had nobody then."
+          }
+        },
+        "required": [
+          "count",
+          "of",
+          "pct",
+          "lastMonthToDate"
+        ]
+      },
+      "LoggedThisWeekDto": {
+        "type": "object",
+        "properties": {
+          "logged": {
+            "type": "number",
+            "description": "Members with a day logged in the last 7 days, today included."
+          },
+          "notLogged": {
+            "type": "number"
+          },
+          "pct": {
+            "type": "number",
+            "nullable": true,
+            "description": "`ACTIVITY_COMPLIANCE_RATE`; `null` over nobody."
+          }
+        },
+        "required": [
+          "logged",
+          "notLogged",
+          "pct"
+        ]
+      },
+      "OverviewEngagementDto": {
+        "type": "object",
+        "properties": {
+          "loggedThisMonth": {
+            "description": "`ACTIVITY_LOGGED_THIS_MONTH` (*Agents who logged activity this month*): members who logged at least one activity this calendar month, over the headcount.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LoggedThisMonthDto"
+              }
+            ]
+          },
+          "loggedThisWeek": {
+            "$ref": "#/components/schemas/LoggedThisWeekDto"
+          }
+        },
+        "required": [
+          "loggedThisMonth",
+          "loggedThisWeek"
+        ]
+      },
+      "RateDto": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "example": 112
+          },
+          "of": {
+            "type": "number",
+            "example": 187,
+            "description": "The group: one headcount for every denominator (OD-24)."
+          },
+          "pct": {
+            "type": "number",
+            "nullable": true,
+            "example": 60,
+            "description": "A whole percent; `null` over nobody, never 0%."
+          }
+        },
+        "required": [
+          "count",
+          "of",
+          "pct"
+        ]
+      },
+      "LeaderboardRowDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Agus Prasetyo"
+          },
+          "teamSize": {
+            "type": "number",
+            "description": "Everybody below them now, at any depth."
+          },
+          "coached": {
+            "type": "number",
+            "description": "Of those, how many they led a 1:1 with in the last 7 days."
+          },
+          "pct": {
+            "type": "number",
+            "nullable": true,
+            "description": "`LEADER_COACHING_FREQUENCY`, a whole percent."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "teamSize",
+          "coached",
+          "pct"
+        ]
+      },
+      "OverviewCoachingDto": {
+        "type": "object",
+        "properties": {
+          "coverage7d": {
+            "description": "`COACHING_COVERAGE` over the agency, coached in the last 7 days.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RateDto"
+              }
+            ]
+          },
+          "coverage30d": {
+            "description": "The same over the last 30 days.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RateDto"
+              }
+            ]
+          },
+          "leaderboard": {
+            "description": "Every AB who leads somebody, lowest share first. The whole ranking: the card shows four and expands.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaderboardRowDto"
+            }
+          }
+        },
+        "required": [
+          "coverage7d",
+          "coverage30d",
+          "leaderboard"
+        ]
+      },
+      "OverviewRecruitmentDto": {
+        "type": "object",
+        "properties": {
+          "expectedToClose": {
+            "type": "number",
+            "description": "`RECRUITMENT_EXPECTED_TO_CLOSE`: open candidates on a stage the agency ticked *Expected to close*."
+          },
+          "pipelineNow": {
+            "type": "number",
+            "description": "`RECRUITMENT_PIPELINE_NOW`: open candidates not on a closing stage."
+          },
+          "closedLastMonth": {
+            "type": "number",
+            "description": "`RECRUITMENT_CLOSED_LAST_MONTH`: candidates closed won last calendar month."
+          },
+          "target": {
+            "type": "number",
+            "nullable": true,
+            "description": "The month’s target, or the latest earlier month’s carried forward; `null` when none was ever set — no pill then."
+          },
+          "targetMonth": {
+            "type": "string",
+            "example": "2026-10",
+            "description": "The month a target is set for: the agency’s current month."
+          }
+        },
+        "required": [
+          "expectedToClose",
+          "pipelineNow",
+          "closedLastMonth",
+          "target",
+          "targetMonth"
+        ]
+      },
+      "YearToDateDto": {
+        "type": "object",
+        "properties": {
+          "achievedMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR minor units, from the agency’s file. `null` is *Not uploaded yet*, never zero."
+          },
+          "targetMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR minor units: the sum of the members’ own goals (OD-143). `null` when nobody has one."
+          },
+          "pct": {
+            "type": "number",
+            "nullable": true,
+            "description": "Achieved of target, a whole percent capped at 999; `null` without both."
+          },
+          "missingMonths": {
+            "example": [
+              "2026-08"
+            ],
+            "description": "The months the year to date is waiting on: this year’s months after the latest month the file holds, before the current one — every month before this one while none is held. A gap before the latest held month is not listed: that month’s year to date already covers it.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "membersWithoutGoal": {
+            "type": "number",
+            "description": "Members with no goal saved for the year: in no target."
+          }
+        },
+        "required": [
+          "achievedMinor",
+          "targetMinor",
+          "pct",
+          "missingMonths",
+          "membersWithoutGoal"
+        ]
+      },
+      "OverviewUnitDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Agus Prasetyo"
+          },
+          "achievedMinor": {
+            "type": "number",
+            "nullable": true
+          },
+          "targetMinor": {
+            "type": "number",
+            "nullable": true
+          },
+          "pct": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "achievedMinor",
+          "targetMinor",
+          "pct"
+        ]
+      },
+      "OverviewAgencyDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Agus Prasetyo"
+          },
+          "achievedMinor": {
+            "type": "number",
+            "nullable": true
+          },
+          "targetMinor": {
+            "type": "number",
+            "nullable": true
+          },
+          "pct": {
+            "type": "number",
+            "nullable": true
+          },
+          "aabUnits": {
+            "description": "Each AAB who leads somebody, over their unit within the agency.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OverviewUnitDto"
+            }
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "achievedMinor",
+          "targetMinor",
+          "pct",
+          "aabUnits"
+        ]
+      },
+      "OverviewProductionDto": {
+        "type": "object",
+        "properties": {
+          "ytd": {
+            "description": "The agency’s year to date from its file, against the sum of its members’ goals.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/YearToDateDto"
+              }
+            ]
+          },
+          "projectionMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "`APE_YEAR_PROJECTION`, IDR minor units: the year to date as of the latest month held, over that month’s number, run to twelve — a month with no file is still covered by the year to date; `null` until a month is held."
+          },
+          "agencies": {
+            "description": "Every AB agency (an AB under an AB is its own), lowest attainment first, a row with none last.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OverviewAgencyDto"
+            }
+          }
+        },
+        "required": [
+          "ytd",
+          "projectionMinor",
+          "agencies"
+        ]
+      },
+      "KpmOverviewDto": {
+        "type": "object",
+        "properties": {
+          "office": {
+            "$ref": "#/components/schemas/OfficeHeaderDto"
+          },
+          "today": {
+            "type": "string",
+            "example": "2026-10-09",
+            "description": "Today in the agency’s calendar."
+          },
+          "month": {
+            "type": "string",
+            "example": "2026-10"
+          },
+          "year": {
+            "type": "string",
+            "example": "2026"
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/ReportingThresholdsDto"
+          },
+          "composition": {
+            "$ref": "#/components/schemas/OverviewCompositionDto"
+          },
+          "engagement": {
+            "$ref": "#/components/schemas/OverviewEngagementDto"
+          },
+          "coaching": {
+            "$ref": "#/components/schemas/OverviewCoachingDto"
+          },
+          "recruitment": {
+            "$ref": "#/components/schemas/OverviewRecruitmentDto"
+          },
+          "production": {
+            "$ref": "#/components/schemas/OverviewProductionDto"
+          }
+        },
+        "required": [
+          "office",
+          "today",
+          "month",
+          "year",
+          "thresholds",
+          "composition",
+          "engagement",
+          "coaching",
+          "recruitment",
+          "production"
+        ]
+      },
+      "RungRefDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "AGENT"
+          },
+          "label": {
+            "type": "string",
+            "example": "Agent"
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
+      "NotLoggedMemberDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Agus Prasetyo"
+          },
+          "rung": {
+            "$ref": "#/components/schemas/RungRefDto"
+          },
+          "lastLoggedOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-30",
+            "description": "Their latest day logged; `null` is *Never logged*."
+          },
+          "daysSince": {
+            "type": "number",
+            "nullable": true,
+            "example": 9,
+            "description": "Whole days since, in the agency’s calendar."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "rung",
+          "lastLoggedOn",
+          "daysSince"
+        ]
+      },
+      "NotLoggedDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number",
+            "example": 69,
+            "description": "Everybody with no day logged in the last 7 days; the reveal’s *“+ {total − 3} more”*."
+          },
+          "members": {
+            "description": "The first three of them (`KPM_REPORTING.NOT_LOGGED_SHOWN`): never logged first, then the longest silent. The rest are the People screen’s.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotLoggedMemberDto"
+            }
+          }
+        },
+        "required": [
+          "total",
+          "members"
+        ]
+      },
+      "SetRecruitTargetDto": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "example": "2026-10",
+            "description": "The agency’s current month, `YYYY-MM`. No other month is accepted."
+          },
+          "target": {
+            "type": "number",
+            "minimum": 0,
+            "example": 15,
+            "description": "Recruits to close in the month: a whole number from 0."
+          }
+        },
+        "required": [
+          "month",
+          "target"
+        ]
+      },
+      "RecruitTargetDto": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "example": "2026-10"
+          },
+          "target": {
+            "type": "number",
+            "example": 15
+          }
+        },
+        "required": [
+          "month",
+          "target"
+        ]
+      },
+      "MoneyDto": {
+        "type": "object",
+        "properties": {
+          "achievedMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR minor units, from the agency’s file. `null` is *Not uploaded yet*, never zero."
+          },
+          "targetMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR minor units: the sum of the members’ own goals (OD-143). `null` when nobody has one."
+          },
+          "pct": {
+            "type": "number",
+            "nullable": true,
+            "description": "Achieved of target, a whole percent capped at 999; `null` without both."
+          }
+        },
+        "required": [
+          "achievedMinor",
+          "targetMinor",
+          "pct"
+        ]
+      },
+      "AnalyticsLeadsDto": {
+        "type": "object",
+        "properties": {
+          "sales": {
+            "type": "number",
+            "description": "Open sales leads (`OPEN_SALES_LEADS`)."
+          },
+          "salesPotential": {
+            "type": "number",
+            "description": "Of them, promised for the period’s month."
+          },
+          "recruit": {
+            "type": "number",
+            "description": "Open recruitment candidates (`RECRUITMENT_PIPELINE_NOW`)."
+          },
+          "recruitPotential": {
+            "type": "number",
+            "description": "Of them, promised for the period’s month."
+          }
+        },
+        "required": [
+          "sales",
+          "salesPotential",
+          "recruit",
+          "recruitPotential"
+        ]
+      },
+      "ManpowerDto": {
+        "type": "object",
+        "properties": {
+          "aab": {
+            "type": "number"
+          },
+          "agents": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number",
+            "description": "Everybody in the row now, its head included (OD-24)."
+          }
+        },
+        "required": [
+          "aab",
+          "agents",
+          "total"
+        ]
+      },
+      "RowHeadDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Agus Prasetyo"
+          },
+          "isReader": {
+            "type": "boolean",
+            "description": "The row is the reader’s own: *(you)*."
+          },
+          "leads": {
+            "type": "boolean",
+            "description": "The head has at least one active direct report — a leader, so the row offers *Coach*. An AB leading nobody heads an agency of one, and is not offered it."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "isReader",
+          "leads"
+        ]
+      },
+      "ClubDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "STAR_CLUB"
+          },
+          "label": {
+            "type": "string",
+            "example": "Star Club"
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
+      "MocCriterionDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "NET_APE",
+            "description": "The metric the carrier’s rule names."
+          },
+          "label": {
+            "type": "string",
+            "example": "Net APE"
+          },
+          "current": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR minor units for Net APE, a percent for persistency, a count otherwise; `null` is not uploaded."
+          },
+          "required": {
+            "type": "number",
+            "description": "The carrier rule’s threshold, in the same unit."
+          },
+          "met": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "`null` while its input is not uploaded — never ✕."
+          },
+          "period": {
+            "type": "string",
+            "example": "Jan–Sep 2026",
+            "description": "What it was read over."
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "current",
+          "required",
+          "met",
+          "period"
+        ]
+      },
+      "MocDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "met",
+              "not_met",
+              "unknown"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "example": "Met via the standard three-criteria path."
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MocCriterionDto"
+            }
+          },
+          "missing": {
+            "type": "string",
+            "nullable": true,
+            "description": "What is not uploaded, when the status is `unknown`."
+          }
+        },
+        "required": [
+          "status",
+          "path",
+          "criteria",
+          "missing"
+        ]
+      },
+      "AnalyticsRowDto": {
+        "type": "object",
+        "properties": {
+          "apeMonth": {
+            "description": "The period’s month’s APE from the file, against the monthly targets as fixed when it began — over the members the row had on the month’s last day, a member who has left since included.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "apeAnnual": {
+            "description": "The year to date against the annual goals — today’s members, whatever the period.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "coached7d": {
+            "description": "`COACHED_7D` over the row’s members today, its head included.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RateDto"
+              }
+            ]
+          },
+          "activeAgents": {
+            "type": "number",
+            "nullable": true,
+            "description": "`MAA_COUNT_IN_UNIT` for the period’s month, over its members on the month’s last day; `null` is *Not uploaded yet*."
+          },
+          "leads": {
+            "description": "As they stood at the period’s end, over the members it had then.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AnalyticsLeadsDto"
+              }
+            ]
+          },
+          "manpower": {
+            "description": "Today’s members, whatever the period.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ManpowerDto"
+              }
+            ]
+          },
+          "head": {
+            "$ref": "#/components/schemas/RowHeadDto"
+          }
+        },
+        "required": [
+          "apeMonth",
+          "apeAnnual",
+          "coached7d",
+          "activeAgents",
+          "leads",
+          "manpower",
+          "head"
+        ]
+      },
+      "AnalyticsUnitRowDto": {
+        "type": "object",
+        "properties": {
+          "apeMonth": {
+            "description": "The period’s month’s APE from the file, against the monthly targets as fixed when it began — over the members the row had on the month’s last day, a member who has left since included.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "apeAnnual": {
+            "description": "The year to date against the annual goals — today’s members, whatever the period.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "coached7d": {
+            "description": "`COACHED_7D` over the row’s members today, its head included.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RateDto"
+              }
+            ]
+          },
+          "activeAgents": {
+            "type": "number",
+            "nullable": true,
+            "description": "`MAA_COUNT_IN_UNIT` for the period’s month, over its members on the month’s last day; `null` is *Not uploaded yet*."
+          },
+          "leads": {
+            "description": "As they stood at the period’s end, over the members it had then.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AnalyticsLeadsDto"
+              }
+            ]
+          },
+          "manpower": {
+            "description": "Today’s members, whatever the period.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ManpowerDto"
+              }
+            ]
+          },
+          "head": {
+            "$ref": "#/components/schemas/RowHeadDto"
+          },
+          "moc": {
+            "nullable": true,
+            "description": "The AAB’s MOC; `null` when the company has no rule for the rung.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MocDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "apeMonth",
+          "apeAnnual",
+          "coached7d",
+          "activeAgents",
+          "leads",
+          "manpower",
+          "head",
+          "moc"
+        ]
+      },
+      "AnalyticsMemberDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Agus Prasetyo"
+          },
+          "rung": {
+            "$ref": "#/components/schemas/RungRefDto"
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "rung"
+        ]
+      },
+      "AnalyticsAgencyDto": {
+        "type": "object",
+        "properties": {
+          "apeMonth": {
+            "description": "The period’s month’s APE from the file, against the monthly targets as fixed when it began — over the members the row had on the month’s last day, a member who has left since included.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "apeAnnual": {
+            "description": "The year to date against the annual goals — today’s members, whatever the period.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "coached7d": {
+            "description": "`COACHED_7D` over the row’s members today, its head included.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RateDto"
+              }
+            ]
+          },
+          "activeAgents": {
+            "type": "number",
+            "nullable": true,
+            "description": "`MAA_COUNT_IN_UNIT` for the period’s month, over its members on the month’s last day; `null` is *Not uploaded yet*."
+          },
+          "leads": {
+            "description": "As they stood at the period’s end, over the members it had then.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AnalyticsLeadsDto"
+              }
+            ]
+          },
+          "manpower": {
+            "description": "Today’s members, whatever the period.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ManpowerDto"
+              }
+            ]
+          },
+          "head": {
+            "$ref": "#/components/schemas/RowHeadDto"
+          },
+          "club": {
+            "nullable": true,
+            "description": "`PRODUCTION_CLUB_TIER` over the agency’s year to date, the highest tier only.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ClubDto"
+              }
+            ]
+          },
+          "moc": {
+            "nullable": true,
+            "description": "`MOC_STATUS` for the AB.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MocDto"
+              }
+            ]
+          },
+          "direct": {
+            "description": "*(Direct)*: the AB and the members in no AAB’s unit.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AnalyticsRowDto"
+              }
+            ]
+          },
+          "aabUnits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnalyticsUnitRowDto"
+            }
+          },
+          "members": {
+            "description": "The manpower toggle: the agency’s people other than the AB.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnalyticsMemberDto"
+            }
+          }
+        },
+        "required": [
+          "apeMonth",
+          "apeAnnual",
+          "coached7d",
+          "activeAgents",
+          "leads",
+          "manpower",
+          "head",
+          "club",
+          "moc",
+          "direct",
+          "aabUnits",
+          "members"
+        ]
+      },
+      "AnalyticsTotalDto": {
+        "type": "object",
+        "properties": {
+          "apeMonth": {
+            "description": "The period’s month’s APE from the file, against the monthly targets as fixed when it began — over the members the row had on the month’s last day, a member who has left since included.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "apeAnnual": {
+            "description": "The year to date against the annual goals — today’s members, whatever the period.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "coached7d": {
+            "description": "`COACHED_7D` over the row’s members today, its head included.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RateDto"
+              }
+            ]
+          },
+          "activeAgents": {
+            "type": "number",
+            "nullable": true,
+            "description": "`MAA_COUNT_IN_UNIT` for the period’s month, over its members on the month’s last day; `null` is *Not uploaded yet*."
+          },
+          "leads": {
+            "description": "As they stood at the period’s end, over the members it had then.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AnalyticsLeadsDto"
+              }
+            ]
+          },
+          "manpower": {
+            "description": "Today’s members, whatever the period.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ManpowerDto"
+              }
+            ]
+          },
+          "abCount": {
+            "type": "number",
+            "description": "The rows: *\"Total — all {n} ABs\"*."
+          },
+          "mocMet": {
+            "type": "number",
+            "description": "ABs meeting MOC."
+          },
+          "mocOf": {
+            "type": "number",
+            "description": "ABs with a MOC evaluated."
+          },
+          "leaversExcludedMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "IDR minor units: the year to date of members who left this year — the agency’s, in no row, so the total’s *APE — Annual* is short of the Overview’s by it. `null` when no leaver holds a figure."
+          }
+        },
+        "required": [
+          "apeMonth",
+          "apeAnnual",
+          "coached7d",
+          "activeAgents",
+          "leads",
+          "manpower",
+          "abCount",
+          "mocMet",
+          "mocOf",
+          "leaversExcludedMinor"
+        ]
+      },
+      "MonthlyProductionDto": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "example": "2026-04"
+          },
+          "apeMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "The agency’s APE for the month from its file; `null` is a gap, no file."
+          }
+        },
+        "required": [
+          "month",
+          "apeMinor"
+        ]
+      },
+      "KpmAnalyticsDto": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "enum": [
+              "this_month",
+              "previous_month"
+            ]
+          },
+          "month": {
+            "type": "string",
+            "example": "2026-10",
+            "description": "The period’s month."
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/ReportingThresholdsDto"
+          },
+          "mocRulesText": {
+            "type": "string",
+            "example": "AAB: Net APE ≥ Rp200M AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\nAB: (Net APE ≥ Rp600M AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.",
+            "description": "The MOC column’s tooltip, composed from the company’s MOC rules: a line per rule, the junior rung first, separated by `\\n`. Empty when the company has none."
+          },
+          "agencies": {
+            "description": "One row per AB agency, A to Z; the rows partition the agency’s members.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnalyticsAgencyDto"
+            }
+          },
+          "total": {
+            "description": "The sum of the rows, a percentage from the sums.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AnalyticsTotalDto"
+              }
+            ]
+          },
+          "monthly": {
+            "description": "The six months before this one, oldest first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MonthlyProductionDto"
+            }
+          }
+        },
+        "required": [
+          "period",
+          "month",
+          "thresholds",
+          "mocRulesText",
+          "agencies",
+          "total",
+          "monthly"
+        ]
+      },
+      "PlatformCompanyRefDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Prudential"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "PlatformOfficeAdoptionDto": {
+        "type": "object",
+        "properties": {
+          "members": {
+            "type": "number",
+            "description": "On an office’s row, its active memberships now. On a company’s and the platform’s, the **people**: distinct accounts among those memberships, so somebody in two offices counts once there."
+          },
+          "byRung": {
+            "description": "Active memberships by rung of the company’s ladder, senior first — on every row the offices’ sum.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RungCountDto"
+            }
+          },
+          "joinedThisMonth": {
+            "type": "number",
+            "description": "Memberships that began this calendar month — on every row the offices’ sum."
+          },
+          "leftThisMonth": {
+            "type": "number",
+            "description": "Memberships removed this calendar month — on every row the offices’ sum."
+          },
+          "signedIn7d": {
+            "type": "number",
+            "description": "Of `members`, who signed in within the last 7 days: memberships on an office’s row, accounts on a company’s and the platform’s."
+          },
+          "signedIn30d": {
+            "type": "number",
+            "description": "The same, within the last 30 days."
+          },
+          "kpmId": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "0417"
+          },
+          "branch": {
+            "type": "string",
+            "example": "BSD City Branch"
+          },
+          "company": {
+            "$ref": "#/components/schemas/PlatformCompanyRefDto"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "suspended",
+              "archived",
+              "ended",
+              "ended_kept_active"
+            ],
+            "description": "The office’s state as *All KPMs* lists it."
+          }
+        },
+        "required": [
+          "members",
+          "byRung",
+          "joinedThisMonth",
+          "leftThisMonth",
+          "signedIn7d",
+          "signedIn30d",
+          "kpmId",
+          "code",
+          "branch",
+          "company",
+          "state"
+        ]
+      },
+      "PlatformCompanyAdoptionDto": {
+        "type": "object",
+        "properties": {
+          "members": {
+            "type": "number",
+            "description": "On an office’s row, its active memberships now. On a company’s and the platform’s, the **people**: distinct accounts among those memberships, so somebody in two offices counts once there."
+          },
+          "byRung": {
+            "description": "Active memberships by rung of the company’s ladder, senior first — on every row the offices’ sum.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RungCountDto"
+            }
+          },
+          "joinedThisMonth": {
+            "type": "number",
+            "description": "Memberships that began this calendar month — on every row the offices’ sum."
+          },
+          "leftThisMonth": {
+            "type": "number",
+            "description": "Memberships removed this calendar month — on every row the offices’ sum."
+          },
+          "signedIn7d": {
+            "type": "number",
+            "description": "Of `members`, who signed in within the last 7 days: memberships on an office’s row, accounts on a company’s and the platform’s."
+          },
+          "signedIn30d": {
+            "type": "number",
+            "description": "The same, within the last 30 days."
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Prudential"
+          },
+          "offices": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "members",
+          "byRung",
+          "joinedThisMonth",
+          "leftThisMonth",
+          "signedIn7d",
+          "signedIn30d",
+          "id",
+          "name",
+          "offices"
+        ]
+      },
+      "PlatformAdoptionDto": {
+        "type": "object",
+        "properties": {
+          "members": {
+            "type": "number",
+            "description": "On an office’s row, its active memberships now. On a company’s and the platform’s, the **people**: distinct accounts among those memberships, so somebody in two offices counts once there."
+          },
+          "byRung": {
+            "description": "Active memberships by rung of the company’s ladder, senior first — on every row the offices’ sum.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RungCountDto"
+            }
+          },
+          "joinedThisMonth": {
+            "type": "number",
+            "description": "Memberships that began this calendar month — on every row the offices’ sum."
+          },
+          "leftThisMonth": {
+            "type": "number",
+            "description": "Memberships removed this calendar month — on every row the offices’ sum."
+          },
+          "signedIn7d": {
+            "type": "number",
+            "description": "Of `members`, who signed in within the last 7 days: memberships on an office’s row, accounts on a company’s and the platform’s."
+          },
+          "signedIn30d": {
+            "type": "number",
+            "description": "The same, within the last 30 days."
+          },
+          "offices": {
+            "type": "number"
+          },
+          "companies": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "members",
+          "byRung",
+          "joinedThisMonth",
+          "leftThisMonth",
+          "signedIn7d",
+          "signedIn30d",
+          "offices",
+          "companies"
+        ]
+      },
+      "PlatformAnalyticsDto": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "example": "2026-10",
+            "description": "The calendar month *joined* and *left* count, in Asia/Jakarta."
+          },
+          "offices": {
+            "description": "One per office, by company then code.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlatformOfficeAdoptionDto"
+            }
+          },
+          "companies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlatformCompanyAdoptionDto"
+            }
+          },
+          "platform": {
+            "$ref": "#/components/schemas/PlatformAdoptionDto"
+          }
+        },
+        "required": [
+          "month",
+          "offices",
+          "companies",
+          "platform"
+        ]
+      },
       "CalendarPersonRowDto": {
         "type": "object",
         "properties": {
@@ -33407,6 +35196,24 @@
             "type": "string",
             "nullable": true
           },
+          "lastActivityOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-07",
+            "description": "On the roster’s **active** rows only — absent on the Pending and Removed tabs: their latest day logged, in the agency’s calendar; `null` is *Never*."
+          },
+          "lastActivityDays": {
+            "type": "number",
+            "nullable": true,
+            "example": 2,
+            "description": "On the roster’s active rows only: whole days since it — 0 is *Today*; `null` is *Never*."
+          },
+          "lastCoachedDays": {
+            "type": "number",
+            "nullable": true,
+            "example": 12,
+            "description": "On the roster’s active rows only: `DAYS_SINCE_LAST_COACHING`, as the coaching roster serves it; `null` is *Never*, no 1:1 yet."
+          },
           "canChangeRole": {
             "type": "boolean",
             "description": "May **this viewer** move this person between Agent and AAB. A direct leader may; so may the office. Decides what is offered, never what is allowed — the API refuses regardless."
@@ -34289,6 +36096,46 @@
           "currency",
           "tiers",
           "annualDiscountPct"
+        ]
+      },
+      "AdoptionDto": {
+        "type": "object",
+        "properties": {
+          "members": {
+            "type": "number",
+            "description": "On an office’s row, its active memberships now. On a company’s and the platform’s, the **people**: distinct accounts among those memberships, so somebody in two offices counts once there."
+          },
+          "byRung": {
+            "description": "Active memberships by rung of the company’s ladder, senior first — on every row the offices’ sum.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RungCountDto"
+            }
+          },
+          "joinedThisMonth": {
+            "type": "number",
+            "description": "Memberships that began this calendar month — on every row the offices’ sum."
+          },
+          "leftThisMonth": {
+            "type": "number",
+            "description": "Memberships removed this calendar month — on every row the offices’ sum."
+          },
+          "signedIn7d": {
+            "type": "number",
+            "description": "Of `members`, who signed in within the last 7 days: memberships on an office’s row, accounts on a company’s and the platform’s."
+          },
+          "signedIn30d": {
+            "type": "number",
+            "description": "The same, within the last 30 days."
+          }
+        },
+        "required": [
+          "members",
+          "byRung",
+          "joinedThisMonth",
+          "leftThisMonth",
+          "signedIn7d",
+          "signedIn30d"
         ]
       }
     }

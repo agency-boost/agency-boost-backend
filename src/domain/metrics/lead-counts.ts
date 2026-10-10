@@ -48,3 +48,40 @@ export function personLeadCounts(
     recruitNominated: recruitment.filter(committed).length,
   };
 }
+
+/** A lead as it stood at an instant needs its history: when it was registered, closed, and moved. */
+export interface DatedLead extends CountedLead {
+  /** When it entered the pipeline: `dateRegistered`, or the row's own creation. */
+  registeredAt: Date | null;
+  outcomeAt: Date | null;
+  transitions?: readonly { toStatusCode: string; at: Date }[] | null;
+}
+
+/**
+ * **A person's four lead counts as they stood at the end of a month** (Phase 18, D-period): *Total leads* under
+ * *Previous month* on the unit comparison (`KPM_Owner.html:3328-3346`). The same rules as `personLeadCounts`
+ * over each lead **as it was then**: registered by then; open unless closed by then (`outcomeAt`); on the stage
+ * its last move by then names (`transitions[]`, append-only, ADR-0044) — a lead moved to the terminal stage
+ * after the month ended was still running in it; and *promised* for that month, from the promise kept by
+ * month (P7-T5). A lead deleted since is no lead at all, as everywhere.
+ */
+export function personLeadCountsAt(
+  leads: readonly DatedLead[],
+  office: { month: string; terminalRecruitmentCodes: readonly string[]; at: Date },
+): LeadCountsRow {
+  const at = office.at.getTime();
+  const then = leads
+    .filter((lead) => lead.registeredAt === null || lead.registeredAt.getTime() < at)
+    .map((lead): CountedLead => {
+      const moves = (lead.transitions ?? []).filter((move) => move.at.getTime() < at);
+      // A close with no stamp is a row older than the stamp: closed, whenever it was.
+      const closed = lead.outcome !== null && (lead.outcomeAt === null || lead.outcomeAt.getTime() < at);
+      return {
+        type: lead.type,
+        outcome: closed ? lead.outcome : null,
+        statusCode: moves.length > 0 ? moves[moves.length - 1].toStatusCode : ((lead.transitions ?? []).length > 0 ? null : lead.statusCode),
+        commitments: lead.commitments,
+      };
+    });
+  return personLeadCounts(then, office);
+}

@@ -281,6 +281,10 @@ describe('template copies (P13.2-T7)', () => {
     });
 
     it('reads no collection outside configuration', async () => {
+      // Compiling the services' models builds their indexes in the background (`autoIndex`): settle that first,
+      // so an index build on a collection the copy never reads is not counted as a read of it (2026-10-09, when
+      // the wiring gained the reporting module's models and the build moved into this window).
+      await Promise.all(mongoose.modelNames().map((name) => mongoose.model(name).init()));
       const touched = new Set<string>();
       mongoose.set('debug', (collection: string) => { touched.add(collection); });
       try {

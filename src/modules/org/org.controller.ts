@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
+import { DirectoryColumns } from '@/modules/reporting/directory-columns';
 import { DirectoryService } from './directory.service';
 import { AdminDelegationService } from './admin-delegation.service';
 import { GroupService } from './group.service';
@@ -29,6 +30,8 @@ export class OrgController {
     private readonly tree: OrgTreeService,
     private readonly groups: GroupService,
     private readonly admins: AdminDelegationService,
+    // Phase 18 (D-directory): the roster's *Last activity* and *Last coached*, and the read entries they write.
+    private readonly columns: DirectoryColumns,
   ) {}
 
   @Get('my-team')
@@ -228,10 +231,12 @@ export class OrgController {
     summary: 'The office roster',
     description:
       'Cursor-paginated by agent code. Filter by role and status, or search by name, ' +
-      'email or agent code. Removed members are excluded unless asked for.',
+      'email or agent code. Removed members are excluded unless asked for. Each **active** row carries ' +
+      'the member\'s latest day logged and the days since their last 1:1, and every active member on the ' +
+      'page other than you is recorded as read; a pending or removed row carries neither and is not.',
   })
   async list(@Ctx() ctx: RequestContext, @Query() query: DirectoryQueryDto) {
-    return this.directory.list(ctx, query);
+    return this.columns.decorate(ctx, await this.directory.list(ctx, query));
   }
 
   @Get(':membershipId')

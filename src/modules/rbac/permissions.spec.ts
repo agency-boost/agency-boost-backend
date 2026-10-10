@@ -1038,6 +1038,79 @@ describe('permission matrix', () => {
     });
   });
 
+  /*
+   * **The Owner's reporting, a positive and a negative for each of the six roles** (P18-T1 AC-1, P18-T2 AC-10,
+   * P18-T8 AC-1; the contract's permissions table, roles §3.9). Over HTTP, per route, is `reporting.int.spec.ts`.
+   */
+  describe('Phase 18 — the Owner’s reporting (roles §3.9)', () => {
+    const REPORTING = [
+      'kpm_overview:read', 'kpm_overview:set_recruit_target', 'kpm_analytics:read', 'platform_analytics:read',
+    ] as const satisfies readonly Permission[];
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: ctx({ owner: true }),
+      KPM_ADMIN: ctx({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+    const EXPECTED: Record<(typeof REPORTING)[number], Record<string, Scope | null>> = {
+      'kpm_overview:read': { SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null },
+      'kpm_overview:set_recruit_target': { SUPER_ADMIN: null, KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null },
+      'kpm_analytics:read': { SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null },
+      'platform_analytics:read': { SUPER_ADMIN: 'all', KPM_OWNER: null, KPM_ADMIN: null, AB: null, AAB: null, AGENT: null },
+    };
+    const cells = REPORTING.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P18-T1 AC-1, P18-T2 AC-10, P18-T8 AC-1 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P18-T1 AC-1, P18-T2 AC-10, P18-T8 AC-1 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it('P18-T1 AC-1 an Owner or Admin who also stands on a rung reads as the office; a removed or pending one holds nothing', () => {
+      expect(scopeFor(ctx({ role: 'ab', owner: true }), 'kpm_overview:read')).toBe('own-kpm');
+      expect(scopeFor(ctx({ role: 'agent', admin: true }), 'kpm_analytics:read')).toBe('own-kpm');
+      for (const status of ['removed', 'pending'] as const) {
+        expect(can(ctx({ role: 'ab', status }), 'kpm_overview:read')).toBe(false);
+      }
+    });
+
+    it('P18-T1 AC-1 a read-only support session reads the Overview and the analytics, and is refused the target', () => {
+      expect(REPORTING.filter((p) => isReadLike(p))).toEqual(['kpm_overview:read', 'kpm_analytics:read', 'platform_analytics:read']);
+      for (const target of [{ owner: true }, { admin: true }]) {
+        const readOnly = ctx({ ...target, impersonatedBy: 'sa-1', readOnly: true });
+        expect(can(readOnly, 'kpm_overview:read')).toBe(true);
+        expect(can(readOnly, 'kpm_analytics:read')).toBe(true);
+        expect(can(readOnly, 'kpm_overview:set_recruit_target')).toBe(false);
+      }
+    });
+
+    it('P18-T1 AC-1 an elevated session writes the target as its member; no session holds the platform’s read', () => {
+      const elevated = ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: false });
+      expect(isBlockedWhileImpersonating('kpm_overview:set_recruit_target')).toBe(false);
+      expect(can(elevated, 'kpm_overview:set_recruit_target')).toBe(true);
+      // A session acts as its member, whose context holds no platform grant (D-admin).
+      expect(can(elevated, 'platform_analytics:read')).toBe(false);
+      expect(can(ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: true }), 'platform_analytics:read')).toBe(false);
+    });
+
+    it('P18-T8 AC-1 the platform’s analytics is its own permission, apart from the overview’s counts', () => {
+      expect(PERMISSIONS['platform_analytics:read']).not.toBe(PERMISSIONS['platform_metrics:read']);
+      expect(Object.keys(PERMISSIONS)).toEqual(expect.arrayContaining(['platform_analytics:read', 'platform_metrics:read']));
+    });
+  });
+
   describe('Phase 14 — the sales tools (roles §3.10)', () => {
     it('P14 exit review N1: no attack_plan:* or sales_attack_plan:read permission exists (D-api, ADR-0117)', () => {
       expect(Object.keys(PERMISSIONS).filter((p) => p.startsWith('attack_plan:') || p === 'sales_attack_plan:read')).toEqual([]);

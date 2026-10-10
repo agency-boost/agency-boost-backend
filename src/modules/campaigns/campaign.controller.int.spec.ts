@@ -136,10 +136,11 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
 
     it('refuses a metric the product does not measure, naming it', async () => {
       const res = await request(app.getHttpServer()).post(url).send(aCampaign({
-        requirements: [{ metricKey: 'NET_APE', comparator: 'gte', value: 100 }],
+        // `NET_APE` was the example until Phase 18 registered it (D-registry); FLC's count is not one (OD-26).
+        requirements: [{ metricKey: 'FLC_COUNT', comparator: 'gte', value: 100 }],
       })).expect(400);
 
-      expect(res.body.error.message).toMatch(/NET_APE/);
+      expect(res.body.error.message).toMatch(/FLC_COUNT/);
     });
 
     it('refuses a body carrying a field the DTO never declared', async () => {
@@ -206,8 +207,9 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
       // evaluation placed before the latest metrics, as it stood for a metric registered later.
       jest.replaceProperty(metricsModule as { CAMPAIGN_EVALUATION_PHASE: number }, 'CAMPAIGN_EVALUATION_PHASE', 18);
       const res = await request(app.getHttpServer()).get('/metrics').expect(200);
+      // The two event metrics are 18.5's since P18-T0 (D-registry), so they wait with the other three.
       expect(res.body.filter((m: Served) => !m.computed).map((m: Served) => m.key).sort()).toEqual([
-        'CAMPAIGN_QUALIFICATION_STATUS', 'EVENT_ATTENDANCE_STATUS', 'TRAINING_COMPLETION_PCT',
+        'CAMPAIGN_QUALIFICATION_STATUS', 'EVENT_ATTENDANCE_RATE', 'EVENT_ATTENDANCE_STATUS', 'EVENT_NPS', 'TRAINING_COMPLETION_PCT',
       ]);
     });
   });

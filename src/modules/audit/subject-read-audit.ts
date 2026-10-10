@@ -20,12 +20,17 @@ import { AuditService } from './audit.service';
  * `activity_dashboard`: `GET /activity/dashboard?for=`, coaching's *Activity* tab, a coachee's days over
  * the range read, once per read (P13.1-T9 AC-2); `unit_dashboard`: `GET /unit/dashboard`, a leader's
  * roster, once per member other than the reader whose figures it carries, the period's window as the
- * range, all in one insert (Phase 15, D-audit). The action keeps its name on every one, so a single
- * query on `targetMembershipId` lists every disclosure of a member's data.
+ * range, all in one insert (Phase 15, D-audit); `kpm_overview`: the Owner's Overview — `GET
+ * /kpm/overview/not-logged`, once per member it lists, the first three (their latest day logged), never the rest
+ * it counts, and `GET /kpm/overview`, once per leader on the coaching-frequency leaderboard (Phase 18, D-audit);
+ * `directory`: `GET /members`, once per active member on the page, whose *Last activity* and *Last coached* it
+ * carries — a pending or removed row carries neither and writes nothing (D-directory). The action keeps its
+ * name on every one, so a single query on `targetMembershipId` lists every disclosure of a member's data.
  */
 export type SubjectReadSurface =
   | 'log' | 'summary' | 'compliance' | 'personal_summary' | 'leads' | 'ratios' | 'coaching_session'
-  | 'coaching_session_print' | 'calendar' | 'activation' | 'activity_dashboard' | 'unit_dashboard';
+  | 'coaching_session_print' | 'calendar' | 'activation' | 'activity_dashboard' | 'unit_dashboard'
+  | 'kpm_overview' | 'directory';
 
 /** The action every subject read writes, whichever surface it came from. */
 export const SUBJECT_READ_ACTION = 'activity_log.read_raw';

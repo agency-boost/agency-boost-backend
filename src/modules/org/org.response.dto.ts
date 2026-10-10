@@ -102,6 +102,28 @@ export class DirectoryMemberDto implements DirectoryMember {
   @ApiProperty({ type: String, nullable: true })
   removedAt!: string | null;
 
+  /*
+   * *Last activity* and *Last coached* (D-directory): on every row of `GET /members` — the roster — and on no
+   * other read of a member, which is why they are optional here. The page's read records one §3.5 entry per
+   * member on it (`DirectoryColumns`).
+   */
+  @ApiProperty({
+    type: String, nullable: true, required: false, example: '2026-10-07',
+    description: 'On the roster’s **active** rows only — absent on the Pending and Removed tabs: their latest day logged, in the agency’s calendar; `null` is *Never*.',
+  })
+  lastActivityOn?: string | null;
+
+  @ApiProperty({
+    type: Number, nullable: true, required: false, example: 2,
+    description: 'On the roster’s active rows only: whole days since it — 0 is *Today*; `null` is *Never*.',
+  })
+  lastActivityDays?: number | null;
+
+  @ApiProperty({
+    type: Number, nullable: true, required: false, example: 12,
+    description: 'On the roster’s active rows only: `DAYS_SINCE_LAST_COACHING`, as the coaching roster serves it; `null` is *Never*, no 1:1 yet.',
+  })
+  lastCoachedDays?: number | null;
 
   @ApiProperty({ type: Boolean, description: 'May **this viewer** move this person between Agent and AAB. A direct leader may; so may the office. Decides what is offered, never what is allowed — the API refuses regardless.' })
   canChangeRole!: boolean;

@@ -42,6 +42,8 @@ const TENANT_SCOPED_MODELS = [
   'ActivationProgress',
   // P17-T4 AC-1: an office's four recruitment pitch documents, from the day the collection exists.
   'RecruitmentPitchSlot',
+  // Phase 18 (D-recruit): an office's recruitment target per month, from the day the collection exists.
+  'KpmRecruitTarget',
 ];
 
 /**
@@ -85,6 +87,7 @@ const ALLOWED = new Map<string, string>([
   ['capability/capability.repository.ts', 'the repository for that model'],
   ['coaching/coaching-session.repository.ts', 'the repository for that model'],
   ['recruitment/recruitment-pitch.repository.ts', 'the repository for that model'],
+  ['reporting/kpm-recruit-target.repository.ts', 'the repository for that model'],
   [
     'config/provisioning.service.ts',
     'writes into an office being created, before any context is scoped to it',

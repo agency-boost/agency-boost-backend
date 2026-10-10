@@ -127,6 +127,74 @@ export class ProductionReadings {
     }
     return out;
   }
+
+  /**
+   * **Each member's monthly cells over a range of months, for many members at once** (Phase 18, D-period,
+   * D-moc): `MAA_COUNT_IN_UNIT` for the period's month, `MONTHLY2_AA` over the last two months held, and the
+   * latest rolling persistency a leader's row holds. One query for the whole list, the range's rows at most;
+   * every member asked about gets an entry, a month absent where the office holds no row for it.
+   */
+  async monthCellsFor(
+    ctx: RequestContext, membershipIds: readonly string[], range: { from: string; to: string },
+  ): Promise<Map<string, Map<string, MonthCells>>> {
+    const out = new Map<string, Map<string, MonthCells>>(membershipIds.map((id) => [id, new Map()]));
+    if (membershipIds.length === 0) return out;
+    const rows = await this.data.find(
+      ctx,
+      { membershipId: { $in: [...new Set(membershipIds)] }, month: { $gte: range.from, $lte: range.to } },
+      { projection: { membershipId: 1, month: 1, apeMonthly: 1, policyCountMonthly: 1, persistencyMonthly: 1 } },
+    );
+    for (const row of rows) {
+      (out.get(row.membershipId) as Map<string, MonthCells>).set(row.month, {
+        apeMonthly: readCell(row.apeMonthly).value,
+        policyCountMonthly: readCell(row.policyCountMonthly).value,
+        persistencyMonthly: readCell(row.persistencyMonthly).value,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * **The office's file, month by month, over a range** (Phase 18, D-figures, T2 AC-6): each month's APE —
+   * the sum of every figure the office holds for it, a member who has since left included (OD-74: their
+   * production stays the office's) — and whether the month is held at all. One aggregate over the office's
+   * rows for the range, on the `(kpmId, month, deletedAt)` index; a month with no row is absent.
+   */
+  async officeMonths(ctx: RequestContext, range: { from: string; to: string }): Promise<Map<string, OfficeMonth>> {
+    const rows = await this.data.aggregate(ctx, [
+      { $match: { month: { $gte: range.from, $lte: range.to } } },
+      {
+        $group: {
+          _id: '$month',
+          ape: { $sum: { $ifNull: ['$apeMonthly.value', 0] } },
+          apeHeld: { $sum: { $cond: [{ $ne: [{ $ifNull: ['$apeMonthly.value', null] }, null] }, 1, 0] } },
+          ytdHeld: { $sum: { $cond: [{ $ne: [{ $ifNull: ['$apeYtd.value', null] }, null] }, 1, 0] } },
+        },
+      },
+    ]);
+    return new Map(rows.map((row) => [String(row._id), {
+      apeMonthlyMinor: (row.apeHeld as number) > 0 ? (row.ape as number) : null,
+      held: (row.apeHeld as number) + (row.ytdHeld as number) > 0,
+    }]));
+  }
+}
+
+/**
+ * A member's month, as the Owner's reporting reads it (Phase 18): the three monthly cells `MONTHLY_ACTIVE_AGENT`
+ * and MOC's persistency read, each as the month table reads it — `null` is nothing held, never zero.
+ */
+export interface MonthCells {
+  apeMonthly: number | null;
+  policyCountMonthly: number | null;
+  persistencyMonthly: number | null;
+}
+
+/** One month of the office's file, summed: what *Monthly production* draws, and whether the month is held at all. */
+export interface OfficeMonth {
+  /** The office's APE for the month from its file — the sum of the figures held; `null` when none is. */
+  apeMonthlyMinor: number | null;
+  /** The office holds a file for the month: at least one APE figure, the month's own or its year to date. */
+  held: boolean;
 }
 
 /** One cell of the month table, as every reader of it reads it (P9-T6). */

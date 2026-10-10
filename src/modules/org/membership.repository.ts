@@ -13,6 +13,13 @@ import { Membership, MembershipDocument } from './membership.schema';
  * below — and no escape hatch to the raw model. Adding one would defeat the chokepoint,
  * and nothing in this module has needed it.
  */
+/** Accounts counted, and how many of them signed in within 7 and 30 days (`distinctAccountsAcrossTenants`). */
+export interface AccountCounts {
+  members: number;
+  signedIn7d: number;
+  signedIn30d: number;
+}
+
 @Injectable()
 export class MembershipRepository extends TenantScopedRepository<MembershipDocument> {
   constructor(@InjectModel(Membership.name) model: Model<MembershipDocument>) {
@@ -103,6 +110,163 @@ export class MembershipRepository extends TenantScopedRepository<MembershipDocum
       .exec();
     for (const row of rows) counts.set(String(row._id), row.n);
     return counts;
+  }
+
+  /**
+   * **Each office's composition, joiners and leavers in a month, for every office** (Phase 18, P18-T8, OD-148 →
+   * option 1): *Cross-platform analytics*' adoption columns.
+   *
+   * **Deliberately unscoped, and named so.** The Super Admin reads adoption across offices and is in none, so
+   * there is no tenant to ask within; invariant §1 asks that such a read be an explicitly named method rather
+   * than an absent filter, and this is one. The caller must be a Super Admin. **Counts, never a row**: by office
+   * and rung code the active memberships, and by office the memberships that began and that were removed inside
+   * `[monthStart, monthEndExclusive)` — no membership id, no name, nothing a member did (ADR-0011's line).
+   */
+  async adoptionPerOfficeAcrossTenants(
+    ctx: RequestContext, month: { start: Date; endExclusive: Date },
+  ): Promise<{
+    byRung: { kpmId: string; orgLevelCode: string; n: number }[];
+    joined: Map<string, number>;
+    left: Map<string, number>;
+  }> {
+    if (!ctx.isSuperAdmin) {
+      throw new MissingTenantContextError(this.collectionName, 'adoptionPerOfficeAcrossTenants');
+    }
+    const inMonth = { $gte: month.start, $lt: month.endExclusive };
+    const [facets] = await this.model
+      .aggregate<{
+        byRung: { _id: { kpmId: string; orgLevelCode: string }; n: number }[];
+        joined: { _id: string; n: number }[];
+        left: { _id: string; n: number }[];
+      }>([
+        { $match: { deletedAt: null, status: { $in: ['active', 'removed'] } } },
+        {
+          $facet: {
+            byRung: [
+              { $match: { status: 'active' } },
+              { $group: { _id: { kpmId: '$kpmId', orgLevelCode: '$orgLevelCode' }, n: { $sum: 1 } } },
+            ],
+            joined: [{ $match: { joinedAt: inMonth } }, { $group: { _id: '$kpmId', n: { $sum: 1 } } }],
+            left: [{ $match: { status: 'removed', removedAt: inMonth } }, { $group: { _id: '$kpmId', n: { $sum: 1 } } }],
+          },
+        },
+      ])
+      .exec();
+    return {
+      byRung: facets.byRung.map((row) => ({ kpmId: String(row._id.kpmId), orgLevelCode: String(row._id.orgLevelCode), n: row.n })),
+      joined: new Map(facets.joined.map((row) => [String(row._id), row.n])),
+      left: new Map(facets.left.map((row) => [String(row._id), row.n])),
+    };
+  }
+
+  /**
+   * **How many of each office's members signed in since two instants, for every office** (Phase 18, P18-T8):
+   * *Signed in (7 days)* and *(30 days)*, from the account's `lastLoginAt`.
+   *
+   * **Deliberately unscoped, and named so**, for the reason `adoptionPerOfficeAcrossTenants` gives. The account
+   * is global and is joined inside the aggregate, by the membership's `userId`, so neither an id nor a time
+   * leaves the database: two counts per office, over its active memberships.
+   */
+  async signInsPerOfficeAcrossTenants(
+    ctx: RequestContext, since: { days7: Date; days30: Date },
+  ): Promise<Map<string, { signedIn7d: number; signedIn30d: number }>> {
+    if (!ctx.isSuperAdmin) {
+      throw new MissingTenantContextError(this.collectionName, 'signInsPerOfficeAcrossTenants');
+    }
+    const rows = await this.model
+      .aggregate<{ _id: string; days7: number; days30: number }>([
+        { $match: { deletedAt: null, status: 'active' } },
+        // An id that is not an ObjectId names no account: nobody signed in, never a failed read.
+        { $project: { kpmId: 1, userId: { $convert: { input: '$userId', to: 'objectId', onError: null, onNull: null } } } },
+        {
+          $lookup: {
+            from: 'users', localField: 'userId', foreignField: '_id', as: 'account',
+            pipeline: [{ $project: { _id: 0, lastLoginAt: 1 } }],
+          },
+        },
+        { $project: { kpmId: 1, lastLoginAt: { $first: '$account.lastLoginAt' } } },
+        {
+          $group: {
+            _id: '$kpmId',
+            days7: { $sum: { $cond: [{ $gte: [{ $ifNull: ['$lastLoginAt', null] }, since.days7] }, 1, 0] } },
+            days30: { $sum: { $cond: [{ $gte: [{ $ifNull: ['$lastLoginAt', null] }, since.days30] }, 1, 0] } },
+          },
+        },
+      ])
+      .exec();
+    return new Map(rows.map((row) => [String(row._id), { signedIn7d: row.days7, signedIn30d: row.days30 }]));
+  }
+
+  /**
+   * **How many people — accounts, not memberships — each company's offices and the platform hold, and how many of
+   * them signed in since two instants** (Phase 18, P18-T8; the exit review, item 6): the company rows' and the
+   * platform row's *Members* and *Signed in* columns. One person with a membership in two offices is one account:
+   * counted in each office's row, which counts memberships, and **once** in their company's and the platform's.
+   *
+   * **Deliberately unscoped, and named so**, for the reason `adoptionPerOfficeAcrossTenants` gives; the caller must
+   * be a Super Admin. `offices` is the offices read and each one's company, so a membership of an office not listed
+   * — a deleted one — is in no total. The account is joined inside the aggregate and grouped there: **counts, never
+   * a row** — no user id, membership id or time leaves the database.
+   */
+  async distinctAccountsAcrossTenants(
+    ctx: RequestContext,
+    offices: readonly { kpmId: string; companyId: string }[],
+    since: { days7: Date; days30: Date },
+  ): Promise<{ companies: Map<string, AccountCounts>; platform: AccountCounts }> {
+    if (!ctx.isSuperAdmin) {
+      throw new MissingTenantContextError(this.collectionName, 'distinctAccountsAcrossTenants');
+    }
+    const kpmIds = offices.map((o) => o.kpmId);
+    const companyIds = offices.map((o) => o.companyId);
+    const counted = (field: 'days7' | 'days30') => ({
+      $sum: { $cond: [{ $gte: [{ $ifNull: ['$lastLoginAt', null] }, since[field]] }, 1, 0] },
+    });
+    const totals = (key: string | null) => ({
+      $group: { _id: key, members: { $sum: 1 }, days7: counted('days7'), days30: counted('days30') },
+    });
+    const [facets] = await this.model
+      .aggregate<{
+        companies: { _id: string; members: number; days7: number; days30: number }[];
+        platform: { members: number; days7: number; days30: number }[];
+      }>([
+        { $match: { deletedAt: null, status: 'active', kpmId: { $in: kpmIds } } },
+        // One row per office, then its company, from the list the caller read: no join on the office collection.
+        { $group: { _id: '$kpmId', users: { $addToSet: '$userId' } } },
+        {
+          $project: {
+            users: 1,
+            companyId: { $arrayElemAt: [{ $literal: companyIds }, { $indexOfArray: [{ $literal: kpmIds }, '$_id'] }] },
+          },
+        },
+        { $unwind: '$users' },
+        // One row per (company, account): a person in two of a company's offices is one row here.
+        { $group: { _id: { companyId: '$companyId', userId: '$users' } } },
+        // An id that is not an ObjectId names no account: a member, never signed in, never a failed read.
+        { $project: { account: { $convert: { input: '$_id.userId', to: 'objectId', onError: null, onNull: null } } } },
+        {
+          $lookup: {
+            from: 'users', localField: 'account', foreignField: '_id', as: 'account',
+            pipeline: [{ $project: { _id: 0, lastLoginAt: 1 } }],
+          },
+        },
+        { $project: { companyId: '$_id.companyId', userId: '$_id.userId', lastLoginAt: { $first: '$account.lastLoginAt' } } },
+        {
+          $facet: {
+            companies: [totals('$companyId')],
+            // Once more across companies: a person in two companies' offices is one account on the platform.
+            platform: [{ $group: { _id: '$userId', lastLoginAt: { $max: '$lastLoginAt' } } }, totals(null)],
+          },
+        },
+      ])
+      .exec();
+    // No member in any office listed: the platform's facet is empty, and its counts are nought.
+    const countsOf = (row = { members: 0, days7: 0, days30: 0 }): AccountCounts => ({
+      members: row.members, signedIn7d: row.days7, signedIn30d: row.days30,
+    });
+    return {
+      companies: new Map(facets.companies.map((row) => [String(row._id), countsOf(row)])),
+      platform: countsOf(facets.platform[0]),
+    };
   }
 
   async existsWithLeaderCode(code: string): Promise<boolean> {

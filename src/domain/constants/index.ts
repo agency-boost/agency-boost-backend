@@ -372,7 +372,14 @@ export {
   type CriteriaMode,
   SEED_PRODUCTION_CLUB_TIERS,
   SEED_MOC_RULES,
+  MOC_PERSISTENCY_MIN_PCT,
 } from './metrics';
+
+// Phase 18: the Owner's reporting — the analytics' periods, the monthly chart's length and MOC's two months.
+export {
+  KPM_REPORTING,
+  type KpmAnalyticsPeriod,
+} from './reporting';
 
 export {
   type CapabilityMilestone,

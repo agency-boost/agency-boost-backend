@@ -12,3 +12,9 @@ by hand against their own database.
 ```bash
 pnpm migrate            # every pending migration, in order
 ```
+
+## Recorded runs
+
+Each migration's `up` returns what it did, and `run.ts` prints it — the deploy log is the record.
+`0026-moc-persistency` (Phase 18, D-moc) prints `{ added, current, cleared }`: the MOC rules given the
+persistency criterion, those that already carried it, and those cleared of metrics registered since.

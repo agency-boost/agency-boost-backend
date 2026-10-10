@@ -38,6 +38,17 @@ const CALLERS: Record<string, Record<string, string>> = {
       '*Leaders used* per office on the Super Admin\'s offices list (P13.2-T3, ADR-0113): counts, never '
       + 'a row, for the offices named',
   },
+  'reporting/platform-analytics.service.ts': {
+    adoptionPerOfficeAcrossTenants:
+      '*Cross-platform analytics* (P18-T8, OD-148, D-admin): each office\'s active members by rung, and the '
+      + 'memberships that began and ended this month — counts, never a row, by the Super Admin who is in no office',
+    signInsPerOfficeAcrossTenants:
+      '*Cross-platform analytics* (P18-T8): how many of each office\'s active members signed in within 7 and 30 '
+      + 'days, the account joined inside the aggregate so no id or time leaves the database — two counts per office',
+    distinctAccountsAcrossTenants:
+      '*Cross-platform analytics* (P18-T8, the exit review item 6): the company and platform rows\' members and '
+      + 'sign-ins as people, not memberships — distinct accounts grouped inside the aggregate, three counts a row',
+  },
   'config/office-settings.source.ts': {
     findInOfficeAcrossTenants:
       '*Save as template* (P13.2-T7, ADR-0115 §5): one named office\'s published configuration — and '

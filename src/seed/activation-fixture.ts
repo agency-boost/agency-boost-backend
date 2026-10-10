@@ -19,7 +19,7 @@
  * | `siti@kpm0417.test` (Agent, Agus) | **Day 102, complete** | **Graduated** three days ago by her own *Mark activation complete →*, every item done, with the audit row. She has left every roster and her *New agent* section |
  * | `dimas@kpm0417.test` (Agent, Agus) | **Day 95**, 8 of 16 (50%), **overdue** | About half done and past the window: his day is red |
  * | `indah@kpm0417.test` (Agent, Agus) | **Day 98**, 15 of 16 (94%), **overdue** | One item short — *Reach Independent Agent milestone* — and red too. *Close first case independently* is done: the roster's *Active Agent* ✓ |
- * | `agent@kpm0555.test` → Lina (Agent, office 0555) | **Day 1**, her prospects item done from her leads | The other office's hire, which every cross-office test reads |
+ * | `agent@kpm0555.test` → Lina (Agent, office 0555) | **Day 61**, her prospects item done from her leads | The other office's hire, which every cross-office test reads. Her start is the day she joined, 60 days back (`OFFICE_0555_JOINED_DAYS_AGO`) |
  *
  * **Who sees what.** Agus's *Your New Hires*: *Direct Unit* (Indah, Dimas), then the leader cards A to Z,
  * *AAB: Arief Hidayat* (Wahyu, Novi) and *AAB: Sari Puspita* (Budi, Rina, Yanti); Siti has left it, and Dewi,

@@ -137,7 +137,11 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   // Served since Phase 5 and absent here until P10-T8 compared the two lists.
   COACHED_30D: { period: 'ROLLING_30D', threshold: null },
   COACHING_COVERAGE: { period: 'ROLLING_7D', threshold: null },
-  LEADER_COACHING_FREQUENCY: { period: 'ROLLING_30D', threshold: null },
+  /*
+   * The Overview's leaderboard reads it over `ROLLING_7D` (§A.3, `KPM_Owner.html:1024-1042`, D-coverage). It
+   * read `ROLLING_30D` here until P18-T1, the first task to compute it. `leader-coaching-frequency.ts`.
+   */
+  LEADER_COACHING_FREQUENCY: { period: 'ROLLING_7D', threshold: null },
 
   // ---- Goals and production ----
   APE_TARGET: { period: 'CALENDAR_YEAR', threshold: null },
@@ -258,6 +262,30 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
    * Counted by `countLeadersUsed` in `modules/org/leader-limit.ts` and nowhere else.
    */
   LEADERS_USED: { period: 'POINT_IN_TIME', threshold: null },
+
+  // ---- The Owner's reporting (Phase 18, D-registry) ----
+  /*
+   * OD-24 (refined 2026-10-09): the office's active memberships on the period's last day — every rung, the
+   * Owner and the Admins as the members they are; pending and removed never; a leaver until `removedAt`.
+   * The one headcount every denominator reads (`office-headcount.ts`).
+   */
+  OFFICE_HEADCOUNT: { period: 'POINT_IN_TIME', threshold: null },
+  OFFICE_NEW_MEMBERS_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
+  // OD-142 → option 2: `ACTIVITY_COMPLIANCE_MONTH`, counted over the office (`activity-logged.ts`).
+  ACTIVITY_LOGGED_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
+  RECRUITMENT_CLOSED_LAST_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
+  // The year to date over the months it covers, run to twelve (D-figures; `ape-year-projection.ts`).
+  APE_YEAR_PROJECTION: { period: 'CALENDAR_YEAR', threshold: null },
+  /*
+   * MOC's inputs, OD-22's stated reading (`moc-status.ts`). Their thresholds are the company's carrier rules,
+   * read live (ADR-0026) — never a platform constant here — so none has one of its own.
+   */
+  NET_APE: { period: 'CALENDAR_YEAR', threshold: null },
+  MONTHLY2_AA: { period: 'CALENDAR_MONTH', threshold: null },
+  MONTHLY2_AA_DU: { period: 'CALENDAR_MONTH', threshold: null },
+  MONTHLY2_AA_DG: { period: 'CALENDAR_MONTH', threshold: null },
+  DIRECT_AB_COUNT: { period: 'POINT_IN_TIME', threshold: null },
+  MOC_PERSISTENCY: { period: 'ROLLING_12M', threshold: null },
 };
 
 export const METRIC_REGISTRY = define(join(SERVED, COMPUTATIONS));

@@ -218,11 +218,22 @@ describe('the metric registry (P4-T4)', () => {
       MAA_COUNT_IN_UNIT: { from: 15, to: 18 },
       ACTIVITY_COMPLIANCE_RATE: { from: 15, to: 18 },
     };
+    /**
+     * P18-T0 (D-registry), 2026-10-09: the two event metrics move to 18.5, whose screens read them — the
+     * compliance, events and campaigns tree. A metric of Phase 18 that read event records would be a roadmap
+     * defect.
+     */
+    const MOVED_BY_P18: Record<string, { from: number; to: number }> = {
+      EVENT_ATTENDANCE_RATE: { from: 18, to: 18.5 },
+      EVENT_NPS: { from: 18, to: 18.5 },
+    };
     /** Campaign evaluation under the 2026-09-29 plan; 18.5 since 2026-10-08 (P18.5-T7, P18.5-T8). */
     const SEPT_29_CAMPAIGN_EVALUATION_PHASE = 14;
-    /** A metric's phase under the 2026-09-29 plan: today's, with both of 2026-10-08's moves undone. */
+    /** A metric's phase under the 2026-09-29 plan: today's, with 2026-10-08's and 2026-10-09's moves undone. */
     const sept29Phase = (id: string): number =>
-      MOVED_2026_10_08[id]?.from ?? MOVED_BY_P15[id]?.from ?? metric(id).phase;
+      MOVED_2026_10_08[id]?.from ?? MOVED_BY_P15[id]?.from ?? MOVED_BY_P18[id]?.from ?? metric(id).phase;
+    /** The metrics about an office rather than a member: measured, and no requirement's to name. */
+    const NOT_REQUIRABLE = SERVED.filter((m) => m.requirable === false).map((m) => m.key);
 
     const COACHING_SIX = [
       'COACHED_7D', 'COACHED_30D', 'DAYS_SINCE_LAST_COACHING', 'COACHING_COVERAGE', 'GOAL_PACE_STATUS', 'PACING_TO_MAA',
@@ -250,6 +261,18 @@ describe('the metric registry (P4-T4)', () => {
       RECRUITMENT_NOMINATED_THIS_MONTH: 15,
       POTENTIAL_MAA_COUNT_IN_UNIT: 15,
       CASCADE_ACTIVITY_TOUCHES: 15,
+      // P18-T1, P18-T2 (D-registry): the Owner's reporting — the office's five, and MOC's six inputs.
+      OFFICE_HEADCOUNT: 18,
+      OFFICE_NEW_MEMBERS_THIS_MONTH: 18,
+      ACTIVITY_LOGGED_THIS_MONTH: 18,
+      RECRUITMENT_CLOSED_LAST_MONTH: 18,
+      APE_YEAR_PROJECTION: 18,
+      NET_APE: 18,
+      MONTHLY2_AA: 18,
+      MONTHLY2_AA_DU: 18,
+      MONTHLY2_AA_DG: 18,
+      DIRECT_AB_COUNT: 18,
+      MOC_PERSISTENCY: 18,
     };
     const existedBefore = (id: string) => !(id in REGISTERED_SINCE);
 
@@ -313,8 +336,11 @@ describe('the metric registry (P4-T4)', () => {
       });
       expect(SERVED.find((m) => m.key === 'LEADERS_USED')?.requirable).toBe(false);
       expect(REQUIREMENT_METRICS.map((m) => m.key)).not.toContain('LEADERS_USED');
-      // It is the only one: every other metric is still a requirement's to name.
-      expect(SERVED.filter((m) => !REQUIREMENT_METRICS.includes(m)).map((m) => m.key)).toEqual(['LEADERS_USED']);
+      // Since Phase 18 the office's headcount and its new members beside it (D-registry); every other metric is a
+      // requirement's.
+      expect(SERVED.filter((m) => !REQUIREMENT_METRICS.includes(m)).map((m) => m.key).sort()).toEqual([
+        'LEADERS_USED', 'OFFICE_HEADCOUNT', 'OFFICE_NEW_MEMBERS_THIS_MONTH',
+      ]);
     });
 
     it('refused, by key, the seven nothing measured by then under that plan', () => {
@@ -361,7 +387,11 @@ describe('the metric registry (P4-T4)', () => {
         // complement — so this list is what an Owner may build a campaign on. Leaders used is
         // measured by then and is about an office, so it is no requirement (the last test here).
         expect(computableAt(CAMPAIGN_EVALUATION_PHASE, (id) => metric(id).phase)
-          .filter((id) => id !== 'LEADERS_USED')).toEqual([
+          .filter((id) => !NOT_REQUIRABLE.includes(id))).toEqual([
+          // P18-T1, P18-T2: nine of the eleven, measured before campaigns are evaluated (the headcount and its
+          // new members are no requirement's to name).
+          'ACTIVITY_LOGGED_THIS_MONTH', 'APE_YEAR_PROJECTION', 'RECRUITMENT_CLOSED_LAST_MONTH',
+          'DIRECT_AB_COUNT', 'MOC_PERSISTENCY', 'MONTHLY2_AA', 'MONTHLY2_AA_DG', 'MONTHLY2_AA_DU', 'NET_APE',
           // P15-T1: the Unit Dashboard's five, measured before campaigns are evaluated.
           'CASCADE_ACTIVITY_TOUCHES', 'OPEN_SALES_LEADS', 'POTENTIAL_MAA_COUNT_IN_UNIT',
           'RECRUITMENT_NOMINATED_THIS_MONTH', 'SALES_LEADS_CLOSING_THIS_MONTH',
@@ -409,7 +439,7 @@ describe('the metric registry (P4-T4)', () => {
         // Its phase was never the reason: it is an office's count, `requirable: false`.
         expect(computableAt(CAMPAIGN_EVALUATION_PHASE, (id) => metric(id).phase)).toContain('LEADERS_USED');
         expect(REQUIREMENT_METRICS.map((m) => m.key).sort())
-          .toEqual(METRIC_IDS.filter((id) => id !== 'LEADERS_USED').sort());
+          .toEqual(METRIC_IDS.filter((id) => !NOT_REQUIRABLE.includes(id)).sort());
       });
     });
   });
@@ -446,6 +476,49 @@ describe('the metric registry (P4-T4)', () => {
     it('P15-T1 AC-6 keeps the potential count apart from the active one: a projection is never MAA', () => {
       expect(metric('POTENTIAL_MAA_COUNT_IN_UNIT').label).toMatch(/^Potential /);
       expect(metric('POTENTIAL_MAA_COUNT_IN_UNIT').label).not.toBe(metric('MAA_COUNT_IN_UNIT').label);
+    });
+  });
+
+  describe('P18-T1 AC-12, P18-T2 — the Owner’s reporting registers its metrics before it serves them (D-registry)', () => {
+    const OFFICE = ['OFFICE_HEADCOUNT', 'OFFICE_NEW_MEMBERS_THIS_MONTH'];
+    const SCOPE = ['ACTIVITY_LOGGED_THIS_MONTH', 'RECRUITMENT_CLOSED_LAST_MONTH', 'APE_YEAR_PROJECTION'];
+    const MOC_INPUTS = ['NET_APE', 'MONTHLY2_AA', 'MONTHLY2_AA_DU', 'MONTHLY2_AA_DG', 'DIRECT_AB_COUNT', 'MOC_PERSISTENCY'];
+
+    it('P18-T1 AC-12 registers the eleven at Phase 18, each with no threshold of its own', () => {
+      for (const id of [...OFFICE, ...SCOPE, ...MOC_INPUTS]) {
+        expect({ id, phase: metric(id).phase, threshold: metric(id).threshold }).toEqual({ id, phase: 18, threshold: null });
+      }
+      // And every metric Phase 18 computes: the eleven, and the five registered there before.
+      expect(METRIC_IDS.filter((id) => metric(id).phase === 18).sort()).toEqual([
+        ...OFFICE, ...SCOPE, ...MOC_INPUTS, 'MAA_COUNT_IN_UNIT', 'ACTIVITY_COMPLIANCE_RATE', 'LEADER_COACHING_FREQUENCY',
+        'MOC_STATUS', 'PRODUCTION_CLUB_TIER',
+      ].sort());
+    });
+
+    it('P18-T1 AC-12 keeps the office’s headcount and new members out of every requirement, and lets one name the other nine', () => {
+      const requirable = REQUIREMENT_METRICS.map((m) => m.key);
+      for (const id of OFFICE) expect([id, requirable.includes(id)]).toEqual([id, false]);
+      for (const id of [...SCOPE, ...MOC_INPUTS]) expect([id, requirable.includes(id)]).toEqual([id, true]);
+    });
+
+    it('P18-T1 AC-12 names each by what it counts: OD-142’s card is logging, never active agents', () => {
+      expect(metric('ACTIVITY_LOGGED_THIS_MONTH').label).toBe('Agents who logged activity this month');
+      expect(metric('ACTIVITY_LOGGED_THIS_MONTH').period).toBe('CALENDAR_MONTH');
+      expect(metric('OFFICE_HEADCOUNT')).toMatchObject({ unit: 'count', period: 'POINT_IN_TIME' });
+      expect(metric('APE_YEAR_PROJECTION')).toMatchObject({ unit: 'idr_minor', period: 'CALENDAR_YEAR' });
+      expect(metric('NET_APE')).toMatchObject({ unit: 'idr_minor', period: 'CALENDAR_YEAR' });
+      expect(metric('MOC_PERSISTENCY')).toMatchObject({ unit: 'percentage', period: 'ROLLING_12M' });
+    });
+
+    it('P18-T1 AC-12 moves EVENT_ATTENDANCE_RATE and EVENT_NPS to 18.5, still requirable there', () => {
+      expect(metric('EVENT_ATTENDANCE_RATE').phase).toBe(18.5);
+      expect(metric('EVENT_NPS').phase).toBe(18.5);
+      expect(CAMPAIGN_EVALUATION_PHASE).toBe(18.5);
+      expect(REQUIREMENT_METRICS.map((m) => m.key)).toEqual(expect.arrayContaining(['EVENT_ATTENDANCE_RATE', 'EVENT_NPS']));
+    });
+
+    it('P18-T1 AC-5 reads LEADER_COACHING_FREQUENCY over the last 7 days, as the leaderboard does', () => {
+      expect(metric('LEADER_COACHING_FREQUENCY').period).toBe('ROLLING_7D');
     });
   });
 

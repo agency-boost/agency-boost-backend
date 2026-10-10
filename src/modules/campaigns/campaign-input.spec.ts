@@ -107,10 +107,11 @@ describe('reading one campaign (P5-T7)', () => {
 
     it('names the alternatives when the metric is not one, rather than leaving a guess', () => {
       const said = refusal(whole({
-        requirements: [{ metricKey: 'NET_APE', comparator: 'gte', value: 1 }],
+        // `NET_APE` was the example until Phase 18 registered it (D-registry); FLC's count is not one (OD-26).
+        requirements: [{ metricKey: 'FLC_COUNT', comparator: 'gte', value: 1 }],
       }));
 
-      expect(said).toMatch(/"NET_APE" is not a metric this product measures/);
+      expect(said).toMatch(/"FLC_COUNT" is not a metric this product measures/);
       expect(said).toMatch(new RegExp(METRIC_REGISTRY[0].key));
     });
 

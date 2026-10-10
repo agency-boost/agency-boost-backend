@@ -26,6 +26,7 @@ import { up as activationBackfill } from './0022-activation-backfill';
 import { up as namedTemplates } from './0023-named-templates';
 import { up as attackPlanReply } from './0024-attack-plan-reply';
 import { up as recruitmentPlaybook } from './0025-recruitment-playbook';
+import { up as mocPersistency } from './0026-moc-persistency';
 
 /**
  * Every migration, in order. Forward-only and idempotent, so running this twice is a
@@ -57,6 +58,7 @@ const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Date) => P
   ['0023-named-templates', namedTemplates],
   ['0024-attack-plan-reply', attackPlanReply],
   ['0025-recruitment-playbook', recruitmentPlaybook],
+  ['0026-moc-persistency', mocPersistency],
 ];
 
 async function main(): Promise<void> {

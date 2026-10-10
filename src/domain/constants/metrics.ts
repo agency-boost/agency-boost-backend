@@ -105,8 +105,13 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'ACTIVATION_DAY_INDEX', name: 'Activation day', unit: 'days', phase: 13 },
   { key: 'TRAINING_COMPLETION_PCT', name: 'Training completion', unit: 'percentage', phase: 18.5 },
   { key: 'EVENT_ATTENDANCE_STATUS', name: 'Event attendance status', unit: 'enum', phase: 18.5 },
-  { key: 'EVENT_ATTENDANCE_RATE', name: 'Event attendance rate', unit: 'percentage', phase: 18 },
-  { key: 'EVENT_NPS', name: 'Event NPS', unit: 'score', phase: 18 },
+  /*
+   * *Moved 2026-10-09 (P18-T0, D-registry): 18 → 18.5.* Every reader of theirs is the compliance, events and
+   * campaigns tree, which moved to 18.5 on 2026-10-08; a metric of Phase 18 that read event records would be a
+   * roadmap defect. 18.5 is `CAMPAIGN_EVALUATION_PHASE`, so neither becomes unrequirable.
+   */
+  { key: 'EVENT_ATTENDANCE_RATE', name: 'Event attendance rate', unit: 'percentage', phase: 18.5 },
+  { key: 'EVENT_NPS', name: 'Event NPS', unit: 'score', phase: 18.5 },
   { key: 'CAMPAIGN_QUALIFICATION_STATUS', name: 'Campaign qualification', unit: 'enum', phase: 18.5 },
   { key: 'MOC_STATUS', name: 'Maintenance of Contract', unit: 'boolean', phase: 18 },
   { key: 'PRODUCTION_CLUB_TIER', name: 'Production club tier', unit: 'enum', phase: 18 },
@@ -128,6 +133,29 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   // P13.2-T4 (ADR-0113): the office's active ABs and AABs, which its leader limit bounds. An office's
   // seats, not anybody's work: no campaign or qualification rule may name it.
   { key: 'LEADERS_USED', name: 'Leaders used', unit: 'count', phase: 13.2, requirable: false },
+  /*
+   * Phase 18 (D-registry): the Owner's reporting. Each is computed once under `domain/metrics/` and pinned there.
+   *
+   * **The headcount and its new members are `requirable: false`**, as `LEADERS_USED` is: they are about an
+   * office, so nobody could qualify by one. The other nine count or sum a scope's members and stay requirable,
+   * as the unit rollups do.
+   */
+  { key: 'OFFICE_HEADCOUNT', name: 'Headcount', unit: 'count', phase: 18, requirable: false },
+  { key: 'OFFICE_NEW_MEMBERS_THIS_MONTH', name: 'New members this month', unit: 'count', phase: 18, requirable: false },
+  // OD-142 → option 2: the Overview's first engagement card — logging, counted, never *active agents*.
+  { key: 'ACTIVITY_LOGGED_THIS_MONTH', name: 'Agents who logged activity this month', unit: 'count', phase: 18 },
+  { key: 'RECRUITMENT_CLOSED_LAST_MONTH', name: 'Recruitment closed last month', unit: 'count', phase: 18 },
+  { key: 'APE_YEAR_PROJECTION', name: 'Projected APE for the year', unit: 'idr_minor', phase: 18 },
+  /*
+   * MOC's inputs (OD-22 → option 1, D-moc): the names the seeded carrier rules have always used, a stated
+   * reading of each over the office's file, which the client confirms before go-live.
+   */
+  { key: 'NET_APE', name: 'Net APE', unit: 'idr_minor', phase: 18 },
+  { key: 'MONTHLY2_AA', name: 'Monthly2 AA', unit: 'count', phase: 18 },
+  { key: 'MONTHLY2_AA_DU', name: 'Monthly2 AA, Direct Unit', unit: 'count', phase: 18 },
+  { key: 'MONTHLY2_AA_DG', name: 'Monthly2 AA, Direct Group', unit: 'count', phase: 18 },
+  { key: 'DIRECT_AB_COUNT', name: 'Direct AB (AB on AB)', unit: 'count', phase: 18 },
+  { key: 'MOC_PERSISTENCY', name: 'MOC rolling persistency', unit: 'percentage', phase: 18 },
 ];
 
 export const metricByKey = (key: string): MetricDefinition | undefined =>
@@ -202,13 +230,21 @@ export const SEED_PRODUCTION_CLUB_TIERS = [
 ] as const;
 
 /**
+ * `MOC_PERSISTENCY_MIN_PCT` (§B.6): the rolling persistency a leader's MOC asks for, AB and AAB alike — the
+ * prototype's *"Rolling Persistency DU/DG ≥ 75%"* (`KPM_Owner.html:1248`, `:3305`, `:3313`). The seeded rules
+ * lacked it until migration `0026-moc-persistency` added it (P18-T2, D-moc).
+ */
+export const MOC_PERSISTENCY_MIN_PCT = 75;
+
+/**
  * Maintenance of Contract, as the carrier states it (ADR-0026, P5-T7 AC-6).
  *
  * **The thresholds are ported; none of the prototype's derivations are.** The prototype fabricates
  * `monthly2Aa` from a headcount it has to hand, which is a different number wearing the carrier's
- * name. Each criterion below names the metric it needs, and the three the registry does not define
- * yet are listed on the rule — so a screen can say *"waiting on Net APE, which Phase 9 computes"*
- * rather than showing a rule that silently never passes.
+ * name. Each criterion below names the metric it needs. Until Phase 18 registered them (D-registry) the
+ * ones the registry did not define were listed on the rule as `waitingOnMetrics`, so a screen could say
+ * what it waited on rather than show a rule that silently never passes; every one is registered now, and
+ * `MOC_STATUS` evaluates them (`domain/metrics/moc-status.ts`).
  */
 export const SEED_MOC_RULES = [
   {
@@ -223,6 +259,8 @@ export const SEED_MOC_RULES = [
           { metricKey: 'NET_APE', comparator: 'gte' as const, value: 600_000_000 * IDR },
           { metricKey: 'MONTHLY2_AA_DU', comparator: 'gte' as const, value: 4 },
           { metricKey: 'MONTHLY2_AA_DG', comparator: 'gte' as const, value: 6 },
+          // P18-T2, D-moc: the criterion the prototype draws and the first seed left out (`0026-moc-persistency`).
+          { metricKey: 'MOC_PERSISTENCY', comparator: 'gte' as const, value: MOC_PERSISTENCY_MIN_PCT },
         ],
       },
       {
@@ -243,6 +281,7 @@ export const SEED_MOC_RULES = [
         criteria: [
           { metricKey: 'NET_APE', comparator: 'gte' as const, value: 200_000_000 * IDR },
           { metricKey: 'MONTHLY2_AA', comparator: 'gte' as const, value: 2 },
+          { metricKey: 'MOC_PERSISTENCY', comparator: 'gte' as const, value: MOC_PERSISTENCY_MIN_PCT },
         ],
       },
     ],

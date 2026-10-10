@@ -24,6 +24,7 @@ import { seedDemo, type SeedResult } from '../demo';
 import { backfillCoachingSnapshots } from '../coaching-snapshots';
 import { SUBSCRIPTION_FIXTURE_PEOPLE } from '../subscription-fixture';
 import { TEMPLATE_FIXTURE_PEOPLE } from '../template-fixture';
+import { REPORTING_CAST } from '../reporting-fixture';
 
 /** The people the subscription fixture makes, by pronoun. */
 const subscriptionPeople = (pronoun: 'she' | 'he') =>
@@ -336,8 +337,11 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     expect(await col('users').findOne({ email: 'newcomer@agencyboost.test' })).toMatchObject({ agentCode: 'PRU-80019' });
   });
 
-  it('P11-T7 the demo people have their own pronouns, so coaching writes she and he; only the operators keep they', async () => {
-    expect(await pronouns()).toEqual({ she: [...WOMEN].sort(), he: [...MEN].sort(), they: [...OPERATORS].sort() });
+  it('P11-T7 the demo people have their own pronouns, so coaching writes she and he; the operators keep they', async () => {
+    // Phase 18's reporting cast states no pronoun (`reporting-fixture.ts`): coaching writes *they* of them.
+    expect(await pronouns()).toEqual({
+      she: [...WOMEN].sort(), he: [...MEN].sort(), they: [...OPERATORS, ...REPORTING_CAST.map((p) => p.email)].sort(),
+    });
     for (const person of COACHING_CAST) {
       expect(await col('users').findOne({ email: person.email })).toMatchObject({ pronoun: person.pronoun });
     }
@@ -432,8 +436,19 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
 
   // ------------------------------------------------------------------ P11-T5 AC-10, P11-T6: the stored sessions, read
 
+  /** The reporting fixture's own 1:1s (Phase 18): its cast's, and 0555's — not the coaching fixture's to account for. */
+  const reportingSessions = async () => {
+    const accounts = await col('users').find({ email: { $in: REPORTING_CAST.map((p) => p.email) } }).toArray();
+    const coaches = new Set((await col('memberships').find({ userId: { $in: accounts.map((a) => String(a._id)) } }).toArray())
+      .map((m) => String(m._id)));
+    const kpm0417 = String((await col('kpms').findOne({ code: '0417' }))!._id);
+    return (s: { coachMembershipId: string; kpmId: string }) => coaches.has(s.coachMembershipId) || s.kpmId !== kpm0417;
+  };
+
   it('P11-T5 AC-10 the fixture’s sessions are stored, each under its own id, as the fixture writes them', async () => {
-    const stored = await col('coachingSessions').find({}).sort({ _id: 1 }).toArray();
+    const theirs = await reportingSessions();
+    const stored = (await col('coachingSessions').find({}).sort({ _id: 1 }).toArray())
+      .filter((s) => !theirs(s as never));
     expect(stored.map((s) => String(s._id))).toEqual(first.coaching.sessions.map((s) => s._id).sort());
     for (const seed of first.coaching.sessions) {
       const row = stored.find((s) => String(s._id) === seed._id)!;
@@ -453,7 +468,8 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
   });
 
   it('P11-T5 AC-10 each finalized session carries the snapshot finalize’s builder takes, as of its own day, and a re-run keeps it', async () => {
-    const finalized = await col('coachingSessions').find({ status: 'finalized' }).toArray();
+    const theirs = await reportingSessions();
+    const finalized = (await col('coachingSessions').find({ status: 'finalized' }).toArray()).filter((s) => !theirs(s as never));
     expect(finalized).toHaveLength(first.coaching.sessions.filter((s) => s.status === 'finalized').length);
     for (const row of finalized) {
       const snapshot = row.snapshot as {
@@ -472,7 +488,8 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
 
     const kept = finalized.map((row) => row.snapshot);
     expect(await backfillCoachingSnapshots(await office())).toBe(0);
-    expect((await col('coachingSessions').find({ status: 'finalized' }).toArray()).map((row) => row.snapshot)).toEqual(kept);
+    expect((await col('coachingSessions').find({ status: 'finalized' }).toArray()).filter((s) => !theirs(s as never)).map((row) => row.snapshot))
+      .toEqual(kept);
   });
 
   it('P11-T6 AC-3 AC-4 the roster Agus reads gives every coachee the status and the Last 1:1 the fixture plans', async () => {
@@ -944,7 +961,10 @@ describe('P11-T2 AC-5 a run at 03:30 on 16 March 2027 in Jakarta, still the 15th
     const melati = await col('leads').findOne({ kpmId, name: 'Ibu Melati Kusumawardani' });
     expect(melati).toMatchObject({ nextActionDate: '2027-03-18', commitments: [expect.objectContaining({ month: '2027-03' })] });
     const months = await col('monthlyAgentData').distinct('month', { kpmId });
-    expect(months.sort()).toEqual(['2027-02', '2027-03']);
+    // This month and last; and since Phase 18 (`reporting-fixture.ts`) the files from January last year to three months
+    // ago — the month before last, January, left empty as it always was.
+    const history = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, '0')}`);
+    expect(months.sort()).toEqual([...history, '2027-02', '2027-03']);
   });
 
   it('P11-T2 AC-5 the planned statuses hold in another month too', async () => {

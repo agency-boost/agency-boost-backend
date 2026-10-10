@@ -73,8 +73,9 @@ describe('campaigns and carrier rules (P5-T7)', () => {
       // The prototype's requirements are display strings — "Net APE ≥ Rp 600 juta" — which nothing
       // can evaluate and nothing can refuse.
       await expect(wired.campaigns.create(member(KPM_A), aCampaign({
-        requirements: [{ metricKey: 'NET_APE', comparator: 'gte', value: 100 }],
-      }))).rejects.toThrow(/"NET_APE" is not a metric this product measures/);
+        // `NET_APE` was the example until Phase 18 registered it (D-registry); FLC's count is not one (OD-26).
+        requirements: [{ metricKey: 'FLC_COUNT', comparator: 'gte', value: 100 }],
+      }))).rejects.toThrow(/"FLC_COUNT" is not a metric this product measures/);
     });
 
     it('refuses a metric nothing measures yet, saying so and naming no phase', async () => {
@@ -187,10 +188,27 @@ describe('campaigns and carrier rules (P5-T7)', () => {
       // The prototype fabricates `monthly2Aa` from a headcount it has to hand — a different number
       // wearing the carrier's name. A rule whose inputs do not exist can never pass, and a screen
       // that hid that would tell somebody they had failed something nothing measures.
+      //
+      // *Amended 2026-10-09 (P18-T2, D-registry, D-moc):* Phase 18 registers every input the seeded MOC rules
+      // name, and the persistency criterion they lacked, so a rule seeded now waits on nothing.
       const moc = await wired.campaigns.listRules(member(KPM_A), 'moc');
 
-      expect(moc.find((r) => r.code === 'MOC_AB')!.waitingOnMetrics)
-        .toEqual(['NET_APE', 'MONTHLY2_AA_DU', 'MONTHLY2_AA_DG', 'DIRECT_AB_COUNT']);
+      expect(moc.find((r) => r.code === 'MOC_AB')!.waitingOnMetrics).toEqual([]);
+      expect(moc.find((r) => r.code === 'MOC_AB')!.criteriaGroups[0].criteria.map((c) => c.metricKey))
+        .toEqual(['NET_APE', 'MONTHLY2_AA_DU', 'MONTHLY2_AA_DG', 'MOC_PERSISTENCY']);
+      // A rule a carrier states with an input nothing registers still says so, its unit the carrier's — the
+      // seeding that recorded Phase 5's waits, kept for the next metric a carrier names before it is measured.
+      const seeded = metricsModule.SEED_MOC_RULES[1].criteriaGroups[0].criteria as unknown as { metricKey: string; comparator: string; value: number }[];
+      seeded.push({ metricKey: 'FLC_COUNT', comparator: 'gte', value: 3 }, { metricKey: 'FLC_APE', comparator: 'gte', value: 5_000_000_00 });
+      try {
+        const company = String(new mongoose.Types.ObjectId());
+        await wired.campaigns.seedForCompany(company);
+        const rules = await mongoose.connection.db!.collection('qualificationRules').find({ companyId: company, code: 'MOC_AAB' }).toArray();
+        expect(rules[0].waitingOnMetrics).toEqual(['FLC_COUNT', 'FLC_APE']);
+        expect(rules[0].criteriaGroups[0].criteria.slice(-2).map((c: { unit: string }) => c.unit)).toEqual(['count', 'idr_minor']);
+      } finally {
+        seeded.splice(-2, 2);
+      }
       // And a tier built on a registry metric waits on nothing.
       const tiers = await wired.campaigns.listRules(member(KPM_A), 'production_club');
       expect(tiers.every((t) => t.waitingOnMetrics.length === 0)).toBe(true);

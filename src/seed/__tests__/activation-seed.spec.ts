@@ -105,7 +105,7 @@ describe.each([
     ]);
   });
 
-  it('Seed: Yanti’s second membership starts afresh and her first has none; Sari, Dewi and Arief have none; Lina is day 1 in office 0555', async () => {
+  it('Seed: Yanti’s second membership starts afresh and her first has none; Sari, Dewi and Arief have none; Lina is day 61 in office 0555', async () => {
     expect(await mine('removed@kpm0417.test')).toMatchObject({ day: 29, startDate: addDays(today, -28) });
     const account = await col('users').findOne({ email: 'removed@kpm0417.test' });
     const former = await col('memberships').findOne({ userId: String(account!._id), status: 'removed' });
@@ -114,7 +114,8 @@ describe.each([
       await expect(mine(email)).rejects.toMatchObject({ code: 'NOT_FOUND' });
     }
     const lina = await mine('agent@kpm0555.test');
-    expect(lina).toMatchObject({ day: 1, startDate: today, state: 'open' });
+    // Lina joined two months ago, and her activation starts on her join, as every hire's does (the Phase 18 exit review).
+    expect(lina).toMatchObject({ day: 61, startDate: addDays(today, -60), state: 'open' });
     expect(item(lina, 'ADD_PROSPECTS').done).toBe(true);
   });
 

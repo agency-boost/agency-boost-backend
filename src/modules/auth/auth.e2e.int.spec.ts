@@ -144,6 +144,15 @@ import { OfficeCounter } from '@/modules/config/office-counter.port';
 import { CampaignKindsApplier } from '@/modules/config/campaign-kinds.port';
 import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import { listenOnLoopback } from '../../../test/listen';
+import { ActivityLog, ActivityLogSchema } from '@/modules/activity/activity-log.schema';
+import { ActivityLogRepository } from '@/modules/activity/activity-log.repository';
+import { ActivityReadings } from '@/modules/activity/activity-readings';
+import { CoachingSession, CoachingSessionSchema } from '@/modules/coaching/coaching-session.schema';
+import { CoachingSessionRepository } from '@/modules/coaching/coaching-session.repository';
+import { CoachingReadings } from '@/modules/coaching/coaching-readings';
+import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
+import { TenantDay } from '@/modules/tenants/tenant-day.service';
+import { DirectoryColumns } from '@/modules/reporting/directory-columns';
 
 /**
  * Boots the real controllers, guards and filter over a real database, and walks the
@@ -228,6 +237,9 @@ describe('auth and admin over HTTP', () => {
         { name: CapabilityCatalog.name, schema: CapabilityCatalogSchema },
         // Phase 17: TenantService gives a company started from the defaults its recruitment playbook.
         { name: RecruitmentPlaybook.name, schema: RecruitmentPlaybookSchema },
+        // Phase 18: the roster's *Last activity* and *Last coached* read the log and the sessions.
+        { name: ActivityLog.name, schema: ActivityLogSchema },
+        { name: CoachingSession.name, schema: CoachingSessionSchema },
         ]),
       ],
       controllers: [
@@ -251,6 +263,9 @@ describe('auth and admin over HTTP', () => {
         { provide: NOTIFICATION_ADAPTERS, useValue: [mailbox] },
         { provide: APP_FILTER, useClass: DomainExceptionFilter },
         ActivityCategoryRepository, ActivityTypeRepository, ActivityConfigService,
+        // Phase 18 (D-directory): `GET /members`' two columns, and the read entries they write.
+        ActivityLogRepository, ActivityReadings, CoachingSessionRepository, CoachingReadings, SubjectReadAudit,
+        TenantDay, DirectoryColumns,
         LeadStatusRepository, LeadStatusService, RatioDefinitionRepository, RatioService,
         ConfigSnapshotRepository,
         TenantConfigService, TemplateService, NamedTemplateService, ConfigChangeService,
