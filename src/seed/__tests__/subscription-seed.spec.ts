@@ -20,6 +20,7 @@ import { User, UserSchema } from '@/modules/users/user.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { seedDemo, type SeedResult } from '../demo';
 import { planSubscriptions, SUBSCRIPTION_OFFICES } from '../subscription-fixture';
+import { COHORT_HIRES } from '../cohort-fixture';
 
 /**
  * **Subscriptions and the leader limit, seeded** (Phase 13.2, *Seed*; `subscription-fixture.ts`), run as
@@ -132,7 +133,8 @@ describe('the subscription seed', () => {
   });
 
   it('the new offices add no hire to the activation demo: everybody in them joined over six months ago', () => {
-    expect(first.written.activationProgress).toBe(9);
+    // The activation fixture's nine, and Phase 18.1's cohort of 0417's graduated hires (`cohort-fixture.ts`).
+    expect(first.written.activationProgress).toBe(9 + COHORT_HIRES.length);
   });
 
   it('a second run on the same day writes nothing, and keeps a subscription a walk edited', async () => {

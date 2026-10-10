@@ -71,6 +71,8 @@ import { monthField, seedMonthFigures } from './production-figures';
 import {
   placeReportingCast, reportingMonthFigures, seedReportingFixture, type ReportingKey,
 } from './reporting-fixture';
+import { seedActivationCohort } from './cohort-fixture';
+import { seedLeaderForumFixture, type LeaderForumFixture } from './leader-forum-fixture';
 import type { StoragePort } from '@/modules/assets/storage.port';
 import { LONG_PIPELINE } from './long-pipeline';
 import {
@@ -219,6 +221,8 @@ const OWNED_COLLECTIONS = [
   'recruitmentPlaybooks', 'kpmRecruitmentPitchDocuments',
   // Phase 18, with the writer that fills it (`reporting-fixture.ts`): an office's recruitment target per month.
   'kpmRecruitTargets',
+  // Phase 18.1, with the writer that fills them (`leader-forum-fixture.ts`): the offices' leader meetings and their links.
+  'leaderMeetings', 'leaderMeetingShareLinks',
 ] as const;
 
 /**
@@ -259,6 +263,8 @@ export interface SeedResult {
   activation: ActivationFixture;
   /** The playbooks, the pitch documents and the brochure, and whether their files were stored. */
   recruitment: RecruitmentFixture;
+  /** The Strategic Leader Forum's meetings and links (`leader-forum-fixture.ts`). */
+  forum: LeaderForumFixture;
 }
 
 async function countRows(): Promise<Record<string, number>> {
@@ -1354,7 +1360,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       { $addToSet: { groupIds: String(group._id) } },
     ).exec();
   }
-  // Core Leader gates Leader Forum co-editing (Phase 18) and nothing else.
+  // Core Leader decides who, besides the Owner and the Admins, may open and write in the Strategic Leader Forum's
+  // meetings (built in Phase 18.1, `leader-forum-fixture.ts`), and nothing else.
   await Memberships.updateMany(
     { _id: { $in: [ab.id, sari.id] } },
     { $set: { isCoreLeader: true } },
@@ -3130,6 +3137,25 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   });
   await insertFixtureRows(ActivationRows as unknown as mongoose.Model<object>, activation.activations);
   await insertFixtureRows(Audit as unknown as mongoose.Model<object>, activation.audits);
+
+  // ------------------- the activation cohort the forum's *3M new agent %* reads (Phase 18.1; `cohort-fixture.ts`)
+
+  const cohort = await seedActivationCohort({ clock, kpmId: id0417, cast: reportingCast });
+
+  // ------------------- the Strategic Leader Forum: 0417's three meetings, two links, 0555's one (Phase 18.1;
+  // `leader-forum-fixture.ts`). After the cohort, so #12's and #13's frozen scorecards carry it.
+
+  const forum = await seedLeaderForumFixture({
+    clock,
+    '0417': {
+      kpmId: id0417,
+      owner: { membershipId: owner.id, userId: String(ownerUser._id) },
+      admin: { membershipId: admin.id },
+      agus: { membershipId: ab.id },
+      sari: { membershipId: sari.id },
+    },
+    '0555': { kpmId: String(kpm0555._id), owner: { membershipId: owner0555.id, userId: String(owner0555User._id) } },
+  });
   const storedActivations = await ActivationRows.countDocuments({ deletedAt: null }).exec();
 
   /** What each long inbox holds now, as the bell counts it, for the summary below. */
@@ -3193,7 +3219,7 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
 
   KPM 0999 · Suspended Branch
     owner@kpm0999.test                                 Signing in shows the page: the office is suspended
-${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guide}${unitDashboard.guide}${recruitment.guide}${reporting.guide}
+${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guide}${unitDashboard.guide}${recruitment.guide}${reporting.guide}${cohort.guide}${forum.guide}
   NO OFFICE
     newcomer@agencyboost.test                          Brand new — starts at Register KPM
 
@@ -3399,7 +3425,7 @@ Sign in at POST /api/v1/auth/login, then send the access token as
     ? 'This run wrote 0 rows: everything it seeds was already there.'
     : `This run wrote ${total} rows: ${Object.entries(written).map(([name, added]) => `${name} +${added}`).join(', ')}`);
 
-  return { written, pronounsSet, coaching, calendar, activation, recruitment };
+  return { written, pronounsSet, coaching, calendar, activation, recruitment, forum };
 }
 
 async function main(): Promise<void> {

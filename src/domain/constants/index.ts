@@ -381,6 +381,13 @@ export {
   type KpmAnalyticsPeriod,
 } from './reporting';
 
+// Phase 18.1: the Strategic Leader Forum — how long a shared link opens, and the bounds of what leaders type.
+export {
+  LEADER_MEETING_SHARE_DAYS,
+  LEADER_MEETING_SHARE_TOKEN_BYTES,
+  LEADER_MEETING_LIMITS,
+} from './leader-forum';
+
 export {
   type CapabilityMilestone,
   type CapabilityStage,

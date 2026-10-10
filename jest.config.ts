@@ -218,6 +218,9 @@ const config: Config = {
     // the two named `…AcrossTenants` reads the platform's adoption makes (invariant §1: tenancy at 100% branch).
     './src/modules/reporting/kpm-recruit-target.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/org/membership.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    // Phase 18.1: who reads the forum and who edits it — the tag is the list, and a field member not tagged meets 404.
+    // It decides access, so it is held where the permissions are.
+    './src/modules/leader-meetings/leader-meeting-people.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],

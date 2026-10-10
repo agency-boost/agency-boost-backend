@@ -286,6 +286,25 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   MONTHLY2_AA_DG: { period: 'CALENDAR_MONTH', threshold: null },
   DIRECT_AB_COUNT: { period: 'POINT_IN_TIME', threshold: null },
   MOC_PERSISTENCY: { period: 'ROLLING_12M', threshold: null },
+
+  // ---- The Strategic Leader Forum's scorecard (Phase 18.1, P18.1-T1; D-cohort, OD-144) ----
+  /*
+   * **The three rows the prototype draws over *FY* and *YTD* alone** (`KPM_Owner.html:2465`, `:2468`, `:2472`, the
+   * single months blocked) are `CALENDAR_YEAR`: a year, or a year to date. The cohort is read over the same periods,
+   * by its start day in the office's calendar (`activation-cohort.ts`).
+   */
+  ACTIVATION_COHORT: { period: 'CALENDAR_YEAR', threshold: null },
+  NEW_AGENT_3M_ACTIVE_PCT: { period: 'CALENDAR_YEAR', threshold: null },
+  PRODUCING_AGENTS: { period: 'CALENDAR_YEAR', threshold: null },
+  AVERAGE_CASE_SIZE_REALISED: { period: 'CALENDAR_YEAR', threshold: null },
+  /*
+   * **The three drawn in every column** are `CALENDAR_MONTH`: each month's figure from the office's file, and over
+   * *FY* or *YTD* the months held summed or averaged — the same definition over a year, as `SUMMARY_ACTIVITY_TARGET`'s
+   * *Yearly* view is (`held-months.ts`).
+   */
+  NEW_ACTIVE_AGENTS_MONTHLY_AVG: { period: 'CALENDAR_MONTH', threshold: null },
+  MAA_MONTHLY_AVG: { period: 'CALENDAR_MONTH', threshold: null },
+  CASE_SUBMISSIONS: { period: 'CALENDAR_MONTH', threshold: null },
 };
 
 export const METRIC_REGISTRY = define(join(SERVED, COMPUTATIONS));

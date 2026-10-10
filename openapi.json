@@ -6834,7 +6834,7 @@
         "description": "**Requires `member:tag_group`.** See `docs/00-product/roles-and-permissions.md`."
       },
       "put": {
-        "description": "Core Leader is for Strategic Leader Forum co-editing, which is not built yet, and nothing else — no hierarchy, no data scope. A group is the same: a label, not a rule.\n\n**Requires `member:tag_group`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Core Leader decides who, besides the Owner and the Admins, may open and write in the Strategic Leader Forum’s meetings, and nothing else — no hierarchy, no data scope. A group is the same: a label, not a rule.\n\n**Requires `member:tag_group`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "OrgController_tagMember_v1",
         "parameters": [
           {
@@ -20748,6 +20748,1419 @@
         ],
         "x-required-permission": "platform_analytics:read"
       }
+    },
+    "/api/v1/leader-meetings": {
+      "get": {
+        "description": "Every meeting of the agency, newest first by date: its number, title and date, *Upcoming* or *Completed* by the agency’s calendar, who can edit it — live while it is upcoming, the list written onto it once it was read after its date — and its open action items. Whether the reader may make one. Not paginated; nothing is recorded.\n\n**Requires `leader_meeting:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_list_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingListViewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — this read takes no query parameter; one of any name is refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — a role without the permission, or any write in a read-only support session; `details.permission` names it. `TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — a field member not tagged *Core Leader*, answered as another office’s meeting is: as if there were nothing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The agency’s meetings",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:read"
+      },
+      "post": {
+        "description": "*+ New meeting*: numbered one past the agency’s highest meeting not deleted, its agenda the latest meeting’s, every box unticked — or, for the agency’s first, the ten items every forum starts from — and no action items. Audited.\n\n**Requires `leader_meeting:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_create_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLeaderMeetingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingCardDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — a Core Leader, or any other field member, or a write in a read-only support session. `TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Make a meeting",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:create"
+      }
+    },
+    "/api/v1/leader-meetings/shared/{token}": {
+      "get": {
+        "description": "The meeting a live link of the reader’s own agency names, **read-only** whoever opens it: every `can` false but `print`. An unknown, expired or revoked link, a deleted meeting and another agency’s link are one answer. Each opening is recorded. An opening after the meeting’s date can be the read that keeps its scorecard.\n\n**Requires `leader_meeting:read_shared_link`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_openShared_v1",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingViewDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — the link is unknown, expired, revoked, of a deleted meeting, or another office’s. One answer for every one of them.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Open a shared meeting",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:read_shared_link"
+      }
+    },
+    "/api/v1/leader-meetings/{meetingId}": {
+      "get": {
+        "description": "The head, who can edit it, *Overview & Stats*, the agenda and the action items in their order, who may edit now, and what the reader may do. The scorecard is computed on every read while the meeting is upcoming; **the first read once it is over writes it, and the editors, onto the meeting** for good — except in a read-only support session, which is answered them and writes nothing. Typed targets laid over it. Not recorded as a read of anybody’s data.\n\n**Requires `leader_meeting:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_read_v1",
+        "parameters": [
+          {
+            "name": "meetingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingViewDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — a role without the permission, or any write in a read-only support session; `details.permission` names it. `TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such meeting, **or** it belongs to another office, was deleted, or the reader is a field member not tagged *Core Leader*. All one answer: a `403` here would confirm the meeting exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A meeting",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:read"
+      },
+      "patch": {
+        "description": "The title, the date or both, pinned to the head’s version, while the meeting is upcoming — whether or not anybody has written in it. Audited with before and after.\n\n**Requires `leader_meeting:reschedule`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_reschedule_v1",
+        "parameters": [
+          {
+            "name": "meetingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RescheduleLeaderMeetingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingCardDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — a Core Leader, or any other field member, or a write in a read-only support session. `TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such meeting, **or** it belongs to another office, was deleted, or the reader is a field member not tagged *Core Leader*. All one answer: a `403` here would confirm the meeting exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`LEADER_MEETING_COMPLETED` — the meeting has taken place, so its date stays. `VERSION_CONFLICT` — its title or date changed since you read it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Move a meeting",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:reschedule"
+      },
+      "delete": {
+        "description": "Only one nobody has written in — no agenda item, box, action item or target saved since it was made. It leaves the list, its address answers not found, and its number may be given again. Audited.\n\n**Requires `leader_meeting:delete`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_remove_v1",
+        "parameters": [
+          {
+            "name": "meetingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "required": true,
+            "in": "query",
+            "description": "The `version` you read.",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — a Core Leader, or any other field member, or a write in a read-only support session. `TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such meeting, **or** it belongs to another office, was deleted, or the reader is a field member not tagged *Core Leader*. All one answer: a `403` here would confirm the meeting exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`LEADER_MEETING_HAS_MINUTES` — somebody has written in it, so it is kept. `VERSION_CONFLICT` — it changed since you read it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a meeting",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:delete"
+      }
+    },
+    "/api/v1/leader-meetings/{meetingId}/agenda-items": {
+      "post": {
+        "description": "*+ Add item*: *\"New agenda item\"*, no PIC, unticked, last in its section. Audited.\n\n**Requires `leader_meeting:edit`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_addAgendaItem_v1",
+        "parameters": [
+          {
+            "name": "meetingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddAgendaItemDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaItemDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — a role without the permission, or any write in a read-only support session; `details.permission` names it. `TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such meeting, **or** it belongs to another office, was deleted, or the reader is a field member not tagged *Core Leader*. All one answer: a `403` here would confirm the meeting exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add an agenda item",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:edit"
+      }
+    },
+    "/api/v1/leader-meetings/{meetingId}/agenda-items/{itemId}": {
+      "patch": {
+        "description": "One field — the text, the PIC, or on *During* the box — with the item’s version. A text emptied removes the item, answered `{ removed: true }`. Audited with before and after.\n\n**Requires `leader_meeting:edit`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_saveAgendaItem_v1",
+        "parameters": [
+          {
+            "name": "meetingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "itemId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveAgendaItemDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaItemSavedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — not exactly one field, a field too long or unknown, or `done` on an item outside *During*.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — a role without the permission, or any write in a read-only support session; `details.permission` names it. `TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such meeting, **or** it belongs to another office, was deleted, or the reader is a field member not tagged *Core Leader*. All one answer: a `403` here would confirm the meeting exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VERSION_CONFLICT` — that same item changed since you read it, or was removed. A write to another item lands. Read the meeting again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save an agenda item’s field",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:edit"
+      }
+    },
+    "/api/v1/leader-meetings/{meetingId}/action-items": {
+      "post": {
+        "description": "*+ Add action item*: *New initiative* · *Success metric* · *New action item* · *TBD* · *Not yet planned* · *TBD*, last. Audited.\n\n**Requires `leader_meeting:edit`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_addActionItem_v1",
+        "parameters": [
+          {
+            "name": "meetingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderActionItemDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — a role without the permission, or any write in a read-only support session; `details.permission` names it. `TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such meeting, **or** it belongs to another office, was deleted, or the reader is a field member not tagged *Core Leader*. All one answer: a `403` here would confirm the meeting exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add an action item",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:edit"
+      }
+    },
+    "/api/v1/leader-meetings/{meetingId}/action-items/order": {
+      "put": {
+        "description": "Every row’s id in its new place. Refused when a row was added or removed since you read them. Audited.\n\n**Requires `leader_meeting:edit`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_reorderActionItems_v1",
+        "parameters": [
+          {
+            "name": "meetingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderActionItemsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LeaderActionItemDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — a role without the permission, or any write in a read-only support session; `details.permission` names it. `TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such meeting, **or** it belongs to another office, was deleted, or the reader is a field member not tagged *Core Leader*. All one answer: a `403` here would confirm the meeting exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VERSION_CONFLICT` — the rows are not the meeting’s: one was added or removed since you read them.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reorder the action items",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:edit"
+      }
+    },
+    "/api/v1/leader-meetings/{meetingId}/action-items/{itemId}": {
+      "patch": {
+        "description": "One cell, or the status, with the row’s version. Audited with before and after.\n\n**Requires `leader_meeting:edit`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_saveActionItem_v1",
+        "parameters": [
+          {
+            "name": "meetingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "itemId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveActionItemDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderActionItemDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — not exactly one field, a field too long or unknown, or an unknown status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — a role without the permission, or any write in a read-only support session; `details.permission` names it. `TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such meeting, **or** it belongs to another office, was deleted, or the reader is a field member not tagged *Core Leader*. All one answer: a `403` here would confirm the meeting exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VERSION_CONFLICT` — that same item changed since you read it, or was removed. A write to another item lands. Read the meeting again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save an action item’s field",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:edit"
+      },
+      "delete": {
+        "description": "×: the row, pinned to its version. Audited with what it was.\n\n**Requires `leader_meeting:edit`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_removeActionItem_v1",
+        "parameters": [
+          {
+            "name": "meetingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "itemId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "required": true,
+            "in": "query",
+            "description": "The `version` you read.",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed."
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — a role without the permission, or any write in a read-only support session; `details.permission` names it. `TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such meeting, **or** it belongs to another office, was deleted, or the reader is a field member not tagged *Core Leader*. All one answer: a `403` here would confirm the meeting exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VERSION_CONFLICT` — that same item changed since you read it, or was removed. A write to another item lands. Read the meeting again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove an action item",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:edit"
+      }
+    },
+    "/api/v1/leader-meetings/{meetingId}/monthly-targets/{row}": {
+      "put": {
+        "description": "The leaders’ own target for one of the six rows the scorecard leaves open — `ape`, `manpower`, `flc`, `new_aa`, `avg_monthly_aa`, `case_submission` — with the cell’s version, 0 for one never typed. Never kept with the scorecard: it stays editable. Audited with before and after.\n\n**Requires `leader_meeting:edit`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_saveMonthlyTarget_v1",
+        "parameters": [
+          {
+            "name": "meetingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "row",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMonthlyTargetDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonthlyTargetSavedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a row the scorecard blocks or does not have, or a value too long.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — a role without the permission, or any write in a read-only support session; `details.permission` names it. `TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such meeting, **or** it belongs to another office, was deleted, or the reader is a field member not tagged *Core Leader*. All one answer: a `403` here would confirm the meeting exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VERSION_CONFLICT` — that same item changed since you read it, or was removed. A write to another item lands. Read the meeting again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save a Monthly Target cell",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:edit"
+      }
+    },
+    "/api/v1/leader-meetings/{meetingId}/share-links": {
+      "post": {
+        "description": "A fresh link, opening the meeting read-only for the agency’s signed-in members for 14 days. Its token is in this answer and nowhere else: only its hash is kept, so a link cannot be shown twice. Audited, never with the token.\n\n**Requires `leader_meeting:share_link`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_share_v1",
+        "parameters": [
+          {
+            "name": "meetingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareLinkDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — a role without the permission, or any write in a read-only support session; `details.permission` names it. `TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such meeting, **or** it belongs to another office, was deleted, or the reader is a field member not tagged *Core Leader*. All one answer: a `403` here would confirm the meeting exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Share a meeting",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:share_link"
+      },
+      "delete": {
+        "description": "*Stop sharing*: every live link to the meeting revoked, each audited. They open nothing after.\n\n**Requires `leader_meeting:share_link`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderMeetingsController_stopSharing_v1",
+        "parameters": [
+          {
+            "name": "meetingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareLinksRevokedDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — a role without the permission, or any write in a read-only support session; `details.permission` names it. `TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such meeting, **or** it belongs to another office, was deleted, or the reader is a field member not tagged *Core Leader*. All one answer: a `403` here would confirm the meeting exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Stop sharing a meeting",
+        "tags": [
+          "leader-forum"
+        ],
+        "x-required-permission": "leader_meeting:share_link"
+      }
     }
   },
   "info": {
@@ -23604,7 +25017,7 @@
           },
           "isCoreLeader": {
             "type": "boolean",
-            "description": "For Strategic Leader Forum co-editing, which is not built yet, and nothing else. It grants no hierarchy and no data scope."
+            "description": "Who, besides the Owner and the Admins, may open and write in the Strategic Leader Forum’s meetings, and nothing else. It grants no hierarchy and no data scope."
           }
         },
         "required": [
@@ -32858,6 +34271,909 @@
           "platform"
         ]
       },
+      "ForumRungDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "AB",
+            "description": "The rung’s stable code on the company’s ladder."
+          },
+          "label": {
+            "type": "string",
+            "example": "AB",
+            "description": "The ladder’s own label for it."
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
+      "ForumPersonDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "example": "Agus Prasetyo"
+          },
+          "rung": {
+            "$ref": "#/components/schemas/ForumRungDto"
+          },
+          "isReader": {
+            "type": "boolean",
+            "description": "The reader themselves: *\"(You)\"* after the name."
+          },
+          "tagged": {
+            "type": "boolean",
+            "description": "Tagged *Core Leader* — now, or when a frozen list was written. *\"{n} core leaders tagged\"* counts every editor tagged but the Owner, an Admin who is tagged included."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "rung",
+          "isReader",
+          "tagged"
+        ]
+      },
+      "MeetingEditorsDto": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "nullable": true,
+            "description": "The Owner, first. `null` for an agency with none.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ForumPersonDto"
+              }
+            ]
+          },
+          "admins": {
+            "description": "The Admins, by name.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ForumPersonDto"
+            }
+          },
+          "coreLeaders": {
+            "description": "Every other member tagged *Core Leader*, by name.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ForumPersonDto"
+            }
+          },
+          "coreLeaderCount": {
+            "type": "number",
+            "example": 3,
+            "description": "*\"{n} core leaders tagged\"*: every editor tagged *Core Leader* but the Owner."
+          },
+          "frozen": {
+            "type": "boolean",
+            "description": "True once the meeting is *Completed* and these are the editors written onto it the first time it was read after its date: its record of who could edit it then, which grants nothing. False: the tag, now."
+          }
+        },
+        "required": [
+          "owner",
+          "admins",
+          "coreLeaders",
+          "coreLeaderCount",
+          "frozen"
+        ]
+      },
+      "MeetingCardDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "number": {
+            "type": "number",
+            "example": 14,
+            "description": "One past the agency’s highest when it was made; never changed."
+          },
+          "title": {
+            "type": "string",
+            "example": "Strategic Check-in — #14",
+            "description": "Plain text: render it as text, never as markup."
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-10-13",
+            "description": "An office date, `YYYY-MM-DD`."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "upcoming",
+              "completed"
+            ],
+            "description": "*Upcoming* through the end of its date in the agency’s calendar, *Completed* from 00:00 after. Never stored."
+          },
+          "editors": {
+            "$ref": "#/components/schemas/MeetingEditorsDto"
+          },
+          "openItems": {
+            "type": "number",
+            "example": 4,
+            "description": "The tracker’s rows not *Implemented*; 0 reads *All clear*."
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "title",
+          "date",
+          "state",
+          "editors",
+          "openItems"
+        ]
+      },
+      "ListCanDto": {
+        "type": "object",
+        "properties": {
+          "create": {
+            "type": "boolean",
+            "description": "*+ New meeting*: the Owner’s and the Admins’ alone."
+          }
+        },
+        "required": [
+          "create"
+        ]
+      },
+      "ForumLimitsDto": {
+        "type": "object",
+        "properties": {
+          "titleMax": {
+            "type": "number",
+            "example": 120,
+            "description": "A title, after trimming."
+          },
+          "textMax": {
+            "type": "number",
+            "example": 500,
+            "description": "An agenda item, and each cell of the tracker but its PIC."
+          },
+          "picMax": {
+            "type": "number",
+            "example": 80,
+            "description": "A PIC."
+          },
+          "targetMax": {
+            "type": "number",
+            "example": 40,
+            "description": "A *Monthly Target* cell."
+          }
+        },
+        "required": [
+          "titleMax",
+          "textMax",
+          "picMax",
+          "targetMax"
+        ]
+      },
+      "MeetingListViewDto": {
+        "type": "object",
+        "properties": {
+          "meetings": {
+            "description": "Every meeting of the agency, newest first by date. Not paginated.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MeetingCardDto"
+            }
+          },
+          "can": {
+            "$ref": "#/components/schemas/ListCanDto"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/ForumLimitsDto"
+          }
+        },
+        "required": [
+          "meetings",
+          "can",
+          "limits"
+        ]
+      },
+      "CreateLeaderMeetingDto": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "example": "Strategic Check-in — #15",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "Plain text, trimmed."
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-10-27",
+            "description": "An office date, `YYYY-MM-DD`, in the agency’s calendar."
+          }
+        },
+        "required": [
+          "title",
+          "date"
+        ]
+      },
+      "ScorecardPeriodsDto": {
+        "type": "object",
+        "properties": {
+          "fy": {
+            "type": "string",
+            "example": "2025",
+            "description": "*FY {year}*: the year before the meeting’s."
+          },
+          "ytd": {
+            "type": "string",
+            "example": "2026",
+            "description": "*YTD {year}*: the meeting’s year, January to its month."
+          },
+          "thisMonthLastYear": {
+            "type": "string",
+            "example": "2025-10"
+          },
+          "lastMonth": {
+            "type": "string",
+            "example": "2026-09"
+          },
+          "thisMonth": {
+            "type": "string",
+            "example": "2026-10"
+          }
+        },
+        "required": [
+          "fy",
+          "ytd",
+          "thisMonthLastYear",
+          "lastMonth",
+          "thisMonth"
+        ]
+      },
+      "ScorecardChipsDto": {
+        "type": "object",
+        "properties": {
+          "manpower": {
+            "type": "number"
+          },
+          "agents": {
+            "type": "number"
+          },
+          "units": {
+            "type": "number"
+          },
+          "ab": {
+            "type": "number"
+          },
+          "aab": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "manpower",
+          "agents",
+          "units",
+          "ab",
+          "aab"
+        ]
+      },
+      "MonthlyTargetDto": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "example": "8 (1 @ unit)",
+            "description": "Typed by an editor; *TBD* is a value. Plain text."
+          },
+          "version": {
+            "type": "number",
+            "example": 1,
+            "description": "0 for a cell never typed."
+          }
+        },
+        "required": [
+          "value",
+          "version"
+        ]
+      },
+      "ScorecardRowDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "ape",
+              "manpower",
+              "flc",
+              "producing_agents",
+              "new_aa",
+              "new_agent_3m",
+              "avg_monthly_aa",
+              "case_submission",
+              "average_case_size"
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "idr_minor",
+              "count",
+              "percentage"
+            ]
+          },
+          "cells": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ScorecardCellDto"
+            },
+            "description": "One cell per column: fy, ytd, thisMonthLastYear, lastMonth, thisMonth."
+          },
+          "monthlyTarget": {
+            "nullable": true,
+            "description": "`null` where the prototype blocks the cell.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MonthlyTargetDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "unit",
+          "cells",
+          "monthlyTarget"
+        ]
+      },
+      "ScorecardDto": {
+        "type": "object",
+        "properties": {
+          "periods": {
+            "$ref": "#/components/schemas/ScorecardPeriodsDto"
+          },
+          "chips": {
+            "$ref": "#/components/schemas/ScorecardChipsDto"
+          },
+          "rows": {
+            "description": "Nine, in the prototype’s order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScorecardRowDto"
+            }
+          },
+          "frozenAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "`null` while the scorecard is computed on every read; the instant it was written onto the meeting otherwise."
+          }
+        },
+        "required": [
+          "periods",
+          "chips",
+          "rows",
+          "frozenAt"
+        ]
+      },
+      "AgendaItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "description": "Plain text."
+          },
+          "pic": {
+            "type": "string",
+            "description": "A name typed by hand; empty for none."
+          },
+          "done": {
+            "type": "boolean",
+            "description": "Meaningful on *During* only."
+          },
+          "version": {
+            "type": "number",
+            "example": 1
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "pic",
+          "done",
+          "version"
+        ]
+      },
+      "AgendaDto": {
+        "type": "object",
+        "properties": {
+          "preparation": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgendaItemDto"
+            }
+          },
+          "during": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgendaItemDto"
+            }
+          },
+          "post": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgendaItemDto"
+            }
+          }
+        },
+        "required": [
+          "preparation",
+          "during",
+          "post"
+        ]
+      },
+      "LeaderActionItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "initiative": {
+            "type": "string",
+            "description": "*Key initiative*."
+          },
+          "metric": {
+            "type": "string",
+            "description": "*Success metric*."
+          },
+          "action": {
+            "type": "string",
+            "description": "*Action item*."
+          },
+          "pic": {
+            "type": "string",
+            "description": "*PIC*."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_planned",
+              "planned",
+              "implemented"
+            ]
+          },
+          "remarks": {
+            "type": "string",
+            "description": "*Remarks / Target*."
+          },
+          "version": {
+            "type": "number",
+            "example": 1
+          }
+        },
+        "required": [
+          "id",
+          "initiative",
+          "metric",
+          "action",
+          "pic",
+          "status",
+          "remarks",
+          "version"
+        ]
+      },
+      "AccessNoteDto": {
+        "type": "object",
+        "properties": {
+          "ownerName": {
+            "type": "string",
+            "nullable": true,
+            "description": "The Owner’s name, now."
+          },
+          "adminNames": {
+            "description": "Each Admin’s name, now.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "ownerName",
+          "adminNames"
+        ]
+      },
+      "MeetingCanDto": {
+        "type": "object",
+        "properties": {
+          "edit": {
+            "type": "boolean"
+          },
+          "share": {
+            "type": "boolean"
+          },
+          "reschedule": {
+            "type": "boolean",
+            "description": "The dialog’s title and date: an upcoming meeting only."
+          },
+          "delete": {
+            "type": "boolean",
+            "description": "*Delete meeting*: one nobody has written in."
+          },
+          "manageTags": {
+            "type": "boolean",
+            "description": "*Manage tags →*."
+          },
+          "print": {
+            "type": "boolean",
+            "description": "*Save as PDF*: whoever reads the meeting."
+          }
+        },
+        "required": [
+          "edit",
+          "share",
+          "reschedule",
+          "delete",
+          "manageTags",
+          "print"
+        ]
+      },
+      "MeetingViewDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "number": {
+            "type": "number",
+            "example": 14,
+            "description": "One past the agency’s highest when it was made; never changed."
+          },
+          "title": {
+            "type": "string",
+            "example": "Strategic Check-in — #14",
+            "description": "Plain text: render it as text, never as markup."
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-10-13",
+            "description": "An office date, `YYYY-MM-DD`."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "upcoming",
+              "completed"
+            ],
+            "description": "*Upcoming* through the end of its date in the agency’s calendar, *Completed* from 00:00 after. Never stored."
+          },
+          "editors": {
+            "$ref": "#/components/schemas/MeetingEditorsDto"
+          },
+          "openItems": {
+            "type": "number",
+            "example": 4,
+            "description": "The tracker’s rows not *Implemented*; 0 reads *All clear*."
+          },
+          "version": {
+            "type": "number",
+            "example": 1,
+            "description": "The head’s version: the title and the date."
+          },
+          "branch": {
+            "type": "string",
+            "example": "BSD City Branch",
+            "description": "The agency’s branch: the share dialog’s hint names it."
+          },
+          "scorecard": {
+            "$ref": "#/components/schemas/ScorecardDto"
+          },
+          "agenda": {
+            "$ref": "#/components/schemas/AgendaDto"
+          },
+          "actionItems": {
+            "description": "In their order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaderActionItemDto"
+            }
+          },
+          "writtenIn": {
+            "type": "boolean",
+            "description": "False: nobody has written in it, so *Delete meeting* is offered."
+          },
+          "via": {
+            "type": "string",
+            "enum": [
+              "address",
+              "link"
+            ],
+            "description": "`link`: opened by a shared link, read-only."
+          },
+          "accessNote": {
+            "description": "Who may edit **now**, on every meeting, past ones included.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AccessNoteDto"
+              }
+            ]
+          },
+          "can": {
+            "$ref": "#/components/schemas/MeetingCanDto"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/ForumLimitsDto"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "title",
+          "date",
+          "state",
+          "editors",
+          "openItems",
+          "version",
+          "branch",
+          "scorecard",
+          "agenda",
+          "actionItems",
+          "writtenIn",
+          "via",
+          "accessNote",
+          "can",
+          "limits"
+        ]
+      },
+      "RescheduleLeaderMeetingDto": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "example": "Strategic Check-in — #14",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-10-14",
+            "description": "An office date, `YYYY-MM-DD`."
+          },
+          "version": {
+            "type": "number",
+            "example": 1,
+            "description": "The head’s `version` you read. Refused `409 VERSION_CONFLICT` once it has moved on."
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "AddAgendaItemDto": {
+        "type": "object",
+        "properties": {
+          "section": {
+            "type": "string",
+            "enum": [
+              "preparation",
+              "during",
+              "post"
+            ]
+          }
+        },
+        "required": [
+          "section"
+        ]
+      },
+      "SaveAgendaItemDto": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Plain text. Emptied, the item is removed."
+          },
+          "pic": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "A name typed by hand; empty for none."
+          },
+          "done": {
+            "type": "boolean",
+            "description": "The box, on *During* only."
+          },
+          "version": {
+            "type": "number",
+            "example": 1,
+            "description": "The item’s `version` you read."
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "AgendaItemSavedDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "pic": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "number"
+          },
+          "removed": {
+            "type": "number",
+            "enum": [
+              true
+            ],
+            "description": "Present, and true, when the item was removed: nothing else is."
+          }
+        }
+      },
+      "ReorderActionItemsDto": {
+        "type": "object",
+        "properties": {
+          "itemIds": {
+            "description": "Every row of the meeting, each once, in their new order.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "itemIds"
+        ]
+      },
+      "SaveActionItemDto": {
+        "type": "object",
+        "properties": {
+          "initiative": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "*Key initiative*."
+          },
+          "metric": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "*Success metric*."
+          },
+          "action": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "*Action item*."
+          },
+          "pic": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "*PIC*: a name typed by hand."
+          },
+          "remarks": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "*Remarks / Target*."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_planned",
+              "planned",
+              "implemented"
+            ],
+            "description": "*Not yet planned*, *Planned* or *Implemented*."
+          },
+          "version": {
+            "type": "number",
+            "example": 1,
+            "description": "The row’s `version` you read."
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "SaveMonthlyTargetDto": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "example": "8 (1 @ unit)",
+            "maxLength": 40,
+            "description": "Plain text; *TBD* is a value, empty clears it."
+          },
+          "version": {
+            "type": "number",
+            "example": 0,
+            "description": "The cell’s `version` you read: 0 for one never typed."
+          }
+        },
+        "required": [
+          "value",
+          "version"
+        ]
+      },
+      "MonthlyTargetSavedDto": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "example": "8 (1 @ unit)",
+            "description": "Typed by an editor; *TBD* is a value. Plain text."
+          },
+          "version": {
+            "type": "number",
+            "example": 1,
+            "description": "0 for a cell never typed."
+          }
+        },
+        "required": [
+          "value",
+          "version"
+        ]
+      },
+      "ShareLinkDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The raw token, in this answer and nowhere else: only its hash is kept."
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "The instant the link stops opening."
+          }
+        },
+        "required": [
+          "token",
+          "expiresAt"
+        ]
+      },
+      "ShareLinksRevokedDto": {
+        "type": "object",
+        "properties": {
+          "revoked": {
+            "type": "number",
+            "example": 2,
+            "description": "The live links to the meeting revoked by this request."
+          }
+        },
+        "required": [
+          "revoked"
+        ]
+      },
+      "StatusAckDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "verification_sent",
+              "verified",
+              "accepted",
+              "reset",
+              "changed",
+              "ended"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
       "CalendarPersonRowDto": {
         "type": "object",
         "properties": {
@@ -32945,25 +35261,6 @@
         "required": [
           "items",
           "page"
-        ]
-      },
-      "StatusAckDto": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "string",
-            "enum": [
-              "verification_sent",
-              "verified",
-              "accepted",
-              "reset",
-              "changed",
-              "ended"
-            ]
-          }
-        },
-        "required": [
-          "status"
         ]
       },
       "SessionDto": {
@@ -36136,6 +38433,35 @@
           "leftThisMonth",
           "signedIn7d",
           "signedIn30d"
+        ]
+      },
+      "ScorecardCellDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "figure",
+              "pending",
+              "none",
+              "blocked"
+            ],
+            "description": "`figure` a value; `pending` *pending data* — no source holds it for its period, never 0; `none` *—*, a ratio over nothing; `blocked`, as the prototype draws it."
+          },
+          "value": {
+            "type": "number",
+            "description": "On a `figure`: exact — IDR minor units, a count, or a whole percentage."
+          },
+          "leavesOut": {
+            "description": "On a `figure`: the months of its period, `YYYY-MM`, not uploaded yet.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "kind"
         ]
       }
     }

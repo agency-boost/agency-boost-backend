@@ -84,6 +84,10 @@ import {
 import { RecruitmentPlaybookSchema } from '@/modules/recruitment/recruitment-playbook.schema';
 import { PitchConfirmationSchema, RecruitmentPitchSlotSchema } from '@/modules/recruitment/recruitment-pitch.schema';
 import { KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
+import {
+  LeaderMeetingActionItemSchema, LeaderMeetingAgendaItemSchema, LeaderMeetingAgendaSchema, LeaderMeetingSchema,
+} from '@/modules/leader-meetings/leader-meeting.schema';
+import { LeaderMeetingShareLinkSchema } from '@/modules/leader-meetings/leader-meeting-share-link.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -135,6 +139,10 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['kpmRecruitmentPitchDocuments', RecruitmentPitchSlotSchema],
   // Phase 18 (D-recruit): an office's recruitment target per month, unique per (office, month), `kpmId`-led.
   ['kpmRecruitTargets', KpmRecruitTargetSchema],
+  // Phase 18.1 (D-forum-model, D-share): an office's leader meetings — the list by date, one number per live meeting —
+  // and the links that share one, opened by `(kpmId, tokenHash)`. Every index `kpmId`-led.
+  ['leaderMeetings', LeaderMeetingSchema],
+  ['leaderMeetingShareLinks', LeaderMeetingShareLinkSchema],
 ];
 
 /**
@@ -401,6 +409,21 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     PitchConfirmationSchema,
     'one tick of a pitch slot\'s checklist, inside the slot it confirms: no collection and no _id of its own',
   ],
+  [
+    'leaderMeetingAgenda (subdocument)',
+    LeaderMeetingAgendaSchema,
+    'a leader meeting\'s three agenda sections, inside the meeting: no collection and no _id of its own',
+  ],
+  [
+    'leaderMeetingAgendaItem (subdocument)',
+    LeaderMeetingAgendaItemSchema,
+    'one item of a meeting\'s agenda section, inside the meeting: no collection, and an item id of its own, not an _id',
+  ],
+  [
+    'leaderMeetingActionItem (subdocument)',
+    LeaderMeetingActionItemSchema,
+    'one row of a meeting\'s action items tracker, inside the meeting: no collection, and a row id, not an _id',
+  ],
 ];
 
 /**
@@ -521,6 +544,11 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [RecruitmentPitchSlotSchema, 'RecruitmentPitchSlotSchema'],
   [KpmRecruitTargetSchema, 'KpmRecruitTargetSchema'],
   [PitchConfirmationSchema, 'PitchConfirmationSchema'],
+  [LeaderMeetingSchema, 'LeaderMeetingSchema'],
+  [LeaderMeetingAgendaSchema, 'LeaderMeetingAgendaSchema'],
+  [LeaderMeetingAgendaItemSchema, 'LeaderMeetingAgendaItemSchema'],
+  [LeaderMeetingActionItemSchema, 'LeaderMeetingActionItemSchema'],
+  [LeaderMeetingShareLinkSchema, 'LeaderMeetingShareLinkSchema'],
 ]);
 
 function schemaExportName(schema: Schema): string {

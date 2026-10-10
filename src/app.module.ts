@@ -260,6 +260,18 @@ import { KpmAnalyticsService } from '@/modules/reporting/kpm-analytics.service';
 import { PlatformAnalyticsService } from '@/modules/reporting/platform-analytics.service';
 import { DirectoryColumns } from '@/modules/reporting/directory-columns';
 import { CarrierRules } from '@/modules/campaigns/carrier-rules';
+import { LeaderMeeting, LeaderMeetingSchema } from '@/modules/leader-meetings/leader-meeting.schema';
+import {
+  LeaderMeetingShareLink, LeaderMeetingShareLinkSchema,
+} from '@/modules/leader-meetings/leader-meeting-share-link.schema';
+import { LeaderMeetingRepository } from '@/modules/leader-meetings/leader-meeting.repository';
+import { LeaderMeetingShareLinkRepository } from '@/modules/leader-meetings/leader-meeting-share-link.repository';
+import { LeaderMeetingPeople } from '@/modules/leader-meetings/leader-meeting-people';
+import { LeaderMeetingsService } from '@/modules/leader-meetings/leader-meetings.service';
+import { LeaderMeetingMinutes } from '@/modules/leader-meetings/leader-meeting-minutes.service';
+import { LeaderMeetingSharing } from '@/modules/leader-meetings/leader-meeting-sharing.service';
+import { LeaderMeetingsController } from '@/modules/leader-meetings/leader-meetings.controller';
+import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/scorecard.module';
 
 @Module({
   imports: [
@@ -338,6 +350,9 @@ import { CarrierRules } from '@/modules/campaigns/carrier-rules';
       { name: RecruitmentPitchSlot.name, schema: RecruitmentPitchSlotSchema },
       // Phase 18: an office's recruitment target, month by month.
       { name: KpmRecruitTarget.name, schema: KpmRecruitTargetSchema },
+      // Phase 18.1: the office's leader meetings, and the links that share one read-only.
+      { name: LeaderMeeting.name, schema: LeaderMeetingSchema },
+      { name: LeaderMeetingShareLink.name, schema: LeaderMeetingShareLinkSchema },
     ]),
   ],
   controllers: [
@@ -391,6 +406,8 @@ import { CarrierRules } from '@/modules/campaigns/carrier-rules';
     KpmOverviewController,
     KpmAnalyticsController,
     PlatformAnalyticsController,
+    // Phase 18.1: the Strategic Leader Forum — the meetings, their minutes, and their shared links.
+    LeaderMeetingsController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -595,6 +612,18 @@ import { CarrierRules } from '@/modules/campaigns/carrier-rules';
     KpmAnalyticsService,
     PlatformAnalyticsService,
     DirectoryColumns,
+    /*
+     * Phase 18.1: the Strategic Leader Forum — the meetings' and the links' tenant repositories, who reads and edits
+     * (the tag is the list), the meetings, their minutes and their links, and the scorecard computed through Phase 18's
+     * readings, live until the meeting and frozen after.
+     */
+    LeaderMeetingRepository,
+    LeaderMeetingShareLinkRepository,
+    LeaderMeetingPeople,
+    LeaderMeetingsService,
+    LeaderMeetingMinutes,
+    LeaderMeetingSharing,
+    ...LEADER_SCORECARD_PROVIDERS,
   ],
   exports: [Clock, AuditService],
 })

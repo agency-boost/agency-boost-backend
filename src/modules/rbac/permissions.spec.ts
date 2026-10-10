@@ -232,10 +232,99 @@ describe('permission matrix', () => {
       expect(stale).toEqual([]);
     });
 
-    it('documents at least as many permissions as the code defines', () => {
-      const documented = new Set(doc.match(/`[a-z_]+:[a-z_]+`/g)?.map((m) => m.slice(1, -1)) ?? []);
-      const inCode = Object.keys(PERMISSIONS);
-      expect(documented.size).toBeGreaterThanOrEqual(inCode.length);
+    /**
+     * **Doc → code, by name** (the Phase 18.1 permission review, M2). This compared a count until then: the
+     * document had to name at least as many permissions as the code, which passed whatever the names were. Now
+     * every permission a row of §3's matrix names — struck rows included, a row's `(annotation)` aside — is in
+     * `PERMISSIONS`, or listed below with the one-line reason it is not.
+     */
+    const MATRIX = doc.slice(doc.indexOf('\n## 3. The permission matrix'), doc.indexOf('\n## 4. Navigation by role'));
+    const NAMED_IN_MATRIX = new Set(MATRIX.split('\n').flatMap((line) => {
+      if (!/^\| (~~)?`/.test(line)) return [];
+      const parts = line.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+      if (parts.length !== 7) return [];
+      const names = [...parts[0].replace(/\([^)]*\)/g, '').matchAll(/`([a-z_]+(?::[a-z_]+)?)`/g)].map((m) => m[1]);
+      if (names.length === 0) return [];
+      const namespace = names[0].split(':')[0];
+      return names.map((n, i) => (n.includes(':') || i === 0 ? n : `${namespace}:${n}`));
+    }));
+
+    const STRUCK = 'struck in §3: the row stays as the dated record of a permission that was removed or folded';
+    const DENIAL = 'a denial row, granted to nobody: there is no route for it to guard';
+    const DERIVED = 'derived from the read it inherits: no route of its own, and the reads answer for it';
+    const NOT_YET = 'Phase 18.5 — events, campaigns and training are built last (the product owner, 2026-10-08)';
+    const UNDECLARED = 'documented, and no route declares it: what it describes is guarded by another permission or not built';
+    /** Documented in §3 and deliberately not in `PERMISSIONS`. Adding to it without a reason is what it exists to prevent. */
+    const DOCUMENTED_NOT_IN_CODE: Record<string, string> = {
+      'leader_meeting:manage_coeditors': `${STRUCK} (D-coeditors: the Core Leader tag is the list)`,
+      'leader_meeting:export_pdf': `${DERIVED} (\`read\` and \`read_shared_link\`, \`can.print\`)`,
+      'export:any': DERIVED,
+      'member:invite': `${STRUCK} (P3.6-T1, the leader code replaced invites)`,
+      'member:revoke_invite': `${STRUCK} (P3.6-T1)`,
+      'org_tree:drill_to_unit_dashboard': `${STRUCK} (P15-T0, D-reach)`,
+      'coaching_note:write': STRUCK,
+      'coaching_session:share': STRUCK,
+      'rollup:recompute_backfill': STRUCK,
+      'attack_plan:generate': `${STRUCK} (OD-133: nothing is generated or stored)`,
+      'attack_plan:attach_to_lead': `${STRUCK} (OD-133)`,
+      'attack_plan:read_telemetry': `${STRUCK} (OD-133)`,
+      'sales_attack_plan:read': `${STRUCK} (folded into \`product_catalog:read\`, OD-133)`,
+      'activity_log:proxy_create': DENIAL,
+      'advanced_analytics:read': DENIAL,
+      'campaign_qualification:evaluate': `${DENIAL} (qualification is computed by the system)`,
+      'leader_request:decline': 'the decline route is guarded by `leader_request:approve`, which the same row names',
+      'impersonation:stop': 'ending a support session needs only the session: `POST /admin/impersonate/end` declares no permission',
+      'campaign:chase': NOT_YET,
+      'campaign:read_list': NOT_YET,
+      'campaign_payout:mark': NOT_YET,
+      'campaign_payout:reverse_paid': NOT_YET,
+      'campaign_qualification:override': NOT_YET,
+      'campaign_qualification:read': NOT_YET,
+      'company_campaign:crud': NOT_YET,
+      'company_campaign:hide': NOT_YET,
+      'company_event:crud': NOT_YET,
+      'company_event:hide': NOT_YET,
+      'event:read_list': NOT_YET,
+      'event:rsvp': NOT_YET,
+      'event:cancel_rsvp': NOT_YET,
+      'event_attendance:self_claim': NOT_YET,
+      'event_attendance:confirm': NOT_YET,
+      'event_feedback:submit': NOT_YET,
+      'event_feedback:read': NOT_YET,
+      'training_progress:read': NOT_YET,
+      'training_progress:update': NOT_YET,
+      'training_progress:verify': NOT_YET,
+      'member:list_directory': UNDECLARED,
+      'member:add_leader_by_code': UNDECLARED,
+      'member:reassign_leader': UNDECLARED,
+      'member:move_subtree': UNDECLARED,
+      'member:read_removed_log': UNDECLARED,
+      'member:restore_removed': UNDECLARED,
+      'kpm_registration:switch': UNDECLARED,
+      'kpm_registration:approve_switch': UNDECLARED,
+      'leader:switch': UNDECLARED,
+      'goal:set_kpm_defaults_and_floors': UNDECLARED,
+      'lead:reassign_owner': UNDECLARED,
+      'moc_evaluation:read': UNDECLARED,
+      'moc_rules:update': UNDECLARED,
+      'production_club_tiers:update': UNDECLARED,
+      'notification_preference:read': UNDECLARED,
+      'notification_defaults:update': UNDECLARED,
+    };
+
+    it('P18.1-T2 AC-1 every permission §3’s matrix names is in the code, or listed with why it is not (M2)', () => {
+      expect(NAMED_IN_MATRIX.size).toBeGreaterThan(Object.keys(PERMISSIONS).length);
+      const missing = [...NAMED_IN_MATRIX].filter((name) => !(name in PERMISSIONS) && !DOCUMENTED_NOT_IN_CODE[name]);
+      expect(missing).toEqual([]);
+    });
+
+    it('P18.1-T2 AC-1 lists nothing the code has since built or the matrix no longer names', () => {
+      const stale = Object.keys(DOCUMENTED_NOT_IN_CODE).filter((name) => name in PERMISSIONS || !NAMED_IN_MATRIX.has(name));
+      expect(stale).toEqual([]);
+    });
+
+    it('P18.1-T2 AC-1 the matrix names every permission of the code, by name', () => {
+      expect(Object.keys(PERMISSIONS).filter((name) => !NAMED_IN_MATRIX.has(name))).toEqual([]);
     });
   });
 
@@ -1108,6 +1197,89 @@ describe('permission matrix', () => {
     it('P18-T8 AC-1 the platform’s analytics is its own permission, apart from the overview’s counts', () => {
       expect(PERMISSIONS['platform_analytics:read']).not.toBe(PERMISSIONS['platform_metrics:read']);
       expect(Object.keys(PERMISSIONS)).toEqual(expect.arrayContaining(['platform_analytics:read', 'platform_metrics:read']));
+    });
+  });
+
+  /*
+   * **The forum's permissions, a positive and a negative per role** (P18.1-T2 AC-1, P18.1-T3 AC-1; roles §3.14 as
+   * answered). A field member's `own-kpm` here is the guard's half: the tag is the service's, which answers 404
+   * to a field member not tagged — `leader-meetings.int.spec.ts` proves it over HTTP, role by role.
+   */
+  describe('Phase 18.1 — the Strategic Leader Forum (roles §3.14)', () => {
+    const FORUM = [
+      'leader_meeting:read', 'leader_meeting:create', 'leader_meeting:reschedule', 'leader_meeting:delete',
+      'leader_meeting:edit', 'leader_meeting:share_link', 'leader_meeting:read_shared_link',
+    ] as const satisfies readonly Permission[];
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: ctx({ owner: true }),
+      KPM_ADMIN: ctx({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+    const OFFICE = { KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm' } as const;
+    const FIELD = { AB: 'own-kpm', AAB: 'own-kpm', AGENT: 'own-kpm' } as const;
+    const NO_FIELD = { AB: null, AAB: null, AGENT: null } as const;
+    const EXPECTED: Record<(typeof FORUM)[number], Record<string, Scope | null>> = {
+      'leader_meeting:read': { SUPER_ADMIN: 'all', ...OFFICE, ...FIELD },
+      'leader_meeting:create': { SUPER_ADMIN: null, ...OFFICE, ...NO_FIELD },
+      'leader_meeting:reschedule': { SUPER_ADMIN: null, ...OFFICE, ...NO_FIELD },
+      'leader_meeting:delete': { SUPER_ADMIN: null, ...OFFICE, ...NO_FIELD },
+      'leader_meeting:edit': { SUPER_ADMIN: null, ...OFFICE, ...FIELD },
+      'leader_meeting:share_link': { SUPER_ADMIN: null, ...OFFICE, ...FIELD },
+      'leader_meeting:read_shared_link': { SUPER_ADMIN: 'all', ...OFFICE, ...FIELD },
+    };
+    const cells = FORUM.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P18.1-T2 AC-1, P18.1-T3 AC-1 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P18.1-T2 AC-1, P18.1-T3 AC-1 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it('P18.1-T2 AC-1 manage_coeditors and export_pdf are no permission of the code (D-coeditors; export_pdf has no route)', () => {
+      expect(Object.keys(PERMISSIONS)).not.toContain('leader_meeting:manage_coeditors');
+      expect(Object.keys(PERMISSIONS)).not.toContain('leader_meeting:export_pdf');
+      expect(Object.keys(PERMISSIONS)).not.toContain('leader_meeting:list');
+    });
+
+    it('P18.1-T2 AC-1 a removed or pending field member holds none of them; nobody outside an office holds any', () => {
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) {
+          for (const permission of FORUM) expect([permission, can(ctx({ role, status }), permission)]).toEqual([permission, false]);
+        }
+      }
+      for (const permission of FORUM) expect(can(ctx({ noMembership: true }), permission)).toBe(false);
+    });
+
+    it('P18.1-T2 AC-1 a read-only support session reads a meeting and a link, and is refused every write', () => {
+      expect(FORUM.filter((p) => isReadLike(p))).toEqual(['leader_meeting:read', 'leader_meeting:read_shared_link']);
+      for (const target of [{ owner: true }, { admin: true }, { role: 'ab' as const }, { role: 'agent' as const }]) {
+        const readOnly = ctx({ ...target, impersonatedBy: 'sa-1', readOnly: true });
+        expect(can(readOnly, 'leader_meeting:read')).toBe(true);
+        expect(can(readOnly, 'leader_meeting:read_shared_link')).toBe(true);
+        for (const write of FORUM.filter((p) => !isReadLike(p))) expect([write, can(readOnly, write)]).toEqual([write, false]);
+      }
+    });
+
+    it('P18.1-T2 AC-1 an elevated session writes as its member: none of the forum is on the hard-blocked list', () => {
+      const elevated = ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: false });
+      for (const permission of FORUM) {
+        expect(isBlockedWhileImpersonating(permission)).toBe(false);
+        expect(can(elevated, permission)).toBe(true);
+      }
+      expect(FORUM.some((p) => isOwnerReserved(p))).toBe(false);
     });
   });
 

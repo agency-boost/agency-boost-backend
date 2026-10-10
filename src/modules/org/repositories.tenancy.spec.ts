@@ -44,6 +44,9 @@ const TENANT_SCOPED_MODELS = [
   'RecruitmentPitchSlot',
   // Phase 18 (D-recruit): an office's recruitment target per month, from the day the collection exists.
   'KpmRecruitTarget',
+  // Phase 18.1 (D-forum-model, D-share): an office's leader meetings and their shared links, from the day they exist.
+  'LeaderMeeting',
+  'LeaderMeetingShareLink',
 ];
 
 /**
@@ -88,6 +91,8 @@ const ALLOWED = new Map<string, string>([
   ['coaching/coaching-session.repository.ts', 'the repository for that model'],
   ['recruitment/recruitment-pitch.repository.ts', 'the repository for that model'],
   ['reporting/kpm-recruit-target.repository.ts', 'the repository for that model'],
+  ['leader-meetings/leader-meeting.repository.ts', 'the repository for that model'],
+  ['leader-meetings/leader-meeting-share-link.repository.ts', 'the repository for that model'],
   [
     'config/provisioning.service.ts',
     'writes into an office being created, before any context is scoped to it',

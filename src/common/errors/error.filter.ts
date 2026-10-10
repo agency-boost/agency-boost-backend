@@ -5,6 +5,7 @@ import { Request, Response } from 'express';
 import { DomainException } from './domain.exception';
 import { ErrorCode } from './error-codes';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
+import { redactUrl } from '@/common/logging/redact-url';
 
 interface ErrorEnvelope {
   error: {
@@ -35,7 +36,8 @@ export class DomainExceptionFilter implements ExceptionFilter {
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(
-        { requestId, path: req.url, err: exception },
+        // A shared link's token is in its path, and never reaches a log (ADR-0131 §1).
+        { requestId, path: redactUrl(req.url), err: exception },
         'unhandled error serving request',
       );
     }

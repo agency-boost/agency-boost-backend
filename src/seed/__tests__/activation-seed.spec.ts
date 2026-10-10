@@ -6,6 +6,7 @@ import type { ActivationView } from '@/modules/activation/activation-progress.vi
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { SARI_NOTE_TO_RINA } from '../activation-fixture';
+import { COHORT_HIRES } from '../cohort-fixture';
 import { seedDemo, type SeedResult } from '../demo';
 
 /**
@@ -57,7 +58,8 @@ describe.each([
 
   it('Seed: nine activations, dated from the office’s today, each pinned to its office’s published checklist', async () => {
     expect(first.activation.today).toBe(today);
-    expect(first.written.activationProgress).toBe(9);
+    // Phase 18.1's cohort adds the twelve graduated long ago, written beside these nine (`cohort-fixture.ts`).
+    expect(first.written.activationProgress).toBe(9 + COHORT_HIRES.length);
     expect(first.activation.activations.every((a) => a.templateVersion === 1 && a.items.length === 16 && a.origin === 'backfill')).toBe(true);
   });
 

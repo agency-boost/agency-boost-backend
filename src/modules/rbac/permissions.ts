@@ -859,6 +859,66 @@ export const PERMISSIONS = {
    */
   'platform_analytics:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
 
+  /*
+   * ---- The Strategic Leader Forum (Phase 18.1; roles §3.14, `functional/leader-forum.md`). ----
+   *
+   * **The tag is the list** (D-coeditors, roles §1.4): the Owner and the Admins read and write every meeting of
+   * the office whatever their tag; an AB, an AAB or an Agent holds `read`, `edit` and `share_link` here at
+   * `own-kpm`, which lets the request through the guard, and **the forum's service answers `404 NOT_FOUND` to one
+   * not tagged *Core Leader*** — on every route, the list included — because the tag is a fact of the membership
+   * read on each request, not of the context, and a refusal must never confirm that a meeting exists.
+   *
+   * Making, moving and deleting a meeting are the Owner's and the Admins' alone (ADR-0130 §6). A shared link opens
+   * for **every** member of the office, any rung, tagged or not (ADR-0131 §5); `read_shared_link` grants nothing
+   * without a live link. The Super Admin's `all` on the two reads is not access on its own: every route resolves
+   * the office from the caller's membership, so one reads a meeting only inside a support session, as its member,
+   * and is answered `TENANT_NO_MEMBERSHIP` outside one. A read-only session reads by the verbs and writes nothing.
+   * `manage_coeditors` is struck (D-coeditors), and `export_pdf` has no route: it inherits the two reads, which
+   * answer `can.print`.
+   */
+  'leader_meeting:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-kpm' },
+    { grantee: AAB, scope: 'own-kpm' },
+    { grantee: AGENT, scope: 'own-kpm' },
+  ],
+  'leader_meeting:create': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  'leader_meeting:reschedule': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  'leader_meeting:delete': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  'leader_meeting:edit': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-kpm' },
+    { grantee: AAB, scope: 'own-kpm' },
+    { grantee: AGENT, scope: 'own-kpm' },
+  ],
+  'leader_meeting:share_link': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-kpm' },
+    { grantee: AAB, scope: 'own-kpm' },
+    { grantee: AGENT, scope: 'own-kpm' },
+  ],
+  'leader_meeting:read_shared_link': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-kpm' },
+    { grantee: AAB, scope: 'own-kpm' },
+    { grantee: AGENT, scope: 'own-kpm' },
+  ],
+
   // ---- Membership. ----
   'member:read_profile': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },

@@ -63,7 +63,9 @@ describe('the metric registry (P4-T4)', () => {
        * D1 — production, not activity — and rescues D2 and D3 under their own names.
        */
       const activeish = METRIC_IDS.filter((id) => id.includes('ACTIVE_AGENT'));
-      expect(activeish.sort()).toEqual(['MONTHLY_ACTIVE_AGENT', 'NEW_ACTIVE_AGENTS']);
+      // P18.1-T1: *New AA (avg. monthly)* averages the file's `NEW_ACTIVE_AGENTS`, the carrier's count, over months —
+      // it defines no *active* of its own, and its name says whose figure it averages.
+      expect(activeish.sort()).toEqual(['MONTHLY_ACTIVE_AGENT', 'NEW_ACTIVE_AGENTS', 'NEW_ACTIVE_AGENTS_MONTHLY_AVG']);
       // And the engagement measure is not called an active agent anywhere.
       expect(metric('ACTIVITY_COMPLIANCE_MONTH').label).toBe('Activity-logging compliance, this month');
     });
@@ -273,6 +275,14 @@ describe('the metric registry (P4-T4)', () => {
       MONTHLY2_AA_DG: 18,
       DIRECT_AB_COUNT: 18,
       MOC_PERSISTENCY: 18,
+      // P18.1-T1 (D-cohort, OD-144): the Strategic Leader Forum's scorecard, and the cohort it reads.
+      ACTIVATION_COHORT: 18.1,
+      NEW_AGENT_3M_ACTIVE_PCT: 18.1,
+      NEW_ACTIVE_AGENTS_MONTHLY_AVG: 18.1,
+      PRODUCING_AGENTS: 18.1,
+      MAA_MONTHLY_AVG: 18.1,
+      CASE_SUBMISSIONS: 18.1,
+      AVERAGE_CASE_SIZE_REALISED: 18.1,
     };
     const existedBefore = (id: string) => !(id in REGISTERED_SINCE);
 
@@ -312,7 +322,7 @@ describe('the metric registry (P4-T4)', () => {
       // And no phase that plan gave no metric to: an old-plan 12 left behind would have read as
       // Calendar's, 16 was Billing, 17 Recruitment tools, 19 go-live. Today's set is pinned below.
       const phases = [...new Set(METRIC_IDS.map(sept29Phase))].sort((a, b) => a - b);
-      expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 14, 15, 18]);
+      expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 14, 15, 18, 18.1]);
     });
 
     it('evaluated campaigns in Phase 14 under that plan, the old plan’s 12: where campaign qualification is computed', () => {
@@ -340,7 +350,10 @@ describe('the metric registry (P4-T4)', () => {
       // requirement's.
       expect(SERVED.filter((m) => !REQUIREMENT_METRICS.includes(m)).map((m) => m.key).sort()).toEqual([
         'LEADERS_USED', 'OFFICE_HEADCOUNT', 'OFFICE_NEW_MEMBERS_THIS_MONTH',
-      ]);
+        // Since Phase 18.1 the forum's seven, each computed over an office alone (P18.1-T1 AC-4).
+        'ACTIVATION_COHORT', 'AVERAGE_CASE_SIZE_REALISED', 'CASE_SUBMISSIONS', 'MAA_MONTHLY_AVG',
+        'NEW_ACTIVE_AGENTS_MONTHLY_AVG', 'NEW_AGENT_3M_ACTIVE_PCT', 'PRODUCING_AGENTS',
+      ].sort());
     });
 
     it('refused, by key, the seven nothing measured by then under that plan', () => {
@@ -379,7 +392,7 @@ describe('the metric registry (P4-T4)', () => {
         // And no phase the plan gives no metric to. Phase 14 is Sales tools now and computes none;
         // 12 is Calendar's, 16 is retired, 17 Recruitment tools, 19 hardening.
         const phases = [...new Set(METRIC_IDS.map((id) => metric(id).phase))].sort((a, b) => a - b);
-        expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 15, 18, 18.5]);
+        expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 15, 18, 18.1, 18.5]);
       });
 
       it('pins, by key, every metric measured by the time a campaign is evaluated: all of them', () => {
@@ -519,6 +532,51 @@ describe('the metric registry (P4-T4)', () => {
 
     it('P18-T1 AC-5 reads LEADER_COACHING_FREQUENCY over the last 7 days, as the leaderboard does', () => {
       expect(metric('LEADER_COACHING_FREQUENCY').period).toBe('ROLLING_7D');
+    });
+  });
+
+  describe('P18.1-T1 AC-4 — the forum registers the cohort and the scorecard’s metrics before it serves them (D-cohort, OD-144)', () => {
+    const FORUM: Record<string, { label: string; unit: string; period: string }> = {
+      ACTIVATION_COHORT: { label: 'Activation cohort', unit: 'count', period: 'CALENDAR_YEAR' },
+      NEW_AGENT_3M_ACTIVE_PCT: { label: '3M new agent %', unit: 'percentage', period: 'CALENDAR_YEAR' },
+      NEW_ACTIVE_AGENTS_MONTHLY_AVG: { label: 'New AA (avg. monthly)', unit: 'count', period: 'CALENDAR_MONTH' },
+      PRODUCING_AGENTS: { label: 'Producing agents', unit: 'count', period: 'CALENDAR_YEAR' },
+      MAA_MONTHLY_AVG: { label: 'Avg. Monthly AA', unit: 'count', period: 'CALENDAR_MONTH' },
+      CASE_SUBMISSIONS: { label: 'Case submission', unit: 'count', period: 'CALENDAR_MONTH' },
+      AVERAGE_CASE_SIZE_REALISED: { label: 'Average Case Size', unit: 'idr_minor', period: 'CALENDAR_YEAR' },
+    };
+
+    it('P18.1-T1 AC-4 registers the seven at Phase 18.1, each with its period, its unit, the prototype’s name and no threshold', () => {
+      for (const [id, want] of Object.entries(FORUM)) {
+        expect(metric(id)).toEqual({ id, ...want, phase: 18.1, threshold: null });
+      }
+      // And nothing else is Phase 18.1's.
+      expect(METRIC_IDS.filter((id) => metric(id).phase === 18.1).sort()).toEqual(Object.keys(FORUM).sort());
+    });
+
+    it('P18.1-T1 AC-4 the three the prototype draws over FY and YTD alone, and the cohort, are a year’s; the three in every column a month’s', () => {
+      // Blocked to the right of *YTD* (`KPM_Owner.html:2465`, `:2468`, `:2472`): a year, or a year to date.
+      for (const id of ['PRODUCING_AGENTS', 'NEW_AGENT_3M_ACTIVE_PCT', 'AVERAGE_CASE_SIZE_REALISED', 'ACTIVATION_COHORT']) {
+        expect([id, metric(id).period]).toEqual([id, 'CALENDAR_YEAR']);
+      }
+      for (const id of ['NEW_ACTIVE_AGENTS_MONTHLY_AVG', 'MAA_MONTHLY_AVG', 'CASE_SUBMISSIONS']) {
+        expect([id, metric(id).period]).toEqual([id, metric('NEW_ACTIVE_AGENTS').period]);
+      }
+    });
+
+    it('P18.1-T1 AC-4 keeps all seven out of every requirement: each is computed over an office alone', () => {
+      const requirable = REQUIREMENT_METRICS.map((m) => m.key);
+      for (const id of Object.keys(FORUM)) {
+        expect([id, SERVED.find((m) => m.key === id)?.requirable, requirable.includes(id)]).toEqual([id, false, false]);
+      }
+      // Measured before campaigns are evaluated, so nothing is refused as not measured yet.
+      expect(Math.max(...Object.keys(FORUM).map((id) => metric(id).phase))).toBeLessThan(CAMPAIGN_EVALUATION_PHASE);
+    });
+
+    it('P18.1-T1 AC-4 names the realised case size apart from the plan’s, and the averages by what they average', () => {
+      expect(metric('AVERAGE_CASE_SIZE_REALISED').unit).toBe(metric('APE_ACHIEVED').unit);
+      expect(metric('NEW_ACTIVE_AGENTS_MONTHLY_AVG').label).toMatch(/avg\. monthly/);
+      expect(metric('MAA_MONTHLY_AVG').label).toMatch(/^Avg\. Monthly AA$/);
     });
   });
 

@@ -156,6 +156,22 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'MONTHLY2_AA_DG', name: 'Monthly2 AA, Direct Group', unit: 'count', phase: 18 },
   { key: 'DIRECT_AB_COUNT', name: 'Direct AB (AB on AB)', unit: 'count', phase: 18 },
   { key: 'MOC_PERSISTENCY', name: 'MOC rolling persistency', unit: 'percentage', phase: 18 },
+  /*
+   * Phase 18.1 (P18.1-T1 AC-1, AC-4; D-cohort, OD-144): the Strategic Leader Forum's scorecard, and the activation
+   * cohort two of its rows read. Each is computed once under `domain/metrics/` (`activation-cohort.ts`,
+   * `producing-agents.ts`, `held-months.ts`) and pinned there.
+   *
+   * **All seven are `requirable: false`**, as the office's headcount is: each is computed over an office — the
+   * scorecard is the office's, `functional/leader-forum.md` — and nothing computes one for a member, so a requirement
+   * naming one could never be evaluated for anybody.
+   */
+  { key: 'ACTIVATION_COHORT', name: 'Activation cohort', unit: 'count', phase: 18.1, requirable: false },
+  { key: 'NEW_AGENT_3M_ACTIVE_PCT', name: '3M new agent %', unit: 'percentage', phase: 18.1, requirable: false },
+  { key: 'NEW_ACTIVE_AGENTS_MONTHLY_AVG', name: 'New AA (avg. monthly)', unit: 'count', phase: 18.1, requirable: false },
+  { key: 'PRODUCING_AGENTS', name: 'Producing agents', unit: 'count', phase: 18.1, requirable: false },
+  { key: 'MAA_MONTHLY_AVG', name: 'Avg. Monthly AA', unit: 'count', phase: 18.1, requirable: false },
+  { key: 'CASE_SUBMISSIONS', name: 'Case submission', unit: 'count', phase: 18.1, requirable: false },
+  { key: 'AVERAGE_CASE_SIZE_REALISED', name: 'Average Case Size', unit: 'idr_minor', phase: 18.1, requirable: false },
 ];
 
 export const metricByKey = (key: string): MetricDefinition | undefined =>
@@ -235,6 +251,13 @@ export const SEED_PRODUCTION_CLUB_TIERS = [
  * lacked it until migration `0026-moc-persistency` added it (P18-T2, D-moc).
  */
 export const MOC_PERSISTENCY_MIN_PCT = 75;
+
+/**
+ * `NEW_AGENT_ACTIVE_MONTHS` (Phase 18.1, D-cohort): the months `NEW_AGENT_3M_ACTIVE_PCT` reads of a hire — **the
+ * start month and the three after it**, the prototype's *"their join month or the following three months"*
+ * (`KPM_Owner.html:2474`). Calendar months in the office's zone, each read from the office's file. Fixed.
+ */
+export const NEW_AGENT_ACTIVE_MONTHS = 4;
 
 /**
  * Maintenance of Contract, as the carrier states it (ADR-0026, P5-T7 AC-6).

@@ -214,8 +214,9 @@ export class OrgController {
   @ApiOperation({
     summary: 'Set this person’s groups and Core Leader flag',
     description:
-      'Core Leader is for Strategic Leader Forum co-editing, which is not built yet, and nothing ' +
-      'else — no hierarchy, no data scope. A group is the same: a label, not a rule.',
+      'Core Leader decides who, besides the Owner and the Admins, may open and write in the Strategic ' +
+      'Leader Forum’s meetings, and nothing else — no hierarchy, no data scope. A group is the same: a ' +
+      'label, not a rule.',
   })
   async tagMember(
     @Ctx() ctx: RequestContext,

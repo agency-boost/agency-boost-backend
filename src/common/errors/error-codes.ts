@@ -301,6 +301,16 @@ export const ErrorCode = {
    */
   TEMPLATE_RUNG_UNKNOWN: 'TEMPLATE_RUNG_UNKNOWN',
 
+  /*
+   * The Strategic Leader Forum (Phase 18.1; `functional/leader-forum.md`, *Errors*). Everything outside a
+   * reader's reach is `NOT_FOUND`, never a forum code: another office's meeting or link, a deleted meeting, an
+   * unknown, expired or revoked link, and every route for a field member not tagged *Core Leader*.
+   */
+  /** A move of a meeting once it is *Completed*: its date is the day its scorecard was frozen for (ADR-0130 §4). `409`. */
+  LEADER_MEETING_COMPLETED: 'LEADER_MEETING_COMPLETED',
+  /** A delete of a meeting somebody has written in — a meeting with minutes is never removed (ADR-0130 §5). `409`. */
+  LEADER_MEETING_HAS_MINUTES: 'LEADER_MEETING_HAS_MINUTES',
+
   // Validation
   VALIDATION_FAILED: 'VALIDATION_FAILED',
   VALIDATION_UNKNOWN_FIELD: 'VALIDATION_UNKNOWN_FIELD',

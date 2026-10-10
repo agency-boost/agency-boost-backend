@@ -82,6 +82,10 @@ import {
 } from '@/modules/activation/activation-progress.schema';
 import { RecruitmentPlaybookSchema } from '@/modules/recruitment/recruitment-playbook.schema';
 import { PitchConfirmationSchema, RecruitmentPitchSlotSchema } from '@/modules/recruitment/recruitment-pitch.schema';
+import {
+  LeaderMeetingActionItemSchema, LeaderMeetingAgendaItemSchema, LeaderMeetingAgendaSchema, LeaderMeetingSchema,
+} from '@/modules/leader-meetings/leader-meeting.schema';
+import { LeaderMeetingShareLinkSchema } from '@/modules/leader-meetings/leader-meeting-share-link.schema';
 import { KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
 
 /**
@@ -148,6 +152,10 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['kpmRecruitmentPitchDocuments', RecruitmentPitchSlotSchema],
   // Phase 18 (D-recruit): an office's recruitment target per month, unique per (office, month), `kpmId`-led.
   ['kpmRecruitTargets', KpmRecruitTargetSchema],
+  // Phase 18.1. *Delete meeting* writes `deletedAt` (ADR-0130 §5); a link expires or is revoked and stays the record
+  // of who shared what (ADR-0131 §4). P19-T1's erasure cascade reaches both.
+  ['leaderMeetings', LeaderMeetingSchema],
+  ['leaderMeetingShareLinks', LeaderMeetingShareLinkSchema],
 ];
 
 /**
@@ -364,6 +372,23 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     'one tick of a pitch slot\'s checklist: cleared by the next attach or an untick, inside the slot it '
       + 'belongs to, which is soft-deleted whole',
   ],
+  [
+    'leaderMeetingAgenda (subdocument)',
+    LeaderMeetingAgendaSchema,
+    'a meeting\'s three agenda sections, inside the meeting, which is soft-deleted whole',
+  ],
+  [
+    'leaderMeetingAgendaItem (subdocument)',
+    LeaderMeetingAgendaItemSchema,
+    'an agenda item is removed by emptying its text, as the prototype has no remove (D-forum-model): the audit '
+      + 'row keeps what it was, and the meeting holding it is soft-deleted whole',
+  ],
+  [
+    'leaderMeetingActionItem (subdocument)',
+    LeaderMeetingActionItemSchema,
+    'a tracker row is removed by its × as drawn (`KPM_Owner.html:2867`): the audit row keeps what it was, and '
+      + 'the meeting holding it is soft-deleted whole',
+  ],
 ];
 
 const EXPORT_NAMES = new Map<Schema, string>([
@@ -452,6 +477,11 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [RecruitmentPitchSlotSchema, 'RecruitmentPitchSlotSchema'],
   [KpmRecruitTargetSchema, 'KpmRecruitTargetSchema'],
   [PitchConfirmationSchema, 'PitchConfirmationSchema'],
+  [LeaderMeetingSchema, 'LeaderMeetingSchema'],
+  [LeaderMeetingAgendaSchema, 'LeaderMeetingAgendaSchema'],
+  [LeaderMeetingAgendaItemSchema, 'LeaderMeetingAgendaItemSchema'],
+  [LeaderMeetingActionItemSchema, 'LeaderMeetingActionItemSchema'],
+  [LeaderMeetingShareLinkSchema, 'LeaderMeetingShareLinkSchema'],
 ]);
 
 describe('soft delete', () => {

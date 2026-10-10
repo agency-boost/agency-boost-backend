@@ -90,6 +90,10 @@ import {
   CalendarDeletedDto, CalendarDownlineDto, CalendarEntryDto, CalendarPeoplePageDto, CalendarPeriodDto,
   CalendarSettingsDto,
 } from '@/modules/calendar/calendar.response.dto';
+import {
+  AgendaItemDto, AgendaItemSavedDto, LEADER_FORUM_SHARED_SHAPES, LeaderActionItemDto, MeetingCardDto, MeetingListViewDto,
+  MeetingViewDto, MonthlyTargetSavedDto, ShareLinkDto, ShareLinksRevokedDto,
+} from '@/modules/leader-meetings/leader-meetings.response.dto';
 
 export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // P6: what an agent did, day by day.
@@ -109,6 +113,23 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   KpmOverviewController_setRecruitTarget: { type: RecruitTargetDto },
   KpmAnalyticsController_read: { type: KpmAnalyticsDto },
   PlatformAnalyticsController_read: { type: PlatformAnalyticsDto },
+  // Phase 18.1: the Strategic Leader Forum — the meetings, their minutes, and their shared links.
+  LeaderMeetingsController_list: { type: MeetingListViewDto },
+  LeaderMeetingsController_create: { type: MeetingCardDto },
+  LeaderMeetingsController_openShared: { type: MeetingViewDto },
+  LeaderMeetingsController_read: { type: MeetingViewDto },
+  LeaderMeetingsController_reschedule: { type: MeetingCardDto },
+  // 204: nothing comes back; the entry is the table's placeholder, as `AuthController_logout`'s is.
+  LeaderMeetingsController_remove: { type: StatusAckDto },
+  LeaderMeetingsController_addAgendaItem: { type: AgendaItemDto },
+  LeaderMeetingsController_saveAgendaItem: { type: AgendaItemSavedDto },
+  LeaderMeetingsController_addActionItem: { type: LeaderActionItemDto },
+  LeaderMeetingsController_reorderActionItems: { type: LeaderActionItemDto, isArray: true },
+  LeaderMeetingsController_saveActionItem: { type: LeaderActionItemDto },
+  LeaderMeetingsController_removeActionItem: { type: StatusAckDto },
+  LeaderMeetingsController_saveMonthlyTarget: { type: MonthlyTargetSavedDto },
+  LeaderMeetingsController_share: { type: ShareLinkDto },
+  LeaderMeetingsController_stopSharing: { type: ShareLinksRevokedDto },
   // P11-T6: the coaching roster. P11-T7: the person a coaching page opens on.
   CoachingController_coachees: { type: CoachingRosterDto },
   CoachingController_coachee: { type: CoacheeDto },
@@ -392,7 +413,11 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
  * Shapes no operation names whole but a client pairs by name: the adoption every row of *Cross-platform analytics*
  * extends (Phase 18), so the frontend's contract spec can pair its `Adoption` with one schema.
  */
-const SHARED_SHAPES: Type<unknown>[] = [AdoptionDto];
+const SHARED_SHAPES: Type<unknown>[] = [
+  AdoptionDto,
+  // Phase 18.1: a scorecard cell, which a row's `cells` names by reference rather than nesting a class.
+  ...LEADER_FORUM_SHARED_SHAPES,
+];
 
 /** Every class the table names, so Swagger emits a schema for each. */
 export const RESPONSE_MODELS: Type<unknown>[] = [
