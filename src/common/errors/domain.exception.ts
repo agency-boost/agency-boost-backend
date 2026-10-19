@@ -36,17 +36,6 @@ export class PermissionDeniedException extends DomainException {
   }
 }
 
-export class OutOfScopeException extends DomainException {
-  constructor(details?: Record<string, unknown>) {
-    super(
-      ErrorCode.PERM_OUT_OF_SCOPE,
-      `That person is outside your unit.`,
-      HttpStatus.FORBIDDEN,
-      details,
-    );
-  }
-}
-
 export class TenantSuspendedException extends DomainException {
   constructor() {
     super(

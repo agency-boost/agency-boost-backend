@@ -10,7 +10,12 @@ export type NotificationChannel = 'in_app' | 'email';
 
 export const NOTIFICATION_CHANNELS: readonly NotificationChannel[] = ['in_app', 'email'] as const;
 
-export type DeliveryStatus = 'pending' | 'sent' | 'failed' | 'suppressed';
+/**
+ * Where one channel's delivery stands. **`held`** is a coalesced notice's email, kept back until the
+ * coaching session it belongs to is finalized and then sent once (`functional/coaching.md`, *One notice
+ * per session*); `pending` is that email claimed for sending, between the claim and the adapter's answer.
+ */
+export type DeliveryStatus = 'pending' | 'held' | 'sent' | 'failed' | 'suppressed';
 
 /**
  * Every template the product sends. Adding one here forces a decision about which
@@ -23,9 +28,40 @@ export const NotificationTemplate = {
   MEMBER_TAGGED_BY_LEADER: 'member.tagged_by_leader',
   MEMBER_REMOVED: 'member.removed',
   ROLE_CHANGED: 'member.role_changed',
-  GOAL_PROPOSED_BY_LEADER: 'goal.proposed_by_leader',
+  ADMIN_ACCESS_CHANGED: 'member.admin_access_changed',
+  /**
+   * A leader set somebody's goal (§3.6, ADR-0046).
+   *
+   * **This was `GOAL_PROPOSED_BY_LEADER: 'goal.proposed_by_leader'` until 2026-09-26** — the
+   * fourth artefact written from OD-09's *propose and accept* recommendation before anything
+   * ratified it, after `goals.acceptedByAgentAt`, `GOAL_ACCEPTANCE_REQUIRED`, and the spec's own
+   * permission table. ADR-0046 settled it the other way: a leader sets the goal directly, and what
+   * the agent is owed is knowing.
+   *
+   * It is renamed rather than left alone because **the copy is what a person reads**, and the old
+   * copy told them to *accept* something no screen offers. Nothing had ever written the old id —
+   * no service, no seed, no fixture — so there are no rows to migrate.
+   */
+  GOAL_SET_BY_LEADER: 'goal.set_by_leader',
   COACHING_SESSION_FINALIZED: 'coaching.session_finalized',
+  /*
+   * The calendar's three (ADR-0095; `functional/calendar.md`, *Notifications*): an invitation to each
+   * invitee added, a block to the member it was placed on, and a change — moved or cancelled — to each
+   * attendee of a future entry. The payload is ids and the entry's office date, never anything typed.
+   */
+  CALENDAR_INVITATION: 'calendar.invitation',
+  CALENDAR_BLOCK_PLACED: 'calendar.block_placed',
+  CALENDAR_ENTRY_CHANGED: 'calendar.entry_changed',
   EVENT_REMINDER: 'event.reminder',
+  /*
+   * A support session, announced to the person and their Owner (§3.13, P4-T10).
+   *
+   * `in_app` **and** email, deliberately: this is the one class of notification whose
+   * whole purpose is that it cannot be missed, and the inbox is only read by somebody who
+   * opens the product.
+   */
+  IMPERSONATION_STARTED: 'impersonation.started',
+  IMPERSONATION_ELEVATED: 'impersonation.elevated',
   EMAIL_VERIFICATION: 'auth.email_verification',
   PASSWORD_RESET: 'auth.password_reset',
 } as const;
@@ -48,9 +84,16 @@ export const TEMPLATE_CHANNELS: Record<NotificationTemplateId, readonly Notifica
   [NotificationTemplate.MEMBER_TAGGED_BY_LEADER]: ['in_app', 'email'],
   [NotificationTemplate.MEMBER_REMOVED]: ['in_app', 'email'],
   [NotificationTemplate.ROLE_CHANGED]: ['in_app', 'email'],
-  [NotificationTemplate.GOAL_PROPOSED_BY_LEADER]: ['in_app', 'email'],
+  [NotificationTemplate.ADMIN_ACCESS_CHANGED]: ['in_app', 'email'],
+  [NotificationTemplate.GOAL_SET_BY_LEADER]: ['in_app', 'email'],
   [NotificationTemplate.COACHING_SESSION_FINALIZED]: ['in_app'],
+  // The inbox always, as ADR-0010's authoritative channel; email by the member's preferences.
+  [NotificationTemplate.CALENDAR_INVITATION]: ['in_app', 'email'],
+  [NotificationTemplate.CALENDAR_BLOCK_PLACED]: ['in_app', 'email'],
+  [NotificationTemplate.CALENDAR_ENTRY_CHANGED]: ['in_app', 'email'],
   [NotificationTemplate.EVENT_REMINDER]: ['in_app', 'email'],
+  [NotificationTemplate.IMPERSONATION_STARTED]: ['in_app', 'email'],
+  [NotificationTemplate.IMPERSONATION_ELEVATED]: ['in_app', 'email'],
   [NotificationTemplate.EMAIL_VERIFICATION]: ['email'],
   [NotificationTemplate.PASSWORD_RESET]: ['email'],
 };

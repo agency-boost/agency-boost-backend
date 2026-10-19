@@ -10,16 +10,36 @@ import { NotificationService } from '@/modules/notifications/notification.servic
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
+import { isEnded } from '@/modules/tenants/subscription';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { HierarchyService } from './hierarchy.service';
-import { JoinRequest, JoinRequestDocument } from './join-request.schema';
+import { JoinRequestRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { MembershipDocument } from './membership.schema';
+
+/** How many offices one directory search answers. */
+const DIRECTORY_PAGE = 50;
+
+/**
+ * The zone whose today is the earliest anywhere (UTC−12): an end date before **its** today has passed
+ * in every office's zone, so the directory's query can drop it without knowing which zone an office
+ * keeps (`Etc/GMT+12` is UTC−12 — the IANA sign is inverted).
+ */
+const EARLIEST_ZONE = 'Etc/GMT+12';
 
 export interface KpmDirectoryEntry {
   kpmId: string;
   code: string;
   branchName: string;
+  /**
+   * The insurer, named and identified.
+   *
+   * The id travels because somebody whose branch is not on the platform has to say which
+   * company they would belong to, and the directory is the only place a newcomer can
+   * learn which companies exist. It names no office and leaks nothing an outsider could
+   * not read from the list itself.
+   */
+  companyId: string;
   companyName: string;
   city: string | null;
 }
@@ -59,7 +79,7 @@ export class OnboardingService {
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
     @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
-    @InjectModel(JoinRequest.name) private readonly requests: Model<JoinRequestDocument>,
+    private readonly requests: JoinRequestRepository,
     private readonly audit: AuditService,
     private readonly notifications: NotificationService,
     private readonly clock: Clock,
@@ -85,7 +105,27 @@ export class OnboardingService {
       ];
     }
 
-    const offices = await this.kpms.find(filter).sort({ code: 1 }).limit(50).exec();
+    /*
+     * **An ended office is not offered** (ADR-0112 §3, P13.2-T3 AC-6): to an outsider it reads as a
+     * suspended one does — absent. The exact rule is the office's own date in its own zone, which only
+     * the clock port can say, so it is applied here, to each row.
+     *
+     * **Filtered before the fifty, not after** (P13.2 exit review). Cutting at fifty and then dropping
+     * the ended ones hid active offices behind them: fifty ended offices answered an empty directory.
+     * The query drops every office ended in **every** zone — an end date before today in the earliest
+     * zone on Earth, not kept active — and the rows are then read one at a time until fifty pass the
+     * exact rule, so the few it cannot settle (ended in Jakarta, not yet west of it) cost a row each.
+     */
+    filter.$nor = [{
+      'subscription.keepActiveAfterEnd': { $ne: true },
+      'subscription.endDate': { $lt: this.clock.localDateFor(EARLIEST_ZONE) },
+    }];
+    const offices: KpmDocument[] = [];
+    for await (const office of this.kpms.find(filter).sort({ code: 1 }).cursor()) {
+      if (isEnded(office, this.clock)) continue;
+      offices.push(office);
+      if (offices.length === DIRECTORY_PAGE) break;
+    }
     if (offices.length === 0) return [];
 
     const companies = await this.companies
@@ -97,6 +137,7 @@ export class OnboardingService {
       kpmId: String(o._id),
       code: o.code,
       branchName: o.branchName,
+      companyId: o.companyId,
       companyName: nameOf.get(o.companyId) ?? 'Unknown',
       city: o.address,
     }));
@@ -116,9 +157,12 @@ export class OnboardingService {
     const kpm = await this.kpms.findOne({ _id: membership.kpmId, deletedAt: null }).exec();
     const company = kpm ? await this.companies.findOne({ _id: kpm.companyId }).exec() : null;
 
-    const request = await this.requests
-      .findOne({ kpmId: membership.kpmId, membershipId: String(membership._id), status: 'pending' })
-      .exec();
+    // The caller may be in no office yet, so this reads by membership across offices —
+    // the named cross-tenant escape rather than an absent filter (invariant §1).
+    const request = await this.requests.pendingForMembership(
+      membership.kpmId,
+      String(membership._id),
+    );
 
     return {
       kpmId: membership.kpmId,
@@ -161,10 +205,11 @@ export class OnboardingService {
     }
 
     const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null, status: 'active' }).exec();
-    // An office that is suspended, archived or absent all read the same to an outsider.
-    if (!kpm) throw new NotFoundException('KPM');
+    // An office that is suspended, archived or absent all read the same to an outsider — and so
+    // does one whose subscription has ended (ADR-0112 §3).
+    if (!kpm || isEnded(kpm, this.clock)) throw new NotFoundException('KPM');
 
-    const scoped = RequestContext.superAdminInTenant(ctx.userId, kpmId);
+    const scoped = RequestContext.joiningTenant(ctx, kpmId);
     const membership = await this.hierarchy.create(scoped, {
       userId: ctx.userId,
       role: 'agent',
@@ -188,6 +233,7 @@ export class OnboardingService {
     return new RequestContext(membership.userId, 'none', {
       membershipId: String(membership._id),
       kpmId: membership.kpmId,
+      orgLevelCode: membership.orgLevelCode,
       hierarchyRole: membership.role,
       status: membership.status,
       isKpmOwner: false,
@@ -222,9 +268,7 @@ export class OnboardingService {
     const byUser = new Map(users.map((u) => [String(u._id), u]));
 
     const mine = ctx.membershipId
-      ? await this.requests
-          .findOne({ kpmId: ctx.kpmId, membershipId: ctx.membershipId, status: 'pending' })
-          .exec()
+      ? await this.requests.findOne(ctx, { membershipId: ctx.membershipId, status: 'pending' })
       : null;
     const self = ctx.membershipId ? await this.members.findById(ctx, ctx.membershipId) : null;
 
@@ -254,6 +298,27 @@ export class OnboardingService {
       );
     }
 
+    /**
+     * **This is the joining flow, and only the joining flow.**
+     *
+     * Nothing here checked whether the *caller* already had a leader, and `approve()`
+     * checked the request's status rather than the member's — so an active member with a
+     * unit of their own could ask a different leader, be approved, and be moved. That is
+     * a re-parent by another name, reachable with no `member:remove_from_team` and no
+     * re-parent permission, of which the matrix has none. Changing an established leader
+     * is a decision the product has not designed; a side door is not the place to
+     * discover that.
+     */
+    const mine = await this.members.findById(ctx, ctx.membershipId);
+    if (mine?.leaderId) {
+      throw new DomainException(
+        ErrorCode.ORG_AGENT_ALREADY_TAGGED,
+        'You already report to somebody. Moving to another leader is not something you can ask for here.',
+        HttpStatus.CONFLICT,
+        { leaderId: mine.leaderId },
+      );
+    }
+
     // Checked first, and deliberately. Asking for yourself also fails the leader test
     // below — a pending agent is not a valid leader — but "you cannot report to
     // yourself" names the actual mistake, and the more specific message should win.
@@ -277,15 +342,13 @@ export class OnboardingService {
 
     // Replace rather than stack: asking someone else is a change of mind, not a second
     // request, and two open rows would let two approvers both say yes.
-    await this.requests
-      .updateMany(
-        { kpmId: ctx.kpmId, membershipId: ctx.membershipId, status: 'pending' },
-        { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
-      )
-      .exec();
+    await this.requests.updateMany(
+      ctx,
+      { membershipId: ctx.membershipId, status: 'pending' },
+      { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
+    );
 
-    await this.requests.create({
-      kpmId: ctx.kpmId,
+    await this.requests.create(ctx, {
       membershipId: ctx.membershipId,
       leaderMembershipId,
       status: 'pending',
@@ -322,13 +385,12 @@ export class OnboardingService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const { modifiedCount } = await this.requests
-      .updateMany(
-        { kpmId: ctx.kpmId, membershipId: ctx.membershipId, status: 'pending' },
-        { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
-      )
-      .exec();
-    if (modifiedCount === 0) throw new NotFoundException('Join request');
+    const cancelled = await this.requests.updateMany(
+      ctx,
+      { membershipId: ctx.membershipId, status: 'pending' },
+      { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
+    );
+    if (cancelled === 0) throw new NotFoundException('Join request');
     return this.myState(ctx);
   }
 }

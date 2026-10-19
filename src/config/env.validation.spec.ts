@@ -13,6 +13,80 @@ const valid = {
 };
 
 describe('environment validation', () => {
+  describe('SMTP_TIMEOUT_MS (P12.1-T1)', () => {
+    it('P12.1-T1 defaults to 5 s, so a configuration written before the key existed still boots', () => {
+      expect(validateEnv(valid).SMTP_TIMEOUT_MS).toBe(5_000);
+    });
+
+    it('P12.1-T1 reads a configured value, as the environment spells it', () => {
+      expect(validateEnv({ ...valid, SMTP_TIMEOUT_MS: '8000' }).SMTP_TIMEOUT_MS).toBe(8_000);
+    });
+
+    it.each(['999', '60001', '2.5', 'soon'])('P12.1-T1 refuses %s: bounded, whole milliseconds', (value) => {
+      expect(() => validateEnv({ ...valid, SMTP_TIMEOUT_MS: value })).toThrow(/SMTP_TIMEOUT_MS/);
+    });
+  });
+
+  describe('mail transport (P4-T14, ADR-0019)', () => {
+    it('defaults to SMTP, so the safe thing is what you get by not deciding', () => {
+      expect(validateEnv(valid).MAIL_TRANSPORT).toBe('smtp');
+    });
+
+    it('allows the log transport outside production, for a developer with no catcher', () => {
+      const env = validateEnv({ ...valid, MAIL_TRANSPORT: 'log' });
+      expect(env.MAIL_TRANSPORT).toBe('log');
+    });
+
+    it('refuses the log transport in production, by name', () => {
+      /*
+       * The failure this key exists to make impossible: an API that accepts a
+       * registration and writes the verification link to stdout. It answers 201, the
+       * person waits for mail that never comes, and nothing says so.
+       */
+      expect(() => validateEnv({ ...valid, NODE_ENV: 'production', MAIL_TRANSPORT: 'log' }))
+        .toThrow(/MAIL_TRANSPORT/);
+      expect(() => validateEnv({ ...valid, NODE_ENV: 'production', MAIL_TRANSPORT: 'log' }))
+        .toThrow(/must be "smtp" in production/);
+    });
+
+    it('leaves production alone when the transport is right', () => {
+      expect(validateEnv({ ...valid, NODE_ENV: 'production' }).MAIL_TRANSPORT).toBe('smtp');
+    });
+  });
+
+  describe('cross-site cookies (ADR-0041)', () => {
+    it('defaults to same-site, the safer of the two', () => {
+      expect(validateEnv(valid).COOKIE_CROSS_SITE).toBe(false);
+    });
+
+    it('reads "false" as false — the string a reader would expect to disable it', () => {
+      // z.coerce.boolean() would make this true, silently turning the control on for
+      // whoever wrote the obvious value.
+      expect(validateEnv({ ...valid, COOKIE_CROSS_SITE: 'false' }).COOKIE_CROSS_SITE).toBe(false);
+    });
+
+    it('enables it over HTTPS, which is the Vercel staging shape', () => {
+      const env = validateEnv({
+        ...valid,
+        COOKIE_CROSS_SITE: 'true',
+        APP_ORIGIN: 'https://app.example',
+      });
+      expect(env.COOKIE_CROSS_SITE).toBe(true);
+    });
+
+    it('refuses it over plain http, where a Secure cookie is discarded', () => {
+      expect(() =>
+        validateEnv({ ...valid, COOKIE_CROSS_SITE: 'true', APP_ORIGIN: 'http://app.example' }),
+      ).toThrow(/COOKIE_CROSS_SITE/);
+    });
+
+    it('rejects a value that is neither true nor false', () => {
+      expect(() => validateEnv({ ...valid, COOKIE_CROSS_SITE: 'yes' })).toThrow(
+        /COOKIE_CROSS_SITE/,
+      );
+    });
+  });
+
   it('accepts a complete configuration and applies defaults', () => {
     const env = validateEnv(valid);
     expect(env.PORT).toBe(3001);

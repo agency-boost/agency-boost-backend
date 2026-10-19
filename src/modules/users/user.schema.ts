@@ -17,6 +17,33 @@ export class User {
   @Prop({ type: String, default: null })
   phone!: string | null;
 
+  /**
+   * The insurer this person sells for, chosen when they register.
+   *
+   * A person belongs to one company (ADR-0017). It is on `users` rather than on the
+   * membership because the agent code below is theirs, and they have one before any
+   * office has let them in — a registered person with no membership is a state this
+   * product supports and shows.
+   *
+   * Null only for a Super Admin, who sells for nobody.
+   */
+  @Prop({ type: String, default: null, index: true })
+  companyId!: string | null;
+
+  /**
+   * The producer id the insurer issued them — their identifier alongside their email.
+   *
+   * **Unique within the company, not globally** (ADR-0017). Two insurers may issue the
+   * same string to different people, and their numbering rules are their own. Stored
+   * upper-cased and trimmed, because it is read off a contract and typed by hand.
+   *
+   * Immutable once set: it is the join key the monthly production import matches on, so
+   * changing one silently breaks the attribution of every row already imported under the
+   * old value.
+   */
+  @Prop({ type: String, default: null, uppercase: true, trim: true })
+  agentCode!: string | null;
+
   @Prop({ type: String, required: true, select: false })
   passwordHash!: string;
 
@@ -52,6 +79,20 @@ export class User {
   @Prop({ type: Date, default: null })
   emailVerifiedAt!: Date | null;
 
+  /**
+   * They are signed in on a password somebody else chose for them.
+   *
+   * Set by the roster import (P3.6-T4), which generates one and hands it to the admin to
+   * pass on. Until it is replaced, `AuthGuard` refuses every route but the ones that let
+   * them replace it — a screen-level redirect would leave the temporary password working
+   * against the API for as long as the account exists.
+   *
+   * Cleared by `POST /auth/change-password`, and by nothing else. A reset through the
+   * forgot-password flow clears it too, because that also proves control of the mailbox.
+   */
+  @Prop({ type: Boolean, default: false })
+  mustChangePassword!: boolean;
+
   @Prop({ type: Date, default: null })
   lastLoginAt!: Date | null;
 
@@ -60,6 +101,26 @@ export class User {
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
+
+/**
+ * Unique per company, over live rows only.
+ *
+ * `partialFilterExpression` does two jobs. It excludes soft-deleted rows, so erasing an
+ * account releases its code. And it excludes the `(null, null)` pair every Super Admin
+ * carries — a plain compound unique index would admit exactly one of them and refuse the
+ * second operator, which is a state the seed creates deliberately.
+ */
+UserSchema.index(
+  { companyId: 1, agentCode: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      deletedAt: null,
+      companyId: { $type: 'string' },
+      agentCode: { $type: 'string' },
+    },
+  },
+);
 
 /** Initials for the avatar chip, derived rather than stored. */
 export function initialsOf(fullName: string): string {

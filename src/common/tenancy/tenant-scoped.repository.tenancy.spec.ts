@@ -37,7 +37,7 @@ function ctxFor(kpmId: string, overrides: Partial<TenantMembership> = {}): Reque
   return new RequestContext('user-' + kpmId, 'none', {
     membershipId: 'mem-' + kpmId,
     kpmId,
-    hierarchyRole: 'agent',
+    orgLevelCode: 'AGENT', hierarchyRole: 'agent',
     status: 'active',
     isKpmOwner: false,
     isKpmAdmin: false, directCount: 0,
@@ -168,6 +168,92 @@ describe('TenantScopedRepository — cross-tenant isolation', () => {
     });
   });
 
+  describe('one named office, read by a Super Admin (P13.2-T7 AC-6)', () => {
+    const root = RequestContext.platform('root');
+
+    it('is refused to anybody but a Super Admin, and to a Super Admin naming no office', async () => {
+      await expect(repo.findInOfficeAcrossTenants(ctxFor(KPM_A), KPM_A)).rejects.toThrow(MissingTenantContextError);
+      await expect(repo.findInOfficeAcrossTenants(root, '')).rejects.toThrow(MissingTenantContextError);
+    });
+
+    it('returns the named office’s live rows and never another’s, whatever the filter says', async () => {
+      await repo.create(ctxFor(KPM_A), { name: 'a' } as Partial<WidgetDoc>);
+      const gone = await repo.create(ctxFor(KPM_A), { name: 'a-gone' } as Partial<WidgetDoc>);
+      await repo.softDeleteById(ctxFor(KPM_A), String(gone._id), new Date());
+      await repo.create(ctxFor(KPM_B), { name: 'b' } as Partial<WidgetDoc>);
+
+      expect((await repo.findInOfficeAcrossTenants(root, KPM_A)).map((w) => w.name)).toEqual(['a']);
+      // A filter naming the other office cannot widen or move the read: the named office wins.
+      const moved = await repo.findInOfficeAcrossTenants(root, KPM_A, { kpmId: KPM_B } as never);
+      expect(moved.map((w) => w.name)).toEqual(['a']);
+      // Nor reach a soft-deleted row by asking for one.
+      const deleted = await repo.findInOfficeAcrossTenants(root, KPM_A, { deletedAt: { $ne: null } } as never);
+      expect(deleted.map((w) => w.name)).toEqual(['a']);
+      expect((await repo.findInOfficeAcrossTenants(root, KPM_B, {}, { limit: 1 })).map((w) => w.name)).toEqual(['b']);
+    });
+  });
+
+  describe('a malformed id is nothing found, wherever it sits in the filter', () => {
+    it('answers null for a bad id at the top level and inside $and', async () => {
+      const ctx = ctxFor(KPM_A);
+      await repo.create(ctx, { name: 'real' } as Partial<WidgetDoc>);
+
+      expect(await repo.findById(ctx, 'not-an-objectid')).toBeNull();
+      expect(await repo.findOne(ctx, { _id: 'not-an-objectid' } as never)).toBeNull();
+      // The shape the person page actually reads through. A guard that only read the top
+      // level went blind the day the id moved inside `$and` to stop a visibility
+      // narrowing overwriting it, and the query threw CastError → 500 again.
+      expect(
+        await repo.findOne(ctx, {
+          $and: [{ _id: 'not-an-objectid' }, { name: 'real' }],
+        } as never),
+      ).toBeNull();
+      // Nested two deep, because `$and` branches are themselves filters.
+      expect(
+        await repo.findOne(ctx, {
+          $and: [{ $and: [{ _id: 'not-an-objectid' }] }],
+        } as never),
+      ).toBeNull();
+    });
+
+    it('does not answer null for a bad id inside $or, where it kills only one branch', async () => {
+      const ctx = ctxFor(KPM_A);
+      const w = await repo.create(ctx, { name: 'real' } as Partial<WidgetDoc>);
+
+      // Disjunction is the case the guard deliberately does not claim: a dead branch is
+      // not a dead query. Mongoose still casts the whole filter, so this throws today —
+      // the assertion pins that the guard stays out of it rather than quietly answering
+      // `null` for a query that has a matching branch.
+      await expect(
+        repo.findOne(ctx, { $or: [{ _id: 'not-an-objectid' }, { _id: w._id }] } as never),
+      ).rejects.toThrow();
+    });
+
+    it('walks past a branch that is not a filter at all', async () => {
+      const ctx = ctxFor(KPM_A);
+      const w = await repo.create(ctx, { name: 'real' } as Partial<WidgetDoc>);
+
+      // Mongo tolerates neither, but the guard runs before Mongo does and must not throw
+      // on its way to deciding. It recurses into whatever `$and` holds, so `null` and a
+      // primitive are both shapes it can be handed.
+      expect(
+        await repo.findOne(ctx, { $and: [null, { _id: 'not-an-objectid' }] } as never),
+      ).toBeNull();
+      // A branch that is not a filter is still nonsense to Mongo, and the guard does not
+      // pretend otherwise — it answers only for malformed ids, and lets everything else
+      // reach the driver rather than inventing a `null` for a query it has no opinion on.
+      await expect(repo.findOne(ctx, { $and: ['nonsense'] } as never)).rejects.toThrow();
+      expect(String((await repo.findOne(ctx, { $and: [{}] } as never))?._id)).toBe(String(w._id));
+    });
+
+    it('still fails closed on a missing tenant, whatever the id looks like', async () => {
+      const noTenant = RequestContext.platform('root');
+      await expect(
+        repo.findOne(noTenant, { $and: [{ _id: 'not-an-objectid' }] } as never),
+      ).rejects.toThrow(MissingTenantContextError);
+    });
+  });
+
   describe('audit stamping', () => {
     it('records the acting membership on create and update', async () => {
       const ctx = ctxFor(KPM_A);
@@ -207,6 +293,36 @@ describe('TenantScopedRepository — cross-tenant isolation', () => {
 
       expect(updated?.updatedBy).toBe('mem-other');
     });
+
+    it('updateMany writes inside the tenant and nowhere else', async () => {
+      /*
+       * `updateMany` had no test at all until the Phase 4 exit review — in the one module
+       * the ratchet holds at 100% branch, which is where an untested write is least
+       * acceptable. It is the sharpest method on the class: a single call with a filter
+       * that reached across tenants would rewrite another office's rows in one statement.
+       */
+      const a = ctxFor(KPM_A);
+      const b = ctxFor(KPM_B);
+      await repo.create(a, { name: 'mine' } as Partial<WidgetDoc>);
+      await repo.create(a, { name: 'mine too' } as Partial<WidgetDoc>);
+      await repo.create(b, { name: 'theirs' } as Partial<WidgetDoc>);
+
+      const changed = await repo.updateMany(a, {}, { $set: { name: 'renamed' } } as never);
+
+      expect(changed).toBe(2);
+      expect((await repo.find(b, {})).map((w) => w.name)).toEqual(['theirs']);
+    });
+
+    it('updateMany stamps updatedBy on an update carrying no $set of its own', async () => {
+      // The `update.$set ?? {}` half, on the bulk path. If the spread were wrong the stamp
+      // would replace the caller's update rather than merge with it.
+      const a = ctxFor(KPM_A);
+      await repo.create(a, { name: 'x' } as Partial<WidgetDoc>);
+      const other = ctxFor(KPM_A, { membershipId: 'mem-bulk' });
+
+      expect(await repo.updateMany(other, {}, { $unset: { originalName: '' } } as never)).toBe(1);
+      expect((await repo.find(a, {}))[0].updatedBy).toBe('mem-bulk');
+    });
   });
 
   describe('includeDeleted opt-in', () => {
@@ -223,4 +339,167 @@ describe('TenantScopedRepository — cross-tenant isolation', () => {
       expect(await new Peeking().peek(ctx)).toHaveLength(1);
     });
   });
+
+  /**
+   * Rollups (P7-T6).
+   *
+   * An aggregation is the one read shape that can look correct and still be wrong: a pipeline
+   * that counts the whole collection and filters afterwards returns this tenant's number while
+   * having read everybody's. So the scope goes into the **first** stage, and a pipeline that does
+   * not begin with one is refused rather than quietly repaired.
+   */
+  describe('aggregation is scoped in its first stage', () => {
+    beforeEach(async () => {
+      await repo.create(ctxFor(KPM_A), { name: 'a-one' } as never);
+      await repo.create(ctxFor(KPM_A), { name: 'a-two' } as never);
+      await repo.create(ctxFor(KPM_B), { name: 'b-one' } as never);
+    });
+
+    it('counts only this tenant’s rows', async () => {
+      const [out] = await repo.aggregate(ctxFor(KPM_A), [
+        { $match: {} }, { $count: 'n' },
+      ]);
+
+      expect(out).toEqual({ n: 2 });
+    });
+
+    it('merges the tenant into a filter the caller supplied', async () => {
+      const [out] = await repo.aggregate(ctxFor(KPM_A), [
+        { $match: { name: 'a-one' } }, { $count: 'n' },
+      ]);
+
+      expect(out).toEqual({ n: 1 });
+    });
+
+    it('cannot be aimed at another tenant by naming one', async () => {
+      // The caller's `kpmId` is overwritten, not merged with: `{...filter, kpmId}` puts the
+      // context last on purpose, so a pipeline asking for KPM B gets KPM A's answer.
+      const [out] = await repo.aggregate(ctxFor(KPM_A), [
+        { $match: { kpmId: KPM_B } }, { $count: 'n' },
+      ]);
+
+      expect(out).toEqual({ n: 2 });
+    });
+
+    it('hides soft-deleted rows unless they are asked for', async () => {
+      const gone = await repo.findOne(ctxFor(KPM_A), { name: 'a-two' });
+      await repo.softDeleteById(ctxFor(KPM_A), String(gone!._id), new Date());
+
+      const [live] = await repo.aggregate(ctxFor(KPM_A), [{ $match: {} }, { $count: 'n' }]);
+      const [all] = await repo.aggregate(ctxFor(KPM_A), [{ $match: {} }, { $count: 'n' }], true);
+
+      expect(live).toEqual({ n: 1 });
+      expect(all).toEqual({ n: 2 });
+    });
+
+    it('refuses a pipeline that does not begin with $match', async () => {
+      await expect(repo.aggregate(ctxFor(KPM_A), [{ $count: 'n' }]))
+        .rejects.toThrow(/must begin with \$match/);
+      await expect(repo.aggregate(ctxFor(KPM_A), []))
+        .rejects.toThrow(/must begin with \$match/);
+    });
+
+    it('fails closed with no tenant context, like every other read', async () => {
+      const noTenant = new RequestContext('u1', 'none', null);
+
+      await expect(repo.aggregate(noTenant, [{ $match: {} }, { $count: 'n' }]))
+        .rejects.toBeInstanceOf(MissingTenantContextError);
+    });
+  });
+
+
+  /**
+   * Create-or-update, in one round trip (P8-T1).
+   *
+   * The shape a read-then-write gets wrong. Two saves race in this product for real — an agent on a
+   * phone and their leader on a laptop in the same 1-on-1 — and read-then-write hands whoever is
+   * second a duplicate-key error rather than the row they meant to write.
+   */
+  describe('upsertOne', () => {
+    it('creates the row when there is none, scoped to the caller', async () => {
+      const created = await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, {
+        $set: { name: 'plan' },
+      });
+
+      expect((created as unknown as { kpmId: string }).kpmId).toBe(KPM_A);
+      expect((created as unknown as { deletedAt: Date | null }).deletedAt).toBeNull();
+      expect((created as unknown as { createdBy: string }).createdBy).toBe('mem-' + KPM_A);
+    });
+
+    it('updates the row when there is one, without creating a second', async () => {
+      await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, { $set: { name: 'plan' } });
+
+      await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, { $set: { name: 'plan' } });
+
+      expect(await repo.count(ctxFor(KPM_A), {})).toBe(1);
+    });
+
+    it('stamps who created it once, and a later writer does not become it', async () => {
+      /*
+       * `createdBy` is the repository's to stamp, not the caller's — the context's membership wins
+       * over anything passed in `$setOnInsert`, which is why it is spread **before** the stamps.
+       * And an update leaves it alone: the second writer moves `updatedBy` and nothing else.
+       */
+      const mine = ctxFor(KPM_A);
+      const theirs = ctxFor(KPM_A, { membershipId: 'mem-second' });
+
+      const first = await repo.upsertOne(mine, { name: 'plan' }, { $set: { name: 'plan' } });
+      const second = await repo.upsertOne(theirs, { name: 'plan' }, { $set: { name: 'plan' } });
+
+      expect((first as unknown as { createdBy: string }).createdBy).toBe('mem-' + KPM_A);
+      expect((second as unknown as { createdBy: string }).createdBy).toBe('mem-' + KPM_A);
+      expect((second as unknown as { updatedBy: string }).updatedBy).toBe('mem-second');
+    });
+
+    it('carries a caller’s $setOnInsert onto a new row, and ignores it on an existing one', async () => {
+      // The clause exists for the fields only a **new** row gets — the ones an update must not
+      // reset. A goal's cascade mapping is the case this was written for (P8-T1).
+      const born = await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, {
+        $setOnInsert: { name: 'plan' },
+      });
+      const again = await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, {
+        $setOnInsert: { name: 'never-applied' },
+      });
+
+      expect((born as unknown as { name: string }).name).toBe('plan');
+      expect((again as unknown as { name: string }).name).toBe('plan');
+      expect(await repo.count(ctxFor(KPM_A), {})).toBe(1);
+    });
+
+    it('takes an update with no $set of its own, and still stamps the writer', async () => {
+      const row = await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, {
+        $setOnInsert: { name: 'plan' },
+      });
+
+      expect((row as unknown as { updatedBy: string }).updatedBy).toBe('mem-' + KPM_A);
+    });
+
+    it('cannot reach another tenant’s row, and makes its own instead', async () => {
+      await repo.upsertOne(ctxFor(KPM_B), { name: 'plan' }, { $set: { name: 'plan' } });
+
+      await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, { $set: { name: 'plan' } });
+
+      expect(await repo.count(ctxFor(KPM_A), {})).toBe(1);
+      expect(await repo.count(ctxFor(KPM_B), {})).toBe(1);
+    });
+
+    it('does not adopt a soft-deleted row', async () => {
+      const gone = await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, { $set: { name: 'plan' } });
+      await repo.softDeleteById(ctxFor(KPM_A), String((gone as unknown as { _id: unknown })._id), new Date());
+
+      const fresh = await repo.upsertOne(ctxFor(KPM_A), { name: 'plan' }, { $set: { name: 'plan' } });
+
+      expect(String((fresh as unknown as { _id: unknown })._id))
+        .not.toBe(String((gone as unknown as { _id: unknown })._id));
+      expect(await repo.count(ctxFor(KPM_A), {})).toBe(1);
+    });
+
+    it('fails closed with no tenant context, like every other write', async () => {
+      const noTenant = new RequestContext('u1', 'none', null);
+
+      await expect(repo.upsertOne(noTenant, { name: 'plan' }, { $set: { name: 'plan' } }))
+        .rejects.toBeInstanceOf(MissingTenantContextError);
+    });
+  });
+
 });

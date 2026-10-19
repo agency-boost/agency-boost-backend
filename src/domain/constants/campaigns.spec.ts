@@ -1,0 +1,39 @@
+import {
+  CAMPAIGN_DURATION_WORDS, CAMPAIGN_KINDS, CAMPAIGN_LIMITS, CAMPAIGN_POSTER_COLORS, CAMPAIGN_QUALIFICATION_STATUSES,
+  CAMPAIGN_ROLLING_MONTHS, CAMPAIGN_SUBTYPES, CAMPAIGN_WINDOWS, DEFAULT_CAMPAIGN_POSTER, MDRT_CAMPAIGN_CODE, MDRT_TOOLTIP,
+  RESERVED_CAMPAIGN_CODES, STRUCTURAL_CAMPAIGN_WINDOWS,
+} from './campaigns';
+
+/** Every value a campaign's rules read, pinned once (invariant §7; `metrics-and-definitions.md` §B.22). */
+describe('the campaigns’ constants (Phase 18.5, §B.22)', () => {
+  it('P18.5-T7 AC-9 the kinds, subtypes and windows D-fields and D-windows answered', () => {
+    expect(CAMPAIGN_KINDS).toEqual(['seasonal', 'structural']);
+    expect(CAMPAIGN_SUBTYPES).toEqual(['promotion', 'ongoing']);
+    expect(CAMPAIGN_WINDOWS).toEqual(['campaign_dates', 'calendar_year', 'rolling_12m']);
+    expect(STRUCTURAL_CAMPAIGN_WINDOWS).toEqual(['calendar_year', 'rolling_12m']);
+    expect(CAMPAIGN_ROLLING_MONTHS).toBe(12);
+  });
+
+  it('P18.5-T7 AC-9 the bounds of what an Owner types, and the poster a campaign has without one', () => {
+    expect(CAMPAIGN_LIMITS).toEqual({ BLURB_MAX: 200, POSTER_EMOJI_MAX: 8 });
+    expect(CAMPAIGN_POSTER_COLORS).toEqual(['amber', 'amber-dark', 'navy', 'navy-soft', 'muted', 'success', 'gold']);
+    expect(DEFAULT_CAMPAIGN_POSTER).toEqual({ emoji: '🎯', color: 'navy' });
+    // The prototype's longest blurb fits (81 characters, `Overall.html:8040-8074`).
+    expect(81).toBeLessThanOrEqual(CAMPAIGN_LIMITS.BLURB_MAX);
+  });
+
+  it('P18.5-T8 AC-4 a chaser is qualified, in progress, not met or unknown; a member who did not chase is not_joined (ADR-0143)', () => {
+    expect(CAMPAIGN_QUALIFICATION_STATUSES).toEqual(['qualified', 'in_progress', 'not_met', 'unknown', 'not_joined']);
+  });
+
+  it('P18.5-T7 AC-7 Chasing MDRT binds to one code, its tooltip in ADR-0142 §3’s words, and `chasing` is no campaign', () => {
+    expect(MDRT_CAMPAIGN_CODE).toBe('MDRT_QUALIFICATION');
+    expect(`${MDRT_TOOLTIP.OPENING}. ${MDRT_TOOLTIP.NONE}`)
+      .toBe('Chasing MDRT (Million Dollar Round Table) this year. No MDRT campaign is running.');
+    expect(RESERVED_CAMPAIGN_CODES).toEqual(['CHASING']);
+    expect(CAMPAIGN_DURATION_WORDS).toEqual({
+      calendar_year: 'Standing — evaluated per calendar year (Jan 1 – Dec 31)',
+      rolling_12m: 'Rolling 12-month window',
+    });
+  });
+});

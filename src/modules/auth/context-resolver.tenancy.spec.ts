@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { FixedClock } from '@/common/clock/clock.port';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
@@ -7,6 +8,8 @@ import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 
 describe('ContextResolver', () => {
   let resolver: ContextResolver;
+  // 10:00 on 8 October 2026 in Jakarta: the day after an office whose subscription ended on the 7th.
+  const clock = new FixedClock(new Date('2026-10-08T03:00:00Z'));
 
   beforeAll(async () => {
     await startMongo();
@@ -14,6 +17,7 @@ describe('ContextResolver', () => {
       mongoose.model(User.name, UserSchema) as never,
       mongoose.model(Kpm.name, KpmSchema) as never,
       mongoose.model(Membership.name, MembershipSchema) as never,
+      clock,
     );
   });
   afterAll(stopMongo);
@@ -34,7 +38,12 @@ describe('ContextResolver', () => {
   async function join(userId: string, kpmId: string, over: Record<string, unknown> = {}) {
     const seq = Math.floor(Math.random() * 900) + 100;
     return mongoose.model(Membership.name).create({
-      kpmId, userId, agentCode: `KPM0417-${seq}`, agentSeq: seq,
+      kpmId, userId, agentCode: `PRU-${seq}`, agentSeq: seq,
+      // Every membership carries one, generated with it (P3.6-T1).
+      leaderCode: `LC${String(seq).padStart(4, '0')}`,
+      // A placeholder rung, deliberately: this helper writes straight to the model to
+      // build a context, and what it exercises is the resolver, not the ladder.
+      orgLevelId: 'lvl-fixture', orgLevelCode: 'FIXTURE',
       role: 'ab', status: 'active', ...over,
     });
   }
@@ -170,6 +179,67 @@ describe('ContextResolver', () => {
       companyId: 'c1', code: '0417', branchName: 'BSD', status: 'suspended',
     });
     await expect(resolver.resolve(String(sa._id))).resolves.toBeDefined();
+  });
+
+  describe('an office whose subscription has ended (ADR-0112 §3, P13.2-T3 AC-5)', () => {
+    const ended = (over: Record<string, unknown> = {}) => ({
+      startDate: '2025-10-08', endDate: '2026-10-07', pricePerLeaderMinor: null,
+      currency: 'IDR', maxLeaders: null, keepActiveAfterEnd: false, ...over,
+    });
+
+    async function memberOf(kpmOver: Record<string, unknown>) {
+      const u = await makeUser();
+      const kpm = await mongoose.model(Kpm.name).create({
+        // A company per office: two offices may share a code across insurers, never within one.
+        companyId: `c-${Math.random()}`, code: '0601', branchName: 'Ended Branch', ...kpmOver,
+      });
+      await join(String(u._id), String(kpm._id), { role: 'agent', orgLevelCode: 'AGENT' });
+      return String(u._id);
+    }
+
+    it('refuses its member the day after the end, naming the date and the office', async () => {
+      const userId = await memberOf({ subscription: ended() });
+      await expect(resolver.resolve(userId)).rejects.toMatchObject({
+        code: 'TENANT_SUBSCRIPTION_ENDED',
+        details: { endDate: '2026-10-07', kpmCode: '0601', branch: 'Ended Branch' },
+      });
+    });
+
+    it('serves its member on the end date itself', async () => {
+      const userId = await memberOf({ subscription: ended({ endDate: '2026-10-08' }) });
+      await expect(resolver.resolve(userId)).resolves.toBeDefined();
+    });
+
+    it('serves an office kept active, and one with no dates', async () => {
+      const kept = await memberOf({ subscription: ended({ keepActiveAfterEnd: true }) });
+      const undated = await memberOf({ subscription: ended({ startDate: null, endDate: null }) });
+      const none = await memberOf({ subscription: null });
+      for (const userId of [kept, undated, none]) {
+        await expect(resolver.resolve(userId)).resolves.toBeDefined();
+      }
+    });
+
+    it('a suspended or an archived office keeps its own code, which wins', async () => {
+      const suspended = await memberOf({ subscription: ended(), status: 'suspended' });
+      const archived = await memberOf({ subscription: ended(), status: 'archived' });
+      await expect(resolver.resolve(suspended)).rejects.toMatchObject({
+        code: 'TENANT_SUSPENDED', details: { kpmCode: '0601', branch: 'Ended Branch' },
+      });
+      await expect(resolver.resolve(archived)).rejects.toMatchObject({ code: 'TENANT_ARCHIVED' });
+    });
+
+    it('serves a support session into it, and refuses one into a suspended office as before', async () => {
+      const ended0601 = await memberOf({ subscription: ended() });
+      await expect(resolver.resolve(ended0601, 'sa-1')).resolves.toMatchObject({ isImpersonating: true });
+      const suspended = await memberOf({ subscription: ended(), status: 'suspended' });
+      await expect(resolver.resolve(suspended, 'sa-1')).rejects.toMatchObject({ code: 'TENANT_SUSPENDED' });
+    });
+
+    it('leaves another office’s members alone', async () => {
+      await memberOf({ subscription: ended() });
+      const other = await memberOf({ code: '0417', subscription: ended({ endDate: '2027-01-31' }) });
+      await expect(resolver.resolve(other)).resolves.toBeDefined();
+    });
   });
 
   it('carries the real actor through an impersonation session', async () => {

@@ -1,10 +1,21 @@
 import {
   ACTIVATION,
+  COACHING,
+  CASCADE_ACTIVITY_CODES,
+  ASSET_LIMITS,
+  PRODUCTION,
+  PRODUCTION_UPLOAD,
   ACTIVITY,
   GOAL_DEFAULTS,
   PERFORMANCE,
+  PERIOD,
   RATIO_BENCHMARKS,
+  INSIGHTS,
+  SUB_PERIOD,
+  SUMMARY,
   TIME,
+  DEFAULT_CURRENCY,
+  DEFAULT_ORG_LADDER,
   DEFAULT_TENANT_TIMEZONE,
   MINOR_UNITS_PER_MAJOR,
 } from './index';
@@ -53,6 +64,24 @@ describe('domain constants', () => {
     });
   });
 
+  /**
+   * Invariant §4 in three assertions. The prototype's footnote reads "Maps to activities #3, #4, #6
+   * in Activity Management" (`Overall.html:3064`, `:5967`), and those numbers are **display order**,
+   * which an office can drag. These pin the codes the cascade actually binds to, against the table in
+   * `metrics-and-definitions.md` — a test that compares the constant to itself pins nothing.
+   */
+  describe('the goal cascade binds to codes (Overall.html:3064, :5967)', () => {
+    it('pins the leads stage to LEADS_CONTACTED', () => {
+      expect(CASCADE_ACTIVITY_CODES.leadsCode).toBe('LEADS_CONTACTED');
+    });
+    it('pins the appointments stage to SELL_PRESENTATION', () => {
+      expect(CASCADE_ACTIVITY_CODES.appointmentsCode).toBe('SELL_PRESENTATION');
+    });
+    it('pins the closings stage to SELL_SUBMISSION', () => {
+      expect(CASCADE_ACTIVITY_CODES.closingsCode).toBe('SELL_SUBMISSION');
+    });
+  });
+
   describe('time conversion (Overall.html:5751, :5818, :7023)', () => {
     it('pins the projection constants', () => {
       expect(TIME.AVG_DAYS_PER_MONTH).toBe(30.44);
@@ -63,16 +92,62 @@ describe('domain constants', () => {
     it('keeps the two month constants mutually consistent to within a day', () => {
       expect(TIME.AVG_DAYS_PER_MONTH / 7).toBeCloseTo(TIME.WEEKS_PER_MONTH, 1);
     });
+    it('P11-T4 AC-4 pins SUB_PERIOD_TARGET_SCALING at 7 / 30.44 (§B.3, Overall.html:7023)', () => {
+      // The document's value, written out: the prototype's `PERIOD_MULT['7']`.
+      expect(SUB_PERIOD.TARGET_SCALING).toBe(7 / 30.44);
+      expect(SUB_PERIOD.TARGET_SCALING).toBeCloseTo(0.22996, 5);
+      // Derived from the 7-day window and the average month, never restated beside them.
+      expect(SUB_PERIOD.TARGET_SCALING).toBe(PERIOD.ROLLING_7D_DAYS / TIME.AVG_DAYS_PER_MONTH);
+    });
+    it('P11-T4 AC-4 pins SUB_PERIOD_CLOSING_TARGET_FLOOR at one policy (§B.4, Overall.html:7061)', () => {
+      expect(SUB_PERIOD.CLOSING_TARGET_FLOOR).toBe(1);
+    });
   });
 
   describe('activity and activation', () => {
     it('pins the per-item daily count range at 0..999', () => {
       expect(ACTIVITY.COUNT_MIN).toBe(0);
       expect(ACTIVITY.COUNT_MAX).toBe(999);
+      // ADR-0042: the current calendar month, plus this many days into the next.
+      expect(ACTIVITY.BACKDATE_GRACE_DAYS).toBe(7);
+    });
+    it('pins the Activity Dashboard: daily to 31 days, 7-day blocks above, nothing past a year (P10-T1)', () => {
+      expect(ACTIVITY.DASHBOARD_DAILY_MAX_DAYS).toBe(31);
+      expect(ACTIVITY.DASHBOARD_BLOCK_DAYS).toBe(7);
+      expect(ACTIVITY.DASHBOARD_RANGE_MAX_DAYS).toBe(366);
+      // The block is the 7-day period's length: *Week 1* of *Last 30 days* is *Last 7 days*.
+      expect(ACTIVITY.DASHBOARD_BLOCK_DAYS).toBe(PERIOD.ROLLING_7D_DAYS);
+    });
+    it('P13.1-T5 AC-2 pins the pace sentence’s window at the prototype’s 30 days, today included (ADR-0109)', () => {
+      // `Overall.html:6295`: `const days = currentPeriod === 'month' ? 30 : 365`, summed by `:6316`.
+      expect(SUMMARY.PACE_WINDOW_DAYS).toBe(30);
+      // It is `ROLLING_30D` (ADR-0022): one number, not a second copy of it.
+      expect(SUMMARY.PACE_WINDOW_DAYS).toBe(PERIOD.ROLLING_30D_DAYS);
+    });
+    it('P13.1-T5 AC-4 has no first day for the pace any more: ADR-0057’s seven days went with its run-rate', () => {
+      expect(SUMMARY).not.toHaveProperty('PACE_MIN_DAYS');
+    });
+    it('pins how many open leads the Summary lists before it counts the rest (P10-T6)', () => {
+      expect(SUMMARY.LEADS_SHOWN).toBe(10);
+    });
+    it('pins the insight rules’ thresholds (P10-T7, ADR-0060)', () => {
+      expect(INSIGHTS.MAX_CARDS).toBe(4);
+      expect(INSIGHTS.RATIO_MIN_DENOMINATOR).toBe(5);
+      expect(INSIGHTS.STRENGTH_FACTOR).toBe(1.5);
     });
     it('pins the activation window at 90 days, counted from day 1', () => {
       expect(ACTIVATION.WINDOW_DAYS).toBe(90);
       expect(ACTIVATION.DAY_INDEX_BASE).toBe(1);
+    });
+    it('P13-T1 AC-5 pins an activation’s life at six calendar months (OD-120, Overall.html:3349)', () => {
+      expect(ACTIVATION.VISIBLE_MONTHS).toBe(6);
+    });
+    it('P13-T5 AC-5 pins how far back a leader may correct a start date at 365 days (OD-118)', () => {
+      expect(ACTIVATION.START_DATE_MAX_DAYS_BACK).toBe(365);
+    });
+    it('P13-T2 AC-4, P13-T6 AC-2 pins the hire’s note at 500 characters and the coaching note at 1,000', () => {
+      expect(ACTIVATION.HIRE_NOTE_MAX).toBe(500);
+      expect(ACTIVATION.COACHING_NOTE_MAX).toBe(1000);
     });
   });
 
@@ -80,16 +155,90 @@ describe('domain constants', () => {
     it('pins the on-track pace threshold at 90%', () => {
       expect(PERFORMANCE.ON_TRACK_PACE_THRESHOLD).toBe(0.9);
     });
+    it('P11-T6 AC-4 pins the MAA gate at one projected policy submission (§B.4, Fixed)', () => {
+      expect(PERFORMANCE.MAA_PROJECTED_SUBMISSIONS_MIN).toBe(1);
+    });
     it('pins the coaching overdue threshold at 7 days', () => {
       expect(PERFORMANCE.COACHING_OVERDUE_DAYS).toBe(7);
     });
+    it('P11-T5 AC-6 pins COACHING_REOPEN_WINDOW_DAYS at 7 days after the first finalize (§B.8, ADR-0079)', () => {
+      expect(COACHING.REOPEN_WINDOW_DAYS).toBe(7);
+    });
+    it('P11-T10 AC-5 pins COACHING_COVERAGE_WINDOWS at [7, 30] days, the primary first (§B.4, Fixed)', () => {
+      expect(COACHING.COVERAGE_WINDOWS).toEqual([7, 30]);
+      // `COACHED_7D`'s and `COACHED_30D`'s windows: the named periods, never a second copy of them.
+      expect(COACHING.COVERAGE_WINDOWS).toEqual([PERIOD.ROLLING_7D_DAYS, PERIOD.ROLLING_30D_DAYS]);
+    });
     it('pins the ratio window at 30 days', () => {
       expect(PERFORMANCE.RATIO_WINDOW_DAYS).toBe(30);
+      // It is `ROLLING_30D`, and fixed (ADR-0022): one number, not an office's.
+      expect(PERFORMANCE.RATIO_WINDOW_DAYS).toBe(PERIOD.ROLLING_30D_DAYS);
+    });
+    it('pins the named rolling periods at 7 and 30 days (ADR-0022)', () => {
+      expect(PERIOD.ROLLING_7D_DAYS).toBe(7);
+      expect(PERIOD.ROLLING_30D_DAYS).toBe(30);
     });
   });
 
   it('defaults tenants to Asia/Jakarta, never UTC', () => {
     expect(DEFAULT_TENANT_TIMEZONE).toBe('Asia/Jakarta');
     expect(DEFAULT_TENANT_TIMEZONE).not.toBe('UTC');
+
+    // The ladder every company starts with. Junior first, and the codes are the
+    // `HierarchyRole` values upper-cased — that one-to-one is what lets the enum keep
+    // working while `orgLevelId` becomes the stored truth (ADR-0012 §3).
+    expect(DEFAULT_ORG_LADDER.map((l) => l.code)).toEqual(['AGENT', 'AAB', 'AB']);
+    expect(DEFAULT_ORG_LADDER.map((l) => l.displayOrder)).toEqual([1, 2, 3]);
+    expect(DEFAULT_ORG_LADDER.map((l) => l.code.toLowerCase())).toEqual(['agent', 'aab', 'ab']);
+
+    // Three registry rows that named no test until the Phase 3.5 exit re-review. The rule
+    // is that every number in `metrics-and-definitions.md` is pinned by a test that fails
+    // if it drifts, and these three were the exceptions.
+    expect(PERFORMANCE.COMPLIANCE_WINDOW_DAYS).toBe(7);
+    // The cap is on a *percentage*, and is deliberately not the same constant as the
+    // 0–999 activity-count clamp even though both read 999 — `metrics:1450` says so.
+    expect(PERFORMANCE.ATTAINMENT_PCT_CAP).toBe(999);
+    expect(DEFAULT_CURRENCY).toBe('IDR');
+  });
+
+  describe('the monthly production upload (P9-T3)', () => {
+    it('pins the ceiling at 1 MiB — ten thousand rows of the template, more than any office', () => {
+      expect(PRODUCTION_UPLOAD.MAX_BYTES).toBe(1024 * 1024);
+      expect(PRODUCTION_UPLOAD.MAX_BYTES).toBe(1_048_576);
+    });
+
+    it('pins a half-written import as stranded after ten minutes (P9-T4)', () => {
+      expect(PRODUCTION_UPLOAD.STRANDED_AFTER_MINUTES).toBe(10);
+    });
+
+    it('locks a month seven days after it ends — the activity window’s number, as ADR-0050 decided', () => {
+      expect(PRODUCTION.LOCK_GRACE_DAYS).toBe(7);
+      expect(PRODUCTION.LOCK_GRACE_DAYS).toBe(ACTIVITY.BACKDATE_GRACE_DAYS);
+    });
+  });
+
+  describe('upload limits (ADR-0032, ADR-0040)', () => {
+    /*
+     * These lived in `modules/assets/storage.port.ts` and were in no registry at all until the
+     * Phase 5 exit review — a threshold outside `domain/constants/` is one that can be
+     * re-declared without anybody noticing, which is the whole of invariant §7.
+     */
+    it('pins the ceiling at 25 MB, above which material is a link rather than an upload', () => {
+      expect(ASSET_LIMITS.MAX_BYTES).toBe(25 * 1024 * 1024);
+      expect(ASSET_LIMITS.MAX_BYTES).toBe(26_214_400);
+    });
+
+    it('pins the signed-URL life at 300 seconds', () => {
+      expect(ASSET_LIMITS.SIGNED_URL_TTL_SECONDS).toBe(300);
+    });
+
+    it('pins the accepted types, so widening the list is a deliberate change', () => {
+      expect([...ASSET_LIMITS.ALLOWED_MIME_TYPES]).toEqual([
+        'image/jpeg', 'image/png', 'image/webp',
+        'application/pdf',
+        'video/mp4',
+        'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ]);
+    });
   });
 });

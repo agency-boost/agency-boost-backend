@@ -1,19 +1,27 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { RateLimiter } from '@/modules/auth/rate-limiter';
+import { DomainException } from '@/common/errors/domain.exception';
+import { ErrorCode } from '@/common/errors/error-codes';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { OnboardingService } from './onboarding.service';
 import {
+  ApproveRequestDto,
+  DeclineRequestDto,
   InviteCodeQueryDto,
-  IssueInviteDto,
   KpmSearchDto,
   LeaderSearchDto,
   RedeemInviteDto,
   RegisterKpmDto,
   RequestLeaderDto,
+  UntaggedSearchDto,
 } from './org.dto';
-import { InviteService } from './invite.service';
+import { LeaderCodeService } from './leader-code.service';
+import { ApprovalsService } from './approvals.service';
+import { KpmRequestService } from '@/modules/tenants/kpm-request.service';
+import { CreateKpmRequestDto } from '@/modules/tenants/tenant.dto';
 
 /**
  * Joining an office, from the joiner's side.
@@ -28,9 +36,35 @@ import { InviteService } from './invite.service';
 export class OnboardingController {
   constructor(
     private readonly onboarding: OnboardingService,
-    private readonly invites: InviteService,
+    private readonly leaderCodes: LeaderCodeService,
+    private readonly approvals: ApprovalsService,
+    private readonly kpmRequests: KpmRequestService,
     private readonly config: ConfigService,
+    private readonly limiter: RateLimiter,
   ) {}
+
+  /**
+   * The leader-code routes, rate limited per caller (P4-T13).
+   *
+   * The code space is 32⁶ and the reward for guessing is joining a stranger's unit — and
+   * the preview hands back the office and the leader's real name for any valid code.
+   * Both routes are authenticated, so a prober needs an account first; this makes the
+   * account they need expensive to use.
+   *
+   * Twenty an hour. Somebody typing a code off a WhatsApp message gets it wrong twice,
+   * not twenty times.
+   */
+  private limitCodeAttempts(ctx: RequestContext): void {
+    const retryAfter = this.limiter.check(`join-code:${ctx.userId}`, 20, 60 * 60);
+    if (retryAfter !== null) {
+      throw new DomainException(
+        ErrorCode.AUTH_RATE_LIMITED,
+        `Too many code attempts. Try again in ${Math.ceil(retryAfter / 60)} minute(s).`,
+        HttpStatus.TOO_MANY_REQUESTS,
+        { retryAfterSeconds: retryAfter },
+      );
+    }
+  }
 
   /**
    * Where a shared link points.
@@ -80,6 +114,32 @@ export class OnboardingController {
     return this.onboarding.registerKpm(ctx, dto.kpmId);
   }
 
+  @Get('kpm-request')
+  @ApiOperation({
+    summary: 'The office you asked for, if you asked for one',
+    description:
+      '`{ request: null }` when you have not. Wrapped rather than returned bare, because a bare ' +
+      '`null` leaves the wire as an empty body and a client cannot tell it from a response that ' +
+      'failed to serialise. The screen reads this before offering the form, so somebody who has ' +
+      'already asked is told where it stands instead of being invited to ask again.',
+  })
+  async myKpmRequest(@Ctx() ctx: RequestContext) {
+    return { request: await this.kpmRequests.mine(ctx) };
+  }
+
+  @Post('kpm-request')
+  @RequirePermission('kpm_request:create')
+  @ApiOperation({
+    summary: 'Ask for an office that does not exist yet',
+    description:
+      'For somebody whose branch has never been provisioned: they search the directory, find ' +
+      'nothing, and until now the product had no answer for them (ADR-0011). Refused to anybody ' +
+      'already in an office.',
+  })
+  async askForKpm(@Ctx() ctx: RequestContext, @Body() dto: CreateKpmRequestDto) {
+    return this.kpmRequests.create(ctx, dto);
+  }
+
   @Get('leaders')
   @RequirePermission('leader:search_directory')
   @ApiOperation({
@@ -113,52 +173,119 @@ export class OnboardingController {
     return this.onboarding.cancelRequest(ctx);
   }
 
-  // ---- Invites: one artefact, three presentations. ----
+  // ---- The leader code: one artefact, three presentations. ----
 
-  @Get('invites')
-  @RequirePermission('member:invite')
+  @Get('my-code')
   @ApiOperation({
-    summary: 'The invites you have issued',
+    summary: 'Your leader code, and the link that carries it',
     description:
-      'Revoked and spent ones stay in the list, so you can see what has been out there ' +
-      'rather than only what still works.',
+      'One code, generated with your membership and never reissued. It replaced ' +
+      'GET/POST/DELETE /join/invites: no prototype has ever had a control ' +
+      'that creates or withdraws one, and a code that cannot be reissued must not be ' +
+      'revocable — withdrawing it would leave you unable to invite anybody.',
   })
-  async listInvites(@Ctx() ctx: RequestContext) {
-    return this.invites.mine(ctx, this.appOrigin);
-  }
-
-  @Post('invites')
-  @RequirePermission('member:invite')
-  @ApiOperation({
-    summary: 'Issue an invite',
-    description:
-      'Returns the code and the link; a QR is that link rendered. Anyone who redeems it ' +
-      'joins your office tagged to you, with no approval — which is why it can carry a ' +
-      'use limit and an expiry, and can be revoked.',
-  })
-  async issueInvite(@Ctx() ctx: RequestContext, @Body() dto: IssueInviteDto) {
-    return this.invites.issue(ctx, dto, this.appOrigin);
-  }
-
-  @Delete('invites/:inviteId')
-  @RequirePermission('member:revoke_invite')
-  @ApiOperation({
-    summary: 'Revoke an invite',
-    description: 'Kills the code, the link and the QR at once — they are one artefact.',
-  })
-  async revokeInvite(@Ctx() ctx: RequestContext, @Param('inviteId') inviteId: string) {
-    return this.invites.revoke(ctx, inviteId);
+  async myLeaderCode(@Ctx() ctx: RequestContext) {
+    return this.leaderCodes.mine(ctx, this.appOrigin);
   }
 
   @Get('invite')
   @ApiOperation({
-    summary: 'What an invite is for',
+    summary: 'What a code is for',
     description:
       'Whose unit and which office, so somebody can see what they are accepting before ' +
-      'they accept it. Unknown, revoked and expired all answer alike.',
+      'they accept it. Authenticated, deliberately: the code space is 32^6 and this ' +
+      'names a real office and a real person, so a prober needs an account first. ' +
+      'A code nobody holds and one whose leader has left answer alike.',
   })
-  async previewInvite(@Query() query: InviteCodeQueryDto) {
-    return this.invites.preview(query.code);
+  async previewInvite(@Ctx() ctx: RequestContext, @Query() query: InviteCodeQueryDto) {
+    this.limitCodeAttempts(ctx);
+    return this.leaderCodes.preview(query.code);
+  }
+
+  // ---- The leader's side: deciding, and pulling somebody in. ----
+
+  @Get('requests')
+  @RequirePermission('leader_request:read_inbox')
+  @ApiOperation({
+    summary: 'Requests waiting on you',
+    description:
+      'Includes anything routed to you by somebody above — an AB may send an agent into ' +
+      'one of their AABs\' units, and that AAB is then the one who decides.',
+  })
+  async inbox(@Ctx() ctx: RequestContext) {
+    return this.approvals.inbox(ctx);
+  }
+
+  @Get('requests/routing')
+  @RequirePermission('leader_request:read_inbox')
+  @ApiOperation({
+    summary: 'Units you may send somebody into',
+    description:
+      'Your own direct AABs, and only those. Empty for an AAB — their reports are ' +
+      'agents, so there is no sub-unit below them.',
+  })
+  async routing(@Ctx() ctx: RequestContext) {
+    return this.approvals.routingChoices(ctx);
+  }
+
+  @Post('requests/:requestId/approve')
+  @RequirePermission('leader_request:approve')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve a request',
+    description:
+      'Returns the inbox as it now stands. Deciding one that was already decided is a ' +
+      '409 naming which way it went — two leaders can have this open at once.',
+  })
+  async approve(
+    @Ctx() ctx: RequestContext,
+    @Param('requestId') requestId: string,
+    @Body() dto: ApproveRequestDto,
+  ) {
+    return this.approvals.approve(ctx, requestId, dto.routeToMembershipId);
+  }
+
+  @Post('requests/:requestId/decline')
+  @RequirePermission('leader_request:approve')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Decline a request',
+    description:
+      'They stay registered to the office and may ask somebody else. Declining is not ' +
+      'removal, and the reason is sent to them.',
+  })
+  async decline(
+    @Ctx() ctx: RequestContext,
+    @Param('requestId') requestId: string,
+    @Body() dto: DeclineRequestDto,
+  ) {
+    return this.approvals.decline(ctx, requestId, dto.reason);
+  }
+
+  @Get('untagged')
+  @RequirePermission('member:search_untagged_pool')
+  @ApiOperation({
+    summary: 'People in this office with no leader',
+    description:
+      'Office-wide, because somebody untagged belongs to nobody yet and so cannot be ' +
+      'found by looking down anybody\'s tree.',
+  })
+  async untagged(@Ctx() ctx: RequestContext, @Query() query: UntaggedSearchDto) {
+    return this.approvals.untagged(ctx, query.q);
+  }
+
+  @Post('untagged/:membershipId')
+  @RequirePermission('member:add_untagged_to_unit')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Add an untagged person to your unit',
+    description:
+      'No approval from them — the office already admitted them, and being placed under ' +
+      'a leader is not a change they have standing to refuse. Somebody who already ' +
+      'reports to another leader is refused: moving them is a different operation.',
+  })
+  async tag(@Ctx() ctx: RequestContext, @Param('membershipId') membershipId: string) {
+    return this.approvals.tag(ctx, membershipId);
   }
 
   @Post('redeem')
@@ -172,6 +299,7 @@ export class OnboardingController {
       'sit in their inbox asking them to approve something that already happened.',
   })
   async redeem(@Ctx() ctx: RequestContext, @Body() dto: RedeemInviteDto) {
-    return this.invites.redeem(ctx, dto.code);
+    this.limitCodeAttempts(ctx);
+    return this.leaderCodes.redeem(ctx, dto.code);
   }
 }

@@ -27,21 +27,41 @@ export class AuditService {
   constructor(@InjectModel(AuditLog.name) private readonly model: Model<AuditLogDocument>) {}
 
   async record(ctx: RequestContext, entry: AuditEntry): Promise<void> {
-    const { actorUserId, effectiveUserId } = ctx.auditActors;
     try {
-      await this.model.create({
-        kpmId: ctx.kpmId,
-        actorUserId,
-        effectiveUserId: ctx.isImpersonating ? effectiveUserId : null,
-        actorMembershipId: ctx.membershipId,
-        onBehalfOf: entry.targetMembershipId != null && entry.targetMembershipId !== ctx.membershipId,
-        ...entry,
-      });
+      await this.model.create(this.rowOf(ctx, entry));
     } catch (err) {
       // An audit write must never take down the operation it describes — but a failure
       // here is a compliance gap, so it is logged at error level and alerts.
       this.logger.error({ err, action: entry.action }, 'failed to write audit entry');
     }
+  }
+
+  /**
+   * **Many entries, one insert** (Phase 15, D-audit): a read that discloses fifty members' data writes
+   * fifty entries, and fifty round trips would make the record the slowest part of the read. Each row is
+   * exactly the one `record` would write; a failure is logged and swallowed for the same reason.
+   */
+  async recordMany(ctx: RequestContext, entries: readonly AuditEntry[]): Promise<void> {
+    if (entries.length === 0) return;
+    try {
+      await this.model.insertMany(entries.map((entry) => this.rowOf(ctx, entry)));
+    } catch (err) {
+      this.logger.error({ err, action: entries[0].action, count: entries.length }, 'failed to write audit entries');
+    }
+  }
+
+  /** The row an entry is written as: both actors under impersonation, and whether it was on somebody's behalf. */
+  private rowOf(ctx: RequestContext, entry: AuditEntry): Record<string, unknown> {
+    const { actorUserId, effectiveUserId } = ctx.auditActors;
+    // The context's fields last: an entry says what happened, never who did it or in which office.
+    return {
+      ...entry,
+      kpmId: ctx.kpmId,
+      actorUserId,
+      effectiveUserId: ctx.isImpersonating ? effectiveUserId : null,
+      actorMembershipId: ctx.membershipId,
+      onBehalfOf: entry.targetMembershipId != null && entry.targetMembershipId !== ctx.membershipId,
+    };
   }
 
   /**

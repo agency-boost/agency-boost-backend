@@ -1,0 +1,11 @@
+This directory is deliberately empty.
+
+Vercel refuses a build whose command produces no static output — "No Output
+Directory named public found after the Build completed" — and this API has none
+to give: everything it serves comes from the function in ../api.
+
+So the directory exists to satisfy that check and stays empty on purpose. Do not
+put a landing page here. `/` currently falls through to the function and answers
+with the API's own JSON 404, and that is worth keeping: it proves the function is
+alive, which is the first thing anybody checks when a deploy looks wrong. A
+static page at `/` would answer 200 while the function was completely broken.

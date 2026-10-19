@@ -1,0 +1,370 @@
+/**
+ * The metric registry, as code (invariant §7, ADR-0035).
+ *
+ * `docs/00-product/metrics-and-definitions.md` Part A is the definition of each of these; this is
+ * the **set of names a requirement may use**, and the phase that first computes each one for real.
+ *
+ * **One list, not two** (P10-T8). `domain/metrics/registry.ts` carried its own copy — its own names,
+ * its own units, and an *available from* that meant something else — and the two disagreed on
+ * seventeen phases and a dozen names before anybody compared them. It now **derives** from this one,
+ * adding only what a computation needs — the period and the threshold — and refuses at load a metric
+ * either side has and the other lacks. `registry.spec.ts` holds both to the document's index.
+ *
+ * **The phases are the current plan's** (P10.1-T2 AC-6, 2026-10-01). The 2026-09-29 re-plan moved
+ * the old Phases 11–15 to 13, 14, 15, 18 and 19 and brought coaching forward to 11
+ * (`roadmap-and-phases.md`, *The 2026-09-29 re-plan*), and every `phase` below moved by that
+ * crosswalk in one change with the document's index. Old 13 split by the task that first computes
+ * each metric: what coaching computes — the session metrics, coverage, and the roster's pace status
+ * and pacing (P11-T5 to P11-T10) — is 11; the unit rollups (P15-T1) are 15. `registry.spec.ts`
+ * pins every moved phase by key, so a number from the old plan cannot come back unnoticed.
+ *
+ * *Amended 2026-10-08 (the re-plan that puts training, events and campaigns last):* the three
+ * enablement metrics — training completion, event attendance status and campaign qualification —
+ * moved from 14 to 18.5 (P18.5-T1, P18.5-T5, P18.5-T8; were P14-T1, P14-T3, P14-T6). Phase 14 is
+ * Sales tools now and computes none. `registry.spec.ts` pins this move by key too.
+ *
+ * *Amended 2026-10-08 again (P15-T0, D-metrics):* the Unit Dashboard draws neither unit rollup the old
+ * plan gave it, so `MAA_COUNT_IN_UNIT` and `ACTIVITY_COMPLIANCE_RATE` moved from 15 to 18, the Owner's
+ * reporting, whose screens draw them (`KPM_Owner.html:1248`, `:982-985`) — still before campaigns are
+ * evaluated (18.5), so a requirement may still name them. Phase 15 registers the five figures its roster
+ * does draw instead, each computed once under `domain/metrics/`: the three lead counts, the potential
+ * active count and the touches.
+ *
+ * A campaign requirement or a qualification rule may only name a metric this product can compute
+ * (ADR-0035). The prototype's requirements are display strings — *"Net APE ≥ Rp 600 juta"* — which
+ * nothing can evaluate and nothing can refuse, so a campaign could promise a reward against a number
+ * the product never produces.
+ */
+export interface MetricDefinition {
+  readonly key: string;
+  readonly name: string;
+  readonly unit: MetricUnit;
+  /** The roadmap phase that first computes it for real. */
+  readonly phase: number;
+  /**
+   * `false` for a metric about **an office rather than a member** (P13.2-T4): no campaign requirement
+   * and no qualification rule may name it, whatever its phase, because nobody could qualify by it. Absent
+   * on every metric a requirement may name. `REQUIREMENT_METRICS` below is the list without them.
+   */
+  readonly requirable?: false;
+  /**
+   * **What a campaign requirement reads, on the small set a campaign may name** (Phase 18.5, D-evaluable).
+   * Present only on that set and absent everywhere else: **a second flag, separate from `requirable`**, which
+   * stays what a carrier rule may name. A target, an enum, a boolean, a per-event rate or a self-declared toggle
+   * is not something anybody *achieves* over a window, so none carries one. `CAMPAIGN_METRICS` below is the set.
+   */
+  readonly campaign?: CampaignReading;
+}
+
+/**
+ * How a campaign requirement reads a metric over its window (D-evaluable, D-windows), through the owning
+ * module's own functions — never a second copy:
+ *
+ * - `source`: `file` — the office's monthly production file (`monthlyAgentData`), read in whole office months;
+ *   `activity` — the member's logged days, any days.
+ * - `aggregate`: `sum` — the months' or days' figures added (a year to date, for a calendar year, the file's own
+ *   year-to-date cell); `latest` — the latest month held in the window; `ratio` — the office's ratio definition
+ *   over the window's counts.
+ * - `subject`: `self` — the member's own figure; `unit` — over the member's Direct Unit (their direct reports on
+ *   the Agent rung) and themselves.
+ *
+ * The evaluator asserts each `aggregate` agrees with the metric's `period` (D-period, `campaign-evaluation.ts`).
+ */
+export interface CampaignReading {
+  readonly source: 'file' | 'activity';
+  readonly aggregate: 'sum' | 'latest' | 'ratio';
+  readonly subject: 'self' | 'unit';
+}
+
+/**
+ * What a metric's number means.
+ *
+ * `idr_minor` is integer sen, never a float and never a display string (invariant §9): the
+ * prototype stores *"Rp 600,000,000"* and one campaign's reward in **pesos**. `tri_state` is
+ * boolean-or-unknown, and the unknown is load-bearing: an office that has not uploaded a month has
+ * no Monthly Active Agents to count, which is not zero of them. `months` is a decimal count of them.
+ */
+export const METRIC_UNITS = [
+  'boolean', 'tri_state', 'count', 'percentage', 'percentage_points', 'ratio', 'days', 'months', 'idr_minor', 'enum', 'score',
+] as const;
+export type MetricUnit = (typeof METRIC_UNITS)[number];
+
+export const METRIC_REGISTRY: readonly MetricDefinition[] = [
+  { key: 'MONTHLY_ACTIVE_AGENT', name: 'Monthly Active Agent (MAA)', unit: 'tri_state', phase: 9 },
+  { key: 'MAA_COUNT_IN_UNIT', name: 'Active agents in unit', unit: 'count', phase: 18, campaign: { source: 'file', aggregate: 'latest', subject: 'unit' } },
+  { key: 'PACING_TO_MAA', name: 'Pacing to MAA', unit: 'boolean', phase: 11 },
+  { key: 'ACTIVITY_COMPLIANCE_7D', name: 'Activity-logging compliance, last 7 days', unit: 'boolean', phase: 6 },
+  { key: 'ACTIVITY_COMPLIANCE_MONTH', name: 'Activity-logging compliance, this month', unit: 'boolean', phase: 6 },
+  { key: 'ACTIVITY_COMPLIANCE_RATE', name: 'Activity-logging compliance rate', unit: 'percentage', phase: 18 },
+  { key: 'ACTIVITY_TOTAL_BY_CATEGORY', name: 'Logged touches by category', unit: 'count', phase: 6 },
+  { key: 'COACHED_7D', name: 'Coached in the last 7 days', unit: 'boolean', phase: 11 },
+  { key: 'COACHED_30D', name: 'Coached in the last 30 days', unit: 'boolean', phase: 11 },
+  { key: 'DAYS_SINCE_LAST_COACHING', name: 'Days since last 1:1', unit: 'days', phase: 11 },
+  { key: 'COACHING_COVERAGE', name: 'Coaching coverage', unit: 'percentage', phase: 11 },
+  { key: 'LEADER_COACHING_FREQUENCY', name: 'AB / AAB coaching frequency', unit: 'percentage', phase: 18 },
+  { key: 'APE_ACHIEVED', name: 'APE achieved', unit: 'idr_minor', phase: 9, campaign: { source: 'file', aggregate: 'sum', subject: 'self' } },
+  { key: 'APE_TARGET', name: 'APE target', unit: 'idr_minor', phase: 8 },
+  { key: 'APE_ATTAINMENT_PCT', name: 'APE achieved vs target', unit: 'percentage', phase: 10 },
+  { key: 'APE_GAP_TO_TARGET', name: 'Gap to target', unit: 'idr_minor', phase: 10 },
+  { key: 'POLICIES_NEEDED', name: 'Policies still needed', unit: 'count', phase: 10 },
+  { key: 'MONTHS_LEFT_IN_YEAR', name: 'Months left in the year', unit: 'months', phase: 8 },
+  { key: 'POLICY_COUNT_TARGET', name: 'Policies to close this month', unit: 'count', phase: 8 },
+  { key: 'APPOINTMENT_TARGET', name: 'Appointments to hold this month', unit: 'count', phase: 8 },
+  { key: 'LEAD_TARGET', name: 'Leads to contact this month', unit: 'count', phase: 8 },
+  { key: 'GOAL_PACE_STATUS', name: 'On-track / pace status', unit: 'enum', phase: 11 },
+  { key: 'SELLING_RECRUITMENT_BALANCE', name: 'Selling vs Recruitment balance', unit: 'percentage_points', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
+  { key: 'SELLING_SUCCESS_RATE', name: 'Selling success rate', unit: 'ratio', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
+  { key: 'RECRUITMENT_SUCCESS_RATE', name: 'Recruitment success rate', unit: 'ratio', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
+  { key: 'LEADS_PER_ACTIVITY', name: 'Leads per activity', unit: 'ratio', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
+  { key: 'MEETING_PER_APPROACH', name: 'Meeting per approach', unit: 'ratio', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
+  { key: 'MEASURED_LEAD_TO_APPOINTMENT_RATE', name: 'Your logged leads-to-appointment rate', unit: 'ratio', phase: 10 },
+  { key: 'MEASURED_CLOSING_RATE', name: 'Your logged closing rate', unit: 'ratio', phase: 10 },
+  { key: 'MONTHLY_APE_TARGET', name: 'This month’s APE target', unit: 'idr_minor', phase: 10 },
+  // P13.1-T5 (ADR-0109): the pace sentence's *tracking to close N*. It replaced ADR-0057's
+  // `PROJECTED_CLOSINGS_THIS_MONTH`, a run-rate, which is no longer measured.
+  { key: 'CLOSINGS_LAST_30_DAYS', name: 'Closings over the last 30 days', unit: 'count', phase: 13.1 },
+  { key: 'CLOSINGS_NEEDED_PER_WEEK', name: 'Closings needed per week', unit: 'count', phase: 10 },
+  { key: 'SUMMARY_ACTIVITY_TARGET', name: 'Activity target for the period', unit: 'count', phase: 10 },
+  { key: 'ACTIVITY_TARGET_ATTAINMENT_PCT', name: 'Logged against the activity target', unit: 'percentage', phase: 10 },
+  // The coaching session's Activity card: this month's activity targets pro-rated to the last 7 days (P11-T4).
+  { key: 'SUB_PERIOD_ACTIVITY_TARGET', name: 'Activity target for the last 7 days, pro-rated', unit: 'count', phase: 11 },
+  { key: 'ACTIVATION_COMPLETION_PCT', name: 'Activation completion', unit: 'percentage', phase: 13 },
+  { key: 'ACTIVATION_DAY_INDEX', name: 'Activation day', unit: 'days', phase: 13 },
+  { key: 'TRAINING_COMPLETION_PCT', name: 'Training completion', unit: 'percentage', phase: 18.5 },
+  { key: 'EVENT_ATTENDANCE_STATUS', name: 'Event attendance status', unit: 'enum', phase: 18.5 },
+  /*
+   * *Moved 2026-10-09 (P18-T0, D-registry): 18 → 18.5.* Every reader of theirs is the compliance, events and
+   * campaigns tree, which moved to 18.5 on 2026-10-08; a metric of Phase 18 that read event records would be a
+   * roadmap defect. 18.5 is `CAMPAIGN_EVALUATION_PHASE`, so neither becomes unrequirable.
+   */
+  { key: 'EVENT_ATTENDANCE_RATE', name: 'Event attendance rate', unit: 'percentage', phase: 18.5 },
+  { key: 'EVENT_NPS', name: 'Event NPS', unit: 'score', phase: 18.5 },
+  { key: 'CAMPAIGN_QUALIFICATION_STATUS', name: 'Campaign qualification', unit: 'enum', phase: 18.5 },
+  { key: 'MOC_STATUS', name: 'Maintenance of Contract', unit: 'boolean', phase: 18 },
+  { key: 'PRODUCTION_CLUB_TIER', name: 'Production club tier', unit: 'enum', phase: 18 },
+  // Computed since P7-T6, in `LeadService.summary` — the document's index said 14 (the old plan's
+  // Owner reporting, 18 now) until P10-T8.
+  { key: 'RECRUITMENT_PIPELINE_NOW', name: 'Recruitment pipeline now', unit: 'count', phase: 7 },
+  { key: 'RECRUITMENT_EXPECTED_TO_CLOSE', name: 'Expected to close', unit: 'count', phase: 7 },
+  /*
+   * Phase 15 (D-leads, D-metrics): the Unit Dashboard's roster, per person and summed by the rollup rule
+   * (`domain/metrics/unit-rollup.ts`, `domain/metrics/lead-counts.ts`).
+   */
+  { key: 'OPEN_SALES_LEADS', name: 'Open sales leads', unit: 'count', phase: 15 },
+  { key: 'SALES_LEADS_CLOSING_THIS_MONTH', name: 'Sales leads closing this month', unit: 'count', phase: 15 },
+  { key: 'RECRUITMENT_NOMINATED_THIS_MONTH', name: 'Recruitment candidates nominated this month', unit: 'count', phase: 15 },
+  { key: 'POTENTIAL_MAA_COUNT_IN_UNIT', name: 'Potential Monthly Active Agents in unit', unit: 'count', phase: 15 },
+  { key: 'CASCADE_ACTIVITY_TOUCHES', name: 'Touches on the goal activities', unit: 'count', phase: 15, campaign: { source: 'activity', aggregate: 'sum', subject: 'self' } },
+  { key: 'NEW_ACTIVE_AGENTS', name: 'New active agents', unit: 'count', phase: 9, campaign: { source: 'file', aggregate: 'sum', subject: 'self' } },
+  { key: 'ROLLING_PERSISTENCY', name: 'Rolling persistency', unit: 'percentage', phase: 9, campaign: { source: 'file', aggregate: 'latest', subject: 'self' } },
+  /*
+   * Phase 18.5 (OD-152 → option 3): **the file's `recruitment` column, as a campaign reads it**
+   * — the prototype's *New Hire* requirement (`Overall.html:7930`, `:7941`, `:7984`). The carrier's count, monthly
+   * and year to date, as `NEW_ACTIVE_AGENTS` is; **not** the glossary's *New hire*, a person in their activation.
+   */
+  { key: 'NEW_HIRES', name: 'New Hire', unit: 'count', phase: 18.5, campaign: { source: 'file', aggregate: 'sum', subject: 'self' } },
+  // P13.2-T4 (ADR-0113): the office's active ABs and AABs, which its leader limit bounds. An office's
+  // seats, not anybody's work: no campaign or qualification rule may name it.
+  { key: 'LEADERS_USED', name: 'Leaders used', unit: 'count', phase: 13.2, requirable: false },
+  /*
+   * Phase 18 (D-registry): the Owner's reporting. Each is computed once under `domain/metrics/` and pinned there.
+   *
+   * **The headcount and its new members are `requirable: false`**, as `LEADERS_USED` is: they are about an
+   * office, so nobody could qualify by one. The other nine count or sum a scope's members and stay requirable,
+   * as the unit rollups do.
+   */
+  { key: 'OFFICE_HEADCOUNT', name: 'Headcount', unit: 'count', phase: 18, requirable: false },
+  { key: 'OFFICE_NEW_MEMBERS_THIS_MONTH', name: 'New members this month', unit: 'count', phase: 18, requirable: false },
+  // OD-142 → option 2: the Overview's first engagement card — logging, counted, never *active agents*.
+  { key: 'ACTIVITY_LOGGED_THIS_MONTH', name: 'Agents who logged activity this month', unit: 'count', phase: 18 },
+  { key: 'RECRUITMENT_CLOSED_LAST_MONTH', name: 'Recruitment closed last month', unit: 'count', phase: 18 },
+  { key: 'APE_YEAR_PROJECTION', name: 'Projected APE for the year', unit: 'idr_minor', phase: 18 },
+  /*
+   * MOC's inputs (OD-22 → option 1, D-moc): the names the seeded carrier rules have always used, a stated
+   * reading of each over the office's file, which the client confirms before go-live.
+   */
+  { key: 'NET_APE', name: 'Net APE', unit: 'idr_minor', phase: 18 },
+  { key: 'MONTHLY2_AA', name: 'Monthly2 AA', unit: 'count', phase: 18 },
+  { key: 'MONTHLY2_AA_DU', name: 'Monthly2 AA, Direct Unit', unit: 'count', phase: 18 },
+  { key: 'MONTHLY2_AA_DG', name: 'Monthly2 AA, Direct Group', unit: 'count', phase: 18 },
+  { key: 'DIRECT_AB_COUNT', name: 'Direct AB (AB on AB)', unit: 'count', phase: 18 },
+  { key: 'MOC_PERSISTENCY', name: 'MOC rolling persistency', unit: 'percentage', phase: 18 },
+  /*
+   * Phase 18.1 (P18.1-T1 AC-1, AC-4; D-cohort, OD-144): the Strategic Leader Forum's scorecard, and the activation
+   * cohort two of its rows read. Each is computed once under `domain/metrics/` (`activation-cohort.ts`,
+   * `producing-agents.ts`, `held-months.ts`) and pinned there.
+   *
+   * **All seven are `requirable: false`**, as the office's headcount is: each is computed over an office — the
+   * scorecard is the office's, `functional/leader-forum.md` — and nothing computes one for a member, so a requirement
+   * naming one could never be evaluated for anybody.
+   */
+  { key: 'ACTIVATION_COHORT', name: 'Activation cohort', unit: 'count', phase: 18.1, requirable: false },
+  { key: 'NEW_AGENT_3M_ACTIVE_PCT', name: '3M new agent %', unit: 'percentage', phase: 18.1, requirable: false },
+  { key: 'NEW_ACTIVE_AGENTS_MONTHLY_AVG', name: 'New AA (avg. monthly)', unit: 'count', phase: 18.1, requirable: false },
+  { key: 'PRODUCING_AGENTS', name: 'Producing agents', unit: 'count', phase: 18.1, requirable: false },
+  { key: 'MAA_MONTHLY_AVG', name: 'Avg. Monthly AA', unit: 'count', phase: 18.1, requirable: false },
+  { key: 'CASE_SUBMISSIONS', name: 'Case submission', unit: 'count', phase: 18.1, requirable: false },
+  { key: 'AVERAGE_CASE_SIZE_REALISED', name: 'Average Case Size', unit: 'idr_minor', phase: 18.1, requirable: false },
+  /*
+   * Phase 18.6 (P18.6-T1 AC-5, AC-7; OD-159, OD-160): the Owner's compliance tree's two chips that needed a definition,
+   * each computed once under `domain/metrics/` (`activation-completion-rate.ts`, `goal-set.ts`). **Both are
+   * `requirable: false`**: each is a share of a set of members, and nobody qualifies by one. `ACTIVATION_COMPLETION_RATE`
+   * is a set's graduations, never `ACTIVATION_COMPLETION_PCT` — one hire's items.
+   */
+  { key: 'ACTIVATION_COMPLETION_RATE', name: 'Activation completion rate', unit: 'percentage', phase: 18.6, requirable: false },
+  { key: 'GOAL_SET_RATE', name: 'Goal set', unit: 'percentage', phase: 18.6, requirable: false },
+];
+
+export const metricByKey = (key: string): MetricDefinition | undefined =>
+  METRIC_REGISTRY.find((m) => m.key === key);
+
+/**
+ * **What a campaign requirement or a qualification rule may name** (ADR-0035): every metric but those
+ * about an office rather than a member (`requirable: false`). `GET /metrics` serves this list, the
+ * requirement DTO enumerates it, and `checkCampaign` refuses a key outside it by name.
+ */
+export const REQUIREMENT_METRICS: readonly MetricDefinition[] = METRIC_REGISTRY
+  .filter((m) => m.requirable !== false);
+
+/**
+ * **What a campaign requirement may name** (Phase 18.5, D-evaluable): the metrics carrying a `campaign` reading —
+ * a member's own production over whole months, their logged activity, the office's five ratios, and their Direct
+ * Unit's active agents. `GET /metrics` serves the flag, the Owner's picker offers only these, `checkCampaign`
+ * refuses anything else by name, and a requirement stored before the set existed reads *Not measured yet*.
+ *
+ * **Not in it, and why**: `TRAINING_COMPLETION_PCT` (a self-declared toggle), `EVENT_ATTENDANCE_RATE` and
+ * `EVENT_NPS` (two figures per event, not per member), every target and pro-rated target —
+ * `SUB_PERIOD_ACTIVITY_TARGET` among them, which answers Phase 11's carried question — every enum and boolean,
+ * `CAMPAIGN_QUALIFICATION_STATUS` itself, and every office count.
+ */
+export const CAMPAIGN_METRICS: readonly MetricDefinition[] = METRIC_REGISTRY.filter((m) => m.campaign !== undefined);
+
+/** Is this key one a campaign requirement may name? */
+export const isCampaignMetric = (key: string): boolean => metricByKey(key)?.campaign !== undefined;
+
+/**
+ * The phase that evaluates a campaign, which is what a requirement has to be computable by.
+ *
+ * A requirement naming a metric computed after this is refused, saying the metric is not measured
+ * yet and naming no phase (P10.1-T2 AC-3, ADR-0062 §3), rather than being accepted and silently
+ * never qualifying anybody. `GET /metrics` reports the same comparison as `computed`.
+ *
+ * **14 is Phase 14, campaigns (P14-T5, P14-T6)** — the old plan's 12, moved by the crosswalk with
+ * the metrics above (P10.1-T2 AC-6). The move has one behavioural consequence, decided rather than
+ * inherited (AC-7): coaching is Phase 11 now and precedes campaign evaluation, so the six metrics
+ * coaching computes — `COACHED_7D`, `COACHED_30D`, `DAYS_SINCE_LAST_COACHING`, `COACHING_COVERAGE`,
+ * `GOAL_PACE_STATUS`, `PACING_TO_MAA` — are measured by the time a campaign is evaluated, and a
+ * campaign may require one. Nothing else changed sides: the unit rollups (15) and the Owner's
+ * reporting metrics (18) were refused before and are refused still. `registry.spec.ts` pins both
+ * sets by key, and the difference between them.
+ *
+ * *Amended 2026-10-08 (the re-plan that puts training, events and campaigns last):* **18.5 is
+ * Phase 18.5, campaigns (P18.5-T7, P18.5-T8; were P14-T5, P14-T6)**, which comes after the Unit
+ * Dashboard (15) and the Owner's reporting (18). The move has one behavioural consequence, decided
+ * and recorded with the re-plan: the unit rollups (15) and the Owner's reporting metrics (18) are
+ * now measured before campaigns are evaluated, so a campaign may require one of those seven, and no
+ * metric registered today is refused as not measured yet. The refusal stays for a metric registered
+ * after campaign evaluation. `LEADERS_USED` stays out of every requirement: it is `requirable: false`
+ * whatever its phase. `registry.spec.ts` pins the new set by key, and the difference from the old.
+ */
+export const CAMPAIGN_EVALUATION_PHASE = 18.5;
+
+/** How a requirement compares. */
+export const REQUIREMENT_COMPARATORS = ['gte', 'gt', 'lte', 'lt', 'eq'] as const;
+export type RequirementComparator = (typeof REQUIREMENT_COMPARATORS)[number];
+
+/** A qualification rule's kinds, and whose they are (ADR-0026, ADR-0035). */
+export const QUALIFICATION_RULE_KINDS = ['moc', 'production_club', 'promotion_path'] as const;
+export type QualificationRuleKind = (typeof QUALIFICATION_RULE_KINDS)[number];
+
+export const QUALIFICATION_RULE_SCOPES = ['company', 'kpm'] as const;
+export type QualificationRuleScope = (typeof QUALIFICATION_RULE_SCOPES)[number];
+
+/** `all` — every criterion; `any` — one is enough. The prototype's MOC has both. */
+export const CRITERIA_MODES = ['all', 'any'] as const;
+export type CriteriaMode = (typeof CRITERIA_MODES)[number];
+
+const IDR = 100; // sen per rupiah
+
+/**
+ * The annual-APE recognition tiers (ADR-0026, P5-T7 AC-5).
+ *
+ * **The insurer's, not an office's.** A branch manager cannot delete Chairman's Club any more than
+ * they can retag their office to another company — which is why the screen shows them read-only,
+ * with the reason on the card (parity I-76).
+ *
+ * Stored in **integer IDR minor units**: the prototype's *"Rp 1.2B"* is a display string, and one of
+ * its campaigns is denominated in pesos.
+ */
+export const SEED_PRODUCTION_CLUB_TIERS = [
+  { code: 'STAR_CLUB', name: 'Star Club', minAnnualApe: 1_200_000_000 * IDR, reward: 'Promotion bonus', rank: 1 },
+  { code: 'ELITE_CLUB', name: 'Elite Club', minAnnualApe: 2_000_000_000 * IDR, reward: 'Trip qualification', rank: 2 },
+  { code: 'CHAIRMANS_CLUB', name: "Chairman's Club", minAnnualApe: 3_500_000_000 * IDR, reward: 'AB override + unit budget', rank: 3 },
+] as const;
+
+/**
+ * `MOC_PERSISTENCY_MIN_PCT` (§B.6): the rolling persistency a leader's MOC asks for, AB and AAB alike — the
+ * prototype's *"Rolling Persistency DU/DG ≥ 75%"* (`KPM_Owner.html:1248`, `:3305`, `:3313`). The seeded rules
+ * lacked it until migration `0026-moc-persistency` added it (P18-T2, D-moc).
+ */
+export const MOC_PERSISTENCY_MIN_PCT = 75;
+
+/**
+ * `NEW_AGENT_ACTIVE_MONTHS` (Phase 18.1, D-cohort): the months `NEW_AGENT_3M_ACTIVE_PCT` reads of a hire — **the
+ * start month and the three after it**, the prototype's *"their join month or the following three months"*
+ * (`KPM_Owner.html:2474`). Calendar months in the office's zone, each read from the office's file. Fixed.
+ */
+export const NEW_AGENT_ACTIVE_MONTHS = 4;
+
+/**
+ * Maintenance of Contract, as the carrier states it (ADR-0026, P5-T7 AC-6).
+ *
+ * **The thresholds are ported; none of the prototype's derivations are.** The prototype fabricates
+ * `monthly2Aa` from a headcount it has to hand, which is a different number wearing the carrier's
+ * name. Each criterion below names the metric it needs. Until Phase 18 registered them (D-registry) the
+ * ones the registry did not define were listed on the rule as `waitingOnMetrics`, so a screen could say
+ * what it waited on rather than show a rule that silently never passes; every one is registered now, and
+ * `MOC_STATUS` evaluates them (`domain/metrics/moc-status.ts`).
+ */
+export const SEED_MOC_RULES = [
+  {
+    code: 'MOC_AB',
+    name: 'Maintenance of Contract — AB',
+    appliesToOrgLevelCodes: ['AB'],
+    /** Net APE **and** both Monthly2 AA counts, **or** five direct ABs. */
+    criteriaGroups: [
+      {
+        mode: 'all' as const,
+        criteria: [
+          { metricKey: 'NET_APE', comparator: 'gte' as const, value: 600_000_000 * IDR },
+          { metricKey: 'MONTHLY2_AA_DU', comparator: 'gte' as const, value: 4 },
+          { metricKey: 'MONTHLY2_AA_DG', comparator: 'gte' as const, value: 6 },
+          // P18-T2, D-moc: the criterion the prototype draws and the first seed left out (`0026-moc-persistency`).
+          { metricKey: 'MOC_PERSISTENCY', comparator: 'gte' as const, value: MOC_PERSISTENCY_MIN_PCT },
+        ],
+      },
+      {
+        mode: 'all' as const,
+        criteria: [{ metricKey: 'DIRECT_AB_COUNT', comparator: 'gte' as const, value: 5 }],
+      },
+    ],
+    /** Groups are ORed: the carrier's own *"or"*. */
+    groupMode: 'any' as const,
+  },
+  {
+    code: 'MOC_AAB',
+    name: 'Maintenance of Contract — AAB',
+    appliesToOrgLevelCodes: ['AAB'],
+    criteriaGroups: [
+      {
+        mode: 'all' as const,
+        criteria: [
+          { metricKey: 'NET_APE', comparator: 'gte' as const, value: 200_000_000 * IDR },
+          { metricKey: 'MONTHLY2_AA', comparator: 'gte' as const, value: 2 },
+          { metricKey: 'MOC_PERSISTENCY', comparator: 'gte' as const, value: MOC_PERSISTENCY_MIN_PCT },
+        ],
+      },
+    ],
+    groupMode: 'any' as const,
+  },
+] as const;

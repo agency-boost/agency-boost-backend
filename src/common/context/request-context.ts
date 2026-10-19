@@ -12,6 +12,22 @@ export type PlatformRole = 'super_admin' | 'none';
 export interface TenantMembership {
   readonly membershipId: string;
   readonly kpmId: string;
+  /**
+   * The rung of the **company's ladder** this person stands on (P4-T9, ADR-0012).
+   *
+   * `AGENT`, `AAB`, `AB` in v1's seeded ladder — and whatever a second insurer publishes
+   * after that. This is what a hierarchy grant is compared against; `hierarchyRole` below
+   * is the enum it used to be compared against, and cannot describe a ladder nobody has
+   * enumerated in advance.
+   */
+  readonly orgLevelCode: string;
+  /**
+   * The three-value enum, kept while it is one-to-one with the ladder.
+   *
+   * Still read by seven services that sort, group and label by it. Retiring the *field*
+   * is a data migration; retiring its use as an **authorisation input** is P4-T9, and that
+   * is what `orgLevelCode` above is for.
+   */
   readonly hierarchyRole: HierarchyRole;
   readonly status: 'active' | 'pending' | 'removed';
   readonly isKpmOwner: boolean;
@@ -41,6 +57,30 @@ export class RequestContext {
      * does not exist.
      */
     private readonly actingInKpmId: string | null = null,
+    /**
+     * They are signed in on a password somebody else chose for them.
+     *
+     * Set on an account created by the roster import (P3.6-T4): the admin was handed a
+     * generated password to pass on, so until it is replaced, the person holding this
+     * session is not demonstrably the person the account belongs to.
+     *
+     * `AuthGuard` refuses everything but the handful of routes that let them fix it. The
+     * flag lives on the context rather than being re-read per route because the guard
+     * already resolves the user on every request — the check costs nothing.
+     */
+    readonly mustChangePassword: boolean = false,
+    /**
+     * A support session that may look and not touch (P4-T10, §3.13).
+     *
+     * **True for every session until a second Super Admin says otherwise.** The operator
+     * who wants to write is not the one who decides they may — an admin session can
+     * rewrite the configuration every member's data depends on, and the person best
+     * placed to notice that was a bad idea is somebody other than the person having it.
+     *
+     * `false` outside a session, because a person acting as themselves is not being
+     * restrained; `can()` reads it and nothing else has to.
+     */
+    readonly impersonationReadOnly: boolean = false,
   ) {
     Object.freeze(this);
   }
@@ -98,6 +138,9 @@ export class RequestContext {
     return new RequestContext(`job:${jobName}`, 'none', {
       membershipId: `job:${jobName}`,
       kpmId,
+      // The most junior rung of the seeded ladder: a job holds no hierarchy grant, and
+      // giving it a senior one would be handing a background task rights nobody granted.
+      orgLevelCode: 'AGENT',
       hierarchyRole: 'agent',
       status: 'active',
       isKpmOwner: false,
@@ -120,5 +163,38 @@ export class RequestContext {
    */
   static superAdminInTenant(userId: string, kpmId: string): RequestContext {
     return new RequestContext(userId, 'super_admin', null, null, kpmId);
+  }
+
+  /**
+   * Somebody writing themselves into an office they have not joined yet.
+   *
+   * The join flow has the same shape as Super Admin provisioning — a write into a tenant
+   * the actor is not yet a member of — and until 2026-09-06 it borrowed
+   * `superAdminInTenant` for it. That was wrong twice.
+   *
+   * It claimed `platformRole: 'super_admin'` for an ordinary newcomer. Nothing reads
+   * platform role off these contexts today (the repository wants only a `kpmId`, and the
+   * guard runs on the real request context, never this one), so it opened no hole — but
+   * "the newcomer is a Super Admin for this write" is one refactor away from being one,
+   * and it is not the sentence anybody meant to write.
+   *
+   * The live defect was the second one: it took a bare `userId` and dropped
+   * `impersonatorUserId` with it. A Super Admin redeeming an invite on somebody's behalf
+   * was audited as the newcomer acting alone. This carries the whole context through, so
+   * `auditActors` still answers *who really did this*.
+   */
+  static joiningTenant(ctx: RequestContext, kpmId: string): RequestContext {
+    return new RequestContext(ctx.userId, 'none', null, ctx.impersonatorUserId, kpmId);
+  }
+
+  /**
+   * A read against one office by somebody outside it, and possibly nobody at all.
+   *
+   * The invite preview is unauthenticated — it is what a joiner sees before committing —
+   * so there is no user to name. It used to pass the literal string `'invite-preview'`
+   * as a userId, which reads like an account. A job label says what it is.
+   */
+  static tenantRead(kpmId: string, reason: string): RequestContext {
+    return new RequestContext(`job:${reason}`, 'none', null, null, kpmId);
   }
 }

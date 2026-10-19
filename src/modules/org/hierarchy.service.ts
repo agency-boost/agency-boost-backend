@@ -6,10 +6,14 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
-import { formatAgentCode } from './agent-code';
-import { MembershipHistory, MembershipHistoryDocument, MembershipEvent } from './membership-history.schema';
+import { User, UserDocument } from '@/modules/users/user.schema';
+import { EdgeEvent, MembershipHistory } from './membership-history.schema';
+import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
-import { HierarchyRole, MembershipDocument } from './membership.schema';
+import { OrgLevelService } from '@/modules/tenants/org-level.service';
+import { generateLeaderCode } from './leader-code';
+import { isLeaderRung, withLeaderSeat } from './leader-limit';
+import { DirectCounts, HierarchyRole, MembershipDocument } from './membership.schema';
 
 export interface CreateMembershipInput {
   userId: string;
@@ -35,42 +39,99 @@ export class HierarchyService {
   constructor(
     private readonly members: MembershipRepository,
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
-    @InjectModel(MembershipHistory.name)
-    private readonly history: Model<MembershipHistoryDocument>,
+    @InjectModel(User.name) private readonly users: Model<UserDocument>,
+    private readonly history: MembershipHistoryRepository,
     private readonly clock: Clock,
+    // No cycle: OrgLevelService knows nothing about the hierarchy.
+    private readonly orgLevels: OrgLevelService,
   ) {}
 
   /**
-   * Allocate the next agent code for an office.
+   * Take the next join-order number for an office.
+   *
+   * **This used to mint the agent code too.** It does not any more (ADR-0017): the code
+   * belongs to the person, issued by their insurer and entered when they registered. What
+   * survives is the sequence, because the directory cursor is a `$gt` on it and seven
+   * services sort by it — none of which has anything to do with who issues a code.
    *
    * `findOneAndUpdate` with `$inc` so the read and the increment are one atomic
-   * operation. A read-then-write would hand two concurrent joins the same number, and
-   * the unique index would then reject one of them — turning a race into a user-visible
-   * failure on a code nobody chose.
+   * operation. A read-then-write would hand two concurrent joins the same number, and the
+   * sort index would then hold two rows the cursor cannot separate — one of which the
+   * roster would skip.
    */
-  private async nextAgentCode(kpmId: string): Promise<{ agentCode: string; agentSeq: number }> {
+  private async nextMemberSeq(kpmId: string): Promise<{ agentSeq: number }> {
     const kpm = await this.kpms
       .findOneAndUpdate(
         { _id: kpmId, deletedAt: null },
-        { $inc: { 'counters.nextAgentCodeSeq': 1 } },
+        { $inc: { 'counters.nextMemberSeq': 1 } },
         { new: false },
       )
       .exec();
     if (!kpm) throw new NotFoundException('KPM');
-    const agentSeq = kpm.counters?.nextAgentCodeSeq ?? 1;
-    return { agentCode: formatAgentCode(kpm.code, agentSeq), agentSeq };
+    return { agentSeq: kpm.counters?.nextMemberSeq ?? 1 };
   }
 
-  private async record(
+  /**
+   * A leader code nobody else holds.
+   *
+   * Unique across every office and generated rather than derived, so a collision is
+   * possible and has to be handled: probe, and try again. Five attempts against a space
+   * of 32⁶ is not a real limit — it is a way of failing loudly if the generator ever
+   * stops being random, rather than looping until the request times out.
+   *
+   * The probe is deliberately **unscoped**. The uniqueness is global, and asking within
+   * one office would hand two offices the same code.
+   */
+  private async freshLeaderCode(): Promise<string> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const code = generateLeaderCode();
+      const taken = await this.members.existsWithLeaderCode(code);
+      if (!taken) return code;
+    }
+    throw new DomainException(
+      ErrorCode.INTERNAL_ERROR,
+      'Could not allocate a leader code.',
+      HttpStatus.INTERNAL_SERVER_ERROR,
+    );
+  }
+
+  /** The insurer an office belongs to. The ladder and the agent code both hang off it. */
+  private async companyOf(kpmId: string): Promise<string> {
+    const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
+    if (!kpm) throw new NotFoundException('KPM');
+    return kpm.companyId;
+  }
+
+  /**
+   * The agent code this person carries, checked against the office they are joining.
+   *
+   * The code is the insurer's, so an office may only admit somebody the insurer issued a
+   * code for — and only its own insurer's. A user whose company differs from the office's
+   * reads as **not found**, the same answer as an office that does not exist, because
+   * confirming otherwise would let anybody map which insurer runs which office.
+   */
+  private async agentCodeOf(userId: string, companyId: string): Promise<string> {
+    const user = await this.users.findOne({ _id: userId, deletedAt: null }).exec();
+    if (!user) throw new NotFoundException('User');
+    if (!user.agentCode || user.companyId !== companyId) {
+      throw new NotFoundException('KPM');
+    }
+    return user.agentCode;
+  }
+
+  /**
+   * The first edge. A membership that did not exist a moment ago has nothing open to close, so
+   * this is the one edge written without `MembershipHistoryRepository.openEdge`; every later one
+   * goes through it, and it closes whatever is open first (P11-T3).
+   */
+  private async recordJoined(
     ctx: RequestContext,
     membershipId: string,
-    eventType: MembershipEvent,
-    fields: Partial<MembershipHistory> = {},
+    fields: Partial<MembershipHistory>,
   ): Promise<void> {
-    await this.history.create({
-      kpmId: ctx.kpmId,
+    await this.history.create(ctx, {
       membershipId,
-      eventType,
+      eventType: 'joined',
       validFrom: this.clock.now(),
       validTo: null,
       actorMembershipId: ctx.membershipId,
@@ -79,17 +140,161 @@ export class HierarchyService {
     });
   }
 
-  /** Close the open edge of a kind, so a change never overwrites what came before. */
-  private async closeEdge(membershipId: string, eventType: MembershipEvent): Promise<void> {
-    await this.history
-      .updateMany(
-        { membershipId, eventType, validTo: null },
-        { $set: { validTo: this.clock.now() } },
-      )
-      .exec();
+  /**
+   * Move somebody to a different rung.
+   *
+   * Here rather than in `RoleChangeService` for the same reason `leaderId` is: **both
+   * fields are written in one place or they drift.** A caller doing
+   * `$set: { role: toRole }` on its own would leave `orgLevelId` pointing at the rung
+   * they left, and nothing would notice — the enum would answer every question correctly
+   * while the reference, which is the stored truth, said something else.
+   *
+   * Returns the rung, so the caller can record it in history.
+   */
+  /**
+   * Is this membership the one that owns the office?
+   *
+   * Ownership lives on `kpms.ownerUserId`, not on the membership — `ContextResolver`
+   * derives `isKpmOwner` by comparing the two — so anything that needs the answer has to
+   * make the same join. Here because this service already holds the Kpm model, and
+   * because both callers that need it already depend on it.
+   */
+  async ownsTheOffice(ctx: RequestContext, membership: { userId: string }): Promise<boolean> {
+    if (!ctx.kpmId) return false;
+    const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).exec();
+    return Boolean(kpm?.ownerUserId) && kpm!.ownerUserId === membership.userId;
+  }
+
+  async setLevel(
+    ctx: RequestContext,
+    membershipId: string,
+    toRole: HierarchyRole,
+  ): Promise<{ orgLevelId: string; role: HierarchyRole }> {
+    const kpmId = ctx.kpmId;
+    if (!kpmId) {
+      throw new DomainException(
+        ErrorCode.TENANT_NO_MEMBERSHIP,
+        'You are not in an office.',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
+    if (!kpm) throw new NotFoundException('KPM');
+
+    const level = await this.orgLevels.resolveByCode(kpm.companyId, toRole);
+    const role = level.code.toLowerCase() as HierarchyRole;
+    const write = async () => {
+      await this.members.updateById(ctx, membershipId, {
+        // All three together, always. `orgLevelCode` is what a permission grant reads and
+        // `role` is what the display services read; writing one without the others is how
+        // somebody comes to hold rights their badge does not show (P4-T9).
+        $set: { orgLevelId: String(level._id), orgLevelCode: level.code, role },
+      });
+      return { orgLevelId: String(level._id), role };
+    };
+
+    /*
+     * **The leader limit** (ADR-0113 §2, P13.2-T4): a move from a rung the limit does not count to
+     * one it does — an Agent to AAB or AB — adds a leader, and is refused when the office has none
+     * to add. AB to AAB, and anything downward, changes nothing and is never refused.
+     *
+     * A pending member is held to it here too, although a pending member is not counted: it costs
+     * nothing, and it refuses a promotion that could never be approved. The approval itself is what
+     * holds them to it ({@link activate}) — promoting two pending members at one below the limit
+     * passes both here, and only the first approval takes the seat (P13.2 exit review).
+     *
+     * **The member is read with the lease held** (exit review): two promotions of one Agent at once
+     * both read *Agent* before it, and the second was counted as a second leader. A move to Agent never
+     * adds one, so it takes no lease at all.
+     */
+    if (!isLeaderRung(level.code)) return write();
+    return withLeaderSeat(this.leaderLimit(), ctx, write, async () => {
+      const member = await this.members.findById(ctx, membershipId);
+      return member !== null && member.status !== 'removed' && !isLeaderRung(member.orgLevelCode);
+    });
+  }
+
+  /**
+   * **Make a member who is not active, active** — an approval, a tag, an Owner assigned who had
+   * registered — under the leader limit (ADR-0113 §2, P13.2 exit review).
+   *
+   * *Leaders used* counts active members only, so a pending member promoted to AB or AAB was not
+   * counted, and the activation that made them count asked nobody: two pending members promoted at
+   * one below the limit, then approved, made it one over. The activation is the write that adds the
+   * leader, so it is the one that takes the seat — refused `409 LEADER_LIMIT_REACHED` with nothing
+   * written, and served as it always was for an Agent, whom the limit never counts.
+   *
+   * Whether it adds one is read with the lease held: the row as it stands at the write, not as the
+   * caller read it.
+   */
+  async activate(ctx: RequestContext, membershipId: string, fields: Record<string, unknown>): Promise<void> {
+    const write = () => this.members.updateById(ctx, membershipId, { $set: { ...fields, status: 'active' } });
+    await withLeaderSeat(this.leaderLimit(), ctx, write, async () => {
+      const member = await this.members.findById(ctx, membershipId);
+      return member !== null && member.status !== 'active' && isLeaderRung(member.orgLevelCode);
+    });
+  }
+
+  /** What the leader limit's check reads and holds (`leader-limit.ts`). */
+  private leaderLimit() {
+    return { kpms: this.kpms, members: this.members, clock: this.clock };
   }
 
   async create(ctx: RequestContext, input: CreateMembershipInput): Promise<MembershipDocument> {
+    const { leader, agentCode, level, status } = await this.admission(ctx, input, input.userId);
+
+    /*
+     * **The leader limit** (ADR-0113 §2, P13.2-T4): an **active** member made at AB or AAB adds a
+     * leader — a roster row's role column, or an Owner assigned who was not yet a member — and is
+     * refused when the office has none to add, before a number or a code is spent on them. Every
+     * join path makes a pending or active Agent, so none of them is ever refused here.
+     */
+    // `admission` read the agent code, since the account exists: it is never null here.
+    const write = () => this.insert(ctx, input, { leader, agentCode: agentCode as string, level, status });
+    if (status !== 'active' || !isLeaderRung(level.code)) return write();
+    return withLeaderSeat(this.leaderLimit(), ctx, write);
+  }
+
+  /**
+   * `create`, for somebody whose **account is made in the same step** — a roster row (P13.2 exit
+   * review).
+   *
+   * The roster import made the account and then the membership, and the leader limit refused the
+   * membership: the account stayed, a person with no office, and its email refused the same row when
+   * the file was imported again. Here the account is made by `makeAccount` only once the refusals that
+   * do not need it have been met — the leader, the rung, and the limit, **with the lease held** — so a
+   * row past the limit leaves nothing behind.
+   */
+  async createWithAccount(
+    ctx: RequestContext,
+    input: Omit<CreateMembershipInput, 'userId'>,
+    makeAccount: () => Promise<string>,
+  ): Promise<MembershipDocument> {
+    const { leader, companyId, level, status } = await this.admission(ctx, input, null);
+    const write = async () => {
+      const userId = await makeAccount();
+      const agentCode = await this.agentCodeOf(userId, companyId);
+      return this.insert(ctx, { ...input, userId }, { leader, agentCode, level, status });
+    };
+    if (status !== 'active' || !isLeaderRung(level.code)) return write();
+    return withLeaderSeat(this.leaderLimit(), ctx, write);
+  }
+
+  /**
+   * What `create` and `createWithAccount` both settle before their write: the office, the leader, the
+   * person's agent code when their account exists already (`userId`), and the rung.
+   */
+  private async admission(
+    ctx: RequestContext,
+    input: Omit<CreateMembershipInput, 'userId'>,
+    userId: string | null,
+  ): Promise<{
+    leader: MembershipDocument | null;
+    companyId: string;
+    agentCode: string | null;
+    level: Awaited<ReturnType<OrgLevelService['resolveByCode']>>;
+    status: 'active' | 'pending';
+  }> {
     const kpmId = ctx.kpmId;
     if (!kpmId) {
       throw new DomainException(
@@ -101,23 +306,60 @@ export class HierarchyService {
 
     const leader = input.leaderId ? await this.requireLeader(ctx, input.leaderId) : null;
 
-    const { agentCode, agentSeq } = await this.nextAgentCode(kpmId);
+    // **The refusal comes before the increment.** `nextMemberSeq` is a `$inc`, and a
+    // rejected join that had already taken a number would leave a gap in the office's
+    // ordering for somebody who never arrived.
+    const companyId = await this.companyOf(kpmId);
+    const agentCode = userId === null ? null : await this.agentCodeOf(userId, companyId);
+
+    // **The level is resolved first, and `role` is taken from what came back.**
+    //
+    // `input.role` is a lookup key, not the value stored: writing the caller's role
+    // beside a level resolved from it is how the two come to disagree. Taking the code
+    // off the resolved rung means they cannot — there is only one source, and it is the
+    // ladder (ADR-0012).
+    //
+    // Before the increment now, because the leader limit's refusal reads it (P13.2-T4).
+    const level = await this.orgLevels.resolveByCode(companyId, input.role);
+    return { leader, companyId, agentCode, level, status: input.status ?? 'pending' };
+  }
+
+  /** `create`'s write, once every refusal it can meet has been met. */
+  private async insert(
+    ctx: RequestContext,
+    input: CreateMembershipInput,
+    resolved: {
+      leader: MembershipDocument | null;
+      agentCode: string;
+      level: { _id: unknown; code: string };
+      status: 'active' | 'pending';
+    },
+  ): Promise<MembershipDocument> {
+    const { leader, agentCode, level, status } = resolved;
+    const { agentSeq } = await this.nextMemberSeq(ctx.kpmId as string);
+    const leaderCode = await this.freshLeaderCode();
+    const role = level.code.toLowerCase() as HierarchyRole;
+
     const membership = await this.members.create(ctx, {
       userId: input.userId,
       agentCode,
       agentSeq,
-      role: input.role,
+      leaderCode,
+      orgLevelId: String(level._id),
+      orgLevelCode: level.code,
+      role,
       leaderId: leader ? String(leader._id) : null,
       ancestorIds: leader ? [...leader.ancestorIds, String(leader._id)] : [],
       depth: leader ? leader.depth + 1 : 0,
-      status: input.status ?? 'pending',
-      joinedAt: (input.status ?? 'pending') === 'active' ? this.clock.now() : null,
+      status,
+      joinedAt: status === 'active' ? this.clock.now() : null,
       recruitedByMembershipId: input.recruitedByMembershipId ?? null,
       sourceLeadId: input.sourceLeadId ?? null,
     });
 
-    await this.record(ctx, String(membership._id), 'joined', {
-      toRole: input.role,
+    await this.recordJoined(ctx, String(membership._id), {
+      toRole: role,
+      toOrgLevelId: String(level._id),
       toLeaderId: membership.leaderId,
     });
 
@@ -146,59 +388,126 @@ export class HierarchyService {
    * carries the moved member's old ancestors and must carry the new ones instead. This
    * is the price of making the descendant query one lookup, and it is paid here.
    */
+  /**
+   * Move a member under a new leader, correctly: cycle check, subtree re-splice, and
+   * `refreshCounts` on **both** the leader they left and the one they joined.
+   *
+   * Extracted because `ApprovalsService.attach` had its own copy of the move — a bare
+   * `$set` of `leaderId`, `ancestorIds` and `depth` — and did none of those three. So
+   * approving a request or tagging somebody who already led a unit left every descendant
+   * carrying the old ancestry: the previous leader kept read reach over a unit that had
+   * gone, the new leader could not see the unit they now owned, and the old leader's
+   * counts were never refreshed. Two ways of doing one thing is how the wrong one gets
+   * called.
+   *
+   * The history row is the caller's to write, because the *meaning* differs: joining an
+   * office for the first time is not the same event as being moved between leaders.
+   *
+   * Returns the leader they had before, or `undefined` when nothing moved.
+   */
+  /**
+   * Would this move be refused? Asked **before** anything is written.
+   *
+   * `moveUnder` checks the same thing, and keeps checking it — it is the one place the
+   * graph changes and it does not get to assume its callers were careful. This exists so
+   * a caller that must write something *else* first can find out beforehand.
+   *
+   * `ApprovalsService.attach` is that caller. It has to set `status: 'active'` before the
+   * move, because `refreshCounts` counts active members — so a refusal inside `moveUnder`
+   * used to leave the joiner active with no leader and a `recruitedByMembershipId` naming
+   * a leader who never took them on, with their request still pending. There are no
+   * transactions here (ADR-0002, and MongoDB sessions are not configured), so the only
+   * way to avoid a half-write is not to start one.
+   */
+  async assertCanMoveUnder(
+    ctx: RequestContext,
+    membershipId: string,
+    newLeaderId: string,
+  ): Promise<void> {
+    // No member read and no nullable leader: the only caller has both in hand already,
+    // and `moveUnder` re-reads and re-checks regardless. Accepting shapes nobody passes
+    // would be two branches no test could reach except by inventing a caller for them.
+    this.refuseCycle(membershipId, newLeaderId, await this.requireLeader(ctx, newLeaderId));
+  }
+
+  /** A cycle would make the subtree query infinite and the member their own ancestor. */
+  private refuseCycle(
+    membershipId: string,
+    newLeaderId: string,
+    leader: MembershipDocument,
+  ): void {
+    const wouldCycle =
+      String(leader._id) === membershipId || leader.ancestorIds.includes(membershipId);
+    if (wouldCycle) {
+      throw new DomainException(
+        ErrorCode.ORG_CYCLE_DETECTED,
+        'That would make this member their own leader.',
+        HttpStatus.CONFLICT,
+        { membershipId, leaderId: newLeaderId },
+      );
+    }
+  }
+
+  async moveUnder(
+    ctx: RequestContext,
+    membershipId: string,
+    newLeaderId: string | null,
+  ): Promise<{ previousLeaderId: string | null; moved: boolean }> {
+    const member = await this.members.findById(ctx, membershipId);
+    if (!member) throw new NotFoundException('Membership');
+
+    const leader = newLeaderId ? await this.requireLeader(ctx, newLeaderId) : null;
+
+    if (leader) this.refuseCycle(membershipId, newLeaderId as string, leader);
+
+    const previousLeaderId = member.leaderId;
+    const target = leader ? String(leader._id) : null;
+    if (previousLeaderId === target) return { previousLeaderId, moved: false };
+
+    const oldPath = [...member.ancestorIds, membershipId];
+    const newAncestors = leader ? [...leader.ancestorIds, String(leader._id)] : [];
+    const newDepth = newAncestors.length;
+
+    await this.members.updateById(ctx, membershipId, {
+      $set: { leaderId: target, ancestorIds: newAncestors, depth: newDepth },
+    });
+
+    // Every descendant carries the old path as a prefix, so the whole subtree is one
+    // splice rather than a walk — and one round trip rather than one per member.
+    await this.members.respliceSubtree(
+      ctx, membershipId, newAncestors, oldPath.length, newDepth - member.depth,
+    );
+
+    await this.refreshCounts(ctx, previousLeaderId);
+    await this.refreshCounts(ctx, target);
+    return { previousLeaderId, moved: true };
+  }
+
   async reparent(
     ctx: RequestContext,
     membershipId: string,
     newLeaderId: string | null,
     reason?: string,
   ): Promise<MembershipDocument> {
+    const { previousLeaderId, moved } = await this.moveUnder(ctx, membershipId, newLeaderId);
     const member = await this.members.findById(ctx, membershipId);
     if (!member) throw new NotFoundException('Membership');
+    if (!moved) return member;
 
-    const leader = newLeaderId ? await this.requireLeader(ctx, newLeaderId) : null;
-
-    if (leader) {
-      // A cycle would make the subtree query infinite and the member their own ancestor.
-      // Checking the proposed leader's ancestors catches it in one comparison: if the
-      // member is already above them, moving them below closes the loop.
-      const wouldCycle =
-        String(leader._id) === membershipId || leader.ancestorIds.includes(membershipId);
-      if (wouldCycle) {
-        throw new DomainException(
-          ErrorCode.ORG_CYCLE_DETECTED,
-          'That would make this member their own leader.',
-          HttpStatus.CONFLICT,
-          { membershipId, leaderId: newLeaderId },
-        );
-      }
-    }
-
-    const previousLeaderId = member.leaderId;
-    if (previousLeaderId === (leader ? String(leader._id) : null)) return member;
-
-    const oldPath = [...member.ancestorIds, membershipId];
-    const newAncestors = leader ? [...leader.ancestorIds, String(leader._id)] : [];
-    const newDepth = newAncestors.length;
-    const depthShift = newDepth - member.depth;
-
-    const updated = await this.members.updateById(ctx, membershipId, {
-      $set: { leaderId: leader ? String(leader._id) : null, ancestorIds: newAncestors, depth: newDepth },
-    });
-
-    // Every descendant carries the old path as a prefix, so the whole subtree is one
-    // splice rather than a walk — and one round trip rather than one per member.
-    await this.members.respliceSubtree(ctx, membershipId, newAncestors, oldPath.length, depthShift);
-
-    await this.closeEdge(membershipId, 're_parented');
-    await this.record(ctx, membershipId, 're_parented', {
+    // Every open edge closes, not only an earlier re-parent: this closed `re_parented` rows
+    // alone, so a member's first move left the edge they joined on open beside the new one
+    // (P11-T3). The row carries the rung they keep, so the open edge says all of where they
+    // stand.
+    await this.history.openEdge(ctx, this.clock.now(), {
+      membershipId,
+      eventType: 're_parented',
       fromLeaderId: previousLeaderId,
-      toLeaderId: leader ? String(leader._id) : null,
+      toLeaderId: member.leaderId,
+      toRole: member.role,
+      toOrgLevelId: member.orgLevelId,
       reason: reason ?? null,
     });
-
-    await this.refreshCounts(ctx, previousLeaderId);
-    await this.refreshCounts(ctx, leader ? String(leader._id) : null);
-    return updated ?? member;
+    return member;
   }
 
   /**
@@ -211,8 +520,25 @@ export class HierarchyService {
   async refreshCounts(ctx: RequestContext, leaderId: string | null): Promise<void> {
     if (!leaderId) return;
     const directs = await this.members.find(ctx, { leaderId, status: 'active' });
-    const counts = { ab: 0, aab: 0, agent: 0, total: directs.length };
-    for (const d of directs) counts[d.role] += 1;
+    /*
+     * Counted by **ladder code**, and built from what is actually there (P4-T9).
+     *
+     * It was three fixed keys seeded to zero, which counts nothing for a rung a second
+     * insurer publishes — a leader with four reports on a new rung would have read as
+     * leading nobody on every screen that groups by role, while `total` said four.
+     */
+    /*
+     * Seeded from the **company's own ladder**, so a rung nobody stands on reads `0`
+     * rather than being absent. That is what the old three fixed keys bought, and losing
+     * it would turn "no AABs yet" into "this screen has no idea".
+     */
+    const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).exec();
+    const ladder = kpm ? await this.orgLevels.activeCodesFor(kpm.companyId) : [];
+    const counts: DirectCounts = { total: directs.length };
+    for (const code of ladder) counts[code] = 0;
+    for (const d of directs) {
+      counts[d.orgLevelCode] = (counts[d.orgLevelCode] ?? 0) + 1;
+    }
 
     const subtreeCount = await this.members.count(ctx, {
       ancestorIds: leaderId,
@@ -241,21 +567,25 @@ export class HierarchyService {
    * The hierarchy as it stood on a date (P3-T2 AC-5).
    *
    * Read from history, not from the current rows: the point is to answer what was true
-   * then, which the current `leaderId` cannot. An edge counts if it had opened by the
-   * date and had not yet closed.
+   * then, which the current `leaderId` cannot.
+   *
+   * **The latest event by that date that set the leader**, rather than the edge still open
+   * then (P11-T3). Every edge now closes when the next one opens, a promotion included, so the
+   * edge open on a date can be a role change. One written since carries the leader it kept; one
+   * written before does not, and sits beside the edge it should have closed. Joining, a
+   * re-parent, a removal and a reinstatement are the events that set the leader, and each
+   * names the one it leaves them with: a removal and a reinstatement, none.
    */
   async leaderAsOf(ctx: RequestContext, membershipId: string, at: Date): Promise<string | null> {
-    const edges = await this.history
-      .find({
-        kpmId: ctx.kpmId,
-        membershipId,
-        eventType: { $in: ['joined', 're_parented'] },
-        validFrom: { $lte: at },
-        $or: [{ validTo: null }, { validTo: { $gt: at } }],
-      })
-      .sort({ validFrom: -1 })
-      .limit(1)
-      .exec();
-    return edges[0]?.toLeaderId ?? null;
+    const latest = await this.history.find(
+      ctx,
+      { membershipId, eventType: { $in: LEADER_EVENTS }, validFrom: { $lte: at } },
+      // Two events in one instant are told apart by the order they were written in.
+      { sort: { validFrom: -1, _id: -1 }, limit: 1 },
+    );
+    return latest[0]?.toLeaderId ?? null;
   }
 }
+
+/** The edge events that set who the member reports to. A role change keeps the leader it found. */
+const LEADER_EVENTS: EdgeEvent[] = ['joined', 're_parented', 'removed', 'reinstated'];

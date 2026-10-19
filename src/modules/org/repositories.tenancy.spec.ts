@@ -1,0 +1,164 @@
+import { readFileSync } from 'node:fs';
+import { globSync } from 'node:fs';
+import { join } from 'node:path';
+
+const MODULES = join(__dirname, '..');
+
+/**
+ * The structural half of P4-T11.
+ *
+ * `raw-writes.tenancy.spec.ts` holds the **writes**; it can only see the shape of a call,
+ * so a *read* has nothing for it to check. This asserts the other thing: that no service
+ * injects a tenant-scoped model at all. A repository removes the chance of forgetting
+ * `kpmId` rather than catching it afterwards — invariant §1: *"a query built without the
+ * repository is a defect even when it happens to be correct today."*
+ */
+const TENANT_SCOPED_MODELS = [
+  // Added 2026-09-18, finishing P4-T11 AC-1, which named `assets` and stopped short of it.
+  // Its absence is why this spec — written to catch a service holding a raw model — never
+  // asked about the one service that was.
+  'Asset',
+  'Group',
+  'JoinRequest',
+  'MembershipHistory',
+  'Membership',
+  'ActivityCategory',
+  'ActivityType',
+  'LeadStatus',
+  'RatioDefinition',
+  'ConfigSnapshot',
+  'TrainingCategory',
+  'TrainingSkill',
+  'TrainingModule',
+  'ActivationTemplate',
+  'KpmProductConfig',
+  'EventType',
+  'Event',
+  // P18.5-T5, T6: members' RSVPs, claims and confirmations, and their answers, from the day the collections exist.
+  'EventRsvp',
+  'EventFeedback',
+  'Campaign',
+  // P18.5-T7, T8: a member's chase of a campaign, and a final standing, from the day the collections exist.
+  'CampaignChase',
+  'CampaignStanding',
+  'CapabilityCatalog',
+  // P11-T5: listed from the day the collection exists, rather than a phase later.
+  'CoachingSession',
+  // P13-T1 AC-8: a hire's activation, from the day the collection exists.
+  'ActivationProgress',
+  // P17-T4 AC-1: an office's four recruitment pitch documents, from the day the collection exists.
+  'RecruitmentPitchSlot',
+  // Phase 18 (D-recruit): an office's recruitment target per month, from the day the collection exists.
+  'KpmRecruitTarget',
+  // Phase 18.1 (D-forum-model, D-share): an office's leader meetings and their shared links, from the day they exist.
+  'LeaderMeeting',
+  'LeaderMeetingShareLink',
+  // P18.5-T1 AC-2: a member's progress on a training module, from the day the collection exists.
+  'TrainingProgress',
+];
+
+/**
+ * Models deliberately **not** on the list above, each with the reason (P10.1-T7).
+ *
+ * Phase 10's exit review recorded `ActivityService` and `TenantDay` reading `kpms` through the
+ * raw model as *"the one exception to invariant §1's no raw model in a service"* (carry-forward
+ * #1). It is not an exception, it is a classification that was never written down, and nineteen
+ * services depend on it — so it is written down here, where the rule it qualifies is enforced,
+ * rather than wrapped in a repository only one of them would use.
+ */
+const NOT_TENANT_SCOPED = new Map<string, string>([
+  [
+    'Kpm',
+    'the tenant record itself. It has no `kpmId` to scope by: its `_id` is the scope. An office '
+      + 'reads its own row by `_id: ctx.kpmId`, which cannot reach another office, and '
+      + '`raw-writes.tenancy.spec.ts` exempts its writes for the same reason',
+  ],
+]);
+
+/**
+ * Files allowed to inject one, each with the reason.
+ *
+ * A repository has to reach its own model, and provisioning writes into an office that
+ * has no request context yet — the Super Admin creating it is in no tenant, and every
+ * document it writes carries an explicit `kpmId`, which `raw-writes.tenancy.spec.ts`
+ * checks.
+ */
+const ALLOWED = new Map<string, string>([
+  ['org/membership.repository.ts', 'the repository for that model'],
+  ['org/org.repositories.ts', 'the repositories for those models'],
+
+  ['config/activity.repository.ts', 'the repositories for those models'],
+  ['training/training.repository.ts', 'the repositories for those models'],
+  ['activation/activation.repository.ts', 'the repository for that model'],
+  ['activation/activation-progress.repository.ts', 'the repository for that model'],
+  ['assets/asset.repository.ts', 'the repository for that model'],
+  ['products/kpm-product.repository.ts', 'the repository for that model'],
+  ['events/event.repository.ts', 'the repositories for those models'],
+  ['campaigns/campaign.repository.ts', 'the repository for that model'],
+  ['campaigns/campaign-chase.repository.ts', 'the repository for that model'],
+  ['campaigns/campaign-standing.repository.ts', 'the repository for that model'],
+  ['capability/capability.repository.ts', 'the repository for that model'],
+  ['coaching/coaching-session.repository.ts', 'the repository for that model'],
+  ['recruitment/recruitment-pitch.repository.ts', 'the repository for that model'],
+  ['reporting/kpm-recruit-target.repository.ts', 'the repository for that model'],
+  ['leader-meetings/leader-meeting.repository.ts', 'the repository for that model'],
+  ['leader-meetings/leader-meeting-share-link.repository.ts', 'the repository for that model'],
+  ['training/training-progress.repository.ts', 'the repository for that model'],
+  [
+    'config/provisioning.service.ts',
+    'writes into an office being created, before any context is scoped to it',
+  ],
+  [
+    'auth/context-resolver.ts',
+    'builds the RequestContext a scoped repository would need — it reads the membership '
+      + 'that decides which tenant the caller is in, so it cannot be scoped to one',
+  ],
+]);
+
+function sourceFiles(dir: string): string[] {
+  return globSync('**/*.ts', { cwd: dir })
+    .filter((f) => !f.endsWith('.spec.ts'))
+    .map((f) => f.replace(/\\/g, '/'));
+}
+
+describe('tenant-scoped collections go through a repository (P4-T11)', () => {
+  const files = sourceFiles(MODULES);
+
+  it('finds the module sources at all, so a silent zero cannot pass', () => {
+    expect(files.length).toBeGreaterThan(20);
+  });
+
+  it('injects no tenant-scoped model outside a repository', () => {
+    const offenders: string[] = [];
+
+    for (const file of files) {
+      if (ALLOWED.has(file)) continue;
+      const text = readFileSync(join(MODULES, file), 'utf8');
+      for (const model of TENANT_SCOPED_MODELS) {
+        if (text.includes(`@InjectModel(${model}.name)`)) {
+          offenders.push(`${file} injects ${model}`);
+        }
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('lists a reason for every file that is allowed to', () => {
+    // An allowance with no reason is how this list becomes a place to hide.
+    for (const [file, reason] of ALLOWED) {
+      expect(reason.length).toBeGreaterThan(10);
+      expect(files).toContain(file);
+    }
+  });
+
+  it('classifies a model once, and says why one is not tenant-scoped (P10.1-T7)', () => {
+    for (const [model, reason] of NOT_TENANT_SCOPED) {
+      expect(TENANT_SCOPED_MODELS).not.toContain(model);
+      expect(reason.length).toBeGreaterThan(10);
+      // A classification nobody relies on is a stale entry, not a decision.
+      expect(files.some((f) => readFileSync(join(MODULES, f), 'utf8')
+        .includes(`@InjectModel(${model}.name)`))).toBe(true);
+    }
+  });
+});

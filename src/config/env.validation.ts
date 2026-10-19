@@ -2,6 +2,16 @@ import { z } from 'zod';
 import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
 
 /**
+ * **How long a mail relay may take to answer a dial, or to greet once dialled** (P12.1-T1), unless
+ * `SMTP_TIMEOUT_MS` says otherwise. nodemailer's own default is two minutes. Email is no longer awaited
+ * inside a request, so this bounds how long a delivery stays `pending` and how long a start-up check
+ * waits, not how long anybody waits for a save.
+ */
+export const SMTP_TIMEOUT_MS_DEFAULT = 5_000;
+/** The range `SMTP_TIMEOUT_MS` may take: long enough for a slow relay, never nodemailer's two minutes. */
+export const SMTP_TIMEOUT_MS_RANGE = { MIN: 1_000, MAX: 60_000 } as const;
+
+/**
  * Configuration is validated at boot. A missing or malformed key stops the process
  * with a named error rather than letting the app start and connect somewhere
  * unexpected — see docs/03-engineering/environments-and-configuration.md.
@@ -29,9 +39,42 @@ export const envSchema = z.object({
   SMTP_USER: z.string().default(''),
   SMTP_PASSWORD: z.string().default(''),
   MAIL_FROM: z.string().min(1),
+  /** Connection and greeting timeout for SMTP, in milliseconds — see `SMTP_TIMEOUT_MS_DEFAULT`. */
+  SMTP_TIMEOUT_MS: z.coerce.number().int()
+    .min(SMTP_TIMEOUT_MS_RANGE.MIN).max(SMTP_TIMEOUT_MS_RANGE.MAX)
+    .default(SMTP_TIMEOUT_MS_DEFAULT),
+  /**
+   * How mail leaves: over SMTP, or into the log.
+   *
+   * `log` exists so a developer with no local mail catcher can still read the link and
+   * finish a registration. **It is refused in production** (ADR-0019): an API that accepts
+   * a registration and writes the verification link to stdout is the defect this key was
+   * added to make impossible, not a fallback. The refusal is below, in `superRefine`.
+   */
+  MAIL_TRANSPORT: z.enum(['smtp', 'log']).default('smtp'),
 
   APP_BASE_URL: z.string().url(),
   CORS_ORIGINS: z.string().default(''),
+  /**
+   * Whether the browser treats a call to this API as cross-site.
+   *
+   * True when the app and the API sit on different registrable domains — which is exactly
+   * the Vercel staging shape, where the frontend is one `*.vercel.app` host and the API is
+   * another (ADR-0041). There, a `SameSite=Lax` refresh cookie is simply never sent, so
+   * login appears to work and every refresh afterwards fails.
+   *
+   * It is a stated fact about the deployment rather than something inferred, because the
+   * API cannot see its own public hostname reliably behind a proxy — and guessing wrong
+   * in the permissive direction would weaken CSRF protection everywhere else.
+   *
+   * Spelled as an enum, not `z.coerce.boolean()`: coercion reads the string "false" as
+   * true, and a security control that silently inverts when someone writes the obvious
+   * value is not a control.
+   */
+  COOKIE_CROSS_SITE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
   /**
    * Where a shared invite link points — the app's origin, not this API's. A joiner opens
    * a page, not an endpoint, and the two differ in every environment.
@@ -45,6 +88,28 @@ export const envSchema = z.object({
    * one. Runtime code reads kpm.timezone — never this value.
    */
   DEFAULT_TENANT_TIMEZONE: z.string().default(DEFAULT_TENANT_TIMEZONE),
+}).superRefine((env, ctx) => {
+  if (env.COOKIE_CROSS_SITE && env.APP_ORIGIN.startsWith('http://')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['COOKIE_CROSS_SITE'],
+      message:
+        'requires HTTPS. A cross-site cookie is sent as "SameSite=None; Secure", and a '
+        + 'browser discards a Secure cookie on a plain-http origin — the session would be '
+        + 'dropped on every request with nothing in the logs to say why.',
+    });
+  }
+
+  if (env.NODE_ENV === 'production' && env.MAIL_TRANSPORT === 'log') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['MAIL_TRANSPORT'],
+      message:
+        'must be "smtp" in production. A production API that logs verification links '
+        + 'instead of sending them accepts registrations it can never complete '
+        + '(ADR-0019).',
+    });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;

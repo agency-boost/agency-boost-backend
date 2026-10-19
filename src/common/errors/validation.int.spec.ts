@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { IsInt, IsString, Max, Min } from 'class-validator';
 import request from 'supertest';
 import { DomainExceptionFilter } from './error.filter';
+import { listenOnLoopback } from '../../../test/listen';
 
 class CreateLeadDto {
   @IsString()
@@ -42,6 +43,9 @@ describe('request validation', () => {
     );
     app.useGlobalFilters(new DomainExceptionFilter());
     await app.init();
+    // Listening once keeps supertest from cycling an ephemeral port per
+    // request — see auth.e2e.int.spec.ts for what that causes.
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

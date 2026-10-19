@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HierarchyRole, RequestContext } from '@/common/context/request-context';
-import { can, PERMISSIONS, Permission, scopeFor } from './permissions';
+import {
+  AAB, AB, AGENT, can, isBlockedWhileImpersonating, isOwnerReserved, isReadLike, PERMISSIONS, Permission, Scope, scopeFor,
+} from './permissions';
 
 function ctx(opts: {
   superAdmin?: boolean;
@@ -10,6 +12,9 @@ function ctx(opts: {
   admin?: boolean;
   status?: 'active' | 'pending' | 'removed';
   noMembership?: boolean;
+  /** Inside a support session, and whether it may write (P4-T10). */
+  impersonatedBy?: string;
+  readOnly?: boolean;
 }): RequestContext {
   return new RequestContext(
     'u1',
@@ -19,15 +24,62 @@ function ctx(opts: {
       : {
           membershipId: 'mem-1',
           kpmId: 'kpm-a',
+          orgLevelCode: (opts.role ?? 'agent').toUpperCase(),
           hierarchyRole: opts.role ?? 'agent',
           status: opts.status ?? 'active',
           isKpmOwner: opts.owner ?? false,
           isKpmAdmin: opts.admin ?? false, directCount: 0,
         },
+    opts.impersonatedBy ?? null,
+    null,
+    false,
+    opts.readOnly ?? false,
   );
 }
 
 describe('permission matrix', () => {
+  /*
+   * P4-T10's two controls, at the level `can()` actually decides them. The e2e suite
+   * covered them through HTTP, which meant the classifier's own edges were never asserted
+   * — and one of them was wrong: `notification:mark_read` ends in `_read` and writes.
+   */
+  describe('P4-T10: a read-only support session', () => {
+    const session = (extra: Parameters<typeof ctx>[0] = {}) =>
+      ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: true, ...extra });
+
+    it('reads what the target can read', () => {
+      expect(can(session(), 'notification:read_inbox')).toBe(true);
+      expect(can(session(), 'org_tree:read')).toBe(true);
+    });
+
+    it('refuses a write however its permission is spelled', () => {
+      // `mark_read` is the trap: it ends in `_read` and destroys unread state — including
+      // the notice telling the target their account is being impersonated.
+      expect(can(session(), 'notification:mark_read')).toBe(false);
+      expect(can(session(), 'tenant_config:write')).toBe(false);
+      expect(can(session(), 'member:remove_from_team')).toBe(false);
+    });
+
+    it('still refuses the hard-blocked list once it may write', () => {
+      const elevated = ctx({ role: 'ab', owner: true, impersonatedBy: 'sa-1', readOnly: false });
+      expect(can(elevated, 'kpm_admin:grant')).toBe(false);
+    });
+
+    it('leaves an ordinary session alone', () => {
+      expect(can(ctx({ role: 'ab' }), 'notification:mark_read')).toBe(true);
+    });
+
+    it('N7 a permission with no verb is a write: refused to a read-only session, and never read-like', () => {
+      // Every registered permission is `resource:action`; one that is not has no action to read, and
+      // the classifier answers on the empty string rather than throwing — a write, fail-closed.
+      const verbless = 'notification' as Permission;
+      expect(isReadLike(verbless)).toBe(false);
+      expect(can(session(), verbless)).toBe(false);
+      expect(isReadLike('goal:read')).toBe(true);
+      expect(isReadLike('goal:update')).toBe(false);
+    });
+  });
+
   describe('code and documentation agree', () => {
     // The matrix is documented for humans and executed by machines. If the two drift,
     // one of them is lying and reviewers cannot tell which.
@@ -36,14 +88,230 @@ describe('permission matrix', () => {
       'utf8',
     );
 
-    it.each(Object.keys(PERMISSIONS))('%s appears in roles-and-permissions.md', (permission) => {
-      expect(doc).toContain(permission);
+    /**
+     * Every row of the matrix: the permissions it names, and its six cells.
+     *
+     * A row may name several permissions — `leader_request:approve` / `decline` — and the second is
+     * written as a bare suffix sharing the first one's namespace.
+     */
+    const ROWS = doc.split('\n').flatMap((line) => {
+      if (!line.startsWith('| `')) return [];
+      const parts = line.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+      if (parts.length !== 7) return [];
+      const names = [...parts[0].matchAll(/`([a-z_]+:?[a-z_]*)`/g)].map((m) => m[1]);
+      if (names.length === 0) return [];
+      const namespace = names[0].split(':')[0];
+      return [{
+        names: names.map((n) => (n.includes(':') ? n : `${namespace}:${n}`)),
+        cells: parts.slice(1),
+      }];
     });
 
-    it('documents at least as many permissions as the code defines', () => {
-      const documented = new Set(doc.match(/`[a-z_]+:[a-z_]+`/g)?.map((m) => m.slice(1, -1)) ?? []);
-      const inCode = Object.keys(PERMISSIONS);
-      expect(documented.size).toBeGreaterThanOrEqual(inCode.length);
+    it.each(Object.keys(PERMISSIONS))('%s appears in roles-and-permissions.md', (permission) => {
+      // Spelled out, or as a matrix row's bare suffix: `coaching_session:create` / `edit` (P11-T3).
+      const named = doc.includes(permission) || ROWS.some((row) => row.names.includes(permission));
+      expect([permission, named]).toEqual([permission, true]);
+    });
+
+    /**
+     * The matrix is six columns of scopes, and until 2026-09-06 nothing compared them to
+     * anything. `toContain(permission)` above asks only whether the *name* occurs
+     * somewhere in the file — which is how `leader_request:approve` sat documented at
+     * `own-kpm` for a KPM Admin while the code granted it to nobody but a leader, through
+     * an entire phase, with the row visible in the doc the whole time.
+     *
+     * This reads the cells. Every difference is either fixed or listed below with the
+     * reason it stands, so drift cannot arrive silently again.
+     */
+    const COLUMNS = [
+      'SUPER_ADMIN', 'KPM_OWNER', 'KPM_ADMIN', 'AB', 'AAB', 'AGENT',
+    ] as const;
+    const WIDENING: Scope[] = ['own', 'own-unit', 'own-downline', 'own-kpm', 'all'];
+
+    /**
+     * Documented grants the code deliberately does not implement yet, each with the
+     * reason and what settles it. Emptying this list is the goal; adding to it without a
+     * reason is the thing it exists to prevent.
+     */
+    const DEFERRED: Record<string, string> = {
+      // `kpm:read_profile` for the AB, the AAB and the Agent: no longer deferred (the Phase 17 exit review). The
+      // code is the truth — they do not hold it — and roles §3.2 says "—" for the three, pinned cell by cell.
+      'member:change_role/SUPER_ADMIN': 'the member routes resolve kpmId from the caller\'s ' +
+        'membership, which a Super Admin has none of — the grant would produce ' +
+        'MissingTenantContextError, not access. A Super Admin reaches an office by ' +
+        'impersonation; a cross-tenant console route is Phase 3.5.',
+      'org_tree:read/SUPER_ADMIN': 'as member:change_role — and this one was granted for a ' +
+        'while: GET /members/tree passed the guard and then answered 500 INTERNAL_ERROR, ' +
+        'because the repository throws MissingTenantContextError when there is no kpmId. ' +
+        'Found at the Phase 3.5 exit review.',
+      'member:read_profile/SUPER_ADMIN': 'as member:change_role',
+      'member:remove_from_team/SUPER_ADMIN': 'as member:change_role',
+      'notification:receive/KPM_OWNER': 'notifications are delivered but not yet subscribed ' +
+        'to by office or by unit; the routing phase implements the wider scopes',
+      'notification:receive/KPM_ADMIN': 'as KPM_OWNER',
+      'notification:receive/AB': 'as KPM_OWNER — own-unit delivery is the routing phase',
+      'notification:receive/AAB': 'as KPM_OWNER',
+      // `commission_rates:read` for the field roles is granted since the catalog's field read carries
+      // the schedule (Phase 14, OD-135): its five deferrals are gone with it.
+    };
+
+    /**
+     * **Every token in a cell, not only the widest** (P11-T3).
+     *
+     * This compared the widest scope per cell until coaching brought cells that hold two —
+     * `own` · `own-downline`, an AB who coaches and is coached. §3 says a wider token never silently
+     * includes the reader's own records, so a registry granting `own-downline` alone would have
+     * passed while dropping the `own` the matrix states. A cell is compared as the whole set, in
+     * widening order, and `—` as null.
+     */
+    function spelled(scopes: Set<Scope>): string | null {
+      if (scopes.size === 0) return null;
+      return WIDENING.filter((scope) => scopes.has(scope)).join(' · ');
+    }
+
+    /** The scopes the matrix gives this permission in each column. */
+    function documented(permission: string): Array<string | null> {
+      const cells = COLUMNS.map(() => new Set<Scope>());
+      // A permission can appear in several rows under different conditions — change_role is split
+      // Agent↔AAB from to/from AB. The grant list holds their union.
+      for (const row of ROWS.filter((r) => r.names.includes(permission))) {
+        row.cells.forEach((cell, i) => {
+          for (const [, token] of cell.matchAll(/`([a-z-]+)`/g)) {
+            if (WIDENING.includes(token as Scope)) cells[i].add(token as Scope);
+          }
+        });
+      }
+      return cells.map(spelled);
+    }
+
+    /** What the grant list gives this permission, in the matrix's column order. */
+    function implemented(permission: Permission): Array<string | null> {
+      return COLUMNS.map((column) => {
+        const grants = PERMISSIONS[permission] as ReadonlyArray<{
+          grantee: { kind: string; role?: string; orgLevelCode?: string };
+          scope: Scope;
+        }>;
+        const held = grants.filter((g) => {
+          if (g.grantee.kind === 'authenticated') return true;
+          if (column === 'SUPER_ADMIN') return g.grantee.kind === 'platform';
+          if (column === 'KPM_OWNER') return g.grantee.role === 'kpm_owner';
+          if (column === 'KPM_ADMIN') return g.grantee.role === 'kpm_admin';
+          // By ladder code since P4-T9: the column headings *are* the seeded ladder's
+          // codes, which is why this comparison got simpler rather than harder.
+          return g.grantee.kind === 'hierarchy' && g.grantee.orgLevelCode === column;
+        });
+        return spelled(new Set(held.map((g) => g.scope)));
+      });
+    }
+
+    it('grants exactly what the matrix documents, cell by cell', () => {
+      const drift: string[] = [];
+      for (const permission of Object.keys(PERMISSIONS) as Permission[]) {
+        const documentedCells = documented(permission);
+        // A permission with no matrix row at all is caught by the test above.
+        if (documentedCells.every((c) => c === null)) continue;
+
+        implemented(permission).forEach((code, i) => {
+          const expected = documentedCells[i];
+          if (code === expected) return;
+          const key = `${permission}/${COLUMNS[i]}`;
+          if (DEFERRED[key]) return;
+          drift.push(`${key}: code=${code ?? '—'} doc=${expected ?? '—'}`);
+        });
+      }
+      expect(drift).toEqual([]);
+    });
+
+    it('defers nothing that the code has since implemented', () => {
+      // A stale deferral is how a list like this rots into a permanent excuse.
+      const stale = Object.keys(DEFERRED).filter((key) => {
+        const [permission, column] = key.split('/');
+        const i = COLUMNS.indexOf(column as (typeof COLUMNS)[number]);
+        return implemented(permission as Permission)[i] === documented(permission)[i];
+      });
+      expect(stale).toEqual([]);
+    });
+
+    /**
+     * **Doc → code, by name** (the Phase 18.1 permission review, M2). This compared a count until then: the
+     * document had to name at least as many permissions as the code, which passed whatever the names were. Now
+     * every permission a row of §3's matrix names — struck rows included, a row's `(annotation)` aside — is in
+     * `PERMISSIONS`, or listed below with the one-line reason it is not.
+     */
+    const MATRIX = doc.slice(doc.indexOf('\n## 3. The permission matrix'), doc.indexOf('\n## 4. Navigation by role'));
+    const NAMED_IN_MATRIX = new Set(MATRIX.split('\n').flatMap((line) => {
+      if (!/^\| (~~)?`/.test(line)) return [];
+      const parts = line.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+      if (parts.length !== 7) return [];
+      const names = [...parts[0].replace(/\([^)]*\)/g, '').matchAll(/`([a-z_]+(?::[a-z_]+)?)`/g)].map((m) => m[1]);
+      if (names.length === 0) return [];
+      const namespace = names[0].split(':')[0];
+      return names.map((n, i) => (n.includes(':') || i === 0 ? n : `${namespace}:${n}`));
+    }));
+
+    const STRUCK = 'struck in §3: the row stays as the dated record of a permission that was removed or folded';
+    const DENIAL = 'a denial row, granted to nobody: there is no route for it to guard';
+    const DERIVED = 'derived from the read it inherits: no route of its own, and the reads answer for it';
+    const UNDECLARED = 'documented, and no route declares it: what it describes is guarded by another permission or not built';
+    /** Documented in §3 and deliberately not in `PERMISSIONS`. Adding to it without a reason is what it exists to prevent. */
+    const DOCUMENTED_NOT_IN_CODE: Record<string, string> = {
+      'leader_meeting:manage_coeditors': `${STRUCK} (D-coeditors: the Core Leader tag is the list)`,
+      'leader_meeting:export_pdf': `${DERIVED} (\`read\` and \`read_shared_link\`, \`can.print\`)`,
+      'export:any': DERIVED,
+      'member:invite': `${STRUCK} (P3.6-T1, the leader code replaced invites)`,
+      'member:revoke_invite': `${STRUCK} (P3.6-T1)`,
+      'org_tree:drill_to_unit_dashboard': `${STRUCK} (P15-T0, D-reach)`,
+      'coaching_note:write': STRUCK,
+      'coaching_session:share': STRUCK,
+      'rollup:recompute_backfill': STRUCK,
+      'attack_plan:generate': `${STRUCK} (OD-133: nothing is generated or stored)`,
+      'attack_plan:attach_to_lead': `${STRUCK} (OD-133)`,
+      'attack_plan:read_telemetry': `${STRUCK} (OD-133)`,
+      'sales_attack_plan:read': `${STRUCK} (folded into \`product_catalog:read\`, OD-133)`,
+      'activity_log:proxy_create': DENIAL,
+      'advanced_analytics:read': DENIAL,
+      'campaign_qualification:evaluate': `${DENIAL} (qualification is computed by the system)`,
+      'leader_request:decline': 'the decline route is guarded by `leader_request:approve`, which the same row names',
+      'impersonation:stop': 'ending a support session needs only the session: `POST /admin/impersonate/end` declares no permission',
+      'campaign_payout:mark': `${STRUCK} (OD-155: no payouts in v1 — the final standing is the record, the office pays outside the product)`,
+      'campaign_payout:reverse_paid': `${STRUCK} (OD-155)`,
+      'company_campaign:crud': 'OD-156: company campaigns are deferred beyond v1 — every campaign is the office\'s',
+      'company_campaign:hide': 'OD-156: deferred beyond v1, with `company_campaign:crud`',
+      // OD-156 (answered 2026-10-10, ADR-0034's second half): company-wide events are deferred beyond v1.
+      'company_event:crud': 'deferred beyond v1 (OD-156): an office records a company event it hosts as its own, `issuer: company`',
+      'company_event:hide': 'deferred beyond v1 (OD-156): with no company-wide event there is nothing for an office to hide',
+      'training_progress:verify': `${STRUCK} (OD-149: completion is the member’s own word, and nothing verifies it)`,
+      'member:list_directory': UNDECLARED,
+      'member:add_leader_by_code': UNDECLARED,
+      'member:reassign_leader': UNDECLARED,
+      'member:move_subtree': UNDECLARED,
+      'member:read_removed_log': UNDECLARED,
+      'member:restore_removed': UNDECLARED,
+      'kpm_registration:switch': UNDECLARED,
+      'kpm_registration:approve_switch': UNDECLARED,
+      'leader:switch': UNDECLARED,
+      'goal:set_kpm_defaults_and_floors': UNDECLARED,
+      'lead:reassign_owner': UNDECLARED,
+      'moc_evaluation:read': UNDECLARED,
+      'moc_rules:update': UNDECLARED,
+      'production_club_tiers:update': UNDECLARED,
+      'notification_preference:read': UNDECLARED,
+      'notification_defaults:update': UNDECLARED,
+    };
+
+    it('P18.1-T2 AC-1 every permission §3’s matrix names is in the code, or listed with why it is not (M2)', () => {
+      expect(NAMED_IN_MATRIX.size).toBeGreaterThan(Object.keys(PERMISSIONS).length);
+      const missing = [...NAMED_IN_MATRIX].filter((name) => !(name in PERMISSIONS) && !DOCUMENTED_NOT_IN_CODE[name]);
+      expect(missing).toEqual([]);
+    });
+
+    it('P18.1-T2 AC-1 lists nothing the code has since built or the matrix no longer names', () => {
+      const stale = Object.keys(DOCUMENTED_NOT_IN_CODE).filter((name) => name in PERMISSIONS || !NAMED_IN_MATRIX.has(name));
+      expect(stale).toEqual([]);
+    });
+
+    it('P18.1-T2 AC-1 the matrix names every permission of the code, by name', () => {
+      expect(Object.keys(PERMISSIONS).filter((name) => !NAMED_IN_MATRIX.has(name))).toEqual([]);
     });
   });
 
@@ -80,17 +348,96 @@ describe('permission matrix', () => {
       expect(can(ctx({ role: 'ab' }), 'audit_log:read')).toBe(false);
     });
 
-    it('does not grant AB rights to an admin who is a plain agent', () => {
+    it('gives an admin who is a plain agent the office, not a unit', () => {
+      // This asserted the opposite until 2026-09-06 — that an agent-Admin is *refused*
+      // `leader_request:approve` — and it was wrong twice over. §1.6 gives an Admin the
+      // Owner's whole operational surface minus four reserved powers, and approving a
+      // join is not among them; the matrix has said `own-kpm` all along. Approving a
+      // join is an office action, not an AB right, so it was a poor example of the
+      // orthogonality this block is about.
+      //
+      // What is actually orthogonal: admin rights arrive from the office and hierarchy
+      // rights from the graph. An agent-Admin administers the office and still leads
+      // nobody — leadership is `directCounts.total > 0` (OD-23), which no permission
+      // can confer.
       const agentAdmin = ctx({ role: 'agent', admin: true });
-      expect(can(agentAdmin, 'leader_request:approve')).toBe(false);
       expect(can(agentAdmin, 'audit_log:read')).toBe(true);
+      expect(can(agentAdmin, 'leader_request:approve')).toBe(true);
+      expect(scopeFor(agentAdmin, 'leader_request:approve')).toBe('own-kpm');
+
+      // …and gains nothing the Owner keeps.
+      expect(can(agentAdmin, 'kpm_admin:grant')).toBe(false);
+    });
+
+    it('refuses the office-wide queue to a leader who is not an admin', () => {
+      // The other direction: an AB decides what was addressed to them, never the office.
+      expect(scopeFor(ctx({ role: 'ab' }), 'leader_request:approve')).toBe('own-unit');
+      expect(scopeFor(ctx({ role: 'aab' }), 'leader_request:approve')).toBe('own-unit');
+      expect(can(ctx({ role: 'agent' }), 'leader_request:approve')).toBe(false);
+    });
+
+    it('keeps the role change log to the office administration', () => {
+      // It was gated on `member:read_profile`, which every member holds — so an agent
+      // could read every role change in the office, with names and reasons, for people
+      // whose roster row they cannot see.
+      expect(can(ctx({ owner: true }), 'member:read_role_change_log')).toBe(true);
+      expect(can(ctx({ admin: true }), 'member:read_role_change_log')).toBe(true);
+      for (const role of ['ab', 'aab', 'agent'] as const) {
+        expect(can(ctx({ role }), 'member:read_role_change_log')).toBe(false);
+      }
     });
 
     it('reserves owner-only actions from an admin', () => {
       expect(can(ctx({ owner: true }), 'kpm_admin:grant')).toBe(true);
       expect(can(ctx({ admin: true }), 'kpm_admin:grant')).toBe(false);
-      expect(can(ctx({ owner: true }), 'kpm:update_identity')).toBe(true);
-      expect(can(ctx({ admin: true }), 'kpm:update_identity')).toBe(false);
+    });
+
+    it('gives an Admin every settings page the Owner has, Branch info included (ADR-0027)', () => {
+      expect(can(ctx({ owner: true }), 'tenant_config:write')).toBe(true);
+      expect(can(ctx({ admin: true }), 'tenant_config:write')).toBe(true);
+      // Nobody else writes an office's settings: a leader would change what the office
+      // counts, and a Super Admin edits the company's template, not the office's copy.
+      expect(can(ctx({ role: 'ab' }), 'tenant_config:write')).toBe(false);
+      expect(can(ctx({ superAdmin: true, noMembership: true }), 'tenant_config:write')).toBe(false);
+    });
+
+    it('holds back from an Admin nothing but managing admins (ADR-0028)', () => {
+      /*
+       * The product owner's rule, made executable: a KPM Admin can do everything the KPM Owner
+       * can, in every feature built and every one to come, except grant or revoke admin
+       * access. A new entry here is a product decision about what an Admin may not do, so it
+       * fails the build until somebody has made it on purpose, with an ADR.
+       */
+      const reserved = (Object.keys(PERMISSIONS) as Permission[]).filter(isOwnerReserved).sort();
+      expect(reserved).toEqual(['kpm_admin:grant', 'kpm_admin:revoke']);
+    });
+
+    it('grants the Admin exactly what it grants the Owner, scope and status alike (ADR-0028)', () => {
+      /*
+       * Stronger than the test above, which only sees a permission the Owner holds *alone*. An
+       * Admin granted a narrower scope than the Owner — `own-unit` against `own-kpm` — would
+       * pass that one and still break the rule, so this compares the two grants whole.
+       */
+      type TenantGrant = {
+        grantee: { kind: string; role?: string };
+        scope: Scope;
+        whileStatus?: readonly string[];
+      };
+      const as = (grants: readonly TenantGrant[], role: 'kpm_owner' | 'kpm_admin') =>
+        grants
+          .filter((g) => g.grantee.kind === 'tenant' && g.grantee.role === role)
+          .map((g) => `${g.scope}|${[...(g.whileStatus ?? ['active'])].sort().join(',')}`)
+          .sort();
+
+      const differ = (Object.keys(PERMISSIONS) as Permission[])
+        .filter((permission) => {
+          const grants = PERMISSIONS[permission] as readonly TenantGrant[];
+          return JSON.stringify(as(grants, 'kpm_owner')) !== JSON.stringify(as(grants, 'kpm_admin'));
+        })
+        .sort();
+      expect(differ).toEqual(['kpm_admin:grant', 'kpm_admin:revoke']);
+      // And the one that used to differ is now held by both.
+      expect(can(ctx({ admin: true }), 'audit_log:export')).toBe(true);
     });
   });
 
@@ -143,6 +490,14 @@ describe('permission matrix', () => {
       // The other door: redeeming a leader's invite skips the search and the approval,
       // and the person redeeming one is by definition in no office yet.
       'join_via_code_link_qr',
+      // The third: asking for an office that does not exist. Somebody whose branch has
+      // never been provisioned cannot find it in the directory, and until 2026-09-06 the
+      // product had no answer for them at all (ADR-0011).
+      'kpm_request:create',
+      // Not a door, but held by the same person for the same reason: their own inbox,
+      // whose first row is the email verification that gets them in.
+      'notification:read_inbox',
+      'notification:mark_read',
     ];
 
     it('holds only the permissions that let somebody join, and nothing else', () => {
@@ -174,13 +529,21 @@ describe('permission matrix', () => {
 
     /**
      * The mirror image: granted to everyone, deliberately, so there is no negative case
-     * to find. Both are the way into an office — refusing either to somebody outside one
-     * would close the only door.
+     * to find. All three are a way into an office — refusing any of them to somebody
+     * outside one would close a door that is the only one they have.
      */
     const UNIVERSAL_GRANTS: readonly string[] = [
       'kpm:read_directory',
       'kpm_registration:create',
       'join_via_code_link_qr',
+      // Asking for an office that has never existed. The service, not the grant, is what
+      // refuses somebody who already belongs somewhere — a permission cannot express
+      // "unless you already did this".
+      'kpm_request:create',
+      // A notification is addressed to a person, and the first one anybody receives is
+      // their own email verification — sent before they have joined anything.
+      'notification:read_inbox',
+      'notification:mark_read',
     ];
 
     const ALL = [
@@ -212,6 +575,1046 @@ describe('permission matrix', () => {
       // Dual attribution is what makes impersonation auditable; a Super Admin acting
       // as another Super Admin erases exactly that.
       expect(can(ctx({ superAdmin: true }), 'impersonation:target_super_admin')).toBe(false);
+    });
+  });
+
+  /*
+   * **Coaching's permissions, a positive and a negative for each of the six roles** (P11-T3 AC-4,
+   * §7.2), at the level `can()` decides them — the API refusing what a screen hides.
+   *
+   * The routes arrive in P11-T5 to T10, each with its own per-role HTTP test; these pin the matrix
+   * they will declare. Who is inside a grant's scope — `COACH`, and 404 outside it — is
+   * `coach-resolver.tenancy.spec.ts`'s question.
+   */
+  describe('P11-T3 — coaching (roles §3.8, functional/coaching.md *The permissions*)', () => {
+    const COACHING = [
+      'coaching_session:create', 'coaching_session:edit', 'coaching_session:read',
+      'coaching_session:finalize', 'coaching_session:reopen', 'coaching_session:export_pdf',
+      'coaching_profile:read', 'coaching_profile:update', 'leader_notes:read', 'leader_notes:write',
+    ] as const satisfies readonly Permission[];
+
+    /** The six columns, each as nothing more than that role: the Owner and the Admin stand on the agent rung. */
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: ctx({ owner: true }),
+      KPM_ADMIN: ctx({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+
+    /** The widest scope each role holds, or null for `—`, read from the coaching spec's table. */
+    const LEADERS: Record<string, Scope | null> = {
+      SUPER_ADMIN: null, KPM_OWNER: null, KPM_ADMIN: null, AB: 'own-downline', AAB: 'own-downline', AGENT: null,
+    };
+    const EXPECTED: Record<(typeof COACHING)[number], Record<string, Scope | null>> = {
+      'coaching_session:create': LEADERS,
+      'coaching_session:edit': LEADERS,
+      'coaching_session:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm',
+        AB: 'own-downline', AAB: 'own-downline', AGENT: 'own',
+      },
+      'coaching_session:finalize': LEADERS,
+      'coaching_session:reopen': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm',
+        AB: 'own-downline', AAB: 'own-downline', AGENT: null,
+      },
+      'coaching_session:export_pdf': {
+        SUPER_ADMIN: null, KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm',
+        AB: 'own-downline', AAB: 'own-downline', AGENT: 'own',
+      },
+      'coaching_profile:read': LEADERS,
+      'coaching_profile:update': LEADERS,
+      'leader_notes:read': LEADERS,
+      'leader_notes:write': LEADERS,
+    };
+
+    const cells = COACHING.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P11-T3 AC-4 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P11-T3 AC-4 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it.each(COACHING)('P11-T3 AC-4 negative: %s is refused to a removed or pending leader', (permission) => {
+      // The other negative for a role that holds the grant: a hierarchy right is an active member's.
+      for (const status of ['removed', 'pending'] as const) {
+        expect(can(ctx({ role: 'ab', status }), permission)).toBe(false);
+        expect(can(ctx({ role: 'aab', status }), permission)).toBe(false);
+      }
+    });
+
+    it('P11-T3 AC-1: the AAB holds what the AB holds on every coaching row (ADR-0074)', () => {
+      for (const permission of COACHING) {
+        expect([permission, scopeFor(ROLES.AAB, permission)])
+          .toEqual([permission, scopeFor(ROLES.AB, permission)]);
+      }
+    });
+
+    it('P11-T3 AC-1: a leader who is coached holds `own` beside `own-downline`, as two grants', () => {
+      // §3: a wider token never silently includes the reader's own records.
+      const ownToo = (permission: Permission, grantee: typeof AB) =>
+        (PERMISSIONS[permission] as readonly { grantee: unknown; scope: Scope }[])
+          .some((g) => g.grantee === grantee && g.scope === 'own');
+      for (const permission of ['coaching_session:read', 'coaching_session:export_pdf', 'leader_notes:read'] as const) {
+        expect([permission, ownToo(permission, AB), ownToo(permission, AAB)]).toEqual([permission, true, true]);
+      }
+      // …and nowhere a session is written or a profile kept: `COACH` never reaches oneself.
+      for (const permission of ['coaching_session:create', 'coaching_profile:read', 'leader_notes:write'] as const) {
+        expect([permission, ownToo(permission, AB)]).toEqual([permission, false]);
+      }
+    });
+
+    it('P11-T3 AC-1: coaching_session:share is struck, and never in the registry (ADR-0077, ADR-0083)', () => {
+      expect(Object.keys(PERMISSIONS)).not.toContain('coaching_session:share');
+    });
+
+    it('P11-T3 AC-7 office_roles_cannot_read_leader_notes: the Owner, the Admin and the Super Admin as such', () => {
+      for (const office of [ROLES.KPM_OWNER, ROLES.KPM_ADMIN, ROLES.SUPER_ADMIN, ctx({ superAdmin: true })]) {
+        expect(can(office, 'leader_notes:read')).toBe(false);
+        expect(can(office, 'coaching_profile:read')).toBe(false);
+      }
+      // One who is also an AB holds the AB's grant, which is the hierarchy, not the office (§1.1).
+      // Whether they reach a given note is the reader predicate's: an ancestor of its author.
+      expect(can(ctx({ role: 'ab', owner: true }), 'leader_notes:read')).toBe(true);
+      expect(can(ctx({ role: 'aab', admin: true }), 'leader_notes:read')).toBe(true);
+    });
+
+    it('P11-T3 AC-7 support_session_cannot_read_leader_notes: read-only or elevated (§3.13)', () => {
+      expect(isBlockedWhileImpersonating('leader_notes:read')).toBe(true);
+      const readOnly = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: true });
+      const elevated = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: false });
+      expect(can(readOnly, 'leader_notes:read')).toBe(false);
+      expect(can(elevated, 'leader_notes:read')).toBe(false);
+      // The same leader outside a session reads them.
+      expect(can(ctx({ role: 'ab' }), 'leader_notes:read')).toBe(true);
+    });
+
+    it('OD-108 support_session_cannot_write_leader_notes: an elevated session cannot save a note in the leader’s name', () => {
+      expect(isBlockedWhileImpersonating('leader_notes:write')).toBe(true);
+      const readOnly = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: true });
+      const elevated = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: false });
+      const elevatedAab = ctx({ role: 'aab', impersonatedBy: 'sa-1', readOnly: false });
+      expect(can(readOnly, 'leader_notes:write')).toBe(false);
+      expect(can(elevated, 'leader_notes:write')).toBe(false);
+      expect(can(elevatedAab, 'leader_notes:write')).toBe(false);
+      // Only the note is blocked: the same elevated session keeps the leader's other coaching writes.
+      expect(can(elevated, 'coaching_session:edit')).toBe(true);
+      // P11-T9 AC-9: the ladder and the grids are not notes, so `coaching_profile:update` is not blocked.
+      expect(isBlockedWhileImpersonating('coaching_profile:update')).toBe(false);
+      expect(can(elevated, 'coaching_profile:update')).toBe(true);
+      // The same leaders outside a session write their own.
+      expect(can(ctx({ role: 'ab' }), 'leader_notes:write')).toBe(true);
+      expect(can(ctx({ role: 'aab' }), 'leader_notes:write')).toBe(true);
+    });
+
+    it('P11-T3 AC-4: a read-only support session reads a session and its print, and writes nothing', () => {
+      const readOnly = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: true });
+      expect(can(readOnly, 'coaching_session:read')).toBe(true);
+      expect(can(readOnly, 'coaching_session:export_pdf')).toBe(true);
+      expect(can(readOnly, 'coaching_profile:read')).toBe(true);
+      for (const write of [
+        'coaching_session:create', 'coaching_session:edit', 'coaching_session:finalize',
+        'coaching_session:reopen', 'coaching_profile:update', 'leader_notes:write',
+      ] as const) {
+        expect([write, can(readOnly, write)]).toEqual([write, false]);
+      }
+    });
+  });
+  /*
+   * **The calendar's permissions, a positive and a negative for each of the six roles** (P12-T1 AC-5,
+   * roles §3.15, §7.2), at the level `can()` decides them — the API refusing what a screen hides. Who is
+   * inside a grant's per-entry scope — the organiser, an attendee, `COACH` — and 404 outside it is the
+   * calendar's own suites' question.
+   *
+   * **An Owner or Admin with no field role** stands on no rung the matrix names: one who also holds a rung
+   * holds that rung's grants (§1.1), which the `ab` and `aab` rows already prove.
+   */
+  describe('P12-T1 — calendar (roles §3.15, functional/calendar.md *The permissions*)', () => {
+    const CALENDAR = [
+      'calendar_entry:read', 'calendar_entry:create', 'calendar_entry:update', 'calendar_entry:delete',
+      'calendar_entry:answer', 'calendar_entry:block', 'calendar_invitee:search',
+    ] as const satisfies readonly Permission[];
+
+    const officeOnly = (over: Parameters<typeof ctx>[0]) => {
+      const base = ctx(over);
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: 'agent' });
+    };
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: officeOnly({ owner: true }),
+      KPM_ADMIN: officeOnly({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+
+    const FIELD_OWN: Record<string, Scope | null> = {
+      SUPER_ADMIN: null, KPM_OWNER: null, KPM_ADMIN: null, AB: 'own', AAB: 'own', AGENT: 'own',
+    };
+    const EXPECTED: Record<(typeof CALENDAR)[number], Record<string, Scope | null>> = {
+      // The widest: `own` · attendee · `own-downline` for a leader, `own` · attendee for an Agent.
+      'calendar_entry:read': { ...FIELD_OWN, AB: 'own-downline', AAB: 'own-downline' },
+      'calendar_entry:create': FIELD_OWN,
+      'calendar_entry:update': FIELD_OWN,
+      'calendar_entry:delete': FIELD_OWN,
+      'calendar_entry:answer': FIELD_OWN,
+      'calendar_entry:block': { ...FIELD_OWN, AB: 'own-downline', AAB: 'own-downline', AGENT: null },
+      'calendar_invitee:search': { ...FIELD_OWN, AB: 'own-kpm', AAB: 'own-kpm', AGENT: 'own-kpm' },
+    };
+
+    const cells = CALENDAR.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P12-T1 AC-5 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P12-T1 AC-5 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it.each(CALENDAR)('P12-T1 AC-5 negative: %s is refused to a removed or pending member', (permission) => {
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role, status }), permission)).toBe(false);
+      }
+    });
+
+    it('P12-T1 AC-5 a leader holds `own` beside `own-downline` on the read, as two grants; the block is COACH alone', () => {
+      const has = (permission: Permission, grantee: typeof AB, scope: Scope) =>
+        (PERMISSIONS[permission] as readonly { grantee: unknown; scope: Scope }[])
+          .some((g) => g.grantee === grantee && g.scope === scope);
+      for (const grantee of [AB, AAB]) {
+        expect([has('calendar_entry:read', grantee, 'own'), has('calendar_entry:read', grantee, 'own-downline')]).toEqual([true, true]);
+        // `COACH` never reaches oneself: a block on yourself is not a grant anybody holds.
+        expect(has('calendar_entry:block', grantee, 'own')).toBe(false);
+      }
+    });
+
+    it('P12-T1 AC-5 the reads are read-like and every write is not, so a read-only support session reads and writes nothing', () => {
+      expect(CALENDAR.filter((p) => isReadLike(p))).toEqual(['calendar_entry:read', 'calendar_invitee:search']);
+      const readOnly = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: true });
+      expect(can(readOnly, 'calendar_entry:read')).toBe(true);
+      expect(can(readOnly, 'calendar_invitee:search')).toBe(true);
+      for (const write of [
+        'calendar_entry:create', 'calendar_entry:update', 'calendar_entry:delete', 'calendar_entry:answer', 'calendar_entry:block',
+      ] as const) {
+        expect([write, can(readOnly, write)]).toEqual([write, false]);
+      }
+    });
+
+    it('P12-T1 AC-5 no calendar permission is blocked outright in a support session: an elevated one writes as the member', () => {
+      const elevated = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: false });
+      for (const permission of CALENDAR) {
+        expect([permission, isBlockedWhileImpersonating(permission), can(elevated, permission)]).toEqual([permission, false, true]);
+      }
+    });
+
+    it('P12-T1 AC-5 an Owner or Admin who also stands on a rung holds that rung’s calendar (§1.1)', () => {
+      expect(scopeFor(ctx({ role: 'ab', owner: true }), 'calendar_entry:block')).toBe('own-downline');
+      expect(scopeFor(ctx({ role: 'agent', admin: true }), 'calendar_entry:read')).toBe('own');
+    });
+  });
+
+  describe('Phase 13 — activation and new hires (roles §3.8, functional/activation.md *The permissions*)', () => {
+    const ACTIVATION = [
+      'activation:read', 'activation:update_manual_item', 'activation:set_start_date', 'activation:graduate',
+      'new_hires:read_roster', 'activation_note:write',
+    ] as const satisfies readonly Permission[];
+
+    const officeOnly = (over: Parameters<typeof ctx>[0]) => {
+      const base = ctx(over);
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: 'agent' });
+    };
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: officeOnly({ owner: true }),
+      KPM_ADMIN: officeOnly({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+    const NONE: Record<string, Scope | null> = { SUPER_ADMIN: null, KPM_OWNER: null, KPM_ADMIN: null };
+    const FIELD = (scope: Scope) => ({ ...NONE, AB: scope, AAB: scope, AGENT: scope });
+    /** The widest scope each role holds — the Agent's downline grants included (OD-122, ADR-0087). */
+    const EXPECTED: Record<(typeof ACTIVATION)[number], Record<string, Scope | null>> = {
+      'activation:read': FIELD('own-downline'),
+      'activation:update_manual_item': FIELD('own-downline'),
+      'activation:set_start_date': FIELD('own-downline'),
+      'activation:graduate': FIELD('own'),
+      'new_hires:read_roster': FIELD('own-downline'),
+      'activation_note:write': FIELD('own-downline'),
+    };
+    const cells = ACTIVATION.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P13-T5 AC-8 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P13-T5 AC-8 negative (D-owner): %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it.each(ACTIVATION)('P13-T5 AC-8 negative: %s is refused to a removed or pending member', (permission) => {
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role, status }), permission)).toBe(false);
+      }
+    });
+
+    it('P13-T2 AC-3 the hire’s own and a leader’s are two grants; graduation is the hire’s alone, the start date and the note a leader’s alone', () => {
+      const has = (permission: Permission, grantee: typeof AB, scope: Scope) =>
+        (PERMISSIONS[permission] as readonly { grantee: unknown; scope: Scope }[])
+          .some((g) => g.grantee === grantee && g.scope === scope);
+      for (const grantee of [AB, AAB, AGENT]) {
+        for (const permission of ['activation:read', 'activation:update_manual_item'] as const) {
+          expect([permission, has(permission, grantee, 'own'), has(permission, grantee, 'own-downline')]).toEqual([permission, true, true]);
+        }
+        expect(has('activation:graduate', grantee, 'own-downline')).toBe(false);
+        for (const permission of ['activation:set_start_date', 'activation_note:write', 'new_hires:read_roster'] as const) {
+          expect([permission, has(permission, grantee, 'own')]).toEqual([permission, false]);
+        }
+      }
+      // A linked item is ticked by nobody: not a grant anybody holds, but its link's liveness.
+      expect(Object.keys(PERMISSIONS)).not.toContain('activation:auto_complete');
+    });
+
+    it('P13-T4 AC-9 the reads are read-like and every write is not, so a read-only support session reads and writes nothing', () => {
+      expect(ACTIVATION.filter((p) => isReadLike(p))).toEqual(['activation:read', 'new_hires:read_roster']);
+      const readOnly = ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: true });
+      expect([can(readOnly, 'activation:read'), can(readOnly, 'new_hires:read_roster')]).toEqual([true, true]);
+      for (const write of ['activation:update_manual_item', 'activation:set_start_date', 'activation:graduate', 'activation_note:write'] as const) {
+        expect([write, can(readOnly, write)]).toEqual([write, false]);
+      }
+    });
+
+    it('P13-T6 AC-5 none but graduation is blocked outright: an elevated session writes as the member, both actors on the record', () => {
+      const elevated = ctx({ role: 'aab', impersonatedBy: 'sa-1', readOnly: false });
+      for (const permission of ACTIVATION.filter((p) => p !== 'activation:graduate')) {
+        expect([permission, isBlockedWhileImpersonating(permission), can(elevated, permission)]).toEqual([permission, false, true]);
+      }
+    });
+
+    it('Phase 13 exit review N4 graduation is the hire’s own declaration (ADR-0100): refused to a support session, read-only or elevated', () => {
+      expect(isBlockedWhileImpersonating('activation:graduate')).toBe(true);
+      for (const role of ['ab', 'aab', 'agent'] as const) {
+        for (const readOnly of [true, false]) {
+          const session = ctx({ role, impersonatedBy: 'sa-1', readOnly });
+          expect([role, readOnly, can(session, 'activation:graduate')]).toEqual([role, readOnly, false]);
+        }
+        // The same member outside a session graduates their own.
+        expect([role, can(ctx({ role }), 'activation:graduate')]).toEqual([role, true]);
+      }
+      // Only graduation: the same elevated session still ticks the hire's items as them.
+      expect(can(ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: false }), 'activation:update_manual_item')).toBe(true);
+    });
+
+    it('P13-T5 AC-8 an Owner or Admin who also stands on a rung holds that rung’s grants (§1.1)', () => {
+      expect(scopeFor(ctx({ role: 'ab', owner: true }), 'new_hires:read_roster')).toBe('own-downline');
+      expect(scopeFor(ctx({ role: 'agent', admin: true }), 'activation:graduate')).toBe('own');
+    });
+
+    /*
+     * **OD-158 → option 1 (P18.6-T1 AC-7, exit test 2)**: the Owner and the Admins read a hire's activation as the
+     * compliance tree's status alone — under `kpm_analytics:read` — and hold no activation grant of their own: no
+     * checklist, no start-date correction, no reversal of a graduation. Every permission of the two families, today's
+     * and any added later, is granted to no office role and no platform role; one who stands on a rung holds that
+     * rung's, as the member they are (§1.1), which reaches only the hires they coach.
+     */
+    it('P18.6-T1 AC-7 OD-158: no activation or new-hires permission is granted to the Owner, the Admin or the Super Admin', () => {
+      const families = (Object.keys(PERMISSIONS) as Permission[])
+        .filter((p) => /^(activation|activation_note|new_hires):/.test(p));
+      expect(families.sort()).toEqual([...ACTIVATION].sort());
+      for (const permission of families) {
+        const roles = (PERMISSIONS[permission] as readonly { grantee: { kind: string } }[]).map((g) => g.grantee.kind);
+        expect([permission, roles.filter((kind) => kind !== 'hierarchy')]).toEqual([permission, []]);
+        for (const role of ['KPM_OWNER', 'KPM_ADMIN', 'SUPER_ADMIN']) {
+          expect([permission, role, can(ROLES[role], permission)]).toEqual([permission, role, false]);
+        }
+      }
+      // What they read of a hire instead: the tree, under the analytics' own permission.
+      expect([can(ROLES.KPM_OWNER, 'kpm_analytics:read'), can(ROLES.KPM_ADMIN, 'kpm_analytics:read')]).toEqual([true, true]);
+    });
+  });
+
+  /*
+   * **The Unit Dashboard's permissions, a positive and a negative per role** (P15-T1 AC-1, P15-T3 AC-4), at
+   * the level `can()` decides them. Who is inside a grant — `COACH`, and 404 outside it — is the module's
+   * own specs' question (`unit-dashboard.int.spec.ts`, `unit-dashboard.tenancy.spec.ts`).
+   */
+  describe('Phase 18.5 — campaigns, the member’s side (roles §3.11)', () => {
+    const CAMPAIGN = [
+      'campaign:read_list', 'campaign:chase', 'campaign_qualification:read', 'campaign_settings:read',
+    ] as const satisfies readonly Permission[];
+    const officeOnly = (over: Parameters<typeof ctx>[0]) => {
+      const base = ctx(over);
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: 'agent' });
+    };
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: officeOnly({ owner: true }),
+      KPM_ADMIN: officeOnly({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+    /** The widest scope each role holds (roles §3.11). */
+    const EXPECTED: Record<(typeof CAMPAIGN)[number], Record<string, Scope | null>> = {
+      'campaign:read_list': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-kpm', AAB: 'own-kpm', AGENT: 'own-kpm',
+      },
+      'campaign:chase': { SUPER_ADMIN: null, KPM_OWNER: null, KPM_ADMIN: null, AB: 'own', AAB: 'own', AGENT: 'own' },
+      'campaign_qualification:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-downline', AAB: 'own-unit', AGENT: 'own',
+      },
+      // Leak 15: the settings reads, the Owner's and the Admins' — never a field rung.
+      'campaign_settings:read': { SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null },
+    };
+    const cells = CAMPAIGN.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P18.5-T7 AC-1, P18.5-T9 AC-2 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P18.5-T7 AC-1 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it('P18.5-T7 AC-1 the Owner and the Admin chase by the rung they hold, in their field view (ADR-0114)', () => {
+      expect(can(ctx({ role: 'ab', owner: true }), 'campaign:chase')).toBe(true);
+      expect(can(ctx({ role: 'agent', admin: true }), 'campaign:chase')).toBe(true);
+    });
+
+    it('P18.5-T7 AC-1 a support session reads campaigns and is refused the chase, read-only or elevated (ADR-0143)', () => {
+      const readOnly = ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: true });
+      expect(can(readOnly, 'campaign:read_list')).toBe(true);
+      expect(can(readOnly, 'campaign_qualification:read')).toBe(true);
+      expect(can(readOnly, 'campaign:chase')).toBe(false);
+      expect(isBlockedWhileImpersonating('campaign:chase')).toBe(true);
+      expect(can(ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: false }), 'campaign:chase')).toBe(false);
+      // Outside a session the member chases.
+      expect(can(ctx({ role: 'agent' }), 'campaign:chase')).toBe(true);
+    });
+
+    it.each(CAMPAIGN)('P18.5-T7 AC-1 negative: %s is refused to a removed or pending member', (permission) => {
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role, status }), permission)).toBe(false);
+      }
+    });
+
+    it('P18.5-T7 AC-1 only the reads are read-like', () => {
+      expect(CAMPAIGN.filter((p) => isReadLike(p))).toEqual(['campaign:read_list', 'campaign_qualification:read', 'campaign_settings:read']);
+    });
+
+    it('P18.5-T7 leak 15 the settings read is refused to every field rung, the Owner and the Admin keeping it as the rung they hold', () => {
+      for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role }), 'campaign_settings:read')).toBe(false);
+      expect(can(ctx({ role: 'agent', owner: true }), 'campaign_settings:read')).toBe(true);
+      expect(can(ctx({ role: 'ab', admin: true, impersonatedBy: 'sa-1', readOnly: true }), 'campaign_settings:read')).toBe(true);
+    });
+  });
+
+  /*
+   * **The override of a final standing** (P18.6-T2 AC-5; roles §3.11, D-override): the Owner and the Admins `own-kpm`,
+   * the Super Admin `all` — which writes only inside an elevated support session, as its member — and no field rung.
+   */
+  describe('Phase 18.6 — the override of a final standing (roles §3.11)', () => {
+    const officeOnly = (over: Parameters<typeof ctx>[0]) => {
+      const base = ctx(over);
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: 'agent' });
+    };
+    const ROLES: [string, RequestContext, Scope | null][] = [
+      ['SUPER_ADMIN', ctx({ superAdmin: true, noMembership: true }), 'all'],
+      ['KPM_OWNER', officeOnly({ owner: true }), 'own-kpm'],
+      ['KPM_ADMIN', officeOnly({ admin: true }), 'own-kpm'],
+      ['AB', ctx({ role: 'ab' }), null],
+      ['AAB', ctx({ role: 'aab' }), null],
+      ['AGENT', ctx({ role: 'agent' }), null],
+    ];
+
+    it.each(ROLES.filter(([, , scope]) => scope !== null))(
+      'P18.6-T2 AC-5 positive: campaign_qualification:override is held by %s',
+      (_role, context, scope) => {
+        expect(can(context, 'campaign_qualification:override')).toBe(true);
+        expect(scopeFor(context, 'campaign_qualification:override')).toBe(scope);
+      },
+    );
+
+    it.each(ROLES.filter(([, , scope]) => scope === null))(
+      'P18.6-T2 AC-5 negative: campaign_qualification:override is refused to %s',
+      (_role, context) => {
+        expect(can(context, 'campaign_qualification:override')).toBe(false);
+      },
+    );
+
+    it('P18.6-T2 AC-5 the Owner and the Admin hold it whatever rung they stand on; a removed or pending member never', () => {
+      expect(can(ctx({ role: 'ab', owner: true }), 'campaign_qualification:override')).toBe(true);
+      expect(can(ctx({ role: 'agent', admin: true }), 'campaign_qualification:override')).toBe(true);
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role, status }), 'campaign_qualification:override')).toBe(false);
+      }
+    });
+
+    it('P18.6-T2 AC-5 a write: refused in a read-only support session, held in an elevated one as the member', () => {
+      expect(isReadLike('campaign_qualification:override')).toBe(false);
+      expect(isBlockedWhileImpersonating('campaign_qualification:override')).toBe(false);
+      expect(can(ctx({ role: 'ab', owner: true, impersonatedBy: 'sa-1', readOnly: true }), 'campaign_qualification:override')).toBe(false);
+      expect(can(ctx({ role: 'ab', owner: true, impersonatedBy: 'sa-1', readOnly: false }), 'campaign_qualification:override')).toBe(true);
+      // An elevated session as a field member holds what the member holds: nothing.
+      expect(can(ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: false }), 'campaign_qualification:override')).toBe(false);
+    });
+  });
+
+  describe('Phase 15 — the Unit Dashboard (roles §3.8, functional/unit-dashboard.md *The permissions*)', () => {
+    const UNIT = ['unit_dashboard:read', 'unit_dashboard:update_production'] as const satisfies readonly Permission[];
+    const officeOnly = (over: Parameters<typeof ctx>[0]) => {
+      const base = ctx(over);
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: 'agent' });
+    };
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: officeOnly({ owner: true }),
+      KPM_ADMIN: officeOnly({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+    /** The widest scope each role holds (contract, roles §3.8). */
+    const EXPECTED: Record<(typeof UNIT)[number], Record<string, Scope | null>> = {
+      'unit_dashboard:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-downline', AAB: 'own-downline', AGENT: 'own-downline',
+      },
+      'unit_dashboard:update_production': {
+        SUPER_ADMIN: null, KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-downline', AAB: 'own-downline', AGENT: null,
+      },
+    };
+    const cells = UNIT.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P15-T1 AC-1, P15-T3 AC-4 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P15-T3 AC-4 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it.each(UNIT)('P15-T1 AC-1 negative: %s is refused to a removed or pending member', (permission) => {
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role, status }), permission)).toBe(false);
+      }
+    });
+
+    it('P15-T1 AC-1 a leader holds `own` beside `own-downline` on both, as two grants; the Agent both on the read and neither on the write', () => {
+      const has = (permission: Permission, grantee: typeof AB, scope: Scope) =>
+        (PERMISSIONS[permission] as readonly { grantee: unknown; scope: Scope }[])
+          .some((g) => g.grantee === grantee && g.scope === scope);
+      for (const grantee of [AB, AAB]) {
+        for (const permission of UNIT) {
+          expect([permission, has(permission, grantee, 'own'), has(permission, grantee, 'own-downline')]).toEqual([permission, true, true]);
+        }
+      }
+      // ADR-0087: an Agent with a direct report is a leader; COACH narrows the downline grant for one who is not.
+      expect([has('unit_dashboard:read', AGENT, 'own'), has('unit_dashboard:read', AGENT, 'own-downline')]).toEqual([true, true]);
+      expect([has('unit_dashboard:update_production', AGENT, 'own'), has('unit_dashboard:update_production', AGENT, 'own-downline')])
+        .toEqual([false, false]);
+      // `org_tree:drill_to_unit_dashboard` folds into the read (roles §3.4): a link, never a permission.
+      expect(Object.keys(PERMISSIONS)).not.toContain('org_tree:drill_to_unit_dashboard');
+    });
+
+    it('P15-T3 AC-4 the read is read-like and the save is not: a read-only support session reads and is refused the save', () => {
+      expect(UNIT.filter((p) => isReadLike(p))).toEqual(['unit_dashboard:read']);
+      const readOnly = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: true });
+      expect(can(readOnly, 'unit_dashboard:read')).toBe(true);
+      expect(can(readOnly, 'unit_dashboard:update_production')).toBe(false);
+      // Not blocked outright: an elevated session corrects as the member, both actors on the audit row.
+      const elevated = ctx({ role: 'ab', impersonatedBy: 'sa-1', readOnly: false });
+      expect(isBlockedWhileImpersonating('unit_dashboard:update_production')).toBe(false);
+      expect(can(elevated, 'unit_dashboard:update_production')).toBe(true);
+    });
+
+    it('P15-T1 AC-1 an Owner or Admin who also stands on a rung reads as the office, its widest grant (§1.1)', () => {
+      expect(scopeFor(ctx({ role: 'ab', owner: true }), 'unit_dashboard:read')).toBe('own-kpm');
+      expect(scopeFor(ctx({ role: 'agent', admin: true }), 'unit_dashboard:update_production')).toBe('own-kpm');
+    });
+  });
+
+  /*
+   * **Recruitment tools' permissions, a positive and a negative for each of the six roles** (P17-T2 AC-5,
+   * P17-T4 AC-7, P17-T8 AC-3; the contract's table): the field read every member holds, the office's writes
+   * on `tenant_config:write`, and the playbook — read on `company_template:read`, written on the new
+   * `recruitment_playbook:write` — the Super Admin's alone. Over HTTP, per route, is
+   * `recruitment.controller.int.spec.ts`.
+   */
+  describe('Phase 17 — recruitment tools (the contract’s permissions table)', () => {
+    const RECRUITMENT = [
+      'recruitment:read', 'tenant_config:write', 'company_template:read', 'recruitment_playbook:write',
+    ] as const satisfies readonly Permission[];
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: ctx({ owner: true }),
+      KPM_ADMIN: ctx({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+    const EXPECTED: Record<(typeof RECRUITMENT)[number], Record<string, Scope | null>> = {
+      'recruitment:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-kpm', AAB: 'own-kpm', AGENT: 'own-kpm',
+      },
+      'tenant_config:write': {
+        SUPER_ADMIN: null, KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null,
+      },
+      'company_template:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: null, KPM_ADMIN: null, AB: null, AAB: null, AGENT: null,
+      },
+      'recruitment_playbook:write': {
+        SUPER_ADMIN: 'all', KPM_OWNER: null, KPM_ADMIN: null, AB: null, AAB: null, AGENT: null,
+      },
+    };
+    const cells = RECRUITMENT.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P17-T2 AC-5, P17-T4 AC-7, P17-T8 AC-3 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P17-T2 AC-5, P17-T4 AC-7, P17-T8 AC-3 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it('P17-T2 AC-5 the field read is refused to a removed or pending member, and to somebody in no office', () => {
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) expect(can(ctx({ role, status }), 'recruitment:read')).toBe(false);
+      }
+      expect(can(ctx({ noMembership: true }), 'recruitment:read')).toBe(false);
+    });
+
+    it('P17-T4 AC-7 a read-only support session reads the plan and the pitch, and is refused every write', () => {
+      expect(isReadLike('recruitment:read')).toBe(true);
+      expect(isReadLike('recruitment_playbook:write')).toBe(false);
+      for (const target of [{ role: 'agent' as const }, { owner: true }, { admin: true }]) {
+        const readOnly = ctx({ ...target, impersonatedBy: 'sa-1', readOnly: true });
+        expect(can(readOnly, 'recruitment:read')).toBe(true);
+        expect(can(readOnly, 'tenant_config:write')).toBe(false);
+      }
+    });
+
+    it('P17-T4 AC-7 an elevated session as the Owner writes the office’s pitch, as its member; no session writes the playbook', () => {
+      const elevated = ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: false });
+      expect(isBlockedWhileImpersonating('tenant_config:write')).toBe(false);
+      expect(can(elevated, 'tenant_config:write')).toBe(true);
+      expect(can(elevated, 'recruitment:read')).toBe(true);
+      // A session acts as its member, whose context holds no platform grant.
+      expect(can(elevated, 'recruitment_playbook:write')).toBe(false);
+      expect(can(elevated, 'company_template:read')).toBe(false);
+    });
+
+    it('P17-T8 AC-3 the playbook’s write is its own permission, not company_template:write nor product_catalog:crud', () => {
+      expect(Object.keys(PERMISSIONS)).toEqual(expect.arrayContaining(['recruitment:read', 'recruitment_playbook:write']));
+      // No office override of the playbook exists (OD-88), so no tenant grantee holds any recruitment write.
+      const tenantWrites = (Object.keys(PERMISSIONS) as Permission[])
+        .filter((p) => p.startsWith('recruitment') && !isReadLike(p))
+        .flatMap((p) => (PERMISSIONS[p] as readonly { grantee: { kind: string } }[]).filter((g) => g.grantee.kind !== 'platform'));
+      expect(tenantWrites).toEqual([]);
+    });
+  });
+
+  /*
+   * **The Owner's reporting, a positive and a negative for each of the six roles** (P18-T1 AC-1, P18-T2 AC-10,
+   * P18-T8 AC-1; the contract's permissions table, roles §3.9). Over HTTP, per route, is `reporting.int.spec.ts`.
+   */
+  describe('Phase 18 — the Owner’s reporting (roles §3.9)', () => {
+    const REPORTING = [
+      'kpm_overview:read', 'kpm_overview:set_recruit_target', 'kpm_analytics:read', 'platform_analytics:read',
+    ] as const satisfies readonly Permission[];
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: ctx({ owner: true }),
+      KPM_ADMIN: ctx({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+    const EXPECTED: Record<(typeof REPORTING)[number], Record<string, Scope | null>> = {
+      'kpm_overview:read': { SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null },
+      'kpm_overview:set_recruit_target': { SUPER_ADMIN: null, KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null },
+      'kpm_analytics:read': { SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null },
+      'platform_analytics:read': { SUPER_ADMIN: 'all', KPM_OWNER: null, KPM_ADMIN: null, AB: null, AAB: null, AGENT: null },
+    };
+    const cells = REPORTING.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P18-T1 AC-1, P18-T2 AC-10, P18-T8 AC-1 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P18-T1 AC-1, P18-T2 AC-10, P18-T8 AC-1 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it('P18-T1 AC-1 an Owner or Admin who also stands on a rung reads as the office; a removed or pending one holds nothing', () => {
+      expect(scopeFor(ctx({ role: 'ab', owner: true }), 'kpm_overview:read')).toBe('own-kpm');
+      expect(scopeFor(ctx({ role: 'agent', admin: true }), 'kpm_analytics:read')).toBe('own-kpm');
+      for (const status of ['removed', 'pending'] as const) {
+        expect(can(ctx({ role: 'ab', status }), 'kpm_overview:read')).toBe(false);
+      }
+    });
+
+    it('P18-T1 AC-1 a read-only support session reads the Overview and the analytics, and is refused the target', () => {
+      expect(REPORTING.filter((p) => isReadLike(p))).toEqual(['kpm_overview:read', 'kpm_analytics:read', 'platform_analytics:read']);
+      for (const target of [{ owner: true }, { admin: true }]) {
+        const readOnly = ctx({ ...target, impersonatedBy: 'sa-1', readOnly: true });
+        expect(can(readOnly, 'kpm_overview:read')).toBe(true);
+        expect(can(readOnly, 'kpm_analytics:read')).toBe(true);
+        expect(can(readOnly, 'kpm_overview:set_recruit_target')).toBe(false);
+      }
+    });
+
+    it('P18-T1 AC-1 an elevated session writes the target as its member; no session holds the platform’s read', () => {
+      const elevated = ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: false });
+      expect(isBlockedWhileImpersonating('kpm_overview:set_recruit_target')).toBe(false);
+      expect(can(elevated, 'kpm_overview:set_recruit_target')).toBe(true);
+      // A session acts as its member, whose context holds no platform grant (D-admin).
+      expect(can(elevated, 'platform_analytics:read')).toBe(false);
+      expect(can(ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: true }), 'platform_analytics:read')).toBe(false);
+    });
+
+    it('P18-T8 AC-1 the platform’s analytics is its own permission, apart from the overview’s counts', () => {
+      expect(PERMISSIONS['platform_analytics:read']).not.toBe(PERMISSIONS['platform_metrics:read']);
+      expect(Object.keys(PERMISSIONS)).toEqual(expect.arrayContaining(['platform_analytics:read', 'platform_metrics:read']));
+    });
+  });
+
+  /*
+   * **The forum's permissions, a positive and a negative per role** (P18.1-T2 AC-1, P18.1-T3 AC-1; roles §3.14 as
+   * answered). A field member's `own-kpm` here is the guard's half: the tag is the service's, which answers 404
+   * to a field member not tagged — `leader-meetings.int.spec.ts` proves it over HTTP, role by role.
+   */
+  describe('Phase 18.1 — the Strategic Leader Forum (roles §3.14)', () => {
+    const FORUM = [
+      'leader_meeting:read', 'leader_meeting:create', 'leader_meeting:reschedule', 'leader_meeting:delete',
+      'leader_meeting:edit', 'leader_meeting:share_link', 'leader_meeting:read_shared_link',
+    ] as const satisfies readonly Permission[];
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: ctx({ owner: true }),
+      KPM_ADMIN: ctx({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+    const OFFICE = { KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm' } as const;
+    const FIELD = { AB: 'own-kpm', AAB: 'own-kpm', AGENT: 'own-kpm' } as const;
+    const NO_FIELD = { AB: null, AAB: null, AGENT: null } as const;
+    const EXPECTED: Record<(typeof FORUM)[number], Record<string, Scope | null>> = {
+      'leader_meeting:read': { SUPER_ADMIN: 'all', ...OFFICE, ...FIELD },
+      'leader_meeting:create': { SUPER_ADMIN: null, ...OFFICE, ...NO_FIELD },
+      'leader_meeting:reschedule': { SUPER_ADMIN: null, ...OFFICE, ...NO_FIELD },
+      'leader_meeting:delete': { SUPER_ADMIN: null, ...OFFICE, ...NO_FIELD },
+      'leader_meeting:edit': { SUPER_ADMIN: null, ...OFFICE, ...FIELD },
+      'leader_meeting:share_link': { SUPER_ADMIN: null, ...OFFICE, ...FIELD },
+      'leader_meeting:read_shared_link': { SUPER_ADMIN: 'all', ...OFFICE, ...FIELD },
+    };
+    const cells = FORUM.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P18.1-T2 AC-1, P18.1-T3 AC-1 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P18.1-T2 AC-1, P18.1-T3 AC-1 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it('P18.1-T2 AC-1 manage_coeditors and export_pdf are no permission of the code (D-coeditors; export_pdf has no route)', () => {
+      expect(Object.keys(PERMISSIONS)).not.toContain('leader_meeting:manage_coeditors');
+      expect(Object.keys(PERMISSIONS)).not.toContain('leader_meeting:export_pdf');
+      expect(Object.keys(PERMISSIONS)).not.toContain('leader_meeting:list');
+    });
+
+    it('P18.1-T2 AC-1 a removed or pending field member holds none of them; nobody outside an office holds any', () => {
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) {
+          for (const permission of FORUM) expect([permission, can(ctx({ role, status }), permission)]).toEqual([permission, false]);
+        }
+      }
+      for (const permission of FORUM) expect(can(ctx({ noMembership: true }), permission)).toBe(false);
+    });
+
+    it('P18.1-T2 AC-1 a read-only support session reads a meeting and a link, and is refused every write', () => {
+      expect(FORUM.filter((p) => isReadLike(p))).toEqual(['leader_meeting:read', 'leader_meeting:read_shared_link']);
+      for (const target of [{ owner: true }, { admin: true }, { role: 'ab' as const }, { role: 'agent' as const }]) {
+        const readOnly = ctx({ ...target, impersonatedBy: 'sa-1', readOnly: true });
+        expect(can(readOnly, 'leader_meeting:read')).toBe(true);
+        expect(can(readOnly, 'leader_meeting:read_shared_link')).toBe(true);
+        for (const write of FORUM.filter((p) => !isReadLike(p))) expect([write, can(readOnly, write)]).toEqual([write, false]);
+      }
+    });
+
+    it('P18.1-T2 AC-1 an elevated session writes as its member: none of the forum is on the hard-blocked list', () => {
+      const elevated = ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: false });
+      for (const permission of FORUM) {
+        expect(isBlockedWhileImpersonating(permission)).toBe(false);
+        expect(can(elevated, permission)).toBe(true);
+      }
+      expect(FORUM.some((p) => isOwnerReserved(p))).toBe(false);
+    });
+  });
+
+  describe('Phase 14 — the sales tools (roles §3.10)', () => {
+    it('P14 exit review N1: no attack_plan:* or sales_attack_plan:read permission exists (D-api, ADR-0117)', () => {
+      expect(Object.keys(PERMISSIONS).filter((p) => p.startsWith('attack_plan:') || p === 'sales_attack_plan:read')).toEqual([]);
+    });
+
+    it('P14 exit review: product_settings:read is the Owner’s and the Admin’s, never a field member’s', () => {
+      // The settings reads carry the office's drafts (ADR-0037); `tenant_config:read`, every member's, no longer covers them.
+      expect(scopeFor(ctx({ owner: true }), 'product_settings:read')).toBe('own-kpm');
+      expect(scopeFor(ctx({ admin: true }), 'product_settings:read')).toBe('own-kpm');
+      expect(scopeFor(ctx({ superAdmin: true, noMembership: true }), 'product_settings:read')).toBe('all');
+      for (const role of ['ab', 'aab', 'agent'] as const) {
+        expect([role, can(ctx({ role }), 'product_settings:read')]).toEqual([role, false]);
+        // The field read of the same shelf is theirs.
+        expect([role, can(ctx({ role }), 'product_catalog:read')]).toEqual([role, true]);
+      }
+    });
+
+    it('P14 exit review: a read by its verb, so a read-only session as the Owner keeps it and as an agent does not gain it', () => {
+      expect(isReadLike('product_settings:read')).toBe(true);
+      expect(can(ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: true }), 'product_settings:read')).toBe(true);
+      expect(can(ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: true }), 'product_settings:read')).toBe(false);
+    });
+  });
+
+  /*
+   * **Events** (P18.5-T5 AC-1, AC-2; P18.5-T6 AC-1; roles §3.10, §3.11 as OD-31 and OD-151 answered them): a positive
+   * and a negative for each of the six roles, at the level `can()` decides — the API refusing what a screen hides.
+   * Who is inside an event's audience, and the 404 outside it, is `event-guest.tenancy.spec.ts`'s question.
+   */
+  describe('Phase 18.5 — events (roles §3.10, §3.11)', () => {
+    const OWNER_AB = ctx({ owner: true, role: 'ab' });
+    const ADMIN_AB = ctx({ admin: true, role: 'ab' });
+    const SA = ctx({ superAdmin: true, noMembership: true });
+    const FIELD = (['ab', 'aab', 'agent'] as const).map((role) => [role, ctx({ role })] as const);
+
+    it('P18.5-T5 AC-1 every member reads the events list; the Super Admin only through a support session', () => {
+      for (const [role, who] of [...FIELD, ['owner', OWNER_AB], ['admin', ADMIN_AB]] as const) {
+        expect([role, scopeFor(who, 'event:read_list')]).toEqual([role, 'own-kpm']);
+      }
+      expect(scopeFor(SA, 'event:read_list')).toBe('all');
+      expect(can(ctx({ role: 'agent', status: 'pending' }), 'event:read_list')).toBe(false);
+    });
+
+    it('P18.5-T5 AC-1 RSVP, cancel and the claim are a field member’s own — the Owner and the Admin hold them as the AB they are', () => {
+      for (const permission of ['event:rsvp', 'event:cancel_rsvp', 'event_attendance:self_claim'] as const) {
+        for (const [role, who] of FIELD) expect([permission, role, scopeFor(who, permission)]).toEqual([permission, role, 'own']);
+        expect([permission, scopeFor(OWNER_AB, permission)]).toEqual([permission, 'own']);
+        // An Owner who held no rung would hold none of them: the grant is the rung's, not the office's.
+        expect([permission, can(ctx({ owner: true, role: 'agent', noMembership: true }), permission)]).toEqual([permission, false]);
+        expect([permission, can(SA, permission)]).toEqual([permission, false]);
+      }
+    });
+
+    it('P18.5-T5 AC-1 only the Owner and the Admins confirm attendance; no leader, no agent (OD-31)', () => {
+      expect(scopeFor(ctx({ owner: true }), 'event_attendance:confirm')).toBe('own-kpm');
+      expect(scopeFor(ctx({ admin: true }), 'event_attendance:confirm')).toBe('own-kpm');
+      for (const [role, who] of FIELD) expect([role, can(who, 'event_attendance:confirm')]).toEqual([role, false]);
+      expect(isReadLike('event_attendance:confirm')).toBe(false);
+    });
+
+    it('P18.5-T6 AC-1 feedback: every field rung submits; the AB and the AAB read their own, the office reads every row', () => {
+      for (const [role, who] of FIELD) {
+        expect([role, scopeFor(who, 'event_feedback:submit')]).toEqual([role, 'own']);
+        expect([role, scopeFor(who, 'event_feedback:read')]).toEqual([role, 'own']);
+      }
+      expect(scopeFor(ctx({ owner: true }), 'event_feedback:read')).toBe('own-kpm');
+      expect(scopeFor(ctx({ admin: true }), 'event_feedback:read')).toBe('own-kpm');
+      expect(can(ctx({ owner: true, noMembership: true }), 'event_feedback:submit')).toBe(false);
+    });
+
+    it('P18.5-T5 AC-2 the events settings read is the Owner’s and the Admin’s, never a field member’s (the leak)', () => {
+      expect(scopeFor(ctx({ owner: true }), 'event_settings:read')).toBe('own-kpm');
+      expect(scopeFor(ctx({ admin: true }), 'event_settings:read')).toBe('own-kpm');
+      expect(scopeFor(SA, 'event_settings:read')).toBe('all');
+      for (const [role, who] of FIELD) {
+        expect([role, can(who, 'event_settings:read')]).toEqual([role, false]);
+        expect([role, can(who, 'event:read_list')]).toEqual([role, true]);
+      }
+    });
+
+    it('P18.5-T5 AC-1 a read-only session reads and writes nothing; an elevated one never RSVPs, claims or answers for the member', () => {
+      const readOnlyAgent = ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: true });
+      expect(can(readOnlyAgent, 'event:read_list')).toBe(true);
+      for (const write of ['event:rsvp', 'event:cancel_rsvp', 'event_attendance:self_claim', 'event_feedback:submit'] as const) {
+        expect([write, can(readOnlyAgent, write)]).toEqual([write, false]);
+      }
+      const readOnlyOwner = ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: true });
+      expect(can(readOnlyOwner, 'event_settings:read')).toBe(true);
+      expect(can(readOnlyOwner, 'event_feedback:read')).toBe(true);
+      expect(can(readOnlyOwner, 'event_attendance:confirm')).toBe(false);
+
+      const elevatedAgent = ctx({ role: 'agent', impersonatedBy: 'sa-1', readOnly: false });
+      expect(can(elevatedAgent, 'event:read_list')).toBe(true);
+      for (const own of ['event:rsvp', 'event:cancel_rsvp', 'event_attendance:self_claim', 'event_feedback:submit'] as const) {
+        expect([own, isBlockedWhileImpersonating(own)]).toEqual([own, true]);
+        expect([own, can(elevatedAgent, own)]).toEqual([own, false]);
+        // The member themselves, outside any session, still holds it.
+        expect([own, can(ctx({ role: 'agent' }), own)]).toEqual([own, true]);
+      }
+      expect(can(ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: false }), 'event_attendance:confirm')).toBe(true);
+    });
+  });
+
+  /*
+   * **Training** (P18.5-T1 AC-1, AC-8; P18.5-T2 AC-1; P18.5-T4 AC-1; roles §3.7 as OD-149 and D-support answered it):
+   * a positive and a negative for each of the six roles, at the level `can()` decides — the API refusing what a
+   * screen hides. Who `?for=` reaches (`COACH`, and 404 outside it) is `training-progress.tenancy.spec.ts`'s question.
+   */
+  describe('Phase 18.5 — training (roles §3.7)', () => {
+    const TRAINING = [
+      'training_progress:read', 'training_progress:update', 'training_settings:read', 'activation_settings:read',
+    ] as const satisfies readonly Permission[];
+    const officeOnly = (over: Parameters<typeof ctx>[0]) => {
+      const base = ctx(over);
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: 'agent' });
+    };
+    const ROLES: Record<string, RequestContext> = {
+      SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
+      KPM_OWNER: officeOnly({ owner: true }),
+      KPM_ADMIN: officeOnly({ admin: true }),
+      AB: ctx({ role: 'ab' }),
+      AAB: ctx({ role: 'aab' }),
+      AGENT: ctx({ role: 'agent' }),
+    };
+    const EXPECTED: Record<(typeof TRAINING)[number], Record<string, Scope | null>> = {
+      'training_progress:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-downline', AAB: 'own-unit', AGENT: 'own',
+      },
+      // The AB and the AAB learn too (the matrix's defect, fixed); the Owner and the Admin through a rung only.
+      'training_progress:update': {
+        SUPER_ADMIN: null, KPM_OWNER: null, KPM_ADMIN: null, AB: 'own', AAB: 'own', AGENT: 'own',
+      },
+      // The leak (AC-8): the settings reads are the office's administration's.
+      'training_settings:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null,
+      },
+      // The exit review's B2: the activation checklist's settings read, the same shape.
+      'activation_settings:read': {
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null,
+      },
+    };
+    const cells = TRAINING.flatMap((permission) =>
+      Object.keys(ROLES).map((role) => [permission, role, EXPECTED[permission][role]] as const));
+
+    it.each(cells.filter(([, , scope]) => scope !== null))(
+      'P18.5-T1 AC-1 positive: %s is held by %s at %s',
+      (permission, role, scope) => {
+        expect(can(ROLES[role], permission)).toBe(true);
+        expect(scopeFor(ROLES[role], permission)).toBe(scope);
+      },
+    );
+
+    it.each(cells.filter(([, , scope]) => scope === null))(
+      'P18.5-T1 AC-1 negative: %s is refused to %s',
+      (permission, role) => {
+        expect(can(ROLES[role], permission)).toBe(false);
+      },
+    );
+
+    it('P18.5-T1 AC-1 an Owner or Admin standing on a rung learns as that rung (ADR-0114)', () => {
+      expect(scopeFor(ctx({ owner: true, role: 'ab' }), 'training_progress:update')).toBe('own');
+      expect(scopeFor(ctx({ admin: true, role: 'agent' }), 'training_progress:update')).toBe('own');
+      // …and still reads the office's settings as its administration.
+      expect(scopeFor(ctx({ owner: true, role: 'ab' }), 'training_settings:read')).toBe('own-kpm');
+    });
+
+    it('P18.5-T1 AC-1 a removed or pending member neither reads nor sets their training', () => {
+      for (const status of ['removed', 'pending'] as const) {
+        for (const role of ['ab', 'aab', 'agent'] as const) {
+          expect([status, role, can(ctx({ role, status }), 'training_progress:read')]).toEqual([status, role, false]);
+          expect([status, role, can(ctx({ role, status }), 'training_progress:update')]).toEqual([status, role, false]);
+        }
+      }
+    });
+
+    it('P18.5-T1 AC-1 D-support: no support session sets a status, read-only or elevated; both read', () => {
+      expect(isBlockedWhileImpersonating('training_progress:update')).toBe(true);
+      expect(isReadLike('training_progress:read')).toBe(true);
+      expect(isReadLike('training_settings:read')).toBe(true);
+      for (const role of ['ab', 'aab', 'agent'] as const) {
+        for (const readOnly of [true, false]) {
+          const session = ctx({ role, impersonatedBy: 'sa-1', readOnly });
+          expect([role, readOnly, can(session, 'training_progress:update')]).toEqual([role, readOnly, false]);
+          expect([role, readOnly, can(session, 'training_progress:read')]).toEqual([role, readOnly, true]);
+        }
+        expect([role, can(ctx({ role }), 'training_progress:update')]).toEqual([role, true]);
+      }
+      // A read-only session as the Owner keeps the settings read (AC-8).
+      expect(can(ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: true }), 'training_settings:read')).toBe(true);
+    });
+
+    it('P18.5-T2 AC-1 `verify` is struck (OD-149): no code grants it', () => {
+      expect(Object.keys(PERMISSIONS)).not.toContain('training_progress:verify');
     });
   });
 });

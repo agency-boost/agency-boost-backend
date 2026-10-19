@@ -1,0 +1,357 @@
+import mongoose from 'mongoose';
+import { RequestContext } from '@/common/context/request-context';
+import { SEED_PRODUCTION_CLUB_TIERS } from '@/domain/constants';
+import * as metricsModule from '@/domain/constants/metrics';
+import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
+import { configModule } from '../../../test/config-module';
+
+const NOW = new Date('2026-09-18T02:00:00Z');
+const KPM_A = '66f0000000000000000000a1';
+const KPM_B = '66f0000000000000000000b1';
+const PRUDENTIAL = '66f0000000000000000000c1';
+const ALLIANZ = '66f0000000000000000000c2';
+
+const member = (kpmId: string) => new RequestContext('u1', 'none', {
+  membershipId: `mem-${kpmId}`, kpmId, orgLevelCode: 'AB', hierarchyRole: 'ab',
+  status: 'active', isKpmOwner: true, isKpmAdmin: false, directCount: 0,
+} as never);
+
+/**
+ * Campaigns, and the carrier rules an office is measured against (P5-T7, ADR-0026, ADR-0035).
+ *
+ * **Two things that look alike on one screen and behave differently.** *Year-End Star Club Drive*
+ * is the office's own campaign and fully editable; *Star Club* is the insurer's recognition tier
+ * and editable by nobody in any office. The API has to enforce that rather than trusting a screen.
+ */
+describe('campaigns and carrier rules (P5-T7)', () => {
+  let wired: ReturnType<typeof configModule>;
+
+  beforeAll(async () => {
+    await startMongo();
+    wired = configModule(NOW);
+  });
+  afterAll(stopMongo);
+
+  beforeEach(async () => {
+    await clearCollections();
+    await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create([
+      { _id: KPM_A, companyId: PRUDENTIAL, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta' },
+      { _id: KPM_B, companyId: ALLIANZ, code: '0999', branchName: 'B', timezone: 'Asia/Jakarta' },
+    ]);
+    await wired.campaigns.seedForCompany(PRUDENTIAL);
+    await wired.campaigns.seedForCompany(ALLIANZ);
+  });
+
+  const aCampaign = (over: Record<string, unknown> = {}) => ({
+    code: 'YEAR_END_DRIVE',
+    title: 'Year-End Star Club Drive',
+    // Whole office months (P18.5-T7, D-windows): 00:00 on 1 October to 23:59 on 31 December, Jakarta.
+    startsAt: '2026-09-30T17:00:00Z',
+    endsAt: '2026-12-31T16:59:59Z',
+    reward: 'Extra unit budget',
+    requirements: [{ metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 500_000_000 * 100 }],
+    ...over,
+  });
+
+  describe('a requirement names a metric this product can compute (AC-1)', () => {
+    // One test below moves `CAMPAIGN_EVALUATION_PHASE` with `replaceProperty`; this puts it back.
+    afterEach(() => jest.restoreAllMocks());
+
+    it('takes one, and copies the unit from the registry rather than from the caller', async () => {
+      const made = await wired.campaigns.create(member(KPM_A), aCampaign());
+
+      expect(made.requirements[0]).toEqual({
+        metricKey: 'APE_ACHIEVED',
+        metricName: 'APE achieved',
+        comparator: 'gte',
+        value: 50_000_000_000,
+        // A client sending its own could label sen as rupiah and every screen would be wrong.
+        unit: 'idr_minor',
+        // P18.5-T8 AC-1: a campaign can measure it.
+        measured: true,
+      });
+    });
+
+    it('refuses a metric nobody measures, naming it and what is available', async () => {
+      // The prototype's requirements are display strings — "Net APE ≥ Rp 600 juta" — which nothing
+      // can evaluate and nothing can refuse.
+      await expect(wired.campaigns.create(member(KPM_A), aCampaign({
+        // `NET_APE` was the example until Phase 18 registered it (D-registry); FLC's count is not one (OD-26).
+        requirements: [{ metricKey: 'FLC_COUNT', comparator: 'gte', value: 100 }],
+      }))).rejects.toThrow(/"FLC_COUNT" is not a metric this product measures/);
+    });
+
+    it('refuses a metric nothing measures yet, saying so and naming no phase', async () => {
+      // Accepting it would be a campaign nobody could ever qualify for, failing silently. The
+      // Owner reads the refusal, so it says what is true now, not our schedule (P10.1-T2 AC-3).
+      // Event NPS is the Owner's reporting metric (Phase 18). It came after campaign evaluation
+      // (14) until the 2026-10-08 re-plan moved campaigns to 18.5, after it; no metric registered
+      // today is refused, and the rule stays for one registered later. So the evaluation is placed
+      // before Event NPS for this test alone (the sets are pinned by key in `registry.spec.ts`).
+      jest.replaceProperty(metricsModule as { CAMPAIGN_EVALUATION_PHASE: number }, 'CAMPAIGN_EVALUATION_PHASE', 17);
+      await expect(wired.campaigns.create(member(KPM_A), aCampaign({
+        requirements: [{ metricKey: 'EVENT_NPS', comparator: 'gte', value: 50 }],
+      }))).rejects.toThrow(/Event NPS is not measured yet, so a campaign asking for it could never qualify anybody/);
+    });
+
+    it('P18.5-T8 AC-1 refuses Event NPS through the service: measured, but two figures per event, never a member’s (D-evaluable)', async () => {
+      // It was taken from the 2026-10-08 re-plan until P18.5-T8: measured before campaigns are evaluated is not enough.
+      await expect(wired.campaigns.create(member(KPM_A), aCampaign({
+        requirements: [{ metricKey: 'EVENT_NPS', comparator: 'gte', value: 50 }],
+      }))).rejects.toThrow(/Event NPS is not something a campaign can measure/);
+    });
+
+    it('refuses money that is not whole sen (AC-2)', async () => {
+      await expect(wired.campaigns.create(member(KPM_A), aCampaign({
+        requirements: [{ metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 1_000.5 }],
+      }))).rejects.toThrow(/whole sen/);
+    });
+
+    it('refuses a comparator it does not have', async () => {
+      await expect(wired.campaigns.create(member(KPM_A), aCampaign({
+        requirements: [{ metricKey: 'APE_ACHIEVED', comparator: 'about', value: 1 }],
+      }))).rejects.toThrow(/comparator is one of/);
+    });
+  });
+
+  describe('when a campaign is running is derived (AC-3)', () => {
+    it('reads upcoming, running and ended off the dates', async () => {
+      const upcoming = await wired.campaigns.create(member(KPM_A), aCampaign());
+      const running = await wired.campaigns.create(member(KPM_A), aCampaign({
+        code: 'NOW', startsAt: '2026-08-31T17:00:00Z', endsAt: '2026-09-30T16:59:00Z',
+      }));
+      const ended = await wired.campaigns.create(member(KPM_A), aCampaign({
+        code: 'LAST', startsAt: '2025-12-31T17:00:00Z', endsAt: '2026-06-30T16:59:00Z',
+      }));
+
+      expect([upcoming.phase, running.phase, ended.phase]).toEqual(['upcoming', 'running', 'ended']);
+      // The prototype labels one campaign Running in the list while its own data says `past`.
+      const stored = await mongoose.connection.db!.collection('campaigns').findOne({ code: 'NOW' });
+      expect(stored).not.toHaveProperty('phase');
+    });
+  });
+
+  describe('isolation (AC-4)', () => {
+    it('keeps one office’s campaigns out of another’s', async () => {
+      await wired.campaigns.create(member(KPM_A), aCampaign());
+
+      expect(await wired.campaigns.list(member(KPM_A))).toHaveLength(1);
+      expect(await wired.campaigns.list(member(KPM_B))).toHaveLength(0);
+    });
+
+    it('refuses another office’s campaign as a 404', async () => {
+      const mine = await wired.campaigns.create(member(KPM_A), aCampaign());
+
+      await expect(wired.campaigns.archive(member(KPM_B), mine.id))
+        .rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('P18.5-T8 review item 15 refuses a company-scoped campaign as a validation failure — deferred beyond v1, ADR-0146', async () => {
+      expect(() => wired.campaigns.refuseCompanyScope('company')).toThrow(expect.objectContaining({
+        code: 'VALIDATION_FAILED', status: 400,
+      }));
+      expect(() => wired.campaigns.refuseCompanyScope('company')).toThrow(/Company-wide campaigns are not available/);
+      expect(() => wired.campaigns.refuseCompanyScope('kpm')).not.toThrow();
+    });
+  });
+
+  describe('the carrier rules are the insurer’s (AC-5, AC-6, AC-7)', () => {
+    it('seeds the three production club tiers, in integer minor units', async () => {
+      const tiers = await wired.campaigns.listRules(member(KPM_A), 'production_club');
+
+      expect(tiers.map((t) => t.name)).toEqual(['Star Club', 'Elite Club', "Chairman's Club"]);
+      expect(tiers.map((t) => t.criteriaGroups[0].criteria[0].value)).toEqual([
+        120_000_000_000, 200_000_000_000, 350_000_000_000,
+      ]);
+      // Rp 1.2B, Rp 2B, Rp 3.5B — the prototype's "Rp 1.2B" is a display string, and one of its
+      // campaigns is denominated in pesos.
+      expect(SEED_PRODUCTION_CLUB_TIERS.map((t) => t.minAnnualApe / 100)).toEqual([
+        1_200_000_000, 2_000_000_000, 3_500_000_000,
+      ]);
+      expect(tiers.map((t) => t.reward)).toEqual([
+        'Promotion bonus', 'Trip qualification', 'AB override + unit budget',
+      ]);
+    });
+
+    it('seeds MOC for AB and AAB, porting the thresholds and no fabricated derivation', async () => {
+      const moc = await wired.campaigns.listRules(member(KPM_A), 'moc');
+
+      const ab = moc.find((r) => r.code === 'MOC_AB')!;
+      expect(ab.appliesToOrgLevelCodes).toEqual(['AB']);
+      // Net APE **and** both Monthly2 AA counts, **or** five direct ABs — the carrier's own "or".
+      expect(ab.groupMode).toBe('any');
+      expect(ab.criteriaGroups).toHaveLength(2);
+      expect(ab.criteriaGroups[0].criteria[0].value).toBe(60_000_000_000);
+
+      const aab = moc.find((r) => r.code === 'MOC_AAB')!;
+      expect(aab.appliesToOrgLevelCodes).toEqual(['AAB']);
+      expect(aab.criteriaGroups[0].criteria[0].value).toBe(20_000_000_000);
+    });
+
+    it('says which metrics a rule is still waiting on, rather than showing it as ordinary', async () => {
+      // The prototype fabricates `monthly2Aa` from a headcount it has to hand — a different number
+      // wearing the carrier's name. A rule whose inputs do not exist can never pass, and a screen
+      // that hid that would tell somebody they had failed something nothing measures.
+      //
+      // *Amended 2026-10-09 (P18-T2, D-registry, D-moc):* Phase 18 registers every input the seeded MOC rules
+      // name, and the persistency criterion they lacked, so a rule seeded now waits on nothing.
+      const moc = await wired.campaigns.listRules(member(KPM_A), 'moc');
+
+      expect(moc.find((r) => r.code === 'MOC_AB')!.waitingOnMetrics).toEqual([]);
+      expect(moc.find((r) => r.code === 'MOC_AB')!.criteriaGroups[0].criteria.map((c) => c.metricKey))
+        .toEqual(['NET_APE', 'MONTHLY2_AA_DU', 'MONTHLY2_AA_DG', 'MOC_PERSISTENCY']);
+      // A rule a carrier states with an input nothing registers still says so, its unit the carrier's — the
+      // seeding that recorded Phase 5's waits, kept for the next metric a carrier names before it is measured.
+      const seeded = metricsModule.SEED_MOC_RULES[1].criteriaGroups[0].criteria as unknown as { metricKey: string; comparator: string; value: number }[];
+      seeded.push({ metricKey: 'FLC_COUNT', comparator: 'gte', value: 3 }, { metricKey: 'FLC_APE', comparator: 'gte', value: 5_000_000_00 });
+      try {
+        const company = String(new mongoose.Types.ObjectId());
+        await wired.campaigns.seedForCompany(company);
+        const rules = await mongoose.connection.db!.collection('qualificationRules').find({ companyId: company, code: 'MOC_AAB' }).toArray();
+        expect(rules[0].waitingOnMetrics).toEqual(['FLC_COUNT', 'FLC_APE']);
+        expect(rules[0].criteriaGroups[0].criteria.slice(-2).map((c: { unit: string }) => c.unit)).toEqual(['count', 'idr_minor']);
+      } finally {
+        seeded.splice(-2, 2);
+      }
+      // And a tier built on a registry metric waits on nothing.
+      const tiers = await wired.campaigns.listRules(member(KPM_A), 'production_club');
+      expect(tiers.every((t) => t.waitingOnMetrics.length === 0)).toBe(true);
+    });
+
+    it('shows an office only its own company’s rules', async () => {
+      const prudential = await wired.campaigns.listRules(member(KPM_A));
+      const allianz = await wired.campaigns.listRules(member(KPM_B));
+
+      expect(prudential).toHaveLength(5);
+      expect(allianz).toHaveLength(5);
+      expect(prudential[0].id).not.toBe(allianz[0].id);
+    });
+
+    it('offers no way for an office to write one — not a refusal, an absence (AC-7)', () => {
+      // A permission check can be bypassed by a new caller; a method that does not exist cannot.
+      for (const name of ['createRule', 'updateRule', 'deleteRule', 'archiveRule']) {
+        expect(wired.campaigns).not.toHaveProperty(name);
+      }
+    });
+
+    it('leaves a company that already has rules alone', async () => {
+      expect(await wired.campaigns.seedForCompany(PRUDENTIAL)).toBe(0);
+    });
+  });
+
+  describe('P18.5-T8 review — the Owner’s writes', () => {
+    const col = () => mongoose.connection.db!.collection('campaigns');
+    const audit = (action: string) => mongoose.connection.db!.collection('auditLog').find({ action }).sort({ _id: -1 }).limit(1).next();
+
+    it('P18.5-T8 review item 9 refuses two requirements on one metric', async () => {
+      await expect(wired.campaigns.create(member(KPM_A), aCampaign({
+        requirements: [
+          { metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 100 }, { metricKey: 'APE_ACHIEVED', comparator: 'lte', value: 900 },
+        ],
+      }))).rejects.toThrow(/APE achieved is asked for already/);
+    });
+
+    it('P18.5-T8 review item 8 stores an end typed to the minute, or the next midnight, as the day’s last instant', async () => {
+      const made = await wired.campaigns.create(member(KPM_A), aCampaign({ endsAt: '2026-12-31T16:59:00Z' }));
+      expect(made.endsAt).toBe('2026-12-31T16:59:59.999Z');
+      const edited = await wired.campaigns.update(member(KPM_A), made.id, { endsAt: '2027-01-31T17:00:00Z' });
+      expect(edited.endsAt).toBe('2027-01-31T16:59:59.999Z');
+    });
+
+    it('P18.5-T8 review item 14 refuses a code already used, in words that name no office', async () => {
+      await wired.campaigns.create(member(KPM_A), aCampaign());
+      const refusal = wired.campaigns.create(member(KPM_A), aCampaign());
+      await expect(refusal).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+      await expect(wired.campaigns.create(member(KPM_A), aCampaign())).rejects.toThrow(/A campaign with the code YEAR_END_DRIVE already exists/);
+      await expect(wired.campaigns.create(member(KPM_A), aCampaign())).rejects.not.toThrow(/office|KPM/);
+    });
+
+    it('P18.5-T8 review item 12 audits a create, an edit and an archive with before and after', async () => {
+      const made = await wired.campaigns.create(member(KPM_A), aCampaign());
+      expect(await audit('campaign.created')).toMatchObject({
+        before: null, after: { code: 'YEAR_END_DRIVE', title: 'Year-End Star Club Drive', kind: 'seasonal', reward: 'Extra unit budget' },
+      });
+      await wired.campaigns.update(member(KPM_A), made.id, { reward: 'A trip', blurb: 'Go' });
+      expect(await audit('campaign.updated')).toMatchObject({
+        before: { reward: 'Extra unit budget', blurb: '' }, after: { reward: 'A trip', blurb: 'Go' },
+      });
+      await wired.campaigns.archive(member(KPM_A), made.id);
+      expect(await audit('campaign.archived')).toMatchObject({ before: { status: 'active' }, after: { status: 'archived' } });
+    });
+
+    it('P18.5-T8 review item 10 a campaign written before today’s rules can still be edited: only what the edit changes is held to them', async () => {
+      // Mid-month dates over the file, and a requirement outside the evaluable set — as Phase 5 could write.
+      const legacy = await col().insertOne({
+        kpmId: KPM_A, code: 'LEGACY', title: 'Legacy', description: '', startsAt: new Date('2026-08-15T00:00:00Z'),
+        endsAt: new Date('2026-09-15T00:00:00Z'), kind: 'seasonal', subtype: null, window: 'campaign_dates',
+        appliesToOrgLevelCodes: ['SENIOR_AB'], poster: { emoji: '🎯', color: 'navy' }, blurb: '', reward: '',
+        requirements: [
+          { metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 100, unit: 'idr_minor' },
+          { metricKey: 'EVENT_NPS', comparator: 'gte', value: 50, unit: 'score' },
+        ],
+        version: 1, status: 'active', archivedAt: null, frozenWindows: [], deletedAt: null,
+      });
+      const id = String(legacy.insertedId);
+      // A title, a prize: the stored dates, rung and requirements stand.
+      expect((await wired.campaigns.update(member(KPM_A), id, { title: 'Legacy, renamed', reward: 'Dinner' })).title).toBe('Legacy, renamed');
+      // The requirements sent back unchanged — the one outside the set included — stay, and change nothing: the stored
+      // mid-month dates are not held to the whole-month rule for it.
+      const kept = await wired.campaigns.update(member(KPM_A), id, {
+        requirements: [{ metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 100 }, { metricKey: 'EVENT_NPS', comparator: 'gte', value: 50 }],
+      });
+      expect(kept.requirements.map((r) => [r.metricKey, r.value, r.unit])).toEqual([['APE_ACHIEVED', 100, 'idr_minor'], ['EVENT_NPS', 50, 'score']]);
+      // Moving a date is a change: the whole-month rule applies, by name.
+      await expect(wired.campaigns.update(member(KPM_A), id, { endsAt: '2026-09-20T00:00:00Z' })).rejects.toThrow(/runs in whole months/);
+      // Changing the out-of-set requirement is held to today's rules.
+      await expect(wired.campaigns.update(member(KPM_A), id, {
+        startsAt: '2026-07-31T17:00:00Z', endsAt: '2026-09-30T16:59:00Z',
+        requirements: [{ metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 100 }, { metricKey: 'EVENT_NPS', comparator: 'gte', value: 60 }],
+      })).rejects.toThrow(/Event NPS is not something a campaign can measure/);
+      // Whole months and the unchanged requirements: accepted; the stale rung, untouched, stands.
+      const fixed = await wired.campaigns.update(member(KPM_A), id, {
+        startsAt: '2026-07-31T17:00:00Z', endsAt: '2026-09-30T16:59:00Z',
+        requirements: [{ metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 100 }, { metricKey: 'EVENT_NPS', comparator: 'gte', value: 50 }],
+      });
+      expect(fixed.requirements.map((r) => [r.metricKey, r.measured])).toEqual([['APE_ACHIEVED', true], ['EVENT_NPS', false]]);
+      expect(fixed.appliesToOrgLevelCodes).toEqual(['SENIOR_AB']);
+    });
+
+    it('P18.5-T8 review — an edit of nothing is 404; a structural edit takes its section; a race lost is 404', async () => {
+      await expect(wired.campaigns.update(member(KPM_A), '66f0000000000000000000ff', { title: 'X' })).rejects.toMatchObject({ status: 404 });
+      const mdrt = await wired.campaigns.create(member(KPM_A), aCampaign({
+        code: 'MDRT_QUALIFICATION', kind: 'structural', subtype: 'ongoing', window: 'calendar_year', endsAt: null,
+      }));
+      const moved = await wired.campaigns.update(member(KPM_A), mdrt.id, { subtype: 'promotion', poster: { emoji: '🏅', color: 'navy' } });
+      expect([moved.subtype, moved.poster]).toEqual(['promotion', { emoji: '🏅', color: 'navy' }]);
+      const repository = (wired.campaigns as unknown as { campaigns: { updateById: () => Promise<unknown> } }).campaigns;
+      const lost = jest.spyOn(repository, 'updateById').mockResolvedValueOnce(null);
+      await expect(wired.campaigns.update(member(KPM_A), mdrt.id, { title: 'Gone meanwhile' })).rejects.toMatchObject({ status: 404 });
+      lost.mockRestore();
+    });
+
+    it('P18.5-T8 review — an office with no row: its zone the platform’s, the rungs as named, and no carrier rules', async () => {
+      const nowhere = member('66f0000000000000000000d9');
+      const made = await wired.campaigns.create(nowhere, aCampaign({ appliesToOrgLevelCodes: ['AGENT'] }));
+      expect(made.appliesToOrgLevelCodes).toEqual(['AGENT']);
+      await expect(wired.campaigns.listRules(nowhere)).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('P18.5-T8 review — a stored requirement on a metric the registry no longer has keeps its key as its name', async () => {
+      await col().insertOne({
+        kpmId: KPM_A, code: 'GONE', title: 'Gone', description: '', startsAt: new Date('2026-09-30T17:00:00Z'),
+        endsAt: new Date('2026-10-31T16:59:59.999Z'), kind: 'seasonal', subtype: null, window: 'campaign_dates',
+        appliesToOrgLevelCodes: [], poster: { emoji: '🎯', color: 'navy' }, blurb: '', reward: '',
+        requirements: [{ metricKey: 'GONE_METRIC', comparator: 'gte', value: 5, unit: 'count' }],
+        version: 1, status: 'active', archivedAt: null, frozenWindows: [], deletedAt: null,
+      });
+      const gone = (await wired.campaigns.list(member(KPM_A))).find((c) => c.code === 'GONE')!;
+      expect(gone.requirements[0]).toMatchObject({ metricKey: 'GONE_METRIC', metricName: 'GONE_METRIC', measured: false });
+    });
+
+    it('P18.5-T8 review item 20 a Super Admin outside a support session is refused both settings reads: no office', async () => {
+      const root = RequestContext.platform('root');
+      await expect(wired.campaigns.list(root, true)).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP', status: 403 });
+      await expect(wired.campaigns.listRules(root)).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP', status: 403 });
+    });
+  });
+});

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { serializeRequest } from './redact-url';
 
 /**
  * Structured JSON logging.
@@ -52,6 +53,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
             ],
             censor: '[redacted]',
           },
+
+          // A shared link's token is in its path (ADR-0131 §1): the logged URL and the route's parameter carry neither.
+          serializers: { req: serializeRequest },
 
           // The health probe would otherwise dominate the log volume.
           autoLogging: {

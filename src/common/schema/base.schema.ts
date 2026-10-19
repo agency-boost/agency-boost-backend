@@ -10,6 +10,25 @@ export const baseSchemaOptions: SchemaOptions = {
 };
 
 /**
+ * Options for **published configuration**, where `version` is the domain's word.
+ *
+ * `domain-invariants.md` §3 requires every configuration collection to carry "a
+ * monotonically increasing `version`" — the number an office's taxonomy is *at*, bumped
+ * when somebody publishes a change. `baseSchemaOptions` has already spent that name on
+ * Mongoose's optimistic-concurrency counter, and Mongoose will happily accept both: it
+ * keeps the declared path and writes its own counter into the same field. The domain
+ * number would then move whenever Mongoose felt like moving it.
+ *
+ * So configuration hands the internal counter back its default name and keeps `version`
+ * for the meaning the rule gives it. Two numbers, two fields, neither pretending to be
+ * the other.
+ */
+export const configSchemaOptions: SchemaOptions = {
+  timestamps: true,
+  versionKey: '__v',
+};
+
+/**
  * Fields every tenant-scoped document carries.
  *
  * `kpmId` is required and leads every compound index — a scoped index that does not

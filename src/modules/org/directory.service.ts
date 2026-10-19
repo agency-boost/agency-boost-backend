@@ -2,8 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { Permission, scopeFor } from '@/modules/rbac/permissions';
 import { NotFoundException } from '@/common/errors/domain.exception';
 import { User, UserDocument } from '@/modules/users/user.schema';
+import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole, MembershipDocument, MembershipStatus } from './membership.schema';
 
@@ -33,15 +35,99 @@ export interface DirectoryMember {
   isKpmOwner: boolean;
   isKpmAdmin: boolean;
   joinedAt: string | null;
+  /** Set only on a removed row. The Removed tab answers "when", which is the first thing asked. */
+  removedAt: string | null;
+
+  /**
+   * What **this viewer** may do to **this person** (P3.5-T13).
+   *
+   * Sent rather than inferred, for the reason `TeamMember.canChangeRole` already gives:
+   * these are server rules, and a screen carrying a second copy of them is a screen that
+   * can drift. Three flags rather than one because the permission matrix has three rows —
+   * Agent⇄AAB is a direct leader's call, anything involving AB is the office's, and
+   * removal has its own refusals. On a leader's own team the three collapse; on a person
+   * page, where an Owner sees the whole office, they do not.
+   *
+   * The API refuses regardless. These decide what is *offered*, never what is *allowed*.
+   */
+  canChangeRole: boolean;
+  canPromoteToAb: boolean;
+  canRemove: boolean;
 }
 
 export interface DirectoryPage {
   members: DirectoryMember[];
   nextCursor: string | null;
+  /**
+   * How many are in each tab, within what this requester may see.
+   *
+   * The prototype labels its tabs `Directory (187)`, `Pending (14)`, `Removed (3)`
+   * (`KPM_Owner.html:1822-1824`). A count that only reflected the current page would be
+   * wrong on every page but the last, so these are counted, not measured from `members`.
+   */
+  counts: { directory: number; pending: number; removed: number };
 }
 
 export const DIRECTORY_PAGE_SIZE = 25;
 export const DIRECTORY_MAX_PAGE_SIZE = 100;
+
+/**
+ * Who this requester may see, as a filter fragment.
+ *
+ * It is exported and shared because the roster and the org tree must narrow
+ * **identically** — two copies of a visibility rule drift, and the drift is a cross-unit
+ * leak rather than a rendering bug.
+ *
+ * **The scope comes from the grant list**, resolved for the permission the caller was
+ * gated on, so the matrix column is the implementation rather than a description of one.
+ * It was not until 2026-09-06: this returned self-plus-whole-downline for everybody who
+ * was not a tenant admin, and no caller passed a scope because it took none.
+ *
+ * **`own-unit` resolves to the subtree here, and that is deliberate.** The matrix's rules
+ * 1 and 2 (`roles-and-permissions.md:187-196`) say so in as many words: *"`own-unit` for
+ * an AB resolves to `own-downline`"*, with role change and removal named as the only
+ * exceptions, and for an AAB *"`own-downline` is still the correct token"* even where a
+ * KPM nests AAB under AAB. This function serves **reading** — the roster and the org
+ * tree — and neither is one of those exceptions. The exceptions act on the leader edge
+ * the actor owns and check `leaderId` directly; they never come through here.
+ *
+ * A first pass on 2026-09-06 read the matrix *cells* and not the rules beneath them, and
+ * narrowed an AAB to their direct reports. That is a real narrowing: a nested AAB would
+ * have lost sight of their own grandchildren in the group tree, on a screen whose manual
+ * says it draws "your unit and everyone below it". Corrected the same day, with the test
+ * below rewritten to assert the downline rather than the narrowing.
+ *
+ * Somebody with no membership sees nothing, and says so as an impossible filter rather
+ * than an absent one — an absent filter would return the office.
+ */
+export function visibleTo(
+  ctx: RequestContext,
+  permission: Permission = 'member:read_profile',
+): FilterQuery<MembershipDocument> {
+  if (ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin || ctx.isSuperAdmin) return {};
+  const self = ctx.membershipId;
+  if (!self) return { _id: null };
+
+  switch (scopeFor(ctx, permission)) {
+    case 'all':
+    case 'own-kpm':
+      return {};
+    // `ancestorIds` makes the downline arm a single indexed lookup on
+    // `(kpmId, ancestorIds, status)`.
+    //
+    // Both tokens land here: see the note above on rules 1 and 2. A leader reads their
+    // subtree; the rules that are genuinely limited to direct reports do not use this.
+    case 'own-downline':
+    case 'own-unit':
+      return { $or: [{ _id: self }, { ancestorIds: self }] };
+    case 'own':
+      return { _id: self };
+    // No grant at all. The guard refuses these before a service is reached; a filter
+    // that fails closed is the backstop for the day one is not behind the guard.
+    default:
+      return { _id: null };
+  }
+}
 
 /**
  * Avatar initials.
@@ -70,29 +156,44 @@ export class DirectoryService {
   constructor(
     private readonly members: MembershipRepository,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
+    // The office, for one field: `kpms.ownerUserId`. Ownership is not on the membership
+    // — `ContextResolver` derives `isKpmOwner` by comparing the two — so a roster that
+    // wants to say who owns the office has to make the same join.
+    @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
   ) {}
+
+  /** The office's owner, as a user id. Null for an office nobody administers yet. */
+  private async ownerUserId(ctx: RequestContext): Promise<string | null> {
+    if (!ctx.kpmId) return null;
+    const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).exec();
+    return kpm?.ownerUserId ?? null;
+  }
 
   /**
    * What this requester may see.
    *
-   * A tenant admin — Owner or KPM Admin — sees everyone. Anyone else sees themselves
-   * and their downline, expressed as an `$or` so the single indexed `ancestorIds`
-   * lookup still does the work.
+   * A tenant admin — Owner or KPM Admin — sees everyone. Below that it is the scope
+   * `member:read_profile` grants — the permission the roster route is gated on, and
+   * documented at the same scopes as `member:list_directory`: an AB their downline, an AAB their own unit. Both
+   * arms are an `$or` so an indexed lookup still does the work.
    */
   private visibility(ctx: RequestContext): FilterQuery<MembershipDocument> {
-    if (ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin || ctx.isSuperAdmin) return {};
-    const self = ctx.membershipId;
-    if (!self) return { _id: null };
-    return { $or: [{ _id: self }, { ancestorIds: self }] };
+    return visibleTo(ctx, 'member:read_profile');
   }
 
   async list(ctx: RequestContext, query: DirectoryQuery = {}): Promise<DirectoryPage> {
     const limit = Math.min(Math.max(query.limit ?? DIRECTORY_PAGE_SIZE, 1), DIRECTORY_MAX_PAGE_SIZE);
 
     const filter: FilterQuery<MembershipDocument> = { ...this.visibility(ctx) };
-    // Removed members are excluded unless asked for by name. The roster's ordinary
-    // question is who is here now; their rows are kept, not hidden.
-    filter.status = query.status ?? { $ne: 'removed' };
+    // **Active only.** The roster's question is who is here now, and somebody still
+    // waiting for a leader is not here yet — they have registered, nothing more.
+    //
+    // This used to be `$ne: 'removed'`, which put pending members in the Directory *and*
+    // counted them under Pending: the same person on two tabs, and a Directory count that
+    // disagreed with its own rows by exactly the number of them. The three tabs are
+    // disjoint populations, as the prototype's `Directory (187) · Pending (14) ·
+    // Removed (3)` implies, and each count now counts what its tab shows.
+    filter.status = query.status ?? 'active';
     if (query.role) filter.role = query.role;
 
     // Cursor rather than offset: an offset skips a row whenever someone joins
@@ -108,9 +209,19 @@ export class DirectoryService {
     });
 
     const page = rows.slice(0, limit);
+    const visible = this.visibility(ctx);
+    const [directory, pending, removed] = await Promise.all([
+      this.members.count(ctx, { ...visible, status: 'active' }),
+      this.members.count(ctx, { ...visible, status: 'pending' }),
+      this.members.count(ctx, { ...visible, status: 'removed' }),
+    ]);
+
     return {
       members: await this.decorate(ctx, page),
       nextCursor: rows.length > limit ? String(page[page.length - 1].agentSeq) : null,
+      // Unfiltered by the search term on purpose: the tab says how many are in that
+      // tab, not how many match what you have typed into a different one.
+      counts: { directory, pending, removed },
     };
   }
 
@@ -169,15 +280,27 @@ export class DirectoryService {
       ]),
     );
 
-    return rows.map((m) => this.present(m, byUser.get(m.userId), leaderName.get(m.leaderId ?? '') ?? null));
+    const owner = await this.ownerUserId(ctx);
+    return rows.map((m) =>
+      this.present(m, byUser.get(m.userId), leaderName.get(m.leaderId ?? '') ?? null, ctx, owner),
+    );
   }
 
   private present(
     m: MembershipDocument,
     user: UserDocument | undefined,
     leaderNameValue: string | null,
+    ctx?: RequestContext,
+    ownerUserId?: string | null,
   ): DirectoryMember {
     const fullName = user?.fullName ?? 'Unknown';
+    const tenantAdmin = Boolean(ctx?.membership?.isKpmOwner || ctx?.membership?.isKpmAdmin);
+    const isDirectLeader = Boolean(ctx?.membershipId) && m.leaderId === ctx?.membershipId;
+    const removed = m.status === 'removed';
+    // **This used to be hardcoded `false`**, so the roster's `Owner` tag — gated on it —
+    // could never appear. It is also what stops an Admin removing the person who owns the
+    // office and leaving it with no working administration.
+    const isOwner = Boolean(ownerUserId) && m.userId === ownerUserId;
     return {
       membershipId: String(m._id),
       agentCode: m.agentCode,
@@ -195,9 +318,30 @@ export class DirectoryService {
       // Leadership is a graph property, not a role (OD-23). An AAB with no reports
       // leads nobody, and every surface gated on this is asking about people you lead.
       isLeader: (m.directCounts?.total ?? 0) > 0,
-      isKpmOwner: false,
+      isKpmOwner: isOwner,
       isKpmAdmin: m.adminAccess?.isKpmAdmin ?? false,
       joinedAt: m.joinedAt ? m.joinedAt.toISOString() : null,
+      removedAt: m.removedAt ? m.removedAt.toISOString() : null,
+      // Mirrors `RoleChangeService.permitted` and `RemovalService.remove`, which are
+      // where these are actually enforced. A refusal the screen did not anticipate is a
+      // worse experience than a control that was never offered, so they are computed the
+      // same way — but the service is still the gate.
+      // The Owner's rung is not the office's to change: demoting them from AB would
+      // strip the rights that come with owning it, and only the platform can reassign an
+      // office. `RoleChangeService` refuses it too.
+      canChangeRole: !removed && !isOwner && (tenantAdmin || isDirectLeader),
+      canPromoteToAb: !removed && !isOwner && tenantAdmin,
+      canRemove:
+        !removed &&
+        // Not the office's owner. Normally they are also the root, but after a transfer
+        // to somebody who was already a member they keep their old leader — and then
+        // nothing else here would stop an Admin removing them.
+        !isOwner &&
+        // Not yourself, and not the office's root — it has no leader, so removing it
+        // would leave the whole office pointing at nothing.
+        String(m._id) !== ctx?.membershipId &&
+        m.leaderId !== null &&
+        (tenantAdmin || isDirectLeader),
     };
   }
 
@@ -210,18 +354,28 @@ export class DirectoryService {
    */
   async reportsOf(ctx: RequestContext, membershipId: string): Promise<DirectoryMember[]> {
     await this.read(ctx, membershipId);
+    // Narrowed again rather than trusting the parent check. "Everyone below someone you
+    // can see is someone you can see" holds for a leader, whose filter is a subtree — it
+    // does not hold at `own`, where the only visible id is your own and the people under
+    // it are precisely the ones you may not read.
     const rows = await this.members.find(
       ctx,
-      { leaderId: membershipId, status: { $ne: 'removed' } },
+      {
+        $and: [{ leaderId: membershipId, status: { $ne: 'removed' } }, this.visibility(ctx)],
+      },
       { sort: { agentSeq: 1 } },
     );
     return this.decorate(ctx, rows);
   }
 
   async read(ctx: RequestContext, membershipId: string): Promise<DirectoryMember> {
+    // `$and`, not a spread. The narrowing for `own` is `{ _id: self }`, which is the one
+    // filter shape that collides with the id being asked for — spread second, it replaced
+    // the id and the read answered about the caller while claiming to be about somebody
+    // else. Under `$and` a colliding narrowing can only ever match nothing, which is the
+    // direction a visibility filter must fail in.
     const scoped = await this.members.findOne(ctx, {
-      _id: membershipId,
-      ...this.visibility(ctx),
+      $and: [{ _id: membershipId }, this.visibility(ctx)],
     });
     // 404 rather than 403 for someone outside your scope: a 403 would confirm they
     // exist, which is the same leak the cross-tenant rule closes.

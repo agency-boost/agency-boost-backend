@@ -3,8 +3,9 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import { Clock } from '@/common/clock/clock.port';
-import { DomainException } from '@/common/errors/domain.exception';
+import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { User, UserDocument } from '@/modules/users/user.schema';
@@ -23,6 +24,18 @@ interface Meta {
   userAgent?: string | null;
 }
 
+/** One place this account is signed in — a token family, not a token. */
+export interface SessionView {
+  sessionId: string;
+  userAgent: string | null;
+  ip: string | null;
+  lastUsedAt: string | null;
+  startedAt: string | null;
+  expiresAt: string;
+  /** The session the caller is reading this from. Revoking it signs them out here. */
+  current: boolean;
+}
+
 const ACCESS_TTL_SECONDS = 15 * 60;
 const REFRESH_TTL_DAYS = 30;
 const VERIFICATION_TTL_HOURS = 24;
@@ -35,6 +48,7 @@ export class AuthService {
   constructor(
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
     @InjectModel(AuthToken.name) private readonly tokens: Model<AuthTokenDocument>,
+    @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
     private readonly passwords: PasswordService,
     private readonly signer: TokenSigner,
     private readonly clock: Clock,
@@ -43,7 +57,13 @@ export class AuthService {
 
   // ---------------------------------------------------------------- registration
 
-  async register(input: { email: string; password: string; fullName: string }): Promise<UserDocument> {
+  async register(input: {
+    email: string;
+    password: string;
+    fullName: string;
+    companyId: string;
+    agentCode: string;
+  }): Promise<UserDocument> {
     const problems = this.passwords.validate(input.password);
     if (problems.length) {
       throw new DomainException(
@@ -64,10 +84,45 @@ export class AuthService {
       return existing;
     }
 
+    // The insurer has to exist before we can hold somebody's code against it.
+    const company = await this.companies
+      .findOne({ _id: input.companyId, deletedAt: null })
+      .exec()
+      // A malformed id is "not here", not a 500 — this arrives from a public form.
+      .catch(() => null);
+    if (!company) throw new NotFoundException('Company');
+
+    const agentCode = input.agentCode.trim().toUpperCase();
+
+    /*
+     * **This one says so, where the email above deliberately does not.**
+     *
+     * A taken address is answered silently because confirming it is an enumeration
+     * oracle and the real owner is emailed instead. A taken agent code has no such
+     * escape: the person is holding a card with that number on it, they cannot proceed
+     * until somebody sorts it out, and staying quiet would send them away waiting for a
+     * verification email that is never coming. The leak — that this code is in use at
+     * this insurer — is smaller than stranding the person who owns it.
+     */
+    const clash = await this.users
+      .findOne({ companyId: input.companyId, agentCode, deletedAt: null })
+      .exec();
+    if (clash) {
+      throw new DomainException(
+        ErrorCode.AGENT_CODE_TAKEN,
+        `Agent code ${agentCode} is already registered at ${company.name}. ` +
+          'Check the code on your contract, or ask your office to sort it out.',
+        HttpStatus.CONFLICT,
+        { field: 'agentCode', agentCode },
+      );
+    }
+
     const user = await this.users.create({
       email,
       passwordHash: await this.passwords.hash(input.password),
       fullName: input.fullName.trim(),
+      companyId: input.companyId,
+      agentCode,
       status: 'invited',
       platformRole: 'none',
     });
@@ -185,7 +240,101 @@ export class AuthService {
       .exec();
   }
 
+  // ------------------------------------------------------------------- sessions
+
+  /**
+   * Where this account is signed in (P4-T13).
+   *
+   * **One row per `familyId`, not per token.** A refresh rotates on every use, so a
+   * session that has been alive a fortnight has a few hundred rows behind it. A person
+   * reading this wants to know *where they are signed in* — one phone, one laptop — and a
+   * list of three hundred entries answers a question nobody asked.
+   *
+   * `current` marks the family the caller is holding, so nobody revokes the seat they are
+   * sitting in by accident and then wonders why they were signed out.
+   */
+  async sessions(userId: string, currentFamilyId: string | null): Promise<SessionView[]> {
+    const rows = await this.tokens
+      .find({ userId, kind: 'refresh', revokedAt: null })
+      .sort({ createdAt: -1 })
+      .exec();
+
+    const byFamily = new Map<string, SessionView>();
+    for (const row of rows) {
+      const familyId = row.familyId ?? String(row._id);
+      const created = row.get('createdAt') as Date | undefined;
+      const existing = byFamily.get(familyId);
+      if (existing) {
+        // Rows come newest first, so the first one seen is the latest use and anything
+        // after it is older — which makes the last one the moment the session began.
+        existing.startedAt = created?.toISOString() ?? existing.startedAt;
+        continue;
+      }
+      byFamily.set(familyId, {
+        sessionId: familyId,
+        userAgent: row.userAgent,
+        ip: row.ip,
+        lastUsedAt: created?.toISOString() ?? null,
+        startedAt: created?.toISOString() ?? null,
+        expiresAt: row.expiresAt.toISOString(),
+        current: familyId === currentFamilyId,
+      });
+    }
+    return [...byFamily.values()];
+  }
+
+  /**
+   * Revoke one session.
+   *
+   * By family, so every rotation of that session dies with it — revoking the newest token
+   * alone would leave an attacker holding an older one that still rotates.
+   */
+  async revokeSession(userId: string, sessionId: string): Promise<void> {
+    const { modifiedCount } = await this.tokens
+      .updateMany(
+        // `userId` in the filter, not checked afterwards: a family id is guessable enough
+        // that reading one and then comparing would be a window, however small.
+        { userId, kind: 'refresh', familyId: sessionId, revokedAt: null },
+        { $set: { revokedAt: this.clock.now(), revokedReason: 'signed out from another device' } },
+      )
+      .exec();
+    if (modifiedCount === 0) throw new NotFoundException('Session');
+  }
+
+  /** Which session a refresh token belongs to, for marking the current one. */
+  async familyOf(rawToken: string): Promise<string | null> {
+    const row = await this.tokens
+      .findOne({ tokenHash: this.passwords.hashToken(rawToken), kind: 'refresh' })
+      .exec();
+    return row?.familyId ?? null;
+  }
+
   // ------------------------------------------------------------ email verification
+
+  /**
+   * A second verification email (P4-T13).
+   *
+   * `agent/01-getting-started.md` has told readers to "sign in and request another" since
+   * Phase 2, against a route that did not exist. It does now — and it matters more since
+   * `P4-T14`, because the first one is finally being sent.
+   *
+   * **Resolves silently for an address that is already verified or absent.** Anything else
+   * is an account-enumeration oracle, the same reason `forgot-password` answers `202`
+   * either way.
+   */
+  async resendVerification(email: string): Promise<void> {
+    const user = await this.users
+      .findOne({ email: email.toLowerCase().trim(), deletedAt: null })
+      .exec();
+    if (!user || user.emailVerifiedAt) return;
+
+    const raw = await this.issueVerification(user);
+    await this.notifications.send({
+      userId: String(user._id),
+      templateId: NotificationTemplate.EMAIL_VERIFICATION,
+      payload: { token: raw, fullName: user.fullName },
+    });
+  }
 
   async issueVerification(user: UserDocument): Promise<string> {
     const raw = this.passwords.generateToken();
@@ -256,7 +405,16 @@ export class AuthService {
     await this.users
       .updateOne(
         { _id: record.userId },
-        { $set: { passwordHash: await this.passwords.hash(newPassword) } },
+        {
+          $set: {
+            passwordHash: await this.passwords.hash(newPassword),
+            // A reset lifts the roster-import gate too (P3.6-T4). It proves control of
+            // the mailbox and produces a password nobody else has seen, which is the
+            // whole of what the gate is waiting for — and somebody who never received
+            // their generated password would otherwise be locked out with no way back.
+            mustChangePassword: false,
+          },
+        },
       )
       .exec();
 
@@ -285,7 +443,20 @@ export class AuthService {
       );
     }
 
+    if (next === current) {
+      // A generated password replaced by itself is not a replacement, and the guard would
+      // let them through on the credential the admin still has a copy of.
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED,
+        'Choose a different password from the one you are using now.',
+        HttpStatus.BAD_REQUEST,
+        { field: 'password' },
+      );
+    }
+
     user.passwordHash = await this.passwords.hash(next);
+    // The one thing that lifts the roster-import gate (P3.6-T4). Nothing else clears it.
+    user.mustChangePassword = false;
     await user.save();
     await this.logoutAll(userId, 'password changed');
   }

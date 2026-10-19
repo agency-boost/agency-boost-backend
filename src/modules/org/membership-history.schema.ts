@@ -5,25 +5,39 @@ import { HierarchyRole } from './membership.schema';
 
 export type MembershipHistoryDocument = HydratedDocument<MembershipHistory>;
 
-export type MembershipEvent =
-  | 'joined'
-  | 'role_changed'
-  | 're_parented'
-  | 'removed'
-  | 'reinstated'
-  | 'admin_granted'
-  | 'admin_revoked';
+/**
+ * **The hierarchy's events: who the member reports to, on which rung, and whether they are here.**
+ *
+ * One edge at a time. A membership has at most one of these rows open (`validTo: null`), and it is
+ * the current edge (roles §6.1, `domain-invariants.md` §5): opening the next closes every one still
+ * open, whichever event opened it (`MembershipHistoryRepository.openEdge`, P11-T3).
+ */
+export const EDGE_EVENTS = ['joined', 'role_changed', 're_parented', 'removed', 'reinstated'] as const;
 
 /**
- * Append-only. Nothing updates or deletes a row here.
+ * **Admin rights, a second chain beside the edges** (P3-T10 AC-2: independent of the hierarchy
+ * role). A grant changes no leader and no rung, so it neither closes an edge nor is closed by one:
+ * `AdminDelegationService` closes its own. A removal closes both.
+ */
+export const ADMIN_EVENTS = ['admin_granted', 'admin_revoked'] as const;
+
+export type EdgeEvent = (typeof EDGE_EVENTS)[number];
+export type MembershipEvent = EdgeEvent | (typeof ADMIN_EVENTS)[number];
+
+/**
+ * Append-only. Nothing is deleted, and closing a row is the one update: it writes `validTo`.
  *
  * Written from the first commit that can create a membership, not from the commit that
  * builds the screen showing it: history cannot be reconstructed after the fact
  * (`domain-invariants.md` §5). The Role change log and the Removed tab arrive in P3-T6
  * and P3-T7 and will read rows that already exist.
  *
- * The current edge is the row with `validTo: null`. Closing one writes `validTo`; it
- * never overwrites.
+ * The current edge is the row with `validTo: null`, and there is one (`EDGE_EVENTS`). Closing
+ * one writes `validTo`; it never overwrites.
+ *
+ * **`to*` is where the row leaves the member**, so the open edge states all of it: a re-parent
+ * carries the rung the member keeps, and a role change the leader they keep. `from*` is what the
+ * event changed, and only that. Rows written before P11-T3 carry only what changed.
  */
 @Schema({ ...baseSchemaOptions, collection: 'membershipHistory' })
 export class MembershipHistory {
@@ -35,7 +49,7 @@ export class MembershipHistory {
 
   @Prop({
     type: String,
-    enum: ['joined', 'role_changed', 're_parented', 'removed', 'reinstated', 'admin_granted', 'admin_revoked'],
+    enum: [...EDGE_EVENTS, ...ADMIN_EVENTS],
     required: true,
   })
   eventType!: MembershipEvent;
@@ -45,6 +59,23 @@ export class MembershipHistory {
 
   @Prop({ type: String, default: null })
   toRole!: HierarchyRole | null;
+
+  /**
+   * The rungs the role names referred to **at the time** (P3.5-T8 AC-3).
+   *
+   * `fromRole`/`toRole` are labels, and a label is renameable: a company that renames
+   * `AAB` to *Associate Agency Business* would otherwise leave every past promotion
+   * describing a rung by a name that no longer exists. The reference survives the rename,
+   * so a history row stays legible after it.
+   *
+   * Nullable because rows written before this existed have none, and backfilling history
+   * would be inventing a fact rather than recording one.
+   */
+  @Prop({ type: String, default: null })
+  fromOrgLevelId!: string | null;
+
+  @Prop({ type: String, default: null })
+  toOrgLevelId!: string | null;
 
   @Prop({ type: String, default: null })
   fromLeaderId!: string | null;
