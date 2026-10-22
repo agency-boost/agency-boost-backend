@@ -12,8 +12,12 @@ import {
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
+import { corsOriginsOf } from '@/config/cors-origins';
 import { initialsOf, User, UserDocument } from '@/modules/users/user.schema';
 import { refreshCookieOptions } from '@/modules/auth/refresh-cookie';
+import { isForeignOrigin, ownOriginOf } from '@/modules/auth/request-origin';
+import { AccessTokenDto } from '@/modules/auth/session.response.dto';
 import { can, PERMISSIONS, Permission } from '@/modules/rbac/permissions';
 import { ActivationNav, activationNavFor } from '@/modules/activation/activation-nav.port';
 import { AuthService } from './auth.service';
@@ -52,6 +56,24 @@ const RESEND_WINDOW_SECONDS = 60 * 60;
  */
 const REFRESH_LIMIT = 60;
 const REFRESH_WINDOW_SECONDS = 60 * 60;
+
+/** What `/auth/refresh` and `/auth/logout` answer a page on a foreign origin (P18.7-T1), as Swagger shows it. */
+const ORIGIN_REFUSED_RESPONSE = {
+  status: HttpStatus.FORBIDDEN,
+  description:
+    '`AUTH_ORIGIN_REFUSED`: the refresh cookie arrived with an `Origin` that is neither one `CORS_ORIGINS` '
+    + 'lists nor the API\'s own. A request with no `Origin` is not refused.',
+  type: ApiErrorEnvelope,
+};
+
+/** What `/auth/login` answers a page on a foreign origin (P18.7-T1), cookie or not. */
+const LOGIN_ORIGIN_REFUSED_RESPONSE = {
+  status: HttpStatus.FORBIDDEN,
+  description:
+    '`AUTH_ORIGIN_REFUSED`: an `Origin` that is neither one `CORS_ORIGINS` lists nor the API\'s own, with or '
+    + 'without a cookie. A request with no `Origin` is not refused.',
+  type: ApiErrorEnvelope,
+};
 
 @ApiTags('auth')
 @Controller('auth')
@@ -114,6 +136,35 @@ export class AuthController {
     return token;
   }
 
+  /**
+   * **A page on another origin may not set, spend or end this browser's session** (P18.7-T1, ADR-0152).
+   *
+   * Allowed: the origins `CORS_ORIGINS` lists, and the API's own (Swagger UI at `/api/docs` posts to the
+   * API it is served from). Refused: any other `Origin`. No `Origin` at all is not a page and is let
+   * through. See `request-origin.ts` for why the four hosts make this necessary.
+   *
+   * Every route that sets or spends the refresh cookie calls it first, before anything is read or written:
+   * - **`login`, always.** A `<form>` on a sibling host needs no preflight, and the cookie its answer sets
+   *   is kept, because the hosts are same-site: the browser would be signed in to somebody else's account.
+   * - **`refresh` and `logout`, when the cookie is there.** The harm is the browser sending somebody's
+   *   session on a page's behalf; a request without the cookie has none to send, and is answered as before.
+   */
+  private refuseForeignOrigin(req: Request): void {
+    const own = ownOriginOf(req);
+    const allowed = [...corsOriginsOf(this.config.get<string>('CORS_ORIGINS')), ...(own ? [own] : [])];
+    if (!isForeignOrigin(req.headers.origin, allowed)) return;
+    throw new DomainException(
+      ErrorCode.AUTH_ORIGIN_REFUSED,
+      'Signing in, refreshing a session and signing out are not accepted from that site.',
+      HttpStatus.FORBIDDEN,
+    );
+  }
+
+  /** `refuseForeignOrigin`, for a route that is refused only when it carries the refresh cookie. */
+  private refuseForeignOriginWithCookie(req: Request): void {
+    if (this.refreshTokenFromOrNull(req)) this.refuseForeignOrigin(req);
+  }
+
   /** The presented refresh token, or nothing — for a route that works either way. */
   private refreshTokenFromOrNull(req: Request): string | null {
     return (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE] ?? null;
@@ -154,11 +205,16 @@ export class AuthController {
       'Rate limited per IP **and** per email — an attacker rotating IPs against one ' +
       'account still burns the per-email budget.',
   })
+  // Stated because a failure is: Swagger drops the success it would infer once any response is declared.
+  @ApiResponse({ status: HttpStatus.OK, description: '', type: AccessTokenDto })
+  @ApiResponse(LOGIN_ORIGIN_REFUSED_RESPONSE)
   async login(
     @Body() dto: LoginDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
+    // Before the limiter: a forged sign-in spends nobody's budget.
+    this.refuseForeignOrigin(req);
     const ip = req.ip ?? 'unknown';
     this.limit(`login:ip:${ip}`, this.loginLimit, LOGIN_WINDOW_SECONDS);
     this.limit(
@@ -197,11 +253,15 @@ export class AuthController {
       'Presenting a token that was already rotated revokes the whole family — the ' +
       'standard signal that a refresh token was stolen.',
   })
+  // Stated because a failure is: Swagger drops the success it would infer once any response is declared.
+  @ApiResponse({ status: HttpStatus.OK, description: '', type: AccessTokenDto })
+  @ApiResponse(ORIGIN_REFUSED_RESPONSE)
   async refresh(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
     @Body() dto?: RefreshDto,
   ) {
+    this.refuseForeignOriginWithCookie(req);
     /*
      * Per session, not per IP (P4-T13). A shared office IP would otherwise ration
      * everybody together, and the thing worth catching — a client stuck in a refresh loop
@@ -239,11 +299,14 @@ export class AuthController {
   @AllowWhileReadOnly()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'End this session' })
+  @ApiResponse({ status: HttpStatus.NO_CONTENT, description: '' })
+  @ApiResponse(ORIGIN_REFUSED_RESPONSE)
   async logout(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
     @Body() dto?: RefreshDto,
   ) {
+    this.refuseForeignOriginWithCookie(req);
     const fromCookie = (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
     const token = fromCookie ?? dto?.refreshToken;
     if (token) await this.auth.logout(token);

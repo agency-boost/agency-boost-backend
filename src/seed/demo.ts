@@ -78,6 +78,7 @@ import { seedTrainingFixture, type TrainingFixture } from './training-fixture';
 import { seedEventsFixture, type EventsFixture } from './events-fixture';
 import { seedCampaignsFixture, type CampaignsFixture } from './campaigns-fixture';
 import { seedComplianceFixture, type ComplianceFixture } from './compliance-fixture';
+import { planSeed } from './seed-guard';
 import type { StoragePort } from '@/modules/assets/storage.port';
 import { LONG_PIPELINE } from './long-pipeline';
 import {
@@ -3513,15 +3514,17 @@ Sign in at POST /api/v1/auth/login, then send the access token as
 
 async function main(): Promise<void> {
   loadEnv();
-  const uri = process.env.MONGODB_URI;
-  const dbName = process.env.MONGODB_DB_NAME ?? 'agencyboost';
-  if (!uri) {
-    console.error('MONGODB_URI is not set. Copy .env.example to .env and fill in your Atlas string.');
+  const reset = process.argv.includes('--reset');
+  // P18.7-T1: never in production, and the target named before a row is written (`seed-guard.ts`).
+  const plan = planSeed(process.env, reset);
+  if ('refusal' in plan) {
+    console.error(plan.refusal);
     process.exit(1);
   }
-  await mongoose.connect(uri, { dbName });
+  console.log(plan.banner);
+  await mongoose.connect(plan.target.uri, { dbName: plan.target.dbName });
   // The storage the demonstration PDFs go through, where one is configured (D-seed); none, and they are skipped.
-  await seedDemo({ reset: process.argv.includes('--reset'), storage: storageFromEnvironment(process.env, new SystemClock()) });
+  await seedDemo({ reset, storage: storageFromEnvironment(process.env, new SystemClock()) });
   await mongoose.disconnect();
 }
 

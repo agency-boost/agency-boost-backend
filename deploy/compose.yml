@@ -1,0 +1,162 @@
+# AgencyBoost's staging and production on one VM (P18.7, ADR-0155; ADR-0152 in part): Caddy in front,
+# one API per environment behind it, one MongoDB beside them.
+#
+# This directory mirrors /opt/agencyboost on the VM: this file is /opt/agencyboost/compose.yml and
+# every relative path below resolves there. Nothing runs it by hand. `bin/compose.sh` wraps it with the
+# two variable files it needs, and the systemd unit and every script go through that wrapper:
+#
+#   env/compose.env    API_HOST_STAGING, API_HOST_PROD, IMAGE_REGISTRY, memory limits   bootstrap.sh
+#   state/images.env   API_IMAGE_STAGING=…@sha256:…, API_IMAGE_PROD=…@sha256:…          bin/deploy.sh
+#
+# Each API is in a profile named after its environment, so an environment that has never been
+# deployed is never started: bin/lib.sh activates the profiles that have a deployed image.
+#
+# Rules the layout exists to keep:
+#
+# - **Only Caddy listens on the internet.** No API publishes a port. Mongo publishes 27017 on the
+#   VM's loopback only, for an operator on an IAP tunnel.
+# - **Mongo's data lives on the separate data disk, or Mongo does not start.** The bind refuses to
+#   create its source, so a VM booted without the disk fails loudly instead of initialising an empty
+#   database on the boot disk and serving it.
+# - **Each API reaches only its own database.** Each connects as its own user, with readWrite on its
+#   own database alone (mongo/init/01-app-users.js). That is the line between the two environments
+#   in Mongo. Nothing else separates them on this VM, and ADR-0155 records that as an accepted risk
+#   while production is dark.
+# - **The memory fits an e2-small (2 GB)** (ADR-0155): mongo 700m with a 0.25 GB WiredTiger cache, each
+#   API 512m with a 384 MB V8 heap, Caddy 128m, and 2 GB of swap (vm/bootstrap.sh) for the rest.
+name: agencyboost
+
+x-logging: &logging
+  # Rotated here as well as in /etc/docker/daemon.json: a file that is only correct on a VM that was
+  # bootstrapped correctly is a file that fills a disk the day someone skips a step.
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+# What the two APIs share. Each service below adds its image, its env file and its profile.
+x-api: &api
+  restart: unless-stopped
+  # tini as PID 1: SIGTERM reaches Node, which drains in-flight work before it exits (P18.7-T1).
+  init: true
+  environment:
+    # Under the container's limit with room for Node's own memory beside the heap. Set here, not in the
+    # secret, so no env file can raise it.
+    NODE_OPTIONS: --max-old-space-size=384
+  depends_on:
+    mongo:
+      condition: service_healthy
+  healthcheck:
+    test:
+      - CMD
+      - node
+      - -e
+      - "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/api/health/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+    interval: 10s
+    timeout: 5s
+    retries: 3
+    start_period: 60s
+    start_interval: 2s
+  mem_limit: ${API_MEM_LIMIT:-512m}
+  # A stop spends up to 15 s closing the HTTP server and waiting for open requests
+  # (HTTP_CLOSE_TIMEOUT_MS), then up to 10 s draining in-flight email (NOTIFICATION_DRAIN_TIMEOUT_MS),
+  # before Mongo's connection closes (P18.7-T1). 40 s leaves margin over those 25, so a stop never
+  # ends in SIGKILL mid-send.
+  stop_grace_period: 40s
+  logging: *logging
+
+services:
+  caddy:
+    image: caddy:2.11.7@sha256:685ae3d7c34d9b5f8caeddc5d14051db7bbd88ff1f5a2fa0c16bd8ca328fb7af
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_HOST_PROD: ${API_HOST_PROD:?API_HOST_PROD is required (api.agencyboost.id)}
+      API_HOST_STAGING: ${API_HOST_STAGING:?API_HOST_STAGING is required (staging-api.agencyboost.id)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The certificates and the ACME account. Losing them means asking Let's Encrypt again, and its
+      # rate limits are per registered domain, shared by staging and production.
+      - caddy_data:/data
+      - caddy_config:/config
+    mem_limit: ${CADDY_MEM_LIMIT:-128m}
+    logging: *logging
+
+  api-prod:
+    <<: *api
+    image: ${API_IMAGE_PROD:-agencyboost-api-prod:not-deployed}
+    profiles: [prod]
+    env_file:
+      # raw: the value is everything after the first "=", taken literally. No quotes, no "$"
+      # expansion, so a generated secret is never mangled. See env/api.env.example.
+      - path: ./env/api-prod.env
+        format: raw
+
+  api-staging:
+    <<: *api
+    image: ${API_IMAGE_STAGING:-agencyboost-api-staging:not-deployed}
+    profiles: [staging]
+    env_file:
+      - path: ./env/api-staging.env
+        format: raw
+
+  mongo:
+    # 7.0, the series the test suite runs (mongodb-memory-server 10). Patch and digest pinned so the
+    # database moves only when somebody moves it: a deploy never restarts it.
+    image: mongo:7.0.45@sha256:c53852c00c23ca9f23fc39690350ffa9a80e3642fe8f96879726d8da0abe80a7
+    restart: unless-stopped
+    # The image adds --auth itself when MONGO_INITDB_ROOT_USERNAME is set. The cache is sized for this
+    # machine (env/compose.env): WiredTiger's default is half of RAM, and two APIs share this VM.
+    command: ["--wiredTigerCacheSizeGB", "${MONGO_CACHE_GB:?MONGO_CACHE_GB is required}"]
+    env_file:
+      - path: ./env/mongo.env
+        format: raw
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - type: bind
+        source: /mnt/mongo-data/db
+        target: /data/db
+        bind:
+          create_host_path: false
+      # Runs once, against an empty /data/db: creates the two APIs' users.
+      - ./mongo/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # ping needs no credentials, so the probe holds none. It dials the container's own hostname, not
+      # localhost: on first start the image runs the init scripts against a temporary mongod bound to
+      # 127.0.0.1 only, and a localhost probe would call the database ready before its users exist.
+      # mongosh reads the hostname itself, so the probe needs no shell and no "$" for compose to escape.
+      test: ["CMD", "mongosh", "--quiet", "--norc", "--nodb", "--eval", "const c = connect('mongodb://' + require('os').hostname() + ':27017/admin'); quit(c.adminCommand({ ping: 1 }).ok ? 0 : 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
+    mem_limit: ${MONGO_MEM_LIMIT:-700m}
+    # A clean WiredTiger checkpoint on shutdown, rather than recovery from the journal on the next start.
+    stop_grace_period: 60s
+    logging: *logging
+
+  # The staging seed, and nothing else. Never started by `up`; bin/seed.sh runs it once and removes it.
+  # It connects with staging's env file, so as staging's database user, which may not touch
+  # production's database; seed.sh proves that before every run.
+  tools-staging:
+    image: ${TOOLS_IMAGE:-agencyboost-tools:unset}
+    profiles: [tools]
+    init: true
+    environment:
+      NODE_OPTIONS: --max-old-space-size=384
+    env_file:
+      - path: ./env/api-staging.env
+        format: raw
+    mem_limit: ${API_MEM_LIMIT:-512m}
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:

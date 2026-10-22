@@ -14,6 +14,14 @@ export const ErrorCode = {
   AUTH_RESET_TOKEN_INVALID: 'AUTH_RESET_TOKEN_INVALID',
   AUTH_ACCOUNT_DEACTIVATED: 'AUTH_ACCOUNT_DEACTIVATED',
   AUTH_RATE_LIMITED: 'AUTH_RATE_LIMITED',
+  /**
+   * A refresh or a sign-out carrying the refresh cookie, sent from a page whose `Origin` is not one
+   * `CORS_ORIGINS` lists (P18.7-T1, ADR-0152). `403`. Every host shares the `agencyboost.id` site, so
+   * the browser sends production's `SameSite=Lax` cookie from a staging page as well; CORS hides the
+   * answer from that page but cannot stop the token rotating or the session ending. A request with
+   * no `Origin` (a server, curl) is not refused.
+   */
+  AUTH_ORIGIN_REFUSED: 'AUTH_ORIGIN_REFUSED',
 
   /*
    * Activity logging (P6). The catalog carried these four rows from an earlier phase and the
@@ -357,6 +365,13 @@ export const ErrorCode = {
   ASSET_TYPE_NOT_ALLOWED: 'ASSET_TYPE_NOT_ALLOWED',
   ASSET_NOT_CONFIRMED: 'ASSET_NOT_CONFIRMED',
   ASSET_NOT_UPLOADED: 'ASSET_NOT_UPLOADED',
+  /**
+   * This instance has no storage bucket (P18.7-T2, D12): local development or a test without `GCS_BUCKET`. Every
+   * upload signature, file link, copy and confirm is refused; nothing else is affected. `503` — see
+   * `modules/assets/unconfigured-storage.ts` for why not `501`. Staging and production cannot raise it: they refuse
+   * to boot without a bucket (`env.validation.ts`).
+   */
+  STORAGE_NOT_CONFIGURED: 'STORAGE_NOT_CONFIGURED',
 
   // Generic
   NOT_FOUND: 'NOT_FOUND',

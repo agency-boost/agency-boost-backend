@@ -1,7 +1,7 @@
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { AssetService } from './asset.service';
-import { ASSET_LIMITS } from '@/domain/constants';
+import { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from '@/domain/constants';
 import {
   AssetOwner, SignedUpload, StoragePort, StoredObject,
 } from './storage.port';
@@ -177,6 +177,43 @@ describe('AssetService', () => {
       };
       await expect(service.confirmUpload(ctx, 'dev/kpm-a/x/1'))
         .rejects.toMatchObject({ code: 'ASSET_TOO_LARGE' });
+    });
+
+    /*
+     * P18.7-T2 (the code review's L6): storage reports the type the bytes are (`content-sniff.ts`), which may differ
+     * from the claim — a PNG saved as `.jpg` — and the route's own list is what decides whether the file stays.
+     */
+    it('P18.7-T2 a PNG claimed as a JPEG, on an image route: accepted, and recorded as image/png', async () => {
+      const { service, assets, storage } = makeService({ _id: 'a1', uploadState: 'pending', mimeType: 'image/jpeg' });
+      storage.stored = { storageKey: 'k', mimeType: 'image/png', bytes: 2048 };
+
+      const confirmed = await service.confirmUpload(ctx, 'dev/kpm-a/events/1');
+
+      expect(confirmed).toMatchObject({ mimeType: 'image/png', uploadState: 'confirmed' });
+      expect((assets.updateById as jest.Mock).mock.calls[0][2].$set).toEqual({
+        mimeType: 'image/png', bytes: 2048, uploadState: 'confirmed',
+      });
+    });
+
+    it('P18.7-T2 a JPEG on a PDF-only route: refused 415 by the route’s list, and nothing recorded', async () => {
+      const { service, assets, storage } = makeService({ _id: 'a1', uploadState: 'pending', mimeType: 'application/pdf' });
+      storage.stored = { storageKey: 'k', mimeType: 'image/jpeg', bytes: 2048 };
+
+      await expect(service.confirmUpload(ctx, 'dev/kpm-a/products/1', DOCUMENT_MIME_TYPES))
+        .rejects.toMatchObject({ code: 'ASSET_TYPE_NOT_ALLOWED', status: 415, details: { mimeType: 'image/jpeg' } });
+      expect(assets.updateById).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['the whole allow-list', ASSET_LIMITS.ALLOWED_MIME_TYPES],
+      ['a PDF-only route', DOCUMENT_MIME_TYPES],
+    ])('P18.7-T2 an .exe claimed as a PDF — storage reports octet-stream — on %s: refused, and nothing recorded', async (_route, allowed) => {
+      const { service, assets, storage } = makeService({ _id: 'a1', uploadState: 'pending', mimeType: 'application/pdf' });
+      storage.stored = { storageKey: 'k', mimeType: 'application/octet-stream', bytes: 4096 };
+
+      await expect(service.confirmUpload(ctx, 'dev/kpm-a/recruitment-pitch/1', allowed))
+        .rejects.toMatchObject({ code: 'ASSET_TYPE_NOT_ALLOWED', status: 415 });
+      expect(assets.updateById).not.toHaveBeenCalled();
     });
 
     it('404s an asset belonging to another tenant, without asking storage', async () => {

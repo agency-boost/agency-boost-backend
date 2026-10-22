@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 
 import { validateEnv } from '@/config/env.validation';
+import { GracefulShutdown } from '@/graceful-shutdown';
 import { Clock, SystemClock } from '@/common/clock/clock.port';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { LoggingModule } from '@/common/logging/logging.module';
@@ -186,8 +187,7 @@ import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
 import { AssetRepository } from '@/modules/assets/asset.repository';
 import { AssetService } from '@/modules/assets/asset.service';
-import { StoragePort } from '@/modules/assets/storage.port';
-import { CloudinaryAdapter } from '@/modules/assets/cloudinary.adapter';
+import { STORAGE_PROVIDER } from '@/modules/assets/storage.provider';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { AuthToken, AuthTokenSchema } from '@/modules/auth/auth-token.schema';
 import {
@@ -566,7 +566,9 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
      */
     AssetRepository,
     AssetService,
-    { provide: StoragePort, useClass: CloudinaryAdapter },
+    // P18.7-T2 (ADR-0153, D12): the bucket when `GCS_BUCKET` names one; in development and test without one,
+    // storage that refuses with `STORAGE_NOT_CONFIGURED` so the API still boots.
+    STORAGE_PROVIDER,
     ConfigSnapshotRepository,
     TenantConfigService,
     TemplateService,
@@ -599,6 +601,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     TenantDay,
     NotificationRepository,
     NotificationService,
+    // P18.7-T1: on shutdown, stop listening and finish the open requests, then wait for their email.
+    GracefulShutdown,
     PasswordService,
     RateLimiter,
     AuthService,

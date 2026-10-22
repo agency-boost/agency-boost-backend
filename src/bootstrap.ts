@@ -6,6 +6,7 @@ import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common
 import { SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 
+import { corsOriginsOf } from './config/cors-origins';
 import { buildOpenApiDocument } from './openapi';
 
 /**
@@ -48,6 +49,17 @@ export const VALIDATION_PIPE_OPTIONS = {
 export function configureApp(app: INestApplication): void {
   const config = app.get(ConfigService);
 
+  /*
+   * **Who the client is, behind the proxy** (P18.7-T1, ADR-0152). `TRUST_PROXY` is validated to
+   * `false` or a hop count; anything else reaching here is a misconfiguration, and it trusts nothing
+   * rather than everything. `req.ip` is what the login limiter keys on and what a session row
+   * records, so believing a forged `X-Forwarded-For` would let a client choose its own bucket.
+   */
+  const trustProxy = config.get<false | number>('TRUST_PROXY');
+  // The instance is the Express app Nest built; the adapter's type does not carry it (as in `serverless.ts`).
+  const express = app.getHttpAdapter().getInstance() as { set(setting: string, value: unknown): unknown };
+  express.set('trust proxy', typeof trustProxy === 'number' && trustProxy > 0 ? trustProxy : false);
+
   // The request id is generated and echoed by the pino http logger (LoggingModule),
   // which also puts it on every log line. The error filter reads the same value.
   app.use(cookieParser());
@@ -64,9 +76,10 @@ export function configureApp(app: INestApplication): void {
 
   app.useGlobalPipes(new ValidationPipe(VALIDATION_PIPE_OPTIONS));
 
-  const origins = config.get<string>('CORS_ORIGINS', '');
+  // Read by `corsOriginsOf`, as the refresh-origin check on `/auth/refresh` reads it (P18.7-T1).
+  const origins = corsOriginsOf(config.get<string>('CORS_ORIGINS', ''));
   app.enableCors({
-    origin: origins ? origins.split(',').map((o) => o.trim()) : false,
+    origin: origins.length > 0 ? origins : false,
     credentials: true,
   });
 

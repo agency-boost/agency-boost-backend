@@ -4,7 +4,7 @@ import type { Clock } from '@/common/clock/clock.port';
 import { RECRUITMENT, RECRUITMENT_PITCH_SLOTS, type RecruitmentPitchSlotCode } from '@/domain/constants';
 import { up as recruitmentPlaybook, type RecruitmentPlaybookResult } from '@/migrations/0025-recruitment-playbook';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
-import { CloudinaryAdapter, vendorRefusal } from '@/modules/assets/cloudinary.adapter';
+import { GcsAdapter, storageRefusal } from '@/modules/assets/gcs.adapter';
 import { StoragePort } from '@/modules/assets/storage.port';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { KpmProductConfig, KpmProductConfigSchema } from '@/modules/products/kpm-product-config.schema';
@@ -127,27 +127,31 @@ export function demonstrationPdf(lines: readonly string[]): Buffer {
 }
 
 /**
- * **The storage the seed writes through, where one is configured** (D-seed) — detected the way the asset
- * module needs it: the three Cloudinary settings `CloudinaryAdapter` reads with `getOrThrow`, each set, and
- * the folder prefix defaulting to `dev` as `env.validation.ts` defaults it. `null` otherwise, and the run
- * says so. Reads the process's environment, which the command loaded; nothing here opens a file.
+ * **The storage the seed writes through, where one is configured** (D-seed; P18.7-T2, ADR-0153) — detected
+ * the way the API detects it: a `GCS_BUCKET` that names a bucket, the key prefix defaulting to `dev` as
+ * `env.validation.ts` defaults it, and `GCS_PROJECT_ID` only if set. `null` otherwise — the API's
+ * `UnconfiguredStorage` case — and the run says so. Credentials are Application Default Credentials, as the
+ * API's are. Reads the process's environment, which the command loaded; nothing here opens a file.
  */
 export function storageFromEnvironment(env: NodeJS.ProcessEnv, clock: Clock): StoragePort | null {
-  const keys = ['CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET'] as const;
-  if (keys.some((key) => !env[key]?.trim())) return null;
+  const bucket = env.GCS_BUCKET?.trim();
+  if (!bucket) return null;
+  const projectId = env.GCS_PROJECT_ID?.trim();
   const values: Record<string, string> = {
-    ...Object.fromEntries(keys.map((key) => [key, env[key]!.trim()])),
-    CLOUDINARY_FOLDER_PREFIX: env.CLOUDINARY_FOLDER_PREFIX?.trim() || 'dev',
+    GCS_BUCKET: bucket,
+    STORAGE_KEY_PREFIX: env.STORAGE_KEY_PREFIX?.trim() || 'dev',
+    ...(projectId ? { GCS_PROJECT_ID: projectId } : {}),
   };
   // Only what the adapter asks for, from the environment given — not a whole `ConfigService`, which would
   // read `process.env` whatever it was handed.
   const config = {
+    get: (key: string) => values[key],
     getOrThrow: (key: string) => {
       if (!(key in values)) throw new Error(`${key} is not set.`);
       return values[key];
     },
   } as unknown as ConfigService;
-  return new CloudinaryAdapter(config, clock);
+  return new GcsAdapter(config, clock);
 }
 
 export interface RecruitmentFixtureDeps {
@@ -214,9 +218,8 @@ export async function seedRecruitmentFixture(deps: RecruitmentFixtureDeps): Prom
     const stored = await deps.storage!.putObject({
       owner: { kind: 'kpm', kpmId }, folder, name, mimeType: 'application/pdf', body: demonstrationPdf(lines),
     }).catch((err: unknown) => {
-      // The vendor's message, from whichever shape it threw — never the whole object, which can carry the
-      // request's credentials.
-      throw new StorageRefused(vendorRefusal(err).message);
+      // The vendor's message alone — never the whole object, which can carry the request's credentials.
+      throw new StorageRefused(storageRefusal(err).message);
     });
     if (stored.sent) sent += 1;
     if (!(await Assets.exists({ storageKey: stored.storageKey }))) {

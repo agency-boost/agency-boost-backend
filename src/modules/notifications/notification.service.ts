@@ -39,6 +39,25 @@ interface Dispatch {
   outcome: Promise<Delivery>;
 }
 
+/**
+ * **How long a shutdown waits for the deliveries still in flight** (P18.7-T1, ADR-0152), in
+ * milliseconds. A deploy stops the old container with SIGTERM and gives it 30 s before SIGKILL
+ * (`stop_grace_period` in `deploy/compose.yml`). An SMTP send is bounded by `SMTP_TIMEOUT_MS`
+ * (5 s by default) per dial and per greeting, so ten seconds covers a slow relay and leaves the
+ * rest of the grace period for the HTTP server and the database to close. It is an operational
+ * bound, not a business number, so it lives here beside the code that waits.
+ */
+export const NOTIFICATION_DRAIN_TIMEOUT_MS = 10_000;
+
+/** A delivery started and not awaited, while it is in flight: what a shutdown waits for, and names if it cannot. */
+export interface InFlightDelivery {
+  templateId: string;
+  channel: NotificationChannel;
+  /** The row it will be recorded on, when that is known as it starts: a held email learns its row by claiming it. */
+  notificationId?: string;
+  coalesceKey?: string;
+}
+
 /** What `deliver` decided: the delivery map to write, and the deliveries still in flight. */
 interface Delivered {
   delivery: Record<string, Delivery>;
@@ -142,6 +161,11 @@ const MAX_SKIP = 2_147_483_647;
 export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);
   private readonly adapters = new Map<NotificationChannel, NotificationChannelAdapter>();
+  /**
+   * Every delivery started and not awaited, until it settles (P18.7-T1). Keyed by a promise that never
+   * rejects, so waiting on them all cannot fail, and removed by that same promise once it settles.
+   */
+  private readonly inFlight = new Map<Promise<void>, InFlightDelivery>();
 
   constructor(
     @InjectModel(Notification.name)
@@ -214,7 +238,7 @@ export class NotificationService {
       readAt: null,
     });
 
-    this.settle(dispatched, request.templateId, (channel, outcome) => this.notifications
+    this.settle(dispatched, request.templateId, String(created._id), (channel, outcome) => this.notifications
       .updateOne(
         // Only over the `pending` this call wrote: an outcome never overwrites one recorded since.
         { _id: created._id, [`delivery.${channel}.status`]: 'pending' },
@@ -262,7 +286,7 @@ export class NotificationService {
         delivery,
         readAt: null,
       } as Partial<NotificationDocument>);
-      this.settle(dispatched, request.templateId, (channel, outcome) =>
+      this.settle(dispatched, request.templateId, String(created._id), (channel, outcome) =>
         this.coalesced.recordDelivery(office, String(created._id), channel, outcome));
     } catch (err) {
       if ((err as { code?: unknown }).code !== DUPLICATE_KEY) throw err;
@@ -291,7 +315,45 @@ export class NotificationService {
     return this.coalesced.markEntryNoticesRead(ctx, userId, templateId, entryId, this.clock.now());
   }
 
-  async releaseHeld(kpmId: string, coalesceKey: string, templateId: NotificationTemplateId): Promise<void> {
+  releaseHeld(kpmId: string, coalesceKey: string, templateId: NotificationTemplateId): Promise<void> {
+    // Its callers never await it (the finalize has answered), so it is tracked here, where it starts.
+    const release = this.sendHeld(kpmId, coalesceKey, templateId);
+    this.track(release, { templateId, channel: HELD_CHANNEL, coalesceKey });
+    return release;
+  }
+
+  /**
+   * **Every delivery in flight, awaited, for at most `timeoutMs`** (P18.7-T1): what a shutdown calls
+   * once the HTTP server has stopped and its last requests have finished (`GracefulShutdown`, in
+   * `src/graceful-shutdown.ts`), before the database connection closes, so each outcome is recorded. A delivery that starts while it waits (a
+   * request the server was still finishing) is waited for too. Whatever is still in flight when the time is
+   * up is logged at warn level, by template, channel and row, and answered: its row stays `pending`, which
+   * is where somebody looking for it will find it.
+   */
+  async drain(timeoutMs: number = NOTIFICATION_DRAIN_TIMEOUT_MS, signal?: string): Promise<InFlightDelivery[]> {
+    if (this.inFlight.size === 0) return [];
+    this.logger.log({ inFlight: this.inFlight.size, signal }, 'waiting for deliveries in flight before shutting down');
+
+    let timer: NodeJS.Timeout | undefined;
+    const expired = new Promise<'expired'>((resolve) => { timer = setTimeout(() => resolve('expired'), timeoutMs); });
+    try {
+      while (this.inFlight.size > 0) {
+        const drained = Promise.all(this.inFlight.keys()).then(() => 'drained' as const);
+        if (await Promise.race([drained, expired]) === 'expired') break;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const pending = [...this.inFlight.values()];
+    if (pending.length > 0) {
+      this.logger.warn({ pending, timeoutMs }, 'shutting down with deliveries still in flight; their rows stay pending');
+    }
+    return pending;
+  }
+
+  /** `releaseHeld`'s work: claim the held email, send it, record the outcome. */
+  private async sendHeld(kpmId: string, coalesceKey: string, templateId: NotificationTemplateId): Promise<void> {
     const office = officeOf(kpmId);
     const claimed = await this.coalesced.claimHeld(office, { coalesceKey, templateId }, HELD_CHANNEL, this.clock.now());
     if (!claimed) return;
@@ -356,13 +418,29 @@ export class NotificationService {
   private settle(
     dispatched: readonly Dispatch[],
     templateId: string,
+    notificationId: string,
     record: (channel: NotificationChannel, outcome: Delivery) => Promise<unknown>,
   ): void {
     for (const { channel, outcome } of dispatched) {
-      void outcome
+      const recorded = outcome
         .then((settled) => record(channel, settled))
         .catch((err: unknown) => this.logger.error({ err, channel, templateId }, 'failed to record a delivery'));
+      // Tracked until it is recorded, not only sent: a shutdown that waited for the send alone could close
+      // the database under the write that records it.
+      this.track(recorded, { templateId, channel, notificationId });
     }
+  }
+
+  /**
+   * Hold `work` in the in-flight set until it settles, whichever way (P18.7-T1). The key is a promise that
+   * never rejects, so `drain` can wait on all of them without one failure ending the wait. `work` itself is
+   * left as it is: whoever started it still sees its rejection.
+   */
+  private track(work: Promise<unknown>, about: InFlightDelivery): void {
+    const settled: Promise<void> = work
+      .then(() => undefined, () => undefined)
+      .then(() => { this.inFlight.delete(settled); });
+    this.inFlight.set(settled, about);
   }
 
   /** A channel settled without asking its adapter: opted out is `suppressed`, no adapter is `failed`. */

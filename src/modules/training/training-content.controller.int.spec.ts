@@ -174,8 +174,8 @@ describe('a training module’s content over HTTP (P5-T2)', () => {
       const res = await request(app.getHttpServer()).post(`${url}/uploads`)
         .send({ filename: 'deck.mp4', mimeType: 'video/mp4', bytes: 1024 }).expect(201);
       expect(wired.storage.signedWith.at(-1)).toEqual({ folder: 'training', mimeType: 'video/mp4', allowedMimeTypes: undefined });
-      expect(res.body.fields).toMatchObject({ overwrite: 'false' });
-      expect(res.body.fields).not.toHaveProperty('allowed_formats');
+      // P18.7-T2: the form names one fresh key, which the create-only signer cannot overwrite, and the type asked for.
+      expect(res.body.fields).toMatchObject({ key: res.body.storageKey, 'Content-Type': 'video/mp4' });
     });
 
     it('refuses a body carrying a field the DTO never declared', async () => {

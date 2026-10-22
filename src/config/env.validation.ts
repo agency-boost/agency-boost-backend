@@ -29,10 +29,24 @@ export const envSchema = z.object({
   ACCESS_TOKEN_TTL: z.string().default('15m'),
   REFRESH_TOKEN_TTL: z.string().default('30d'),
 
-  CLOUDINARY_CLOUD_NAME: z.string().min(1),
-  CLOUDINARY_API_KEY: z.string().min(1),
-  CLOUDINARY_API_SECRET: z.string().min(1),
-  CLOUDINARY_FOLDER_PREFIX: z.enum(['dev', 'staging', 'prod']).default('dev'),
+  /**
+   * **The private Cloud Storage bucket every file lives in** (P18.7-T2, ADR-0153): one per environment.
+   * Required in staging and production (below, in `superRefine`). Unset in development or test, the API
+   * still boots, with storage that refuses every upload and file link with `STORAGE_NOT_CONFIGURED`
+   * (plan decision D12). An empty value is unset, as `.env.example`'s `GCS_BUCKET=` writes it.
+   *
+   * There are no storage credentials in configuration: the client uses Application Default
+   * Credentials — the VM's service account when deployed, an impersonated one on a laptop.
+   */
+  GCS_BUCKET: z.string().trim().optional().transform((v) => v || undefined),
+  /** Optional: the bucket's project, for when Application Default Credentials cannot tell. */
+  GCS_PROJECT_ID: z.string().trim().optional().transform((v) => v || undefined),
+  /**
+   * **The first segment of every storage key** (`<prefix>/<owner>/<folder>/<id>`), naming the
+   * environment that wrote it. `prod` in production and nowhere else (below, in `superRefine`), so a
+   * laptop pointed at the wrong bucket still never writes where production's files are.
+   */
+  STORAGE_KEY_PREFIX: z.enum(['dev', 'staging', 'prod']).default('dev'),
 
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
@@ -84,6 +98,36 @@ export const envSchema = z.object({
   RATE_LIMIT_LOGIN_PER_15M: z.coerce.number().int().positive().default(5),
 
   /**
+   * **How many proxies stand between the client and this process** (P18.7-T1, ADR-0152), handed to
+   * Express as `trust proxy`. `false` believes the socket: right when nothing is in front, as in
+   * local development. Unset is `false` there, and **refused in staging and production** (below):
+   * forgetting the key on a VM brought back the lockout described next, silently.
+   *
+   * Behind Caddy on the VM the socket is always Caddy, so `req.ip` is one address for everybody.
+   * The login limiter keys on it, which meant five wrong passwords from anyone locked everyone out
+   * for fifteen minutes, and every session row recorded the proxy's address instead of the
+   * client's. `1` takes the last hop of `X-Forwarded-For`: the one Caddy wrote.
+   *
+   * A count rather than `true`. `true` trusts every hop, so the left-most entry, which is whatever
+   * the client chose to send, becomes its IP and the limiter can be dodged by changing a header.
+   * `0` is the same as `false`.
+   */
+  TRUST_PROXY: z
+    .string()
+    .trim()
+    .optional()
+    .refine((v) => v === undefined || v === 'false' || /^\d+$/.test(v), {
+      message:
+        'must be "false" or the number of proxies in front of the API (1 behind Caddy). '
+        + '"true" is refused: it trusts every hop, so a client could set its own IP with a header.',
+    })
+    // `undefined` stays `undefined`, so the refinement below can tell "unset" from a written `false`.
+    .transform((v): false | number | undefined => {
+      if (v === undefined) return undefined;
+      return v === 'false' || Number(v) === 0 ? false : Number(v);
+    }),
+
+  /**
    * Only the default applied when a Super Admin creates a tenant without specifying
    * one. Runtime code reads kpm.timezone — never this value.
    */
@@ -108,6 +152,50 @@ export const envSchema = z.object({
         'must be "smtp" in production. A production API that logs verification links '
         + 'instead of sending them accepts registrations it can never complete '
         + '(ADR-0019).',
+    });
+  }
+
+  /*
+   * P18.7-T1 (the review's L2): a VM sits behind Caddy, so a missing `TRUST_PROXY` puts every client on
+   * Caddy's address and one person's wrong passwords lock everybody out. Written as `false` is a decision
+   * somebody took and is accepted; left out is refused.
+   */
+  if ((env.NODE_ENV === 'staging' || env.NODE_ENV === 'production') && env.TRUST_PROXY === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['TRUST_PROXY'],
+      message:
+        `must be set when NODE_ENV is ${env.NODE_ENV}: 1 behind Caddy, or "false" if nothing stands in `
+        + 'front. Left unset, every client would share the proxy\'s IP, and its login limit.',
+    });
+  }
+
+  // P18.7-T2 (ADR-0153, D12): storage may be absent only where nobody depends on it.
+  if ((env.NODE_ENV === 'staging' || env.NODE_ENV === 'production') && !env.GCS_BUCKET) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['GCS_BUCKET'],
+      message:
+        `is required when NODE_ENV is ${env.NODE_ENV}. Without a bucket every upload and file `
+        + 'link is refused (STORAGE_NOT_CONFIGURED), which only development and test accept.',
+    });
+  }
+
+  if (env.NODE_ENV === 'production' && env.STORAGE_KEY_PREFIX !== 'prod') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['STORAGE_KEY_PREFIX'],
+      message: `must be "prod" in production, not "${env.STORAGE_KEY_PREFIX}": production's keys say so.`,
+    });
+  }
+
+  if (env.NODE_ENV !== 'production' && env.STORAGE_KEY_PREFIX === 'prod') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['STORAGE_KEY_PREFIX'],
+      message:
+        `may be "prod" only in production, and NODE_ENV is ${env.NODE_ENV}: nothing else may `
+        + 'write keys that read as production\'s.',
     });
   }
 });

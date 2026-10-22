@@ -38,17 +38,19 @@ export class StubStorage extends StoragePort {
       storageKey, mimeType: params.mimeType, bytes: 1024,
     });
     return {
-      uploadUrl: 'https://upload.test',
+      uploadUrl: 'https://storage.googleapis.com/stub-bucket/',
       storageKey,
       signature: 'sig',
-      // Shaped as the adapter's: never overwrite, and a narrower list asked of the vendor too.
+      // Shaped as `GcsAdapter`'s V4 POST policy (P18.7-T2): the one key, and the Content-Type pinned to the
+      // type the service checked — which is how a route's narrower list reaches storage.
       fields: {
-        public_id: storageKey,
-        overwrite: 'false',
-        ...(params.allowedMimeTypes
-          ? { allowed_formats: params.allowedMimeTypes.map((m) => m.split('/')[1]).join(',') }
-          : {}),
-        signature: 'sig',
+        'Content-Type': params.mimeType,
+        key: storageKey,
+        'x-goog-date': '20260918T020000Z',
+        'x-goog-credential': 'stub-signer@stub.iam.gserviceaccount.com/20260918/auto/storage/goog4_request',
+        'x-goog-algorithm': 'GOOG4-RSA-SHA256',
+        policy: 'eyJjb25kaXRpb25zIjpbXX0=',
+        'x-goog-signature': 'sig',
       },
       expiresAt: new Date('2026-09-18T02:10:00Z'),
     };

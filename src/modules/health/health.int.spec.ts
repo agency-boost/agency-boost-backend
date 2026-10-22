@@ -2,8 +2,12 @@ import { Controller, Get, INestApplication, VersioningType, Version } from '@nes
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { HealthController } from './health.controller';
-import { getConnectionToken } from '@nestjs/mongoose';
+import { getConnectionToken, MongooseModule } from '@nestjs/mongoose';
+import { APP_FILTER } from '@nestjs/core';
+import mongoose, { Connection } from 'mongoose';
+import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { listenOnLoopback } from '../../../test/listen';
+import { startMongo, stopMongo } from '../../../test/mongo';
 
 /**
  * Proves the routing contract the frontend depends on:
@@ -85,5 +89,58 @@ describe('API versioning', () => {
     await request(app.getHttpServer())
       .get('/api/health/ready')
       .expect(200, { status: 'ok', checks: { database: 'up' } });
+  });
+});
+
+/**
+ * **Readiness answers with its status, not only its body** (P18.7-T1, ADR-0152), over a real
+ * connection and through the global error filter. A probe reads the status: `200` with `degraded`
+ * in the body passed the container's healthcheck and the deploy's wait with no database behind
+ * the API. And the filter must not rewrite the body into its error envelope, so whoever reads it
+ * still sees which check failed.
+ */
+describe('readiness over a real connection (P18.7-T1)', () => {
+  let app: INestApplication;
+  let connection: Connection;
+
+  beforeAll(async () => {
+    const uri = await startMongo();
+    const dbName = mongoose.connection.db?.databaseName;
+    await mongoose.disconnect(); // hand the database to Nest's own connection
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [MongooseModule.forRoot(uri, { dbName })],
+      controllers: [HealthController],
+      providers: [{ provide: APP_FILTER, useClass: DomainExceptionFilter }],
+    }).compile();
+
+    app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api');
+    app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
+    await app.init();
+    await listenOnLoopback(app);
+    connection = app.get<Connection>(getConnectionToken());
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await stopMongo();
+  });
+
+  it('P18.7-T1 answers 200 while the database is connected', async () => {
+    await request(app.getHttpServer())
+      .get('/api/health/ready')
+      .expect(200, { status: 'ok', checks: { database: 'up' } });
+  });
+
+  it('P18.7-T1 answers 503 with the same body once the database is gone, and liveness stays 200', async () => {
+    await connection.close();
+    expect(connection.readyState).not.toBe(1);
+
+    await request(app.getHttpServer())
+      .get('/api/health/ready')
+      .expect(503, { status: 'degraded', checks: { database: 'down' } });
+    // Liveness says nothing about dependencies: the process is up, so a restart would not help.
+    await request(app.getHttpServer()).get('/api/health').expect(200, { status: 'ok' });
   });
 });

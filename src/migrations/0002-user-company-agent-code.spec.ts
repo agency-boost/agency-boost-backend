@@ -55,7 +55,7 @@ describe('0002 — moving the agent code onto the account', () => {
 
   it('takes the company from the office and the code from the membership', async () => {
     const { userId, companyId } = await legacy();
-    expect(await run()).toMatchObject({ users: 1, skipped: 0, collisions: [] });
+    expect(await run()).toMatchObject({ users: 1, skipped: 0, collisions: 0 });
 
     const user = await db().collection('users').findOne({ _id: userId });
     expect(user?.companyId).toBe(companyId);
@@ -106,8 +106,34 @@ describe('0002 — moving the agent code onto the account', () => {
 
     const result = await run();
     expect(result.users).toBe(1);
-    expect(result.collisions).toHaveLength(1);
-    expect(result.collisions[0]).toContain('b@kpm.test');
+    expect(result.collisions).toBe(1);
+    // Counted, never named: the result is printed to the deploy log (P18.7-T1).
+    expect(JSON.stringify(result)).not.toMatch(/@kpm\.test/);
+  });
+
+  /*
+   * P18.7-T1 (the security review's L5): there is no ledger, so every deploy runs this again. The account
+   * reported as a collision on the first run must not claim the pair on the second: with the users' unique
+   * index standing, that was an E11000, and every deploy from then on stopped at this migration.
+   */
+  it('P18.7-T1 runs again over a collision without claiming the taken pair, and without throwing', async () => {
+    // The index the users schema builds, as a deployed database has it.
+    await db().collection('users').createIndex(
+      { companyId: 1, agentCode: 1 },
+      {
+        unique: true,
+        partialFilterExpression: { deletedAt: null, companyId: { $type: 'string' }, agentCode: { $type: 'string' } },
+      },
+    );
+    const first = await legacy({ email: 'a@kpm.test' });
+    const second = await legacy({ email: 'b@kpm.test', kpmId: first.kpmId });
+
+    expect(await run()).toMatchObject({ users: 1, collisions: 1 });
+    const afterFirst = await db().collection('users').find({}).sort({ _id: 1 }).toArray();
+
+    await expect(run()).resolves.toMatchObject({ users: 0, collisions: 1 });
+    expect(await db().collection('users').find({}).sort({ _id: 1 }).toArray()).toEqual(afterFirst);
+    expect((await db().collection('users').findOne({ _id: second.userId }))?.agentCode).toBeUndefined();
   });
 
   it('drops the unique membership index, which the schema alone cannot', async () => {

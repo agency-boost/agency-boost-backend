@@ -1,0 +1,12 @@
+# Reports a failed agencyboost-backup.service (P18.7 review, M1), as one line nobody can mistake.
+#
+# The Ops Agent ships the journal to Cloud Logging, and the alert policy provision.sh --alert-email
+# creates mails the operators when this line appears. Without the alert it is still the one thing to
+# search for: journalctl -t agencyboost-backup -p err
+
+[Unit]
+Description=Report a failed AgencyBoost backup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger --priority user.err --tag agencyboost-backup "AGENCYBOOST_BACKUP_FAILED on %H: agencyboost-backup.service failed, journalctl -u agencyboost-backup says why"

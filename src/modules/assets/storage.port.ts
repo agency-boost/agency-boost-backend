@@ -1,6 +1,7 @@
 /**
- * Storage is a port so the vendor is mockable and swappable. Tests never reach
- * Cloudinary; the adapter is stubbed at this boundary.
+ * Storage is a port so the vendor is mockable and swappable. Tests never reach the
+ * vendor; the adapter is stubbed at this boundary. Today's adapter is `GcsAdapter`
+ * (ADR-0153), and `UnconfiguredStorage` stands in where no bucket is configured (D12).
  */
 export interface SignedUpload {
   /** Where the browser **POSTs** the bytes, multipart: `file`, and every entry of `fields`. */
@@ -12,8 +13,9 @@ export interface SignedUpload {
   /**
    * **The exact multipart fields the vendor needs beside `file`** (Phase 17): everything the signature
    * covers, the signature itself and whatever else the vendor asks for — so a browser appends each entry
-   * and knows nothing about which vendor it is talking to. For Cloudinary: `api_key`, `timestamp`,
-   * `public_id`, `type` (`authenticated`) and `signature`.
+   * and knows nothing about which vendor it is talking to. For Cloud Storage's V4 POST policy: `key`,
+   * `Content-Type`, `policy`, `x-goog-algorithm`, `x-goog-credential`, `x-goog-date` and `x-goog-signature`,
+   * with `file` sent last.
    */
   readonly fields: Readonly<Record<string, string>>;
 }
@@ -60,8 +62,11 @@ export abstract class StoragePort {
    * What storage actually holds under this key, or `null` if it holds nothing.
    *
    * The confirm step (ADR-0040): the browser uploads straight to the vendor, so the only
-   * honest source for an object's real type and size is the vendor itself. A client's
-   * claim is a claim.
+   * honest source for an object's real type and size is what storage holds. A client's
+   * claim is a claim — and a vendor that only keeps the claim (Cloud Storage keeps the
+   * form's `Content-Type`) has the type read from the stored bytes by its adapter
+   * (`content-sniff.ts`, P18.7-T2), reporting `application/octet-stream` where they
+   * disagree.
    */
   abstract describe(storageKey: string): Promise<StoredObject | null>;
 
@@ -102,24 +107,3 @@ export abstract class StoragePort {
     body: Buffer;
   }): Promise<StoredObject & { sent: boolean }>;
 }
-
-
-/**
- * A vendor's file extension back to the media type this product speaks (ADR-0040).
- *
- * The browser uploads straight to Cloudinary, which reports a `format` — `jpg`, `pdf`, `xlsx` —
- * rather than a media type. Confirming means turning that back into one, and this map covers
- * exactly `ALLOWED_MIME_TYPES` and nothing else: a format missing from here confirms as its own
- * raw string, which then fails the allow-list, so an unrecognised upload is refused rather than
- * waved through as something it is not.
- */
-export const FORMAT_TO_MIME_TYPE: Readonly<Record<string, string>> = {
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-  webp: 'image/webp',
-  pdf: 'application/pdf',
-  mp4: 'video/mp4',
-  csv: 'text/csv',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-};

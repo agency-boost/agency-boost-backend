@@ -4,7 +4,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { localDayOf } from '@/common/time/local-day';
 import { SEED_RECRUITMENT_PLAYBOOK } from '@/domain/constants';
 import { up as recruitmentPlaybook } from '@/migrations/0025-recruitment-playbook';
-import { CloudinaryAdapter } from '@/modules/assets/cloudinary.adapter';
+import { GcsAdapter } from '@/modules/assets/gcs.adapter';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { StubStorage } from '../../../test/stub-storage';
@@ -18,7 +18,7 @@ import { BLANK_COMPANY, EMPTY_OFFICE } from '../template-fixture';
 /**
  * **Phase 17 — recruitment tools, seeded** (P17-T7 AC-1, P17-T9 AC-4, D-seed; `recruitment-fixture.ts`).
  *
- * Run as the command runs it — with a fake storage standing where Cloudinary is configured — and read back
+ * Run as the command runs it — with a fake storage standing where a bucket is configured — and read back
  * through the services the screens read, so what is asserted is what 0417's people, 0555's, 0701's and the
  * Super Admin see. Then once more with no storage: the playbooks still, and no slot without its file.
  */
@@ -240,27 +240,34 @@ describe('the recruitment fixture’s pieces (D-seed)', () => {
     expect(Buffer.byteLength(stream, 'latin1')).toBe(length);
   });
 
-  it('finds storage only where all three Cloudinary settings are set, its prefix dev unless named', () => {
+  it('P18.7-T2 finds storage only where GCS_BUCKET names a bucket, its prefix dev unless named (ADR-0153)', () => {
     const clock = new FixedClock(new Date('2026-10-09T03:00:00Z'));
-    const full = { CLOUDINARY_CLOUD_NAME: 'c', CLOUDINARY_API_KEY: 'k', CLOUDINARY_API_SECRET: 's' };
+    type Config = { get: (k: string) => string | undefined; getOrThrow: (k: string) => string };
+    const configOf = (storage: unknown) => (storage as { config: Config }).config;
     expect(storageFromEnvironment({}, clock)).toBeNull();
-    expect(storageFromEnvironment({ ...full, CLOUDINARY_API_SECRET: '  ' }, clock)).toBeNull();
-    expect(storageFromEnvironment({ ...full, CLOUDINARY_CLOUD_NAME: undefined }, clock)).toBeNull();
-    const adapter = storageFromEnvironment(full, clock) as CloudinaryAdapter;
-    expect(adapter).toBeInstanceOf(CloudinaryAdapter);
-    const config = (adapter as unknown as { config: { getOrThrow: (k: string) => string } }).config;
-    expect(config.getOrThrow('CLOUDINARY_FOLDER_PREFIX')).toBe('dev');
-    expect(config.getOrThrow('CLOUDINARY_CLOUD_NAME')).toBe('c');
-    expect(() => config.getOrThrow('MONGODB_URI')).toThrow('MONGODB_URI is not set.');
-    const staging = storageFromEnvironment({ ...full, CLOUDINARY_FOLDER_PREFIX: 'staging' }, clock) as CloudinaryAdapter;
-    expect((staging as unknown as { config: { getOrThrow: (k: string) => string } }).config.getOrThrow('CLOUDINARY_FOLDER_PREFIX')).toBe('staging');
+    expect(storageFromEnvironment({ GCS_BUCKET: '  ' }, clock)).toBeNull();
+    // The API's `UnconfiguredStorage` case: a prefix or a project without a bucket is still no storage.
+    expect(storageFromEnvironment({ GCS_BUCKET: '', STORAGE_KEY_PREFIX: 'staging', GCS_PROJECT_ID: 'p' }, clock)).toBeNull();
+    const adapter = storageFromEnvironment({ GCS_BUCKET: ' agencyboost-dev-assets ' }, clock);
+    expect(adapter).toBeInstanceOf(GcsAdapter);
+    expect(configOf(adapter).getOrThrow('GCS_BUCKET')).toBe('agencyboost-dev-assets');
+    expect(configOf(adapter).getOrThrow('STORAGE_KEY_PREFIX')).toBe('dev');
+    expect(configOf(adapter).get('GCS_PROJECT_ID')).toBeUndefined();
+    expect(() => configOf(adapter).getOrThrow('MONGODB_URI')).toThrow('MONGODB_URI is not set.');
+    const staging = storageFromEnvironment({
+      GCS_BUCKET: 'agencyboost-staging-assets', STORAGE_KEY_PREFIX: ' staging ', GCS_PROJECT_ID: 'agencyboost-staging',
+    }, clock);
+    expect(configOf(staging).getOrThrow('STORAGE_KEY_PREFIX')).toBe('staging');
+    expect(configOf(staging).get('GCS_PROJECT_ID')).toBe('agencyboost-staging');
   });
 
   it('D-seed a storage that refuses leaves no slot and no brochure, and the run says why', async () => {
     await clearCollections();
     const refusing = new StubStorage();
-    // The Admin API's own shape: the message one level down.
-    jest.spyOn(refusing, 'putObject').mockRejectedValue({ error: { message: 'Invalid Signature', http_code: 401 } });
+    // P18.7-T2: a vendor failure carrying the request it made — bearer token included — reports its message alone.
+    jest.spyOn(refusing, 'putObject').mockRejectedValue(Object.assign(new Error('Invalid Signature'), {
+      code: 401, config: { headers: { Authorization: 'Bearer ya29.a0-secret-token' } },
+    }));
     const companies = { prudential: '66f0000000000000000000c1', allianz: '66f0000000000000000000c2' };
     const fixture = await seedRecruitmentFixture({
       clock: new FixedClock(new Date('2026-10-09T03:00:00Z')),
@@ -272,6 +279,7 @@ describe('the recruitment fixture’s pieces (D-seed)', () => {
       },
     });
     expect(fixture.files).toBe('skipped: storage refused (Invalid Signature)');
+    expect(JSON.stringify(fixture)).not.toContain('ya29');
     expect(fixture.written).toBe(2);
     expect(await col('kpmRecruitmentPitchDocuments').countDocuments({})).toBe(0);
     expect(await col('assets').countDocuments({})).toBe(0);

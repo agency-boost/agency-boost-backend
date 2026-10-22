@@ -7,6 +7,9 @@ const config: Config = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: '.',
   testRegex: '\\.spec\\.ts$',
+  // P18.7-T2: `*.live.spec.ts` reaches a real bucket and runs only under `pnpm test:storage-live`, which
+  // replaces this list. Every other script — the full run, coverage, integration, tenancy — leaves it out.
+  testPathIgnorePatterns: ['/node_modules/', '\\.live\\.spec\\.ts$'],
   transform: { '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json' }] },
   moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
   collectCoverageFrom: [
@@ -249,6 +252,16 @@ const config: Config = {
     // Phase 18.1: who reads the forum and who edits it — the tag is the list, and a field member not tagged meets 404.
     // It decides access, so it is held where the permissions are.
     './src/modules/leader-meetings/leader-meeting-people.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    /*
+     * Phase 18.7 (P18.7-T2, ADR-0153): storage. The adapter decides what an upload may be and what a file is
+     * confirmed as, and the sniff is the one check standing where Cloudinary read the bytes itself (ADR-0040), so
+     * both are held whole; so is the choice between the bucket and the storage that refuses. All four measured
+     * 100 on every figure the day they landed.
+     */
+    './src/modules/assets/gcs.adapter.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/assets/content-sniff.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/assets/unconfigured-storage.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/assets/storage.provider.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],

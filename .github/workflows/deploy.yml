@@ -1,0 +1,329 @@
+name: deploy
+
+# development is staging and main is production (P18.7-T4, ADR-0152, ADR-0154). Every push to either
+# runs ci, then build, then deploy, then smoke, and stops at the first job that fails.
+#
+# Both environments run on one VM, in one project (ADR-0155): each has its own API container, its own
+# database and its own registry there, and a deploy of one never touches the other.
+#
+# - build builds the image in this run and pushes it to the environment's own Artifact Registry
+#   repository, agencyboost-<staging|prod>. **Nothing is reused, by tag or by cache.** An image found by tag would be
+#   trusted because of a name, and anything able to run a job on development could have written that
+#   name first (P18.7 review). So production builds from the main commit with no build cache imported.
+#   Tags are immutable and unique per build, `<commit>-<run id>-<attempt>`, so a re-run pushes a new
+#   tag rather than failing on an old one.
+#   It signs in as gh-builder, which may push images and nothing else, and with a bare access token:
+#   no credentials file is written into the workspace, so none can reach the build context (P18.7
+#   review, H1).
+# - deploy signs in as gh-deployer. It goes ahead only if this commit is still the branch's head, so an
+#   older run that queued behind a newer one cannot put the older code back. A re-run (attempt 2 and
+#   later) always goes ahead, because re-running is the rollback. In production it first snapshots the
+#   data disk, which holds both environments' databases. It then copies deploy/ to the VM over IAP and
+#   runs `bin/deploy.sh <staging|prod>` with the image's digest. That script runs as a systemd unit of its
+#   own, so a dropped SSH session does not stop it halfway. It runs that environment's migrations, swaps
+#   that environment's API container, and puts its previous image back if the new one is not healthy.
+#   Mongo and the other environment's API are never restarted.
+# - smoke checks the public host: ready, HSTS, refusing an anonymous caller, and CORS for the app's
+#   origin alone.
+#
+# A rollback is "Re-run jobs" on the deploy job of an earlier green run: it deploys that run's digest.
+# Or, on the VM, as an operator with sudo, naming the environment first (staging in both places for
+# staging):
+#   sudo /opt/agencyboost/bin/deploy.sh prod "$(sudo cat /opt/agencyboost/state/prod/previous)"
+#
+# No secret lives in GitHub. Each job proves who it is with GitHub's OIDC token (Workload Identity
+# Federation). The provider accepts only this repository, and for each environment only its branch and
+# its workflow files; production accepts deployments from main alone (D5). Each environment's registry
+# is written by that environment's gh-builder-<env> alone.
+# Variables, in each GitHub environment (README, Deployment):
+#   the same in both:      GCP_PROJECT_ID, GCP_WIF_PROVIDER, GCE_INSTANCE, GCE_ZONE
+#   per environment:       GCP_BUILD_SA, GCP_DEPLOY_SA, API_HOST, APP_ORIGIN
+# The registry follows: asia-southeast2-docker.pkg.dev/<GCP_PROJECT_ID>/agencyboost-<staging|prod>.
+#
+# Every action is pinned by commit, with its version beside it; .github/dependabot.yml proposes updates.
+on:
+  push:
+    branches: [development, main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "staging deploys development and production deploys main: run this from that branch"
+        type: choice
+        options: [staging, production]
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The branch decides the environment. A manual run must name the one its branch deploys, so a
+  # production deploy of development cannot be started by picking it from a list.
+  target:
+    runs-on: ubuntu-latest
+    outputs:
+      # The GitHub environment (staging, production), and its short name on the VM (staging, prod).
+      environment: ${{ steps.pick.outputs.environment }}
+      vm_env: ${{ steps.pick.outputs.vm_env }}
+    steps:
+      - name: Which environment this run deploys
+        id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          REQUESTED: ${{ inputs.environment }}
+        run: |
+          case "$GITHUB_REF" in
+            refs/heads/main) environment=production vm_env=prod ;;
+            refs/heads/development) environment=staging vm_env=staging ;;
+            *)
+              echo "::error::Deploys run from development (staging) or main (production), not $GITHUB_REF."
+              exit 1
+              ;;
+          esac
+          if [ "$EVENT" = workflow_dispatch ] && [ "$REQUESTED" != "$environment" ]; then
+            echo "::error::This run is on $GITHUB_REF, which deploys $environment, not $REQUESTED."
+            exit 1
+          fi
+          echo "environment=$environment" >> "$GITHUB_OUTPUT"
+          echo "vm_env=$vm_env" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: target
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: [target, ci]
+    runs-on: ubuntu-latest
+    # The environment's variables, and the identity that may push, exist only inside it.
+    environment: ${{ needs.target.outputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    env:
+      VM_ENV: ${{ needs.target.outputs.vm_env }}
+      PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+      BUILD_SA: ${{ vars.GCP_BUILD_SA }}
+    steps:
+      - name: The environment is configured
+        run: |
+          missing=""
+          [ -n "$PROJECT" ] || missing="$missing GCP_PROJECT_ID"
+          [ -n "$WIF_PROVIDER" ] || missing="$missing GCP_WIF_PROVIDER"
+          [ -n "$BUILD_SA" ] || missing="$missing GCP_BUILD_SA"
+          if [ -n "$missing" ]; then
+            echo "::error::Variables missing:$missing. deploy/gcp/provision.sh prints their values."
+            exit 1
+          fi
+          # This environment's repository (provision.sh), and a tag no other build has: immutable tags
+          # refuse a second push of the same one.
+          echo "IMAGE=asia-southeast2-docker.pkg.dev/$PROJECT/agencyboost-$VM_ENV/api" >> "$GITHUB_ENV"
+          echo "TAG=$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+      # Nothing here needs git after the checkout, so the token is not left in .git/config either.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      # An access token as a step output and nothing on disk: with a credentials file, `COPY . .`
+      # would carry it into the image's build stage and the build cache.
+      - id: gcp
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_BUILD_SA }}
+          token_format: access_token
+          create_credentials_file: false
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: asia-southeast2-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.gcp.outputs.access_token }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Staging shares a build cache with CI. Production imports none: its image is made from the main
+      # commit, the pinned base and the lockfile, and from nothing another run left behind.
+      - name: Build and push the runtime image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: runtime
+          push: true
+          tags: ${{ env.IMAGE }}:${{ env.TAG }}
+          no-cache: ${{ needs.target.outputs.environment == 'production' }}
+          cache-from: ${{ needs.target.outputs.environment == 'staging' && 'type=gha,scope=api-runtime' || '' }}
+          cache-to: ${{ needs.target.outputs.environment == 'staging' && 'type=gha,scope=api-runtime,mode=max' || '' }}
+      - name: The image, by digest
+        id: image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          case "$DIGEST" in
+            sha256:*) ;;
+            *) echo "::error::No image digest came out of the build."; exit 1 ;;
+          esac
+          echo "image=$IMAGE@$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Image: \`$IMAGE@$DIGEST\` (tag \`$TAG\`)" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: [target, build]
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.target.outputs.environment }}
+      url: https://${{ vars.API_HOST }}/api/health/ready
+    # One deploy per environment at a time, and never one cancelled halfway: a later push waits.
+    # bin/deploy.sh holds a lock on the VM as well, which a seed takes too.
+    concurrency:
+      group: deploy-${{ needs.target.outputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    # Not secrets: handed to the smoke job, which runs outside the environment.
+    outputs:
+      deployed: ${{ steps.head.outputs.deploy }}
+      api_host: ${{ vars.API_HOST }}
+      app_origin: ${{ vars.APP_ORIGIN }}
+    env:
+      VM_ENV: ${{ needs.target.outputs.vm_env }}
+      IMAGE: ${{ needs.build.outputs.image }}
+      # The VM's data disk (provision.sh adopts it by this name). One disk, both databases.
+      DATA_DISK: mongodb
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCE_INSTANCE: ${{ vars.GCE_INSTANCE }}
+      GCE_ZONE: ${{ vars.GCE_ZONE }}
+      DEPLOY_SA: ${{ vars.GCP_DEPLOY_SA }}
+    steps:
+      - name: The environment is configured
+        run: |
+          for name in GCP_PROJECT_ID GCE_INSTANCE GCE_ZONE DEPLOY_SA; do
+            if [ -z "$(printenv "$name")" ]; then
+              echo "::error::Variable $name is missing. deploy/gcp/provision.sh prints its value."
+              exit 1
+            fi
+          done
+      # The credentials file below is written into this workspace. That is safe here because this job
+      # builds nothing, and only deploy/ is copied to the VM.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      # Runs queue per environment, so an older one can start after a newer one has deployed. Skipped
+      # unless this commit is still the branch's head, except on a re-run, which is the rollback.
+      - name: Still the head of the branch?
+        id: head
+        env:
+          ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          head=$(git ls-remote origin "refs/heads/$GITHUB_REF_NAME" | cut -f1)
+          if [ -z "$head" ]; then
+            echo "::error::Could not read the head of $GITHUB_REF_NAME."
+            exit 1
+          fi
+          if [ "$ATTEMPT" -gt 1 ]; then
+            echo "Attempt $ATTEMPT: deploying $GITHUB_SHA as asked (a re-run is the rollback); $GITHUB_REF_NAME is at $head."
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          elif [ "$head" = "$GITHUB_SHA" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$GITHUB_REF_NAME has moved on to $head. Not deploying the older $GITHUB_SHA over it."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        if: steps.head.outputs.deploy == 'true'
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        if: steps.head.outputs.deploy == 'true'
+
+      # D4: the data disk is snapshotted before a production deploy changes anything on it. It holds
+      # staging's database too, so this covers both; a staging deploy takes none (ADR-0155).
+      # Crash-consistent, which WiredTiger's journal recovers from. Labelled predeploy=true: these do
+      # not expire, and the runbook prunes them (the deployer may create snapshots and never delete one).
+      - name: Snapshot the data disk
+        if: steps.head.outputs.deploy == 'true' && needs.target.outputs.environment == 'production'
+        run: |
+          gcloud compute snapshots create "$GCE_INSTANCE-predeploy-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --project="$GCP_PROJECT_ID" \
+            --source-disk="$DATA_DISK" \
+            --source-disk-zone="$GCE_ZONE" \
+            --storage-location=asia-southeast2 \
+            --labels="app=agencyboost,predeploy=true" \
+            --description="Before deploying $GITHUB_SHA ($IMAGE)"
+
+      # Over IAP, with an SSH key that expires in 30 minutes. This environment's deployer may run
+      # `bin/deploy.sh <this environment>` as root and nothing else (vm/bootstrap.sh's sudoers rules),
+      # which is why the environment is the script's first argument. deploy.sh runs the work as a
+      # systemd unit and follows its journal here, so this step's log is the deploy's.
+      - name: Copy deploy/ to the VM and run deploy.sh
+        if: steps.head.outputs.deploy == 'true'
+        run: |
+          bundle="agencyboost-bundle-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          ssh_flags=(--project="$GCP_PROJECT_ID" --zone="$GCE_ZONE" --tunnel-through-iap --ssh-key-expire-after=30m --quiet)
+          gcloud compute scp "${ssh_flags[@]}" --recurse deploy "$GCE_INSTANCE:$bundle"
+          gcloud compute ssh "$GCE_INSTANCE" "${ssh_flags[@]}" --command="
+            sudo /opt/agencyboost/bin/deploy.sh $VM_ENV --bundle \"\$HOME/$bundle\" '$IMAGE'
+            status=\$?
+            rm -rf \"\$HOME/$bundle\"
+            exit \$status
+          "
+
+  smoke:
+    needs: [target, deploy]
+    if: needs.deploy.outputs.deployed == 'true'
+    runs-on: ubuntu-latest
+    env:
+      ENVIRONMENT: ${{ needs.target.outputs.environment }}
+      API_HOST: ${{ needs.deploy.outputs.api_host }}
+      APP_ORIGIN: ${{ needs.deploy.outputs.app_origin }}
+    steps:
+      - name: Ready, through Caddy and TLS
+        run: curl -fsS --retry 5 --retry-delay 3 --retry-all-errors "https://$API_HOST/api/health/ready"
+      - name: HSTS
+        run: |
+          if ! curl -fsS -o /dev/null -D - "https://$API_HOST/api/health" | tr -d '\r' \
+            | grep -qix 'strict-transport-security: max-age=31536000; includeSubDomains'; then
+            echo "::error::https://$API_HOST does not send the HSTS header deploy/Caddyfile sets."
+            exit 1
+          fi
+      - name: An anonymous caller is refused
+        run: |
+          status=$(curl -s -o /dev/null -w '%{http_code}' "https://$API_HOST/api/v1/auth/me")
+          if [ "$status" != 401 ]; then
+            echo "::error::GET /api/v1/auth/me without a token answered $status, not 401."
+            exit 1
+          fi
+      - name: CORS allows the app's origin, and no other
+        run: |
+          allowed_origin() {
+            curl -s -o /dev/null -D - -X OPTIONS \
+              -H "Origin: $1" \
+              -H 'Access-Control-Request-Method: POST' \
+              -H 'Access-Control-Request-Headers: content-type' \
+              "https://$API_HOST/api/v1/auth/refresh" \
+              | tr -d '\r' | sed -n 's/^[Aa]ccess-[Cc]ontrol-[Aa]llow-[Oo]rigin: //p'
+          }
+          got=$(allowed_origin "$APP_ORIGIN")
+          if [ "$got" != "$APP_ORIGIN" ]; then
+            echo "::error::A preflight from $APP_ORIGIN was answered with Access-Control-Allow-Origin '$got'."
+            exit 1
+          fi
+          # The other environment's app is same-site with this API (agencyboost.id), so it must be
+          # refused like any stranger.
+          case "$APP_ORIGIN" in
+            https://agencyboost.id) sibling=https://staging.agencyboost.id ;;
+            *) sibling=https://agencyboost.id ;;
+          esac
+          for origin in "$sibling" https://example.invalid; do
+            got=$(allowed_origin "$origin")
+            if [ -n "$got" ]; then
+              echo "::error::A preflight from $origin was allowed ('$got'). CORS_ORIGINS must name $APP_ORIGIN alone."
+              exit 1
+            fi
+          done
+      - name: The OpenAPI page is on staging only
+        run: |
+          status=$(curl -s -o /dev/null -w '%{http_code}' "https://$API_HOST/api/docs")
+          case "$ENVIRONMENT:$status" in
+            staging:200 | production:404) echo "/api/docs answered $status on $ENVIRONMENT, as it should." ;;
+            *) echo "::error::/api/docs answered $status on $ENVIRONMENT."; exit 1 ;;
+          esac

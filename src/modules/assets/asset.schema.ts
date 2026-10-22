@@ -7,7 +7,7 @@ export type AssetDocument = HydratedDocument<Asset>;
 /**
  * The central registry for every uploaded file.
  *
- * Without it, Cloudinary references scatter across training modules, product documents,
+ * Without it, storage keys scatter across training modules, product documents,
  * event posters, coaching exports and upload batches — and there is no way to find an
  * orphan, account for storage per tenant, or say who uploaded what.
  */
@@ -32,7 +32,11 @@ export class Asset {
   @Prop({ type: String, default: null, index: true })
   companyId!: string | null;
 
-  /** Cloudinary public_id, including the tenant folder prefix. */
+  /**
+   * The object's name in the environment's Cloud Storage bucket (ADR-0153):
+   * `<STORAGE_KEY_PREFIX>/<kpmId | company/<companyId>>/<folder>/<id>`. Keys written while storage was
+   * Cloudinary (ADR-0032) have the same shape, as its public ids did.
+   */
   @Prop({ type: String, required: true, unique: true })
   storageKey!: string;
 

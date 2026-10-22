@@ -1,0 +1,36 @@
+# AgencyBoost's containers at boot: Caddy, the API and MongoDB (P18.7-T3, ADR-0152).
+#
+# Installed by vm/bootstrap.sh and enabled, never started by it: there is nothing to run until the
+# first deploy has recorded an image, which is what ConditionPathExists waits for.
+#
+# **It does not start without the data disk.** RequiresMountsFor makes this unit depend on the mount
+# of /mnt/mongo-data, and fstab mounts that disk with nofail, so a VM booted without it still boots
+# (and can be reached over SSH to fix) while this unit fails instead of starting Mongo on an empty
+# directory on the boot disk. The two ExecStartPre checks are the same ones bin/deploy.sh makes.
+
+[Unit]
+Description=AgencyBoost (Caddy, the staging and production APIs, MongoDB) under Docker Compose
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+RequiresMountsFor=/mnt/mongo-data
+# Either environment deployed at least once; compose.sh starts only the APIs that have been (profiles).
+ConditionPathExistsGlob=/opt/agencyboost/state/*/current
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/usr/bin/mountpoint -q /mnt/mongo-data
+ExecStartPre=/usr/bin/test -f /mnt/mongo-data/.agencyboost-data-disk
+# --no-recreate: create what is missing and start what is stopped, and never recreate a container whose
+# definition changed since it was made (P18.7 review, M4). A reboot is no time to restart Mongo onto a
+# new definition; deploy.sh warns when one is pending, and a person recreates it (the runbook).
+ExecStart=/opt/agencyboost/bin/compose.sh up --detach --no-recreate
+# A stop, not a down: the containers and their state stay, and each stops within its own grace period
+# (Mongo's 60 s checkpoint, each API's 40 s drain).
+ExecStop=/opt/agencyboost/bin/compose.sh stop
+TimeoutStartSec=300
+TimeoutStopSec=150
+
+[Install]
+WantedBy=multi-user.target

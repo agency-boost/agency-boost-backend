@@ -1,0 +1,47 @@
+# The only thing on this VM that faces the internet (P18.7-T3, ADR-0152, ADR-0155): two sites, one per
+# environment, each in front of its own API.
+#
+# TLS from Let's Encrypt, issued and renewed by Caddy itself for both hosts (API_HOST_PROD and
+# API_HOST_STAGING, from env/compose.env). Plain HTTP on :80 redirects to HTTPS and answers the ACME
+# challenge. Both DNS records point at the VM's one static address.
+#
+# Edited here, in the repository: bin/deploy.sh installs it and reloads Caddy only when it changed.
+
+{
+	servers {
+		# HTTP/3 is off because the firewall opens TCP 443 only. Advertising it would send every
+		# browser to try QUIC first, time out, and fall back.
+		protocols h1 h2
+	}
+}
+
+# What both sites do, in front of the API container named by the one argument.
+(api) {
+	# A year. Sent by this host, HSTS covers this host and, with includeSubDomains, only the names below
+	# it: a browser never applies it to the apex or a sibling. HSTS for agencyboost.id and the app's
+	# hosts is Vercel's to send (P18.7 review, L8).
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	# Uploads go from the browser straight to Cloud Storage (ADR-0153), so no request here is large.
+	# 30 MB is headroom over the 25 MB upload limit for the one path that might still carry a file.
+	request_body {
+		max_size 30MB
+	}
+
+	reverse_proxy {args[0]}:3001 {
+		# A deploy replaces the API container: compose stops the old one, then starts the new. For that
+		# gap a request waits here and is retried, rather than failing with a 502. Usually a few seconds;
+		# at worst the old container's full drain (15 s for open requests, 10 s for email: compose.yml)
+		# plus the new one's start, about 30 s. 45 s covers that worst case with room to spare.
+		lb_try_duration 45s
+		lb_try_interval 250ms
+	}
+}
+
+{$API_HOST_PROD} {
+	import api api-prod
+}
+
+{$API_HOST_STAGING} {
+	import api api-staging
+}

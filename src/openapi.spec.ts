@@ -62,6 +62,13 @@ describe('the OpenAPI document describes the API', () => {
 
   it('AC-2: every operation documents its failures with the shared envelope', () => {
     const envelope = '#/components/schemas/ApiErrorEnvelope';
+    /*
+     * **The one failure that is not an error** (P18.7-T1, ADR-0152): readiness answers 503 with its own body,
+     * `{status:'degraded', checks:{database:'down'}}`, so a load balancer and `deploy.sh` read the status and an
+     * operator reads which check failed. It is a probe's answer, never the envelope, and documenting it as one would
+     * be false.
+     */
+    const ownBody: Record<string, string> = { 'GET /api/health/ready 503': '#/components/schemas/ReadinessDto' };
     for (const { label, op } of operations) {
       const failures = Object.entries(op.responses).filter(([code]) => code.startsWith('4') || code.startsWith('5'));
       expect([label, failures.length > 0]).toEqual([label, true]);
@@ -69,7 +76,7 @@ describe('the OpenAPI document describes the API', () => {
         const schema = (response.content as Record<string, { schema?: { $ref?: string } }> | undefined)?.[
           'application/json'
         ]?.schema;
-        expect([label, code, schema?.$ref]).toEqual([label, code, envelope]);
+        expect([label, code, schema?.$ref]).toEqual([label, code, ownBody[`${label} ${code}`] ?? envelope]);
       }
     }
   });

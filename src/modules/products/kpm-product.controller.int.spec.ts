@@ -418,7 +418,7 @@ describe('an office’s products over HTTP (P5-T5, P5-T10)', () => {
       it('P17-T9 AC-1 signs a PDF into the office’s own products folder, and the existing route attaches it — no confirm step between', async () => {
         const signed = await sign({ filename: 'Brosur PRUMapan.pdf', mimeType: 'application/pdf', bytes: 2_048_000 }).expect(201);
         expect(Object.keys(signed.body).sort()).toEqual(['expiresAt', 'fields', 'signature', 'storageKey', 'uploadUrl']);
-        expect(signed.body.fields).toMatchObject({ public_id: signed.body.storageKey, signature: signed.body.signature });
+        expect(signed.body.fields).toMatchObject({ key: signed.body.storageKey, 'x-goog-signature': signed.body.signature });
         expect(signed.body.storageKey).toMatch(new RegExp(`^dev/${KPM_A}/products/`));
 
         // The browser sends the bytes to storage; the stub holds them from the signature on.
@@ -486,7 +486,8 @@ describe('an office’s products over HTTP (P5-T5, P5-T10)', () => {
       it('N5 signs a PDF-only upload: the storage is asked for PDFs alone, and the fields say so', async () => {
         const res = await sign({ filename: 'x.pdf', mimeType: 'application/pdf', bytes: 10 }).expect(201);
         expect(wired.storage.signedWith.at(-1)).toEqual({ folder: 'products', mimeType: 'application/pdf', allowedMimeTypes: ['application/pdf'] });
-        expect(res.body.fields).toMatchObject({ overwrite: 'false', allowed_formats: 'pdf' });
+        // P18.7-T2: the V4 POST policy pins the Content-Type to the one type the route accepts.
+        expect(res.body.fields).toMatchObject({ key: res.body.storageKey, 'Content-Type': 'application/pdf' });
       });
 
       it('N2 lets an elevated support session as the Owner sign and attach, as its member', async () => {

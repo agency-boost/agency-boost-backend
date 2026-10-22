@@ -7,3 +7,7 @@ coverage/
 *.log
 .DS_Store
 .turbo/
+# A VM env file filled from deploy/env/*.env.example holds real secrets (P18.7-T3).
+deploy/env/*.env
+# A Workload Identity credentials file google-github-actions/auth may write (P18.7 review, H1).
+gha-creds-*.json

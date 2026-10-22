@@ -1,12 +1,10 @@
 import { validateEnv } from './env.validation';
+import { MONGODB_DB_NAME_DEFAULT } from './mongo-target';
 
 const valid = {
   MONGODB_URI: 'mongodb://localhost:27017',
   JWT_ACCESS_SECRET: 'a'.repeat(32),
   JWT_REFRESH_SECRET: 'b'.repeat(32),
-  CLOUDINARY_CLOUD_NAME: 'demo',
-  CLOUDINARY_API_KEY: 'key',
-  CLOUDINARY_API_SECRET: 'secret',
   SMTP_HOST: 'smtp.example.test',
   MAIL_FROM: 'AgencyBoost <no-reply@example.test>',
   APP_BASE_URL: 'http://localhost:3000',
@@ -50,7 +48,12 @@ describe('environment validation', () => {
     });
 
     it('leaves production alone when the transport is right', () => {
-      expect(validateEnv({ ...valid, NODE_ENV: 'production' }).MAIL_TRANSPORT).toBe('smtp');
+      // P18.7-T2: production also needs its bucket and its key prefix.
+      // P18.7-T1: and its TRUST_PROXY, stated.
+      const production = {
+        ...valid, NODE_ENV: 'production', GCS_BUCKET: 'agencyboost-prod-assets', STORAGE_KEY_PREFIX: 'prod', TRUST_PROXY: '1',
+      };
+      expect(validateEnv(production).MAIL_TRANSPORT).toBe('smtp');
     });
   });
 
@@ -87,12 +90,65 @@ describe('environment validation', () => {
     });
   });
 
+  describe('TRUST_PROXY (P18.7-T1, ADR-0152)', () => {
+    it('P18.7-T1 may be left unset in development and test, where nothing is in front: no proxy is trusted', () => {
+      expect(validateEnv(valid).TRUST_PROXY).toBeUndefined();
+      expect(validateEnv({ ...valid, NODE_ENV: 'test' }).TRUST_PROXY).toBeUndefined();
+    });
+
+    /*
+     * The review's L2: a VM sits behind Caddy, and a key nobody wrote put every client on Caddy's address,
+     * one login bucket for the whole office. Saying `false` is a decision; saying nothing is refused.
+     */
+    describe.each(['staging', 'production'] as const)('in %s', (NODE_ENV) => {
+      const deployedEnv = {
+        ...valid, NODE_ENV, GCS_BUCKET: 'agencyboost-assets', STORAGE_KEY_PREFIX: NODE_ENV === 'production' ? 'prod' : 'staging',
+      };
+
+      it(`P18.7-T1 refuses to boot ${NODE_ENV} with TRUST_PROXY unset, by name`, () => {
+        expect(() => validateEnv(deployedEnv)).toThrow(`TRUST_PROXY: must be set when NODE_ENV is ${NODE_ENV}`);
+      });
+
+      it.each([['1', 1], ['false', false], ['0', false]])(`P18.7-T1 boots ${NODE_ENV} with TRUST_PROXY written as %j`, (value, parsed) => {
+        expect(validateEnv({ ...deployedEnv, TRUST_PROXY: value }).TRUST_PROXY).toBe(parsed);
+      });
+    });
+
+    it('P18.7-T1 reads "false" as false, not as a truthy string', () => {
+      expect(validateEnv({ ...valid, TRUST_PROXY: 'false' }).TRUST_PROXY).toBe(false);
+    });
+
+    it.each([['1', 1], ['2', 2], [' 1 ', 1]])('P18.7-T1 reads the hop count %j as %d', (value, hops) => {
+      expect(validateEnv({ ...valid, TRUST_PROXY: value }).TRUST_PROXY).toBe(hops);
+    });
+
+    it('P18.7-T1 reads 0 hops as false: no proxy is trusted either way', () => {
+      expect(validateEnv({ ...valid, TRUST_PROXY: '0' }).TRUST_PROXY).toBe(false);
+    });
+
+    it('P18.7-T1 refuses "true", which would let a client set its own IP with a header', () => {
+      expect(() => validateEnv({ ...valid, TRUST_PROXY: 'true' })).toThrow(/TRUST_PROXY/);
+      expect(() => validateEnv({ ...valid, TRUST_PROXY: 'true' })).toThrow(/"true" is refused/);
+    });
+
+    it.each(['-1', '1.5', 'loopback', '10.0.0.0/8', 'yes', ''])('P18.7-T1 refuses %j', (value) => {
+      expect(() => validateEnv({ ...valid, TRUST_PROXY: value })).toThrow(/TRUST_PROXY/);
+    });
+  });
+
+  it('P18.7-T1 the commands default to the database the API defaults to', () => {
+    // The migrations, the seed and create-super-admin read MONGODB_DB_NAME without this schema.
+    expect(valid).not.toHaveProperty('MONGODB_DB_NAME');
+    expect(validateEnv(valid).MONGODB_DB_NAME).toBe(MONGODB_DB_NAME_DEFAULT);
+  });
+
   it('accepts a complete configuration and applies defaults', () => {
     const env = validateEnv(valid);
     expect(env.PORT).toBe(3001);
     expect(env.NODE_ENV).toBe('development');
     expect(env.DEFAULT_TENANT_TIMEZONE).toBe('Asia/Jakarta');
-    expect(env.CLOUDINARY_FOLDER_PREFIX).toBe('dev');
+    expect(env.STORAGE_KEY_PREFIX).toBe('dev');
+    expect(env.GCS_BUCKET).toBeUndefined();
   });
 
   it('fails loudly on a missing required key, naming it', () => {
@@ -106,8 +162,49 @@ describe('environment validation', () => {
     );
   });
 
-  it('rejects a Cloudinary folder prefix outside the known environments', () => {
-    expect(() => validateEnv({ ...valid, CLOUDINARY_FOLDER_PREFIX: 'production' })).toThrow();
+  describe('storage (P18.7-T2, ADR-0153, D12)', () => {
+    const deployed = (NODE_ENV: 'staging' | 'production', extra: Record<string, string> = {}) => ({
+      // TRUST_PROXY is stated, as a VM's env file states it (P18.7-T1): these are storage's assertions.
+      ...valid, NODE_ENV, STORAGE_KEY_PREFIX: NODE_ENV === 'production' ? 'prod' : 'staging', TRUST_PROXY: '1', ...extra,
+    });
+
+    it.each(['development', 'test'])('P18.7-T2 boots %s with no bucket at all — storage then refuses, nothing else does', (NODE_ENV) => {
+      const env = validateEnv({ ...valid, NODE_ENV });
+      expect(env.GCS_BUCKET).toBeUndefined();
+      expect(env.GCS_PROJECT_ID).toBeUndefined();
+    });
+
+    it('P18.7-T2 reads an empty or blank bucket as unset, as `.env.example` writes it', () => {
+      expect(validateEnv({ ...valid, GCS_BUCKET: '', GCS_PROJECT_ID: '  ' })).toMatchObject({ GCS_BUCKET: undefined, GCS_PROJECT_ID: undefined });
+      expect(validateEnv({ ...valid, GCS_BUCKET: ' agencyboost-dev-assets ' }).GCS_BUCKET).toBe('agencyboost-dev-assets');
+    });
+
+    it.each(['staging', 'production'] as const)('P18.7-T2 refuses %s without a bucket, by name', (NODE_ENV) => {
+      expect(() => validateEnv(deployed(NODE_ENV))).toThrow(/GCS_BUCKET: is required when NODE_ENV is/);
+      expect(() => validateEnv(deployed(NODE_ENV, { GCS_BUCKET: ' ' }))).toThrow(/GCS_BUCKET/);
+    });
+
+    it.each(['staging', 'production'] as const)('P18.7-T2 boots %s with its bucket and its prefix', (NODE_ENV) => {
+      const env = validateEnv(deployed(NODE_ENV, { GCS_BUCKET: `agencyboost-${NODE_ENV}-assets`, GCS_PROJECT_ID: 'agencyboost-x' }));
+      expect(env).toMatchObject({ GCS_BUCKET: `agencyboost-${NODE_ENV}-assets`, GCS_PROJECT_ID: 'agencyboost-x' });
+    });
+
+    it.each(['dev', 'staging'])('P18.7-T2 refuses production writing keys prefixed %s', (prefix) => {
+      expect(() => validateEnv(deployed('production', { GCS_BUCKET: 'b', STORAGE_KEY_PREFIX: prefix })))
+        .toThrow(/STORAGE_KEY_PREFIX: must be "prod" in production/);
+      // Left at its default, too: production names its prefix.
+      const { STORAGE_KEY_PREFIX: _default, ...unnamed } = deployed('production', { GCS_BUCKET: 'b' });
+      expect(() => validateEnv(unnamed)).toThrow(/STORAGE_KEY_PREFIX/);
+    });
+
+    it.each(['development', 'test', 'staging'])('P18.7-T2 refuses the prod prefix in %s', (NODE_ENV) => {
+      expect(() => validateEnv({ ...valid, NODE_ENV, GCS_BUCKET: 'b', STORAGE_KEY_PREFIX: 'prod' }))
+        .toThrow(/STORAGE_KEY_PREFIX: may be "prod" only in production/);
+    });
+
+    it('P18.7-T2 rejects a prefix outside the known environments', () => {
+      expect(() => validateEnv({ ...valid, STORAGE_KEY_PREFIX: 'production' })).toThrow(/STORAGE_KEY_PREFIX/);
+    });
   });
 
   it('coerces numeric strings from the environment', () => {

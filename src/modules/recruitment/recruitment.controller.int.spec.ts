@@ -233,7 +233,8 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       expect(Object.keys(res.body).sort()).toEqual(['expiresAt', 'fields', 'signature', 'storageKey', 'uploadUrl']);
       expect(res.body.storageKey).toMatch(new RegExp(`^dev/${FIXTURE_KPM}/recruitment-pitch/`));
       expect(wired.storage.signedWith.at(-1)).toEqual({ folder: 'recruitment-pitch', mimeType: 'application/pdf', allowedMimeTypes: ['application/pdf'] });
-      expect(res.body.fields).toMatchObject({ public_id: res.body.storageKey, overwrite: 'false', allowed_formats: 'pdf' });
+      // P18.7-T2: one fresh key, and the Content-Type pinned to PDF by the V4 POST policy.
+      expect(res.body.fields).toMatchObject({ key: res.body.storageKey, 'Content-Type': 'application/pdf' });
     });
   });
 

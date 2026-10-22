@@ -289,7 +289,7 @@ describe('auth and admin over HTTP', () => {
         { provide: CampaignKindsApplier, useExisting: ProvisioningService },
         ProductService,
         // P5-T2: a training module's content is files (ADR-0032). The vendor is stubbed —
-        // this file's subject is the HTTP contract, not Cloudinary.
+        // this file's subject is the HTTP contract, not storage.
         AssetRepository,
         AssetService,
         // P5-T7: TenantService seeds a company's carrier rules at creation.

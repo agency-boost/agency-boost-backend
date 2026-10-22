@@ -37,21 +37,26 @@ type Recorded = {
   enableVersioning: jest.Mock;
   useGlobalPipes: jest.Mock;
   enableCors: jest.Mock;
+  /** The Express instance's `set`, where `trust proxy` goes. */
+  expressSet: jest.Mock;
 };
 
-function recordingApp(env: Record<string, string>): Recorded {
+/** `env` holds what `ConfigService` hands back: validated values, so `TRUST_PROXY` is `false` or a number. */
+function recordingApp(env: Record<string, unknown>): Recorded {
   const use = jest.fn();
   const setGlobalPrefix = jest.fn();
   const enableVersioning = jest.fn();
   const useGlobalPipes = jest.fn();
   const enableCors = jest.fn();
+  const expressSet = jest.fn();
 
   const config = {
-    get: (key: string, fallback?: string) => env[key] ?? fallback,
+    get: (key: string, fallback?: unknown) => env[key] ?? fallback,
   } as unknown as ConfigService;
 
   const app = {
     get: () => config,
+    getHttpAdapter: () => ({ getInstance: () => ({ set: expressSet }) }),
     use,
     setGlobalPrefix,
     enableVersioning,
@@ -59,7 +64,7 @@ function recordingApp(env: Record<string, string>): Recorded {
     enableCors,
   } as unknown as INestApplication;
 
-  return { app, use, setGlobalPrefix, enableVersioning, useGlobalPipes, enableCors };
+  return { app, use, setGlobalPrefix, enableVersioning, useGlobalPipes, enableCors, expressSet };
 }
 
 describe('configureApp', () => {
@@ -138,6 +143,33 @@ describe('configureApp', () => {
       configureApp(r.app);
       expect(r.enableCors).toHaveBeenCalledWith({ origin: false, credentials: true });
     });
+  });
+
+  /*
+   * P18.7-T1 (ADR-0152): behind Caddy the socket is always the proxy, so without this every client
+   * shares one `req.ip`, one login bucket, and one address on every session row.
+   */
+  describe('trust proxy (P18.7-T1)', () => {
+    it('P18.7-T1 trusts no proxy by default', () => {
+      const r = recordingApp({ NODE_ENV: 'production', TRUST_PROXY: false });
+      configureApp(r.app);
+      expect(r.expressSet).toHaveBeenCalledWith('trust proxy', false);
+    });
+
+    it('P18.7-T1 trusts the configured number of hops', () => {
+      const r = recordingApp({ NODE_ENV: 'production', TRUST_PROXY: 1 });
+      configureApp(r.app);
+      expect(r.expressSet).toHaveBeenCalledWith('trust proxy', 1);
+    });
+
+    it.each([undefined, 'true', true, '1', 0, -1])(
+      'P18.7-T1 trusts nothing when handed %j, which validation never produces',
+      (value) => {
+        const r = recordingApp({ NODE_ENV: 'production', TRUST_PROXY: value });
+        configureApp(r.app);
+        expect(r.expressSet).toHaveBeenCalledWith('trust proxy', false);
+      },
+    );
   });
 
   describe('Swagger', () => {

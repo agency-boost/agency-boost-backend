@@ -1,23 +1,30 @@
 name: ci
 
+# Every pull request, and every deploy (P18.7-T4, ADR-0154): deploy.yml calls this workflow before it
+# builds anything, so a push to development or main is checked once, by the run that ships it. A
+# `push` trigger here as well would run the same suite twice for every merge.
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_call:
+
+# Read the repository and nothing more; no job here writes anything through the token. Every action is
+# pinned by commit, with its version beside it; .github/dependabot.yml proposes updates.
+permissions:
+  contents: read
 
 jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       # No version pinned here on purpose: the action reads package.json#packageManager,
       # which is the same pnpm the lockfile was generated with and the same one Vercel
       # uses. Pinning it in four places is how CI came to run a pnpm that read the
       # overrides from somewhere the lockfile did not.
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v5
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
@@ -75,21 +82,21 @@ jobs:
       matrix:
         tz: [UTC, Asia/Jakarta, America/New_York]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       # No version pinned here on purpose: the action reads package.json#packageManager,
       # which is the same pnpm the lockfile was generated with and the same one Vercel
       # uses. Pinning it in four places is how CI came to run a pnpm that read the
       # overrides from somewhere the lockfile did not.
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v5
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
       # The in-memory MongoDB binary is large; cache it rather than downloading per job.
       - name: Cache MongoDB binary
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.cache/mongodb-binaries
           key: mongodb-binaries-${{ runner.os }}
@@ -102,18 +109,18 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       # No version pinned here on purpose: the action reads package.json#packageManager,
       # which is the same pnpm the lockfile was generated with and the same one Vercel
       # uses. Pinning it in four places is how CI came to run a pnpm that read the
       # overrides from somewhere the lockfile did not.
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v5
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: actions/cache@v5
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.cache/mongodb-binaries
           key: mongodb-binaries-${{ runner.os }}
@@ -126,16 +133,75 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       # No version pinned here on purpose: the action reads package.json#packageManager,
       # which is the same pnpm the lockfile was generated with and the same one Vercel
       # uses. Pinning it in four places is how CI came to run a pnpm that read the
       # overrides from somewhere the lockfile did not.
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v5
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Dependency audit
         run: pnpm audit --audit-level high
+
+  # The image the VMs run, built as deploy.yml builds it and started as a VM starts it (P18.7-T3,
+  # ADR-0152). deploy/ci/container-smoke.sh gives it a mongo:7.0 on a private network and asserts that
+  # readiness answers 200, then 503 once the database is stopped, then 200 again: what bin/deploy.sh
+  # relies on to roll back an image that cannot reach its database. It runs the same on a laptop.
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      # Decoys where the real things would be: google-github-actions/auth writes gha-creds-*.json into the
+      # workspace, and a laptop has a .env. The last step proves .dockerignore kept both out of the image.
+      - name: Plant decoy credentials in the build context
+        run: |
+          echo '{"decoy": "a credentials file that must never reach an image"}' > gha-creds-ci-decoy.json
+          echo 'DECOY=a local env file that must never reach an image' > .env
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the runtime image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: runtime
+          load: true
+          tags: agencyboost-api:ci
+          # The scope staging's deploy build reads. Production's build imports no cache at all.
+          cache-from: type=gha,scope=api-runtime
+          cache-to: type=gha,scope=api-runtime,mode=max
+      - name: Build the tools image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: tools
+          load: true
+          tags: agencyboost-tools:ci
+          cache-from: |
+            type=gha,scope=api-tools
+            type=gha,scope=api-runtime
+          cache-to: type=gha,scope=api-tools,mode=max
+      - name: Readiness answers 200 beside a database and 503 without one
+        run: bash deploy/ci/container-smoke.sh agencyboost-api:ci
+      - name: Neither image carries a credentials file or an env file
+        run: bash deploy/ci/no-secrets-in-image.sh agencyboost-api:ci agencyboost-tools:ci
+
+  # The VM's scripts and compose file (P18.7-T3). None of them runs anywhere before it reaches a VM,
+  # so a typo here is otherwise found by a failed deploy.
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Shell syntax
+        run: find deploy -name '*.sh' -print0 | xargs -0 -n1 bash -n
+      # Pinned rather than the runner's own copy, whose version moves with the runner image.
+      - name: shellcheck
+        run: find deploy -name '*.sh' -print0 | sort -z | xargs -0 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0
+      - name: compose.yml resolves, publishes only Caddy, and never creates the data directory
+        run: bash deploy/ci/compose-config.sh

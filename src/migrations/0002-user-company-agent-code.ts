@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { emptyIfMissing } from './missing-collection';
 
 /**
  * Move the agent code onto the account (ADR-0017, P3.6-T3).
@@ -17,12 +18,16 @@ import mongoose from 'mongoose';
  * unique index deliberately excludes.
  *
  * Idempotent: it touches only accounts with no code yet, and skips a user whose oldest
- * membership it cannot resolve.
+ * membership it cannot resolve. **Across runs as well as within one** (P18.7-T1): every deploy
+ * runs it again, so a pair an earlier run gave somebody is claimed before this run begins.
+ *
+ * It returns counts only. The result is printed to the deploy log, which is a CI log, and a
+ * collision used to be reported by the person's email.
  */
 export async function up(
   db: mongoose.mongo.Db,
   now: Date,
-): Promise<{ users: number; skipped: number; collisions: string[]; droppedIndex: boolean }> {
+): Promise<{ users: number; skipped: number; collisions: number; droppedIndex: boolean }> {
   /*
    * **Drop the old unique index, because Mongoose will not.**
    *
@@ -37,7 +42,11 @@ export async function up(
    * in seconds.
    */
   let droppedIndex = false;
-  const indexes = await db.collection('memberships').indexes();
+  // A fresh database has no `memberships` collection yet, and `indexes()` on a missing collection throws
+  // `NamespaceNotFound`: every new VM's first deploy runs the migrations before any collection exists
+  // (P18.7-T3, found rehearsing `deploy.sh` on an empty database). Nothing to drop then; 0023 guards the same way.
+  // Only that error: any other is thrown (`emptyIfMissing`, P18.7-T1).
+  const indexes: { name?: string; unique?: boolean }[] = await emptyIfMissing(db.collection('memberships').indexes());
   if (indexes.some((i) => i.name === 'kpmId_1_agentCode_1' && i.unique)) {
     await db.collection('memberships').dropIndex('kpmId_1_agentCode_1');
     await db.collection('memberships').createIndex({ kpmId: 1, agentCode: 1 });
@@ -54,8 +63,17 @@ export async function up(
 
   // Every `(companyId, agentCode)` already claimed, so a second claim is reported rather
   // than left for the unique index to reject at some later write.
-  const claimed = new Set<string>();
-  const collisions: string[] = [];
+  //
+  // **Seeded with every account that already holds a pair** (P18.7-T1, the security review's L5),
+  // the rows `users { companyId, agentCode }`'s unique index covers. Without it the guard held for one
+  // run only: an account reported as a collision on the first claimed the same pair on the next deploy,
+  // the index refused it (E11000), and every deploy after stopped at this migration.
+  const claimed = new Set<string>(
+    users
+      .filter((u) => typeof u.companyId === 'string' && typeof u.agentCode === 'string' && u.agentCode)
+      .map((u) => `${u.companyId as string}::${String(u.agentCode).toUpperCase()}`),
+  );
+  let collisions = 0;
   let migrated = 0;
   let skipped = 0;
 
@@ -83,7 +101,8 @@ export async function up(
     const agentCode = String(first.agentCode).toUpperCase();
     const key = `${companyId}::${agentCode}`;
     if (claimed.has(key)) {
-      collisions.push(`${user.email as string} → ${agentCode}`);
+      // Counted, never named: who collided is a query on `users { agentCode: null }`, not a log line.
+      collisions += 1;
       skipped += 1;
       continue;
     }

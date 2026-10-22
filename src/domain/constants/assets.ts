@@ -16,8 +16,9 @@ export const ASSET_LIMITS = {
   /** 25 MB. Anything larger is a link, not an upload (ADR-0032). */
   MAX_BYTES: 25 * 1024 * 1024,
   /**
-   * The whole vocabulary, and `cloudinary.adapter.ts`'s format map covers exactly this list —
-   * a format missing from there confirms as its own extension and is refused.
+   * The whole vocabulary, and `modules/assets/content-sniff.ts` holds a byte signature for exactly
+   * this list (P18.7-T2) — a type with none, or bytes that contradict the claim, confirm as
+   * `application/octet-stream` and are refused.
    */
   ALLOWED_MIME_TYPES: [
     'image/jpeg', 'image/png', 'image/webp',

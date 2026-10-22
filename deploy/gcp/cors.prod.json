@@ -1,0 +1,14 @@
+[
+  {
+    "origin": [
+      "https://agencyboost.id"
+    ],
+    "method": [
+      "POST"
+    ],
+    "responseHeader": [
+      "Content-Type"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

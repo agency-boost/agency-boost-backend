@@ -1,0 +1,31 @@
+# What never enters the image's build context (P18.7-T3).
+
+# Secrets. A local .env copied into a layer is in the registry for good, whatever a later layer does.
+# gha-creds-*.json is what google-github-actions/auth writes into the workspace when it writes a
+# credentials file (P18.7 review, H1); the CI container job plants a decoy and checks it stays out.
+gha-creds-*.json
+**/gha-creds-*.json
+.env
+.env.*
+**/.env
+**/.env.*
+deploy/env/*.env
+
+# Built and installed inside the image, never copied in from a laptop: a macOS node_modules carries
+# the wrong argon2 binary, and a stale dist/ would ship code the build did not produce.
+node_modules
+dist
+*.tsbuildinfo
+coverage
+
+# The Vercel function path, which the image does not use. Removed at the T7 cutover.
+api/
+vercel.json
+public/
+
+# Not the API: the VM's own files, CI, and the repository's history.
+deploy/
+.github/
+.git
+*.log
+.DS_Store
