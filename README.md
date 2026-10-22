@@ -228,8 +228,14 @@ deployment target, in this order. The runbook has the checks after each one.
 
    ```bash
    deploy/gcp/provision.sh --project project-2bac9fc9-f453-47b4-a29 \
-     --github-owner-id <n> --github-repo-id <n> --alert-email <ops address> --dry-run
+     --alert-email <ops address> --dry-run
    ```
+
+   It looks up the two numeric ids WIF is pinned to (the repository's owner and the repository) itself:
+   through `gh` when it is signed in (`gh auth login`), else GitHub's public API, which answers only for a
+   public repository. If neither can, it stops and says how to read them in a browser (the repository
+   page's source, `octolytics-dimension-user_id` and `octolytics-dimension-repository_id`); then pass them
+   with `--github-owner-id <n> --github-repo-id <n>`.
 
    Then run it without `--dry-run`. It creates or adopts:
    - the five service accounts (`api-runtime`, `gh-builder-staging`, `gh-builder-prod`,

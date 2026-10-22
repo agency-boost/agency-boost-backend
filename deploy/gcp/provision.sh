@@ -3,18 +3,22 @@
 # Provision the one GCP project AgencyBoost's staging and production share, around the VM that is
 # already running there (P18.7-T3, ADR-0152, ADR-0153, ADR-0155).
 #
-#   deploy/gcp/provision.sh --project <id> --github-owner-id <n> --github-repo-id <n> [options]
+#   deploy/gcp/provision.sh --project <id> [options]
 #
 # It adopts the existing VM (default agencyboost-backend in asia-southeast2-b) rather than creating
 # one. It does not stop it: the one change that needs a stop is printed, or made with --apply-vm-identity.
 #
-# The two numeric ids pin Workload Identity Federation to this repository: a name can be renamed and
-# then reused by somebody else, an id cannot. To read them:
-#
-#   gh api repos/agency-boost/agency-boost-backend --jq '"--github-owner-id \(.owner.id) --github-repo-id \(.id)"'
+# Workload Identity Federation is pinned to the backend repository by two numeric ids, its owner's and
+# its own: a name can be renamed and then reused by somebody else, an id cannot. The script looks them
+# up itself from --github-repo (default agency-boost/agency-boost-backend): through `gh` when it is
+# signed in (`gh auth login`), else GitHub's public API, which answers for a public repository only. If
+# neither can, it stops and says how to read them by hand; then pass them with the two --github-*-id flags.
 #
 # Options:
 #   --project <id>            the project (required)
+#   --github-repo <owner/name>  the backend repository WIF trusts (default agency-boost/agency-boost-backend)
+#   --github-owner-id <n>     its owner's numeric id, instead of looking it up
+#   --github-repo-id <n>      its numeric id, instead of looking it up
 #   --instance <name>         the VM to adopt (default agencyboost-backend)
 #   --zone <zone>             its zone (default asia-southeast2-b)
 #   --data-disk <name>        its data disk (default mongodb)
@@ -33,7 +37,7 @@
 set -euo pipefail
 export CLOUDSDK_CORE_DISABLE_PROMPTS=1
 
-usage() { sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '3,36p' "$0" | sed 's/^# \{0,1\}//'; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 say() { printf '\n== %s\n' "$*" >&2; }
 note() { printf '   %s\n' "$*" >&2; }
@@ -50,13 +54,14 @@ exists() { "$@" >/dev/null 2>&1; }
 # --- arguments -------------------------------------------------------------------------------------
 
 project="" instance=agencyboost-backend zone=asia-southeast2-b data_disk=mongodb
-owner_id="" repo_id="" alert_email="" apply_identity=0
+github_repo=agency-boost/agency-boost-backend owner_id="" repo_id="" alert_email="" apply_identity=0
 while (($#)); do
   case $1 in
     --project) project=${2:?}; shift 2 ;;
     --instance) instance=${2:?}; shift 2 ;;
     --zone) zone=${2:?}; shift 2 ;;
     --data-disk) data_disk=${2:?}; shift 2 ;;
+    --github-repo) github_repo=${2:?}; shift 2 ;;
     --github-owner-id) owner_id=${2:?}; shift 2 ;;
     --github-repo-id) repo_id=${2:?}; shift 2 ;;
     --alert-email) alert_email=${2:?}; shift 2 ;;
@@ -67,8 +72,32 @@ while (($#)); do
   esac
 done
 [[ -n $project ]] || die "--project is required (see --help)"
+[[ $github_repo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "--github-repo '$github_repo' is not <owner>/<name>"
+
+# The two ids WIF is pinned to, looked up when they were not passed. Reading them is the step operators
+# got stuck on (a `gh` that is not signed in answers 401), so the script does it: `gh` first, because it
+# sees a private repository; then the public API, which answers without a login for a public one.
+first_number() { grep -m1 '"id":' | tr -dc '0-9'; }
+if [[ -z $owner_id || -z $repo_id ]]; then
+  ids=""
+  if command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
+    ids=$(gh api "repos/$github_repo" --jq '"\(.owner.id) \(.id)"' 2>/dev/null) || ids=""
+  fi
+  if [[ -z $ids ]] && command -v curl >/dev/null; then
+    found_repo=$(curl -fsS "https://api.github.com/repos/$github_repo" 2>/dev/null | first_number) || found_repo=""
+    found_owner=$(curl -fsS "https://api.github.com/users/${github_repo%%/*}" 2>/dev/null | first_number) || found_owner=""
+    if [[ -n $found_repo && -n $found_owner ]]; then ids="$found_owner $found_repo"; fi
+  fi
+  [[ -n $ids ]] || die "could not read the ids of $github_repo. Either sign gh in (gh auth login, then run this again), \
+or read them in a browser signed in to GitHub: open https://github.com/$github_repo, view the page source, \
+and find octolytics-dimension-user_id (the owner id) and octolytics-dimension-repository_id (the repository \
+id); then run this again with --github-owner-id <n> --github-repo-id <n>"
+  [[ -n $owner_id ]] || owner_id=${ids%% *}
+  [[ -n $repo_id ]] || repo_id=${ids##* }
+fi
 [[ $owner_id =~ ^[0-9]+$ && $repo_id =~ ^[0-9]+$ ]] \
-  || die "--github-owner-id and --github-repo-id are required, and numeric (see --help)"
+  || die "--github-owner-id and --github-repo-id must be numeric (see --help)"
+printf 'GitHub: %s, owner id %s, repository id %s\n' "$github_repo" "$owner_id" "$repo_id" >&2
 [[ -z $alert_email || $alert_email =~ ^[^@\"[:space:]]+@[^@\"[:space:]]+$ ]] \
   || die "--alert-email '$alert_email' is not an email address"
 
@@ -138,8 +167,31 @@ for env in "${envs[@]}"; do
   ensure_sa "$(deployer_sa "$env")" "GitHub Actions deployer, $env: SSH to the VM"
 done
 
+# A custom role made a moment ago is not yet visible to every service. On the first real run (2026-10-22)
+# Cloud Storage refused a binding to agencyboostBackupWriter, created a second earlier, with "Role … does not
+# exist in the resource's hierarchy". So a binding to one of our own roles is retried for up to two minutes
+# while that is the answer; any other error fails at once, as `run` does.
+run_new_role() {
+  printf '+ %s\n' "$*" >&2
+  if ((dry_run)); then return 0; fi
+  local attempt err=""
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    if err=$("$@" 2>&1 >/dev/null); then return 0; fi
+    case $err in
+      *[Rr]ole*"does not exist"*)
+        note "the new custom role is not visible yet (attempt $attempt of 12); waiting 10 s"
+        sleep 10 ;;
+      *) printf '%s\n' "$err" >&2; return 1 ;;
+    esac
+  done
+  printf '%s\n' "$err" >&2
+  return 1
+}
+# Our own roles are `projects/<id>/roles/…`; Google's predefined ones are `roles/…`.
+bind_cmd() { if [[ $1 == projects/* ]]; then echo run_new_role; else echo run; fi; }
+
 bind_project() {
-  run gcloud projects add-iam-policy-binding "$project" \
+  "$(bind_cmd "$2")" gcloud projects add-iam-policy-binding "$project" \
     --member="serviceAccount:$1" --role="$2" --condition=None >/dev/null
 }
 # A project-level custom role, created or brought up to date: ensure_role <id> <title> <permissions>.
@@ -191,7 +243,7 @@ ensure_bucket() {
   run gcloud storage buckets update "$bucket" --uniform-bucket-level-access --public-access-prevention
 }
 bind_bucket() {
-  run gcloud storage buckets add-iam-policy-binding "gs://$1" \
+  "$(bind_cmd "$3")" gcloud storage buckets add-iam-policy-binding "gs://$1" \
     --member="serviceAccount:$2" --role="$3" >/dev/null
 }
 
