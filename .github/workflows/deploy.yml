@@ -124,7 +124,7 @@ jobs:
           echo "IMAGE=asia-southeast2-docker.pkg.dev/$PROJECT/agencyboost-$VM_ENV/api" >> "$GITHUB_ENV"
           echo "TAG=$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       # Nothing here needs git after the checkout, so the token is not left in .git/config either.
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # An access token as a step output and nothing on disk: with a credentials file, `COPY . .`
@@ -206,7 +206,7 @@ jobs:
           done
       # The credentials file below is written into this workspace. That is safe here because this job
       # builds nothing, and only deploy/ is copied to the VM.
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Runs queue per environment, so an older one can start after a newer one has deployed. Skipped
       # unless this commit is still the branch's head, except on a re-run, which is the rollback.
