@@ -9,7 +9,13 @@ const config: Config = {
   testRegex: '\\.spec\\.ts$',
   // P18.7-T2: `*.live.spec.ts` reaches a real bucket and runs only under `pnpm test:storage-live`, which
   // replaces this list. Every other script — the full run, coverage, integration, tenancy — leaves it out.
-  testPathIgnorePatterns: ['/node_modules/', '\\.live\\.spec\\.ts$'],
+  //
+  // `*.performance.spec.ts` runs only under `pnpm test:performance`, one suite at a time, which replaces this
+  // list too. A p95 taken beside three other workers measures the other workers, and one taken under coverage
+  // measures the instrumentation. The forum's meeting read, ≈ 710 ms alone on a laptop, took 10.5 s in the CI
+  // runner's unit run and 48 s under its coverage run, and starved the tenancy suites into hook timeouts
+  // beside it (the first run on GitHub, 2026-10-23).
+  testPathIgnorePatterns: ['/node_modules/', '\\.live\\.spec\\.ts$', '\\.performance\\.spec\\.ts$'],
   transform: { '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json' }] },
   moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
   collectCoverageFrom: [

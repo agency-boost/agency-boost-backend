@@ -197,8 +197,8 @@ On a push to `development` or `main`, or by hand from that branch (`workflow_dis
 
 ### GitHub configuration
 
-No secret is stored in GitHub; every value is an identifier. `deploy/gcp/provision.sh` prints them.
-Set them on both GitHub environments, `staging` and `production`:
+No deployment secret is stored in GitHub; every value is an identifier. `deploy/gcp/provision.sh` prints
+them. Set them on both GitHub environments, `staging` and `production`:
 
 | Variable | The same in both | Example |
 |---|---|---|
@@ -212,6 +212,10 @@ Set them on both GitHub environments, `staging` and `production`:
 | `APP_ORIGIN` | per environment | `https://staging.agencyboost.id` / `https://agencyboost.id` |
 
 The registry is not a variable: it follows from `GCP_PROJECT_ID` and the environment.
+
+**The one secret is CI's, not a deployment's**: `SUPERPROJECT_DEPLOY_KEY`, a read-only deploy key of the
+superproject, so the tests can read its `docs/` and `prototype/` (CI/CD, below). It is a repository secret,
+not an environment's, and a Dependabot secret as well.
 
 **The environments are the approval gate** (D5). `production` allows deployments from `main` only, and
 `staging` from `development` only. The Workload Identity provider accepts a token only from this
@@ -282,9 +286,23 @@ deployment target, in this order. The runbook has the checks after each one.
      it already holds a filesystem, and refused if it holds a partition table;
    - installs `/opt/agencyboost`, the systemd units and the two deployers' sudoers rules.
 6. **Set the GitHub variables** (above), and restrict each environment's deployment branches.
-7. **Deploy staging**: run `deploy` from `development`, then `seed staging`.
-8. **Deploy production**: run `deploy` from `main`, then create the first Super Admin (below).
-9. **Close port 22 to the world.** The default network's `default-allow-ssh` opens it for every VM in
+7. **Let CI read the superproject.** Without this every deploy stops at `ci`. On a laptop signed in to
+   `gh` as an owner of both repositories:
+
+   ```bash
+   ssh-keygen -t ed25519 -N '' -C 'agency-boost-backend CI: read the superproject' -f ./superproject-ci
+   gh repo deploy-key add ./superproject-ci.pub --repo <owner>/agency-boost --title 'agency-boost-backend CI (read-only)'
+   gh secret set SUPERPROJECT_DEPLOY_KEY --repo agency-boost/agency-boost-backend < ./superproject-ci
+   gh secret set SUPERPROJECT_DEPLOY_KEY --repo agency-boost/agency-boost-backend --app dependabot < ./superproject-ci
+   rm ./superproject-ci ./superproject-ci.pub
+   ```
+
+   A deploy key reads one repository and is read-only unless `--allow-write` is given. Where the
+   superproject is not `agency-boost/agency-boost`, name it once:
+   `gh variable set SUPERPROJECT_REPOSITORY --repo agency-boost/agency-boost-backend --body <owner>/agency-boost`.
+8. **Deploy staging**: run `deploy` from `development`, then `seed staging`.
+9. **Deploy production**: run `deploy` from `main`, then create the first Super Admin (below).
+10. **Close port 22 to the world.** The default network's `default-allow-ssh` opens it for every VM in
    the project. `provision.sh` prints the command to delete it, and does not run it, because the rule
    is not this VM's alone.
 
@@ -379,11 +397,24 @@ Node 24:
 | `quality` | Unscoped `pnpm.overrides`; `pnpm lint`; `pnpm typecheck`; `pnpm test:unit`; `openapi.json` not what `pnpm openapi` produces |
 | `integration` | `test:integration` and `test:tenancy`, each under `TZ=UTC`, `Asia/Jakarta` and `America/New_York` |
 | `coverage` | The coverage ratchet: global 80%, domain 95%, tenancy and permissions 100% branch |
-| `audit` | `pnpm audit --audit-level high` |
+| `performance` | `pnpm test:performance`: a read over its budget at p95, one suite at a time. No other run includes these suites (`jest.config.ts` says why) |
+| `audit` | `pnpm audit --audit-level high`. It ignores one advisory, which has no patched release: `../docs/02-specs/nfr/security-and-privacy.md`, *Dependencies* |
 | `container` | The runtime or tools image does not build. The runtime image runs as root, cannot load argon2, or its readiness does not answer 200 beside a database, 503 once the database stops, and 200 when it returns (`deploy/ci/container-smoke.sh`). Either image carries a `gha-creds*` credentials file or an `.env`: the job plants decoys of both in the build context first (`deploy/ci/no-secrets-in-image.sh`) |
-| `scripts` | `bash -n` or shellcheck on any `deploy/**/*.sh`. Or `deploy/compose.yml` that does not resolve, publishes an API, binds Mongo beyond loopback, would create the data directory, gives an environment's API (or the staging seed) the other environment's env file, or leaves a service without a memory limit or an API without a heap cap (`deploy/ci/compose-config.sh`) |
+| `scripts` | `bash -n` or shellcheck on any `deploy/**/*.sh` or `.github/ci/*.sh`. Or `deploy/compose.yml` that does not resolve, publishes an API, binds Mongo beyond loopback, would create the data directory, gives an environment's API (or the staging seed) the other environment's env file, or leaves a service without a memory limit or an API without a heap cap (`deploy/ci/compose-config.sh`) |
 
 The `deploy/ci/` scripts run the same on a laptop with Docker, from this directory.
+
+**`quality`, `integration` and `coverage` read the superproject.** The parity specs pin the metric
+registry, the permission matrix and the prototype's lists against the code, and read them at `../docs`
+and `../prototype`, where the superproject puts them on a laptop. On CI this repository is checked out
+alone, so `.github/ci/superproject-beside.sh` clones those two folders beside it first, with
+`SUPERPROJECT_DEPLOY_KEY` (*Adopting the VM*, step 7). It reads a pull request's own branch where the
+superproject has one, otherwise the branch it merges into, and for a push the branch pushed: **when a
+change moves a pinned number and its doc, push the superproject's docs commit first**, or re-run CI.
+
+**Jest reads no `.env`.** Under `NODE_ENV=test`, `app.module.ts` skips the file, and a suite that
+imports the real `AppModule` imports `test/boot-env.ts` above it, so a suite runs on a laptop exactly as
+it does on CI.
 
 **Every action in every workflow is pinned by commit**, with its version in a comment beside it. A tag
 can be moved, and whoever moves it would run with this repository's deploy identity.

@@ -6,6 +6,11 @@ name: ci
 on:
   pull_request:
   workflow_call:
+    secrets:
+      # Reads the superproject's docs and prototype (.github/ci/superproject-beside.sh). Passed by name, not
+      # with `secrets: inherit`, so a call hands this workflow nothing else.
+      SUPERPROJECT_DEPLOY_KEY:
+        required: true
 
 # Read the repository and nothing more; no job here writes anything through the token. Every action is
 # pinned by commit, with its version beside it; .github/dependabot.yml proposes updates.
@@ -17,6 +22,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      # The parity specs read the superproject's docs/ and prototype/ at ../, where a laptop has them.
+      - name: The superproject's docs and prototype, beside this checkout
+        env:
+          SUPERPROJECT_DEPLOY_KEY: ${{ secrets.SUPERPROJECT_DEPLOY_KEY }}
+          SUPERPROJECT_REPOSITORY: ${{ vars.SUPERPROJECT_REPOSITORY || format('{0}/agency-boost', github.repository_owner) }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref || github.ref_name }}
+        run: bash .github/ci/superproject-beside.sh
       # No version pinned here on purpose: the action reads package.json#packageManager,
       # which is the same pnpm the lockfile was generated with and the same one Vercel
       # uses. Pinning it in four places is how CI came to run a pnpm that read the
@@ -83,6 +96,14 @@ jobs:
         tz: [UTC, Asia/Jakarta, America/New_York]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      # The parity specs read the superproject's docs/ and prototype/ at ../, where a laptop has them.
+      - name: The superproject's docs and prototype, beside this checkout
+        env:
+          SUPERPROJECT_DEPLOY_KEY: ${{ secrets.SUPERPROJECT_DEPLOY_KEY }}
+          SUPERPROJECT_REPOSITORY: ${{ vars.SUPERPROJECT_REPOSITORY || format('{0}/agency-boost', github.repository_owner) }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref || github.ref_name }}
+        run: bash .github/ci/superproject-beside.sh
       # No version pinned here on purpose: the action reads package.json#packageManager,
       # which is the same pnpm the lockfile was generated with and the same one Vercel
       # uses. Pinning it in four places is how CI came to run a pnpm that read the
@@ -110,6 +131,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      # The parity specs read the superproject's docs/ and prototype/ at ../, where a laptop has them.
+      - name: The superproject's docs and prototype, beside this checkout
+        env:
+          SUPERPROJECT_DEPLOY_KEY: ${{ secrets.SUPERPROJECT_DEPLOY_KEY }}
+          SUPERPROJECT_REPOSITORY: ${{ vars.SUPERPROJECT_REPOSITORY || format('{0}/agency-boost', github.repository_owner) }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref || github.ref_name }}
+        run: bash .github/ci/superproject-beside.sh
       # No version pinned here on purpose: the action reads package.json#packageManager,
       # which is the same pnpm the lockfile was generated with and the same one Vercel
       # uses. Pinning it in four places is how CI came to run a pnpm that read the
@@ -127,8 +156,35 @@ jobs:
 
       # Global 80%, domain 95%, tenancy 100% branch. The ratchet only moves up — a
       # change that lowers a threshold fails here rather than being edited to pass.
+      #
+      # Two workers, not jest.config.ts's four: the runner has two vCPUs, so a third and a fourth add
+      # no throughput, only memory, and a queue for the CPU that pushed hooks past their 30 s here.
       - name: Coverage ratchet
-        run: pnpm test:coverage
+        run: pnpm test:coverage --maxWorkers=2
+
+  # The read budgets (docs/02-specs/nfr/performance-and-scale.md), one suite at a time with nothing beside
+  # it. They are left out of every other run: a p95 taken beside three other workers, or under coverage,
+  # measured those and not the read (jest.config.ts). None of them reads the superproject.
+  performance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      # No version pinned here on purpose: the action reads package.json#packageManager,
+      # which is the same pnpm the lockfile was generated with and the same one Vercel
+      # uses. Pinning it in four places is how CI came to run a pnpm that read the
+      # overrides from somewhere the lockfile did not.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}
+      - name: Read budgets, one suite at a time
+        run: pnpm test:performance
 
   audit:
     runs-on: ubuntu-latest
@@ -191,7 +247,7 @@ jobs:
         run: bash deploy/ci/no-secrets-in-image.sh agencyboost-api:ci agencyboost-tools:ci
 
   # The VM's scripts and compose file (P18.7-T3). None of them runs anywhere before it reaches a VM,
-  # so a typo here is otherwise found by a failed deploy.
+  # so a typo here is otherwise found by a failed deploy. CI's own scripts, in .github/ci, are checked too.
   scripts:
     runs-on: ubuntu-latest
     steps:
@@ -199,9 +255,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Shell syntax
-        run: find deploy -name '*.sh' -print0 | xargs -0 -n1 bash -n
+        run: find deploy .github/ci -name '*.sh' -print0 | xargs -0 -n1 bash -n
       # Pinned rather than the runner's own copy, whose version moves with the runner image.
       - name: shellcheck
-        run: find deploy -name '*.sh' -print0 | sort -z | xargs -0 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0
+        run: find deploy .github/ci -name '*.sh' -print0 | sort -z | xargs -0 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0
       - name: compose.yml resolves, publishes only Caddy, and never creates the data directory
         run: bash deploy/ci/compose-config.sh

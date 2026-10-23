@@ -2,6 +2,8 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+// Above AppModule: its import validates the configuration (openapi-env.ts says why).
+import './openapi-env';
 import { AppModule } from '../src/app.module';
 import { buildOpenApiDocument } from '../src/openapi';
 
@@ -23,16 +25,11 @@ import { buildOpenApiDocument } from '../src/openapi';
  * The same global prefix and URI versioning `main.ts` applies are applied here, so the
  * paths in the file are the paths a client calls.
  *
- * The environment is stubbed rather than read: `validateEnv` still runs over the config,
- * and in preview mode nothing ever dials the URI. Generating the contract must not
+ * The environment is stubbed rather than read (`openapi-env.ts`): `validateEnv` still runs over
+ * the config, and in preview mode nothing ever dials the URI. Generating the contract must not
  * depend on having credentials for anything.
  */
 async function main(): Promise<void> {
-  process.env.MONGODB_URI ??= 'mongodb://127.0.0.1:27017/openapi-generation-only';
-  process.env.MONGODB_DB_NAME ??= 'openapi-generation-only';
-  process.env.JWT_SECRET ??= 'openapi-generation-only';
-  process.env.NODE_ENV ??= 'test';
-
   const app = await NestFactory.create(AppModule, { logger: false, preview: true });
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });

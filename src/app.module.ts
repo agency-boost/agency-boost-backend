@@ -312,7 +312,9 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
 @Module({
   imports: [
     LoggingModule,
-    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    // Under Jest (which sets NODE_ENV=test) no `.env` is read: a suite is configured by what it sets
+    // (test/boot-env.ts), so it runs on a laptop as it runs on CI, where there is no `.env` to read.
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv, ignoreEnvFile: process.env.NODE_ENV === 'test' }),
     MongooseModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

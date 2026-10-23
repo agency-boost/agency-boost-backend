@@ -26,6 +26,16 @@ export type OverrideStatus = (typeof OVERRIDE_STATUSES)[number];
 /** A reason, trimmed: required to set and to clear, as long as the house's other reasons (`REASON_MAX`). */
 export const OVERRIDE_REASON = { min: 1, max: 500 } as const;
 
+/**
+ * **How long a write waits for a standing another request is freezing**: a read every `ms`, at most `reads` of
+ * them, two seconds in all. Of two first reads of a window at once, the one that loses `markFrozen` answers *final*
+ * before the winner's insert has landed (`CampaignEvaluation`), so a chaser's row can be a moment away rather than
+ * missing. Only a chaser at the window's end is waited for: anybody else has no row to wait for.
+ */
+export const FREEZE_WAIT = { ms: 25, reads: 80 } as const;
+
+const pause = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
+
 /** The override as the tree's cell names it: who set what, when and why. */
 export interface StandingOverrideView {
   status: OverrideStatus;
@@ -73,6 +83,8 @@ export function checkStandingOverrideClear(body: unknown): { reason: string } {
  *   member's dialog shows requirement rows only (ADR-0147) and does not change.
  * - **One write per reading**: conditional on the row's `version`; a write that lost a race re-reads and re-checks
  *   once (so a second identical set answers *"already reads"*, as it would in sequence), then `409 VERSION_CONFLICT`.
+ *   A write that froze nothing itself, because another request was freezing the window at the same moment, waits
+ *   for a chaser's row rather than calling it missing (`FREEZE_WAIT`; found by a coverage run, 2026-10-23).
  *   Each write audited once, `campaign_standing.overridden` or `campaign_standing.override_cleared`, with before,
  *   after, the reason and the previous status; both actors in a support session (the audit's own).
  * - **Nobody overrides their own result** (the exit review, round 1; ADR-0138's rule): the caller's own membership is
@@ -135,9 +147,15 @@ export class CampaignStandingOverrides {
       );
     }
     const where = { campaignCode: campaign.code, windowKey: evaluated.window.key, membershipId };
+    // A chaser at the window's end has a stored standing, or is about to (FREEZE_WAIT).
+    const chaser = evaluated.members.get(membershipId)?.chasing === true;
 
     for (let attempt = 0; ; attempt += 1) {
-      const row = await this.standings.findOne(ctx, where);
+      let row = await this.standings.findOne(ctx, where);
+      for (let read = 1; !row && chaser && read < FREEZE_WAIT.reads; read += 1) {
+        await pause(FREEZE_WAIT.ms);
+        row = await this.standings.findOne(ctx, where);
+      }
       // A member who was not chasing at the window's end has no stored standing (ADR-0143 §4): nothing to correct.
       if (!row) throw new NotFoundException('Standing');
       // Hydrated with the schema's default: a row frozen before the field existed reads `null`.

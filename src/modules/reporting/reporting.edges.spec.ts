@@ -26,9 +26,12 @@ describe('the Owner’s reporting at its edges', () => {
   const place = async (kpmId: string, over: Record<string, unknown> = {}) => {
     const userId = new mongoose.Types.ObjectId();
     const id = new mongoose.Types.ObjectId();
+    // Leader codes are unique, so they come from the id's counter (its last digits), never its head: an ObjectId
+    // opens with the second it was made, so seven of its first digits name a sixteen-second window, and two
+    // memberships placed inside one collided on the CI runner.
     await db().collection('users').insertOne({ _id: userId, email: `${id}@edge.test`, passwordHash: 'x', fullName: 'Hadi Gunawan', status: 'active', deletedAt: null });
     await db().collection('memberships').insertOne({
-      _id: id, kpmId, userId: String(userId), agentCode: `E${id}`, agentSeq: 1, leaderCode: `L${id}`.slice(0, 8), orgLevelId: 'x',
+      _id: id, kpmId, userId: String(userId), agentCode: `E${id}`, agentSeq: 1, leaderCode: `L${String(id).slice(-7)}`, orgLevelId: 'x',
       orgLevelCode: 'AB', role: 'ab', leaderId: null, ancestorIds: [], depth: 0, status: 'active',
       joinedAt: new Date('2025-01-02T02:00:00Z'), deletedAt: null, ...over,
     });
@@ -181,7 +184,7 @@ describe('the Owner’s reporting at its edges', () => {
     const ab = new mongoose.Types.ObjectId();
     const aab = new mongoose.Types.ObjectId();
     const ghost = (id: mongoose.Types.ObjectId, over: Record<string, unknown>) => db().collection('memberships').insertOne({
-      _id: id, kpmId: NAMELESS, userId: String(new mongoose.Types.ObjectId()), agentCode: `G${id}`, leaderCode: `G${id}`.slice(0, 8),
+      _id: id, kpmId: NAMELESS, userId: String(new mongoose.Types.ObjectId()), agentCode: `G${id}`, leaderCode: `G${String(id).slice(-7)}`,
       orgLevelId: 'x', status: 'active', joinedAt: new Date('2025-01-02T02:00:00Z'), deletedAt: null, ...over,
     });
     await ghost(ab, { agentSeq: 2, orgLevelCode: 'AB', role: 'ab', leaderId: owner.membershipId, ancestorIds: [owner.membershipId], depth: 1 });

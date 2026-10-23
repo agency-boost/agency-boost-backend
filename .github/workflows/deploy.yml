@@ -89,6 +89,9 @@ jobs:
   ci:
     needs: target
     uses: ./.github/workflows/ci.yml
+    # The one secret CI reads: the superproject's docs and prototype, for the parity specs.
+    secrets:
+      SUPERPROJECT_DEPLOY_KEY: ${{ secrets.SUPERPROJECT_DEPLOY_KEY }}
 
   build:
     needs: [target, ci]

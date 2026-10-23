@@ -5,6 +5,8 @@ import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
+// Above AppModule: its import validates the configuration (test/boot-env.ts says why).
+import '../../../test/boot-env';
 import { AppModule } from '@/app.module';
 import {
   AAB, AB, ADMIN, AGENT, declaredPermissions, FIXTURE_KPM, OWNER, productionPipe, session, StubAuth,
