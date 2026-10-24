@@ -136,6 +136,13 @@ describe('AppModule boots', () => {
       .expect(202);
   });
 
+  it('answers a path no route serves 404 NOT_FOUND, through the real router — never INTERNAL_ERROR', async () => {
+    for (const path of ['/api/v1/no-such-route', '/api/no-such-route', '/']) {
+      const res = await request(app.getHttpServer()).get(path).expect(404);
+      expect(res.body.error).toMatchObject({ code: 'NOT_FOUND', message: `Cannot GET ${path}` });
+    }
+  });
+
   it('enforces permissions on the admin surface', async () => {
     const res = await request(app.getHttpServer()).get('/api/v1/admin/tenants').expect(401);
     expect(res.body.error.code).toBeDefined();

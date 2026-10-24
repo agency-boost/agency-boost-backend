@@ -9,6 +9,10 @@ import { RequestContext } from '@/common/context/request-context';
  * is not a 400 becomes `INTERNAL_ERROR`. So a plain `NotFoundException` from `@nestjs/common`
  * answered 404 with `code: "INTERNAL_ERROR"` — the tenant boundary, the most important refusal in
  * this module, reporting itself as a server fault. Found at the Phase 6 exit review.
+ *
+ * Since 2026-10-24 the filter gives Nest's 400, 401, 403 and 404 their catalog codes too
+ * (`FRAMEWORK_CODES`), so the router's own 404 is `NOT_FOUND`. A domain refusal still throws the
+ * project's exception: only it carries a specific code, a message and `details`.
  */
 import {
   DomainException, NoMembershipException, NotFoundException,

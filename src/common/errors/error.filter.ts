@@ -7,6 +7,20 @@ import { ErrorCode } from './error-codes';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import { redactUrl } from '@/common/logging/redact-url';
 
+/**
+ * **The code a framework exception carries, by its status.** Nest's own exceptions, never one of ours: the
+ * router's *"Cannot GET /x"* (404), a guard that answered `false` (403), the global pipe's refusal (400). Each
+ * takes the catalog's code for its status. `INTERNAL_ERROR` is the catalog's 500 and nothing else: a 404 that
+ * called itself an internal error sent whoever opened the API's root looking for a fault (staging's first day,
+ * 2026-10-24). A status with no catalog code of its own is still `INTERNAL_ERROR`.
+ */
+const FRAMEWORK_CODES: Readonly<Partial<Record<number, string>>> = {
+  [HttpStatus.BAD_REQUEST]: ErrorCode.VALIDATION_FAILED,
+  [HttpStatus.UNAUTHORIZED]: ErrorCode.AUTH_TOKEN_INVALID,
+  [HttpStatus.FORBIDDEN]: ErrorCode.PERM_DENIED,
+  [HttpStatus.NOT_FOUND]: ErrorCode.NOT_FOUND,
+};
+
 interface ErrorEnvelope {
   error: {
     code: string;
@@ -92,12 +106,11 @@ export class DomainExceptionFilter implements ExceptionFilter {
         typeof response === 'string'
           ? response
           : ((response as { message?: string | string[] }).message ?? exception.message);
-      const isValidation = exception.getStatus() === HttpStatus.BAD_REQUEST;
       return {
         status: exception.getStatus(),
         body: {
           error: {
-            code: isValidation ? ErrorCode.VALIDATION_FAILED : ErrorCode.INTERNAL_ERROR,
+            code: FRAMEWORK_CODES[exception.getStatus()] ?? ErrorCode.INTERNAL_ERROR,
             message: Array.isArray(message) ? message.join('; ') : String(message),
             ...(Array.isArray(message) ? { details: { violations: message } } : {}),
             requestId,

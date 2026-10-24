@@ -1,4 +1,7 @@
-import { BadRequestException, HttpStatus, InternalServerErrorException } from '@nestjs/common';
+import {
+  BadRequestException, ForbiddenException, HttpStatus, InternalServerErrorException, NotFoundException as RouteNotFound,
+  PayloadTooLargeException, UnauthorizedException,
+} from '@nestjs/common';
 import { DomainExceptionFilter } from './error.filter';
 import { NotFoundException, PermissionDeniedException, VersionConflictException } from './domain.exception';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
@@ -80,6 +83,23 @@ describe('DomainExceptionFilter', () => {
     expect(body).not.toContain('hunter2');
     expect(body).not.toContain('mongodb+srv');
     expect(json.mock.calls[0][0].error.requestId).toBe('req-1');
+  });
+
+  it('gives a framework exception the catalog code for its status: the router’s 404 is NOT_FOUND, never INTERNAL_ERROR', () => {
+    const cases: [Error, number, string][] = [
+      [new RouteNotFound('Cannot GET /'), 404, 'NOT_FOUND'],
+      [new ForbiddenException(), 403, 'PERM_DENIED'],
+      [new UnauthorizedException(), 401, 'AUTH_TOKEN_INVALID'],
+      [new BadRequestException('plain message'), 400, 'VALIDATION_FAILED'],
+      // No catalog code of its own: still INTERNAL_ERROR, at its own status.
+      [new PayloadTooLargeException(), 413, 'INTERNAL_ERROR'],
+    ];
+    for (const [exception, code, name] of cases) {
+      const { host, status, json } = makeHost();
+      filter.catch(exception, host as never);
+      expect(status).toHaveBeenCalledWith(code);
+      expect(json.mock.calls[0][0].error).toMatchObject({ code: name, requestId: 'req-1' });
+    }
   });
 
   it('treats a non-domain HttpException 500 as INTERNAL_ERROR', () => {
