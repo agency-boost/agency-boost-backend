@@ -15,12 +15,15 @@ import { ActivationEvents, signalActivation } from '@/modules/activation/activat
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import type { Permission } from '@/modules/rbac/permissions';
-import { CASCADE_ACTIVITY_CODES, GOAL_DEFAULTS, PERIOD } from '@/domain/constants';
+import { GOAL_DEFAULT_RATIOS, GOAL_DEFAULTS, PERIOD } from '@/domain/constants';
+import { defaultBinding, type CascadeBinding } from '@/modules/config/activity-binding';
+import { ActivityBindingService } from '@/modules/config/activity-binding.service';
+import { RatioDefinitionRepository } from '@/modules/config/activity.repository';
 import { ProductionReadings } from '@/modules/production/production-readings';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { measuredRates, type MeasuredRates } from '@/domain/metrics/measured-rates';
 import { rollingWindow, type LocalDate } from '@/common/time/local-day';
-import { computeCascade, defaultMonthsLeft, type CascadeResult } from './goal-cascade';
+import { computeCascade, defaultMonthsLeft, defaultRates, type CascadeInputs, type CascadeResult } from './goal-cascade';
 import { checkGoal } from './goal-input';
 import { GoalRepository } from './goal.repository';
 import type { GoalDocument, GoalMode } from './goal.schema';
@@ -57,6 +60,19 @@ function achievedOf(
   return held
     ? { minor: held.minor, provenance: held.provenance, month: held.month }
     : { minor: typed, provenance: 'self_reported', month: null };
+}
+
+/**
+ * **The record a plan's first save keeps** (`goals.cascadeMapping`, ADR-0163 §4): the first code of each role in the
+ * office's binding at that moment. A record and never a reader — every count reads the binding.
+ */
+function mappingOf(binding: CascadeBinding): GoalView['cascadeMapping'] {
+  return { leadsCode: binding.leads[0], appointmentsCode: binding.appointments[0], closingsCode: binding.closings[0] };
+}
+
+/** A binding the caller may change without reaching anybody else's copy. */
+function copyOf(binding: CascadeBinding): CascadeBinding {
+  return { leads: [...binding.leads], appointments: [...binding.appointments], closings: [...binding.closings] };
 }
 
 /** The inputs of a plan, current or replaced. One reader, so the two shapes cannot drift. */
@@ -185,8 +201,18 @@ export interface GoalView {
    * come back, and the screen says which of them it cannot work from.
    */
   projected: CascadeResult | null;
-  /** The three activity **codes** the cascade counts against — never the prototype's #3, #4, #6. */
+  /**
+   * **What a saved plan was first counted against** — the first code of each role in the office's binding at the
+   * plan's first save — kept as its record (ADR-0163 §4) and never rewritten by a rebind. Not what anything
+   * counts: that is `cascadeBinding`. For a plan nobody has saved, the binding's first codes today.
+   */
   cascadeMapping: { leadsCode: string; appointmentsCode: string; closingsCode: string };
+  /**
+   * **What the plan's three columns count against today**: the office's activity binding (ADR-0163), each role a
+   * list of codes, summed — read through `resolveCascadeBinding`, the one reader. The goal screen's *Activity #n*
+   * chips are drawn from it, never from a constant.
+   */
+  cascadeBinding: CascadeBinding;
   /**
    * The subject's own rates over the last 30 days, beside the assumptions they measure (ADR-0055) —
    * **for the subject's own read only.** `null` whenever the caller is not the goal's member (the
@@ -240,7 +266,35 @@ export class GoalService {
      * A port the activation module answers, so goals does not depend on it; optional, failing open.
      */
     @Optional() @Inject(ActivationEvents) private readonly activation: ActivationEvents | null = null,
+    /*
+     * P18.8-T10 AC-1 (ADR-0160 §3): the office's two benchmarks a new plan's percentages open on — the working
+     * copy `/activity/ratio` reads. The application always provides it; optional, with the token named as
+     * `ActivityService`'s `published` explains, so a hand-built instance that offers no defaults need not, and
+     * without it the defaults are `GOAL_DEFAULTS`.
+     */
+    @Optional() @Inject(RatioDefinitionRepository) private readonly ratios: RatioDefinitionRepository | null = null,
+    /*
+     * ADR-0163 §4: which activity types each cascade role counts — the office's binding, the one reader. Optional,
+     * the token named as above, and without it the default binding.
+     */
+    @Optional() @Inject(ActivityBindingService) private readonly bindings: ActivityBindingService | null = null,
   ) {}
+
+  /** The office's activity binding (ADR-0163 §4), or the default binding on a hand-built instance. */
+  private async binding(ctx: RequestContext): Promise<CascadeBinding> {
+    return this.bindings ? this.bindings.resolveCascadeBinding(ctx) : defaultBinding();
+  }
+
+  /**
+   * **The percentages a plan nobody has saved opens on** (ADR-0160 §3): the office's *Selling success rate* and
+   * *Set appointment to meeting* benchmarks, active ones only, or `GOAL_DEFAULTS` (`defaultRates`). One read.
+   */
+  private async officeRates(ctx: RequestContext): Promise<Pick<CascadeInputs, 'leadsToApptPct' | 'closingRatePct'>> {
+    const rows = this.ratios
+      ? await this.ratios.find(ctx, { code: { $in: Object.values(GOAL_DEFAULT_RATIOS) }, status: 'active' })
+      : [];
+    return defaultRates(rows);
+  }
 
   /**
    * **The subject's counts over the last 30 days** (ADR-0055) — `ROLLING_30D`, the ratio window, ending
@@ -261,10 +315,10 @@ export class GoalService {
     return membershipId === ctx.membershipId ? this.activityFor(ctx, membershipId, day) : null;
   }
 
-  private measured(window: ActivityWindow | null, mapping: GoalView['cascadeMapping']): GoalMeasured | null {
+  private measured(window: ActivityWindow | null, binding: CascadeBinding): GoalMeasured | null {
     if (!window) return null;
     return {
-      from: window.from, to: window.to, days: PERIOD.ROLLING_30D_DAYS, ...measuredRates(window.counts, mapping),
+      from: window.from, to: window.to, days: PERIOD.ROLLING_30D_DAYS, ...measuredRates(window.counts, binding),
     };
   }
 
@@ -355,6 +409,7 @@ export class GoalService {
     const achieved = await this.achievedFor(ctx, membershipId, input.period!, typed);
     // Refuses an unusable assumption before anything is written (AC-7).
     const agreed = computeCascade({ ...input, monthsLeft, apeAchievedMinor: achieved.minor } as never);
+    const binding = await this.binding(ctx);
 
     const saved = await this.goals.upsertOne(
       ctx,
@@ -389,7 +444,8 @@ export class GoalService {
         $setOnInsert: {
           membershipId,
           period: input.period!,
-          cascadeMapping: { ...CASCADE_ACTIVITY_CODES },
+          // The record of what the plan was first counted against: the office's binding then (ADR-0163 §4).
+          cascadeMapping: mappingOf(binding),
         },
         /*
          * **Bumped on every save, including the first.** `version` starts at 0 on insert and this
@@ -415,7 +471,7 @@ export class GoalService {
     }
     // P13-T3 AC-2: the hire's goal, saved by them or by a leader with `?for=`, attributed to whoever saved it.
     await signalActivation(this.activation, ctx, membershipId, 'feature:goals');
-    return this.view(saved, day, achieved, await this.measuring(ctx, membershipId, day));
+    return this.view(saved, day, achieved, await this.measuring(ctx, membershipId, day), binding);
   }
 
   /**
@@ -446,7 +502,7 @@ export class GoalService {
     const day = await this.days.for(ctx);
     return this.view(
       goal, day, await this.achievedFor(ctx, membershipId, period, goal.apeAchievedMinor),
-      await this.measuring(ctx, membershipId, day),
+      await this.measuring(ctx, membershipId, day), await this.binding(ctx),
     );
   }
 
@@ -469,17 +525,21 @@ export class GoalService {
   ): Promise<Map<string, Omit<GoalView, 'id' | 'membershipId' | 'version'>>> {
     const ids = [...new Set(membershipIds)];
     if (ids.length === 0) return new Map();
-    const [day, goals] = await Promise.all([
+    // The office's benchmarks, once, beside the plans — read whether or not somebody here has none, so a batch
+    // costs the same queries whoever it holds (P15-T1 AC-8).
+    const [day, goals, binding, rates] = await Promise.all([
       this.days.for(ctx),
       this.goals.find(ctx, { membershipId: { $in: ids }, period }),
+      this.binding(ctx),
+      this.officeRates(ctx),
     ]);
     const byMember = new Map(goals.map((goal) => [goal.membershipId, goal]));
     return new Map(ids.map((id) => {
       const goal = byMember.get(id);
       const held = yearToDate.get(id) ?? null;
       return [id, goal
-        ? this.view(goal, day, achievedOf(held, goal.apeAchievedMinor), null)
-        : this.defaultsView(period, day, achievedOf(held, 0), null)];
+        ? this.view(goal, day, achievedOf(held, goal.apeAchievedMinor), null, binding)
+        : this.defaultsView(period, day, achievedOf(held, 0), null, rates, binding)];
     }));
   }
 
@@ -491,7 +551,7 @@ export class GoalService {
     const day = await this.days.for(ctx);
     return this.view(
       goal, day, await this.achievedFor(ctx, membershipId, period, goal.apeAchievedMinor),
-      await this.measuring(ctx, membershipId, day),
+      await this.measuring(ctx, membershipId, day), await this.binding(ctx),
     );
   }
 
@@ -526,9 +586,10 @@ export class GoalService {
     const membershipId = this.me(ctx);
     const day = await this.days.for(ctx);
     const rows = await this.goals.find(ctx, { membershipId }, { sort: { period: -1 } });
-    const activity = await this.activityFor(ctx, membershipId, day);
-    return Promise.all(rows.map(async (row) =>
-      this.view(row, day, await this.achievedFor(ctx, membershipId, row.period, row.apeAchievedMinor), activity)));
+    const [activity, binding] = await Promise.all([this.activityFor(ctx, membershipId, day), this.binding(ctx)]);
+    return Promise.all(rows.map(async (row) => this.view(
+      row, day, await this.achievedFor(ctx, membershipId, row.period, row.apeAchievedMinor), activity, binding,
+    )));
   }
 
   /**
@@ -536,20 +597,27 @@ export class GoalService {
    *
    * Not a stored goal — nothing is written. It is the defaults the screen opens with, from
    * `GOAL_DEFAULTS`, so the constants have exactly one home (invariant §7) and the screen does not
-   * carry a second copy of them.
+   * carry a second copy of them — but for the two conversion percentages, which are the office's own
+   * benchmarks where it has them (ADR-0160 §3, `officeRates`).
    */
   async defaults(
     ctx: RequestContext, period: string, membershipId: string = this.me(ctx),
   ): Promise<Omit<GoalView, 'id' | 'membershipId' | 'version'>> {
     const day = await this.days.for(ctx);
     // Nobody has typed anything yet, so the carrier's figure, if there is one, is the whole answer.
-    const achieved = await this.achievedFor(ctx, membershipId, period, 0);
-    return this.defaultsView(period, day, achieved, await this.measuring(ctx, membershipId, day));
+    const [achieved, rates, activity, binding] = await Promise.all([
+      this.achievedFor(ctx, membershipId, period, 0),
+      this.officeRates(ctx),
+      this.measuring(ctx, membershipId, day),
+      this.binding(ctx),
+    ]);
+    return this.defaultsView(period, day, achieved, activity, rates, binding);
   }
 
   /** The defaults as a view, from what `defaults` read — and what `plansOf` read in bulk. */
   private defaultsView(
     period: string, day: OfficeDay, achieved: GoalAchieved, activity: ActivityWindow | null,
+    rates: Pick<CascadeInputs, 'leadsToApptPct' | 'closingRatePct'>, binding: CascadeBinding,
   ): Omit<GoalView, 'id' | 'membershipId' | 'version'> {
     const inputs = {
       mode: 'direct' as const,
@@ -562,8 +630,8 @@ export class GoalService {
       monthsLeftIsOverride: false,
       apeAchievedMinor: 0,
       caseSizeMinor: GOAL_DEFAULTS.CASE_SIZE_MINOR,
-      leadsToApptPct: GOAL_DEFAULTS.LEADS_TO_APPOINTMENT_PCT,
-      closingRatePct: GOAL_DEFAULTS.CLOSING_RATE_PCT,
+      // The office's benchmarks, or `GOAL_DEFAULTS` (ADR-0160 §3): the agent's to change from here (ADR-0048).
+      ...rates,
     };
 
     return {
@@ -574,8 +642,10 @@ export class GoalService {
       // the screen would open on five empty cards.
       snapshot: { ...EMPTY_SNAPSHOT },
       projected: computeCascade({ ...inputs, apeAchievedMinor: achieved.minor }),
-      cascadeMapping: { ...CASCADE_ACTIVITY_CODES },
-      measured: this.measured(activity, CASCADE_ACTIVITY_CODES),
+      // Nothing saved, so nothing recorded: the binding's first codes today, and the binding itself.
+      cascadeMapping: mappingOf(binding),
+      cascadeBinding: copyOf(binding),
+      measured: this.measured(activity, binding),
       savedAt: null,
       savedByMembershipId: null,
     };
@@ -583,6 +653,7 @@ export class GoalService {
 
   private view(
     doc: GoalDocument, day: OfficeDay, achieved: GoalAchieved, activity: ActivityWindow | null,
+    binding: CascadeBinding,
   ): GoalView {
     /*
      * **Every read recomputes** (AC-1b). The stored snapshot is the agreement; this is what it
@@ -632,7 +703,9 @@ export class GoalService {
         appointmentsCode: doc.cascadeMapping.appointmentsCode,
         closingsCode: doc.cascadeMapping.closingsCode,
       },
-      measured: this.measured(activity, doc.cascadeMapping),
+      // What the columns count today: the office's binding, not the record above (ADR-0163 §4).
+      cascadeBinding: copyOf(binding),
+      measured: this.measured(activity, binding),
       savedAt: doc.savedAt ? doc.savedAt.toISOString() : null,
       savedByMembershipId: doc.savedByMembershipId,
       version: doc.version,

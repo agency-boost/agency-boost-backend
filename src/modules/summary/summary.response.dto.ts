@@ -50,8 +50,13 @@ export class PaceDto implements Pace {
 
 export class ActivityTargetDto implements ActivityTarget {
   @ApiProperty({ enum: ['leads', 'appointments', 'closings'] }) key!: ActivityTargetKey;
-  @ApiProperty({ example: 'SELL_SUBMISSION', description: 'The goal’s own code for this count (`cascadeMapping`).' }) code!: string;
-  @ApiProperty({ description: 'Logged over the period, archived types included.' }) logged!: number;
+  @ApiProperty({ example: 'SELL_SUBMISSION', description: 'The first code the office binds to this role (its activity binding).' }) code!: string;
+  @ApiProperty({
+    type: [String], example: ['SELL_SUBMISSION'],
+    description: 'Every code the office binds to this role; `logged` is their sum, so a replaced activity keeps counting.',
+  })
+  codes!: string[];
+  @ApiProperty({ description: 'Logged over the period, every bound code summed, archived types included.' }) logged!: number;
   @ApiProperty({
     type: Number, nullable: true,
     description: '`SUMMARY_ACTIVITY_TARGET`. `null` without an APE target; 0 when the month needs nothing more — met, not unmeasured.',
@@ -106,6 +111,10 @@ export class OpenLeadDto implements OpenLead {
 class SummaryLeadsDto {
   @ApiProperty({ type: [OpenLeadDto], description: 'The nearest `SUMMARY.LEADS_SHOWN` (10), nearest next action first, undated last.' }) rows!: OpenLeadDto[];
   @ApiProperty({ description: 'Every open lead of the reader’s own.' }) total!: number;
+  @ApiProperty({
+    description: 'The open leads of everybody else the reader’s `lead:read` reaches — what Leads Management lists them '
+      + 'besides their own. Counted on the reader’s own summary while `total` is 0; 0 otherwise.',
+  }) unitOpen!: number;
 }
 
 export class InsightDto {
@@ -125,10 +134,23 @@ class SummaryGoalDto {
   @ApiProperty({ type: String, nullable: true, format: 'date-time' }) savedAt!: string | null;
 }
 
+/** Which period the Summary is for, and which there are (P18.8-T11, ADR-0161 §4). */
+class SummaryPeriodDto {
+  @ApiProperty({ example: '2025-03', description: 'The office’s first month, `YYYY-MM`, in its zone: the earliest `month` there is, and its year the earliest `year`.' })
+  firstMonth!: string;
+  @ApiProperty({ example: '2026-09', description: 'The office’s current month, `YYYY-MM`: the latest there is.' })
+  thisMonth!: string;
+  @ApiProperty({ description: '`month` is the current month: its days run to today, and the pace is said. Otherwise it is read whole, with no pace.' })
+  currentMonth!: boolean;
+  @ApiProperty({ description: '`year` is the current year: its days run to today. Otherwise it is read whole, to 31 December.' })
+  currentYear!: boolean;
+}
+
 export class SummaryDto implements SummaryView {
-  @ApiProperty({ example: '2026' }) year!: string;
-  @ApiProperty({ example: '2026-09' }) month!: string;
+  @ApiProperty({ example: '2026', description: 'The year *Yearly* is about: this one, or the one asked for.' }) year!: string;
+  @ApiProperty({ example: '2026-09', description: 'The month *Monthly* is about: this one, the one asked for, or the December of a closed year asked for.' }) month!: string;
   @ApiProperty({ example: '2026-09-28' }) today!: string;
+  @ApiProperty({ type: SummaryPeriodDto }) period!: SummaryPeriodDto;
   @ApiProperty({ type: SummaryGoalDto }) goal!: { set: boolean; savedAt: string | null };
   @ApiProperty() caseSizeMinor!: number;
 
@@ -141,14 +163,14 @@ export class SummaryDto implements SummaryView {
   @ApiProperty({ type: YearlyFiguresDto, description: '*Yearly*: the annual target against the year to date.' })
   yearly!: YearlyFiguresDto;
 
-  @ApiProperty({ type: PaceDto, nullable: true, description: 'The pace sentence (ADR-0109); `null` without a goal.' })
+  @ApiProperty({ type: PaceDto, nullable: true, description: 'The pace sentence (ADR-0109); `null` without a goal, and for a month that has ended (ADR-0161).' })
   pace!: Pace | null;
 
   @ApiProperty({ type: SummaryActivityPeriodsDto, description: '*Your sales activity targets* and the other sections.' })
   activity!: { monthly: SummaryActivityDto; yearly: SummaryActivityDto };
 
   @ApiProperty({ type: SummaryLeadsDto, description: '*Leads that need you*: the reader’s own open leads.' })
-  leads!: { rows: OpenLeadDto[]; total: number };
+  leads!: { rows: OpenLeadDto[]; total: number; unitOpen: number };
 
   @ApiProperty({ type: [InsightDto], description: 'The insight cards: the rules that fired, in their fixed priority, at most four.' })
   insights!: Insight[];

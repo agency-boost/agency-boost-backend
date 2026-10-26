@@ -1,16 +1,16 @@
 import { PERFORMANCE } from '@/domain/constants';
 import type { HeldFigure, MonthStanding } from '@/modules/production/production-readings';
+import { defaultBinding } from '@/modules/config/activity-binding';
 import { monthPaceOf, type GoalPlan } from './pace-status';
 
 const M = 1_000_000 * 100;
 const RATIO = PERFORMANCE.ON_TRACK_PACE_THRESHOLD;
-const CODES = { leadsCode: 'LEADS_CONTACTED', appointmentsCode: 'SELL_PRESENTATION', closingsCode: 'SELL_SUBMISSION' };
 
 /** Rp 500 M for the year at Rp 18 M a case, 30% and 30% — the Summary's performance fixture. */
 const goal = (over: Partial<GoalPlan> = {}): GoalPlan => ({
   savedAt: new Date('2026-01-05T02:00:00Z'), mode: 'direct', annualApeTargetMinor: 500 * M,
   savingsTargetMinor: 0, commissionRatePct: 0, apeAchievedMinor: 0, caseSizeMinor: 18 * M,
-  leadsToApptPct: 30, closingRatePct: 30, cascadeMapping: CODES, ...over,
+  leadsToApptPct: 30, closingRatePct: 30, ...over,
 } as GoalPlan);
 
 const held = (minor: number, month: string, provenance: HeldFigure['provenance'] = 'imported'): HeldFigure =>
@@ -29,7 +29,8 @@ const logged = (leads: number, appointments = 0, closings = 0, other = 0) => new
 ]);
 
 const pace = (over: Partial<Parameters<typeof monthPaceOf>[0]> = {}) => monthPaceOf({
-  goal: goal(), standing: SEPTEMBER, counts: logged(16), recentCounts: new Map(), month: '2026-09', onTrackRatio: RATIO, ...over,
+  goal: goal(), standing: SEPTEMBER, counts: logged(16), recentCounts: new Map(), month: '2026-09', onTrackRatio: RATIO,
+  binding: defaultBinding(), ...over,
 });
 
 /**
@@ -123,9 +124,17 @@ describe('a member’s month (P11-T6 AC-4)', () => {
       expect(pace({ counts: new Map() }).pacingToMaa).toBe(false);
     });
 
-    it('P11-T6 AC-4 counts the goal’s own codes when the office binds others (invariant §4)', () => {
-      const rebound = goal({ cascadeMapping: { leadsCode: 'RECRUIT_FOLLOWUP', appointmentsCode: 'SELL_PRESENTATION', closingsCode: 'SELL_SUBMISSION' } });
-      expect(pace({ goal: rebound, counts: logged(0, 0, 0, 16) }).pacingToMaa).toBe(true);
+    it('P18.9-T2 AC-2 counts the codes the office binds, not the platform’s (invariant §4)', () => {
+      const rebound = { ...defaultBinding(), leads: ['RECRUIT_FOLLOWUP'] };
+      expect(pace({ binding: rebound, counts: logged(0, 0, 0, 16) }).pacingToMaa).toBe(true);
+      expect(pace({ binding: rebound, counts: logged(16) }).pacingToMaa).toBe(false);
+    });
+
+    it('P18.9-T2 AC-2 a role bound to [A, B] counts both', () => {
+      // 8 of the old code and 8 of its replacement: the 16 the month needs, as 16 of one would be.
+      const replaced = { ...defaultBinding(), leads: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'] };
+      expect(pace({ binding: replaced, counts: logged(8, 0, 0, 8) }).pacingToMaa).toBe(true);
+      expect(pace({ counts: logged(8, 0, 0, 8) }).pacingToMaa).toBe(false);
     });
 
     it('P11-T6 AC-4 nothing uploaded and no closing logged: Watch closely while pacing', () => {
@@ -229,10 +238,13 @@ describe('a member’s month (P11-T6 AC-4)', () => {
       expect(pace({ recentCounts: logged(0, 0, 10) }).status).toBe('watch_closely');
     });
 
-    it('OD-110 counts the goal’s own closing code (invariant §4)', () => {
-      const rebound = goal({ cascadeMapping: { ...CODES, closingsCode: 'RECRUIT_FOLLOWUP' } });
-      expect(pace({ goal: rebound, standing: unfiled, counts: logged(16, 0, 0, 3), recentCounts: logged(0, 0, 0, 5) }).status).toBe('on_track');
-      expect(pace({ goal: rebound, standing: unfiled, counts: logged(16, 0, 3, 0), recentCounts: logged(0, 0, 5, 0) }).status).toBe('watch_closely');
+    it('OD-110 counts the closing codes the office binds (invariant §4, ADR-0163)', () => {
+      const rebound = { ...defaultBinding(), closings: ['RECRUIT_FOLLOWUP'] };
+      expect(pace({ binding: rebound, standing: unfiled, counts: logged(16, 0, 0, 3), recentCounts: logged(0, 0, 0, 5) }).status).toBe('on_track');
+      expect(pace({ binding: rebound, standing: unfiled, counts: logged(16, 0, 3, 0), recentCounts: logged(0, 0, 5, 0) }).status).toBe('watch_closely');
+      // Bound to both, the closings of either count toward N.
+      const both = { ...defaultBinding(), closings: ['SELL_SUBMISSION', 'RECRUIT_FOLLOWUP'] };
+      expect(pace({ binding: both, standing: unfiled, counts: logged(16, 0, 2, 1), recentCounts: logged(0, 0, 3, 2) }).status).toBe('on_track');
     });
 
     it('OD-110 the gate still comes first: closings at the target do not lift a member who is not pacing', () => {

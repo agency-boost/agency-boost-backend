@@ -137,4 +137,38 @@ describe('the office’s day (P7-T4)', () => {
       }
     });
   });
+
+  describe('the office’s day and the month it opened (P18.8-T11, ADR-0161 §4)', () => {
+    it('P18.8-T11 AC-1 the first month is the month the record was created, in the office’s zone', async () => {
+      // 17:30 UTC on 31 January is 00:30 on 1 February in Jakarta: the office opened in February.
+      const kpmId = await office({ createdAt: new Date('2026-01-31T17:30:00Z') });
+
+      const answer = await days.calendar(member(kpmId));
+
+      expect(answer).toEqual({ today: '2026-09-26', month: '2026-09', timezone: 'Asia/Jakarta', firstMonth: '2026-02' });
+    });
+
+    it('P18.8-T11 AC-1 the same instant is still January for an office in New York', async () => {
+      const kpmId = await office({ code: '0555', timezone: 'America/New_York', createdAt: new Date('2026-01-31T17:30:00Z') });
+
+      expect((await days.calendar(member(kpmId))).firstMonth).toBe('2026-01');
+    });
+
+    it('P18.8-T11 AC-1 is never later than this month, whatever stamped the record', async () => {
+      const kpmId = await office({ createdAt: new Date('2026-11-02T02:00:00Z') });
+
+      expect((await days.calendar(member(kpmId))).firstMonth).toBe('2026-09');
+    });
+
+    it('P18.8-T11 AC-1 a row with no stamp opened this month, and so does an office that is not there', async () => {
+      const kpmId = await office();
+      await mongoose.connection.db!.collection('kpms')
+        .updateOne({ _id: new mongoose.Types.ObjectId(kpmId) }, { $unset: { createdAt: '' } });
+
+      expect((await days.calendar(member(kpmId))).firstMonth).toBe('2026-09');
+      for (const ctx of [member('66f0000000000000000000ff'), new RequestContext('u9', 'none', null)]) {
+        expect(await days.calendar(ctx)).toEqual({ today: '2026-09-26', month: '2026-09', timezone: 'Asia/Jakarta', firstMonth: '2026-09' });
+      }
+    });
+  });
 });

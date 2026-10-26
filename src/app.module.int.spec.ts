@@ -14,7 +14,9 @@ import { ActivationProgressService } from './modules/activation/activation-progr
 import { TrainingProgressService } from '@/modules/training/training-progress.service';
 import { ActivityService } from './modules/activity/activity.service';
 import { TenantConfigService } from './modules/config/tenant-config.service';
+import { RatioDefinitionRepository } from './modules/config/activity.repository';
 import { AuthController } from './modules/auth/auth.controller';
+import { ProfileLineReader } from './modules/org/profile-line';
 import { CalendarLeave } from './modules/calendar/calendar-leave';
 import { GoalService } from './modules/goals/goal.service';
 import { LeadService } from './modules/leads/lead.service';
@@ -76,6 +78,8 @@ describe('AppModule boots', () => {
     expect(port(ApprovalsService, 'activations')).toBe(activation);
     expect(port(LeaderCodeService, 'activations')).toBe(activation);
     expect(port(AuthController, 'activationNav')).toBe(activation);
+    // P18.8-T6 AC-1: the profile line's groups and office, read with the session.
+    expect(port(AuthController, 'profileLine')).toBe(app.get(ProfileLineReader, { strict: false }));
     // P18.5-T7 AC-5: leaving answers the calendar and the campaigns' chases, both behind the one port.
     const departures = port(RemovalService, 'departures') as { each: unknown[] };
     expect(departures).toBe(app.get(MemberDeparture as never, { strict: false }));
@@ -94,6 +98,16 @@ describe('AppModule boots', () => {
     const service = app.get(ActivityService, { strict: false }) as unknown as Record<string, unknown>;
     // Compared, not matched: a failing `toBe` on a service prints its whole graph, configuration included.
     expect(service.published === app.get(TenantConfigService, { strict: false })).toBe(true);
+  });
+
+  /*
+   * P18.8-T10 AC-1: a plan nobody saved opens on the office's benchmarks, read through an optional dependency
+   * so a hand-built instance need not provide it. Optional means a graph that failed to would quietly open
+   * every plan on `GOAL_DEFAULTS` again, so the real graph is asserted.
+   */
+  it('P18.8-T10 AC-1 hands GoalService the office’s ratio definitions, in the real graph', () => {
+    const service = app.get(GoalService, { strict: false }) as unknown as Record<string, unknown>;
+    expect(service.ratios === app.get(RatioDefinitionRepository, { strict: false })).toBe(true);
   });
 
   /*

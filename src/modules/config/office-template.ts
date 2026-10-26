@@ -2,6 +2,9 @@ import { trainingLinkModuleCode } from '@/modules/activation/activation-input';
 import type { StoredObject } from '@/modules/assets/storage.port';
 import type { TrainingContentPayload, TrainingTaxonomyPayload } from '@/modules/training/training-payload';
 import { withCascadeTypes, type OfficeTemplateKind } from './template-defaults';
+import {
+  BINDING_ROLE_LABEL, BINDING_ROLES, bindingOfPayload, defaultBinding, type CascadeBinding,
+} from './activity-binding';
 
 /**
  * **An office's published settings, as a template's kinds** (P13.2-T7, ADR-0115 §5, §6).
@@ -40,6 +43,12 @@ export interface OfficeSettings {
    * code the snapshot does not offer is never asked for, and a row for one is ignored.
    */
   moduleContent: { code: string; companyContent?: ContentRows | null; officeContent?: ContentRows | null }[];
+  /**
+   * The office's **live** activity binding (ADR-0163): the Super Admin keeps it and the Owner does not publish it,
+   * so the live row is never an unpublished edit — it is what the office counts. Absent, the snapshot's
+   * `activityBinding`, and without either the template carries none and its offices count the default binding.
+   */
+  binding?: CascadeBinding | null;
 }
 
 /** The snapshot's training, as `TrainingService.offered` rendered it: nested, each row with its status. */
@@ -176,6 +185,8 @@ export function templateKindsFromOffice(
           displayOrder: t.displayOrder,
         }))),
     };
+    const bindings = bindingFrom(settings, kinds.activity_taxonomy, dropped);
+    if (bindings) kinds.activity_taxonomy.bindings = bindings;
   }
 
   const statuses = ((snapshot.leadPipelines ?? []) as { statuses?: Row[] }[])
@@ -218,6 +229,40 @@ export function templateKindsFromOffice(
 }
 
 /**
+ * **The office's activity binding, for the template** (ADR-0163 §1): each role's codes that are among the
+ * template's activity types — the office's active ones. An archived code counts in the office for its history, and
+ * an office made from the template has no history: it is taken out, and said. A role left counting nothing leaves
+ * the whole binding out, said too, and the template's offices count the default binding.
+ */
+function bindingFrom(settings: OfficeSettings, taxonomy: Record<string, unknown>, dropped: DroppedSetting[]): CascadeBinding | null {
+  const held = settings.binding
+    ?? bindingOfPayload({ bindings: (settings.snapshot as Row | null)?.activityBinding ?? null });
+  if (!held) return null;
+  const typeCodes = new Set(((taxonomy.types ?? []) as Row[]).map((t) => String(t.code)));
+  const kept = Object.fromEntries(BINDING_ROLES.map((role) => [role, held[role].filter((c) => typeCodes.has(c))])) as unknown as CascadeBinding;
+  const gone = [...new Set(BINDING_ROLES.flatMap((role) => held[role].filter((c) => !typeCodes.has(c))))];
+  const empty = BINDING_ROLES.filter((role) => kept[role].length === 0);
+  if (empty.length) {
+    dropped.push({
+      kind: 'activity_taxonomy',
+      code: null,
+      reason: `The activity binding was left out: ${empty.map((role) => BINDING_ROLE_LABEL[role]).join(', ')} `
+        + `would count ${gone.length ? `only ${notActiveTypes(gone)}` : 'nothing'} in this office. Offices made from the template count the `
+        + 'default binding.',
+    });
+    return null;
+  }
+  if (gone.length) {
+    dropped.push({
+      kind: 'activity_taxonomy',
+      code: null,
+      reason: `The activity binding no longer counts ${notActiveTypes(gone)} in this office.`,
+    });
+  }
+  return kept;
+}
+
+/**
  * The active ratios, each counting only activity types an office made from the template will have: the
  * template's own, and the three cascade types every office is given (ADR-0115 §2) — the set provisioning's
  * whole-source check holds a ratio to. An archived code is taken out; a ratio with a side left counting
@@ -228,7 +273,10 @@ function ratiosFrom(snapshot: Row, kinds: TemplateKinds, dropped: DroppedSetting
     categories?: Parameters<typeof withCascadeTypes>[0];
     types?: Parameters<typeof withCascadeTypes>[1];
   };
-  const given = withCascadeTypes(taxonomy.categories ?? [], taxonomy.types ?? []);
+  // The types the template's own binding gives an office, or the default binding's (ADR-0163 §5).
+  const given = withCascadeTypes(
+    taxonomy.categories ?? [], taxonomy.types ?? [], bindingOfPayload(kinds.activity_taxonomy) ?? defaultBinding(),
+  );
   const sections = new Set(given.categories.map((c) => c.code));
   const typeCodes = new Set(given.types.filter((t) => sections.has(t.categoryCode)).map((t) => t.code));
 

@@ -3,7 +3,7 @@
   "paths": {
     "/api/v1/summary": {
       "get": {
-        "description": "Your goal against what you produced, this month and this year, the gap, and the pace — read from your goal, the office’s production and your own log. With `for`, the same page **computed for that person**: their goal, their production and whose figure it is, their log, their leads, their compliance, and their rung for the sections and the ratios. A read of somebody else’s writes one entry to the audit log; your own writes none.\n\n**Requires `personal_summary:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Your goal against what you produced, this month and this year, the gap, and the pace — read from your goal, the office’s production and your own log. With `month` or `year`, an earlier month or year, read whole, with no pace (ADR-0161). With `for`, the same page **computed for that person**: their goal, their production and whose figure it is, their log, their leads, their compliance, and their rung for the sections and the ratios. A read of somebody else’s writes one entry to the audit log; your own writes none.\n\n**Requires `personal_summary:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "SummaryController_read_v1",
         "parameters": [
           {
@@ -13,6 +13,28 @@
             "description": "The **membership** whose Summary to read. Omitted, or your own, it is yours. Anybody else is read as far as your grant reaches: the people you coach, or the whole agency for its owner and its administrators. Every read of somebody else’s is recorded.",
             "schema": {
               "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "name": "month",
+            "required": false,
+            "in": "query",
+            "description": "A month to look back on, `YYYY-MM`, read **whole**: *Monthly* is that month, *Yearly* its year. From the office’s first month to this one; the future, or a month before the office, is `400`. Omitted, it is this month. Not with `year`.",
+            "schema": {
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+              "example": "2026-08",
+              "type": "string"
+            }
+          },
+          {
+            "name": "year",
+            "required": false,
+            "in": "query",
+            "description": "A year to look back on, `YYYY`, read **whole**: *Yearly* is that year, *Monthly* its December — or, for this year, this month. From the office’s first year to this one; the future, or a year before the office, is `400`. Not with `month`.",
+            "schema": {
+              "pattern": "^\\d{4}$",
+              "example": "2025",
               "type": "string"
             }
           }
@@ -29,7 +51,7 @@
             }
           },
           "400": {
-            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "description": "`VALIDATION_FAILED` — a parameter other than `for`, `month` and `year`; a malformed `month` or `year`; both together; or one in the future or before the office’s first month, with `details.field`, `earliest` and `latest`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -169,7 +191,7 @@
             "name": "sort",
             "required": false,
             "in": "query",
-            "description": "`name` ignores case and accents. `type` orders blank, Sales, Recruitment. `status` orders by the stage’s place in its own ladder as the office last published it, blank first; equal places are ordered by type and then by registration, oldest first. Every order ends on the id, so equal leads keep their places from one page to the next. `desc` reverses the whole order. Sorted before the page is cut.",
+            "description": "`name` ignores case and accents. `type` orders blank, Sales, Recruitment. `status` orders by the stage’s place in its own ladder as the office last published it, blank first; equal places are ordered by type and then by registration, oldest first. Every order ends on the id, so equal leads keep their places from one page to the next. `desc` reverses the whole order. Sorted before the page is cut. **Omitted, the list is in its owner’s own order** — where `PATCH /leads/order` put each lead, a new one at the top (ADR-0161 §1).",
             "schema": {
               "enum": [
                 "dateRegistered",
@@ -185,7 +207,7 @@
             "name": "dir",
             "required": false,
             "in": "query",
-            "description": "Omitted is `desc`.",
+            "description": "With `sort`; omitted is `desc`. The owner’s own order has no direction.",
             "schema": {
               "enum": [
                 "asc",
@@ -644,6 +666,85 @@
           "leads"
         ],
         "x-required-permission": "lead:delete"
+      }
+    },
+    "/api/v1/leads/order": {
+      "patch": {
+        "description": "Every one of your **open** leads, once each, top first: `GET /leads` without `sort` then answers in this order, and a lead you add goes to the top (ADR-0161 §1). Your own, whatever your grant reaches: a leader orders their own leads, not their agents’. A closed or deleted lead, somebody else’s, another office’s, a repeat or one left out is `VALIDATION_FAILED` (400), and nothing is written. A place is not a change to the lead: no `version` moves and no editor is named. One `lead.reordered` entry, with how many.\n\n**Requires `lead:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeadController_reorder_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderLeadsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadOrderDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `lead:update`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Put your leads in your order",
+        "tags": [
+          "leads"
+        ],
+        "x-required-permission": "lead:update"
       }
     },
     "/api/v1/leads/{id}/status": {
@@ -2360,7 +2461,7 @@
     },
     "/api/v1/auth/logout-all": {
       "post": {
-        "description": "Revokes every refresh session for this account, this one included. What somebody does when they think a device was lost.\n\n**Any signed-in user.** No further permission.",
+        "description": "Revokes every refresh session for this account, this one included. What somebody does when they think a device was lost. Refused `403 PERM_DENIED` in any support session.\n\n**Any signed-in user.** No further permission.",
         "operationId": "AuthController_logoutAll_v1",
         "parameters": [],
         "responses": {
@@ -2452,7 +2553,7 @@
     },
     "/api/v1/auth/sessions/{sessionId}": {
       "delete": {
-        "description": "Revokes the whole token family — revoking only its newest token would leave an attacker holding an older one that still rotates. `404` for a session that is not this account's.\n\n**Any signed-in user.** No further permission.",
+        "description": "Revokes the whole token family — revoking only its newest token would leave an attacker holding an older one that still rotates. `404` for a session that is not this account's. Refused `403 PERM_DENIED` in any support session.\n\n**Any signed-in user.** No further permission.",
         "operationId": "AuthController_revokeSession_v1",
         "parameters": [
           {
@@ -2512,7 +2613,7 @@
     },
     "/api/v1/auth/change-password": {
       "post": {
-        "description": "Revokes your other sessions.\n\n**Any signed-in user.** No further permission.",
+        "description": "Revokes your other sessions. Refused `403 PERM_DENIED` in any support session.\n\n**Any signed-in user.** No further permission.",
         "operationId": "AuthController_changePassword_v1",
         "parameters": [],
         "requestBody": {
@@ -2626,6 +2727,7 @@
         ]
       },
       "patch": {
+        "description": "Your name, preferred name and pronoun; and your date of birth, gender, company join month and work status (ADR-0158) — each optional, none clearable. A birth date must be in the past and at least 18 years ago and a join month not in the future, else `400 VALIDATION_FAILED` naming the field. Work status is written on your membership in your office, and on your account until you have one. **Refused `403 PERM_DENIED` in any support session**, read-only, setup or elevated: a person's own account is theirs to change.\n\n**Any signed-in user.** No further permission.",
         "operationId": "AuthController_updateMe_v1",
         "parameters": [],
         "requestBody": {
@@ -2688,8 +2790,7 @@
         "summary": "Update your own account",
         "tags": [
           "auth"
-        ],
-        "description": "**Any signed-in user.** No further permission."
+        ]
       }
     },
     "/api/v1/admin/overview": {
@@ -3493,7 +3594,7 @@
         "x-required-permission": "org_level:crud"
       },
       "post": {
-        "description": "The ladder belongs to the company, not to any office (ADR-0012): a KPM cannot add, rename or remove a rung. `code` is stable and semantic and is never reused — not even after archiving — because it is what every membership holds.\n\n**Requires `org_level:crud`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The ladder belongs to the company, not to any office (ADR-0012): a KPM cannot add, rename or remove a rung. `code` is stable and semantic and is never reused — not even after archiving — because it is what every membership holds. `leaderTier` (`senior`, `associate` or `null`, absent being `null`) decides the class its members are given (ADR-0156).\n\n**Requires `org_level:crud`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_createOrgLevel_v1",
         "parameters": [],
         "requestBody": {
@@ -3575,7 +3676,7 @@
     },
     "/api/v1/admin/org-levels/{id}": {
       "patch": {
-        "description": "The code is not updatable, by construction — it is absent from the body. Archiving retires a rung and keeps every membership that references it readable.\n\n**Requires `org_level:crud`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The code is not updatable, by construction — it is absent from the body. Archiving retires a rung and keeps every membership that references it readable. A change of `leaderTier` is refused `409 ORG_LEVEL_TIER_IN_USE`, with `details.members`, while any live membership stands on the rung: nobody is re-classed silently (ADR-0156 §5).\n\n**Requires `org_level:crud`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_updateOrgLevel_v1",
         "parameters": [
           {
@@ -3667,7 +3768,7 @@
             "bearer": []
           }
         ],
-        "summary": "Rename, reorder or archive a rung",
+        "summary": "Rename, reorder, archive or set the leader tier of a rung",
         "tags": [
           "admin (Super Admin)"
         ],
@@ -3736,7 +3837,7 @@
         "description": "**Requires `kpm:list_all`.** See `docs/00-product/roles-and-permissions.md`."
       },
       "post": {
-        "description": "The only way an office comes into existence — there is no self-service path (ADR-0005). Seeds the per-office settings every prototype screen hardcodes, and its configuration from `startFrom` (ADR-0115): one of the company's active templates, the AgencyBoost defaults, or empty — the company's default template when absent. There is no fallback: a kind the source holds none of is empty in the office, and every office has the three cascade activity types. The whole source is checked before the office is written, so a refusal (400, naming what is broken; 404 for a template that is not the company's) leaves nothing behind.\n\n**Requires `kpm:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The only way an office comes into existence — there is no self-service path (ADR-0005). Seeds the per-office settings every prototype screen hardcodes, and its configuration from `startFrom` (ADR-0115): one of the company's active templates, the Template library's (`templateLibrary`, ADR-0164), the AgencyBoost defaults, or empty — the company's default template when absent. There is no fallback: a kind the source holds none of is empty in the office, and every office has the three cascade activity types. The whole source is checked before the office is written, so a refusal (400, naming what is broken; 404 for a template that is not the company's; 409 TEMPLATE_RUNG_UNKNOWN for a library template naming a role the company's ladder lacks) leaves nothing behind. The Template library itself holds no office: 409 COMPANY_IS_TEMPLATE_LIBRARY.\n\n**Requires `kpm:create`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_createTenant_v1",
         "parameters": [],
         "requestBody": {
@@ -5094,7 +5195,7 @@
     },
     "/api/v1/admin/impersonate/{userId}": {
       "post": {
-        "description": "Time-boxed to an hour, reason required, and every action it produces records both the real Super Admin and the person acted as. Refused for another Super Admin — that would erase the attribution the feature depends on.\n\n**Requires `impersonation:start`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Time-boxed to an hour, reason required, and every action it produces records both the real Super Admin and the person acted as. Refused for another Super Admin — that would erase the attribution the feature depends on. Read-only, unless `purpose` is `setup`: then it may also write the office's settings, its people import and its production file, and nothing else, without a second Super Admin — for an active office's Owner or one of its Admins only (`409 IMPERSONATION_SETUP_TARGET`).\n\n**Requires `impersonation:start`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_impersonate_v1",
         "parameters": [
           {
@@ -6016,6 +6117,247 @@
         "x-required-permission": "member:read_role_change_log"
       }
     },
+    "/api/v1/members/leader-limit-requests": {
+      "get": {
+        "description": "Every request of the office for its Owner and an Admin; for an AB or AAB, the ones they asked. Pending first. Each carries the office’s limit and Leaders used now.\n\n**Requires `leader_limit_request:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "OrgController_leaderLimitRequests_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LeaderLimitRequestRowDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `leader_limit_request:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office’s requests to make a leader past its limit",
+        "tags": [
+          "organisation"
+        ],
+        "x-required-permission": "leader_limit_request:read"
+      }
+    },
+    "/api/v1/members/leader-limit-requests/{requestId}": {
+      "delete": {
+        "description": "Whoever asked, or the Owner or an Admin, may withdraw an open one; nothing about the member changes. Another office’s request is 404. One already decided or cancelled is 409 LEADER_LIMIT_REQUEST_DECIDED.\n\n**Requires `leader_limit_request:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "OrgController_cancelLeaderLimitRequest_v1",
+        "parameters": [
+          {
+            "name": "requestId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LeaderLimitRequestRowDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `leader_limit_request:create`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancel a request to make a leader past the limit",
+        "tags": [
+          "organisation"
+        ],
+        "x-required-permission": "leader_limit_request:create"
+      }
+    },
+    "/api/v1/members/{membershipId}/leader-limit-request": {
+      "post": {
+        "description": "For the write the limit refused with LEADER_LIMIT_REACHED and canRequest: a role change onto a leader rung (`promote`, naming the rung and the reason), or letting in a pending member who stands on one (`activate`). Refused wherever that write would be, in its words; a change that makes no new leader is 400. One open request per member: a second is 409 LEADER_LIMIT_REQUEST_OPEN. Nothing about the member changes while it waits.\n\n**Requires `leader_limit_request:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "OrgController_requestPastLeaderLimit_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLeaderLimitRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderLimitRequestRowDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `leader_limit_request:create`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Ask AgencyBoost to approve one leader past the office’s limit",
+        "tags": [
+          "organisation"
+        ],
+        "x-required-permission": "leader_limit_request:create"
+      }
+    },
     "/api/v1/members/{membershipId}": {
       "delete": {
         "description": "Requires the literal word REMOVE in the body — the screen's gate is a convenience, this is the control. Nothing is deleted: the row, the agent code and every history event stay with the office. If they still have reports, the body must say where those reports go; there is no default, because a default here silently reorganises somebody else's unit.\n\n**Requires `member:remove_from_team`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -6874,7 +7216,7 @@
         "description": "**Requires `member:tag_group`.** See `docs/00-product/roles-and-permissions.md`."
       },
       "put": {
-        "description": "Core Leader decides who, besides the Owner and the Admins, may open and write in the Strategic Leader Forum’s meetings, and nothing else — no hierarchy, no data scope. A group is the same: a label, not a rule.\n\n**Requires `member:tag_group`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Core Leader (ADR-0159) decides who, besides the Owner and the Admins, opens and writes in the Strategic Leader Forum’s meetings and reads the office’s KPM analytics — no hierarchy. **A leader’s only**: a change to it is checked against `member:tag_core_leader`, and setting it on a member whose rung is not a leader rung is refused `400 CORE_LEADER_NOT_A_LEADER`; an unchanged flag is not asked about. A group is a label, not a rule.\n\n**Requires `member:tag_group`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "OrgController_tagMember_v1",
         "parameters": [
           {
@@ -6968,6 +7310,104 @@
           "organisation"
         ],
         "x-required-permission": "member:tag_group"
+      }
+    },
+    "/api/v1/members/{membershipId}/core-leader": {
+      "put": {
+        "description": "The directory row’s control (ADR-0159 §1): the Core Leader flag alone, the person’s groups untouched. A leader’s only — `400 CORE_LEADER_NOT_A_LEADER` for a member whose rung is not a leader rung. Audited as `member.tagged`, before and after; the same value again writes nothing. Answers the person’s tags.\n\n**Requires `member:tag_core_leader`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "OrgController_setCoreLeader_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCoreLeaderDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberTagsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:tag_core_leader`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Tag or untag this person Core Leader",
+        "tags": [
+          "organisation"
+        ],
+        "x-required-permission": "member:tag_core_leader"
       }
     },
     "/api/v1/members": {
@@ -7175,6 +7615,250 @@
           "organisation"
         ],
         "x-required-permission": "member:read_profile"
+      }
+    },
+    "/api/v1/admin/leader-limit-requests": {
+      "get": {
+        "description": "Every office’s requests, pending first, each with the office’s limit and Leaders used now. The Super Admin’s alone: an office’s own Owner reads their office’s at /members/leader-limit-requests.\n\n**Requires `leader_limit_request:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderLimitRequestAdminController_queue_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LeaderLimitRequestRowDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `leader_limit_request:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Leaders waiting past their office’s limit",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "leader_limit_request:read"
+      }
+    },
+    "/api/v1/admin/leader-limit-requests/{requestId}/approve": {
+      "post": {
+        "description": "Re-checks that the act still applies — the member live and on the rung they stood on, still pending for an activation — and carries it out past the limit, under the office’s leader lease; the limit does not move. A request that no longer applies is 409 LEADER_LIMIT_REQUEST_STALE and is closed as declined. One already decided is 409 LEADER_LIMIT_REQUEST_DECIDED. Whoever asked is notified.\n\n**Requires `leader_limit_request:decide`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderLimitRequestAdminController_approve_v1",
+        "parameters": [
+          {
+            "name": "requestId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LeaderLimitRequestRowDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `leader_limit_request:decide`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Approve a leader past the office’s limit",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "leader_limit_request:decide"
+      }
+    },
+    "/api/v1/admin/leader-limit-requests/{requestId}/decline": {
+      "post": {
+        "description": "Nothing about the member changes. The reason is required, and is sent to whoever asked.\n\n**Requires `leader_limit_request:decide`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderLimitRequestAdminController_decline_v1",
+        "parameters": [
+          {
+            "name": "requestId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclineLeaderLimitRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LeaderLimitRequestRowDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `leader_limit_request:decide`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Decline a leader past the office’s limit",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "leader_limit_request:decide"
       }
     },
     "/api/v1/join/me": {
@@ -9217,7 +9901,7 @@
         "x-required-permission": "tenant_config:write"
       },
       "delete": {
-        "description": "Archiving, never deleting (invariant §3) — and it cascades to the section’s types, because a live type inside a retired section would still be loggable from nowhere. A ratio naming an archived type keeps computing over its history. 409 ACTIVITY_TYPE_RESERVED while it holds LEADS_CONTACTED, SELL_PRESENTATION or SELL_SUBMISSION, which the goal plan and the summary count (`details.codes`): move them out first.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Archiving, never deleting (invariant §3) — and it cascades to the section’s types, because a live type inside a retired section would still be loggable from nowhere. A ratio naming an archived type keeps computing over its history. 409 ACTIVITY_TYPE_BOUND while it holds an active type the office’s activity binding names, which the goal plan and the summary count (`details.codes`, `details.roles`): move them out first.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TenantConfigController_archiveCategory_v1",
         "parameters": [
           {
@@ -9551,7 +10235,7 @@
         "x-required-permission": "tenant_config:write"
       },
       "delete": {
-        "description": "Archived, not deleted (invariant §3). It leaves the capture screen and stays readable wherever a historical activity log names it. 409 ACTIVITY_TYPE_RESERVED for LEADS_CONTACTED, SELL_PRESENTATION and SELL_SUBMISSION, which the goal plan and the summary count: they are renamed, described, reordered and moved, never archived.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Archived, not deleted (invariant §3). It leaves the capture screen and stays readable wherever a historical activity log names it. 409 ACTIVITY_TYPE_BOUND for a type the office’s activity binding names, which the goal plan and the summary count: it is renamed, described, reordered and moved, and archived only once the Super Admin has unbound it.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TenantConfigController_archiveType_v1",
         "parameters": [
           {
@@ -11153,6 +11837,239 @@
           "tenant configuration"
         ],
         "x-required-permission": "tenant_config:read"
+      }
+    },
+    "/api/v1/admin/tenants/{kpmId}/activity-binding": {
+      "get": {
+        "description": "Which of the office’s activity types each cascade role counts — `leads` (*Set appointment*), `appointments` (*Sales meeting*), `closings` (*Submission polis*) — with its version, and every activity type the office holds, archived ones included, that a role may name. A version of 0 is an office with no binding yet, which counts the default binding. Super Admin only, read through a named cross-tenant method that reads configuration alone. An unknown office is 404.\n\n**Requires `activity_binding:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivityBindingAdminController_read_v1",
+        "parameters": [
+          {
+            "name": "kpmId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfficeActivityBindingDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activity_binding:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read an office’s activity binding",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "activity_binding:read"
+      },
+      "put": {
+        "description": "The whole binding, every time: each role a list of the office’s activity type codes, summed — replacing an activity is `[A]` → `[A, B]`, so the old code’s history keeps counting and the new one counts from now. Every code must be one of that office’s activity types (archived allowed, its history counts); an unknown code, an empty role or a code in two roles is 400 VALIDATION_FAILED. A stale `expectedVersion` is 409 VERSION_CONFLICT. Takes effect when saved: the summary, the pace, the Unit Dashboard, coaching, the measured rates and the campaigns read it from then. A goal’s stored `cascadeMapping` and coaching snapshots are not changed. Super Admin only; audited `activity_binding.updated` with the binding before and after. An unknown office is 404.\n\n**Requires `activity_binding:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivityBindingAdminController_update_v1",
+        "parameters": [
+          {
+            "name": "kpmId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateActivityBindingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfficeActivityBindingDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activity_binding:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set an office’s activity binding",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "activity_binding:write"
+      }
+    },
+    "/api/v1/kpm/settings/activity-binding": {
+      "get": {
+        "description": "Which of this office’s activity types each cascade role counts — `leads` (*Set appointment*), `appointments` (*Sales meeting*), `closings` (*Submission polis*) — read-only here: the Super Admin keeps it. A bound type cannot be archived (409 ACTIVITY_TYPE_BOUND). Version 0 is an office with no binding yet, which counts the default binding.\n\n**Requires `activity_binding:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivityBindingReadController_read_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityBindingDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activity_binding:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The office’s activity binding",
+        "tags": [
+          "tenant configuration"
+        ],
+        "x-required-permission": "activity_binding:read"
       }
     },
     "/api/v1/kpm/settings/training": {
@@ -22562,7 +23479,7 @@
     },
     "/api/v1/kpm/analytics": {
       "get": {
-        "description": "One row per AB agency — the AB and everybody below them down to the next AB, so an AB under an AB is its own row and the rows add up to the agency — each with its *(Direct)* row and a row per AAB unit: APE this month against the targets fixed when it began, APE this year against the annual goals, coached in the last 7 days, active agents for the period’s month, total and promised leads, and manpower by rung. Each AB’s and AAB’s Maintenance of Contract against the company’s carrier rules, criterion by criterion, a criterion without uploaded input `null` rather than failed; each agency’s production club. The total row, and the agency’s production for the six months before this one. Computed on the read, not paginated; nothing is recorded.\n\n**Requires `kpm_analytics:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "One row per AB agency — the AB and everybody below them down to the next AB, so an AB under an AB is its own row and the rows add up to the agency — each with its *(Direct)* row and a row per AAB unit: APE this month against the targets fixed when it began, APE this year against the annual goals, coached in the last 7 days, active agents for the period’s month, total and promised leads, and manpower by rung. Each AB’s and AAB’s Maintenance of Contract against the company’s carrier rules, criterion by criterion, a criterion without uploaded input `null` rather than failed; each agency’s production club. The total row, and the agency’s production for the six months before this one. Computed on the read, not paginated; nothing is recorded. Read by the Owner, an Admin and a Core Leader (ADR-0159 §2), the whole office, read-only.\n\n**Requires `kpm_analytics:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "KpmAnalyticsController_read_v1",
         "parameters": [
           {
@@ -22612,7 +23529,17 @@
             }
           },
           "403": {
-            "description": "`TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency. `PERM_DENIED` — a role without the permission: every field role.",
+            "description": "`TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency. `PERM_DENIED` — a role without the permission: an Agent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — an AB or an AAB who is not a Core Leader (tagged, on a leader rung; ADR-0159 §2), read on every request: the forum’s rule. Indistinguishable from another office’s.",
             "content": {
               "application/json": {
                 "schema": {
@@ -22715,7 +23642,7 @@
     },
     "/api/v1/kpm/analytics/compliance": {
       "get": {
-        "description": "Every AB agency’s members — one section per AB, A to Z, its own card and one per AAB who leads somebody — with each member’s status on the item selected: a training module, this year’s goal, logging in the last 7 days, the 90-day activation, an event of this year, or a campaign of this year. Six counts, one per category, each done over those it applies to, computed on every read; what the office offers and lists, for the tabs and pickers. Not paginated. A training, activity or activation read records each member listed as read, in one entry each.\n\n**Requires `kpm_analytics:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every AB agency’s members — one section per AB, A to Z, its own card and one per AAB who leads somebody — with each member’s status on the item selected: a training module, this year’s goal, logging in the last 7 days, the 90-day activation, an event of this year, or a campaign of this year. Six counts, one per category, each done over those it applies to, computed on every read; what the office offers and lists, for the tabs and pickers. Not paginated. A training, activity or activation read records each member listed as read, in one entry each. Read by the Owner, an Admin and a Core Leader (ADR-0159 §2), read-only.\n\n**Requires `kpm_analytics:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ComplianceController_read_v1",
         "parameters": [
           {
@@ -22780,7 +23707,7 @@
             }
           },
           "403": {
-            "description": "`TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no office. `PERM_DENIED` — a role without the permission: every field role.",
+            "description": "`TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no office. `PERM_DENIED` — a role without the permission: an Agent.",
             "content": {
               "application/json": {
                 "schema": {
@@ -22790,7 +23717,7 @@
             }
           },
           "404": {
-            "description": "`NOT_FOUND` — an item the office does not list: another office’s module, event or campaign, an archived one, or one outside this year. Indistinguishable from another office’s.",
+            "description": "`NOT_FOUND` — an item the office does not list: another office’s module, event or campaign, an archived one, or one outside this year. Indistinguishable from another office’s. And any request from an AB or an AAB who is not a Core Leader (ADR-0159 §2), before anything is read.",
             "content": {
               "application/json": {
                 "schema": {
@@ -24253,6 +25180,35 @@
       }
     },
     "schemas": {
+      "SummaryPeriodDto": {
+        "type": "object",
+        "properties": {
+          "firstMonth": {
+            "type": "string",
+            "example": "2025-03",
+            "description": "The office’s first month, `YYYY-MM`, in its zone: the earliest `month` there is, and its year the earliest `year`."
+          },
+          "thisMonth": {
+            "type": "string",
+            "example": "2026-09",
+            "description": "The office’s current month, `YYYY-MM`: the latest there is."
+          },
+          "currentMonth": {
+            "type": "boolean",
+            "description": "`month` is the current month: its days run to today, and the pace is said. Otherwise it is read whole, with no pace."
+          },
+          "currentYear": {
+            "type": "boolean",
+            "description": "`year` is the current year: its days run to today. Otherwise it is read whole, to 31 December."
+          }
+        },
+        "required": [
+          "firstMonth",
+          "thisMonth",
+          "currentMonth",
+          "currentYear"
+        ]
+      },
       "SummaryGoalDto": {
         "type": "object",
         "properties": {
@@ -24496,11 +25452,21 @@
           "code": {
             "type": "string",
             "example": "SELL_SUBMISSION",
-            "description": "The goal’s own code for this count (`cascadeMapping`)."
+            "description": "The first code the office binds to this role (its activity binding)."
+          },
+          "codes": {
+            "example": [
+              "SELL_SUBMISSION"
+            ],
+            "description": "Every code the office binds to this role; `logged` is their sum, so a replaced activity keeps counting.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "logged": {
             "type": "number",
-            "description": "Logged over the period, archived types included."
+            "description": "Logged over the period, every bound code summed, archived types included."
           },
           "target": {
             "type": "number",
@@ -24519,6 +25485,7 @@
         "required": [
           "key",
           "code",
+          "codes",
           "logged",
           "target",
           "attainmentPct",
@@ -24722,11 +25689,16 @@
           "total": {
             "type": "number",
             "description": "Every open lead of the reader’s own."
+          },
+          "unitOpen": {
+            "type": "number",
+            "description": "The open leads of everybody else the reader’s `lead:read` reaches — what Leads Management lists them besides their own. Counted on the reader’s own summary while `total` is 0; 0 otherwise."
           }
         },
         "required": [
           "rows",
-          "total"
+          "total",
+          "unitOpen"
         ]
       },
       "InsightDto": {
@@ -24769,15 +25741,20 @@
         "properties": {
           "year": {
             "type": "string",
-            "example": "2026"
+            "example": "2026",
+            "description": "The year *Yearly* is about: this one, or the one asked for."
           },
           "month": {
             "type": "string",
-            "example": "2026-09"
+            "example": "2026-09",
+            "description": "The month *Monthly* is about: this one, the one asked for, or the December of a closed year asked for."
           },
           "today": {
             "type": "string",
             "example": "2026-09-28"
+          },
+          "period": {
+            "$ref": "#/components/schemas/SummaryPeriodDto"
           },
           "goal": {
             "$ref": "#/components/schemas/SummaryGoalDto"
@@ -24803,7 +25780,7 @@
           },
           "pace": {
             "nullable": true,
-            "description": "The pace sentence (ADR-0109); `null` without a goal.",
+            "description": "The pace sentence (ADR-0109); `null` without a goal, and for a month that has ended (ADR-0161).",
             "allOf": [
               {
                 "$ref": "#/components/schemas/PaceDto"
@@ -24838,6 +25815,7 @@
           "year",
           "month",
           "today",
+          "period",
           "goal",
           "caseSizeMinor",
           "monthly",
@@ -25132,6 +26110,40 @@
           "name"
         ]
       },
+      "ReorderLeadsDto": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "example": [
+              "66f0…a1",
+              "66f0…a2"
+            ],
+            "description": "Every one of your open leads, once each, top first. A closed or deleted lead, somebody else’s, another office’s, a repeat or one left out is `400 VALIDATION_FAILED`, and nothing is written.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "ids"
+        ]
+      },
+      "LeadOrderDto": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "description": "Your open leads’ ids, in the order now saved.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "ids"
+        ]
+      },
       "UpdateLeadDto": {
         "type": "object",
         "properties": {
@@ -25323,19 +26335,21 @@
           },
           "policiesPerWeek": {
             "type": "number",
-            "description": "The screen’s `≈ n/week` sub-line. Ceil, like every step."
+            "description": "Steps 3 and 5’s `≈ n/week`: `policiesPerMonth` ÷ 4.33 to **one decimal**, a whole figure whole — `1.4` for six a month (ADR-0160 §5)."
           },
           "appointmentsPerMonth": {
             "type": "number"
           },
           "appointmentsPerWeek": {
-            "type": "number"
+            "type": "number",
+            "description": "The `≈ n/week` sub-line: ÷ 4.33, rounded up, a whole count."
           },
           "leadsPerMonth": {
             "type": "number"
           },
           "leadsPerWeek": {
-            "type": "number"
+            "type": "number",
+            "description": "The `≈ n/week` sub-line: ÷ 4.33, rounded up, a whole count."
           },
           "targetMet": {
             "type": "boolean",
@@ -25376,6 +26390,46 @@
           "leadsCode",
           "appointmentsCode",
           "closingsCode"
+        ]
+      },
+      "GoalCascadeBindingDto": {
+        "type": "object",
+        "properties": {
+          "leads": {
+            "example": [
+              "LEADS_CONTACTED"
+            ],
+            "description": "*Set appointment*.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "appointments": {
+            "example": [
+              "SELL_PRESENTATION"
+            ],
+            "description": "*Sales meeting*.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "closings": {
+            "example": [
+              "SELL_SUBMISSION"
+            ],
+            "description": "*Submission polis*.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "leads",
+          "appointments",
+          "closings"
         ]
       },
       "GoalMeasuredDto": {
@@ -25462,10 +26516,12 @@
             "type": "number"
           },
           "leadsToApptPct": {
-            "type": "number"
+            "type": "number",
+            "description": "*Appointment to Sales meeting*, a percentage. Unsaved, the office’s *Set appointment to meeting* benchmark, or 30 (ADR-0160 §3)."
           },
           "closingRatePct": {
-            "type": "number"
+            "type": "number",
+            "description": "*Closing rate*, a percentage. Unsaved, the office’s *Selling success rate* benchmark, or 30 (ADR-0160 §3)."
           },
           "snapshot": {
             "description": "What was agreed, frozen at save time. **Never a display source** — `projected` is what a screen renders, because `monthsLeft` shrinks every day.",
@@ -25485,16 +26541,24 @@
             ]
           },
           "cascadeMapping": {
-            "description": "Activity **codes**, never positions.",
+            "description": "Activity **codes**, never positions: the first code of each role in the office’s binding when the plan was first saved, kept as its record and never rewritten. Nothing counts from it — see `cascadeBinding`.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/GoalCascadeMappingDto"
               }
             ]
           },
+          "cascadeBinding": {
+            "description": "What the three columns count today: the office’s activity binding, each role a list of codes, summed. The *Activity #n* chips are drawn from it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoalCascadeBindingDto"
+              }
+            ]
+          },
           "measured": {
             "nullable": true,
-            "description": "Your own conversion rates over the last 30 days, over **this goal’s** cascade codes — printed under the assumptions they measure. Read only: nothing is filled in (ADR-0048, ADR-0055). **`null` on anybody else’s plan**: reading or saving somebody else’s goal answers no rate from their log.",
+            "description": "Your own conversion rates over the last 30 days, over the office’s cascade binding — printed under the assumptions they measure. Read only: nothing is filled in (ADR-0048, ADR-0055). **`null` on anybody else’s plan**: reading or saving somebody else’s goal answers no rate from their log.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/GoalMeasuredDto"
@@ -25528,6 +26592,7 @@
           "snapshot",
           "projected",
           "cascadeMapping",
+          "cascadeBinding",
           "measured",
           "savedAt",
           "savedByMembershipId"
@@ -25577,12 +26642,12 @@
           "leadsToApptPct": {
             "type": "number",
             "example": 30,
-            "description": "Per cent of contacted leads that become an appointment."
+            "description": "*Appointment to Sales meeting*: per cent of set appointments that become a sales meeting."
           },
           "closingRatePct": {
             "type": "number",
             "example": 30,
-            "description": "Per cent of appointments that become a closing."
+            "description": "*Closing rate*: per cent of sales meetings that become a submitted policy."
           },
           "period": {
             "type": "string",
@@ -26442,8 +27507,35 @@
           },
           "agentCode": {
             "type": "string",
-            "example": "PRU-88213",
-            "maxLength": 32
+            "example": "88213",
+            "minLength": 3,
+            "maxLength": 32,
+            "pattern": "^\\d{3,32}$"
+          },
+          "dateOfBirth": {
+            "type": "string",
+            "example": "1990-03-15",
+            "description": "`YYYY-MM-DD`. In the past, and at least 18 years ago."
+          },
+          "companyJoinMonth": {
+            "type": "string",
+            "example": "2021-07",
+            "description": "`YYYY-MM`: the month they joined the insurer chosen in `companyId` (*Joined Prudential*). Not in the future."
+          },
+          "workStatus": {
+            "type": "string",
+            "enum": [
+              "full_time",
+              "part_time"
+            ],
+            "description": "Copied onto the membership they are given when an office takes them on (ADR-0158 §1)."
+          },
+          "gender": {
+            "type": "string",
+            "enum": [
+              "male",
+              "female"
+            ]
           }
         },
         "required": [
@@ -26451,7 +27543,11 @@
           "password",
           "fullName",
           "companyId",
-          "agentCode"
+          "agentCode",
+          "dateOfBirth",
+          "companyJoinMonth",
+          "workStatus",
+          "gender"
         ]
       },
       "LoginDto": {
@@ -26561,8 +27657,10 @@
             "example": "Rina Wijaya"
           },
           "preferredName": {
-            "type": "string",
-            "example": "Rina"
+            "type": "object",
+            "example": "Rina",
+            "nullable": true,
+            "description": "What colleagues call you. Empty, blank or `null` means none: it is stored as `null`, and your full name is shown wherever a name is."
           },
           "pronoun": {
             "type": "string",
@@ -26572,6 +27670,31 @@
               "they"
             ],
             "description": "Yours to set. It appears in the coaching commitment sentence your leader reads."
+          },
+          "dateOfBirth": {
+            "type": "string",
+            "example": "1990-03-15",
+            "description": "`YYYY-MM-DD`. In the past, and at least 18 years ago."
+          },
+          "companyJoinMonth": {
+            "type": "string",
+            "example": "2021-07",
+            "description": "`YYYY-MM`: the month you joined your insurer. Not in the future."
+          },
+          "workStatus": {
+            "type": "string",
+            "enum": [
+              "full_time",
+              "part_time"
+            ],
+            "description": "Written on your membership in your office; on your account until you have one."
+          },
+          "gender": {
+            "type": "string",
+            "enum": [
+              "male",
+              "female"
+            ]
           }
         }
       },
@@ -26617,7 +27740,7 @@
           "usesPlatformDefaults": {
             "type": "boolean",
             "default": true,
-            "description": "True gives the company the platform's activity taxonomy, ratios, lead ladders, training tree, activation checklist, capability ladder, event types, carrier rules and product catalog to edit. False leaves every one of them empty, for a company whose presets are being authored from scratch. The role ladder is seeded either way: an office whose company has none is one nobody can join."
+            "description": "True copies the Template library: its role ladder with the leader tiers, product catalog, carrier rules and recruitment playbook, and its Default template — activity taxonomy, ratios, lead ladders, training tree, activation checklist, capability ladder and event types — as the company's first, default template. A copy: changing the Template later changes no company made from it. Where no Template library exists, the AgencyBoost defaults. False leaves every one of them empty, for a company whose presets are being authored from scratch. The role ladder is seeded either way: an office whose company has none is one nobody can join."
           }
         },
         "required": [
@@ -26681,6 +27804,15 @@
             "type": "number",
             "example": 2,
             "description": "Junior first. Presentation only — nothing references it."
+          },
+          "leaderTier": {
+            "type": "string",
+            "enum": [
+              "senior",
+              "associate"
+            ],
+            "nullable": true,
+            "description": "*Senior Leader* (what AB is), *Associate Leader* (what AAB is), or `null` — *Not a leader*. A member’s role class is derived from it wherever they are placed on the rung (ADR-0156). Absent is `null`."
           }
         },
         "required": [
@@ -26702,6 +27834,15 @@
             "type": "number",
             "example": 2
           },
+          "leaderTier": {
+            "type": "string",
+            "enum": [
+              "senior",
+              "associate"
+            ],
+            "nullable": true,
+            "description": "*Senior Leader* (what AB is), *Associate Leader* (what AAB is), or `null` — *Not a leader*. A member’s role class is derived from it wherever they are placed on the rung (ADR-0156). Refused `409 ORG_LEVEL_TIER_IN_USE` while anybody holds the rung."
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -26722,11 +27863,15 @@
               "defaults",
               "empty"
             ],
-            "description": "`template`: one of the company’s active templates, named by `templateId`. `defaults`: the AgencyBoost defaults. `empty`: nothing but the three cascade activity types."
+            "description": "`template`: one of the company’s active templates, named by `templateId` — or, with `templateLibrary`, one of the Template library’s. `defaults`: the AgencyBoost defaults. `empty`: nothing but the three cascade activity types."
           },
           "templateId": {
             "type": "string",
-            "description": "Required when `kind` is `template`."
+            "description": "Required when `kind` is `template`, unless `templateLibrary` is true: then it names one of the Template library’s active templates, and absent its default."
+          },
+          "templateLibrary": {
+            "type": "boolean",
+            "description": "With `kind: template`, the template is the Template library’s rather than the company’s — *Template · Default template*. Its settings are copied across companies, and every role they name must be on the company’s ladder (409 TEMPLATE_RUNG_UNKNOWN)."
           }
         },
         "required": [
@@ -26913,6 +28058,15 @@
             "minimum": 1,
             "maximum": 60,
             "default": 60
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "support",
+              "setup"
+            ],
+            "default": "support",
+            "description": "`support` looks and changes nothing. `setup` may also change the office's settings, import people and upload its production file, and nothing else — for an active office's Owner or one of its Admins only, else `409 IMPERSONATION_SETUP_TARGET`."
           }
         },
         "required": [
@@ -27037,11 +28191,8 @@
         "properties": {
           "toRole": {
             "type": "string",
-            "enum": [
-              "ab",
-              "aab",
-              "agent"
-            ]
+            "example": "aab",
+            "description": "The rung, by its code on the company’s ladder, in any case: `ab`, `aab`, `agent`, or a rung the company added. What the member is given — AB, AAB or Agent rights — follows the rung’s leader tier. A code that is no active rung is refused `409 ORG_LEVEL_NOT_ON_LADDER`."
           },
           "reason": {
             "type": "string",
@@ -27051,6 +28202,32 @@
         },
         "required": [
           "toRole"
+        ]
+      },
+      "CreateLeaderLimitRequestDto": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "promote",
+              "activate"
+            ],
+            "description": "`promote`: the role change the limit refused, onto the rung named. `activate`: letting in a pending member who stands on a leader rung — approving their join request, or tagging them into your unit."
+          },
+          "orgLevelCode": {
+            "type": "string",
+            "example": "AAB",
+            "description": "For `promote`: the rung, by its code on the company’s ladder."
+          },
+          "reason": {
+            "type": "string",
+            "example": "Ready to bring on their own agents",
+            "description": "For `promote`: kept in the role change log when AgencyBoost approves it."
+          }
+        },
+        "required": [
+          "action"
         ]
       },
       "SubtreeDispositionDto": {
@@ -27128,12 +28305,37 @@
           },
           "isCoreLeader": {
             "type": "boolean",
-            "description": "Who, besides the Owner and the Admins, may open and write in the Strategic Leader Forum’s meetings, and nothing else. It grants no hierarchy and no data scope."
+            "description": "Core Leader (ADR-0159): who, besides the Owner and the Admins, opens and writes in the Strategic Leader Forum’s meetings and reads the office’s KPM analytics. A leader’s only: setting it on a member whose rung is not a leader rung is refused `400 CORE_LEADER_NOT_A_LEADER`, and changing it needs `member:tag_core_leader`. It grants no hierarchy."
           }
         },
         "required": [
           "groupIds",
           "isCoreLeader"
+        ]
+      },
+      "SetCoreLeaderDto": {
+        "type": "object",
+        "properties": {
+          "isCoreLeader": {
+            "type": "boolean",
+            "description": "Tag (`true`) or untag (`false`) this member *Core Leader*. Their groups are untouched. Setting it on a member whose rung is not a leader rung is refused `400 CORE_LEADER_NOT_A_LEADER`."
+          }
+        },
+        "required": [
+          "isCoreLeader"
+        ]
+      },
+      "DeclineLeaderLimitRequestDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "example": "Raise the limit at renewal instead.",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "reason"
         ]
       },
       "RegisterKpmDto": {
@@ -27672,6 +28874,51 @@
             "description": "The month the financial year starts. Stored now; no computation reads it yet."
           }
         }
+      },
+      "UpdateActivityBindingDto": {
+        "type": "object",
+        "properties": {
+          "leads": {
+            "example": [
+              "LEADS_CONTACTED"
+            ],
+            "description": "*Set appointment*: the activity type codes the leads column counts. At least one; archived allowed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "appointments": {
+            "example": [
+              "SELL_PRESENTATION"
+            ],
+            "description": "*Sales meeting*: the codes the appointments column counts. At least one; archived allowed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "closings": {
+            "example": [
+              "SELL_SUBMISSION"
+            ],
+            "description": "*Submission polis*: the codes the closings column and the pace sentence count. At least one.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expectedVersion": {
+            "type": "number",
+            "minimum": 0,
+            "description": "The version read. When sent and no longer current, 409 VERSION_CONFLICT and nothing is written."
+          }
+        },
+        "required": [
+          "leads",
+          "appointments",
+          "closings"
+        ]
       },
       "RequestUploadDto": {
         "type": "object",
@@ -30575,12 +31822,22 @@
           "code": {
             "type": "string",
             "example": "LEADS_CONTACTED",
-            "description": "The goal’s own code for this count, never an item number."
+            "description": "The first code the office binds to this role, never an item number."
+          },
+          "codes": {
+            "example": [
+              "LEADS_CONTACTED"
+            ],
+            "description": "Every code the office binds to this role (its activity binding); `logged` is their sum.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "logged": {
             "type": "number",
             "example": 14,
-            "description": "Every entry against the code in the window, archived types included."
+            "description": "Every entry against the bound codes in the window, summed, archived types included."
           },
           "target": {
             "type": "number",
@@ -30592,6 +31849,7 @@
         "required": [
           "key",
           "code",
+          "codes",
           "logged",
           "target"
         ]
@@ -35490,21 +36748,31 @@
           "targetMinor": {
             "type": "number",
             "nullable": true,
-            "description": "The rows’ targets summed; `null` when none holds one."
+            "description": "The targets of the rows whose production is held, summed — every target held when no row’s production is; `null` when none holds one."
           },
           "actualMinor": {
             "type": "number",
             "nullable": true,
-            "description": "The rows’ actuals summed; `null` when none holds one."
+            "description": "The rows’ actuals summed; `null` when none holds one: *Not uploaded yet*."
           },
           "attainmentPct": {
             "type": "number",
             "nullable": true,
-            "description": "From the sums, never averaged."
+            "description": "From the paired sums, never averaged."
           },
           "missing": {
             "type": "number",
-            "description": "Rows holding no actual, which the sum leaves out."
+            "description": "Rows holding no actual, which both sums leave out."
+          },
+          "gapMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "How far the actual is short of the target; 0 when met; `null` without both."
+          },
+          "overMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "How far the actual is over the target; 0 when short; `null` without both."
           },
           "period": {
             "type": "string",
@@ -35519,6 +36787,8 @@
           "actualMinor",
           "attainmentPct",
           "missing",
+          "gapMinor",
+          "overMinor",
           "period"
         ]
       },
@@ -36007,41 +37277,53 @@
           "campaigns"
         ]
       },
-      "RolledUpGoalDto": {
+      "PairedGoalDto": {
         "type": "object",
         "properties": {
           "targetMinor": {
             "type": "number",
             "nullable": true,
-            "description": "The rows’ targets summed; `null` when none holds one."
+            "description": "The targets of the rows whose production is held, summed — every target held when no row’s production is; `null` when none holds one."
           },
           "actualMinor": {
             "type": "number",
             "nullable": true,
-            "description": "The rows’ actuals summed; `null` when none holds one."
+            "description": "The rows’ actuals summed; `null` when none holds one: *Not uploaded yet*."
           },
           "attainmentPct": {
             "type": "number",
             "nullable": true,
-            "description": "From the sums, never averaged."
+            "description": "From the paired sums, never averaged."
           },
           "missing": {
             "type": "number",
-            "description": "Rows holding no actual, which the sum leaves out."
+            "description": "Rows holding no actual, which both sums leave out."
+          },
+          "gapMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "How far the actual is short of the target; 0 when met; `null` without both."
+          },
+          "overMinor": {
+            "type": "number",
+            "nullable": true,
+            "description": "How far the actual is over the target; 0 when short; `null` without both."
           }
         },
         "required": [
           "targetMinor",
           "actualMinor",
           "attainmentPct",
-          "missing"
+          "missing",
+          "gapMinor",
+          "overMinor"
         ]
       },
       "UnitTotalDto": {
         "type": "object",
         "properties": {
           "goal": {
-            "$ref": "#/components/schemas/RolledUpGoalDto"
+            "$ref": "#/components/schemas/PairedGoalDto"
           },
           "leadsCounts": {
             "$ref": "#/components/schemas/LeadCountsDto"
@@ -39860,6 +41142,35 @@
               "super_admin",
               "none"
             ]
+          },
+          "dateOfBirth": {
+            "type": "string",
+            "nullable": true,
+            "example": "1990-03-15",
+            "description": "`YYYY-MM-DD`."
+          },
+          "gender": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "male",
+              "female"
+            ]
+          },
+          "companyJoinMonth": {
+            "type": "string",
+            "nullable": true,
+            "example": "2021-07",
+            "description": "`YYYY-MM`: the month they joined their insurer."
+          },
+          "workStatus": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "full_time",
+              "part_time"
+            ],
+            "description": "Their membership's, in the office this session is in; until they have one, what they registered with."
           }
         },
         "required": [
@@ -39869,7 +41180,28 @@
           "preferredName",
           "pronoun",
           "initials",
-          "platformRole"
+          "platformRole",
+          "dateOfBirth",
+          "gender",
+          "companyJoinMonth",
+          "workStatus"
+        ]
+      },
+      "MeOfficeDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "0417"
+          },
+          "branch": {
+            "type": "string",
+            "example": "Cempaka Putih"
+          }
+        },
+        "required": [
+          "code",
+          "branch"
         ]
       },
       "MeMembershipDto": {
@@ -39912,6 +41244,29 @@
           "directCount": {
             "type": "number",
             "description": "What makes somebody a leader (OD-23) — the rung does not."
+          },
+          "isCoreLeader": {
+            "type": "boolean",
+            "description": "A Core Leader now (ADR-0159 §4): tagged *Core Leader* **and** on a leader rung, read on every request. The field shell's *Core leader* menu and the profile line read it; the forum and KPM analytics refuse regardless."
+          },
+          "groups": {
+            "example": [
+              "Top Producers 2026"
+            ],
+            "description": "The live groups this member is tagged with, A to Z — the profile line's (ADR-0159 §5). Empty for none.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "office": {
+            "nullable": true,
+            "description": "The office, as the profile line names it: *0417 · Cempaka Putih* (ADR-0159 §5).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MeOfficeDto"
+              }
+            ]
           }
         },
         "required": [
@@ -39922,7 +41277,10 @@
           "isKpmOwner",
           "isKpmAdmin",
           "status",
-          "directCount"
+          "directCount",
+          "isCoreLeader",
+          "groups",
+          "office"
         ]
       },
       "MeActivationDto": {
@@ -39961,7 +41319,23 @@
           },
           "impersonationReadOnly": {
             "type": "boolean",
-            "description": "A support session that may look and not touch (§3.13). False outside a session, and false inside one a second Super Admin has approved to write."
+            "description": "A support session that may look and not touch (§3.13). False outside a session, and false inside one a second Super Admin has approved to write. True in a setup session, which writes only what `impersonationWriteScope` lists."
+          },
+          "impersonationPurpose": {
+            "type": "string",
+            "enum": [
+              "support",
+              "setup"
+            ],
+            "nullable": true,
+            "description": "Why the session was started: `support` to look, `setup` to configure the office as its Owner or Admin would. `null` outside a session."
+          },
+          "impersonationWriteScope": {
+            "description": "The permissions a setup session may write besides reading: the office's settings, its people import and its production file. Empty outside a session and in a support session.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "impersonatedBy": {
             "type": "string",
@@ -39998,6 +41372,8 @@
           "membership",
           "isImpersonating",
           "impersonationReadOnly",
+          "impersonationPurpose",
+          "impersonationWriteScope",
           "impersonatedBy",
           "mustChangePassword",
           "permissions",
@@ -41011,6 +42387,57 @@
           "version"
         ]
       },
+      "ActivityBindingDto": {
+        "type": "object",
+        "properties": {
+          "leads": {
+            "example": [
+              "LEADS_CONTACTED"
+            ],
+            "description": "*Set appointment*: the activity type codes the goal cascade’s leads column counts, summed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "appointments": {
+            "example": [
+              "SELL_PRESENTATION"
+            ],
+            "description": "*Sales meeting*: the codes the appointments column counts, summed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "closings": {
+            "example": [
+              "SELL_SUBMISSION"
+            ],
+            "description": "*Submission polis*: the codes the closings column and the pace sentence count, summed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "version": {
+            "type": "number",
+            "description": "Bumped on every write. 0 for an office with no binding yet, which counts the default binding."
+          },
+          "updatedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "leads",
+          "appointments",
+          "closings",
+          "version",
+          "updatedAt"
+        ]
+      },
       "TenantConfigDto": {
         "type": "object",
         "properties": {
@@ -41064,6 +42491,15 @@
               }
             ]
           },
+          "activityBinding": {
+            "nullable": true,
+            "description": "The activity binding in force when the copy was published — a record. Every count reads the office’s live binding, which takes effect when it is saved. `null` in a copy published before the binding existed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivityBindingDto"
+              }
+            ]
+          },
           "version": {
             "type": "number",
             "description": "The highest version across everything above — one number to compare rather than three collections to reason about. It moves when what the office counts changes, and not on a reorder, because a reorder rebinds nothing."
@@ -41077,7 +42513,103 @@
           "activationChecklist",
           "eventTypes",
           "capability",
+          "activityBinding",
           "version"
+        ]
+      },
+      "BindableTypeDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SELL_PRESENTATION"
+          },
+          "label": {
+            "type": "string"
+          },
+          "categoryCode": {
+            "type": "string"
+          },
+          "displayOrder": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "categoryCode",
+          "displayOrder",
+          "status"
+        ]
+      },
+      "OfficeActivityBindingDto": {
+        "type": "object",
+        "properties": {
+          "leads": {
+            "example": [
+              "LEADS_CONTACTED"
+            ],
+            "description": "*Set appointment*: the activity type codes the goal cascade’s leads column counts, summed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "appointments": {
+            "example": [
+              "SELL_PRESENTATION"
+            ],
+            "description": "*Sales meeting*: the codes the appointments column counts, summed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "closings": {
+            "example": [
+              "SELL_SUBMISSION"
+            ],
+            "description": "*Submission polis*: the codes the closings column and the pace sentence count, summed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "version": {
+            "type": "number",
+            "description": "Bumped on every write. 0 for an office with no binding yet, which counts the default binding."
+          },
+          "updatedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "kpmId": {
+            "type": "string"
+          },
+          "types": {
+            "description": "Every activity type the office holds, archived ones included (their history counts), in its order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BindableTypeDto"
+            }
+          }
+        },
+        "required": [
+          "leads",
+          "appointments",
+          "closings",
+          "version",
+          "updatedAt",
+          "kpmId",
+          "types"
         ]
       },
       "ActivationLinkKindDto": {
@@ -41425,6 +42957,15 @@
           "displayOrder": {
             "type": "number"
           },
+          "leaderTier": {
+            "type": "string",
+            "enum": [
+              "senior",
+              "associate"
+            ],
+            "nullable": true,
+            "description": "*Senior Leader*, *Associate Leader*, or `null` — *Not a leader* (ADR-0156)."
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -41443,6 +42984,7 @@
           "code",
           "label",
           "displayOrder",
+          "leaderTier",
           "status",
           "archivedAt"
         ]
@@ -41628,6 +43170,11 @@
               "agent"
             ]
           },
+          "orgLevelCode": {
+            "type": "string",
+            "example": "AAB",
+            "description": "The rung they stand on, by its code on the company’s ladder. `role` is the class it gives."
+          },
           "directCount": {
             "type": "number"
           },
@@ -41642,6 +43189,7 @@
           "initials",
           "agentCode",
           "role",
+          "orgLevelCode",
           "directCount",
           "canChangeRole"
         ]
@@ -41697,6 +43245,112 @@
           "reason",
           "actorName",
           "changedAt"
+        ]
+      },
+      "LeaderLimitRequestRowDto": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "kpmId": {
+            "type": "string"
+          },
+          "kpmCode": {
+            "type": "string",
+            "example": "0417"
+          },
+          "kpmBranchName": {
+            "type": "string",
+            "example": "Cempaka Putih"
+          },
+          "subjectMembershipId": {
+            "type": "string"
+          },
+          "subjectName": {
+            "type": "string"
+          },
+          "subjectAgentCode": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "promote",
+              "activate"
+            ]
+          },
+          "fromOrgLevelCode": {
+            "type": "string",
+            "description": "The rung they stood on when it was asked, by code."
+          },
+          "toOrgLevelCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "The rung asked for, for `promote`."
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true,
+            "description": "The office’s reason, for `promote`."
+          },
+          "requestedByMembershipId": {
+            "type": "string"
+          },
+          "requestedByName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "declined",
+              "cancelled"
+            ]
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "decidedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "declineReason": {
+            "type": "string",
+            "nullable": true,
+            "description": "AgencyBoost’s reason, or that it no longer applied."
+          },
+          "maxLeaders": {
+            "type": "number",
+            "nullable": true,
+            "description": "The office’s leader limit now; `null` for none."
+          },
+          "leadersUsed": {
+            "type": "number",
+            "description": "The office’s Leaders used now."
+          }
+        },
+        "required": [
+          "requestId",
+          "kpmId",
+          "kpmCode",
+          "kpmBranchName",
+          "subjectMembershipId",
+          "subjectName",
+          "subjectAgentCode",
+          "action",
+          "fromOrgLevelCode",
+          "toOrgLevelCode",
+          "reason",
+          "requestedByMembershipId",
+          "requestedByName",
+          "status",
+          "requestedAt",
+          "decidedAt",
+          "declineReason",
+          "maxLeaders",
+          "leadersUsed"
         ]
       },
       "RoleCountsDto": {
@@ -41955,14 +43609,60 @@
             }
           },
           "isCoreLeader": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "The tag as stored. It has effect only while `canBeCoreLeader` (ADR-0159 §1)."
+          },
+          "canBeCoreLeader": {
+            "type": "boolean",
+            "description": "Their rung is a leader rung, so the tag may be set and has effect (ADR-0159 §1). False for an Agent, whose tag is refused `CORE_LEADER_NOT_A_LEADER`, and for a member tagged and since moved off a leader rung."
           }
         },
         "required": [
           "membershipId",
           "fullName",
           "groupIds",
-          "isCoreLeader"
+          "isCoreLeader",
+          "canBeCoreLeader"
+        ]
+      },
+      "MemberPersonalDto": {
+        "type": "object",
+        "properties": {
+          "dateOfBirth": {
+            "type": "string",
+            "nullable": true,
+            "example": "1990-03-15",
+            "description": "`YYYY-MM-DD`. `null` is *Not recorded*."
+          },
+          "gender": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "male",
+              "female"
+            ]
+          },
+          "companyJoinMonth": {
+            "type": "string",
+            "nullable": true,
+            "example": "2021-07",
+            "description": "`YYYY-MM`: the month they joined the insurer."
+          },
+          "workStatus": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "full_time",
+              "part_time"
+            ],
+            "description": "How they work in this office."
+          }
+        },
+        "required": [
+          "dateOfBirth",
+          "gender",
+          "companyJoinMonth",
+          "workStatus"
         ]
       },
       "DirectoryMemberDto": {
@@ -41981,6 +43681,11 @@
               "aab",
               "agent"
             ]
+          },
+          "orgLevelCode": {
+            "type": "string",
+            "example": "AAB",
+            "description": "The rung they stand on, by its code on the company’s ladder. `role` is the class it gives."
           },
           "status": {
             "type": "string",
@@ -42029,6 +43734,14 @@
           "isKpmAdmin": {
             "type": "boolean"
           },
+          "isCoreLeader": {
+            "type": "boolean",
+            "description": "A Core Leader now (ADR-0159 §1): tagged, on a leader rung — the effective flag. A member tagged and since moved off a leader rung reads `false` here, and their tag stays on `GET /members/:id/tags`."
+          },
+          "canTagCoreLeader": {
+            "type": "boolean",
+            "description": "Whether this viewer may tag or untag this member *Core Leader* from the row: they hold `member:tag_core_leader`, and the member stands on a leader rung and has not left (ADR-0159 §1). An offer, never the gate: `PUT /members/:id/core-leader` refuses regardless."
+          },
           "joinedAt": {
             "type": "string",
             "nullable": true
@@ -42066,12 +43779,21 @@
           "canRemove": {
             "type": "boolean",
             "description": "May they remove this person. False for yourself, for the office root, and for anybody already removed."
+          },
+          "personal": {
+            "description": "On `GET /members/:membershipId` only, and only to the office’s Owner, an Admin, or the person themselves (ADR-0158 §6): their birth date, gender, company join month and work status. Absent on the roster and on a leader’s read.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MemberPersonalDto"
+              }
+            ]
           }
         },
         "required": [
           "membershipId",
           "agentCode",
           "role",
+          "orgLevelCode",
           "status",
           "fullName",
           "preferredName",
@@ -42085,6 +43807,8 @@
           "isLeader",
           "isKpmOwner",
           "isKpmAdmin",
+          "isCoreLeader",
+          "canTagCoreLeader",
           "joinedAt",
           "removedAt",
           "canChangeRole",
@@ -42455,6 +44179,14 @@
           "usesPlatformDefaults": {
             "type": "boolean",
             "description": "False means this company was created blank: no product catalog, no carrier rules, and every Company template tab starts empty rather than from the platform's presets."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "insurer",
+              "template"
+            ],
+            "description": "`insurer` for every company people work for. `template` for the one Template library, which holds the templates a new company and a new office copy: nobody registers under it, and it holds no office."
           }
         },
         "required": [
@@ -42465,7 +44197,8 @@
           "defaultLocale",
           "defaultTimezone",
           "status",
-          "usesPlatformDefaults"
+          "usesPlatformDefaults",
+          "kind"
         ]
       },
       "KpmSubscriptionDto": {
@@ -42644,7 +44377,8 @@
         "properties": {
           "header": {
             "type": "string",
-            "example": "fullName,email,agentCode,role,leaderAgentCode"
+            "example": "fullName,email,agentCode,role,leaderAgentCode,dateOfBirth,companyJoinMonth,workStatus,gender",
+            "description": "Nine columns: the four a person records follow the five, each required (ADR-0158)."
           },
           "columns": {
             "type": "array",
@@ -42854,11 +44588,37 @@
             "type": "string",
             "format": "date-time",
             "description": "Time-boxed. The session cannot outlive this."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "What a second Super Admin approves writing for."
+          },
+          "readOnly": {
+            "type": "boolean",
+            "description": "Always `true` at the start. A setup session writes only what `writeScope` lists."
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "support",
+              "setup"
+            ]
+          },
+          "writeScope": {
+            "description": "The permissions this session may write besides reading. Empty for a support session.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
           "accessToken",
-          "expiresAt"
+          "expiresAt",
+          "sessionId",
+          "readOnly",
+          "purpose",
+          "writeScope"
         ]
       },
       "BillingTierDto": {

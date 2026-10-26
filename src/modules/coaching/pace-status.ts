@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import { rollingWindow, type LocalDate } from '@/common/time/local-day';
 import { PERFORMANCE, SUMMARY } from '@/domain/constants';
@@ -10,12 +10,17 @@ import { GoalRepository } from '@/modules/goals/goal.repository';
 import type { Goal } from '@/modules/goals/goal.schema';
 import { ProductionReadings, type MonthStanding } from '@/modules/production/production-readings';
 import { monthlyApeTarget, ytdBeforeThisMonth } from '@/modules/summary/summary-figures';
+import { boundCodes, countOf, defaultBinding, type CascadeBinding } from '@/modules/config/activity-binding';
+import { ActivityBindingService } from '@/modules/config/activity-binding.service';
 
-/** What a stored goal contributes to the month: its plan, its own APE figure, its codes. */
+/**
+ * What a stored goal contributes to the month: its plan and its own APE figure. **Not its codes**: what each
+ * cascade role counts is the office's binding (ADR-0163 §4), handed in beside it.
+ */
 export type GoalPlan = Pick<
   Goal,
   | 'savedAt' | 'mode' | 'annualApeTargetMinor' | 'savingsTargetMinor' | 'commissionRatePct' | 'apeAchievedMinor'
-  | 'caseSizeMinor' | 'leadsToApptPct' | 'closingRatePct' | 'cascadeMapping'
+  | 'caseSizeMinor' | 'leadsToApptPct' | 'closingRatePct'
 >;
 
 /** A member's calendar month, as the roster reads it. */
@@ -60,7 +65,7 @@ function plannedAnnualTarget(goal: GoalPlan): number | null {
  * goal saved for the year, an unusable plan, or an annual target of zero; this month's target is
  * `MONTHLY_APE_TARGET`, taken from the year to date through last month; its activity targets are
  * `SUMMARY_ACTIVITY_TARGET`, the cascade on that target at the goal's own rates; and the month's count is
- * the member's on the goal's three cascade codes. The tenancy spec holds the roster and the Summary to
+ * the member's on the codes the office binds to the three cascade roles (ADR-0163 §4). The tenancy spec holds the roster and the Summary to
  * the same monthly target for the same person, so the two cannot drift apart.
  */
 export function monthPaceOf(input: {
@@ -76,8 +81,10 @@ export function monthPaceOf(input: {
   /** The office's month, `YYYY-MM`. */
   month: string;
   onTrackRatio: number;
+  /** Which activity types each cascade role counts: the office's binding (ADR-0163 §4). */
+  binding: CascadeBinding;
 }): MonthPace {
-  const { goal, standing, counts, recentCounts, month, onTrackRatio } = input;
+  const { goal, standing, counts, recentCounts, month, onTrackRatio, binding } = input;
   // An unsaved default is an offer, not a goal, as the Summary says: it measures nobody.
   const planned = goal && goal.savedAt !== null ? plannedAnnualTarget(goal) : null;
   if (goal === null || planned === null || planned <= 0) {
@@ -107,9 +114,8 @@ export function monthPaceOf(input: {
     ? plan
     : cascadeCounts(goal.caseSizeMinor * PERFORMANCE.MAA_PROJECTED_SUBMISSIONS_MIN, goal);
 
-  const { leadsCode, appointmentsCode, closingsCode } = goal.cascadeMapping;
-  const logged = [leadsCode, appointmentsCode, closingsCode]
-    .reduce((sum, code) => sum + (counts.get(code) ?? 0), 0);
+  // Every code the office binds, summed: a role bound to `[A, B]` counts both (ADR-0163 §4).
+  const logged = countOf(counts, boundCodes(binding));
   const pacing = pacingToMaa({
     targets: { leads: gate.leads, appointments: gate.appointments, closings: gate.policies }, logged,
   });
@@ -122,7 +128,7 @@ export function monthPaceOf(input: {
    * before the 7th; the sentence now counts the last 30 days, and has an answer every day.*
    */
   const apeMinor = standing.thisMonth?.minor ?? null;
-  const closings = apeMinor !== null ? null : { last30Days: recentCounts.get(closingsCode) ?? 0, target: plan.policies };
+  const closings = apeMinor !== null ? null : { last30Days: countOf(recentCounts, binding.closings), target: plan.policies };
 
   return {
     status: goalPaceStatus({ month: { targetMinor, apeMinor, pacing, closings }, onTrackRatio }),
@@ -145,6 +151,11 @@ export class PaceStatusReadings {
     private readonly goals: GoalRepository,
     private readonly production: ProductionReadings,
     private readonly activity: ActivityReadings,
+    /*
+     * ADR-0163 §4: which activity types each cascade role counts — the office's binding, the one reader. Optional,
+     * the token named (a `X | null` parameter is emitted as `Object`), and without it the default binding.
+     */
+    @Optional() @Inject(ActivityBindingService) private readonly bindings: ActivityBindingService | null = null,
   ) {}
 
   async paceOf(
@@ -154,13 +165,14 @@ export class PaceStatusReadings {
   ): Promise<Map<string, MonthPace>> {
     const ids = [...new Set(membershipIds)];
     if (ids.length === 0) return new Map();
-    const [goals, standings, counts, recent] = await Promise.all([
+    const [goals, standings, counts, recent, binding] = await Promise.all([
       this.goals.find(ctx, { membershipId: { $in: ids }, period: office.month.slice(0, 4) }),
       this.production.standingsFor(ctx, ids, office.month),
       // The calendar month so far: no day after today can hold a log (ADR-0042).
       this.activity.countsOverMany(ctx, ids, { from: `${office.month}-01` as LocalDate, to: office.today }),
       // The pace sentence's last 30 days, the office's, as the Summary counts them (ADR-0109).
       this.activity.countsOverMany(ctx, ids, rollingWindow(office.today, SUMMARY.PACE_WINDOW_DAYS)),
+      this.bindings ? this.bindings.resolveCascadeBinding(ctx) : Promise.resolve(defaultBinding()),
     ]);
     const goalOf = new Map(goals.map((goal) => [goal.membershipId, goal]));
     return new Map(ids.map((id) => [id, monthPaceOf({
@@ -170,6 +182,7 @@ export class PaceStatusReadings {
       recentCounts: recent.get(id) ?? new Map(),
       month: office.month,
       onTrackRatio: office.onTrackRatio,
+      binding,
     })]));
   }
 }

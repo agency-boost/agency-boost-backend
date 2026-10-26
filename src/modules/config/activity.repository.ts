@@ -7,6 +7,7 @@ import { ActivityType, ActivityTypeDocument } from './activity-type.schema';
 import { LeadStatus, LeadStatusDocument } from './lead-status.schema';
 import { RatioDefinition, RatioDefinitionDocument } from './ratio-definition.schema';
 import { ConfigSnapshot, ConfigSnapshotDocument } from './config-snapshot.schema';
+import { ActivityBinding, ActivityBindingDocument } from './activity-binding.schema';
 
 /**
  * The office's activity categories. No escape hatch to the raw model, by design — the
@@ -49,5 +50,13 @@ export class RatioDefinitionRepository extends TenantScopedRepository<RatioDefin
 export class ConfigSnapshotRepository extends TenantScopedRepository<ConfigSnapshotDocument> {
   constructor(@InjectModel(ConfigSnapshot.name) model: Model<ConfigSnapshotDocument>) {
     super(model, 'configSnapshots');
+  }
+}
+
+/** The office's activity binding: which activity types each cascade role counts (ADR-0163). */
+@Injectable()
+export class ActivityBindingRepository extends TenantScopedRepository<ActivityBindingDocument> {
+  constructor(@InjectModel(ActivityBinding.name) model: Model<ActivityBindingDocument>) {
+    super(model, 'activityBindings');
   }
 }

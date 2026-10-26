@@ -5,10 +5,12 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { localDayOf } from '@/common/time/local-day';
 import { can } from '@/modules/rbac/permissions';
 import { AuditService } from '@/modules/audit/audit.service';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
-import { countLeadersUsed, isLeaderRung, leaderLimitReached } from '@/modules/org/leader-limit';
+import { isLeaderClass } from '@/domain/constants';
+import { countLeadersUsed, leaderLimitReached } from '@/modules/org/leader-limit';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { PasswordService } from '@/modules/auth/password.service';
 import { User, UserDocument } from '@/modules/users/user.schema';
@@ -16,6 +18,7 @@ import { Kpm, KpmDocument } from './kpm.schema';
 import {
   generateTemporaryPassword,
   inLeaderFirstOrder,
+  isRungCode,
   parseRoster,
   type RosterIssue,
   type RosterRow,
@@ -105,6 +108,14 @@ export class RosterImportService {
    * importing Owner to `platformRole: 'super_admin'` for the duration of the write, and
    * every membership they created would have been attributed to a platform operator.
    */
+  /**
+   * The office's calendar day, which a birth date and a join month are measured against (ADR-0158 §2):
+   * the injected clock, in the office's own timezone (invariant §9).
+   */
+  private todayIn(kpm: KpmDocument): string {
+    return localDayOf(this.clock.now(), kpm.timezone);
+  }
+
   private writeContext(ctx: RequestContext, kpmId: string): RequestContext {
     return ctx.kpmId === kpmId ? ctx : RequestContext.superAdminInTenant(ctx.userId, kpmId);
   }
@@ -121,8 +132,20 @@ export class RosterImportService {
   ): Promise<RosterIssue[]> {
     const issues: RosterIssue[] = [];
     const inFile = new Set(rows.map((r) => r.agentCode));
+    // The company's own ladder (OD-50): a row may name any of its live rungs, a rung it added included.
+    const rungs = await this.hierarchy.rungClassesOf(String(kpm._id));
 
     for (const row of rows) {
+      // A code the parser found well-formed, which is no live rung of this company's ladder. A malformed one
+      // already has the parser's issue.
+      if (isRungCode(row.role) && !rungs.has(row.role.toUpperCase())) {
+        issues.push({
+          line: row.line,
+          column: 'role',
+          message: `"${row.role.toUpperCase()}" is not a rung of this company’s ladder. Use one of: `
+            + `${[...rungs.keys()].sort().join(', ')}.`,
+        });
+      }
       if (row.email) {
         const existing = await this.users.findOne({ email: row.email, deletedAt: null }).exec();
         if (existing) {
@@ -209,21 +232,28 @@ export class RosterImportService {
     if (max === null) return [];
 
     const issues: RosterIssue[] = [];
+    const leads = await this.leadsOnTheLadder(kpm);
     let leaders = used;
     for (const row of [...rows].sort((a, b) => a.line - b.line)) {
-      if (!isLeaderRung(row.role)) continue;
+      if (!leads(row.role)) continue;
       leaders += 1;
       if (leaders <= max) continue;
       const already = `${used} ${used === 1 ? 'is' : 'are'} in use already`;
       issues.push({
         line: row.line,
         column: 'role',
+        /*
+         * ADR-0157 §5: a row past the limit is still refused, never queued — its temporary password is shown
+         * once, to the importer, and could not be handed over after an approval. So the office is told the way
+         * through that asks: import them as an Agent, then promote them, which asks AgencyBoost.
+         */
         message: ctx.isSuperAdmin
           ? `This office’s leader limit is ${max} — ABs and AABs together — and ${already}, so this `
             + `row would be one too many. Raise the limit with Edit subscription on the offices list `
             + 'first, or import them as an Agent.'
           : `Your office’s leader limit is ${max} — ABs and AABs together — and ${already}, so this `
-            + 'row would be one too many. Import them as an Agent, or ask AgencyBoost to raise the limit.',
+            + 'row would be one too many. Import them as an Agent, then promote them on their page: past the '
+            + 'limit, that asks AgencyBoost to approve it.',
       });
     }
     return issues;
@@ -233,7 +263,7 @@ export class RosterImportService {
     this.require(ctx);
     const kpm = await this.office(ctx, kpmId);
 
-    const { rows, issues } = parseRoster(text);
+    const { rows, issues } = parseRoster(text, this.todayIn(kpm));
     const all = [
       ...issues,
       ...(await this.issuesAgainstTheOffice(kpm, rows)),
@@ -254,7 +284,7 @@ export class RosterImportService {
     this.require(ctx);
     const kpm = await this.office(ctx, kpmId);
 
-    const { rows, issues } = parseRoster(text);
+    const { rows, issues } = parseRoster(text, this.todayIn(kpm));
     const all = [...issues, ...(await this.issuesAgainstTheOffice(kpm, rows))];
     if (all.length > 0) {
       throw new DomainException(
@@ -281,7 +311,8 @@ export class RosterImportService {
      * this very loop runs.
      */
     const { max, used } = await this.seats(kpm);
-    const leadersInFile = rows.filter((row) => isLeaderRung(row.role)).length;
+    const leads = max === null ? () => false : await this.leadsOnTheLadder(kpm);
+    const leadersInFile = rows.filter((row) => leads(row.role)).length;
     if (max !== null && leadersInFile > 0 && used + leadersInFile > max) {
       throw leaderLimitReached(max, used);
     }
@@ -305,6 +336,10 @@ export class RosterImportService {
           fullName: row.fullName,
           companyId: kpm.companyId,
           agentCode: row.agentCode,
+          // What the person records (ADR-0158): checked by the parser, so none is missing here.
+          dateOfBirth: row.dateOfBirth,
+          companyJoinMonth: row.companyJoinMonth,
+          gender: row.gender,
           // **The credential the admin has read opens nothing but the screen that replaces
           // it.** Set here rather than by a later sweep: an account that reached `active`
           // without it would be a permanent hole.
@@ -330,9 +365,12 @@ export class RosterImportService {
        * import. `createWithAccount` makes it only once the row has its seat, with the lease held.
        */
       const membership = await this.hierarchy.createWithAccount(scoped, {
-        role: row.role as 'ab' | 'aab' | 'agent',
+        // The rung's code, a lookup key — any live rung of the company's ladder (OD-50).
+        role: row.role,
         leaderId,
         status: 'active',
+        // How they work in this office is the membership's (ADR-0158 §1), not the account's.
+        workStatus: row.workStatus,
       }, makeAccount);
       madeInThisRun.set(row.agentCode, String(membership._id));
 
@@ -354,6 +392,16 @@ export class RosterImportService {
     });
 
     return { created };
+  }
+
+  /**
+   * **Whether a row's rung makes a leader**, by the rung's tier on the office's company ladder (ADR-0156): the
+   * file names the rung by code, and the class it gives — not the code — is what the leader limit counts. A code
+   * that is no active rung leads nobody here, and its own write is refused `ORG_LEVEL_NOT_ON_LADDER`.
+   */
+  private async leadsOnTheLadder(kpm: KpmDocument): Promise<(rung: string) => boolean> {
+    const classes = await this.hierarchy.rungClassesOf(String(kpm._id));
+    return (rung) => isLeaderClass(classes.get(rung.toUpperCase()));
   }
 
   private async existingLeader(kpm: KpmDocument, row: RosterRow): Promise<string> {

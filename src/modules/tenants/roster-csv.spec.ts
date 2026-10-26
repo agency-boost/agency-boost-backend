@@ -1,19 +1,25 @@
 import {
   generateTemporaryPassword,
   inLeaderFirstOrder,
-  parseRoster,
+  parseRoster as parse,
   ROSTER_EXAMPLES,
   ROSTER_TEMPLATE,
   ROSTER_TEMPLATE_HEADER,
 } from './roster-csv';
 
 const H = ROSTER_TEMPLATE_HEADER;
+/** The office's calendar day the four personal columns are measured against (ADR-0158 §2). */
+const TODAY = '2026-10-26';
+/** What a person records, for a row whose test is about something else (P18.8-T4). */
+const P = ',1990-03-15,2021-07,full-time,female';
+const P_TAB = P.split(',').join('\t');
+const parseRoster = (text: string) => parse(text, TODAY);
 
 describe('the roster file (P3.6-T4)', () => {
   describe('parsing', () => {
     it('reads a well-formed file', () => {
       const { rows, issues } = parseRoster(
-        `${H}\nRina Wijaya,Rina@KPM.test,pru-1,agent,PRU-9\n`,
+        `${H}\nRina Wijaya,Rina@KPM.test,00881,agent,99${P}\n`,
       );
       expect(issues).toEqual([]);
       expect(rows).toEqual([{
@@ -22,22 +28,26 @@ describe('the roster file (P3.6-T4)', () => {
         // Normalised the way the account will store them, so the preview shows what the
         // commit will write rather than what the file happened to contain.
         email: 'rina@kpm.test',
-        agentCode: 'PRU-1',
+        agentCode: '00881',
         role: 'agent',
-        leaderAgentCode: 'PRU-9',
+        leaderAgentCode: '99',
+        dateOfBirth: '1990-03-15',
+        companyJoinMonth: '2021-07',
+        workStatus: 'full_time',
+        gender: 'female',
       }]);
     });
 
     it('keeps a comma inside a quoted name', () => {
       // The case that actually turns up in an export. Splitting it would report a
       // mystifying issue about a missing agent code rather than the real problem.
-      const { rows, issues } = parseRoster(`${H}\n"Wijaya, Rina",r@k.test,PRU-1,agent,\n`);
+      const { rows, issues } = parseRoster(`${H}\n"Wijaya, Rina",r@k.test,881,agent,${P}\n`);
       expect(issues).toEqual([]);
       expect(rows[0].fullName).toBe('Wijaya, Rina');
     });
 
     it('counts lines the way a spreadsheet does, header included', () => {
-      const { rows } = parseRoster(`${H}\na,a@k.test,A1,agent,\nb,b@k.test,B1,agent,\n`);
+      const { rows } = parseRoster(`${H}\na,a@k.test,101,agent,${P}\nb,b@k.test,201,agent,${P}\n`);
       expect(rows.map((r) => r.line)).toEqual([2, 3]);
     });
 
@@ -48,7 +58,7 @@ describe('the roster file (P3.6-T4)', () => {
     });
 
     it('accepts a template saved by Excel, byte-order mark and all', () => {
-      const { issues } = parseRoster(`﻿${H}\nRina,r@k.test,PRU-1,agent,\n`);
+      const { issues } = parseRoster(`﻿${H}\nRina,r@k.test,881,agent,${P}\n`);
       expect(issues).toEqual([]);
     });
 
@@ -59,28 +69,113 @@ describe('the roster file (P3.6-T4)', () => {
 
     it('reports every bad cell on a row, not the first one', () => {
       // A per-row issue list is only useful if one pass surfaces everything wrong.
-      const { issues } = parseRoster(`${H}\n,not-an-email,,director,\n`);
-      expect(issues.map((i) => i.column).sort()).toEqual(['agentCode', 'email', 'fullName', 'role']);
+      const { issues } = parseRoster(`${H}\n,not-an-email,,senior manager,,,,,\n`);
+      expect(issues.map((i) => i.column).sort()).toEqual([
+        'agentCode', 'companyJoinMonth', 'dateOfBirth', 'email', 'fullName', 'gender', 'role', 'workStatus',
+      ]);
     });
 
     it('names the rung it will not accept', () => {
-      const { issues } = parseRoster(`${H}\nRina,r@k.test,PRU-1,director,\n`);
-      expect(issues[0].message).toContain('"director" is not a rung');
+      const { issues } = parseRoster(`${H}\nRina,r@k.test,881,senior manager,${P}\n`);
+      expect(issues[0].message).toBe(
+        '"senior manager" is not a rung. Use a rung of your company’s ladder by its code — AB, AAB or Agent, '
+          + 'or one it added.',
+      );
+    });
+
+    it('OD-50 leaves a rung the company added to the import, which checks it against the ladder', () => {
+      // `SM` is a code in shape; whether the company's ladder has it, only the office can say.
+      const { rows, issues } = parseRoster(`${H}\nRina,r@k.test,881,SM,${P}\n`);
+      expect(issues).toEqual([]);
+      expect(rows[0].role).toBe('sm');
     });
 
     it('reports a row with the wrong number of columns rather than guessing', () => {
-      const { issues } = parseRoster(`${H}\nRina,r@k.test,PRU-1\n`);
-      expect(issues[0].message).toContain('Expected 5 columns, found 3');
+      const { issues } = parseRoster(`${H}\nRina,r@k.test,881\n`);
+      expect(issues[0].message).toContain('Expected 9 columns, found 3');
     });
 
     it('catches a duplicate inside the file, and points at the first one', () => {
       const { issues } = parseRoster(
-        `${H}\nA,same@k.test,PRU-1,agent,\nB,same@k.test,PRU-2,agent,\nC,c@k.test,PRU-1,agent,\n`,
+        `${H}\nA,same@k.test,881,agent,${P}\nB,same@k.test,882,agent,${P}\nC,c@k.test,881,agent,${P}\n`,
       );
       expect(issues).toEqual([
         { line: 3, column: 'email', message: 'Already on line 2.' },
         { line: 4, column: 'agentCode', message: 'Already on line 2.' },
       ]);
+    });
+  });
+
+  describe('what a person records (P18.8-T4, ADR-0158)', () => {
+    const row = (cells: Partial<Record<'code' | 'role' | 'dob' | 'join' | 'work' | 'gender', string>>) => {
+      const c = { code: '881', role: 'agent', dob: '1990-03-15', join: '2021-07', work: 'full-time', gender: 'female', ...cells };
+      return parseRoster(`${H}\nRina,r@k.test,${c.code},${c.role},,${c.dob},${c.join},${c.work},${c.gender}\n`);
+    };
+    const only = (result: ReturnType<typeof row>) => result.issues.map(({ column, message }) => ({ column, message }));
+
+    it('AC-2: reads the four columns after the five, in that order, into what is stored', () => {
+      expect(H).toBe('fullName,email,agentCode,role,leaderAgentCode,dateOfBirth,companyJoinMonth,workStatus,gender');
+      const { rows, issues } = row({ work: 'Part-Time', gender: 'MALE' });
+      expect(issues).toEqual([]);
+      expect(rows[0]).toMatchObject({
+        dateOfBirth: '1990-03-15', companyJoinMonth: '2021-07', workStatus: 'part_time', gender: 'male',
+      });
+    });
+
+    it('AC-2: a row missing any of the four is an issue naming it', () => {
+      expect(only(row({ dob: '' }))).toEqual([{ column: 'dateOfBirth', message: 'A date of birth is required.' }]);
+      expect(only(row({ join: '' }))).toEqual([
+        { column: 'companyJoinMonth', message: 'The month they joined the company is required.' },
+      ]);
+      expect(only(row({ work: '' }))).toEqual([
+        { column: 'workStatus', message: 'A work status is required: full-time or part-time.' },
+      ]);
+      expect(only(row({ gender: '' }))).toEqual([{ column: 'gender', message: 'A gender is required: male or female.' }]);
+    });
+
+    it('AC-2: a malformed one is an issue naming it and what it takes', () => {
+      expect(only(row({ dob: '15/03/1990' }))[0]).toMatchObject({ column: 'dateOfBirth' });
+      expect(only(row({ dob: '15/03/1990' }))[0].message).toContain('Write it YYYY-MM-DD');
+      expect(only(row({ join: '07/2021' }))[0]).toMatchObject({ column: 'companyJoinMonth' });
+      expect(only(row({ work: 'fulltime' }))).toEqual([
+        { column: 'workStatus', message: '"fulltime" is not a work status. Use full-time or part-time.' },
+      ]);
+      expect(only(row({ gender: 'f' }))).toEqual([{ column: 'gender', message: '"f" is not a gender. Use male or female.' }]);
+    });
+
+    it('AC-4: a birth date in the past and at least 18 years ago, as of the office\'s today', () => {
+      expect(row({ dob: '2008-10-26' }).issues).toEqual([]);
+      expect(only(row({ dob: '2008-10-27' }))).toEqual([
+        { column: 'dateOfBirth', message: 'A date of birth must be at least 18 years ago.' },
+      ]);
+      expect(only(row({ dob: '2027-01-01' }))).toEqual([
+        { column: 'dateOfBirth', message: 'A date of birth must be in the past.' },
+      ]);
+      // Measured against the day it is handed, not the machine's.
+      expect(parse(`${H}\nRina,r@k.test,881,agent,,2008-10-27,2021-07,full-time,female\n`, '2026-10-27').issues).toEqual([]);
+    });
+
+    it('AC-4: a join month not in the future', () => {
+      expect(row({ join: '2026-10' }).issues).toEqual([]);
+      expect(only(row({ join: '2026-11' }))).toEqual([
+        { column: 'companyJoinMonth', message: 'The company join month cannot be in the future.' },
+      ]);
+    });
+
+    it('AC-5: an agent code is digits, 3 to 32 of them', () => {
+      expect(row({ code: '880' }).issues).toEqual([]);
+      for (const bad of ['PRU-88001', '88', '8'.repeat(33), '88.001']) {
+        expect(only(row({ code: bad }))).toEqual([
+          { column: 'agentCode', message: `"${bad}" is not an agent code. Use digits only, 3 to 32 of them.` },
+        ]);
+      }
+    });
+
+    it('AC-2: reads a rung in any case, as the template writes them AB, AAB and Agent', () => {
+      for (const [cell, role] of [['AB', 'ab'], ['AAB', 'aab'], ['Agent', 'agent'], ['aGeNt', 'agent']]) {
+        expect(row({ role: cell }).rows[0].role).toBe(role);
+      }
+      expect(ROSTER_EXAMPLES.map((cells) => cells[3])).toEqual(['AB', 'AAB', 'Agent']);
     });
   });
 
@@ -95,21 +190,21 @@ describe('the roster file (P3.6-T4)', () => {
 
     it('reads tab-separated rows the same as comma-separated ones', () => {
       const { rows, issues } = parseRoster(tsv(
-        'fullName\temail\tagentCode\trole\tleaderAgentCode',
-        'Rina Wijaya\trina@k.test\tPRU-1\tagent\tPRU-9',
+        H.split(',').join('\t'),
+        `Rina Wijaya\trina@k.test\t881\tagent\t99${P_TAB}`,
       ));
       expect(issues).toEqual([]);
-      expect(rows[0]).toMatchObject({ fullName: 'Rina Wijaya', agentCode: 'PRU-1' });
+      expect(rows[0]).toMatchObject({ fullName: 'Rina Wijaya', agentCode: '881', workStatus: 'full_time' });
     });
 
     it('takes rows with no header at all, which is what somebody selects', () => {
       // A person highlights the rows they typed, not the header above them.
       const { rows, issues } = parseRoster(tsv(
-        'Agus Prasetyo\tagus@k.test\tPRU-1\tab\t',
-        'Rina Wijaya\trina@k.test\tPRU-2\tagent\tPRU-1',
+        `Agus Prasetyo\tagus@k.test\t881\tAB\t${P_TAB}`,
+        `Rina Wijaya\trina@k.test\t882\tAgent\t881${P_TAB}`,
       ));
       expect(issues).toEqual([]);
-      expect(rows.map((r) => r.agentCode)).toEqual(['PRU-1', 'PRU-2']);
+      expect(rows.map((r) => r.agentCode)).toEqual(['881', '882']);
       // And the first row is line 1, because there is no header above it.
       expect(rows[0].line).toBe(1);
     });
@@ -117,7 +212,7 @@ describe('the roster file (P3.6-T4)', () => {
     it('keeps a comma inside a cell, because the delimiter is the tab', () => {
       // Excel does not quote a comma when the clipboard delimiter is a tab, so this
       // arrives bare — and splitting on commas would tear the name in half.
-      const { rows } = parseRoster('Puspita, Sari\tsari@k.test\tPRU-1\taab\t');
+      const { rows } = parseRoster(`Puspita, Sari\tsari@k.test\t881\taab\t${P_TAB}`);
       expect(rows[0].fullName).toBe('Puspita, Sari');
     });
 
@@ -132,8 +227,8 @@ describe('the roster file (P3.6-T4)', () => {
       // The delimiter is decided once, from the first line. Deciding per row would let a
       // stray character change how a single line is read.
       const { rows, issues } = parseRoster(tsv(
-        'Agus\tagus@k.test\tPRU-1\tab\t',
-        'Wijaya, Rina\trina@k.test\tPRU-2\tagent\tPRU-1',
+        `Agus\tagus@k.test\t881\tab\t${P_TAB}`,
+        `Wijaya, Rina\trina@k.test\t882\tagent\t881${P_TAB}`,
       ));
       expect(issues).toEqual([]);
       expect(rows[1].fullName).toBe('Wijaya, Rina');
@@ -156,7 +251,13 @@ describe('the roster file (P3.6-T4)', () => {
       // The leader column is the one people get wrong: it is an agent code, not a name,
       // and somebody at the top of the office has none.
       expect(ROSTER_TEMPLATE).toContain('LEAVE IT EMPTY');
-      expect(ROSTER_TEMPLATE).toContain('ab, aab or agent');
+      expect(ROSTER_TEMPLATE).toContain('AB, AAB or Agent');
+      // And the four a person records, with the shape each takes (ADR-0158).
+      expect(ROSTER_TEMPLATE).toContain('dateOfBirth       YYYY-MM-DD');
+      expect(ROSTER_TEMPLATE).toContain('companyJoinMonth  YYYY-MM');
+      expect(ROSTER_TEMPLATE).toContain('full-time or part-time');
+      expect(ROSTER_TEMPLATE).toContain('male or female');
+      expect(ROSTER_TEMPLATE).toContain('digits only, 3 to 32');
     });
 
     it('does not imply the password is emailed, because nothing emails it', () => {
@@ -170,8 +271,8 @@ describe('the roster file (P3.6-T4)', () => {
 
     it('shows a chain, so the leader column is unambiguous', () => {
       // Agus leads Sari leads Rina, by code — which is what the column takes.
-      expect(ROSTER_TEMPLATE).toContain('PRU-88002,aab,PRU-88001');
-      expect(ROSTER_TEMPLATE).toContain('PRU-88003,agent,PRU-88002');
+      expect(ROSTER_TEMPLATE).toContain('88002,AAB,88001');
+      expect(ROSTER_TEMPLATE).toContain('88003,Agent,88002');
     });
 
     it('quotes an example name with a comma, and leaves the others bare', () => {
@@ -181,7 +282,7 @@ describe('the roster file (P3.6-T4)', () => {
     });
 
     it('imports what somebody adds under the examples, and nothing else', () => {
-      const filled = `${ROSTER_TEMPLATE}Budi Santoso,budi@k.test,PRU-1,agent,\n`;
+      const filled = `${ROSTER_TEMPLATE}Budi Santoso,budi@k.test,881,agent,${P}\n`;
       const { rows, issues } = parseRoster(filled);
       expect(issues).toEqual([]);
       expect(rows.map((r) => r.fullName)).toEqual(['Budi Santoso']);
@@ -191,7 +292,7 @@ describe('the roster file (P3.6-T4)', () => {
       // The template is eleven lines of comment before the header. Numbering the survivors
       // instead of carrying their real positions would point the reader at a row they
       // cannot see.
-      const filled = `${ROSTER_TEMPLATE},not-an-email,,director,\n`;
+      const filled = `${ROSTER_TEMPLATE},not-an-email,,director,,,,,\n`;
       const { issues } = parseRoster(filled);
       const linesInFile = ROSTER_TEMPLATE.split('\n').length;
       expect(new Set(issues.map((i) => i.line))).toEqual(new Set([linesInFile]));
@@ -210,19 +311,19 @@ describe('the roster file (P3.6-T4)', () => {
     it('would import, exactly as the paste box shows them', () => {
       const { rows, issues } = parseRoster(asPaste());
       expect(issues).toEqual([]);
-      expect(rows.map((r) => r.agentCode)).toEqual(['PRU-88001', 'PRU-88002', 'PRU-88003']);
+      expect(rows.map((r) => r.agentCode)).toEqual(['88001', '88002', '88003']);
     });
 
     it('shows the leader column filled and empty, which is the column people get wrong', () => {
       // One row at the top of the office with nothing in it, and two naming a code. A
       // single example row can only ever demonstrate one of those.
-      expect(ROSTER_EXAMPLES.map((cells) => cells[4])).toEqual(['', 'PRU-88001', 'PRU-88002']);
+      expect(ROSTER_EXAMPLES.map((cells) => cells[4])).toEqual(['', '88001', '88002']);
     });
 
     it('reads as a chain, so the column is plainly a code and not a name', () => {
       const { rows } = parseRoster(asPaste());
       expect(inLeaderFirstOrder(rows)?.map((r) => r.agentCode))
-        .toEqual(['PRU-88001', 'PRU-88002', 'PRU-88003']);
+        .toEqual(['88001', '88002', '88003']);
     });
 
     it('needs no quoting when pasted, because the delimiter is the tab', () => {
@@ -238,32 +339,32 @@ describe('the roster file (P3.6-T4)', () => {
       // A spreadsheet lists people in whatever order it held them, and creating a
       // membership needs its leader to exist already.
       const { rows } = parseRoster(
-        `${H}\nAgent,a@k.test,A1,agent,B1\nLeader,b@k.test,B1,ab,\n`,
+        `${H}\nAgent,a@k.test,101,agent,201${P}\nLeader,b@k.test,201,ab,${P}\n`,
       );
-      expect(inLeaderFirstOrder(rows)?.map((r) => r.agentCode)).toEqual(['B1', 'A1']);
+      expect(inLeaderFirstOrder(rows)?.map((r) => r.agentCode)).toEqual(['201', '101']);
     });
 
     it('handles a chain three deep', () => {
       const { rows } = parseRoster(
-        `${H}\nC,c@k.test,C1,agent,B1\nB,b@k.test,B1,aab,A1\nA,a@k.test,A1,ab,\n`,
+        `${H}\nC,c@k.test,301,agent,201${P}\nB,b@k.test,201,aab,101${P}\nA,a@k.test,101,ab,${P}\n`,
       );
-      expect(inLeaderFirstOrder(rows)?.map((r) => r.agentCode)).toEqual(['A1', 'B1', 'C1']);
+      expect(inLeaderFirstOrder(rows)?.map((r) => r.agentCode)).toEqual(['101', '201', '301']);
     });
 
     it('leaves a leader who is not in the file alone, because the office may hold them', () => {
-      const { rows } = parseRoster(`${H}\nRina,r@k.test,PRU-1,agent,ALREADY-HERE\n`);
-      expect(inLeaderFirstOrder(rows)?.map((r) => r.agentCode)).toEqual(['PRU-1']);
+      const { rows } = parseRoster(`${H}\nRina,r@k.test,881,agent,ALREADY-HERE${P}\n`);
+      expect(inLeaderFirstOrder(rows)?.map((r) => r.agentCode)).toEqual(['881']);
     });
 
     it('refuses a cycle rather than discovering it halfway through the write', () => {
       const { rows } = parseRoster(
-        `${H}\nA,a@k.test,A1,ab,B1\nB,b@k.test,B1,ab,A1\n`,
+        `${H}\nA,a@k.test,101,ab,201${P}\nB,b@k.test,201,ab,101${P}\n`,
       );
       expect(inLeaderFirstOrder(rows)).toBeNull();
     });
 
     it('refuses somebody who is their own leader', () => {
-      const { rows } = parseRoster(`${H}\nA,a@k.test,A1,ab,A1\n`);
+      const { rows } = parseRoster(`${H}\nA,a@k.test,101,ab,101${P}\n`);
       expect(inLeaderFirstOrder(rows)).toBeNull();
     });
   });

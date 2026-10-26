@@ -212,7 +212,8 @@ export class OnboardingService {
     const scoped = RequestContext.joiningTenant(ctx, kpmId);
     const membership = await this.hierarchy.create(scoped, {
       userId: ctx.userId,
-      role: 'agent',
+      // The ladder's lowest rung that leads nobody: `AGENT` on the default ladder (ADR-0156).
+      role: await this.hierarchy.entryRungCode(kpmId, 'joiner'),
       leaderId: null,
       status: 'pending',
     });

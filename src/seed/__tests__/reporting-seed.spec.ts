@@ -87,7 +87,7 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     const people = (await wired.directoryColumns.decorate(owner, await directory.list(owner, { limit: 200 }))).members;
     expect(people.find((m) => m.fullName === 'Maya Halim')).toMatchObject({ lastActivityDays: 13 });
     expect(people.find((m) => m.fullName === 'Wilson Tanoto')).toMatchObject({ lastActivityDays: 11 });
-    const gilang = (await col('memberships').findOne({ agentCode: 'PRU-87015' }))!;
+    const gilang = (await col('memberships').findOne({ agentCode: '87015' }))!;
     expect(gilang).toMatchObject({ status: 'removed' });
     expect((gilang.removedAt as Date).toISOString().slice(0, 7)).toBe('2026-09');
     // On every file this year to July; the Overview's year to date holds it, the analytics' total says how much (OD-74).

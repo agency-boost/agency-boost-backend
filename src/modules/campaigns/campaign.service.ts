@@ -256,6 +256,40 @@ export class CampaignService {
     return tiers.length + moc.length;
   }
 
+  /**
+   * **A new company's carrier rules, copied from another company's** (ADR-0164 §4): every live rule of the
+   * Template library — its kind, code, name, rungs, criteria, reward, rank and dates — as the new company's own.
+   * A copy, never a link: a later change to either company's rules is that company's alone. A company that
+   * already has rules is left alone, as `seedForCompany` leaves it.
+   */
+  async copyRulesFromCompany(sourceCompanyId: string, companyId: string): Promise<number> {
+    if (await this.rules.exists({ companyId, deletedAt: null })) return 0;
+    const source = await this.rules.find({ companyId: sourceCompanyId, deletedAt: null }).lean().exec();
+    if (source.length === 0) return 0;
+    await this.rules.insertMany(source.map((rule) => ({
+      companyId,
+      scope: rule.scope,
+      kind: rule.kind,
+      code: rule.code,
+      name: rule.name,
+      appliesToOrgLevelCodes: [...(rule.appliesToOrgLevelCodes ?? [])],
+      criteriaGroups: (rule.criteriaGroups ?? []).map((group) => ({
+        mode: group.mode,
+        criteria: group.criteria.map((c) => ({
+          metricKey: c.metricKey, comparator: c.comparator, value: c.value, unit: c.unit,
+        })),
+      })),
+      groupMode: rule.groupMode,
+      reward: rule.reward ?? '',
+      rank: rule.rank,
+      waitingOnMetrics: [...(rule.waitingOnMetrics ?? [])],
+      effectiveFrom: rule.effectiveFrom ?? null,
+      effectiveTo: rule.effectiveTo ?? null,
+      deletedAt: null,
+    })));
+    return source.length;
+  }
+
   // -------------------------------------------------------------------- internals
 
   private async setStatus(

@@ -30,7 +30,7 @@ export class ComplianceController {
       + 'days, the 90-day activation, an event of this year, or a campaign of this year. Six counts, one per '
       + 'category, each done over those it applies to, computed on every read; what the office offers and lists, for '
       + 'the tabs and pickers. Not paginated. A training, activity or activation read records each member listed as '
-      + 'read, in one entry each.',
+      + 'read, in one entry each. Read by the Owner, an Admin and a Core Leader (ADR-0159 §2), read-only.',
   })
   @ApiResponse({ status: 200, type: ComplianceViewDto })
   @ApiResponse(refusal(
@@ -41,12 +41,13 @@ export class ComplianceController {
   @ApiResponse(refusal(
     403,
     '`TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no office. `PERM_DENIED` — '
-    + 'a role without the permission: every field role.',
+    + 'a role without the permission: an Agent.',
   ))
   @ApiResponse(refusal(
     404,
     '`NOT_FOUND` — an item the office does not list: another office’s module, event or campaign, an archived one, or '
-    + 'one outside this year. Indistinguishable from another office’s.',
+    + 'one outside this year. Indistinguishable from another office’s. And any request from an AB or an AAB who is '
+    + 'not a Core Leader (ADR-0159 §2), before anything is read.',
   ))
   async read(@Ctx() ctx: RequestContext, @Query() query: ComplianceQueryDto) {
     return this.compliance.read(ctx, query);

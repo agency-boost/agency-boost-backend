@@ -52,6 +52,52 @@ export function rollUpGoal(rows: readonly GoalFigure[]): RolledUpGoal {
   };
 }
 
+/** A unit's goal figures paired (ADR-0165 §1): the sums of the members whose production is held, and how far apart. */
+export interface PairedGoal extends RolledUpGoal {
+  /** How far the paired actual falls short of the paired target; 0 when it is met; `null` without both. */
+  gapMinor: number | null;
+  /** How far the paired actual is over the paired target; 0 when short; `null` without both. */
+  overMinor: number | null;
+}
+
+/**
+ * **The Unit Dashboard's totals, paired** (ADR-0165 §1, P18.8-T15 AC-6; the client's UI review, UI-004) — a unit's
+ * total and *Direct Group production*. `rollUpGoal` summed every target that exists against the production held, so a
+ * member whose file was late counted as producing nothing: *5% · Rp 264.666.667 short* for a unit two of whose
+ * members were *Not uploaded yet*, beside a tooltip saying they were *not counted*. Their targets were.
+ *
+ * - **A member counts in the target only when their production for the period is held**, and the actual is the same
+ *   members' production. The percentage, the shortfall and the excess are worked out from those two sums.
+ * - **The members left out are `missing`**, as before — the rows holding no actual, which the total's tooltip names.
+ * - **With nobody's production held** the actual is `null` and the total reads *Not uploaded yet* beside the targets
+ *   that exist, as a row does (*of {target} target*); no percentage, no shortfall.
+ *
+ * Only the Unit Dashboard pairs. The Owner's office figures (`kpm-overview`, `kpm-analytics`) keep `rollUpGoal` and
+ * their own documented rules, which name the months not held separately.
+ */
+export function rollUpGoalPaired(rows: readonly GoalFigure[]): PairedGoal {
+  const held = rows.filter((row) => row.actualMinor !== null);
+  if (held.length === 0) {
+    return {
+      targetMinor: sumHeld(rows.map((row) => row.targetMinor)),
+      actualMinor: null,
+      attainmentPct: null,
+      missing: rows.length,
+      gapMinor: null,
+      overMinor: null,
+    };
+  }
+  const paired = rollUpGoal(held);
+  const { targetMinor, actualMinor } = paired;
+  const both = targetMinor !== null && actualMinor !== null;
+  return {
+    ...paired,
+    missing: rows.length - held.length,
+    gapMinor: both ? Math.max(0, targetMinor - actualMinor) : null,
+    overMinor: both ? Math.max(0, actualMinor - targetMinor) : null,
+  };
+}
+
 /** Something logged against a target: `target` is `null` where there is no APE target to derive it from. */
 export interface CountAgainst {
   logged: number;

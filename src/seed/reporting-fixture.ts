@@ -73,25 +73,25 @@ const RECENT = [0, 2, 4, 6, 8, 10, 12];
 
 /** The two new agencies, leaders first. Nobody here is in Agus's, Sari's or Arief's downline. */
 export const REPORTING_CAST: readonly ReportingCastMember[] = [
-  { key: 'yosef', email: 'yosef@kpm0417.test', fullName: 'Yosef Tambunan', role: 'ab', leader: 'owner', agentCode: 'PRU-87001', joinedDaysAgo: 420, apeMillions: 18, persistency: 88, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'arini', email: 'arini@kpm0417.test', fullName: 'Arini Kusuma', role: 'agent', leader: 'yosef', agentCode: 'PRU-87002', joinedDaysAgo: 390, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'bonar', email: 'bonar@kpm0417.test', fullName: 'Bonar Hutapea', role: 'agent', leader: 'yosef', agentCode: 'PRU-87003', joinedDaysAgo: 380, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'cahya', email: 'cahya@kpm0417.test', fullName: 'Cahya Ningrum', role: 'agent', leader: 'yosef', agentCode: 'PRU-87004', joinedDaysAgo: 360, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'damar', email: 'damar@kpm0417.test', fullName: 'Damar Pangestu', role: 'agent', leader: 'yosef', agentCode: 'PRU-87005', joinedDaysAgo: 340, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'elsa', email: 'elsa@kpm0417.test', fullName: 'Elsa Marbun', role: 'agent', leader: 'yosef', agentCode: 'PRU-87006', joinedDaysAgo: 320, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'winda', email: 'winda@kpm0417.test', fullName: 'Winda Anggraeni', role: 'aab', leader: 'yosef', agentCode: 'PRU-87007', joinedDaysAgo: 400, apeMillions: 17, persistency: 85, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'ikhsan', email: 'ikhsan@kpm0417.test', fullName: 'Ikhsan Prabowo', role: 'agent', leader: 'winda', agentCode: 'PRU-87008', joinedDaysAgo: 300, apeMillions: 15, persistency: 80, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'jihan', email: 'jihan@kpm0417.test', fullName: 'Jihan Mardiyah', role: 'agent', leader: 'winda', agentCode: 'PRU-87009', joinedDaysAgo: 290, apeMillions: 15, persistency: 80, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'yosef', email: 'yosef@kpm0417.test', fullName: 'Yosef Tambunan', role: 'ab', leader: 'owner', agentCode: '87001', joinedDaysAgo: 420, apeMillions: 18, persistency: 88, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'arini', email: 'arini@kpm0417.test', fullName: 'Arini Kusuma', role: 'agent', leader: 'yosef', agentCode: '87002', joinedDaysAgo: 390, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'bonar', email: 'bonar@kpm0417.test', fullName: 'Bonar Hutapea', role: 'agent', leader: 'yosef', agentCode: '87003', joinedDaysAgo: 380, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'cahya', email: 'cahya@kpm0417.test', fullName: 'Cahya Ningrum', role: 'agent', leader: 'yosef', agentCode: '87004', joinedDaysAgo: 360, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'damar', email: 'damar@kpm0417.test', fullName: 'Damar Pangestu', role: 'agent', leader: 'yosef', agentCode: '87005', joinedDaysAgo: 340, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'elsa', email: 'elsa@kpm0417.test', fullName: 'Elsa Marbun', role: 'agent', leader: 'yosef', agentCode: '87006', joinedDaysAgo: 320, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'winda', email: 'winda@kpm0417.test', fullName: 'Winda Anggraeni', role: 'aab', leader: 'yosef', agentCode: '87007', joinedDaysAgo: 400, apeMillions: 17, persistency: 85, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'ikhsan', email: 'ikhsan@kpm0417.test', fullName: 'Ikhsan Prabowo', role: 'agent', leader: 'winda', agentCode: '87008', joinedDaysAgo: 300, apeMillions: 15, persistency: 80, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'jihan', email: 'jihan@kpm0417.test', fullName: 'Jihan Mardiyah', role: 'agent', leader: 'winda', agentCode: '87009', joinedDaysAgo: 290, apeMillions: 15, persistency: 80, annualTargetMillions: 180, loggedDaysBack: RECENT },
   // A quiet agent: no APE, no policy, every month — *not active*.
-  { key: 'kemal', email: 'kemal@kpm0417.test', fullName: 'Kemal Rasyid', role: 'agent', leader: 'winda', agentCode: 'PRU-87010', joinedDaysAgo: 280, apeMillions: 0, persistency: 80, annualTargetMillions: 180, loggedDaysBack: [8, 11, 15, 20] },
-  { key: 'satria', email: 'satria@kpm0417.test', fullName: 'Satria Nugraha', role: 'ab', leader: 'owner', agentCode: 'PRU-87011', joinedDaysAgo: 330, apeMillions: 6, persistency: 70, annualTargetMillions: 300, loggedDaysBack: [1, 3] },
-  { key: 'oscar', email: 'oscar@kpm0417.test', fullName: 'Oscar Lumbantobing', role: 'agent', leader: 'satria', agentCode: 'PRU-87012', joinedDaysAgo: 310, apeMillions: 4, persistency: 72, annualTargetMillions: 300, loggedDaysBack: [9, 15] },
-  { key: 'pandu', email: 'pandu@kpm0417.test', fullName: 'Pandu Wirawan', role: 'agent', leader: 'satria', agentCode: 'PRU-87013', joinedDaysAgo: 250, apeMillions: 5, persistency: 72, annualTargetMillions: 300, loggedDaysBack: [12] },
+  { key: 'kemal', email: 'kemal@kpm0417.test', fullName: 'Kemal Rasyid', role: 'agent', leader: 'winda', agentCode: '87010', joinedDaysAgo: 280, apeMillions: 0, persistency: 80, annualTargetMillions: 180, loggedDaysBack: [8, 11, 15, 20] },
+  { key: 'satria', email: 'satria@kpm0417.test', fullName: 'Satria Nugraha', role: 'ab', leader: 'owner', agentCode: '87011', joinedDaysAgo: 330, apeMillions: 6, persistency: 70, annualTargetMillions: 300, loggedDaysBack: [1, 3] },
+  { key: 'oscar', email: 'oscar@kpm0417.test', fullName: 'Oscar Lumbantobing', role: 'agent', leader: 'satria', agentCode: '87012', joinedDaysAgo: 310, apeMillions: 4, persistency: 72, annualTargetMillions: 300, loggedDaysBack: [9, 15] },
+  { key: 'pandu', email: 'pandu@kpm0417.test', fullName: 'Pandu Wirawan', role: 'agent', leader: 'satria', agentCode: '87013', joinedDaysAgo: 250, apeMillions: 5, persistency: 72, annualTargetMillions: 300, loggedDaysBack: [12] },
   // Joined long ago and has never logged: *Never logged* on the Overview, *Never* in the directory.
-  { key: 'raka', email: 'raka@kpm0417.test', fullName: 'Raka Aditama', role: 'agent', leader: 'satria', agentCode: 'PRU-87014', joinedDaysAgo: 220, apeMillions: null, persistency: 0, annualTargetMillions: 300, loggedDaysBack: [] },
+  { key: 'raka', email: 'raka@kpm0417.test', fullName: 'Raka Aditama', role: 'agent', leader: 'satria', agentCode: '87014', joinedDaysAgo: 220, apeMillions: null, persistency: 0, annualTargetMillions: 300, loggedDaysBack: [] },
   // Yosef's agent until last month: on every file this year to three months ago, removed since (OD-74). Placed
   // last, so every member above keeps the agent sequence a fresh seed has always given them.
-  { key: 'gilang', email: 'gilang@kpm0417.test', fullName: 'Gilang Saputra', role: 'agent', leader: 'yosef', agentCode: 'PRU-87015', joinedDaysAgo: 400, apeMillions: 14, persistency: 81, annualTargetMillions: 180, loggedDaysBack: [], removedLastMonth: true },
+  { key: 'gilang', email: 'gilang@kpm0417.test', fullName: 'Gilang Saputra', role: 'agent', leader: 'yosef', agentCode: '87015', joinedDaysAgo: 400, apeMillions: 14, persistency: 81, annualTargetMillions: 180, loggedDaysBack: [], removedLastMonth: true },
 ];
 
 /** This month's recruitment target, set by the Owner (D-recruit). */

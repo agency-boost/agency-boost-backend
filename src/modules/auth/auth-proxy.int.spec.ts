@@ -10,6 +10,8 @@ import { Clock, SystemClock } from '@/common/clock/clock.port';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
+import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
+import { MembershipRepository } from '@/modules/org/membership.repository';
 import { User, UserDocument, UserSchema } from '@/modules/users/user.schema';
 import { listenOnLoopback } from '../../../test/listen';
 import { startMongo, stopMongo } from '../../../test/mongo';
@@ -42,11 +44,14 @@ async function boot(uri: string, dbName: string, env: Record<string, unknown>): 
         { name: User.name, schema: UserSchema },
         { name: AuthToken.name, schema: AuthTokenSchema },
         { name: Company.name, schema: CompanySchema },
+        { name: Membership.name, schema: MembershipSchema },
       ]),
     ],
     controllers: [AuthController],
     providers: [
       AuthService,
+      // `/auth/me` reads and writes work status on the membership (ADR-0158).
+      MembershipRepository,
       PasswordService,
       RateLimiter,
       { provide: Clock, useClass: SystemClock },

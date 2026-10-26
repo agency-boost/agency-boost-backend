@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, ValidationPipe } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { REQUIRED_PERMISSION } from '@/common/auth/auth.decorators';
-import { RequestContext } from '@/common/context/request-context';
+import { RequestContext, type HierarchyRole } from '@/common/context/request-context';
 import { VALIDATION_PIPE_OPTIONS } from '@/bootstrap';
 
 /**
@@ -13,6 +13,14 @@ import { VALIDATION_PIPE_OPTIONS } from '@/bootstrap';
  * at all; this is what the specs that close that gap are built from, written once so the awkward
  * parts (a mutable session, reading metadata off a prototype) are not re-derived five times.
  */
+
+/**
+ * **The class of an Owner or Admin "with no field role"** — what every `officeOnly` harness gives the context beside
+ * its `NO_RUNG`. A hierarchy grant matches the class since ADR-0156 (P18.8-T1), not the rung's code, so a context
+ * that kept its `ab` while naming no rung would hold every AB grant. Impossible in data — every membership stands on
+ * a rung and every rung gives a class — and exactly what the Owner and Admin columns of a matrix mean.
+ */
+export const NO_CLASS = 'none' as unknown as HierarchyRole;
 
 /** The office every fixture below belongs to. A spec creates it; the ids only have to agree. */
 export const FIXTURE_KPM = '66f0000000000000000000a1';

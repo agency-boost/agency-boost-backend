@@ -6,11 +6,11 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
-import { can } from '@/modules/rbac/permissions';
+import { can, SETUP_SESSION_WRITE_SCOPE } from '@/modules/rbac/permissions';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import {
-  ImpersonationSession, ImpersonationSessionDocument,
+  ImpersonationPurpose, ImpersonationSession, ImpersonationSessionDocument,
 } from './impersonation-session.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { NotificationService } from '@/modules/notifications/notification.service';
@@ -47,7 +47,12 @@ export class ImpersonationService {
     targetUserId: string,
     reason: string,
     durationMinutes = IMPERSONATION_MAX_MINUTES,
-  ): Promise<{ accessToken: string; expiresAt: Date; sessionId: string; readOnly: boolean }> {
+    /** `setup` may write the office's setup and nothing else (ADR-0162); `support` only looks. */
+    purpose: ImpersonationPurpose = 'support',
+  ): Promise<{
+    accessToken: string; expiresAt: Date; sessionId: string; readOnly: boolean;
+    purpose: ImpersonationPurpose; writeScope: string[];
+  }> {
     /*
      * **This one first, and the order is the point.**
      *
@@ -176,17 +181,29 @@ export class ImpersonationService {
       }
     }
 
+    /*
+     * **A setup session acts as somebody who configures an office** (ADR-0162 §1): its Owner, or one of its
+     * Admins, in an office the loop above has found active. Anybody else has no settings to change, so the
+     * session would be a support session that says otherwise. Refused before anything is written.
+     */
+    const setsUpTheOffice = Boolean(ownedByTarget)
+      || (membership?.status === 'active' && Boolean(membership.adminAccess?.isKpmAdmin));
+    if (purpose === 'setup' && !setsUpTheOffice) {
+      throw new DomainException(
+        ErrorCode.IMPERSONATION_SETUP_TARGET,
+        'A setup session acts as an office\'s Owner or one of its Admins, and this person is neither. '
+          + 'Start a support session to look at their screens.',
+        HttpStatus.CONFLICT,
+        { purpose },
+      );
+    }
+    const writeScope = purpose === 'setup' ? [...SETUP_SESSION_WRITE_SCOPE] : [];
+
     const minutes = Math.min(Math.max(1, Math.floor(durationMinutes)), IMPERSONATION_MAX_MINUTES);
     const ttlSeconds = minutes * 60;
     const inTenant = kpmId
       ? RequestContext.superAdminInTenant(ctx.userId, kpmId)
       : ctx;
-    await this.audit.record(inTenant, {
-      action: 'impersonation.started',
-      targetCollection: 'users',
-      targetId: targetUserId,
-      after: { reason: reason.trim(), minutes, readOnly: true },
-    });
 
     // `sid` records who is really acting, so the resolved context can carry both.
     const accessToken = this.signer.sign({ sub: targetUserId, sid: `imp:${ctx.userId}` }, ttlSeconds);
@@ -210,8 +227,11 @@ export class ImpersonationService {
       kpmId,
       tokenHash: this.passwords.hashToken(accessToken),
       // Read-only until a *second* Super Admin says otherwise. The operator who wants to
-      // write is not the one who decides they may.
+      // write is not the one who decides they may — except the setup screens' own
+      // permissions, which a setup session names here (ADR-0162 §2).
       readOnly: true,
+      purpose,
+      writeScope,
       elevatedByUserId: null,
       elevatedAt: null,
       reason: reason.trim(),
@@ -222,9 +242,22 @@ export class ImpersonationService {
       deletedAt: null,
     });
 
-    await this.announce(targetUserId, kpmId, office?.ownerUserId ?? null, reason.trim());
+    const sessionId = String(session._id);
+    /*
+     * **After the row, so the entry names it** (ADR-0162 §3): the Owner's log can then tie the start to the
+     * session's elevation and its end. The purpose and the scope are the trust extended, recorded where an
+     * Owner reads them.
+     */
+    await this.audit.record(inTenant, {
+      action: 'impersonation.started',
+      targetCollection: 'users',
+      targetId: targetUserId,
+      after: { reason: reason.trim(), minutes, readOnly: true, purpose, sessionId, writeScope },
+    });
 
-    return { accessToken, expiresAt, sessionId: String(session._id), readOnly: true };
+    await this.announce(targetUserId, kpmId, office?.ownerUserId ?? null, reason.trim(), purpose);
+
+    return { accessToken, expiresAt, sessionId, readOnly: true, purpose, writeScope };
   }
 
   /**
@@ -366,6 +399,7 @@ export class ImpersonationService {
     kpmId: string | null,
     ownerUserId: string | null,
     reason: string,
+    purpose: ImpersonationPurpose,
   ): Promise<void> {
     const told = new Set<string>();
     for (const userId of [targetUserId, ownerUserId]) {
@@ -375,7 +409,8 @@ export class ImpersonationService {
         userId,
         kpmId,
         templateId: NotificationTemplate.IMPERSONATION_STARTED,
-        payload: { reason, isSubject: userId === targetUserId },
+        // The notice says which kind of session it is (ADR-0162 §3): a setup one changes things.
+        payload: { reason, isSubject: userId === targetUserId, purpose },
       });
     }
   }

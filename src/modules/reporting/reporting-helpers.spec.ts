@@ -12,7 +12,7 @@ import { OfficePeople, rungsFor } from './office-people';
 import { stateOf, sumOf } from './platform-analytics.service';
 
 const level = (code: string, label: string, displayOrder: number, status: 'active' | 'archived' = 'active'): OrgLevelRow => ({
-  orgLevelId: code, companyId: 'c', code, label, displayOrder, status, archivedAt: null,
+  orgLevelId: code, companyId: 'c', code, label, displayOrder, leaderTier: null, status, archivedAt: null,
 });
 const LADDER = [level('AGENT', 'Agent', 1), level('AAB', 'AAB', 2), level('AB', 'AB', 3), level('JR', 'Junior', 0, 'archived')];
 

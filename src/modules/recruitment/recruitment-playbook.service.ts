@@ -74,6 +74,21 @@ export class RecruitmentPlaybookService {
     return true;
   }
 
+  /**
+   * **A new company's playbook, copied from another company's** (ADR-0164 §4): the Template library's words as
+   * the new company's version 1. A copy, never a link: rewording either afterwards is that company's alone. A
+   * source with no playbook gives none; a company that has one is left alone. `true` when it wrote.
+   */
+  async copyFromCompany(sourceCompanyId: string, companyId: string): Promise<boolean> {
+    if (await this.ofCompany(companyId)) return false;
+    const source = await this.ofCompany(sourceCompanyId);
+    if (!source) return false;
+    await this.playbooks.create({
+      companyId, body: structuredClone(source.toObject().body), version: 1, updatedBy: null, createdBy: null, deletedAt: null,
+    });
+    return true;
+  }
+
   /** `GET /admin/companies/:companyId/recruitment-playbook`: the company's playbook or none, and the defaults. */
   async readForAdmin(companyId: string): Promise<PlaybookAdminView> {
     await this.requireCompany(companyId);

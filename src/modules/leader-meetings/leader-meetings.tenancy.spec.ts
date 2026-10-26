@@ -91,9 +91,15 @@ describe('the Strategic Leader Forum, isolated (invariant §1)', () => {
   );
 
   it('P18.1-T2 AC-9, P18.1-T3 AC-3 a Core Leader tagged in 0555 edits 0555’s meeting and meets 404 on every route of 0417’s', async () => {
+    const row = { _id: new mongoose.Types.ObjectId(office.id.B_AGENT) };
+    const memberships = mongoose.connection.db!.collection('memberships');
     await office.tag('B_AGENT', true);
     try {
       session.current = office.as('B_AGENT');
+      // Tagged on an Agent's rung, in their own office: no Core Leader (ADR-0159 §1, P18.8-T5 AC-1).
+      expect((await http().get(`/leader-meetings/${sides['0555'].view.id}`).expect(404)).body.error.code).toBe('NOT_FOUND');
+      // Moved to a leader rung, the same tag makes one.
+      await memberships.updateOne(row, { $set: { role: 'aab' } });
       // Tagged, in their own office: an editor.
       await http().get(`/leader-meetings/${sides['0555'].view.id}`).expect(200);
       await http().post(`/leader-meetings/${sides['0555'].view.id}/agenda-items`).send({ section: 'post' }).expect(201);
@@ -109,6 +115,7 @@ describe('the Strategic Leader Forum, isolated (invariant §1)', () => {
       expect(await everything()).toEqual(before);
     } finally {
       await office.tag('B_AGENT', false);
+      await memberships.updateOne(row, { $set: { role: 'agent' } });
     }
   });
 

@@ -158,6 +158,26 @@ describe('Phase 10’s periods, at midnight in Jakarta (P10-T8)', () => {
       expect(after).toMatchObject({ year: '2027', month: '2027-01', activity: { yearly: { from: '2027-01-01', to: '2027-01-01' } } });
     });
 
+    it('P18.8-T11 AC-1 September closes at midnight in Jakarta: current to 23:59, read whole and with no pace at 00:01', async () => {
+      // Opened in August, in the office's zone (`TenantDay.calendar`).
+      await mongoose.connection.db!.collection('kpms').updateOne(
+        { _id: new mongoose.Types.ObjectId(KPM) }, { $set: { createdAt: new Date('2026-07-31T17:00:00Z') } },
+      );
+      await day('2026-09-30', { SELL_SUBMISSION: 1 });
+
+      const before = await wired.summary.read(agent(), undefined, { month: '2026-09' });
+      await expect(wired.summary.read(agent(), undefined, { month: '2026-10' })).rejects.toMatchObject({ status: 400 });
+      at(AFTER);
+      const after = await wired.summary.read(agent(), undefined, { month: '2026-09' });
+
+      expect(before).toMatchObject({ month: '2026-09', period: { currentMonth: true, firstMonth: '2026-08' }, activity: { monthly: { to: '2026-09-30' } } });
+      expect(after).toMatchObject({
+        month: '2026-09', pace: null, period: { currentMonth: false, thisMonth: '2026-10' },
+        activity: { monthly: { from: '2026-09-01', to: '2026-09-30', total: 1 } },
+      });
+      expect((await wired.summary.read(agent(), undefined, { month: '2026-10' })).period.currentMonth).toBe(true);
+    });
+
     it('the logging window behind *Nothing logged* is the office’s last seven days', async () => {
       await day('2026-09-24', { SELL_PRESENTATION: 0 });
 

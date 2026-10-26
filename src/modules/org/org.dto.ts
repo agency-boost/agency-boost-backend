@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
-  IsArray, IsBoolean, IsEnum, IsInt, IsMongoId, IsNotEmpty, IsOptional, IsString, Max,
+  IsArray, IsBoolean, IsEnum, IsInt, IsMongoId, IsNotEmpty, IsOptional, IsString, Matches, Max,
   MaxLength, Min, MinLength, ValidateIf, ValidateNested,
 } from 'class-validator';
 
@@ -124,10 +124,20 @@ export class UntaggedSearchDto {
   q?: string;
 }
 
+/** A rung's code as the company's ladder writes it: letters, digits and underscores, starting with a letter. */
+const RUNG_CODE = /^[A-Za-z][A-Za-z0-9_]{1,31}$/;
+
 export class ChangeRoleDto {
-  @ApiProperty({ enum: ['ab', 'aab', 'agent'] })
-  @IsEnum(['ab', 'aab', 'agent'])
-  toRole!: 'ab' | 'aab' | 'agent';
+  @ApiProperty({
+    example: 'aab',
+    description:
+      'The rung, by its code on the company\u2019s ladder, in any case: `ab`, `aab`, `agent`, or a rung the company '
+      + 'added. What the member is given — AB, AAB or Agent rights — follows the rung\u2019s leader tier. A code that '
+      + 'is no active rung is refused `409 ORG_LEVEL_NOT_ON_LADDER`.',
+  })
+  @IsString()
+  @Matches(RUNG_CODE, { message: 'toRole must be a rung code' })
+  toRole!: string;
 
   @ApiPropertyOptional({
     example: 'Ready to bring on their own agents',
@@ -220,9 +230,60 @@ export class TagMemberDto {
 
   @ApiProperty({
     description:
-      'Who, besides the Owner and the Admins, may open and write in the Strategic Leader Forum’s ' +
-      'meetings, and nothing else. It grants no hierarchy and no data scope.',
+      'Core Leader (ADR-0159): who, besides the Owner and the Admins, opens and writes in the Strategic Leader ' +
+      'Forum’s meetings and reads the office’s KPM analytics. A leader’s only: setting it on a member whose rung ' +
+      'is not a leader rung is refused `400 CORE_LEADER_NOT_A_LEADER`, and changing it needs ' +
+      '`member:tag_core_leader`. It grants no hierarchy.',
   })
   @IsBoolean()
   isCoreLeader!: boolean;
+}
+
+/** `PUT /members/:membershipId/core-leader` — the directory row's control (ADR-0159 §1). */
+export class SetCoreLeaderDto {
+  @ApiProperty({
+    description:
+      'Tag (`true`) or untag (`false`) this member *Core Leader*. Their groups are untouched. Setting it on a ' +
+      'member whose rung is not a leader rung is refused `400 CORE_LEADER_NOT_A_LEADER`.',
+  })
+  @IsBoolean()
+  isCoreLeader!: boolean;
+}
+
+/** Asking AgencyBoost to approve one leader past the office's limit (ADR-0157 §1). */
+export class CreateLeaderLimitRequestDto {
+  @ApiProperty({
+    enum: ['promote', 'activate'],
+    description:
+      '`promote`: the role change the limit refused, onto the rung named. `activate`: letting in a pending member '
+      + 'who stands on a leader rung — approving their join request, or tagging them into your unit.',
+  })
+  @IsEnum(['promote', 'activate'])
+  action!: 'promote' | 'activate';
+
+  @ApiPropertyOptional({ example: 'AAB', description: 'For `promote`: the rung, by its code on the company\u2019s ladder.' })
+  @IsOptional()
+  @IsString()
+  @Matches(RUNG_CODE, { message: 'orgLevelCode must be a rung code' })
+  orgLevelCode?: string;
+
+  @ApiPropertyOptional({
+    example: 'Ready to bring on their own agents',
+    description: 'For `promote`: kept in the role change log when AgencyBoost approves it.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(300)
+  reason?: string;
+}
+
+/** Declining a leader-limit request: the reason is required, and travels back to whoever asked. */
+export class DeclineLeaderLimitRequestDto {
+  @ApiProperty({ example: 'Raise the limit at renewal instead.', maxLength: 500 })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MinLength(1)
+  @MaxLength(500)
+  reason!: string;
 }

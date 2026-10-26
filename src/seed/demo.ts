@@ -30,6 +30,7 @@ import { User, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
 import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
+import { up as leadPosition } from '@/migrations/0031-lead-position';
 import { Goal, GoalSchema } from '@/modules/goals/goal.schema';
 import {
   KpmProductConfig, KpmProductConfigSchema,
@@ -63,6 +64,7 @@ import { backfillCoachingSnapshots } from './coaching-snapshots';
 import { buildCalendarFixture, type CalendarFixture } from './calendar-fixture';
 import { buildActivationFixture, type ActivationFixture } from './activation-fixture';
 import { seedSubscriptionFixture } from './subscription-fixture';
+import { seedPersonalFor } from './personal-fixture';
 import { seedTemplateFixture } from './template-fixture';
 import { seedTemplateCopyFixture } from './template-copy-fixture';
 import { seedSalesToolsFixture } from './sales-tools-fixture';
@@ -97,6 +99,7 @@ import {
 } from '@/modules/org/membership-history.schema';
 import { Group, GroupSchema } from '@/modules/org/group.schema';
 import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
+import { LeaderLimitRequest, LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
 import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { Notification, NotificationSchema } from '@/modules/notifications/notification.schema';
@@ -110,6 +113,8 @@ import {
   ActivityCategory, ActivityCategorySchema,
 } from '@/modules/config/activity-category.schema';
 import { ActivityType, ActivityTypeSchema } from '@/modules/config/activity-type.schema';
+import { ActivityBinding, ActivityBindingSchema } from '@/modules/config/activity-binding.schema';
+import { defaultBinding } from '@/modules/config/activity-binding';
 import { LeadStatus, LeadStatusSchema } from '@/modules/config/lead-status.schema';
 import {
   RatioDefinition, RatioDefinitionSchema,
@@ -157,6 +162,12 @@ export type SeedPronoun = Exclude<User['pronoun'], 'they'>;
  */
 const SEED_OWNED_EMAIL = /@[a-z0-9.-]+\.test$/i;
 
+/** The three a person records on the account (ADR-0158); work status is the membership's (`place`). */
+function seedPersonalAccount(email: string, pronoun?: 'she' | 'he' | 'they') {
+  const { dateOfBirth, gender, companyJoinMonth } = seedPersonalFor(email, pronoun);
+  return { dateOfBirth, gender, companyJoinMonth };
+}
+
 /**
  * Every model is compiled with this, so a second run in one process — the seed's spec runs it two and
  * three times — recompiles rather than throwing `OverwriteModelError`. The command runs it once.
@@ -197,6 +208,8 @@ const OWNED_COLLECTIONS = [
   // across two different offices.
   'activityCategories', 'activityTypes', 'leadStatuses', 'ratioDefinitions',
   'configSnapshots',
+  // P18.9-T2 (ADR-0163): which activity types each cascade role counts, one row per office.
+  'activityBindings',
   // Phase 5. `products` is the company's rather than the office's, and it is cleared for
   // the same reason: a previous run's shelf orphaned against a company id that no longer
   // exists renders as an empty Products tab on a company that should have 31.
@@ -235,6 +248,8 @@ const OWNED_COLLECTIONS = [
   'eventRsvps', 'eventFeedback',
   // Phase 18.5, with the writer that fills them (`campaigns-fixture.ts`): members' chases, and the standings frozen once final.
   'campaignChases', 'campaignStandings',
+  // Phase 18.8, with the writer that fills it (`subscription-fixture.ts`): 0603's leaders past its limit (ADR-0157).
+  'leaderLimitRequests',
 ] as const;
 
 /**
@@ -326,6 +341,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const Kpms = mongoose.model(Kpm.name, KpmSchema, undefined, RECOMPILE);
   const ActivityCategories = mongoose.model(ActivityCategory.name, ActivityCategorySchema, undefined, RECOMPILE);
   const ActivityTypes = mongoose.model(ActivityType.name, ActivityTypeSchema, undefined, RECOMPILE);
+  const ActivityBindings = mongoose.model(ActivityBinding.name, ActivityBindingSchema, undefined, RECOMPILE);
   const LeadStatuses = mongoose.model(LeadStatus.name, LeadStatusSchema, undefined, RECOMPILE);
   const RatioDefinitions = mongoose.model(RatioDefinition.name, RatioDefinitionSchema, undefined, RECOMPILE);
   const ConfigSnapshots = mongoose.model(ConfigSnapshot.name, ConfigSnapshotSchema, undefined, RECOMPILE);
@@ -347,6 +363,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const History = mongoose.model(MembershipHistory.name, MembershipHistorySchema, undefined, RECOMPILE);
   const Groups = mongoose.model(Group.name, GroupSchema, undefined, RECOMPILE);
   const JoinRequests = mongoose.model(JoinRequest.name, JoinRequestSchema, undefined, RECOMPILE);
+  const LeaderLimitRequests = mongoose.model(LeaderLimitRequest.name, LeaderLimitRequestSchema, undefined, RECOMPILE);
   const KpmRequests = mongoose.model(KpmRequest.name, KpmRequestSchema, undefined, RECOMPILE);
   const Audit = mongoose.model(AuditLog.name, AuditLogSchema, undefined, RECOMPILE);
   const Notifications = mongoose.model(Notification.name, NotificationSchema, undefined, RECOMPILE);
@@ -421,6 +438,19 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
         pronounsSet += modifiedCount;
         if (modifiedCount) existing.set('pronoun', opts.pronoun);
       }
+      /*
+       * **What a person records** (ADR-0158), given once to an account an earlier run made before the
+       * seed recorded it — on an address the seed owns, and only while it has none, so a birth date
+       * somebody typed on `/profile` in a walk is kept. Its agent code is left as it is: a code is
+       * never rewritten, and the production rows already imported join on it.
+       */
+      if (SEED_OWNED_EMAIL.test(email) && existing.get('platformRole') !== 'super_admin' && !existing.get('dateOfBirth')) {
+        const { dateOfBirth, gender, companyJoinMonth } = seedPersonalFor(email, existing.get('pronoun'));
+        await Users.updateOne(
+          { _id: existing._id, dateOfBirth: null },
+          { $set: { dateOfBirth, gender, companyJoinMonth } },
+        ).exec();
+      }
       return existing;
     }
     const platformRole = opts.platformRole ?? 'none';
@@ -434,9 +464,12 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       fullName,
       platformRole,
       companyId: sellsForSomebody ? (opts.companyId ?? String(prudential._id)) : null,
+      // Digits only, as every new code is since ADR-0158 §4. It was `PRU-80001` and so on until then.
       agentCode: sellsForSomebody
-        ? (opts.agentCode ?? `PRU-${String(80000 + issued)}`)
+        ? (opts.agentCode ?? String(80000 + issued))
         : null,
+      // What a person records (ADR-0158). A Super Admin sells for nobody, and records none of it.
+      ...(sellsForSomebody ? seedPersonalAccount(email, opts.pronoun) : {}),
       status: opts.status ?? 'active',
       pronoun: opts.pronoun ?? 'they',
       // Pre-verified: the point of a demo tenant is to sign in, not to chase an inbox.
@@ -632,6 +665,17 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       appliesToOrgLevelCodes: [...(r.appliesToOrgLevelCodes ?? [])],
       version: 1, status: 'active', archivedAt: null, deletedAt: null,
     })));
+    }
+
+    /*
+     * The office's activity binding (ADR-0163 §1): today's three codes, one per cascade role — what provisioning
+     * gives an office from the AgencyBoost defaults, and what the Super Admin's *Activity binding* card opens on.
+     */
+    if (await missing(ActivityBindings as never)) {
+      await ActivityBindings.create({
+        kpmId, ...defaultBinding(), version: 1, status: 'active', archivedAt: null, deletedAt: null,
+        createdBy: null, updatedBy: null,
+      });
     }
 
     // The training taxonomy (P5-T1), through the helper provisioning and migration 0011 use.
@@ -863,7 +907,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     if (newest && Array.isArray(current?.eventTypes)) return;
     const [
       cats, types, ratios, statuses, trainingCats, trainingSkills, trainingModules,
-      eventTypeRows, capabilityRow, checklistRow,
+      eventTypeRows, capabilityRow, checklistRow, bindingRow,
     ] = await Promise.all([
       ActivityCategories.find({ kpmId, status: 'active' }).sort({ displayOrder: 1 }).lean().exec(),
       ActivityTypes.find({ kpmId, status: 'active' }).sort({ displayOrder: 1 }).lean().exec(),
@@ -886,6 +930,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       CapabilityCatalogs.findOne({ kpmId }).lean().exec(),
       ActivationTemplates.findOne({ kpmId, status: 'published' })
         .sort({ version: -1 }).lean().exec(),
+      // The binding in force, which a publish records (ADR-0163 §1).
+      ActivityBindings.findOne({ kpmId, status: 'active', deletedAt: null }).lean().exec(),
     ]);
     const view = (rows: Record<string, unknown>[]): Record<string, unknown>[] =>
       rows.map((r) => ({ ...r, id: String(r._id) }));
@@ -931,6 +977,15 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
           milestones: (capabilityRow as { milestones?: unknown[] }).milestones ?? [],
           grids: (capabilityRow as { grids?: unknown[] }).grids ?? [],
           version: (capabilityRow as { version: number }).version,
+        }
+        : null,
+      activityBinding: bindingRow
+        ? {
+          leads: (bindingRow as { leads: string[] }).leads,
+          appointments: (bindingRow as { appointments: string[] }).appointments,
+          closings: (bindingRow as { closings: string[] }).closings,
+          version: (bindingRow as { version: number }).version,
+          updatedAt: null,
         }
         : null,
       version: 1,
@@ -1000,6 +1055,17 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       status: { $ne: 'removed' },
     }).exec();
     if (existing) {
+      // ADR-0158: a membership an earlier run made before work status existed is given one, once.
+      if (!existing.get('workStatus')) {
+        const account = await Users.findOne({ _id: userId }).exec();
+        const email = account?.get('email') as string | undefined;
+        if (email && SEED_OWNED_EMAIL.test(email)) {
+          await Memberships.updateOne(
+            { _id: existing._id, workStatus: null },
+            { $set: { workStatus: seedPersonalFor(email).workStatus } },
+          ).exec();
+        }
+      }
       return {
         id: String(existing._id),
         ancestorIds: existing.get('ancestorIds') as string[],
@@ -1050,6 +1116,9 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       joinedAt: status === 'pending' ? null : joined,
       removedAt: status === 'removed' ? daysAgo(opts.removedDaysAgo ?? 0) : null,
       recruitedByMembershipId: leaderId,
+      // Full-time or part-time in this office (ADR-0158 §1), from the same derivation as the person's
+      // birth date, so a reseed gives the same answer.
+      workStatus: seedPersonalFor(String(account?.get('email') ?? userId)).workStatus,
       // A grant nobody made and nobody dated reads as a bug on Manage KPM admins, so
       // the seed records both — the Owner, months ago.
       adminAccess: opts.isKpmAdmin
@@ -1198,12 +1267,30 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    * `HierarchyRole` enum lower-cased — which is the whole reason v1's one-to-one mapping
    * lets the enum keep working while the reference becomes the stored truth.
    */
-  for (const { code, label, displayOrder } of DEFAULT_ORG_LADDER) {
+  for (const { code, label, displayOrder, leaderTier } of DEFAULT_ORG_LADDER) {
     const existing = await OrgLevels.findOne({ companyId: String(prudential._id), code }).exec();
     if (!existing) {
       await OrgLevels.create({
-        companyId: String(prudential._id), code, label, displayOrder,
+        companyId: String(prudential._id), code, label, displayOrder, leaderTier,
         status: 'active', archivedAt: null, deletedAt: null,
+      });
+    }
+  }
+
+  /*
+   * **Allianz Life's own ladder, with rungs it named itself** (P18.8-T1, ADR-0156): *Unit Manager* marked
+   * *Associate Leader* and *Senior Manager* marked *Senior Leader*, so `/admin/org-levels` shows a ladder whose
+   * leaders are not called AB or AAB. Allianz has no office yet, so nobody stands on them and the tiers can still
+   * be changed there; the members who hold a custom rung's rights are the seed task's (P18.8-T14).
+   */
+  for (const rung of [
+    { code: 'AGENT', label: 'Agent', displayOrder: 1, leaderTier: null },
+    { code: 'UM', label: 'Unit Manager', displayOrder: 2, leaderTier: 'associate' },
+    { code: 'SM', label: 'Senior Manager', displayOrder: 3, leaderTier: 'senior' },
+  ]) {
+    if (!(await OrgLevels.exists({ companyId: String(allianz._id), code: rung.code }))) {
+      await OrgLevels.create({
+        companyId: String(allianz._id), ...rung, status: 'active', archivedAt: null, deletedAt: null,
       });
     }
   }
@@ -1221,15 +1308,27 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     companyId: kpm0417.get('companyId') as string,
   };
   const id0417 = String(kpm0417._id);
+  /*
+   * **Open since January last year** (P18.8-T11, ADR-0161 §4): the Personal Summary's month and year selects run
+   * from the office's first month, the month its record was created, and the production files begin then
+   * (`reporting-fixture.ts`). Written to the collection, as `createdAt` is immutable to the model; only ever moved
+   * earlier, so a later run leaves an office opened earlier still is.
+   */
+  {
+    const today = clock.localDateFor(DEFAULT_TENANT_TIMEZONE);
+    const opened = clock.startOfLocalDay(DEFAULT_TENANT_TIMEZONE, `${Number(today.slice(0, 4)) - 1}-01-01`);
+    await Kpms.collection.updateOne({ _id: kpm0417._id, createdAt: { $gt: opened } }, { $set: { createdAt: opened } });
+  }
 
   await configure(id0417);
   /*
    * **Published, and untouched since: the prototype's settings** (P13.1-T3, K5). The office the client
    * walks is the one their prototype draws: the platform's defaults as `configure` copies them — the
-   * twelve activity types, the two ladders, the five ratios at the prototype's benchmarks — with nothing
+   * twelve activity types, the two ladders, the five ratios at the platform's benchmarks — with nothing
    * archived, no ratio of the office's own and no edit since publishing, so its publish bar reads clean.
    * The defaults differ from the prototype only where a register says so (ADR-0043's seventh recruitment
-   * stage, item 7's label).
+   * stage, item 7's label; ADR-0160's words for items 3, 7 and 8, its benchmarks and *Set appointment to
+   * meeting*).
    *
    * It used to carry the settings screens' demonstration states as well: an archived type and status,
    * *Referral rate*, *Selling success rate* raised to 18%. The client read them as the seed disagreeing
@@ -1419,7 +1518,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    * Three things are deliberately spread across them:
    *
    * - **The contact details**: one with a name and nothing else, phones in the formats agents type —
-   *   each opens WhatsApp from *Lead details* — and one reachable only by email. *No lawful basis since
+   *   each opens WhatsApp from its row's *Actions* (ADR-0161 §2) — and one reachable only by email. *No lawful basis since
    *   2026-10-07 (ADR-0108): the client removed the field, and the API neither takes nor returns one.*
    * - **The ladder**, because a status is reached by *moving* (ADR-0045) — so each seeded lead
    *   that holds one also holds the transitions that put it there, walked or jumped.
@@ -2180,8 +2279,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   );
 
   /*
-   * **An edit since publishing, on a row that is still active**: the Owner raised the selling bar to 18%
-   * and has not published, so the settings screen shows 18.0% while Lina is still judged at 15.0%.
+   * **An edit since publishing, on a row that is still active**: the Owner raised the selling bar to 40%
+   * and has not published, so the settings screen shows 40.0% while Lina is still judged at 30.0%.
    *
    * The first version of this seed archived and edited one row in the same breath, when the bar compared
    * the highest live version only and so read clean; P5-T11 compares which rows are present at which
@@ -2189,7 +2288,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    */
   await RatioDefinitions.updateOne(
     { kpmId: id0555, code: 'SELLING_SUCCESS_RATE', version: 1 },
-    { $set: { benchmark: 0.18, version: 2 } },
+    { $set: { benchmark: 0.4, version: 2 } },
   );
 
   if (!(await RatioDefinitions.findOne({ kpmId: id0555, code: 'REFERRAL_RATE' }).exec())) {
@@ -2273,6 +2372,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const subscriptions = await seedSubscriptionFixture({
     clock, Kpms: Kpms as never, companyId: String(prudential._id), kpm0417: id0417, kpm0555: id0555,
     user, configure, publish, place, recount, daysAgo,
+    // ADR-0157: 0603's leaders past its limit, their requests, and the promotions they carried out.
+    promote: promotedEarlier, LeaderLimitRequests: LeaderLimitRequests as never, superAdminUserId: String(superAdmin._id),
   });
 
   // ------------------- named templates, and an office started Empty (P13.2-T6; `template-fixture.ts`)
@@ -2334,6 +2435,35 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     coachingCastIds: new Set(Object.values(cast).map((placed) => placed.id)),
     office0555: { kpmId: id0555, owner: owner0555.id, agent: agent0555.id },
   });
+
+  // ------------------- a lead list in a dragged order (P18.8-T7; ADR-0161 §1)
+
+  /*
+   * **Every lead above gets its place in its owner's list, and Rina's list is one she has dragged** (P18.8-T7
+   * AC-1, P18.8-T14 AC-1). `GET /leads` without a sort reads `position`, so a lead with none would sort first,
+   * and a list in registration order cannot show that the order is kept: every lead of Rina's is registered
+   * on one day. Here, after the last fixture that writes a lead.
+   *
+   * Rina's open leads first, in the order an agent would put them — the one waiting on its policy, then the
+   * overdue one, then the next meetings, the two with nothing planned last — **only while none of hers holds
+   * a place yet**, so a walk that dragged them is not undone by the next run. Then migration 0031 places every
+   * other lead, newest registration first, below anything already placed: Rina's closed ones, and everybody
+   * else's. A second run places nothing.
+   */
+  const RINA_DRAGGED = [
+    'Ibu Wulan Sari', 'Pak Hendro Gunawan', 'Ibu Rosa Damayanti', 'Ibu Kartika Dewanti', 'Pak Surya Dharma', 'Pak Bambang',
+  ];
+  const rinaOpen = await Leads.find({ kpmId: id0417, ownerMembershipId: rina.id, outcome: null, deletedAt: null })
+    .sort({ dateRegistered: -1, _id: -1 }).exec();
+  if (rinaOpen.length > 0 && rinaOpen.every((lead) => lead.position === null)) {
+    // A name the list does not hold keeps its registration order, after the ones it does.
+    const rank = (name: string) => (RINA_DRAGGED.indexOf(name) + RINA_DRAGGED.length + 1) % (RINA_DRAGGED.length + 1);
+    const dragged = [...rinaOpen].sort((a, b) => rank(a.name) - rank(b.name));
+    await Leads.bulkWrite(dragged.map((lead, position) => ({
+      updateOne: { filter: { _id: lead._id, position: null }, update: { $set: { position } } },
+    })), { timestamps: false });
+  }
+  await leadPosition(mongoose.connection.db!);
 
   // ------------------------------------------------- offices asking to exist
 
@@ -2744,12 +2874,17 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   };
 
   // Rina: a working week, with the shape a real one has — busier midweek, quiet on the edges.
+  /*
+   * Her prospecting is her strength: about two new prospects for every lead-generation activity, so *Leads per
+   * activity* stands well past its benchmark of 1.00 (ADR-0160 §2) — `INSIGHTS.STRENGTH_FACTOR` times it — and
+   * the Summary has a strength card beside the ratio she is below on (P18.8-T14).
+   */
   const rinaWeek = new Map<number, DayCounts>([
-    [0, { LEADS_GEN_ACTIVITY: 2, LEADS_CONTACTED: 5, SELL_PRESENTATION: 2, SELL_SUBMISSION: 1 }],
+    [0, { LEADS_GEN_ACTIVITY: 2, LEADS_NEW_PROSPECT: 3, LEADS_CONTACTED: 5, SELL_PRESENTATION: 2, SELL_SUBMISSION: 1 }],
     [1, { LEADS_CONTACTED: 4, SELL_PRESENTATION: 3, SELL_FOLLOWUP: 2 }],
-    [2, { LEADS_GEN_ACTIVITY: 1, LEADS_CONTACTED: 6, SELL_PRESENTATION: 1 }],
+    [2, { LEADS_GEN_ACTIVITY: 1, LEADS_NEW_PROSPECT: 2, LEADS_CONTACTED: 6, SELL_PRESENTATION: 1 }],
     [4, { LEADS_CONTACTED: 3, SELL_FOLLOWUP: 1, DEV_TRAINING_ATTEND: 1 }],
-    [5, { LEADS_GEN_ACTIVITY: 3, LEADS_NEW_PROSPECT: 2 }],
+    [5, { LEADS_GEN_ACTIVITY: 3, LEADS_NEW_PROSPECT: 5 }],
   ]);
 
   /*
@@ -2760,7 +2895,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    */
   const rinaEarlier = (back: number): DayCounts => ({
     LEADS_GEN_ACTIVITY: back % 3,
-    LEADS_NEW_PROSPECT: back % 4 === 0 ? 2 : back % 5 === 0 ? 1 : 0,
+    LEADS_NEW_PROSPECT: 2 * (back % 3) + (back % 4 === 0 ? 1 : 0),
     LEADS_CONTACTED: 2 + (back % 5),
     SELL_PRESENTATION: back % 2,
     SELL_FOLLOWUP: back % 3 === 1 ? 1 : 0,
@@ -2776,10 +2911,17 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   // She is pacing to MAA (P11-T2): `coaching-fixture.ts` says what that makes her status.
   await logPlan(rina.id, { days: rinaDays, counts: (back) => rinaWeek.get(back) ?? rinaEarlier(back), pacing: true });
 
-  // Sari leads a unit: a month of recruitment and team development, most days.
+  /*
+   * Sari leads a unit: a month of recruitment and team development, most days — and, every few days, a
+   * referral drive that brings in two or three prospects, so her *Leads per activity* stands well past its
+   * benchmark of 1.00 and her Summary shows a strength beside the ratio she is below on (P18.8-T14). Neither
+   * code is the cascade's, so her goal activities on the Unit Dashboard are unchanged.
+   */
   for (let back = 0; back <= 34; back += 1) {
     if (back % 4 === 2) continue;
     await logDay(sari.id, back, {
+      LEADS_GEN_ACTIVITY: back % 3 === 1 ? 1 : 0,
+      LEADS_NEW_PROSPECT: back % 3 === 1 ? 2 + (back % 2) : 0,
       LEADS_CONTACTED: 1 + (back % 3),
       SELL_PRESENTATION: back % 3 === 0 ? 1 : 0,
       RECRUIT_PRESENTATION: back % 2,
@@ -3026,10 +3168,14 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    * - **What really happened first.** Each earlier finalize of a session they were coached in sent its notice,
    *   as the latest one's above (`/coaching/me?session=`, read since). Sari received Rina's request on the day
    *   Rina joined and Yanti's on the day she came back; Agus received Sari's and Dewi's on the days they joined.
-   * - **Then the run of an ordinary office**, to make up the 45: their leader setting their goal again
-   *   (no link), entries they were on being cancelled (`/calendar?date=`, the week it was in — the entry is
-   *   gone, which is what a cancellation says) and the office's event reminders (no link). Payloads are ids,
-   *   names and dates, never anything typed, as every notice's is.
+   * - **Then the run of an ordinary office**, to make up the 45: entries they were on being cancelled
+   *   (`/calendar?date=`, the week it was in — the entry is gone, which is what a cancellation says) and the
+   *   office's event reminders (no link). Payloads are ids, names and dates, never anything typed, as every
+   *   notice's is.
+   * - **No *set your goal* among them** (P18.8-T15 AC-3, the client's UI review, UI-003). The run had their leader
+   *   setting their goal every fifth row, so Agus's inbox said *Wilson Tanoto set your goal* seven times beside a
+   *   Summary that says he has none. That notice is written below for each goal a leader actually saved, and for
+   *   nothing else.
    *
    * Every row is written under an `_id` derived from its account and position, only when that id is absent,
    * so a re-run writes none, and a notice somebody read or unread in a walk keeps that state.
@@ -3041,17 +3187,17 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const EVENT_STARTS_IN_DAYS: Record<string, number> = { 'PRULink briefing': -21, 'Leaders’ huddle': 0, 'Kickoff 2026': 14 };
   const historyCast = [
     {
-      key: 'agus', user: abUser, membership: ab, joinedDaysAgo: 106, leader: ownerUser.fullName,
+      key: 'agus', user: abUser, membership: ab, joinedDaysAgo: 106,
       requests: [{ fullName: sariUser.fullName, daysAgo: 103 }, { fullName: dewiUser.fullName, daysAgo: 100 }],
       reminders: ['Leaders’ huddle', 'PRULink briefing', 'Kickoff 2026'],
     },
     {
-      key: 'sari', user: sariUser, membership: sari, joinedDaysAgo: 103, leader: abUser.fullName,
+      key: 'sari', user: sariUser, membership: sari, joinedDaysAgo: 103,
       requests: [{ fullName: rinaUser.fullName, daysAgo: RINA_JOINED_DAYS_AGO }, { fullName: removedUser.fullName, daysAgo: 28 }],
       reminders: ['Leaders’ huddle', 'PRULink briefing', 'Kickoff 2026'],
     },
     {
-      key: 'rina', user: rinaUser, membership: rina, joinedDaysAgo: RINA_JOINED_DAYS_AGO, leader: sariUser.fullName,
+      key: 'rina', user: rinaUser, membership: rina, joinedDaysAgo: RINA_JOINED_DAYS_AGO,
       requests: [], reminders: ['PRULink briefing', 'Kickoff 2026'],
     },
   ] as const;
@@ -3085,15 +3231,13 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     const span = person.joinedDaysAgo - 3;
     for (let i = 0; i < HISTORY_SIZE - made; i += 1) {
       const at = new Date(daysAgo(2 + (span * i) / (HISTORY_SIZE - made)).getTime() - (i % 5) * hour);
-      const kind = (['goal', 'cancelled', 'reminder', 'cancelled', 'goal'] as const)[i % 5];
-      const [templateId, payload] = kind === 'goal'
-        ? [NotificationTemplate.GOAL_SET_BY_LEADER, { byName: person.leader, period: officeDate(at).slice(0, 4) }]
-        : kind === 'cancelled'
-          ? [NotificationTemplate.CALENDAR_ENTRY_CHANGED, {
-            entryId: seedObjectId('inbox-history', person.key, 'entry', String(i)),
-            date: officeDate(new Date(at.getTime() + 2 * 24 * hour)), change: 'cancelled',
-          }]
-          : [NotificationTemplate.EVENT_REMINDER, { title: reminderFor(person.reminders, at, i) }];
+      const kind = (['cancelled', 'reminder'] as const)[i % 2];
+      const [templateId, payload] = kind === 'cancelled'
+        ? [NotificationTemplate.CALENDAR_ENTRY_CHANGED, {
+          entryId: seedObjectId('inbox-history', person.key, 'entry', String(i)),
+          date: officeDate(new Date(at.getTime() + 2 * 24 * hour)), change: 'cancelled',
+        }]
+        : [NotificationTemplate.EVENT_REMINDER, { title: reminderFor(person.reminders, at, i) }];
       // The newest few are unread, and every fourth after them: an inbox somebody keeps up with, mostly.
       const unread = i < 3 || i % 4 === 0;
       historyRows.push({
@@ -3110,6 +3254,30 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   for (const row of historyRows) {
     if (await Notifications.exists({ _id: row._id })) continue;
     await Notifications.collection.insertOne(row);
+  }
+  /*
+   * **A *set your goal* notice for each goal a leader saved, and only those** (P18.8-T15 AC-3, UI-003): read back
+   * from the goals this run holds — this year's whose current plan somebody other than its owner saved (ADR-0046),
+   * Dewi's by Agus and Novi's by Arief among them — with the payload `GoalService.announce` sends, on the day it was
+   * saved, read a few hours later. Keyed on its payload, as every notice here is, so a re-run writes none.
+   */
+  const setForThem = await Goals.find({
+    kpmId: id0417, period: thisYear, deletedAt: null, $expr: { $ne: ['$savedByMembershipId', '$membershipId'] },
+  }).lean().exec();
+  for (const goal of setForThem) {
+    const [member, leader] = await Promise.all([
+      Memberships.findOne({ _id: goal.membershipId, kpmId: id0417 }).lean().exec(),
+      Memberships.findOne({ _id: goal.savedByMembershipId, kpmId: id0417 }).lean().exec(),
+    ]);
+    const leaderUser = leader ? await Users.findById(leader.userId).select('fullName').lean().exec() : null;
+    if (!member || !leaderUser || !goal.savedAt) continue;
+    const savedAt = goal.savedAt;
+    await notify(
+      { userId: String(member.userId), membershipId: String(member._id) },
+      NotificationTemplate.GOAL_SET_BY_LEADER,
+      { byName: leaderUser.fullName, period: goal.period },
+      { sentAt: savedAt, readAt: new Date(Math.min(savedAt.getTime() + 3 * hour, clock.now().getTime())) },
+    );
   }
   /*
    * **Every hire's 90-day activation** (Phase 13, *Seed*; `activation-fixture.ts`, whose header says which
@@ -3282,7 +3450,8 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     dewi@kpm0417.test                                  AAB leading nobody — the OD-23 case
                                                        Sari, Dewi and Arief were promoted from Agent,
                                                        so /people/members Role change log has rows
-    rina@kpm0417.test            demo password rina    Agent under Sari
+    rina@kpm0417.test            demo password rina    Agent under Sari; /leads in the order she dragged
+                                                       it, Ibu Wulan Sari first, Pak Bambang last
     budi@kpm0417.test                                  Agent under Sari, with ${budiOpenLeads} open leads: /leads
                                                        shows 30, then Show more
     indah@ · dimas@ · siti@kpm0417.test                Agents under Agus — his direct agents
@@ -3361,8 +3530,10 @@ ${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guid
                                  chip per other section, and the pulse — her three ratios.
                                  Leads that need you: Pak Hendro first, overdue and promised
                                  this month; Pak Bambang and Pak Surya last, with no date set.
-                                 Four insight cards: Pak Hendro overdue, Pak Surya with no
-                                 next step, a ratio below benchmark and one well above it
+                                 Four insight cards: behind pace, Pak Hendro overdue, Pak
+                                 Surya with no next step, and a ratio below benchmark. Her
+                                 Leads per activity is well above its benchmark (green on
+                                 /activity/ratio), the fifth card, and four is the most shown
     budi@kpm0417.test            a goal (from savings), and not in this month's file — this
                                  month reads "Not uploaded yet", never zero. His last day was
                                  over a week ago, so "Nothing logged" leads his cards, then
@@ -3371,8 +3542,8 @@ ${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guid
                                  Her activity still counts, with no target to divide it by;
                                  her pulse has four ratios, the balance left to /activity/ratio.
                                  Two leads of her own, both with a date coming, so no lead
-                                 asks for her. One insight: a ratio below benchmark, and no
-                                 action card. (admin@ has neither a goal nor a lead, and her
+                                 asks for her. Two insights: a ratio below benchmark, and
+                                 Leads per activity well above it; no action card. (admin@ has neither a goal nor a lead, and her
                                  Summary shows both empty states.)
 
   MONTHLY UPLOAD at /kpm/data-upload  (owner@kpm0417.test or admin@kpm0417.test)

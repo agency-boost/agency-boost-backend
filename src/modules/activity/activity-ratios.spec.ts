@@ -38,8 +38,9 @@ describe('computing one ratio (P10-T2)', () => {
     });
 
     it('reads exactly the benchmark as on track, and anything under it as below', () => {
-      expect(computeRatio(SSR, sums({ SELL_SUBMISSION: 3, SELL_PRESENTATION: 20 })).status).toBe('success');
-      expect(computeRatio(SSR, sums({ SELL_SUBMISSION: 2, SELL_PRESENTATION: 20 })).status).toBe('alert');
+      // 30%, the client's benchmark since ADR-0160 §2: 6 ÷ 20 is exactly it.
+      expect(computeRatio(SSR, sums({ SELL_SUBMISSION: 6, SELL_PRESENTATION: 20 })).status).toBe('success');
+      expect(computeRatio(SSR, sums({ SELL_SUBMISSION: 5, SELL_PRESENTATION: 20 })).status).toBe('alert');
     });
 
     it('takes the benchmark it is given — an office’s own, not the platform’s', () => {

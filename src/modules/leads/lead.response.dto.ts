@@ -126,3 +126,9 @@ export class DeletedLeadDto {
   @ApiPropertyOptional({ type: String, format: 'date-time' })
   deletedAt!: string;
 }
+
+/** `PATCH /leads/order`: the order as it was saved, top first (P18.8-T7). */
+export class LeadOrderDto {
+  @ApiProperty({ type: [String], description: 'Your open leads’ ids, in the order now saved.' })
+  ids!: string[];
+}

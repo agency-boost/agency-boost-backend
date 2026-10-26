@@ -1,4 +1,7 @@
 import { randomInt } from 'node:crypto';
+import type { LocalDate } from '@/common/time/local-day';
+import { AGENT_CODE_PATTERN, type Gender, type WorkStatus } from '@/domain/constants';
+import { birthDateProblem, joinMonthProblem } from '@/modules/users/personal-data';
 
 /**
  * The roster file, and the password an imported account starts on.
@@ -8,16 +11,42 @@ import { randomInt } from 'node:crypto';
  * reason: the rules about the *file* are not rules about the *office*.
  */
 
-/** The columns, in order. The template download writes exactly this header. */
+/**
+ * The columns, in order. The template download writes exactly this header.
+ *
+ * **Nine since P18.8-T4** (ADR-0158 §2): the four a person records follow the five, in this order, and
+ * every one is required — a row missing any is an issue naming it.
+ */
 export const ROSTER_COLUMNS = [
   'fullName',
   'email',
   'agentCode',
   'role',
   'leaderAgentCode',
+  'dateOfBirth',
+  'companyJoinMonth',
+  'workStatus',
+  'gender',
 ] as const;
 
+/**
+ * The file's words for `memberships.workStatus` and `users.gender`, read in any case.
+ *
+ * Hyphenated in the file because that is how a person writes it in a spreadsheet; underscored in the
+ * database because that is how a code is written (ADR-0158 §1).
+ */
+const WORK_STATUS_WORDS: Record<string, WorkStatus> = { 'full-time': 'full_time', 'part-time': 'part_time' };
+const GENDER_WORDS: Record<string, Gender> = { male: 'male', female: 'female' };
+
 export const ROSTER_TEMPLATE_HEADER = ROSTER_COLUMNS.join(',');
+
+/**
+ * Is this a rung's code in shape — letters, digits and underscores, starting with a letter, as the ladder
+ * writes them (any case)? Whether the company's ladder has it is the import's to check.
+ */
+export function isRungCode(value: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9_]{1,31}$/.test(value);
+}
 
 /**
  * A line the importer ignores entirely.
@@ -47,9 +76,9 @@ export const COMMENT_PREFIX = '#';
  * here to demonstrate quoting.
  */
 export const ROSTER_EXAMPLES: readonly (readonly string[])[] = [
-  ['Agus Prasetyo', 'agus@example.test', 'PRU-88001', 'ab', ''],
-  ['Puspita, Sari', 'sari@example.test', 'PRU-88002', 'aab', 'PRU-88001'],
-  ['Rina Wijaya', 'rina@example.test', 'PRU-88003', 'agent', 'PRU-88002'],
+  ['Agus Prasetyo', 'agus@example.test', '88001', 'AB', '', '1984-05-12', '2012-03', 'full-time', 'male'],
+  ['Puspita, Sari', 'sari@example.test', '88002', 'AAB', '88001', '1990-11-02', '2016-08', 'full-time', 'female'],
+  ['Rina Wijaya', 'rina@example.test', '88003', 'Agent', '88002', '1998-07-21', '2024-01', 'part-time', 'female'],
 ];
 
 /** Quote a cell only where the delimiter would otherwise tear it in half. */
@@ -67,10 +96,16 @@ export const ROSTER_TEMPLATE = [
   `${COMMENT_PREFIX} fullName          the person's name. Quote it if it contains a comma.`,
   `${COMMENT_PREFIX} email             their address. It must be one nobody has registered yet.`,
   `${COMMENT_PREFIX}                   You send them their password yourself — nothing is emailed.`,
-  `${COMMENT_PREFIX} agentCode         the producer id their insurer issued. Unique within the insurer.`,
-  `${COMMENT_PREFIX} role              ab, aab or agent. Nothing else.`,
+  `${COMMENT_PREFIX} agentCode         the producer id their insurer issued: digits only, 3 to 32 of them.`,
+  `${COMMENT_PREFIX}                   Unique within the insurer.`,
+  `${COMMENT_PREFIX} role              the rung's code on your company's ladder: AB, AAB or Agent,`,
+  `${COMMENT_PREFIX}                   or a rung the company added.`,
   `${COMMENT_PREFIX} leaderAgentCode   the agent code of whoever they report to.`,
   `${COMMENT_PREFIX}                   LEAVE IT EMPTY for somebody who reports to nobody.`,
+  `${COMMENT_PREFIX} dateOfBirth       YYYY-MM-DD, like 1990-03-15. They must be at least 18.`,
+  `${COMMENT_PREFIX} companyJoinMonth  YYYY-MM, like 2021-07: the month they joined the insurer.`,
+  `${COMMENT_PREFIX} workStatus        full-time or part-time.`,
+  `${COMMENT_PREFIX} gender            male or female.`,
   ROSTER_TEMPLATE_HEADER,
   ...ROSTER_EXAMPLES.map((cells) => `${COMMENT_PREFIX} ${cells.map(asCsvCell).join(',')}`),
   '',
@@ -85,6 +120,14 @@ export interface RosterRow {
   role: string;
   /** Empty for somebody who reports to nobody: the office root, or a second one. */
   leaderAgentCode: string;
+  /** `YYYY-MM-DD`, checked: a real day, in the past, at least 18 years ago (ADR-0158 §2). */
+  dateOfBirth: string;
+  /** `YYYY-MM`, checked: a real month, not one still to come. */
+  companyJoinMonth: string;
+  /** Read from `full-time` / `part-time`; `null` only on a row that has an issue saying why. */
+  workStatus: WorkStatus | null;
+  /** Read from `male` / `female`; `null` only on a row that has an issue saying why. */
+  gender: Gender | null;
 }
 
 export interface RosterIssue {
@@ -189,7 +232,11 @@ function looksLikeHeader(cells: string[]): boolean {
   return cells.some((cell) => names.has(cell.toLowerCase().replace(/^﻿/, '')));
 }
 
-export function parseRoster(text: string): { rows: RosterRow[]; issues: RosterIssue[] } {
+/**
+ * `today` is the office's calendar day (from the injected clock, in `kpms.timezone`), which a birth
+ * date and a join month are measured against. The parser reads no clock of its own.
+ */
+export function parseRoster(text: string, today: LocalDate): { rows: RosterRow[]; issues: RosterIssue[] } {
   const issues: RosterIssue[] = [];
 
   /*
@@ -251,7 +298,10 @@ export function parseRoster(text: string): { rows: RosterRow[]; issues: RosterIs
       continue;
     }
 
-    const [fullName, emailRaw, agentCodeRaw, roleRaw, leaderAgentCodeRaw] = cells;
+    const [
+      fullName, emailRaw, agentCodeRaw, roleRaw, leaderAgentCodeRaw,
+      dateOfBirth, companyJoinMonth, workStatusRaw, genderRaw,
+    ] = cells;
     const email = emailRaw.toLowerCase();
     const agentCode = agentCodeRaw.toUpperCase();
     const role = roleRaw.toLowerCase();
@@ -266,10 +316,52 @@ export function parseRoster(text: string): { rows: RosterRow[]; issues: RosterIs
     }
     if (!agentCode) {
       issues.push({ line, column: 'agentCode', message: 'An agent code is required.' });
-    }
-    if (!['ab', 'aab', 'agent'].includes(role)) {
+    } else if (!AGENT_CODE_PATTERN.test(agentCode)) {
+      // ADR-0158 §4: digits only on every new code. One already held elsewhere keeps its letters.
       issues.push({
-        line, column: 'role', message: `"${roleRaw}" is not a rung. Use ab, aab or agent.`,
+        line, column: 'agentCode',
+        message: `"${agentCodeRaw}" is not an agent code. Use digits only, 3 to 32 of them.`,
+      });
+    }
+    // The shape of a rung's code. Whether it is a rung **of this company's ladder** the parser cannot know:
+    // the import checks it against the ladder (OD-50), so a rung the company added — `SM` — is placed too.
+    if (!isRungCode(role)) {
+      issues.push({
+        line, column: 'role',
+        message: `"${roleRaw}" is not a rung. Use a rung of your company’s ladder by its code — AB, AAB or Agent, `
+          + 'or one it added.',
+      });
+    }
+
+    // The four a person records (ADR-0158 §2), each required, each named when it is wrong.
+    if (!dateOfBirth) {
+      issues.push({ line, column: 'dateOfBirth', message: 'A date of birth is required.' });
+    } else {
+      const problem = birthDateProblem(dateOfBirth, today);
+      if (problem) issues.push({ line, column: 'dateOfBirth', message: problem });
+    }
+    if (!companyJoinMonth) {
+      issues.push({ line, column: 'companyJoinMonth', message: 'The month they joined the company is required.' });
+    } else {
+      const problem = joinMonthProblem(companyJoinMonth, today);
+      if (problem) issues.push({ line, column: 'companyJoinMonth', message: problem });
+    }
+    const workStatus = WORK_STATUS_WORDS[workStatusRaw.toLowerCase()] ?? null;
+    if (!workStatus) {
+      issues.push({
+        line, column: 'workStatus',
+        message: workStatusRaw
+          ? `"${workStatusRaw}" is not a work status. Use full-time or part-time.`
+          : 'A work status is required: full-time or part-time.',
+      });
+    }
+    const gender = GENDER_WORDS[genderRaw.toLowerCase()] ?? null;
+    if (!gender) {
+      issues.push({
+        line, column: 'gender',
+        message: genderRaw
+          ? `"${genderRaw}" is not a gender. Use male or female.`
+          : 'A gender is required: male or female.',
       });
     }
 
@@ -284,7 +376,10 @@ export function parseRoster(text: string): { rows: RosterRow[]; issues: RosterIs
       issues.push({ line, column: 'agentCode', message: `Already on line ${codeFirst}.` });
     } else if (agentCode) seenCode.set(agentCode, line);
 
-    rows.push({ line, fullName, email, agentCode, role, leaderAgentCode });
+    rows.push({
+      line, fullName, email, agentCode, role, leaderAgentCode,
+      dateOfBirth, companyJoinMonth, workStatus, gender,
+    });
   }
 
   return { rows, issues };

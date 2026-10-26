@@ -11,6 +11,7 @@ import { CapabilityCatalog, CapabilityCatalogSchema } from '@/modules/capability
 import { capabilitySeedDocument } from '@/modules/capability/capability-payload';
 import { OFFICE_TEMPLATE_KINDS, withCascadeTypes, withPlatformLadder } from '@/modules/config/template-defaults';
 import { up as namedTemplates, type NamedTemplatesResult } from '@/migrations/0023-named-templates';
+import { up as templateCompany, type TemplateCompanyResult } from '@/migrations/0037-template-company';
 import { seedObjectId } from './coaching-fixture';
 
 /**
@@ -23,6 +24,7 @@ import { seedObjectId } from './coaching-fixture';
  * | **Prudential** | holds **Prudential template**, its default — the template migration `0023` gives every company, holding the event types the seed published and each other kind as a published version 1 of the AgencyBoost defaults | `superadmin@agencyboost.test` at `/admin/companies/{Prudential}/template`: the picker, *Prudential template · Default*, its office count; at `/admin/tenants/new`, *Start from* offers it first, then *AgencyBoost defaults* and *Empty* |
  * | **Allianz Life** | **Allianz Life template**, the same way, with its own two event types | the picker on Allianz's template screen |
  * | **Sejahtera Baru Life** (new) | a company created **without** the defaults — *Started blank* — whose default template, *Sejahtera Baru Life template*, holds nothing | its template screen: every tab empty |
+ * | **Template** (P18.9-T3) | the *Template library* (ADR-0164): made by migration `0037`, as every environment's is — the default ladder with its tiers, the 31 products, the carrier rules, the playbook, and **Default template**, its default, every kind a published version 1 of the AgencyBoost defaults | `superadmin@agencyboost.test` at `/admin/companies`: the row badged *Template library*; its template screen; at `/admin/tenants/new`, *Start from* offers *Template · Default template* after the company's own; not offered as a company there, nor at registration, `/admin`, `/admin/analytics` or `/admin/org-levels` |
  * | **0701** Cempaka Putih (new), Sejahtera Baru Life | started ***Empty***: the three cascade activity types in *Leads Generation* and *Selling*, the platform capability ladder (ADR-0116: four stages, five milestones, four grids), and nothing else — no lead stages, ratios, training, checklist or event types — so **no activation** | `owner@kpm0701.test`: every other settings screen opens empty and authors its first row, *Capability Mapping* shows the standard ladder; archiving one of the three is refused. `agent@kpm0701.test`: Log Activity with the three, the empty states elsewhere, no *New agent* section |
  *
  * A second Prudential template, *BSD City settings* saved from 0417, is the copies' fixture's (P13.2-T7,
@@ -56,8 +58,8 @@ export const EMPTY_OFFICE = {
 
 /** The two people of 0701, each with their insurer's own code. */
 export const TEMPLATE_FIXTURE_PEOPLE = {
-  owner0701: { email: 'owner@kpm0701.test', fullName: 'Hadi Gunawan', pronoun: 'he', agentCode: 'SBL-70001' },
-  agent0701: { email: 'agent@kpm0701.test', fullName: 'Nadia Putri', pronoun: 'she', agentCode: 'SBL-70002' },
+  owner0701: { email: 'owner@kpm0701.test', fullName: 'Hadi Gunawan', pronoun: 'he', agentCode: '70001' },
+  agent0701: { email: 'agent@kpm0701.test', fullName: 'Nadia Putri', pronoun: 'she', agentCode: '70002' },
 } as const;
 
 /** A company's default template id, derived — what migration `0023` would otherwise mint at random. */
@@ -91,6 +93,8 @@ export interface TemplateFixtureDeps {
 export interface TemplateFixture {
   /** What migration `0023` did on this run: nothing on a re-run. */
   migration: NamedTemplatesResult;
+  /** What migration `0037` did on this run: made the Template company after a `--reset`, nothing on a re-run. */
+  library: TemplateCompanyResult;
   /** Each company's default template id. */
   defaults: Record<string, string>;
   /** The lines the printed guide carries for this fixture. */
@@ -111,6 +115,13 @@ export async function seedTemplateFixture(deps: TemplateFixtureDeps): Promise<Te
     await mongoose.connection.collection('templates').dropIndexes().catch(() => undefined);
   }
 
+  /*
+   * ---- The Template company (P18.9-T3 AC-7, ADR-0164 §2), by the migration every deploy runs — here, after the
+   * reset above has emptied `templates`, so a `--reset` (what staging's seed runs) never leaves an environment
+   * without it. Before `0023`, which then finds its default template and gives it nothing.
+   */
+  const library = await templateCompany(mongoose.connection.db as mongoose.mongo.Db, now);
+
   // ---- The blank company: created without the defaults, so no products and no carrier rules, but a
   // ladder all the same (every company has one) and a default template that holds nothing.
   const blankId = BLANK_COMPANY._id;
@@ -121,10 +132,10 @@ export async function seedTemplateFixture(deps: TemplateFixtureDeps): Promise<Te
       status: 'active', usesPlatformDefaults: false, deletedAt: null,
     });
   }
-  for (const { code, label, displayOrder } of DEFAULT_ORG_LADDER) {
+  for (const { code, label, displayOrder, leaderTier } of DEFAULT_ORG_LADDER) {
     if (!(await Ladders.exists({ companyId: blankId, code }))) {
       await Ladders.create({
-        companyId: blankId, code, label, displayOrder, status: 'active', archivedAt: null, deletedAt: null,
+        companyId: blankId, code, label, displayOrder, leaderTier, status: 'active', archivedAt: null, deletedAt: null,
       });
     }
   }
@@ -224,6 +235,8 @@ export async function seedTemplateFixture(deps: TemplateFixtureDeps): Promise<Te
 
   const guide = `
   TEMPLATES at /admin/companies → Template  (Super Admin; from src/seed/template-fixture.ts)
+    Template                     the Template library: "Default template", every kind of the AgencyBoost
+                                 defaults; a new company copies it, and Start from offers it to a new office
     Prudential                   "Prudential template", its default — the migration's, holding every
                                  kind; Start from at /admin/tenants/new offers it first
     Allianz Life                 "Allianz Life template", its default
@@ -236,7 +249,7 @@ export async function seedTemplateFixture(deps: TemplateFixtureDeps): Promise<Te
                                  no activation and no New agent section
 `;
 
-  return { migration, defaults, guide };
+  return { migration, library, defaults, guide };
 }
 
 /** One of the two, through the seed's own `user`, as the blank company's producer. */

@@ -59,6 +59,31 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
 
   const row = (name: string, v = view) => everyRow(v).find((r) => first(r.name) === name)!;
 
+  it('P18.8-T11 0417 has been open since January last year, so the Summary offers every month since, read whole', async () => {
+    const august = await wired.summary.read(agus, undefined, { month: '2026-08' });
+    expect(august).toMatchObject({
+      month: '2026-08', pace: null,
+      period: { firstMonth: '2025-01', thisMonth: MONTH, currentMonth: false, currentYear: true },
+      activity: { monthly: { from: '2026-08-01', to: '2026-08-31' } },
+    });
+    expect((await wired.summary.read(agus, undefined, { year: '2025' })).month).toBe('2025-12');
+    await expect(wired.summary.read(agus, undefined, { month: '2024-12' })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('P18.8-T14 AC-1 the raised benchmarks still leave a strength to see: Sari’s, and Rina’s cut by the four-card limit', async () => {
+    const sari = await as('sari@kpm0417.test');
+    const sariCards = (await wired.summary.read(sari, undefined, {})).insights;
+    expect(sariCards.map((i) => i.rule)).toEqual(['RATIO_BELOW', 'RATIO_STRENGTH']);
+    expect(sariCards[1]).toMatchObject({ facts: { code: 'LEADS_PER_ACTIVITY', benchmark: 1 } });
+
+    // Rina: behind pace, two leads, and the ratio she is below on — four, so her strength is not shown (ADR-0060).
+    const rina = await as('rina@kpm0417.test');
+    expect((await wired.summary.read(rina, undefined, {})).insights.map((i) => i.rule))
+      .toEqual(['BEHIND_PACE', 'LEAD_OVERDUE', 'LEAD_NEGLECTED', 'RATIO_BELOW']);
+    const ratios = await wired.activityLogs.ratiosOf(rina, { membershipId: rina.membershipId!, orgLevelCode: 'AGENT' });
+    expect(ratios.ratios.find((r) => r.code === 'LEADS_PER_ACTIVITY')).toMatchObject({ benchmark: 1, status: 'success' });
+  });
+
   it('P15-T1 AC-12 Agus reads the roster the phase file draws: Your Unit · 4, then Arief’s, Dewi’s and Sari’s units', () => {
     expect(view.yourUnit.rows.map((r) => first(r.name))).toEqual(['Agus', 'Dimas', 'Indah', 'Siti']);
     expect(view.units.map((u) => [first(u.head.name), ...rowsOf(u).slice(1).map((r) => first(r.name))]))
@@ -153,9 +178,12 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
         [v.yourUnit.rows, v.yourUnit.total], ...v.units.flatMap(groups).map((g) => [rowsOf(g), g.total] as const),
       ] as const) {
         const actuals = rows.map((r) => r.goal.actualMinor).filter((a): a is number => a !== null);
-        const targets = rows.map((r) => r.goal.targetMinor).filter((a): a is number => a !== null);
+        // Paired (ADR-0165 §1, P18.8-T15 AC-6): a target counts only beside production held — every target when none is.
+        const counted = actuals.length ? rows.filter((r) => r.goal.actualMinor !== null) : rows;
+        const targets = counted.map((r) => r.goal.targetMinor).filter((a): a is number => a !== null);
         expect(total.goal.actualMinor).toBe(actuals.length ? actuals.reduce((a, b) => a + b, 0) : null);
         expect(total.goal.targetMinor).toBe(targets.length ? targets.reduce((a, b) => a + b, 0) : null);
+        expect(total.goal.missing).toBe(rows.length - actuals.length);
         expect(total.potentialActive).toEqual({ count: rows.filter((r) => r.pacingToMaa === true).length, of: rows.length });
         expect(total.leadsCounts.salesOpen).toBe(rows.reduce((s, r) => s + r.leadsCounts.salesOpen, 0));
       }

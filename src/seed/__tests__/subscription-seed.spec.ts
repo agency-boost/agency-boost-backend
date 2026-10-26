@@ -126,8 +126,38 @@ describe('the subscription seed', () => {
     });
   });
 
+  it('P18.8-T2 0603: a limit of 10 and 13 used — three approved past it, a fourth waiting (ADR-0157)', async () => {
+    const kpm = await office('0603');
+    expect(String(kpm._id)).toBe(SUBSCRIPTION_OFFICES['0603']._id);
+    expect(kpm.subscription).toEqual(plan['0603']);
+    expect(kpm.subscription).toMatchObject({ maxLeaders: 10, pricePerLeaderMinor: 350_000_00 });
+    expect(await used('0603')).toBe(13);
+
+    const requests = await col('leaderLimitRequests').find({ kpmId: String(kpm._id) }).sort({ createdAt: 1 }).toArray();
+    const nameOf = async (membershipId: string) => {
+      const m = await col('memberships').findOne({ _id: new mongoose.Types.ObjectId(membershipId) });
+      return (await col('users').findOne({ _id: new mongoose.Types.ObjectId(m!.userId as string) }))!.fullName;
+    };
+    const named = await Promise.all(requests.map(async (r) => [await nameOf(r.subjectMembershipId), r.status]));
+    expect(named).toEqual([
+      ['Irfan Hakim', 'approved'], ['Siska Amelia', 'approved'], ['Fajar Nugroho', 'approved'], ['Rizky Ramadhan', 'pending'],
+    ]);
+    // Each approved act carried out: the AAB they are, and the promotion on the role change log.
+    for (const r of requests.filter((x) => x.status === 'approved')) {
+      const m = await col('memberships').findOne({ _id: new mongoose.Types.ObjectId(r.subjectMembershipId) });
+      expect([m!.orgLevelCode, m!.role]).toEqual(['AAB', 'aab']);
+      expect(await col('membershipHistory').findOne({ membershipId: r.subjectMembershipId, eventType: 'role_changed', validTo: null }))
+        .toMatchObject({ fromRole: 'agent', toRole: 'aab', reason: 'Leads the weekend team already' });
+      expect(r.decidedByUserId).toBe(await userIdOf('superadmin@agencyboost.test'));
+    }
+    // Rizky waits: still an Agent, the Owner's ask open.
+    const rizky = await col('memberships').findOne({ userId: await userIdOf('agent@kpm0603.test') });
+    expect(rizky!.role).toBe('agent');
+    expect(requests.at(-1)).toMatchObject({ subjectMembershipId: String(rizky!._id), toOrgLevelCode: 'AAB' });
+  });
+
   it('every other office has no subscription and behaves as before (T3 AC-10)', async () => {
-    const rest = await col('kpms').find({ code: { $nin: ['0417', '0555', '0601', '0602'] } }).toArray();
+    const rest = await col('kpms').find({ code: { $nin: ['0417', '0555', '0601', '0602', '0603'] } }).toArray();
     expect(rest.length).toBeGreaterThan(0);
     for (const kpm of rest) expect(kpm.subscription ?? null).toBeNull();
   });

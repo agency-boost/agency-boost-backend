@@ -11,6 +11,9 @@ import type {
 import type { TemplateView } from './template.service';
 import type { NamedTemplateView } from './named-template.service';
 import type { DroppedSetting } from './office-template';
+import type {
+  ActivityBindingView, BindableType, OfficeActivityBindingView,
+} from './activity-binding.service';
 import type { SavedOfficeTemplateView } from './template-copy.service';
 import { TEMPLATE_ORIGINS, type TemplateOrigin } from './named-template.schema';
 import { OFFICE_TEMPLATE_KINDS, type OfficeTemplateKind } from './template-defaults';
@@ -295,6 +298,56 @@ export class SnapshotEventTypeDto implements SnapshotEventTypeView {
   version!: number;
 }
 
+/** Which activity types each cascade role counts — the office's activity binding (ADR-0163). */
+export class ActivityBindingDto implements ActivityBindingView {
+  @ApiProperty({
+    type: [String], example: ['LEADS_CONTACTED'],
+    description: '*Set appointment*: the activity type codes the goal cascade\u2019s leads column counts, summed.',
+  })
+  leads!: string[];
+
+  @ApiProperty({
+    type: [String], example: ['SELL_PRESENTATION'],
+    description: '*Sales meeting*: the codes the appointments column counts, summed.',
+  })
+  appointments!: string[];
+
+  @ApiProperty({
+    type: [String], example: ['SELL_SUBMISSION'],
+    description: '*Submission polis*: the codes the closings column and the pace sentence count, summed.',
+  })
+  closings!: string[];
+
+  @ApiProperty({
+    type: Number,
+    description: 'Bumped on every write. 0 for an office with no binding yet, which counts the default binding.',
+  })
+  version!: number;
+
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' })
+  updatedAt!: string | null;
+}
+
+/** One of the office's activity types, as the Super Admin's binding card offers it. */
+export class BindableTypeDto implements BindableType {
+  @ApiProperty({ type: String, example: 'SELL_PRESENTATION' }) code!: string;
+  @ApiProperty({ type: String }) label!: string;
+  @ApiProperty({ type: String }) categoryCode!: string;
+  @ApiProperty({ type: Number }) displayOrder!: number;
+  @ApiProperty({ enum: ['active', 'archived'] }) status!: 'active' | 'archived';
+}
+
+/** One named office\u2019s activity binding, with every type it may name, archived ones included. */
+export class OfficeActivityBindingDto extends ActivityBindingDto implements OfficeActivityBindingView {
+  @ApiProperty({ type: String }) kpmId!: string;
+
+  @ApiProperty({
+    type: [BindableTypeDto],
+    description: 'Every activity type the office holds, archived ones included (their history counts), in its order.',
+  })
+  types!: BindableTypeDto[];
+}
+
 /** Everything an agent surface needs, in one round trip (P4-T7). */
 export class TenantConfigDto implements TenantConfigView {
   @ApiProperty({ type: [ActivityCategoryDto] })
@@ -340,6 +393,15 @@ export class TenantConfigDto implements TenantConfigView {
       + 'for an office provisioned before it existed.',
   })
   capability!: CapabilityCatalogDto | null;
+
+  @ApiProperty({
+    type: ActivityBindingDto,
+    nullable: true,
+    description:
+      'The activity binding in force when the copy was published — a record. Every count reads the office\u2019s '
+      + 'live binding, which takes effect when it is saved. `null` in a copy published before the binding existed.',
+  })
+  activityBinding!: ActivityBindingDto | null;
 
   @ApiProperty({
     type: Number,

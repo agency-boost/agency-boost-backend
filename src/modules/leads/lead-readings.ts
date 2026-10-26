@@ -124,6 +124,17 @@ export class LeadReadings {
   }
 
   /**
+   * **How many open leads some members hold between them** (P18.8-T15 AC-4): open is `openOf`'s rule — no outcome,
+   * not deleted. `owners` `null` is the office, the reader's own leads left out by `except`. A count, never rows.
+   */
+  async countOpenOf(ctx: RequestContext, owners: readonly string[] | null, except: string): Promise<number> {
+    if (owners === null) return this.leads.count(ctx, { ownerMembershipId: { $ne: except }, outcome: null, deletedAt: null });
+    const others = [...new Set(owners)].filter((id) => id !== except);
+    if (others.length === 0) return 0;
+    return this.leads.count(ctx, { ownerMembershipId: { $in: others }, outcome: null, deletedAt: null });
+  }
+
+  /**
    * **Each member's four lead counts, for many members at once** (Phase 15, D-leads): the Unit Dashboard's
    * *Leads* column — open sales leads, those promised for the office's month, `RECRUITMENT_PIPELINE_NOW`
    * and the recruitment leads promised for the month — by **`LeadService.summary`'s rules** over one owner

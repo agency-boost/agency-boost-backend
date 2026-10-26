@@ -34,7 +34,11 @@ export interface ComplianceRow extends CompliancePerson {
   cell: ComplianceCell;
 }
 
-/** A unit card: the AB's own (*(Direct)*) or an AAB's. `done / of` count the rows the item applies to. */
+/**
+ * A unit card: the AB's own (*(Direct)*) or an AAB's. `done / of` count the rows the item applies to. `rung` names
+ * the **class** of the card's head, as `partitionAgencies` placed them (ADR-0156): a *Senior Leader* rung's agency
+ * is an `AB` card whatever the rung is called.
+ */
 export interface ComplianceUnit {
   head: CompliancePerson;
   rung: 'AB' | 'AAB';
@@ -114,7 +118,8 @@ export class ComplianceService {
   ) {}
 
   async read(ctx: RequestContext, query: ComplianceQuery = {}): Promise<ComplianceView> {
-    OfficePeople.require(ctx);
+    // The Owner, an Admin, or a Core Leader (ADR-0159 §2); any other field member 404, before anything is read.
+    OfficePeople.requireAnalyticsReader(ctx);
     const category = query.category ?? 'training';
     const asked = query.item ?? null;
     if (asked !== null && SINGLE_ITEM_CATEGORIES.includes(category)) {

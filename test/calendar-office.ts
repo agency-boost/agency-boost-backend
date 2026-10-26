@@ -20,7 +20,7 @@ import {
 } from '@/modules/notifications/notification.types';
 import { configModule } from './config-module';
 import { buildCoachingOffice, ROSTER_NOW, type CoachingOffice, type Who } from './coaching-office';
-import { productionPipe, session, StubAuth } from './http-permissions';
+import { NO_CLASS, productionPipe, session, StubAuth } from './http-permissions';
 import { listenOnLoopback } from './listen';
 import { clearCollections, startMongo, stopMongo } from './mongo';
 
@@ -138,7 +138,8 @@ export async function startCalendar(options: { realNotifications?: boolean } = {
     col,
     officeOnly: (who) => {
       const base = office.as(who);
-      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG' });
+      // No rung, and so no class (ADR-0156): a grant reads the class, and `NO_CLASS` matches none.
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: NO_CLASS });
     },
     supporting: (who, readOnly = true) => {
       const base = office.as(who);

@@ -149,20 +149,29 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
   });
 
   describe('P10-T5 AC-1 — the three chips, logged against the period’s targets', () => {
-    const mapping = { leadsCode: 'LEADS_CONTACTED', appointmentsCode: 'SELL_PRESENTATION', closingsCode: 'SELL_SUBMISSION' };
+    const mapping = { leads: ['LEADS_CONTACTED'], appointments: ['SELL_PRESENTATION'], closings: ['SELL_SUBMISSION'] };
     const logged = new Map([['LEADS_CONTACTED', 62], ['SELL_PRESENTATION', 18], ['SELL_SUBMISSION', 2], ['RECRUIT_FOLLOWUP', 9]]);
 
-    it('reads each count by the goal’s own code, in the prototype’s order', () => {
+    it('reads each count by the office’s bound codes, in the prototype’s order', () => {
       expect(activityTargets({ leads: 80, appointments: 24, policies: 6 }, mapping, logged)).toEqual([
-        { key: 'leads', code: 'LEADS_CONTACTED', logged: 62, target: 80, attainmentPct: 78, targetMet: false },
-        { key: 'appointments', code: 'SELL_PRESENTATION', logged: 18, target: 24, attainmentPct: 75, targetMet: false },
-        { key: 'closings', code: 'SELL_SUBMISSION', logged: 2, target: 6, attainmentPct: 33, targetMet: false },
+        { key: 'leads', code: 'LEADS_CONTACTED', codes: ['LEADS_CONTACTED'], logged: 62, target: 80, attainmentPct: 78, targetMet: false },
+        { key: 'appointments', code: 'SELL_PRESENTATION', codes: ['SELL_PRESENTATION'], logged: 18, target: 24, attainmentPct: 75, targetMet: false },
+        { key: 'closings', code: 'SELL_SUBMISSION', codes: ['SELL_SUBMISSION'], logged: 2, target: 6, attainmentPct: 33, targetMet: false },
       ]);
     });
 
-    it('follows a goal bound to other codes (invariant §4)', () => {
-      const [leads] = activityTargets({ leads: 10, appointments: 1, policies: 1 }, { ...mapping, leadsCode: 'RECRUIT_FOLLOWUP' }, logged);
+    it('follows an office bound to other codes (invariant §4)', () => {
+      const [leads] = activityTargets({ leads: 10, appointments: 1, policies: 1 }, { ...mapping, leads: ['RECRUIT_FOLLOWUP'] }, logged);
       expect(leads).toMatchObject({ code: 'RECRUIT_FOLLOWUP', logged: 9 });
+    });
+
+    it('P18.9-T2 AC-2 a role bound to [A, B] counts both: the replaced activity’s history and its replacement', () => {
+      const [leads] = activityTargets(
+        { leads: 80, appointments: 1, policies: 1 }, { ...mapping, leads: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'] }, logged,
+      );
+      expect(leads).toMatchObject({
+        code: 'LEADS_CONTACTED', codes: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'], logged: 71, attainmentPct: 89,
+      });
     });
 
     it('F-25: no target is null, never NaN% — and a code with nothing logged is 0, not missing', () => {
@@ -211,6 +220,44 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
           { code: 'RECRUIT_OLD', label: 'Retired, with history', count: 2 },
         ],
       });
+    });
+
+    it('P18.9-T2 AC-5 an archived section keeps, on its tile, the types the period holds counts for', () => {
+      const archived: ShownSection[] = [
+        { code: 'COMMUNITY', label: 'Community', summaryGroupCode: 'OUTREACH', summaryGroupLabel: 'Outreach', types: [
+          { code: 'COMMUNITY_EVENT', label: 'Event', status: 'active' },
+        ] },
+        { code: 'OLD_OUTREACH', label: 'Old outreach', summaryGroupCode: 'OUTREACH', summaryGroupLabel: 'Outreach', status: 'archived', types: [
+          { code: 'FLYERS', label: 'Flyers', status: 'archived' },
+          { code: 'BOOTH', label: 'Booth', status: 'archived' },
+        ] },
+        { code: 'RETIRED', label: 'Retired', status: 'archived', types: [{ code: 'CANVAS', label: 'Canvas', status: 'archived' }] },
+      ];
+      // A period holding Flyers: the tile keeps it beside the live section, and Booth with nothing is gone.
+      expect(sectionChips(archived, new Map([['COMMUNITY_EVENT', 1], ['FLYERS', 4]]), cascade)).toEqual([
+        { code: 'OUTREACH', label: 'Outreach', total: 5, rows: [
+          { code: 'COMMUNITY_EVENT', label: 'Event', count: 1 }, { code: 'FLYERS', label: 'Flyers', count: 4 },
+        ] },
+      ]);
+      // A tile of its own, archived, is a chip only for a period that counted it.
+      expect(sectionChips(archived, new Map([['CANVAS', 2]]), cascade).map((c) => [c.code, c.total])).toEqual([
+        ['OUTREACH', 0], ['RETIRED', 2],
+      ]);
+    });
+
+    it('P18.9-T2 AC-5 an archived section holding a bound code never takes a live tile out with it', () => {
+      const archived: ShownSection[] = [
+        { code: 'COMMUNITY', label: 'Community', summaryGroupCode: 'OUTREACH', summaryGroupLabel: 'Outreach', types: [
+          { code: 'COMMUNITY_EVENT', label: 'Event', status: 'active' },
+        ] },
+        { code: 'OLD_SELLING', label: 'Old selling', summaryGroupCode: 'OUTREACH', summaryGroupLabel: 'Outreach', status: 'archived', types: [
+          { code: 'SELL_SUBMISSION', label: 'Submission', status: 'archived' },
+        ] },
+      ];
+      // The bound code's count is the target chips': the tile keeps its live row and does not repeat it.
+      expect(sectionChips(archived, new Map([['SELL_SUBMISSION', 3]]), cascade)).toEqual([
+        { code: 'OUTREACH', label: 'Outreach', total: 0, rows: [{ code: 'COMMUNITY_EVENT', label: 'Event', count: 0 }] },
+      ]);
     });
 
     it('totals every code logged, in any section or none', () => {

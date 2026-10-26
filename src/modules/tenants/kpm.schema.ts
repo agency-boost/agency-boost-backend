@@ -208,6 +208,11 @@ export interface KpmStartedFrom {
   templateId: string | null;
   /** Its name at the time, for a record that still reads after a rename. */
   templateName: string | null;
+  /**
+   * The company whose template it was, **only when it was not the office's own**: the Template library's, for an
+   * office started from *Template · Default template* (ADR-0164 §5). Absent, the office's company.
+   */
+  companyId?: string;
 }
 
 export const KpmSchema = SchemaFactory.createForClass(Kpm);

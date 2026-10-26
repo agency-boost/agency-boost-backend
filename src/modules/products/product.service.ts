@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { SEED_PRODUCTS, type ProductLifecycle } from '@/domain/constants';
@@ -233,6 +233,49 @@ export class ProductService {
       createdAt: now,
       updatedAt: now,
     }));
+    await this.products.insertMany(rows);
+    return rows.length;
+  }
+
+  /**
+   * **A new company's catalog, copied from another company's** (ADR-0164 §4): every live product of the
+   * Template library, its lifecycle included, as the new company's own — version 1, nobody's edit. A copy,
+   * never a link: a later change to either shelf is that company's alone.
+   *
+   * Two things are not copied. **Commission**, which each company states for itself — a figure an agent reads
+   * as their pay is the source's, not this insurer's (parity F-15). **The product documents**, which are the
+   * source company's files: the new company uploads its own. A replacement is pointed at the copy of the
+   * product it names. A company that already has products is left alone, as `seedForCompany` leaves it.
+   */
+  async copyFromCompany(sourceCompanyId: string, companyId: string): Promise<number> {
+    if (await this.products.exists({ companyId, deletedAt: null })) return 0;
+    const source = await this.products.find({ companyId: sourceCompanyId, deletedAt: null }).lean().exec();
+    if (source.length === 0) return 0;
+
+    const now = this.clock.now();
+    const ids = new Map(source.map((p) => [String(p._id), new Types.ObjectId()]));
+    const rows = source.map((product) => {
+      const { _id, createdAt: _c, updatedAt: _u, __v: _v, ...fields } = product as typeof product & {
+        createdAt?: Date; updatedAt?: Date; __v?: number;
+      };
+      const replacement = product.replacedByProductId ? ids.get(product.replacedByProductId) ?? null : null;
+      return {
+        ...structuredClone(fields),
+        _id: ids.get(String(_id)),
+        companyId,
+        commissionSchedule: [],
+        defaultDocuments: {},
+        replacedByProductId: replacement ? String(replacement) : null,
+        lifecycleChangedAt: null,
+        lifecycleChangedBy: null,
+        version: 1,
+        deletedAt: null,
+        createdBy: null,
+        updatedBy: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    });
     await this.products.insertMany(rows);
     return rows.length;
   }

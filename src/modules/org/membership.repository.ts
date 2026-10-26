@@ -113,6 +113,24 @@ export class MembershipRepository extends TenantScopedRepository<MembershipDocum
   }
 
   /**
+   * **How many live memberships stand on one rung, in whichever offices hold them** (ADR-0156 §5, P18.8-T1): what
+   * refuses a change of the rung's leader tier while anybody would be re-classed by it.
+   *
+   * **Deliberately unscoped, and named so.** A rung is the company's, and its members are in every office of that
+   * company; the Super Admin who edits the ladder is in none of them. Invariant §1 asks that such a read be an
+   * explicitly named method rather than an absent filter, and this is one: the caller must be a Super Admin, and
+   * it answers a count, never a row. *Live* is active or pending — a removed member holds no rights to re-class.
+   */
+  async countHoldingRungAcrossTenants(ctx: RequestContext, orgLevelId: string): Promise<number> {
+    if (!ctx.isSuperAdmin) {
+      throw new MissingTenantContextError(this.collectionName, 'countHoldingRungAcrossTenants');
+    }
+    return this.model
+      .countDocuments({ orgLevelId, status: { $in: ['active', 'pending'] }, deletedAt: null })
+      .exec();
+  }
+
+  /**
    * **Each office's composition, joiners and leavers in a month, for every office** (Phase 18, P18-T8, OD-148 →
    * option 1): *Cross-platform analytics*' adoption columns.
    *

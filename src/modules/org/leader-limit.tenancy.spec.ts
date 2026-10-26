@@ -9,6 +9,7 @@ import { CompanyOrgLevel, CompanyOrgLevelSchema } from '@/modules/tenants/compan
 import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
+import { ROSTER_TEMPLATE_HEADER } from '@/modules/tenants/roster-csv';
 import { RosterImportService } from '@/modules/tenants/roster-import.service';
 import { TenantService } from '@/modules/tenants/tenant.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
@@ -285,17 +286,17 @@ describe('the leader limit', () => {
   });
 
   describe('AC-4: the roster import', () => {
-    const HEADER = 'fullName,email,agentCode,role,leaderAgentCode';
+    const HEADER = ROSTER_TEMPLATE_HEADER;
 
     it('the preview names each row past the limit by its line and role column, so nothing commits', async () => {
       await limit(KPM_A, 2);
       await join(KPM_A, 'ab');
       const file = [
         HEADER,
-        'Ana,ana@kpm.test,PRU-9001,aab,',
-        'Budi,budi@kpm.test,PRU-9002,agent,PRU-9001',
-        'Citra,citra@kpm.test,PRU-9003,ab,',
-        'Dodi,dodi@kpm.test,PRU-9004,aab,PRU-9003',
+        'Ana,ana@kpm.test,9001,aab,,1990-01-01,2020-01,full-time,female',
+        'Budi,budi@kpm.test,9002,agent,9001,1990-01-01,2020-01,full-time,female',
+        'Citra,citra@kpm.test,9003,ab,,1990-01-01,2020-01,full-time,female',
+        'Dodi,dodi@kpm.test,9004,aab,9003,1990-01-01,2020-01,full-time,female',
       ].join('\n');
 
       const asSa = await roster.preview(RequestContext.platform('sa-1'), KPM_A, file);
@@ -307,7 +308,9 @@ describe('the leader limit', () => {
 
       const ownerCtx = await as((await members.find(office(KPM_A), { role: 'ab' }))[0].id, { owner: true });
       const asOwner = await roster.preview(ownerCtx, KPM_A, file);
-      expect(asOwner.issues[0].message).toMatch(/ask AgencyBoost to raise the limit/);
+      // P18.8-T2 AC-9 (ADR-0157 §5): a row past the limit is still refused, and the way through that asks is named.
+      expect(asOwner.issues[0].message).toMatch(/Import them as an Agent, then promote them on their page/);
+      expect(asOwner.issues[0].message).toMatch(/asks AgencyBoost to approve it/);
 
       // Committed anyway, against the preview's advice: refused whole, with the limit's own code.
       await expect(roster.commit(RequestContext.platform('sa-1'), KPM_A, file)).rejects.toMatchObject(LIMIT);
@@ -318,7 +321,7 @@ describe('the leader limit', () => {
     it('the commit refuses with the code when the office filled up after the preview, creating nobody', async () => {
       await limit(KPM_A, 2);
       const root = await join(KPM_A, 'ab');
-      const file = [HEADER, 'Ana,ana@kpm.test,PRU-9001,aab,'].join('\n');
+      const file = [HEADER, 'Ana,ana@kpm.test,9001,aab,,1990-01-01,2020-01,full-time,female'].join('\n');
       expect((await roster.preview(RequestContext.platform('sa-1'), KPM_A, file)).issues).toEqual([]);
 
       await join(KPM_A, 'aab', root);
@@ -330,7 +333,7 @@ describe('the leader limit', () => {
   });
 
   describe('exit review: a roster row refused mid-commit leaves no account behind', () => {
-    const HEADER = 'fullName,email,agentCode,role,leaderAgentCode';
+    const HEADER = ROSTER_TEMPLATE_HEADER;
 
     it('the office fills while the loop runs: the refused row’s account is never made', async () => {
       await limit(KPM_A, 3);
@@ -350,7 +353,11 @@ describe('the leader limit', () => {
         members, hierarchy, kpms as never, users as never, passwords as never,
         new AuditService(mongoose.model(AuditLog.name) as never), new FixedClock(NOW),
       );
-      const file = [HEADER, 'Ana,ana@kpm.test,PRU-9001,ab,', 'Budi,budi@kpm.test,PRU-9002,aab,'].join('\n');
+      const file = [
+        HEADER,
+        'Ana,ana@kpm.test,9001,ab,,1990-01-01,2020-01,full-time,female',
+        'Budi,budi@kpm.test,9002,aab,,1990-01-01,2020-01,full-time,female',
+      ].join('\n');
 
       await expect(racing.commit(RequestContext.platform('sa-1'), KPM_A, file)).rejects.toMatchObject({
         ...LIMIT, details: { maxLeaders: 3, leadersUsed: 3 },

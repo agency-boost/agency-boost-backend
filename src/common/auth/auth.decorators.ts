@@ -67,6 +67,17 @@ export const ALLOWED_WHILE_READ_ONLY = 'allowedWhileReadOnly';
 export const AllowWhileReadOnly = () => SetMetadata(ALLOWED_WHILE_READ_ONLY, true);
 
 /**
+ * **Refused in every support session** — read-only, setup or elevated (ADR-0162 §4).
+ *
+ * A person's own account: their profile, their password and where they are signed in. A read-only session
+ * was refused these by their method already; an elevated one let them through, so a session approved to fix
+ * an office's settings could rename the Owner, change their password or sign them out of their phone. None of
+ * that is support: only the person may, as themselves. `PermissionsGuard` reads it before anything else.
+ */
+export const REFUSED_IN_SUPPORT_SESSION = 'refusedInSupportSession';
+export const RefuseInSupportSession = () => SetMetadata(REFUSED_IN_SUPPORT_SESSION, true);
+
+/**
  * Reachable by **a support session whose office cannot be used** (P13.2 exit review).
  *
  * `ContextResolver` refuses every request of a suspended or archived office's member, and a support

@@ -10,14 +10,15 @@ import { can } from '@/modules/rbac/permissions';
 import type { StoredObject } from '@/modules/assets/storage.port';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
-import { NamedTemplateService, type NamedTemplateView } from './named-template.service';
+import { NamedTemplateService, type NamedTemplateView, type PublishedKinds } from './named-template.service';
 import type { NamedTemplateDocument, TemplateOrigin } from './named-template.schema';
 import { OfficeSettingsSource } from './office-settings.source';
 import {
-  filesOfTraining, rungCodesOf, templateKindsFromOffice, withCopiedFiles,
+  filesOfTraining, templateKindsFromOffice, withCopiedFiles,
   type DroppedSetting, type TemplateFile, type TemplateKinds,
 } from './office-template';
 import { ProvisioningService } from './provisioning.service';
+import { refuseUnknownRungs } from './template-rungs';
 
 /**
  * *Save as template*'s answer: the template as made, and **what the office held that it left out or
@@ -30,6 +31,21 @@ export interface SavedOfficeTemplateView extends NamedTemplateView {
 /** A file about to be duplicated, with what its source asset row says it was called. */
 interface FileToCopy extends TemplateFile {
   originalFilename: string | null;
+}
+
+/**
+ * **What a new company copies from the Template library** (ADR-0164 §4): its default template's kinds as
+ * published now, and every training file they name, known to have arrived — read and checked **before the
+ * company exists**, so a refusal leaves no company behind.
+ */
+export interface LibraryCopy {
+  /** The Template library's company id. */
+  companyId: string;
+  templateId: string;
+  templateName: string;
+  kinds: TemplateKinds;
+  versions: PublishedKinds['versions'];
+  files: FileToCopy[];
 }
 
 /**
@@ -162,6 +178,53 @@ export class TemplateCopyService {
     return this.templates.viewOf(companyId, written);
   }
 
+  /**
+   * **The Template library's default template, read for a new company** (ADR-0164 §4): each kind's newest
+   * published version and every training file it names, checked to have arrived. `null` where there is no
+   * Template library — a database migration `0037` has not run on — and the company is then given the
+   * AgencyBoost defaults as before. Called by `TenantService.createCompany` before it writes the company, under
+   * `company:crud`, which it checks.
+   */
+  async libraryCopy(ctx: RequestContext): Promise<LibraryCopy | null> {
+    const library = await this.templates.library();
+    if (!library) return null;
+    const templateId = String(library.template._id);
+    const { kinds, versions } = await this.templates.publishedKindsOf(library.companyId, templateId);
+    const files = await this.knownFiles(ctx, filesOfTraining(kinds.training_taxonomy), {
+      kpmId: null, companyId: library.companyId,
+    });
+    return { companyId: library.companyId, templateId, templateName: library.template.name, kinds, versions, files };
+  }
+
+  /**
+   * **A new company's first template, its default, copied from the Template library** (ADR-0164 §4): named
+   * *"{Company name} template"*, as every company's first is, each kind the library published a published
+   * version 1, and each training file duplicated into the new company's assets — the library's files are the
+   * library's. Its origin names the source. No rung check: the company's ladder is copied from the same
+   * library first. One audit row, naming the source.
+   */
+  async writeFirstFromLibrary(
+    ctx: RequestContext, company: { _id: unknown; name: string }, from: LibraryCopy,
+  ): Promise<NamedTemplateDocument> {
+    const companyId = String(company._id);
+    const name = `${company.name} template`;
+    const copies = await this.duplicate(companyId, from.files);
+    const written = await this.write(ctx, companyId, name, {
+      kind: 'copy', templateId: from.templateId, companyId: from.companyId,
+    }, from.kinds, copies, true);
+    await this.audit.record(ctx, {
+      action: 'template.created',
+      targetCollection: 'templates',
+      targetId: String(written._id),
+      after: {
+        companyId, name, from: 'copy', isDefault: true,
+        source: { companyId: from.companyId, templateId: from.templateId, name: from.templateName, versions: from.versions },
+        filesDuplicated: copies.size,
+      },
+    });
+    return written;
+  }
+
   // -------------------------------------------------------------------- internals
 
   /** `company_template:write`, or `403 PERM_DENIED` — before anything is read. */
@@ -177,24 +240,12 @@ export class TemplateCopyService {
   }
 
   /**
-   * **Every rung the kinds name, on the destination's ladder** (ADR-0115 §6): a ratio's or an
-   * activity section's `appliesToOrgLevelCodes`, against the destination company's **active** rungs.
-   * One refusal naming every code missing, before anything is written or copied.
+   * **Every rung the kinds name, on the destination's ladder** (ADR-0115 §6): one refusal naming every
+   * code missing, before anything is written or copied. The check is `template-rungs.ts`'s, shared with an
+   * office started from the Template library (ADR-0164 §5).
    */
   private async refuseUnknownRungs(companyId: string, kinds: TemplateKinds): Promise<void> {
-    const named = rungCodesOf(kinds);
-    if (named.length === 0) return;
-    const ladder = new Set(await this.orgLevels.activeCodesFor(companyId));
-    const codes = named.filter((code) => !ladder.has(code));
-    if (codes.length === 0) return;
-    throw new DomainException(
-      ErrorCode.TEMPLATE_RUNG_UNKNOWN,
-      `This company’s role ladder has no ${codes.join(', ')}, and the settings being copied show `
-        + `ratios or activity sections to ${codes.length === 1 ? 'that role' : 'those roles'}. Add `
-        + `${codes.length === 1 ? 'it' : 'them'} to the company’s ladder first, or copy other settings.`,
-      HttpStatus.CONFLICT,
-      { codes },
-    );
+    await refuseUnknownRungs(kinds, () => this.orgLevels.activeCodesFor(companyId));
   }
 
   /**
@@ -251,12 +302,14 @@ export class TemplateCopyService {
     origin: TemplateOrigin,
     kinds: TemplateKinds,
     copies: Map<string, StoredObject>,
+    /** Only a company's first template is its default, made with it. */
+    isDefault = false,
   ): Promise<NamedTemplateDocument> {
     const final: TemplateKinds = { ...kinds };
     if (final.training_taxonomy && copies.size) {
       final.training_taxonomy = withCopiedFiles(final.training_taxonomy, copies);
     }
-    const written = await this.templates.writeTemplate(ctx, companyId, name, origin, final);
+    const written = await this.templates.writeTemplate(ctx, companyId, name, origin, final, isDefault);
     await this.assets.retainCompanyCopies(companyId, [...copies.values()].map((c) => c.storageKey));
     return written;
   }

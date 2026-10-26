@@ -5,7 +5,7 @@ import type { ErrorCodeValue } from '@/common/errors/error-codes';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import {
-  ActivityConfigService, RESERVED_TYPE_CODES, reservedSectionRefusal, reservedTypeRefusal,
+  ActivityConfigService, boundSectionRefusal, boundTypeRefusal,
 } from './activity.service';
 import { resolveDisplayUnit, type RatioDisplayUnit } from '@/domain/constants';
 import { RatioService } from './ratio.service';
@@ -183,6 +183,8 @@ export class ConfigChangeService {
 
     const ladder = await this.orgLevels.ladderForOffice(ctx);
     const activeRungs = new Set(ladder.filter((l) => l.status === 'active').map((l) => l.code));
+    // The codes the office's activity binding names, with their roles: none may be archived (ADR-0163 §5).
+    const bound = await this.activity.boundRolesOf(ctx);
 
     const rowsByKind: Record<string, Map<string, Known>> = {
       category: categories,
@@ -254,19 +256,22 @@ export class ConfigChangeService {
           ));
         }
         /*
-         * **The three cascade types are never archived, nor a section holding one** (ADR-0115 §2) —
-         * refused here, in the projection, so a batch that would is refused before any of it is
-         * written. The section's types are read as the batch has moved them so far.
+         * **A bound type is never archived, nor a section holding one** (ADR-0163 §5) — refused here, in
+         * the projection, so a batch that would is refused before any of it is written. The section's
+         * types are read as the batch has moved them so far.
          */
-        if (op.op === 'type.archive' && RESERVED_TYPE_CODES.includes(row!.code)) {
-          throw this.atOp(index, op.op, reservedTypeRefusal({ code: row!.code, label: row!.label ?? row!.code }));
+        if (op.op === 'type.archive' && bound.has(row!.code)) {
+          throw this.atOp(index, op.op, boundTypeRefusal(
+            { code: row!.code, label: row!.label ?? row!.code }, bound.get(row!.code)!,
+          ));
         }
         if (op.op === 'category.archive') {
           const held = [...types.values()].filter((t) => t.parent === row!.code && t.status === 'active'
-            && RESERVED_TYPE_CODES.includes(t.code));
+            && bound.has(t.code));
           if (held.length) {
-            throw this.atOp(index, op.op, reservedSectionRefusal(
-              { label: row!.label ?? row!.code }, held.map((t) => ({ code: t.code, label: t.label ?? t.code })),
+            throw this.atOp(index, op.op, boundSectionRefusal(
+              { label: row!.label ?? row!.code },
+              held.map((t) => ({ code: t.code, label: t.label ?? t.code, role: bound.get(t.code)! })),
             ));
           }
         }

@@ -7,7 +7,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import type { CookieOptions, Request, Response } from 'express';
 import {
-  AllowTemporaryPassword, AllowWhileReadOnly, Ctx, Public,
+  AllowTemporaryPassword, AllowWhileReadOnly, Ctx, Public, RefuseInSupportSession,
 } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
@@ -15,11 +15,14 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import { corsOriginsOf } from '@/config/cors-origins';
 import { initialsOf, User, UserDocument } from '@/modules/users/user.schema';
+import { preferredNameOf } from '@/modules/users/display-name';
+import { MembershipRepository } from '@/modules/org/membership.repository';
 import { refreshCookieOptions } from '@/modules/auth/refresh-cookie';
 import { isForeignOrigin, ownOriginOf } from '@/modules/auth/request-origin';
 import { AccessTokenDto } from '@/modules/auth/session.response.dto';
 import { can, PERMISSIONS, Permission } from '@/modules/rbac/permissions';
 import { ActivationNav, activationNavFor } from '@/modules/activation/activation-nav.port';
+import { ProfileLineReader, profileLineFor } from '@/modules/org/profile-line';
 import { AuthService } from './auth.service';
 import { RateLimiter } from './rate-limiter';
 import {
@@ -39,6 +42,7 @@ import {
  * succeed from the UI without pasting anything.
  */
 const REFRESH_COOKIE = 'agencyboost_refresh';
+
 const REFRESH_COOKIE_MAX_AGE_MS = 30 * 86_400_000;
 
 const LOGIN_WINDOW_SECONDS = 15 * 60;
@@ -83,11 +87,18 @@ export class AuthController {
     private readonly limiter: RateLimiter,
     private readonly config: ConfigService,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
+    /** Work status is the membership's (ADR-0158 §1), so `/auth/me` reads and writes it there. */
+    private readonly members: MembershipRepository,
     /*
      * P13-T7 AC-5: the *New agent* section's two facts, served with the session. A port, so the auth
      * module does not depend on activation; optional, so a harness without it answers *nothing to show*.
      */
     @Optional() @Inject(ActivationNav) private readonly activationNav: ActivationNav | null = null,
+    /*
+     * P18.8-T6 AC-1: the groups and the office on the sidebar's profile line (ADR-0159 §5). Optional by its token,
+     * as the port above, so a harness without it answers the role alone.
+     */
+    @Optional() @Inject(ProfileLineReader) private readonly profileLine: ProfileLineReader | null = null,
   ) {}
 
   /**
@@ -368,12 +379,14 @@ export class AuthController {
 
   @ApiBearerAuth()
   @Post('logout-all')
+  // Signs the member out of their own devices: theirs to do, never a support session's (ADR-0162 §4).
+  @RefuseInSupportSession()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Sign out everywhere',
     description:
       'Revokes every refresh session for this account, this one included. What somebody '
-      + 'does when they think a device was lost.',
+      + 'does when they think a device was lost. Refused `403 PERM_DENIED` in any support session.',
   })
   async logoutAll(@Ctx() ctx: RequestContext, @Res({ passthrough: true }) res: Response) {
     await this.auth.logoutAll(ctx.userId, 'signed out everywhere');
@@ -397,13 +410,14 @@ export class AuthController {
 
   @ApiBearerAuth()
   @Delete('sessions/:sessionId')
+  @RefuseInSupportSession()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Sign out one device',
     description:
       'Revokes the whole token family — revoking only its newest token would leave an '
       + 'attacker holding an older one that still rotates. `404` for a session that is not '
-      + 'this account\'s.',
+      + 'this account\'s. Refused `403 PERM_DENIED` in any support session.',
   })
   async revokeSession(@Ctx() ctx: RequestContext, @Param('sessionId') sessionId: string) {
     await this.auth.revokeSession(ctx.userId, sessionId);
@@ -414,8 +428,12 @@ export class AuthController {
   // replace it, or leave (P3.6-T4).
   @AllowTemporaryPassword()
   @Post('change-password')
+  @RefuseInSupportSession()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Change your password', description: 'Revokes your other sessions.' })
+  @ApiOperation({
+    summary: 'Change your password',
+    description: 'Revokes your other sessions. Refused `403 PERM_DENIED` in any support session.',
+  })
   async changePassword(@Ctx() ctx: RequestContext, @Body() dto: ChangePasswordDto) {
     await this.auth.changePassword(ctx.userId, dto.currentPassword, dto.newPassword);
     return { status: 'changed' };
@@ -435,22 +453,40 @@ export class AuthController {
   async me(@Ctx() ctx: RequestContext) {
     const user = await this.users.findOne({ _id: ctx.userId }).exec();
     const permissions = (Object.keys(PERMISSIONS) as Permission[]).filter((p) => can(ctx, p));
+    // ADR-0158 §1: how they work is their membership's; until an office has them, what they registered with.
+    const membership = ctx.membershipId ? await this.members.findById(ctx, ctx.membershipId) : null;
     const nav = await activationNavFor(this.activationNav, ctx);
+    const line = await profileLineFor(this.profileLine, ctx, membership?.groupIds ?? []);
 
     return {
       user: {
         id: ctx.userId,
         email: user?.email,
         fullName: user?.fullName,
-        preferredName: user?.preferredName,
+        preferredName: preferredNameOf(user?.preferredName),
         pronoun: user?.pronoun,
         initials: initialsOf(user?.fullName ?? ''),
         platformRole: ctx.platformRole,
+        // What a person records (ADR-0158): `null` is *Not recorded* — somebody who arrived before it was asked.
+        dateOfBirth: user?.dateOfBirth ?? null,
+        gender: user?.gender ?? null,
+        companyJoinMonth: user?.companyJoinMonth ?? null,
+        workStatus: ctx.membershipId ? (membership?.workStatus ?? null) : (user?.registeredWorkStatus ?? null),
       },
-      membership: ctx.membership,
+      /*
+       * The context's membership — its `isCoreLeader` the effective flag, the tag on a leader rung (ADR-0159 §4) — and
+       * what the sidebar's profile line says after the role (§5, P18.8-T6): the member's live tag groups, A to Z, and
+       * their office's code and branch.
+       */
+      membership: ctx.membership
+        ? { ...ctx.membership, isCoreLeader: ctx.isCoreLeader, groups: line.groups, office: line.office }
+        : null,
       isImpersonating: ctx.isImpersonating,
       // So the banner can say which kind of session this is (P4-T10).
       impersonationReadOnly: ctx.impersonationReadOnly,
+      // And why it was started, with what a setup session may write besides reading (ADR-0162).
+      impersonationPurpose: ctx.impersonationPurpose,
+      impersonationWriteScope: ctx.impersonationWriteScope,
       impersonatedBy: ctx.impersonatorUserId,
       /*
        * The reason every other route is answering 403 (P3.6-T4).
@@ -474,9 +510,35 @@ export class AuthController {
 
   @ApiBearerAuth()
   @Patch('me')
-  @ApiOperation({ summary: 'Update your own account' })
+  @RefuseInSupportSession()
+  @ApiOperation({
+    summary: 'Update your own account',
+    description:
+      'Your name, preferred name and pronoun; and your date of birth, gender, company join month and work '
+      + 'status (ADR-0158) — each optional, none clearable. A birth date must be in the past and at least 18 '
+      + 'years ago and a join month not in the future, else `400 VALIDATION_FAILED` naming the field. Work '
+      + 'status is written on your membership in your office, and on your account until you have one. '
+      + '**Refused `403 PERM_DENIED` in any support session**, read-only, setup or elevated: a person\'s own '
+      + 'account is theirs to change.',
+  })
   async updateMe(@Ctx() ctx: RequestContext, @Body() dto: UpdateProfileDto) {
-    await this.users.updateOne({ _id: ctx.userId }, { $set: { ...dto } }).exec();
+    const { workStatus, ...account } = dto;
+    /*
+     * **The person's own word, in no session's hands** (P18.8-T4 AC-6, ADR-0162 §4): `@RefuseInSupportSession`
+     * refuses the whole route in any session, so a birth date, a gender or a work status — and the name and
+     * pronoun beside them — are never recorded in their name. It refused the four fields alone until ADR-0162.
+     */
+    this.auth.refusePersonalData(dto);
+
+    await this.users.updateOne({ _id: ctx.userId }, { $set: { ...account } }).exec();
+    if (workStatus !== undefined) {
+      if (ctx.membershipId) {
+        await this.members.updateById(ctx, ctx.membershipId, { $set: { workStatus } });
+      } else {
+        // Nobody's member yet: kept for the membership they are given (`HierarchyService`).
+        await this.users.updateOne({ _id: ctx.userId }, { $set: { registeredWorkStatus: workStatus } }).exec();
+      }
+    }
     return this.me(ctx);
   }
 }

@@ -5,7 +5,20 @@ import {
   IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsMongoId, IsOptional, IsString, Matches, Max,
   MaxLength, Min, MinLength, ValidateIf, ValidateNested,
 } from 'class-validator';
-import { DEFAULT_TENANT_TIMEZONE, SUBSCRIPTION } from '@/domain/constants';
+import { DEFAULT_TENANT_TIMEZONE, LEADER_TIERS, SUBSCRIPTION, type LeaderTier } from '@/domain/constants';
+
+/**
+ * A rung's leader tier on the wire (ADR-0156): `senior`, `associate`, or `null` for *Not a leader*.
+ * `@IsOptional` passes `null` through, which is the point — `null` is a value here, and only a string
+ * outside the two tiers is refused.
+ */
+const LEADER_TIER_PROPERTY = {
+  enum: [...LEADER_TIERS],
+  nullable: true,
+  description:
+    '*Senior Leader* (what AB is), *Associate Leader* (what AAB is), or `null` — *Not a leader*. A member\u2019s '
+    + 'role class is derived from it wherever they are placed on the rung (ADR-0156).',
+};
 
 export class CreateCompanyDto {
   @ApiProperty({ example: 'Prudential', minLength: 2, maxLength: 120 })
@@ -37,7 +50,7 @@ export class CreateCompanyDto {
   slug!: string;
 
   /**
-   * Start this company from the platform's presets, or from nothing.
+   * Start this company from the Template library, or from nothing (ADR-0164 §4).
    *
    * **Default true, and absent means true** — a company created before this field existed,
    * and every caller that does not care, gets what they always got.
@@ -45,11 +58,13 @@ export class CreateCompanyDto {
   @ApiPropertyOptional({
     default: true,
     description:
-      'True gives the company the platform\'s activity taxonomy, ratios, lead ladders, '
-      + 'training tree, activation checklist, capability ladder, event types, carrier rules '
-      + 'and product catalog to edit. False leaves every one of them empty, for a company '
-      + 'whose presets are being authored from scratch. The role ladder is seeded either '
-      + 'way: an office whose company has none is one nobody can join.',
+      'True copies the Template library: its role ladder with the leader tiers, product catalog, '
+      + 'carrier rules and recruitment playbook, and its Default template — activity taxonomy, ratios, '
+      + 'lead ladders, training tree, activation checklist, capability ladder and event types — as the '
+      + 'company\'s first, default template. A copy: changing the Template later changes no company made '
+      + 'from it. Where no Template library exists, the AgencyBoost defaults. False leaves every one of '
+      + 'them empty, for a company whose presets are being authored from scratch. The role ladder is '
+      + 'seeded either way: an office whose company has none is one nobody can join.',
   })
   @IsOptional()
   @IsBoolean()
@@ -123,6 +138,11 @@ export class CreateOrgLevelDto {
   @Min(1)
   @Max(99)
   displayOrder!: number;
+
+  @ApiPropertyOptional({ ...LEADER_TIER_PROPERTY, description: `${LEADER_TIER_PROPERTY.description} Absent is \`null\`.` })
+  @IsOptional()
+  @IsIn([...LEADER_TIERS])
+  leaderTier?: LeaderTier | null;
 }
 
 /** No `code`. Renaming is what `label` is for; a different rung is a different level. */
@@ -140,6 +160,14 @@ export class UpdateOrgLevelDto {
   @Min(1)
   @Max(99)
   displayOrder?: number;
+
+  @ApiPropertyOptional({
+    ...LEADER_TIER_PROPERTY,
+    description: `${LEADER_TIER_PROPERTY.description} Refused \`409 ORG_LEVEL_TIER_IN_USE\` while anybody holds the rung.`,
+  })
+  @IsOptional()
+  @IsIn([...LEADER_TIERS])
+  leaderTier?: LeaderTier | null;
 
   @ApiPropertyOptional({
     enum: ['active', 'archived'],

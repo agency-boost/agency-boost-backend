@@ -18,9 +18,11 @@ import {
   CompanyTemplate, CompanyTemplateSchema,
 } from '@/modules/config/company-template.schema';
 import {
-  ActivityCategoryRepository, ActivityTypeRepository, ConfigSnapshotRepository,
+  ActivityBindingRepository, ActivityCategoryRepository, ActivityTypeRepository, ConfigSnapshotRepository,
   LeadStatusRepository, RatioDefinitionRepository,
 } from '@/modules/config/activity.repository';
+import { ActivityBinding, ActivityBindingSchema } from '@/modules/config/activity-binding.schema';
+import { ActivityBindingService } from '@/modules/config/activity-binding.service';
 import { ActivityConfigService } from '@/modules/config/activity.service';
 import { LeadStatusService } from '@/modules/config/lead-status.service';
 import { RatioService } from '@/modules/config/ratio.service';
@@ -222,6 +224,15 @@ export function configModule(
     new LeadStatusRepository(leadStatuses as never), audit, clock,
   );
   const kpms = model('KpmModelForConfig', KpmSchema);
+  /*
+   * P18.9-T2 (ADR-0163): an office's activity binding, and `resolveCascadeBinding`, the one reader every cascade
+   * count goes through — the summary, coaching, the Unit Dashboard, pace status, the goals and the campaigns below.
+   */
+  const activityBindingRows = model(ActivityBinding.name, ActivityBindingSchema);
+  const activityBindingRepository = new ActivityBindingRepository(activityBindingRows as never);
+  const activityBindings = new ActivityBindingService(
+    activityBindingRepository, new ActivityTypeRepository(types as never), kpms as never, audit,
+  );
   // Shared, because the lead service resolves a leader's downline from the same rows the org
   // module reads — two handles on one collection is two caches and one of them stale.
   const memberships = new MembershipRepository(model(Membership.name, MembershipSchema) as never);
@@ -248,6 +259,8 @@ export function configModule(
     orgLevels,
     audit,
     clock,
+    // P18.9-T2: a bound type is not archived (ADR-0163 §5).
+    activityBindings,
   );
   const ratios = new RatioService(
     new RatioDefinitionRepository(ratioDefinitions as never), activity, orgLevels, audit, clock,
@@ -420,6 +433,10 @@ export function configModule(
     ),
     // P13-T3: a goal saved on a hire's membership completes their `feature:goals` item.
     activationProgress,
+    // P18.8-T10: a new plan's two percentages open on the office's benchmarks (ADR-0160 §3).
+    new RatioDefinitionRepository(ratioDefinitions as never),
+    // P18.9-T2: the measured rates and `cascadeBinding` read the office's binding.
+    activityBindings,
   );
   // P6: what an agent did, day by day. The first module holding what people *did*. After `goals` since
   // P11-T4, whose plan the 7-day targets read.
@@ -439,6 +456,10 @@ export function configModule(
     activityReadings,
     // P13-T3: a day saved or corrected may make a hire's fourth week of activity.
     activationProgress,
+    // The published copy is handed over below, once `config` exists.
+    undefined,
+    // P18.9-T2: the 7-day targets count the office's binding.
+    activityBindings,
   );
   // P10-T4: the Personal Summary, read from the goal, the office's production and the member's log.
   const summary = new SummaryService(
@@ -457,6 +478,8 @@ export function configModule(
     subjectReads,
     // Phase 15: who corrected a figure, by name.
     new MemberNames(memberships, users as never),
+    // P18.9-T2: the targets, the pace and the tiles count the office's binding.
+    activityBindings,
   );
   // P11-T5: the coaching sessions, and the coaching metrics read over them.
   const coachingSessions = new CoachingSessionRepository(
@@ -465,7 +488,7 @@ export function configModule(
   const coachingReadings = new CoachingReadings(coachingSessions, clock);
   // P11-T6: `GOAL_PACE_STATUS` over `PACING_TO_MAA`, and the roster that serves them.
   const paceStatus = new PaceStatusReadings(
-    new GoalRepository(model(Goal.name, GoalSchema) as never), productionReadings, activityReadings,
+    new GoalRepository(model(Goal.name, GoalSchema) as never), productionReadings, activityReadings, activityBindings,
   );
   const coachingRoster = new CoachingRosterService(
     coach,
@@ -554,6 +577,8 @@ export function configModule(
     activation,
     events,
     capability,
+    // P18.9-T2: the binding rendered into each snapshot, as its record.
+    activityBindings,
   );
   /*
    * P13.1-T2: the activity log reads and saves in the office's published vocabulary, as Nest wires it
@@ -597,6 +622,11 @@ export function configModule(
     clock,
     config,
     namedTemplateRows as never,
+    // P18.9-T2: the office's binding, copied from the source's taxonomy.
+    activityBindingRows as never,
+    // P18.9-T3: the Template library an office may start from, and the ladder its rungs are checked against.
+    model('CompanyModelForConfig', CompanySchema) as never,
+    orgLevels,
   );
 
   // `orgLevels` and `kpms` are exposed since P4-T15: a ratio's applicability validates
@@ -636,6 +666,8 @@ export function configModule(
     new ActivationTemplateRepository(activationTemplates as never),
     new TrainingModuleRepository(trainingModules as never),
     new AssetRepository(assetRows as never),
+    // P18.9-T2: the office's live binding, which *Save as template* carries.
+    activityBindingRepository,
   );
   const templateCopies = new TemplateCopyService(
     namedTemplates, officeSettings, assets, orgLevels, provisioning, kpms as never, audit,
@@ -682,6 +714,8 @@ export function configModule(
   const campaignEvaluation = new CampaignEvaluation(
     productionReadings, productionMonths, activityReadings, new RatioDefinitionRepository(ratioDefinitions as never),
     memberships, campaignChases, campaignStandings, campaignRows, new TenantDay(kpms as never, clock), clock, audit,
+    // P18.9-T2: the cascade touches count the office's binding.
+    activityBindings,
   );
   const campaignAgent = new CampaignAgentService(
     campaignRows, campaignChases, campaignChaseReadings, campaignEvaluation, coach, memberships, audit,
@@ -706,6 +740,8 @@ export function configModule(
     ),
     subjectReads,
     campaignChaseReadings,
+    // P18.9-T2: the activity cells count the office's binding.
+    activityBindings,
   );
 
   /*
@@ -778,6 +814,7 @@ export function configModule(
     leadReadings, recruitTargets, officePeople, carrierRules, kpmOverview, kpmAnalytics, platformAnalytics,
     directoryColumns, memberships, users,
     eventRsvps, eventFeedback, eventAudiences, eventReadings, eventGuests, eventRollCalls,
+    activityBindings, activityBindingRows,
   };
 }
 

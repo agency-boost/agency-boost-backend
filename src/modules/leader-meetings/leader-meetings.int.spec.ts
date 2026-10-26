@@ -30,18 +30,22 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
   const make = async (title: string, date: string) => office.forum.create(office.as('OWNER'), { title, date });
   const audits = (action: string) => db().collection('auditLog').find({ action }).toArray();
 
-  /** Every editor by the address — the Owner, the Admin, and a tagged AB, AAB and Agent. */
-  const EDITORS: Who[] = ['OWNER', 'ADMIN', 'AGUS', 'SARI', 'INDAH'];
-  /** The tagged field members: editors who make, move and delete nothing. */
-  const CORE_LEADERS: Who[] = ['AGUS', 'SARI', 'INDAH'];
-  /** An AB, an AAB and an Agent of the office, none tagged. */
-  const NOT_TAGGED: Who[] = ['PEER_AB', 'DEWI', 'RINA'];
+  /** Every editor by the address — the Owner, the Admin, and a tagged AB and AAB. */
+  const EDITORS: Who[] = ['OWNER', 'ADMIN', 'AGUS', 'SARI'];
+  /** The Core Leaders — tagged, on a leader rung (ADR-0159 §1): editors who make, move and delete nothing. */
+  const CORE_LEADERS: Who[] = ['AGUS', 'SARI'];
+  /**
+   * An AB, an AAB and an Agent of the office, none tagged; and INDAH, an Agent **tagged** — a tag written before
+   * ADR-0159 made it a leader's, which stays on her row and makes her no Core Leader (P18.8-T5).
+   */
+  const NOT_TAGGED: Who[] = ['PEER_AB', 'DEWI', 'RINA', 'INDAH'];
 
   beforeAll(async () => {
     await startMongo();
     wired = configModule(ROSTER_NOW);
     await clearCollections();
     office = await buildForumOffice(wired);
+    // An Agent tagged before ADR-0159: the flag stays on her row and does nothing (P18.8-T5 AC-1).
     await office.tag('INDAH', true);
     app = await forumApp(office);
   }, 120_000);
@@ -102,7 +106,7 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
       }
     });
 
-    it.each(NOT_TAGGED)('P18.1-T2 AC-1 negative: %s, a field member not tagged, is answered 404 on every route, the list included', async (who) => {
+    it.each(NOT_TAGGED)('P18.1-T2 AC-1, P18.8-T5 AC-1 negative: %s, a field member who is no Core Leader, is answered 404 on every route, the list included', async (who) => {
       as(who);
       const before = await db().collection('auditLog').countDocuments();
       for (const route of routes(meetingId)) {
@@ -235,9 +239,10 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
       expect(list.meetings.find((m: { id: string }) => m.id === older.id).state).toBe('completed');
       expect(card.editors.owner).toMatchObject({ membershipId: office.id.OWNER, name: 'Wilson Tanoto', isReader: true, rung: { code: 'AB', label: 'AB' } });
       expect(card.editors.admins.map((p: { name: string }) => p.name)).toEqual(['Maya Kusuma']);
-      expect(card.editors.coreLeaders.map((p: { name: string }) => p.name)).toEqual(['Agus Salim', 'Indah Permatasari', 'Sari Puspita']);
-      // Every editor tagged but the Owner: the three tagged; the Admin is not tagged.
-      expect(card.editors).toMatchObject({ coreLeaderCount: 3, frozen: false });
+      // The Core Leaders: Indah's tag, an Agent's, makes her none (ADR-0159 §1).
+      expect(card.editors.coreLeaders.map((p: { name: string }) => p.name)).toEqual(['Agus Salim', 'Sari Puspita']);
+      // Every editor tagged but the Owner: the two Core Leaders; the Admin is not tagged.
+      expect(card.editors).toMatchObject({ coreLeaderCount: 2, frozen: false });
       expect(list.can).toEqual({ create: true });
       expect(list.limits).toEqual(LEADER_MEETING_LIMITS);
       as('AGUS');
@@ -258,8 +263,8 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
         const [card] = (await http().get('/leader-meetings').expect(200)).body.meetings;
         expect(card.editors.admins.map((p: { name: string }) => p.name)).toEqual(['Maya Kusuma']);
         expect(card.editors.coreLeaders.map((p: { name: string }) => p.name)).not.toContain('Maya Kusuma');
-        expect(card.editors.coreLeaderCount).toBe(4);
-        // Each editor says whether they are tagged, so the card draws exactly the four it counts.
+        expect(card.editors.coreLeaderCount).toBe(3);
+        // Each editor says whether they are tagged, so the card draws exactly the three it counts.
         const drawn = [card.editors.owner, ...card.editors.admins, ...card.editors.coreLeaders];
         expect(drawn.filter((p: { tagged: boolean }, i: number) => i > 0 && p.tagged)).toHaveLength(card.editors.coreLeaderCount);
         expect(card.editors.admins[0].tagged).toBe(true);

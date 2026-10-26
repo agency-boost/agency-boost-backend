@@ -9,9 +9,7 @@ import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { UNIT_DASHBOARD_CORRECTION_REASON } from '@/domain/constants';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
-import {
-  declaredPermissions, productionPipe, session, StubAuth, SUPER_ADMIN,
-} from '../../../test/http-permissions';
+import { declaredPermissions, NO_CLASS, productionPipe, session, StubAuth, SUPER_ADMIN } from '../../../test/http-permissions';
 import { listenOnLoopback } from '../../../test/listen';
 import { buildCoachingOffice, ROSTER_NOW, type CoachingOffice, type Who } from '../../../test/coaching-office';
 import { seedUnitLeads, UNIT_MONTH } from '../../../test/unit-office';
@@ -144,7 +142,9 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
 
     it('P15-T1 AC-1 negative: a membership on no rung the matrix names, or still pending, is refused by the guard', async () => {
       const agus = office.as('AGUS');
-      session.current = new RequestContext('u-x', 'none', { ...agus.membership!, orgLevelCode: 'NOT_A_RUNG' });
+      session.current = new RequestContext('u-x', 'none', {
+        ...agus.membership!, orgLevelCode: 'NOT_A_RUNG', hierarchyRole: NO_CLASS,
+      });
       expect((await dashboard().expect(403)).body.error).toMatchObject({ code: 'PERM_DENIED', details: { permission: 'unit_dashboard:read' } });
       session.current = new RequestContext('u-x', 'none', { ...agus.membership!, status: 'pending' });
       expect((await dashboard().expect(403)).body.error.code).toBe('PERM_DENIED');

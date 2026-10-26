@@ -31,12 +31,8 @@ export const SUBSCRIPTION = {
   MAX_LEADERS_MAX: 10_000,
 } as const;
 
-/**
- * **What a leader is, for the leader limit** (ADR-0113 §1): the rungs whose active members count
- * towards *Leaders used*. The Owner counts at the AB rung they are created on, and an Admin at
- * whichever of the two they stand on.
- *
- * Not ADR-0087's *leader* — anybody with direct reports — which governs coaching, the landing and
- * the nav. An AAB with nobody under them counts here; an Agent with a direct report does not.
+/*
+ * `LEADER_RUNG_CODES` (`['AB', 'AAB']`) stood here until P18.8-T1. What the leader limit counts is now a
+ * class, not a code — `LEADER_CLASSES` in `leader-tier.ts` (ADR-0156 §4) — so a leader on a rung a company
+ * named itself is counted too.
  */
-export const LEADER_RUNG_CODES = ['AB', 'AAB'] as const;

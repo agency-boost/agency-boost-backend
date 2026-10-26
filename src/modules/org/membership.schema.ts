@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { baseSchemaOptions } from '@/common/schema/base.schema';
+import { WORK_STATUSES, type WorkStatus } from '@/domain/constants';
 
 export type MembershipDocument = HydratedDocument<Membership>;
 
@@ -43,11 +44,14 @@ export class Membership {
   userId!: string;
 
   /**
-   * `KPM0417-001`. Server-issued from the tenant counter and immutable: the monthly
-   * production import joins on it, so changing one silently breaks the attribution of
-   * every row already imported under the old value.
+   * **A copy of `users.agentCode`**, the producer id the person's insurer issued them (ADR-0017),
+   * written once when the membership is made and never minted here. It was `KPM0417-001`, issued
+   * from the tenant counter, until 2026-09-08; that format is gone. Digits only on every new code
+   * since ADR-0158 §4 — a code already held keeps its letters.
    *
-   * Unique within the office, not globally — two offices may both have a `-001`.
+   * Immutable: the monthly production import joins on it, so changing one silently breaks the
+   * attribution of every row already imported under the old value. Unique where it is owned,
+   * `(companyId, agentCode)` on `users`; the index below serves the roster's search.
    */
   @Prop({ type: String, required: true })
   agentCode!: string;
@@ -99,28 +103,27 @@ export class Membership {
    * has to be here rather than joined because `ContextResolver` reads it on **every
    * request**, and a third lookup on that path is not free.
    *
-   * This is what a hierarchy permission grant is compared against since `P4-T9`. `role`
-   * below is the enum it used to be compared against, and an enum of three fixed names
-   * cannot describe a ladder a second insurer has not published yet.
+   * A hierarchy permission grant was compared against this from `P4-T9` until ADR-0156,
+   * and a rung a company named itself therefore held nobody's rights. Grants read the
+   * class below now; this is what the badge and the config bound to rungs read.
    */
   @Prop({ type: String, required: true, uppercase: true, trim: true })
   orgLevelCode!: string;
 
   /**
-   * **Derived from `orgLevelId`, never written on its own.**
+   * **The class, derived from the rung's leader tier, never written on its own** (ADR-0156).
    *
-   * **No longer an authorisation input** (P4-T9). Permission grants compare against
-   * `orgLevelCode`; this is read by the services that sort, group and label — the org
-   * tree, the directory, the unit dashboard — where a stable three-value enum is a
-   * convenience rather than a constraint.
+   * *Senior Leader* → `ab`, *Associate Leader* → `aab`, none → `agent`, whatever the rung's
+   * code. **The authorisation input again since ADR-0156**: a hierarchy grant matches the
+   * class, so a custom rung holds its tier's rights; *Leaders used* counts `ab` and `aab`;
+   * the Owner's agency and unit partitions read it; and the services that sort, group and
+   * label — the org tree, the directory, the unit dashboard — read it as they always did.
    *
-   * It stays because removing the *field* is a data migration across seven services, and
-   * because v1 seeds exactly one ladder so the two are one-to-one. What P4-T9 removed is
-   * the part that mattered: an enum of three fixed names deciding who may do what, in a
-   * product whose ladder is company configuration (ADR-0012).
+   * It was derived from the rung's code lower-cased from P3.5-T8 until P18.8-T1, which made
+   * it one-to-one with v1's one ladder and meaningless for any other (OD-50, narrowed).
    *
    * Every write goes through `HierarchyService`, which sets it from the resolved level's
-   * `code`. Setting it directly is how the two come to disagree.
+   * tier. Setting it directly is how the two come to disagree.
    */
   @Prop({ type: String, enum: ['ab', 'aab', 'agent'], required: true })
   role!: HierarchyRole;
@@ -175,6 +178,19 @@ export class Membership {
     default: () => ({ isKpmAdmin: false, grantedByUserId: null, grantedAt: null, revokedAt: null }),
   })
   adminAccess!: AdminAccess;
+
+  /**
+   * ***Full-time* or *part-time*: how this person works in this office** (ADR-0158 §1, P18.8-T4).
+   *
+   * On the membership, not the account, because somebody may work one way here and another way in an
+   * office they join later. **Optional**: a member who arrived before it has none, which a screen reads
+   * as *Not recorded*, and they set it on `/profile`. Written by the roster import from its
+   * `workStatus` column, and copied by `HierarchyService` from `users.registeredWorkStatus` — what a
+   * person said when they registered — onto whichever membership they are given. The person's own to
+   * change (`PATCH /auth/me`); the Owner and the Admins read it on the person page.
+   */
+  @Prop({ type: String, enum: [...WORK_STATUSES, null], default: null })
+  workStatus!: WorkStatus | null;
 
   /** Who brought them in, and from which recruitment lead. Attribution, set at join. */
   @Prop({ type: String, default: null })

@@ -98,13 +98,14 @@ describe('the office’s ratios, over a member’s last 30 days (P10-T2, P10-T3)
   describe('AC-3 — judged against the office’s own benchmark (testing obligation 5)', () => {
     it('reads one office against its raised benchmark, and leaves the other on the default', async () => {
       for (const kpmId of [KPM_A, KPM_B]) {
-        await day(TODAY, { SELL_SUBMISSION: 2, SELL_PRESENTATION: 10 }, { kpmId, membershipId: `mem-${kpmId}` });
+        await day(TODAY, { SELL_SUBMISSION: 4, SELL_PRESENTATION: 10 }, { kpmId, membershipId: `mem-${kpmId}` });
       }
       const ssr = (await wired.ratios.list(owner())).find((r) => r.code === 'SELLING_SUCCESS_RATE')!;
-      await wired.ratios.update(owner(), ssr.id, { benchmark: 0.25 });
+      await wired.ratios.update(owner(), ssr.id, { benchmark: 0.45 });
 
-      expect((await byCode(agent(KPM_A))).SELLING_SUCCESS_RATE).toMatchObject({ value: 0.2, benchmark: 0.25, status: 'alert' });
-      expect((await byCode(agent(KPM_B))).SELLING_SUCCESS_RATE).toMatchObject({ value: 0.2, benchmark: 0.15, status: 'success' });
+      expect((await byCode(agent(KPM_A))).SELLING_SUCCESS_RATE).toMatchObject({ value: 0.4, benchmark: 0.45, status: 'alert' });
+      // The default is 30% since ADR-0160 §2.
+      expect((await byCode(agent(KPM_B))).SELLING_SUCCESS_RATE).toMatchObject({ value: 0.4, benchmark: 0.3, status: 'success' });
     });
   });
 

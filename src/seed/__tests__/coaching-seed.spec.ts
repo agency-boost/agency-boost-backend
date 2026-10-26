@@ -2,7 +2,8 @@ import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { addDays } from '@/common/time/local-day';
-import { CASCADE_ACTIVITY_CODES, PERFORMANCE } from '@/domain/constants';
+import { AGENT_CODE_PATTERN, CASCADE_ACTIVITY_CODES, GENDERS, PERFORMANCE, WORK_STATUSES } from '@/domain/constants';
+import { birthDateProblem, joinMonthProblem } from '@/modules/users/personal-data';
 import { PasswordService } from '@/modules/auth/password.service';
 import { annualTargetOf, cascadeCounts } from '@/modules/goals/goal-cascade';
 import { EDGE_EVENTS } from '@/modules/org/membership-history.schema';
@@ -22,13 +23,14 @@ import {
 import { ROSTER_PLAN, seedObjectId, type CoachingFixture, type LastOneToOne } from '../coaching-fixture';
 import { seedDemo, type SeedResult } from '../demo';
 import { backfillCoachingSnapshots } from '../coaching-snapshots';
-import { SUBSCRIPTION_FIXTURE_PEOPLE } from '../subscription-fixture';
+import { LEADER_LIMIT_PEOPLE, SUBSCRIPTION_FIXTURE_PEOPLE } from '../subscription-fixture';
 import { TEMPLATE_FIXTURE_PEOPLE } from '../template-fixture';
 import { REPORTING_CAST } from '../reporting-fixture';
 
-/** The people the subscription fixture makes, by pronoun. */
+/** The people the subscription fixture makes, by pronoun — 0603's leaders past its limit among them (ADR-0157). */
 const subscriptionPeople = (pronoun: 'she' | 'he') =>
-  Object.values(SUBSCRIPTION_FIXTURE_PEOPLE).filter((p) => p.pronoun === pronoun).map((p) => p.email);
+  [...Object.values(SUBSCRIPTION_FIXTURE_PEOPLE), ...LEADER_LIMIT_PEOPLE]
+    .filter((p) => p.pronoun === pronoun).map((p) => p.email);
 /** The people the template fixture makes — office 0701, started Empty — by pronoun. */
 const templatePeople = (pronoun: 'she' | 'he') =>
   Object.values(TEMPLATE_FIXTURE_PEOPLE).filter((p) => p.pronoun === pronoun).map((p) => p.email);
@@ -150,7 +152,7 @@ const WOMEN = [
   'admin@kpm0417.test', 'sari@kpm0417.test', 'dewi@kpm0417.test', 'rina@kpm0417.test', 'pending@kpm0417.test',
   'removed@kpm0417.test', 'indah@kpm0417.test', 'siti@kpm0417.test', 'novi@kpm0417.test', 'agent@kpm0555.test',
   'maya@agencyboost.test', 'newcomer@agencyboost.test',
-  // P13.2: offices 0601 and 0602 (`subscription-fixture.ts`).
+  // P13.2: offices 0601 and 0602, and P18.8's 0603 (`subscription-fixture.ts`).
   ...subscriptionPeople('she'),
   // P13.2-T6: office 0701 (`template-fixture.ts`).
   ...templatePeople('she'),
@@ -317,14 +319,14 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     }
   });
 
-  it("P11-T2 AC-1 the new people follow the seed's patterns: an email at the office, the field password, a PRU code of their own", async () => {
+  it("P11-T2 AC-1 the new people follow the seed's patterns: an email at the office, the field password, a code of their own", async () => {
     const passwords = new PasswordService();
     const codes = new Set<string>();
     for (const person of COACHING_CAST) {
       const account = await col('users').findOne({ email: person.email });
       expect(person.email).toMatch(/^[a-z]+@kpm0417\.test$/);
       expect(account).toMatchObject({ fullName: person.fullName, agentCode: person.agentCode, status: 'active' });
-      expect(person.agentCode).toMatch(/^PRU-8\d{4}$/);
+      expect(person.agentCode).toMatch(/^8\d{4}$/);
       expect(await passwords.verify(account!.passwordHash, 'demo password field')).toBe(true);
       expect((await memberOf(person.email)).agentCode).toBe(person.agentCode);
       codes.add(person.agentCode);
@@ -333,8 +335,35 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     const all = await col('users').find({ agentCode: { $type: 'string' } }).toArray();
     expect(new Set(all.map((u) => u.agentCode)).size).toBe(all.length);
     // The accounts the seed had keep the codes a fresh seed has always given them.
-    expect(await col('users').findOne({ email: 'owner@kpm0417.test' })).toMatchObject({ agentCode: 'PRU-80003' });
-    expect(await col('users').findOne({ email: 'newcomer@agencyboost.test' })).toMatchObject({ agentCode: 'PRU-80019' });
+    expect(await col('users').findOne({ email: 'owner@kpm0417.test' })).toMatchObject({ agentCode: '80003' });
+    expect(await col('users').findOne({ email: 'newcomer@agencyboost.test' })).toMatchObject({ agentCode: '80019' });
+  });
+
+  it('P18.8-T4 every seeded person records the four, as the import and registration would take them, and the operators none', async () => {
+    const today = '2026-10-02';
+    const people = await col('users').find({ deletedAt: null }).toArray();
+    expect(people.length).toBeGreaterThan(20);
+    for (const u of people) {
+      if (u.platformRole === 'super_admin') {
+        expect({ email: u.email, dateOfBirth: u.dateOfBirth ?? null, gender: u.gender ?? null }).toEqual({
+          email: u.email, dateOfBirth: null, gender: null,
+        });
+        continue;
+      }
+      expect({ email: u.email, dob: birthDateProblem(u.dateOfBirth, today), join: joinMonthProblem(u.companyJoinMonth, today) })
+        .toEqual({ email: u.email, dob: null, join: null });
+      expect(GENDERS).toContain(u.gender);
+      // Digits on every code the seed writes (ADR-0158 §4).
+      expect({ email: u.email, agentCode: AGENT_CODE_PATTERN.test(u.agentCode) }).toEqual({ email: u.email, agentCode: true });
+    }
+    const memberships = await col('memberships').find({ deletedAt: null }).toArray();
+    expect(memberships.filter((m) => !WORK_STATUSES.includes(m.workStatus)).map((m) => String(m._id))).toEqual([]);
+    // Both ways of working are in the demo office, and the gender follows the pronoun the seed gives.
+    const kpmId = await office();
+    expect(new Set(memberships.filter((m) => m.kpmId === kpmId).map((m) => m.workStatus))).toEqual(new Set(WORK_STATUSES));
+    for (const person of COACHING_CAST) {
+      expect((await col('users').findOne({ email: person.email }))!.gender).toBe(person.pronoun === 'she' ? 'female' : 'male');
+    }
   });
 
   it('P11-T7 the demo people have their own pronouns, so coaching writes she and he; the operators keep they', async () => {
@@ -794,6 +823,34 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
         .countDocuments({ userId: String(member.userId), templateId: NotificationTemplate.COACHING_SESSION_FINALIZED });
       expect({ email, finalizes: finalizes > 1 }).toEqual({ email, finalizes: true });
     }
+  });
+
+  /*
+   * P18.8-T15 AC-3 (the client's UI review, UI-003): Agus's inbox said *Wilson Tanoto set your goal* seven times beside
+   * a Summary saying he has no goal. A *set your goal* notice is written for a goal a leader saved, and nothing else.
+   */
+  it('P18.8-T15 AC-3 writes a set-your-goal notice only for a goal a leader actually saved, by the leader who saved it', async () => {
+    const kpmId = await office();
+    const notices = await col('notifications').find({ kpmId, templateId: NotificationTemplate.GOAL_SET_BY_LEADER }).toArray();
+    expect(notices.length).toBeGreaterThan(0);
+    for (const notice of notices) {
+      const goal = await col('goals').findOne({
+        kpmId, membershipId: notice.membershipId, period: notice.payload.period, deletedAt: null,
+      });
+      expect(goal).not.toBeNull();
+      expect(goal!.savedByMembershipId).not.toBe(goal!.membershipId);
+      const leader = await col('memberships').findOne({ _id: new mongoose.Types.ObjectId(String(goal!.savedByMembershipId)) });
+      const leaderUser = await col('users').findOne({ _id: new mongoose.Types.ObjectId(String(leader!.userId)) });
+      expect(notice.payload.byName).toBe(leaderUser!.fullName);
+    }
+    // Each goal set for somebody has its one notice — Dewi's by Agus and Novi's by Arief among them.
+    const setForThem = await col('goals')
+      .find({ kpmId, deletedAt: null, $expr: { $ne: ['$savedByMembershipId', '$membershipId'] } }).toArray();
+    expect(new Set(notices.map((n) => n.membershipId))).toEqual(new Set(setForThem.map((g) => g.membershipId)));
+    expect(setForThem.map((g) => g.membershipId)).toEqual(expect.arrayContaining([ids.dewi, ids.novi]));
+    // Agus has no goal this year, and so no notice claiming one.
+    const agusUser = String(agus.userId);
+    expect(await col('notifications').countDocuments({ userId: agusUser, templateId: NotificationTemplate.GOAL_SET_BY_LEADER })).toBe(0);
   });
 
   it("P11-T2 AC-3 ticks name codes in the office's catalog, and each note's author leads its coachee", async () => {

@@ -2,7 +2,7 @@ import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { localDayOf } from '@/common/time/local-day';
-import { GOAL_DEFAULTS, TIME } from '@/domain/constants';
+import { GOAL_DEFAULT_RATIOS, GOAL_DEFAULTS, TIME } from '@/domain/constants';
 
 /**
  * The five-step cascade (P8-T2).
@@ -34,7 +34,10 @@ export interface CascadeInputs {
   closingRatePct: number;
 }
 
-/** What the five steps produce. Weekly figures are the screen's `≈ n/week` sub-lines. */
+/**
+ * What the five steps produce. Weekly figures are the screen's `≈ n/week` sub-lines: policies to one decimal
+ * (ADR-0160 §5), appointments and leads whole.
+ */
 export interface CascadeResult {
   /** Resolved from whichever entry mode was used — the two produce one number. */
   annualApeTargetMinor: number;
@@ -130,7 +133,7 @@ export function computeCascade(inputs: CascadeInputs): CascadeResult {
     remainingApeMinor: remaining,
     monthlyApeTargetMinor: monthly,
     policiesPerMonth: policies,
-    policiesPerWeek: weeklyOf(policies),
+    policiesPerWeek: policiesPerWeekOf(policies),
     appointmentsPerMonth: appointments,
     appointmentsPerWeek: weeklyOf(appointments),
     leadsPerMonth: leads,
@@ -167,9 +170,60 @@ export function cascadeCounts(
   return { policies, appointments, leads };
 }
 
-/** `≈ n/week` (`Overall.html:5818`). Ceil, like every other step. */
+/**
+ * `≈ n/week` for appointments and leads (`Overall.html:5818`). Ceil, like every other step: they are counts to
+ * do, and a target that rounds down is a target that is missed.
+ */
 export function weeklyOf(perMonth: number): number {
   return Math.ceil(perMonth / TIME.WEEKS_PER_MONTH);
+}
+
+/**
+ * **Policies per week, to one decimal** (ADR-0160 §5, OD-183; P18.8-T10 AC-2): the monthly policies ÷
+ * `WEEKS_PER_MONTH`, rounded to a tenth. Six a month is **1.4**, not *≈ 2*, which is what the client asked: a
+ * week's share of six policies is not two of them. The same 4.33 as every weekly figure in the product (invariant
+ * §7) — the client's example divided by four, and one constant beats a second for one figure.
+ *
+ * A number, not a string: a whole one comes back whole (`2`, never `2.0`), and the screen writes it with a
+ * decimal point. Step 3's *Policies per week* and step 5's *Submission polis* are this one figure.
+ */
+export function policiesPerWeekOf(perMonth: number): number {
+  return Math.round((perMonth / TIME.WEEKS_PER_MONTH) * 10) / 10;
+}
+
+/** One of the office's ratios, as the goal's defaults read it. */
+export interface BenchmarkSource {
+  code: string;
+  benchmark: number;
+  comparison: string;
+}
+
+/**
+ * **The two conversion percentages a new plan opens on** (ADR-0160 §3, OD-182; P18.8-T10 AC-1): *Closing
+ * rate* is the office's *Selling success rate* benchmark and *Appointment to Sales meeting* its *Set
+ * appointment to meeting* benchmark, by code (`GOAL_DEFAULT_RATIOS`), as percentages to one decimal — 30 and 50
+ * with the seeded benchmarks.
+ *
+ * **`GOAL_DEFAULTS` where the office has no usable one**: no such ratio, a balance rule (judged in points, so no
+ * proportion), or a benchmark that is no percentage a plan can use — above 100% (an Owner's `1.50` meetings an
+ * appointment) or none at all. A default the cascade refused would leave the screen with no plan to open on.
+ *
+ * Only the **defaults**: a saved goal keeps its own percentages, which stay the agent's (ADR-0048).
+ */
+export function defaultRates(
+  ratios: readonly BenchmarkSource[],
+): Pick<CascadeInputs, 'leadsToApptPct' | 'closingRatePct'> {
+  const pctOf = (code: string, fallback: number) => {
+    const ratio = ratios.find((r) => r.code === code && r.comparison === 'gte');
+    if (!ratio) return fallback;
+    // Rounded to a tenth through the integer, so 0.3 reads 30 rather than 30.000000000000004.
+    const pct = Math.round(ratio.benchmark * 1000) / 10;
+    return pct > 0 && pct <= 100 ? pct : fallback;
+  };
+  return {
+    leadsToApptPct: pctOf(GOAL_DEFAULT_RATIOS.leadsToApptPct, GOAL_DEFAULTS.LEADS_TO_APPOINTMENT_PCT),
+    closingRatePct: pctOf(GOAL_DEFAULT_RATIOS.closingRatePct, GOAL_DEFAULTS.CLOSING_RATE_PCT),
+  };
 }
 
 /**
@@ -189,9 +243,10 @@ function requireUsableAssumptions(inputs: CascadeInputs): void {
   if (!(inputs.caseSizeMinor > 0)) {
     violations.push('Average case size must be above zero: it is what a policy is worth.');
   }
+  // The fields' own labels on Goal Settings (ADR-0160 §4), so the refusal names what the reader sees.
   for (const [field, label] of [
-    ['leadsToApptPct', 'Leads that become an appointment'],
-    ['closingRatePct', 'Appointments that become a closing'],
+    ['leadsToApptPct', 'Appointment to Sales meeting'],
+    ['closingRatePct', 'Closing rate'],
   ] as const) {
     const value = inputs[field];
     if (!(value > 0) || value > 100) {

@@ -40,11 +40,11 @@ export class SaveGoalDto {
   @Allow()
   caseSizeMinor!: number;
 
-  @ApiProperty({ type: Number, example: 30, description: 'Per cent of contacted leads that become an appointment.' })
+  @ApiProperty({ type: Number, example: 30, description: '*Appointment to Sales meeting*: per cent of set appointments that become a sales meeting.' })
   @Allow()
   leadsToApptPct!: number;
 
-  @ApiProperty({ type: Number, example: 30, description: 'Per cent of appointments that become a closing.' })
+  @ApiProperty({ type: Number, example: 30, description: '*Closing rate*: per cent of sales meetings that become a submitted policy.' })
   @Allow()
   closingRatePct!: number;
 

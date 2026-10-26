@@ -7,7 +7,7 @@ import {
 import {
   InboxDto, NotificationReadStateDto, UnreadCountDto,
 } from '@/modules/notifications/notification.response.dto';
-import { DeletedLeadDto, LeadPageDto, LeadResponseDto } from '@/modules/leads/lead.response.dto';
+import { DeletedLeadDto, LeadOrderDto, LeadPageDto, LeadResponseDto } from '@/modules/leads/lead.response.dto';
 import { GoalResponseDto } from '@/modules/goals/goal.response.dto';
 import {
   CorrectionResultDto, HistoryDto, ImportResultDto, MonthStateDto, MonthViewDto, TemplateFileDto,
@@ -15,7 +15,7 @@ import {
 } from '@/modules/production/production.response.dto';
 import {
   DelegatedAdminDto, DirectoryMemberDto, DirectoryPageDto, GroupSummaryDto, InvitePreviewDto,
-  JoinStateDto, KpmDirectoryEntryDto, LeaderChoiceDto, MemberTagsDto,
+  JoinStateDto, KpmDirectoryEntryDto, LeaderChoiceDto, LeaderLimitRequestRowDto, MemberTagsDto,
   MyLeaderCodeDto, OrgTreeDto, PendingRequestDto, RoleChangeEntryDto, RoutingChoiceDto, TeamMemberDto,
   UntaggedMemberDto,
 } from '@/modules/org/org.response.dto';
@@ -28,7 +28,8 @@ import {
 } from '@/modules/tenants/platform.response.dto';
 import {
   ActivityCategoryDto, ActivityTypeDto, LeadPipelineDto, LeadStatusDto, RatioDefinitionDto,
-  CompanyTemplateDto, NamedTemplateDto, PublishStateDto, SavedOfficeTemplateDto, TenantConfigDto,
+  ActivityBindingDto, CompanyTemplateDto, NamedTemplateDto, OfficeActivityBindingDto, PublishStateDto,
+  SavedOfficeTemplateDto, TenantConfigDto,
 } from '@/modules/config/config.response.dto';
 import {
   ModuleContentDto, SignedUploadDto, SignedUrlDto, TrainingCategoryDto,
@@ -235,6 +236,10 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_updateType: { type: ActivityTypeDto },
   TenantConfigController_archiveType: { type: ActivityTypeDto },
   TenantConfigController_restoreType: { type: ActivityTypeDto },
+  // P18.9-T2 (ADR-0163): an office's activity binding — the Owner's and Admin's read, the Super Admin's read and write.
+  ActivityBindingReadController_read: { type: ActivityBindingDto },
+  ActivityBindingAdminController_read: { type: OfficeActivityBindingDto },
+  ActivityBindingAdminController_update: { type: OfficeActivityBindingDto },
   TenantConfigController_listLeadStatuses: { type: LeadPipelineDto, isArray: true },
   TenantConfigController_createLeadStatus: { type: LeadStatusDto },
   TenantConfigController_reorderLeadStatuses: { type: LeadPipelineDto },
@@ -255,6 +260,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   LeadController_list: { type: LeadPageDto },
   LeadController_read: { type: LeadResponseDto },
   LeadController_create: { type: LeadResponseDto },
+  LeadController_reorder: { type: LeadOrderDto },
   LeadController_update: { type: LeadResponseDto },
   LeadController_setStatus: { type: LeadResponseDto },
   LeadController_setOutcome: { type: LeadResponseDto },
@@ -396,6 +402,13 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   OrgController_changeRole: { type: TeamMemberDto, isArray: true },
   OrgController_remove: { type: TeamMemberDto, isArray: true },
   OrgController_roleLog: { type: RoleChangeEntryDto, isArray: true },
+  // ADR-0157: a leader past the office's limit, asked about and decided.
+  OrgController_leaderLimitRequests: { type: LeaderLimitRequestRowDto, isArray: true },
+  OrgController_cancelLeaderLimitRequest: { type: LeaderLimitRequestRowDto, isArray: true },
+  OrgController_requestPastLeaderLimit: { type: LeaderLimitRequestRowDto },
+  LeaderLimitRequestAdminController_queue: { type: LeaderLimitRequestRowDto, isArray: true },
+  LeaderLimitRequestAdminController_approve: { type: LeaderLimitRequestRowDto, isArray: true },
+  LeaderLimitRequestAdminController_decline: { type: LeaderLimitRequestRowDto, isArray: true },
   OrgController_orgTree: { type: OrgTreeDto },
   OrgController_listAdmins: { type: DelegatedAdminDto, isArray: true },
   OrgController_grantAdmin: { type: DelegatedAdminDto, isArray: true },
@@ -406,6 +419,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   OrgController_archiveGroup: { type: GroupSummaryDto, isArray: true },
   OrgController_readTags: { type: MemberTagsDto },
   OrgController_tagMember: { type: MemberTagsDto },
+  OrgController_setCoreLeader: { type: MemberTagsDto },
   OrgController_list: { type: DirectoryPageDto },
   OrgController_read: { type: DirectoryMemberDto },
   OrgController_reports: { type: DirectoryMemberDto, isArray: true },

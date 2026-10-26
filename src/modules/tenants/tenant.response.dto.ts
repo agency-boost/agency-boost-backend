@@ -291,6 +291,12 @@ export class OrgLevelRowDto implements OrgLevelRow {
   @ApiProperty({ type: Number })
   displayOrder!: number;
 
+  @ApiProperty({
+    enum: ['senior', 'associate'], type: String, nullable: true,
+    description: '*Senior Leader*, *Associate Leader*, or `null` — *Not a leader* (ADR-0156).',
+  })
+  leaderTier!: 'senior' | 'associate' | null;
+
   @ApiProperty({ enum: ['active', 'archived'], type: String })
   status!: 'active' | 'archived';
 
@@ -302,7 +308,11 @@ export class OrgLevelRowDto implements OrgLevelRow {
 
 /** The roster template's header row, so a client can offer the download. */
 export class RosterTemplateDto {
-  @ApiProperty({ type: String, example: 'fullName,email,agentCode,role,leaderAgentCode' })
+  @ApiProperty({
+    type: String,
+    example: 'fullName,email,agentCode,role,leaderAgentCode,dateOfBirth,companyJoinMonth,workStatus,gender',
+    description: 'Nine columns: the four a person records follow the five, each required (ADR-0158).',
+  })
   header!: string;
 
   @ApiProperty({ type: [String] })

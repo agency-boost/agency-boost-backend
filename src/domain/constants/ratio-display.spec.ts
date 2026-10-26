@@ -66,7 +66,8 @@ describe('defaultDisplayUnitFor', () => {
         SELLING_SUCCESS_RATE: 'percent',
         RECRUITMENT_SUCCESS_RATE: 'percent',
         LEADS_PER_ACTIVITY: 'decimal',
-        MEETING_PER_APPROACH: 'decimal',
+        // *Set appointment to meeting*, a share of the appointments set (ADR-0160 §2).
+        MEETING_PER_APPROACH: 'percent',
       });
   });
 

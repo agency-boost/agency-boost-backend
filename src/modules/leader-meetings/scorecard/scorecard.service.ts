@@ -16,16 +16,13 @@ import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-d
 import {
   ProductionReadings, type MonthCells, type MonthLedger, type OfficeMonth,
 } from '@/modules/production/production-readings';
-import { AGENCY_RUNG, UNIT_RUNG } from '@/modules/reporting/agency-partition';
+import { AGENCY_CLASS, AGENT_CLASS, UNIT_CLASS } from '@/modules/reporting/agency-partition';
 import { shiftMonth } from '@/modules/reporting/office-figures';
 import { OfficePeople, type OfficePerson } from '@/modules/reporting/office-people';
 import {
   COLUMN_KEYS, MONTH_COLUMN_KEYS, type ColumnKey, type ComputedScorecard, type ComputedScorecardRow,
   type RowKey, type ScorecardCell, type ScorecardChips, type ScorecardInput, type ScorecardUnit,
 } from './scorecard.types';
-
-/** The seeded ladder's junior rung: *# of agents* counts it (`kpm-analytics.service.ts` reads the same code). */
-const AGENT_RUNG = 'AGENT';
 
 /** A column's period: its first day, and the day it ends — the earliest of its own last day, the meeting's and today. */
 interface Period {
@@ -214,18 +211,19 @@ export class LeaderScorecardService {
 
   /**
    * **The chips**, on the *This Month* period's last day: `OFFICE_HEADCOUNT` — the same function, on the same day, as
-   * the *Manpower* row's *This Month* cell — and its members by rung code, as the Overview's composition counts them.
-   * *# of units* is the office's AB agencies (D-units), one per member on the `AB` rung.
+   * the *Manpower* row's *This Month* cell — and its members by class (ADR-0156), as `kpm-analytics.service.ts`
+   * counts them: a *Senior Leader* rung's members are ABs, whatever the company called it. *# of units* is the
+   * office's AB agencies (D-units), one per member of the `ab` class.
    */
   private chips(everyone: readonly OfficePerson[], endOfDay: Date): ScorecardChips {
     const members = everyone.filter((p) => memberAt(p, endOfDay));
-    const on = (code: string) => members.filter((p) => p.orgLevelCode === code).length;
+    const of = (role: string) => members.filter((p) => p.role === role).length;
     return {
       manpower: officeHeadcount(everyone, endOfDay),
-      agents: on(AGENT_RUNG),
-      units: on(AGENCY_RUNG),
-      ab: on(AGENCY_RUNG),
-      aab: on(UNIT_RUNG),
+      agents: of(AGENT_CLASS),
+      units: of(AGENCY_CLASS),
+      ab: of(AGENCY_CLASS),
+      aab: of(UNIT_CLASS),
     };
   }
 

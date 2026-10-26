@@ -37,6 +37,15 @@ export class CompanyResponseDto {
       + 'and every Company template tab starts empty rather than from the platform\'s presets.',
   })
   usesPlatformDefaults!: boolean;
+
+  @ApiProperty({
+    type: String,
+    enum: ['insurer', 'template'],
+    description:
+      '`insurer` for every company people work for. `template` for the one Template library, which holds '
+      + 'the templates a new company and a new office copy: nobody registers under it, and it holds no office.',
+  })
+  kind!: 'insurer' | 'template';
 }
 
 /** One row of the append-only platform log. Read-only by construction — there is no edit. */

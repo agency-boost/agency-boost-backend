@@ -56,9 +56,12 @@ import {
   MembershipHistory, MembershipHistorySchema,
 } from '@/modules/org/membership-history.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import { ProfileLineReader } from '@/modules/org/profile-line';
 import {
-  GroupRepository, JoinRequestRepository, MembershipHistoryRepository,
+  GroupRepository, JoinRequestRepository, LeaderLimitRequestRepository, MembershipHistoryRepository,
 } from '@/modules/org/org.repositories';
+import { LeaderLimitRequest, LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
+import { LeaderLimitRequestService } from '@/modules/org/leader-limit-request.service';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { DirectoryService } from '@/modules/org/directory.service';
 import { OrgController } from '@/modules/org/org.controller';
@@ -248,6 +251,8 @@ describe('auth and admin over HTTP', () => {
         // Phase 18: the roster's *Last activity* and *Last coached* read the log and the sessions.
         { name: ActivityLog.name, schema: ActivityLogSchema },
         { name: CoachingSession.name, schema: CoachingSessionSchema },
+        // P18.8-T2: `/members/:id/leader-limit-requests` and the Super Admin's queue are OrgController's.
+        { name: LeaderLimitRequest.name, schema: LeaderLimitRequestSchema },
         ]),
       ],
       controllers: [
@@ -305,6 +310,10 @@ describe('auth and admin over HTTP', () => {
     GroupRepository,
     JoinRequestRepository,
     MembershipHistoryRepository, HierarchyService, DirectoryService, OnboardingService, LeaderCodeService, ApprovalsService, RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService,
+        // P18.8-T6: the profile line's groups and office on `/auth/me`.
+        ProfileLineReader,
+        // P18.8-T2: the leader-limit requests OrgController answers.
+        LeaderLimitRequestRepository, LeaderLimitRequestService,
         AuthGuard, PermissionsGuard,
       ],
     }).compile();
@@ -361,6 +370,12 @@ describe('auth and admin over HTTP', () => {
    * fixture built in `beforeAll`.
    */
   let e2eCodeSeq = 0;
+  /** What a person records at registration (ADR-0158), required since P18.8-T4. */
+  const PERSONAL = {
+    dateOfBirth: '1990-03-15', companyJoinMonth: '2021-07', workStatus: 'full_time', gender: 'female',
+  } as const;
+  /** A fresh digits-only agent code (ADR-0158 §4), unique enough for one suite's run. */
+  const digits = () => `${Date.now() % 1_000_000_000}${Math.floor(Math.random() * 1000)}`.padStart(6, '1');
   async function anInsurer(): Promise<string> {
     const companies = app.get<Model<CompanyDocument>>(getModelToken(Company.name));
     // Named the thing the assertions below expect. A person and the office they own must
@@ -393,7 +408,7 @@ describe('auth and admin over HTTP', () => {
     await api().post('/api/v1/auth/register')
       .send({
         email, password: PASSWORD, fullName: 'Test Person',
-        companyId, agentCode: `PRU-${9000 + e2eCodeSeq}`,
+        companyId, agentCode: String(9000 + e2eCodeSeq), ...PERSONAL,
       }).expect(201);
 
     const users = app.get<Model<UserDocument>>(getModelToken(User.name));
@@ -497,7 +512,7 @@ describe('auth and admin over HTTP', () => {
       const res = await api().post('/api/v1/auth/register')
         .send({
           email: `num-${Math.random()}@kpm.test`, password: PASSWORD, fullName: 'N',
-          companyId, agentCode: 88213,
+          companyId, agentCode: 88213, ...PERSONAL,
         })
         .expect(400);
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
@@ -1271,7 +1286,8 @@ describe('auth and admin over HTTP', () => {
       });
       // Their insurer's producer id (ADR-0017), not a code the office minted. This
       // asserted /^KPM\d+-001$/ until 2026-09-08.
-      expect(res.body.members[0].agentCode).toMatch(/^PRU-\d+$/);
+      // Digits only on every new code since ADR-0158 §4.
+      expect(res.body.members[0].agentCode).toMatch(/^\d{3,32}$/);
       expect(res.body.nextCursor).toBeNull();
     });
 
@@ -1568,9 +1584,9 @@ describe('auth and admin over HTTP', () => {
       const submission = selling.types.find((t: { code: string }) => t.code === 'SELL_SUBMISSION');
 
       const type = await api().delete(`/api/v1/kpm/settings/activity-types/${submission.id}`).set(auth).expect(409);
-      expect(type.body.error).toMatchObject({ code: 'ACTIVITY_TYPE_RESERVED', details: { codes: ['SELL_SUBMISSION'] } });
+      expect(type.body.error).toMatchObject({ code: 'ACTIVITY_TYPE_BOUND', details: { codes: ['SELL_SUBMISSION'] } });
       const section = await api().delete(`/api/v1/kpm/settings/activity-categories/${selling.id}`).set(auth);
-      expect([section.status, section.body.error?.code]).toEqual([409, 'ACTIVITY_TYPE_RESERVED']);
+      expect([section.status, section.body.error?.code]).toEqual([409, 'ACTIVITY_TYPE_BOUND']);
       expect(section.body.error.details.codes).toEqual(['SELL_PRESENTATION', 'SELL_SUBMISSION']);
 
       // Renaming and describing it are the office's.
@@ -1783,27 +1799,31 @@ describe('auth and admin over HTTP', () => {
       return { auth, kpmId: String(kpm.body._id) };
     }
 
-    const file = (...rows: string[]) =>
-      ['fullName,email,agentCode,role,leaderAgentCode', ...rows].join('\n');
+    /** Each row gains the four a person records (ADR-0158), valid ones. */
+    const file = (...rows: string[]) => [
+      'fullName,email,agentCode,role,leaderAgentCode,dateOfBirth,companyJoinMonth,workStatus,gender',
+      ...rows.map((row) => `${row},1990-03-15,2021-07,full-time,female`),
+    ].join('\n');
 
     it('offers the template, on a route an :id would otherwise swallow', async () => {
       const { auth } = await anOffice();
       const res = await api().get('/api/v1/admin/tenants/roster-template').set(auth).expect(200);
-      expect(res.body.header).toBe('fullName,email,agentCode,role,leaderAgentCode');
+      expect(res.body.header).toBe(
+        'fullName,email,agentCode,role,leaderAgentCode,dateOfBirth,companyJoinMonth,workStatus,gender',
+      );
       // The same three rows as cells, for the paste box. A screen splitting the CSV out
-      // of `template` would be a second parser, disagreeing over the quoted row.
+      // of `template` would be a second parser, disagreeing over the quoted row. The rungs
+      // written AB, AAB and Agent since P18.8-T4 (ADR-0158 §5).
       expect(res.body.examples).toEqual([
-        ['Agus Prasetyo', 'agus@example.test', 'PRU-88001', 'ab', ''],
-        ['Puspita, Sari', 'sari@example.test', 'PRU-88002', 'aab', 'PRU-88001'],
-        ['Rina Wijaya', 'rina@example.test', 'PRU-88003', 'agent', 'PRU-88002'],
+        ['Agus Prasetyo', 'agus@example.test', '88001', 'AB', '', '1984-05-12', '2012-03', 'full-time', 'male'],
+        ['Puspita, Sari', 'sari@example.test', '88002', 'AAB', '88001', '1990-11-02', '2016-08', 'full-time', 'female'],
+        ['Rina Wijaya', 'rina@example.test', '88003', 'Agent', '88002', '1998-07-21', '2024-01', 'part-time', 'female'],
       ]);
     });
 
     it('previews without writing, then commits the whole file', async () => {
       const { auth, kpmId } = await anOffice();
-      const csv = file(
-        `Root,root-${Math.random()}@k.test,RT-${Math.random()},ab,`,
-      ).replace(/RT-0\./, 'RT-');
+      const csv = file(`Root,root-${Math.random()}@k.test,${digits()},ab,`);
 
       const preview = await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
         .set(auth).send({ rows: csv }).expect(200);
@@ -1822,7 +1842,7 @@ describe('auth and admin over HTTP', () => {
       // person signs in with it, and the product is shut to them until it is theirs.
       const { auth, kpmId } = await anOffice();
       const email = `imported-${Math.random()}@k.test`;
-      const csv = file(`Imported Person,${email},IMP-${Date.now()},ab,`);
+      const csv = file(`Imported Person,${email},${digits()},ab,`);
 
       const committed = await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
         .set(auth).send({ rows: csv }).expect(201);
@@ -1850,8 +1870,8 @@ describe('auth and admin over HTTP', () => {
     it('refuses the whole file for one bad row, and writes nothing', async () => {
       const { auth, kpmId } = await anOffice();
       const csv = file(
-        `Good,good-${Math.random()}@k.test,GD-${Date.now()},ab,`,
-        'Bad,not-an-email,BD-1,agent,',
+        `Good,good-${Math.random()}@k.test,${digits()},ab,`,
+        'Bad,not-an-email,101,agent,',
       );
 
       const refused = await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
@@ -1862,7 +1882,7 @@ describe('auth and admin over HTTP', () => {
       const roster = await api().get('/api/v1/admin/tenants').set(auth).expect(200);
       expect(roster.body.find((k: { _id: string }) => k._id === kpmId)).toBeDefined();
       const preview = await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
-        .set(auth).send({ rows: file(`Good,good2-${Math.random()}@k.test,GD2-${Date.now()},ab,`) })
+        .set(auth).send({ rows: file(`Good,good2-${Math.random()}@k.test,${digits()},ab,`) })
         .expect(200);
       expect(preview.body.willCreate).toBe(1);
     });
@@ -1879,7 +1899,7 @@ describe('auth and admin over HTTP', () => {
 
       await api().get('/api/v1/admin/tenants/roster-template').set(theirs).expect(200);
       const mine = await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
-        .set(theirs).send({ rows: file(`R,r-${Math.random()}@k.test,OW-${Date.now()},agent,`) })
+        .set(theirs).send({ rows: file(`R,r-${Math.random()}@k.test,${digits()},agent,`) })
         .expect(200);
       expect(mine.body.willCreate).toBe(1);
 
@@ -2202,8 +2222,14 @@ describe('auth and admin over HTTP', () => {
     it('validates the role rather than writing whatever arrives', async () => {
       const { asOwner, agent } = await officeWithAgent();
       const res = await api().patch(`/api/v1/members/${agent.membershipId}/role`)
-        .set(asOwner).send({ toRole: 'manager' }).expect(400);
+        .set(asOwner).send({ toRole: 'not a rung!' }).expect(400);
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
+
+      // A rung code's shape, since a company may add rungs (ADR-0156): one the ladder has not got is refused by
+      // the ladder, not by the shape.
+      const offLadder = await api().patch(`/api/v1/members/${agent.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'manager' }).expect(409);
+      expect(offLadder.body.error.code).toBe('ORG_LEVEL_NOT_ON_LADDER');
 
       await api().patch(`/api/v1/members/${agent.membershipId}/role`)
         .set(asOwner).send({ toRole: 'aab', note: 'dropped?' }).expect(400);
@@ -2624,9 +2650,10 @@ describe('auth and admin over HTTP', () => {
 
       const before = await api().get('/api/v1/members').set(one.as).expect(200);
 
+      // Groups alone: since ADR-0159 the Core Leader tag is a leader's, and these two are agents.
       for (const person of [one, two]) {
         await api().put(`/api/v1/members/${person.membershipId}/tags`).set(asOwner)
-          .send({ groupIds: [made.body[0].groupId], isCoreLeader: true }).expect(200);
+          .send({ groupIds: [made.body[0].groupId], isCoreLeader: false }).expect(200);
       }
 
       const after = await api().get('/api/v1/members').set(one.as).expect(200);
@@ -2675,6 +2702,114 @@ describe('auth and admin over HTTP', () => {
         .send({ groupIds: 'not-an-array', isCoreLeader: false }).expect(400);
       await api().put(`/api/v1/members/${ownerMembershipId}/tags`).set(asOwner)
         .send({ groupIds: [], isCoreLeader: 'yes' }).expect(400);
+    });
+  });
+
+  describe('the Core Leader and the profile line, over HTTP (P18.8-T5, P18.8-T6)', () => {
+    /** An office, its Owner, an AAB in the Owner's unit and an Agent. */
+    async function office() {
+      const sa = await makeUser(`sa-cl-${Math.random()}@agencyboost.test`, 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const owner = await makeUser(`owner-cl-${Math.random()}@kpm.test`);
+      const code = `${Math.floor(Math.random() * 9000) + 1000}`;
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({ companyId: await anInsurer(), code, branchName: 'Cempaka Putih' })
+        .expect(201);
+      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`).set(auth).send({ userId: owner.id }).expect(200);
+      const asOwner = { Authorization: `Bearer ${owner.accessToken}` };
+      const kpmId = String(kpm.body._id);
+      const joins = async () => {
+        const email = `cl-${Math.random()}@kpm.test`;
+        const user = await makeUser(email);
+        const as = { Authorization: `Bearer ${user.accessToken}` };
+        await api().post('/api/v1/join/kpm').set(as).send({ kpmId }).expect(200);
+        const pool = await api().get('/api/v1/join/untagged').set(asOwner).expect(200);
+        const mine = pool.body.find((row: { email: string }) => row.email === email);
+        await api().post(`/api/v1/join/untagged/${mine.membershipId}`).set(asOwner).expect(200);
+        return { as, membershipId: String(mine.membershipId) };
+      };
+      const leader = await joins();
+      await api().patch(`/api/v1/members/${leader.membershipId}/role`).set(asOwner)
+        .send({ toRole: 'aab', reason: 'Leads a unit' }).expect(200);
+      const agent = await joins();
+      return { kpmId, code, asOwner, leader, agent };
+    }
+
+    it('P18.8-T5 AC-2 refuses tagging an Agent on both routes, 400 CORE_LEADER_NOT_A_LEADER, and writes nothing', async () => {
+      const { asOwner, agent } = await office();
+      for (const res of [
+        await api().put(`/api/v1/members/${agent.membershipId}/core-leader`).set(asOwner).send({ isCoreLeader: true }),
+        await api().put(`/api/v1/members/${agent.membershipId}/tags`).set(asOwner).send({ groupIds: [], isCoreLeader: true }),
+      ]) {
+        expect([res.status, res.body.error.code]).toEqual([400, 'CORE_LEADER_NOT_A_LEADER']);
+      }
+      const tags = await api().get(`/api/v1/members/${agent.membershipId}/tags`).set(asOwner).expect(200);
+      expect(tags.body).toMatchObject({ isCoreLeader: false, canBeCoreLeader: false });
+    });
+
+    it('P18.8-T5 AC-1, AC-3 tags a leader from the row; the row, the tags and their session say so; untagging ends it', async () => {
+      const { asOwner, leader, agent } = await office();
+      const before = await api().get('/api/v1/auth/me').set(leader.as).expect(200);
+      expect(before.body.membership.isCoreLeader).toBe(false);
+
+      const tagged = await api().put(`/api/v1/members/${leader.membershipId}/core-leader`).set(asOwner)
+        .send({ isCoreLeader: true }).expect(200);
+      expect(tagged.body).toMatchObject({ membershipId: leader.membershipId, isCoreLeader: true, canBeCoreLeader: true });
+
+      const roster = (await api().get('/api/v1/members').set(asOwner).expect(200)).body.members as {
+        membershipId: string; isCoreLeader: boolean; canTagCoreLeader: boolean;
+      }[];
+      const row = (id: string) => roster.find((m) => m.membershipId === id)!;
+      expect(row(leader.membershipId)).toMatchObject({ isCoreLeader: true, canTagCoreLeader: true });
+      expect(row(agent.membershipId)).toMatchObject({ isCoreLeader: false, canTagCoreLeader: false });
+
+      expect((await api().get('/api/v1/auth/me').set(leader.as).expect(200)).body.membership.isCoreLeader).toBe(true);
+      await api().put(`/api/v1/members/${leader.membershipId}/core-leader`).set(asOwner).send({ isCoreLeader: false }).expect(200);
+      expect((await api().get('/api/v1/auth/me').set(leader.as).expect(200)).body.membership.isCoreLeader).toBe(false);
+    });
+
+    it('P18.8-T5 AC-2, AC-6 a leader, an Agent and another office’s Owner may not set it', async () => {
+      const mine = await office();
+      const theirs = await office();
+      for (const as of [mine.leader.as, mine.agent.as]) {
+        const res = await api().put(`/api/v1/members/${mine.leader.membershipId}/core-leader`).set(as).send({ isCoreLeader: true });
+        expect([res.status, res.body.error.details.permission]).toEqual([403, 'member:tag_core_leader']);
+      }
+      await api().put(`/api/v1/members/${mine.leader.membershipId}/core-leader`).set(theirs.asOwner)
+        .send({ isCoreLeader: true }).expect(404);
+      await api().put(`/api/v1/members/${mine.leader.membershipId}/core-leader`).set(mine.asOwner)
+        .send({ isCoreLeader: 'yes' }).expect(400);
+      expect((await api().get('/api/v1/auth/me').set(mine.leader.as).expect(200)).body.membership.isCoreLeader).toBe(false);
+    });
+
+    it('P18.8-T6 AC-1 /auth/me names the live tag groups A to Z and the office’s code and branch', async () => {
+      const { asOwner, leader, code } = await office();
+      const ownerMembershipId = (await api().get('/api/v1/members').set(asOwner).expect(200)).body.members
+        .find((m: { isKpmOwner: boolean }) => m.isKpmOwner).membershipId;
+      const make = async (name: string) => (await api().post('/api/v1/members/groups').set(asOwner)
+        .send({ name, ownerMembershipId }).expect(201)).body.find((g: { name: string }) => g.name === name).groupId as string;
+      const top = await make('Top Producers 2026');
+      const circle = await make('Mentoring Circle');
+      const retired = await make('Class of 2025');
+      await api().put(`/api/v1/members/${leader.membershipId}/tags`).set(asOwner)
+        .send({ groupIds: [top, circle, retired], isCoreLeader: true }).expect(200);
+      await api().delete(`/api/v1/members/groups/${retired}`).set(asOwner).expect(200);
+
+      const me = (await api().get('/api/v1/auth/me').set(leader.as).expect(200)).body.membership;
+      expect(me).toMatchObject({
+        isCoreLeader: true,
+        groups: ['Mentoring Circle', 'Top Producers 2026'],
+        office: { code, branch: 'Cempaka Putih' },
+      });
+      // The Owner: in no group, not tagged, the same office.
+      expect((await api().get('/api/v1/auth/me').set(asOwner).expect(200)).body.membership)
+        .toMatchObject({ isCoreLeader: false, groups: [], office: { code, branch: 'Cempaka Putih' } });
+    });
+
+    it('P18.8-T6 AC-1 somebody in no office has no membership, so no line beyond their role', async () => {
+      const nobody = await makeUser(`no-office-${Math.random()}@kpm.test`);
+      const me = await api().get('/api/v1/auth/me').set({ Authorization: `Bearer ${nobody.accessToken}` }).expect(200);
+      expect(me.body.membership).toBeNull();
     });
   });
 
@@ -2874,6 +3009,302 @@ describe('auth and admin over HTTP', () => {
     it('carries a requestId on every error', async () => {
       const res = await api().get('/api/v1/auth/me').expect(401);
       expect(res.body.error.requestId).toBeDefined();
+    });
+  });
+
+  /*
+   * P18.8-T4 (ADR-0158): what a person records — a birth date, a gender, the month they joined their
+   * insurer and how they work — asked at registration, theirs to complete on `/profile`, and never a
+   * support session's to write. The agent code is digits on every new write.
+   */
+  describe('what a person records, over HTTP (P18.8-T4)', () => {
+    const registration = async (over: Record<string, unknown> = {}) => ({
+      email: `reg-${Math.random()}@kpm.test`, password: PASSWORD, fullName: 'Reg Person',
+      companyId: await anInsurer(), agentCode: digits(), ...PERSONAL, ...over,
+    });
+
+    it('AC-3: refuses a registration missing any of the four, naming each', async () => {
+      const body = await registration();
+      for (const field of ['dateOfBirth', 'companyJoinMonth', 'workStatus', 'gender'] as const) {
+        const { [field]: _left, ...rest } = body;
+        const res = await api().post('/api/v1/auth/register').send(rest).expect(400);
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
+        expect(JSON.stringify(res.body.error.details)).toContain(field);
+      }
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      expect(await users.countDocuments({ email: body.email })).toBe(0);
+    });
+
+    it('AC-3: refuses a gender or a work status that is not one of the two', async () => {
+      await api().post('/api/v1/auth/register').send(await registration({ gender: 'other' })).expect(400);
+      await api().post('/api/v1/auth/register').send(await registration({ workStatus: 'full-time' })).expect(400);
+    });
+
+    it('AC-4: refuses a birth date under 18 years ago and a join month in the future, naming each', async () => {
+      const young = await api().post('/api/v1/auth/register')
+        .send(await registration({ dateOfBirth: '2020-01-01' })).expect(400);
+      expect(young.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED', message: 'A date of birth must be at least 18 years ago.', details: { field: 'dateOfBirth' },
+      });
+      const later = await api().post('/api/v1/auth/register')
+        .send(await registration({ companyJoinMonth: '2999-01' })).expect(400);
+      expect(later.body.error.details).toEqual({ field: 'companyJoinMonth' });
+    });
+
+    it('AC-5: refuses an agent code with anything but 3 to 32 digits', async () => {
+      for (const agentCode of ['PRU-88213', '88', '8'.repeat(33), '88 213']) {
+        const res = await api().post('/api/v1/auth/register').send(await registration({ agentCode })).expect(400);
+        expect(JSON.stringify(res.body.error.details)).toContain('agentCode must be digits only');
+      }
+      await api().post('/api/v1/auth/register').send(await registration({ agentCode: ' 88213 ' })).expect(201);
+    });
+
+    it('AC-3: carries the work status onto the membership the person gets, and /auth/me reads it from there', async () => {
+      const sa = await makeUser(`sa-ws-${Math.random()}@agencyboost.test`, 'super_admin');
+      const owner = await makeUser(`owner-ws-${Math.random()}@kpm.test`);
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({ companyId: await anInsurer(), code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'WS Branch' })
+        .expect(201);
+      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`).set(auth).send({ userId: owner.id }).expect(200);
+
+      const asOwner = { Authorization: `Bearer ${owner.accessToken}` };
+      const me = await api().get('/api/v1/auth/me').set(asOwner).expect(200);
+      expect(me.body.user).toMatchObject({
+        dateOfBirth: '1990-03-15', companyJoinMonth: '2021-07', gender: 'female', workStatus: 'full_time',
+      });
+      const memberships = app.get(MembershipRepository);
+      const row = await memberships.findById(
+        RequestContext.tenantRead(String(kpm.body._id), 'test'), me.body.membership.membershipId,
+      );
+      expect(row?.workStatus).toBe('full_time');
+    });
+
+    it('AC-6: PATCH /auth/me sets the four for oneself, work status on the membership', async () => {
+      const person = await makeUser(`self-${Math.random()}@kpm.test`);
+      const theirs = { Authorization: `Bearer ${person.accessToken}` };
+      const res = await api().patch('/api/v1/auth/me').set(theirs).send({
+        dateOfBirth: '1985-01-31', gender: 'male', companyJoinMonth: '2010-02', workStatus: 'part_time',
+      }).expect(200);
+      expect(res.body.user).toMatchObject({
+        dateOfBirth: '1985-01-31', gender: 'male', companyJoinMonth: '2010-02', workStatus: 'part_time',
+      });
+      // No office yet, so the work status waits on the account for the membership they are given.
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      expect((await users.findById(person.id).lean())?.registeredWorkStatus).toBe('part_time');
+      // The rest of the profile keeps its own rules.
+      await api().patch('/api/v1/auth/me').set(theirs).send({ preferredName: 'Ari' }).expect(200);
+    });
+
+    it('P18.8-T15 AC-1: an empty, blank or null preferred name is stored as none, and a real one trimmed', async () => {
+      const person = await makeUser(`named-${Math.random()}@kpm.test`);
+      const theirs = { Authorization: `Bearer ${person.accessToken}` };
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      const stored = async () => (await users.findById(person.id).lean())?.preferredName;
+
+      const named = await api().patch('/api/v1/auth/me').set(theirs).send({ preferredName: '  Ari ' }).expect(200);
+      expect(named.body.user.preferredName).toBe('Ari');
+      expect(await stored()).toBe('Ari');
+
+      // What the profile sent for an empty field until this, and what printed a blank header (UI-005).
+      for (const blank of ['', '   ', null]) {
+        await api().patch('/api/v1/auth/me').set(theirs).send({ preferredName: 'Ari' }).expect(200);
+        const res = await api().patch('/api/v1/auth/me').set(theirs).send({ preferredName: blank }).expect(200);
+        expect(res.body.user.preferredName).toBeNull();
+        expect(await stored()).toBeNull();
+      }
+
+      // Left out, it is left alone.
+      await api().patch('/api/v1/auth/me').set(theirs).send({ preferredName: 'Ari' }).expect(200);
+      await api().patch('/api/v1/auth/me').set(theirs).send({ pronoun: 'he' }).expect(200);
+      expect(await stored()).toBe('Ari');
+
+      // One saved blank before the fix still reads as none.
+      await users.updateOne({ _id: person.id }, { $set: { preferredName: ' ' } });
+      const me = await api().get('/api/v1/auth/me').set(theirs).expect(200);
+      expect(me.body.user.preferredName).toBeNull();
+
+      // Not a string at all is still refused.
+      await api().patch('/api/v1/auth/me').set(theirs).send({ preferredName: 42 }).expect(400);
+    });
+
+    it('AC-4, AC-6: refuses a profile birth date under 18, a future join month, a null and a malformed value', async () => {
+      const person = await makeUser(`bad-${Math.random()}@kpm.test`);
+      const theirs = { Authorization: `Bearer ${person.accessToken}` };
+      const young = await api().patch('/api/v1/auth/me').set(theirs).send({ dateOfBirth: '2020-01-01' }).expect(400);
+      expect(young.body.error.details).toEqual({ field: 'dateOfBirth' });
+      const later = await api().patch('/api/v1/auth/me').set(theirs).send({ companyJoinMonth: '2999-12' }).expect(400);
+      expect(later.body.error.details).toEqual({ field: 'companyJoinMonth' });
+      await api().patch('/api/v1/auth/me').set(theirs).send({ gender: null }).expect(400);
+      await api().patch('/api/v1/auth/me').set(theirs).send({ dateOfBirth: '15/03/1990' }).expect(400);
+      // Nothing of it landed.
+      const me = await api().get('/api/v1/auth/me').set(theirs).expect(200);
+      expect(me.body.user).toMatchObject({ dateOfBirth: '1990-03-15', gender: 'female', companyJoinMonth: '2021-07' });
+    });
+
+    it('AC-6: refuses the four in any support session, read-only or elevated', async () => {
+      const sa = await makeUser(`sa-pd-${Math.random()}@agencyboost.test`, 'super_admin');
+      const other = await makeUser(`sa-pd2-${Math.random()}@agencyboost.test`, 'super_admin');
+      const target = await makeUser(`pd-target-${Math.random()}@kpm.test`);
+      const started = await api().post(`/api/v1/admin/impersonate/${target.id}`)
+        .set({ Authorization: `Bearer ${sa.accessToken}` }).send({ reason: 'Support' }).expect(201);
+      const asThem = { Authorization: `Bearer ${started.body.accessToken}` };
+
+      // Read-only: refused as every write is.
+      await api().patch('/api/v1/auth/me').set(asThem).send({ gender: 'male' }).expect(403);
+
+      await api().post(`/api/v1/admin/impersonation/${started.body.sessionId}/elevate`)
+        .set({ Authorization: `Bearer ${other.accessToken}` })
+        .send({ reason: 'Their profile will not save from the screen.' }).expect(204);
+
+      // Elevated: the four are still the person's own word.
+      for (const body of [{ gender: 'male' }, { dateOfBirth: '1980-01-01' }, { companyJoinMonth: '2000-01' }, { workStatus: 'part_time' }]) {
+        const refused = await api().patch('/api/v1/auth/me').set(asThem).send(body).expect(403);
+        expect(refused.body.error.code).toBe('PERM_DENIED');
+      }
+      const me = await api().get('/api/v1/auth/me').set(asThem).expect(200);
+      expect(me.body.user).toMatchObject({ gender: 'female', dateOfBirth: '1990-03-15', workStatus: 'full_time' });
+      // ADR-0162 §4: and the rest of the profile with them — the whole route is refused in every session now.
+      await api().patch('/api/v1/auth/me').set(asThem).send({ preferredName: 'Supported' }).expect(403);
+    });
+  });
+
+  /*
+   * ADR-0162 (P18.9-T1 AC-1 to AC-4, AC-6): **a setup session**, started by one Super Admin as an office's
+   * Owner, writing the setup screens' permissions and nothing else. The data upload, a lead and a goal are
+   * asked in `setup-session.int.spec.ts`; these are the routes this module mounts.
+   */
+  describe('a setup session, over HTTP (P18.9-T1, ADR-0162)', () => {
+    /** One Super Admin, and two offices of one insurer, each with its Owner. */
+    async function twoOffices() {
+      const sa = await makeUser(`sa-setup-${Math.random()}@agencyboost.test`, 'super_admin');
+      const saAuth = { Authorization: `Bearer ${sa.accessToken}` };
+      const companyId = await anInsurer();
+      const office = async (branchName: string) => {
+        const kpm = await api().post('/api/v1/admin/tenants').set(saAuth)
+          .send({ companyId, code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName }).expect(201);
+        const owner = await makeUser(`owner-setup-${Math.random()}@kpm.test`);
+        await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`).set(saAuth)
+          .send({ userId: owner.id }).expect(200);
+        // The grant lands on the membership, so the Owner's own token is minted after it.
+        const again = await api().post('/api/v1/auth/login').send({ email: owner.email, password: PASSWORD }).expect(200);
+        return {
+          kpmId: String(kpm.body._id), owner,
+          asOwner: { Authorization: `Bearer ${(again.body as { accessToken: string }).accessToken}` },
+        };
+      };
+      return { sa, saAuth, a: await office('Setup A'), b: await office('Setup B') };
+    }
+
+    async function setupAs(saAuth: Record<string, string>, userId: string) {
+      const started = await api().post(`/api/v1/admin/impersonate/${userId}`).set(saAuth)
+        .send({ reason: 'Setting the office up', purpose: 'setup' }).expect(201);
+      return { started, asThem: { Authorization: `Bearer ${started.body.accessToken}` } };
+    }
+
+    const typeCodes = async (auth: Record<string, string>) => {
+      const res = await api().get('/api/v1/kpm/settings/activity-types').set(auth).expect(200);
+      return res.body.flatMap((c: { types: { code: string }[] }) => c.types.map((t) => t.code)) as string[];
+    };
+    const ROSTER = (email: string) => [
+      'fullName,email,agentCode,role,leaderAgentCode,dateOfBirth,companyJoinMonth,workStatus,gender',
+      `Setup Person,${email},${digits()},agent,,1990-03-15,2021-07,full-time,female`,
+    ].join('\n');
+
+    it('AC-1, AC-6: one Super Admin starts it as the Owner, and /auth/me says what it may write', async () => {
+      const { saAuth, a } = await twoOffices();
+      const { started, asThem } = await setupAs(saAuth, a.owner.id);
+      expect(started.body).toMatchObject({ readOnly: true, purpose: 'setup' });
+      expect(started.body.writeScope).toEqual(expect.arrayContaining(['tenant_config:write', 'kpm:import_roster', 'data_upload:commit_import']));
+
+      const me = await api().get('/api/v1/auth/me').set(asThem).expect(200);
+      expect(me.body).toMatchObject({
+        isImpersonating: true, impersonationReadOnly: true, impersonationPurpose: 'setup',
+        impersonationWriteScope: started.body.writeScope,
+      });
+      // The settings screens decide editability from these, so they open for editing.
+      expect(me.body.permissions).toEqual(expect.arrayContaining(['tenant_config:write', 'kpm:import_roster', 'data_upload:commit_import']));
+      for (const write of ['member:change_role', 'kpm_admin:grant', 'kpm_overview:set_recruit_target', 'activity_log:create']) {
+        expect(me.body.permissions).not.toContain(write);
+      }
+    });
+
+    it('AC-6: saves an activity type and imports people, in the Owner\'s office', async () => {
+      const { saAuth, a } = await twoOffices();
+      const { asThem } = await setupAs(saAuth, a.owner.id);
+
+      await api().post('/api/v1/kpm/settings/activity-types').set(asThem)
+        .send({ code: 'SETUP_CALL', categoryCode: 'SELLING', label: 'Telepon setup' }).expect(201);
+      expect(await typeCodes(a.asOwner)).toContain('SETUP_CALL');
+
+      const email = `setup-person-${Math.random()}@k.test`;
+      const preview = await api().post(`/api/v1/admin/tenants/${a.kpmId}/roster/preview`).set(asThem)
+        .send({ rows: ROSTER(email) }).expect(200);
+      expect(preview.body.issues).toEqual([]);
+      const created = await api().post(`/api/v1/admin/tenants/${a.kpmId}/roster`).set(asThem)
+        .send({ rows: ROSTER(email) }).expect(201);
+      expect(created.body.created).toHaveLength(1);
+    });
+
+    it('AC-3, AC-6: may not change a role, nor the Owner\'s profile, password or sign-ins', async () => {
+      const { saAuth, a } = await twoOffices();
+      const { asThem } = await setupAs(saAuth, a.owner.id);
+
+      const role = await api().patch('/api/v1/members/66f0000000000000000000a1/role').set(asThem)
+        .send({ toRole: 'aab', reason: 'Not support' }).expect(403);
+      expect(role.body.error).toMatchObject({ code: 'PERM_DENIED', details: { permission: 'member:change_role' } });
+      expect(role.body.error.message).toContain('This setup session can change the office');
+
+      const profile = await api().patch('/api/v1/auth/me').set(asThem).send({ fullName: 'Renamed By Setup' }).expect(403);
+      expect(profile.body.error.message).toContain('own account');
+      await api().post('/api/v1/auth/change-password').set(asThem)
+        .send({ currentPassword: PASSWORD, newPassword: 'another horse battery' }).expect(403);
+      await api().delete('/api/v1/auth/sessions/66f0000000000000000000a1').set(asThem).expect(403);
+      await api().post('/api/v1/auth/logout-all').set(asThem).expect(403);
+
+      // The Owner is untouched, and still signs in with their own password.
+      const own = await api().get('/api/v1/auth/me').set(a.asOwner).expect(200);
+      expect(own.body.user.fullName).toBe('Test Person');
+      await api().post('/api/v1/auth/login').send({ email: a.owner.email, password: PASSWORD }).expect(200);
+    });
+
+    it('AC-6: a setup session for office A writes nothing of office B', async () => {
+      const { saAuth, a, b } = await twoOffices();
+      const { asThem } = await setupAs(saAuth, a.owner.id);
+      const before = await typeCodes(b.asOwner);
+
+      // The settings routes name no office: the session's own is the only one they reach.
+      await api().post('/api/v1/kpm/settings/activity-types').set(asThem)
+        .send({ code: 'SETUP_ONLY_A', categoryCode: 'SELLING', label: 'Hanya A' }).expect(201);
+      // The import names one, and another office's is not there for it — 404, never 403.
+      const email = `cross-${Math.random()}@k.test`;
+      await api().post(`/api/v1/admin/tenants/${b.kpmId}/roster/preview`).set(asThem).send({ rows: ROSTER(email) }).expect(404);
+      await api().post(`/api/v1/admin/tenants/${b.kpmId}/roster`).set(asThem).send({ rows: ROSTER(email) }).expect(404);
+
+      expect(await typeCodes(b.asOwner)).toEqual(before);
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      expect(await users.countDocuments({ email })).toBe(0);
+    });
+
+    it('AC-1: refuses one as somebody who is neither an Owner nor an Admin, 409', async () => {
+      const { saAuth } = await twoOffices();
+      const nobody = await makeUser(`setup-nobody-${Math.random()}@kpm.test`);
+      const refused = await api().post(`/api/v1/admin/impersonate/${nobody.id}`).set(saAuth)
+        .send({ reason: 'Setting up', purpose: 'setup' }).expect(409);
+      expect(refused.body.error).toMatchObject({ code: 'IMPERSONATION_SETUP_TARGET', details: { purpose: 'setup' } });
+      // A purpose that is neither is refused at the DTO.
+      await api().post(`/api/v1/admin/impersonate/${nobody.id}`).set(saAuth)
+        .send({ reason: 'Setting up', purpose: 'write' }).expect(400);
+    });
+
+    it('AC-6: elevation still needs a second Super Admin', async () => {
+      const { sa, saAuth, a } = await twoOffices();
+      const { started, asThem } = await setupAs(saAuth, a.owner.id);
+      await api().post(`/api/v1/admin/impersonation/${started.body.sessionId}/elevate`)
+        .set({ Authorization: `Bearer ${sa.accessToken}` })
+        .send({ reason: 'I would like to change a role as well.' }).expect(403);
+      const me = await api().get('/api/v1/auth/me').set(asThem).expect(200);
+      expect(me.body.impersonationReadOnly).toBe(true);
     });
   });
 });

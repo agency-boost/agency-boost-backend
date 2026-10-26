@@ -1,10 +1,21 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
-  IsEmail, IsEnum, IsInt, IsMongoId, IsOptional, IsString, Matches, Max, MaxLength, Min,
-  MinLength,
+  IsEmail, IsEnum, IsIn, IsInt, IsMongoId, IsOptional, IsString, Matches, Max, MaxLength, Min,
+  MinLength, ValidateIf,
 } from 'class-validator';
+import { AGENT_CODE_PATTERN, GENDERS, WORK_STATUSES, type Gender, type WorkStatus } from '@/domain/constants';
+import { preferredNameOf } from '@/modules/users/display-name';
 import { PasswordService } from './password.service';
+import { IMPERSONATION_PURPOSES, type ImpersonationPurpose } from './impersonation-session.schema';
+
+/**
+ * The shapes of what a person records (ADR-0158), checked at the door. Whether a birth date is in the
+ * past and 18 years ago, and a join month not in the future, needs today — that is the service's
+ * (`personal-data.ts`), so both refusals are named in one sentence each.
+ */
+const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
+const MONTH_SHAPE = /^\d{4}-\d{2}$/;
 
 export class RegisterDto {
   @ApiProperty({ example: 'rina@kpm0417.test' })
@@ -28,20 +39,44 @@ export class RegisterDto {
   /**
    * The producer id the insurer issued them (ADR-0017).
    *
-   * Upper-cased on the way in, because it is read off a contract and typed by hand, and
-   * `pru-88213` and `PRU-88213` are the same code to everybody except a unique index.
-   * The pattern is deliberately loose — every insurer numbers its own way, and refusing
-   * a real code because it does not match our idea of one is worse than storing it.
+   * **Digits only, 3 to 32 of them, since ADR-0158 §4** — the client's rule, on every new
+   * code. It was deliberately loose until then (`/^[A-Z0-9][A-Z0-9./-]*$/`, upper-cased),
+   * and codes registered under it keep their letters; nothing re-checks one already held.
+   * Trimmed on the way in, because it is read off a contract and typed by hand.
    */
-  @ApiProperty({ example: 'PRU-88213', maxLength: 32 })
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value))
+  @ApiProperty({ example: '88213', minLength: 3, maxLength: 32, pattern: AGENT_CODE_PATTERN.source })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
-  @MinLength(3)
-  @MaxLength(32)
-  @Matches(/^[A-Z0-9][A-Z0-9./-]*$/, {
-    message: 'agentCode may contain letters, digits, and . / - only',
-  })
+  @Matches(AGENT_CODE_PATTERN, { message: 'agentCode must be digits only, 3 to 32 of them' })
   agentCode!: string;
+
+  /*
+   * What a person records (ADR-0158, P18.8-T4 AC-3), all four required at registration.
+   */
+
+  @ApiProperty({ example: '1990-03-15', description: '`YYYY-MM-DD`. In the past, and at least 18 years ago.' })
+  @IsString()
+  @Matches(DATE_SHAPE, { message: 'dateOfBirth must be a date, YYYY-MM-DD' })
+  dateOfBirth!: string;
+
+  @ApiProperty({
+    example: '2021-07',
+    description: '`YYYY-MM`: the month they joined the insurer chosen in `companyId` (*Joined Prudential*). Not in the future.',
+  })
+  @IsString()
+  @Matches(MONTH_SHAPE, { message: 'companyJoinMonth must be a month, YYYY-MM' })
+  companyJoinMonth!: string;
+
+  @ApiProperty({
+    enum: WORK_STATUSES,
+    description: 'Copied onto the membership they are given when an office takes them on (ADR-0158 §1).',
+  })
+  @IsIn(WORK_STATUSES, { message: 'workStatus must be full_time or part_time' })
+  workStatus!: WorkStatus;
+
+  @ApiProperty({ enum: GENDERS })
+  @IsIn(GENDERS, { message: 'gender must be male or female' })
+  gender!: Gender;
 }
 
 export class LoginDto {
@@ -105,10 +140,17 @@ export class UpdateProfileDto {
   @IsString()
   fullName?: string;
 
-  @ApiPropertyOptional({ example: 'Rina' })
+  @ApiPropertyOptional({
+    example: 'Rina',
+    nullable: true,
+    description: 'What colleagues call you. Empty, blank or `null` means none: it is stored as `null`, and your '
+      + 'full name is shown wherever a name is.',
+  })
+  // A blank one is no name: `''` would print as nothing wherever the full name should have stood in.
+  @Transform(({ value }) => (typeof value === 'string' ? preferredNameOf(value) : value))
   @IsOptional()
   @IsString()
-  preferredName?: string;
+  preferredName?: string | null;
 
   @ApiPropertyOptional({
     enum: ['she', 'he', 'they'],
@@ -117,6 +159,37 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsEnum(['she', 'he', 'they'])
   pronoun?: 'she' | 'he' | 'they';
+
+  /*
+   * **What a person records** (ADR-0158 §3, P18.8-T4 AC-6): yours to complete or correct, each on its
+   * own. Not clearable — a `null` is refused, since each is required of everybody who arrives now.
+   * **Refused in any support session**, read-only or elevated: these are the person's own word.
+   */
+
+  @ApiPropertyOptional({ example: '1990-03-15', description: '`YYYY-MM-DD`. In the past, and at least 18 years ago.' })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @Matches(DATE_SHAPE, { message: 'dateOfBirth must be a date, YYYY-MM-DD' })
+  dateOfBirth?: string;
+
+  @ApiPropertyOptional({ example: '2021-07', description: '`YYYY-MM`: the month you joined your insurer. Not in the future.' })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @Matches(MONTH_SHAPE, { message: 'companyJoinMonth must be a month, YYYY-MM' })
+  companyJoinMonth?: string;
+
+  @ApiPropertyOptional({
+    enum: WORK_STATUSES,
+    description: 'Written on your membership in your office; on your account until you have one.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsIn(WORK_STATUSES, { message: 'workStatus must be full_time or part_time' })
+  workStatus?: WorkStatus;
+
+  @ApiPropertyOptional({ enum: GENDERS })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsIn(GENDERS, { message: 'gender must be male or female' })
+  gender?: Gender;
 }
 
 export class ImpersonateDto {
@@ -131,6 +204,18 @@ export class ImpersonateDto {
   @Min(1)
   @Max(60)
   durationMinutes?: number;
+
+  @ApiPropertyOptional({
+    enum: IMPERSONATION_PURPOSES,
+    default: 'support',
+    description:
+      '`support` looks and changes nothing. `setup` may also change the office\'s settings, import people and '
+      + 'upload its production file, and nothing else — for an active office\'s Owner or one of its Admins '
+      + 'only, else `409 IMPERSONATION_SETUP_TARGET`.',
+  })
+  @IsOptional()
+  @IsIn(IMPERSONATION_PURPOSES)
+  purpose?: ImpersonationPurpose;
 }
 
 

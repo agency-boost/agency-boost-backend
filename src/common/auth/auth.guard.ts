@@ -70,6 +70,7 @@ export class AuthGuard implements CanActivate {
      * Only `imp:` tokens pay for the lookup, and they are rare by design.
      */
     let readOnlySession = false;
+    let writeScope: readonly string[] = [];
     if (impersonator) {
       const session = await this.impersonation.liveSession(token);
       if (!session) {
@@ -87,6 +88,8 @@ export class AuthGuard implements CanActivate {
        * is already being read here to check the session is live, so this costs nothing.
        */
       readOnlySession = session.readOnly;
+      // A setup session's scope, off the same row (ADR-0162 §2). A row from before it existed has none.
+      writeScope = session.writeScope ?? [];
     }
 
     /*
@@ -98,7 +101,9 @@ export class AuthGuard implements CanActivate {
       ALLOWED_WHILE_OFFICE_UNAVAILABLE, [execution.getHandler(), execution.getClass()],
     ) === true;
 
-    const context = await this.resolver.resolve(claims.sub, impersonator, readOnlySession, leavingSupport);
+    const context = await this.resolver.resolve(
+      claims.sub, impersonator, readOnlySession, leavingSupport, writeScope,
+    );
 
     /*
      * **A temporary password buys three routes and nothing else.**

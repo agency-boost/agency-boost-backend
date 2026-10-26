@@ -25,7 +25,7 @@ import { TrainingComplianceCategory } from '@/modules/reporting/compliance/train
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { configModule } from './config-module';
 import { COMPANY, KPM_A, KPM_B, ROSTER_NOW, ROSTER_TODAY, type Who } from './coaching-office';
-import { productionPipe, session, StubAuth } from './http-permissions';
+import { NO_CLASS, productionPipe, session, StubAuth } from './http-permissions';
 import { listenOnLoopback } from './listen';
 import { clearCollections, startMongo, stopMongo } from './mongo';
 import { buildReportingOffice, type ReportingOffice } from './reporting-office';
@@ -167,7 +167,8 @@ export async function startComplianceHarness(): Promise<ComplianceHarness> {
     ownerOfB,
     officeOnly: (who) => {
       const base = office.as(who);
-      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG' });
+      // No rung, and so no class (ADR-0156): a grant reads the class, and `NO_CLASS` matches none.
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: NO_CLASS });
     },
     supporting: (who, readOnly = true) => {
       const base = office.as(who);

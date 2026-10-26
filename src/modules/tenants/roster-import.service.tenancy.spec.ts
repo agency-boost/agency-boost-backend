@@ -28,12 +28,12 @@ describe('RosterImportService (P3.6-T4)', () => {
   let members: MembershipRepository;
   let kpmId: string;
   let companyId: string;
+  const clock = new FixedClock(NOW);
 
   const sa = () => RequestContext.platform('root');
 
   beforeAll(async () => {
     await startMongo();
-    const clock = new FixedClock(NOW);
     const users = mongoose.model(User.name, UserSchema);
     const kpms = mongoose.model(Kpm.name, KpmSchema);
     mongoose.model(Membership.name, MembershipSchema);
@@ -83,9 +83,15 @@ describe('RosterImportService (P3.6-T4)', () => {
       counters: { nextMemberSeq: 1 },
     });
     kpmId = String(kpm._id);
+    clock.set(NOW);
   });
 
-  const file = (...rows: string[]) => [H, ...rows].join('\n');
+  /**
+   * Each row gains the four a person records (ADR-0158), valid ones, so a test about something else is
+   * not refused for them. A test about them writes its own (`what a person records`, below).
+   */
+  const P = ',1990-03-15,2021-07,full-time,female';
+  const file = (...rows: string[]) => [H, ...rows.map((row) => `${row}${P}`)].join('\n');
 
   describe('who may run it', () => {
     const memberOf = (id: string, over: Record<string, unknown> = {}) =>
@@ -98,7 +104,7 @@ describe('RosterImportService (P3.6-T4)', () => {
       // An office that hires ten people at once is the case this exists for; routing it
       // through a platform operator would be the reason nobody uses it.
       const owner = memberOf(kpmId, { isKpmOwner: true });
-      const preview = await service.preview(owner, kpmId, file('Rina,rina@k.test,PRU-1,ab,'));
+      const preview = await service.preview(owner, kpmId, file('Rina,rina@k.test,101,ab,'));
       expect(preview.issues).toEqual([]);
       expect(preview.willCreate).toBe(1);
     });
@@ -106,8 +112,8 @@ describe('RosterImportService (P3.6-T4)', () => {
     it('lets an Admin do the same', async () => {
       const admin = memberOf(kpmId, { isKpmAdmin: true });
       await expect(
-        service.commit(admin, kpmId, file('Rina,rina@k.test,PRU-1,ab,')),
-      ).resolves.toMatchObject({ created: [{ agentCode: 'PRU-1' }] });
+        service.commit(admin, kpmId, file('Rina,rina@k.test,101,ab,')),
+      ).resolves.toMatchObject({ created: [{ agentCode: '101' }] });
     });
 
     it('refuses a leader, who administers nothing', async () => {
@@ -131,8 +137,8 @@ describe('RosterImportService (P3.6-T4)', () => {
       const owner = memberOf(kpmId, { isKpmOwner: true });
 
       for (const call of [
-        () => service.preview(owner, String(other._id), file('R,r@k.test,PRU-1,ab,')),
-        () => service.commit(owner, String(other._id), file('R,r@k.test,PRU-1,ab,')),
+        () => service.preview(owner, String(other._id), file('R,r@k.test,101,ab,')),
+        () => service.commit(owner, String(other._id), file('R,r@k.test,101,ab,')),
       ]) {
         await expect(call()).rejects.toMatchObject({ code: 'NOT_FOUND' });
       }
@@ -144,7 +150,7 @@ describe('RosterImportService (P3.6-T4)', () => {
       // unconditionally would attribute every membership an Owner imported to a platform
       // operator, and promote their context for the duration of the write.
       const owner = memberOf(kpmId, { isKpmOwner: true });
-      await service.commit(owner, kpmId, file('Rina,rina@k.test,PRU-1,ab,'));
+      await service.commit(owner, kpmId, file('Rina,rina@k.test,101,ab,'));
 
       const row = await mongoose.model(AuditLog.name).findOne({ action: 'roster.imported' });
       expect(row?.get('actorUserId')).toBe('u-member');
@@ -163,19 +169,19 @@ describe('RosterImportService (P3.6-T4)', () => {
 
   describe('the preview', () => {
     it('reports what a clean file would do, and writes nothing', async () => {
-      const csv = file('Rina Wijaya,rina@k.test,PRU-1,ab,');
+      const csv = file('Rina Wijaya,rina@k.test,101,ab,');
       const preview = await service.preview(sa(), kpmId, csv);
 
       expect(preview.issues).toEqual([]);
       expect(preview.willCreate).toBe(1);
-      expect(preview.rows[0]).toMatchObject({ line: 2, agentCode: 'PRU-1' });
+      expect(preview.rows[0]).toMatchObject({ line: 2, agentCode: '101' });
       expect(await mongoose.model(User.name).countDocuments({})).toBe(0);
     });
 
     it('says zero would be created the moment anything is wrong', async () => {
       // Not "nine of ten": the commit is all-or-nothing, so a count that suggested
       // otherwise would be a promise the commit does not keep.
-      const csv = file('Rina,rina@k.test,PRU-1,ab,', 'Budi,not-an-email,PRU-2,agent,');
+      const csv = file('Rina,rina@k.test,101,ab,', 'Budi,not-an-email,102,agent,');
       const preview = await service.preview(sa(), kpmId, csv);
       expect(preview.issues).toHaveLength(1);
       expect(preview.willCreate).toBe(0);
@@ -183,56 +189,108 @@ describe('RosterImportService (P3.6-T4)', () => {
 
     it('reports a code the insurer already issued, naming who has it', async () => {
       await mongoose.model(User.name).create({
-        email: 'held@k.test', passwordHash: 'x', fullName: 'Held', companyId, agentCode: 'PRU-1',
+        email: 'held@k.test', passwordHash: 'x', fullName: 'Held', companyId, agentCode: '101',
       });
-      const preview = await service.preview(sa(), kpmId, file('Rina,rina@k.test,PRU-1,ab,'));
+      const preview = await service.preview(sa(), kpmId, file('Rina,rina@k.test,101,ab,'));
       expect(preview.issues[0]).toMatchObject({ line: 2, column: 'agentCode' });
       expect(preview.issues[0].message).toContain('held@k.test');
     });
 
     it('reports an address that already has an account', async () => {
       await mongoose.model(User.name).create({
-        email: 'rina@k.test', passwordHash: 'x', fullName: 'Rina', companyId, agentCode: 'PRU-9',
+        email: 'rina@k.test', passwordHash: 'x', fullName: 'Rina', companyId, agentCode: '109',
       });
-      const preview = await service.preview(sa(), kpmId, file('Rina,rina@k.test,PRU-1,ab,'));
+      const preview = await service.preview(sa(), kpmId, file('Rina,rina@k.test,101,ab,'));
       expect(preview.issues[0].column).toBe('email');
     });
 
     it('accepts a leader who is already in the office', async () => {
-      const csv = file('Root,root@k.test,PRU-9,ab,');
+      const csv = file('Root,root@k.test,109,ab,');
       await service.commit(sa(), kpmId, csv);
-      const preview = await service.preview(sa(), kpmId, file('Rina,rina@k.test,PRU-1,agent,PRU-9'));
+      const preview = await service.preview(sa(), kpmId, file('Rina,rina@k.test,101,agent,109'));
       expect(preview.issues).toEqual([]);
     });
 
     it('refuses a leader who is in neither the file nor the office', async () => {
-      const preview = await service.preview(sa(), kpmId, file('Rina,rina@k.test,PRU-1,agent,NOBODY'));
+      const preview = await service.preview(sa(), kpmId, file('Rina,rina@k.test,101,agent,NOBODY'));
       expect(preview.issues[0]).toMatchObject({ line: 2, column: 'leaderAgentCode' });
       expect(preview.issues[0].message).toContain('NOBODY');
     });
 
     it('sorts issues by line, so the list reads like the file', async () => {
       const csv = file(
-        'A,a@k.test,A1,director,',
-        'B,not-an-email,B1,agent,',
+        'A,a@k.test,201,director,',
+        'B,not-an-email,202,agent,',
       );
       const preview = await service.preview(sa(), kpmId, csv);
       expect(preview.issues.map((i) => i.line)).toEqual([2, 3]);
     });
   });
 
+  describe('what a person records (P18.8-T4, ADR-0158)', () => {
+    const bare = (...rows: string[]) => [H, ...rows].join('\n');
+
+    it('AC-1, AC-2: writes the birth date, join month and gender on the account, the work status on the membership', async () => {
+      await service.commit(sa(), kpmId, bare(
+        'Root,root@k.test,109,AB,,1984-05-12,2012-03,full-time,male',
+        'Rina,rina@k.test,101,Agent,109,1998-07-21,2024-01,Part-Time,FEMALE',
+      ));
+      const rina = await mongoose.model(User.name).findOne({ email: 'rina@k.test' }).lean<User & { _id: unknown }>();
+      expect(rina).toMatchObject({ dateOfBirth: '1998-07-21', companyJoinMonth: '2024-01', gender: 'female' });
+      const scoped = RequestContext.tenantRead(kpmId, 'test');
+      const membership = await members.findOne(scoped, { userId: String(rina!._id) });
+      expect(membership?.workStatus).toBe('part_time');
+      expect(membership?.role).toBe('agent');
+      const root = await members.findOne(scoped, { agentCode: '109' });
+      expect(root?.workStatus).toBe('full_time');
+    });
+
+    it('AC-2: a row missing one of the four is refused whole, the column named, and nothing is written', async () => {
+      const refusal = await service.commit(sa(), kpmId, bare(
+        'Rina,rina@k.test,101,Agent,,1998-07-21,,part-time,female',
+      )).catch((e) => e);
+      expect(refusal.details.issues).toEqual([
+        { line: 2, column: 'companyJoinMonth', message: 'The month they joined the company is required.' },
+      ]);
+      expect(await mongoose.model(User.name).countDocuments({})).toBe(0);
+    });
+
+    it('AC-4: measures 18 years and the join month against the office\'s today, in its timezone', async () => {
+      // 02:00 UTC on 9 September is 09:00 in Jakarta: somebody born on 10 September 2008 is not 18 yet.
+      const row = 'Rina,rina@k.test,101,Agent,,2008-09-10,2026-09,full-time,female';
+      const early = await service.preview(sa(), kpmId, bare(row));
+      expect(early.issues).toEqual([
+        { line: 2, column: 'dateOfBirth', message: 'A date of birth must be at least 18 years ago.' },
+      ]);
+      // 20:00 UTC on 9 September is already the 10th in Jakarta, while the server's UTC still says the 9th.
+      clock.set(new Date('2026-09-09T20:00:00.000Z'));
+      expect((await service.preview(sa(), kpmId, bare(row))).issues).toEqual([]);
+      const nextMonth = await service.preview(sa(), kpmId, bare('Rina,rina@k.test,101,Agent,,1990-01-01,2026-10,full-time,female'));
+      expect(nextMonth.issues).toEqual([
+        { line: 2, column: 'companyJoinMonth', message: 'The company join month cannot be in the future.' },
+      ]);
+    });
+
+    it('AC-5: refuses a new agent code with letters in it', async () => {
+      const refused = await service.preview(sa(), kpmId, bare('Rina,rina@k.test,PRU-101,Agent,,1990-01-01,2020-01,full-time,female'));
+      expect(refused.issues).toEqual([
+        { line: 2, column: 'agentCode', message: '"PRU-101" is not an agent code. Use digits only, 3 to 32 of them.' },
+      ]);
+    });
+  });
+
   describe('the commit', () => {
     it('creates everybody, with a membership and a rung', async () => {
       const csv = file(
-        'Root,root@k.test,PRU-9,ab,',
-        'Rina,rina@k.test,PRU-1,agent,PRU-9',
+        'Root,root@k.test,109,ab,',
+        'Rina,rina@k.test,101,agent,109',
       );
       const result = await service.commit(sa(), kpmId, csv);
 
       expect(result.created).toHaveLength(2);
       const rina = await mongoose.model(User.name).findOne({ email: 'rina@k.test' });
       expect(rina?.get('companyId')).toBe(companyId);
-      expect(rina?.get('agentCode')).toBe('PRU-1');
+      expect(rina?.get('agentCode')).toBe('101');
 
       const membership = await members.findOne(
         RequestContext.tenantRead(kpmId, 'test'),
@@ -246,20 +304,20 @@ describe('RosterImportService (P3.6-T4)', () => {
     it('creates a leader before the people who report to them, whatever the file order', async () => {
       // A spreadsheet lists people in whatever order it held them.
       const csv = file(
-        'Rina,rina@k.test,PRU-1,agent,PRU-9',
-        'Root,root@k.test,PRU-9,ab,',
+        'Rina,rina@k.test,101,agent,109',
+        'Root,root@k.test,109,ab,',
       );
       await service.commit(sa(), kpmId, csv);
 
       const scoped = RequestContext.tenantRead(kpmId, 'test');
-      const root = (await members.find(scoped, { agentCode: 'PRU-9' }))[0];
-      const rina = (await members.find(scoped, { agentCode: 'PRU-1' }))[0];
+      const root = (await members.find(scoped, { agentCode: '109' }))[0];
+      const rina = (await members.find(scoped, { agentCode: '101' }))[0];
       expect(rina.leaderId).toBe(String(root._id));
       expect(rina.ancestorIds).toEqual([String(root._id)]);
     });
 
     it('hands back a password per person, and stores none of them', async () => {
-      const csv = file('Rina,rina@k.test,PRU-1,ab,');
+      const csv = file('Rina,rina@k.test,101,ab,');
       const { created } = await service.commit(sa(), kpmId, csv);
 
       expect(created[0].temporaryPassword).toMatch(/^[a-z2-9]{4}(-[a-z2-9]{4}){3}$/);
@@ -274,7 +332,7 @@ describe('RosterImportService (P3.6-T4)', () => {
     });
 
     it('marks every account as owing a password of its own', async () => {
-      await service.commit(sa(), kpmId, file('Rina,rina@k.test,PRU-1,ab,'));
+      await service.commit(sa(), kpmId, file('Rina,rina@k.test,101,ab,'));
       const rina = await mongoose.model(User.name).findOne({ email: 'rina@k.test' });
       // The credential the operator has read opens nothing but the screen that replaces
       // it — `AuthGuard` refuses the rest.
@@ -288,9 +346,9 @@ describe('RosterImportService (P3.6-T4)', () => {
       // The promise the whole design turns on. A half-imported roster cannot be told from
       // a whole one, and re-uploading the file would refuse every row that landed.
       const csv = file(
-        'Root,root@k.test,PRU-9,ab,',
-        'Rina,rina@k.test,PRU-1,agent,PRU-9',
-        'Broken,not-an-email,PRU-2,agent,PRU-9',
+        'Root,root@k.test,109,ab,',
+        'Rina,rina@k.test,101,agent,109',
+        'Broken,not-an-email,102,agent,109',
       );
       await expect(service.commit(sa(), kpmId, csv)).rejects.toMatchObject({
         code: 'VALIDATION_FAILED',
@@ -315,10 +373,10 @@ describe('RosterImportService (P3.6-T4)', () => {
     });
 
     it('audits the count and the codes, and never a password', async () => {
-      const { created } = await service.commit(sa(), kpmId, file('Rina,rina@k.test,PRU-1,ab,'));
+      const { created } = await service.commit(sa(), kpmId, file('Rina,rina@k.test,101,ab,'));
       const row = await mongoose.model(AuditLog.name).findOne({ action: 'roster.imported' });
 
-      expect(row?.get('after')).toMatchObject({ count: 1, agentCodes: ['PRU-1'] });
+      expect(row?.get('after')).toMatchObject({ count: 1, agentCodes: ['101'] });
       expect(JSON.stringify(row?.toObject())).not.toContain(created[0].temporaryPassword);
     });
 
@@ -327,7 +385,7 @@ describe('RosterImportService (P3.6-T4)', () => {
         companyId, code: '0555', branchName: 'Other', status: 'active',
         counters: { nextMemberSeq: 1 },
       });
-      await service.commit(sa(), String(other._id), file('Rina,rina@k.test,PRU-1,ab,'));
+      await service.commit(sa(), String(other._id), file('Rina,rina@k.test,101,ab,'));
 
       const here = await members.find(RequestContext.tenantRead(kpmId, 'test'), {});
       expect(here).toEqual([]);

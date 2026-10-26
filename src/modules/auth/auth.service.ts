@@ -3,9 +3,13 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import { Clock } from '@/common/clock/clock.port';
+import { localDayOf } from '@/common/time/local-day';
+import { DEFAULT_TENANT_TIMEZONE, type Gender, type WorkStatus } from '@/domain/constants';
+import { birthDateProblem, joinMonthProblem } from '@/modules/users/personal-data';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
+import { INSURERS_ONLY } from '@/modules/tenants/template-library';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { User, UserDocument } from '@/modules/users/user.schema';
@@ -63,6 +67,10 @@ export class AuthService {
     fullName: string;
     companyId: string;
     agentCode: string;
+    dateOfBirth: string;
+    companyJoinMonth: string;
+    workStatus: WorkStatus;
+    gender: Gender;
   }): Promise<UserDocument> {
     const problems = this.passwords.validate(input.password);
     if (problems.length) {
@@ -74,6 +82,9 @@ export class AuthService {
       );
     }
 
+    // Before anything is looked up, so the answer is the same whether or not the address exists.
+    this.refusePersonalData(input);
+
     const email = input.email.toLowerCase().trim();
     const existing = await this.users.findOne({ email }).exec();
     if (existing) {
@@ -84,9 +95,10 @@ export class AuthService {
       return existing;
     }
 
-    // The insurer has to exist before we can hold somebody's code against it.
+    // The insurer has to exist before we can hold somebody's code against it. **The Template library is not
+    // one** (ADR-0164 §3): nobody works for it, so it is "not here" to somebody registering, as it is not listed.
     const company = await this.companies
-      .findOne({ _id: input.companyId, deletedAt: null })
+      .findOne({ _id: input.companyId, deletedAt: null, ...INSURERS_ONLY })
       .exec()
       // A malformed id is "not here", not a 500 — this arrives from a public form.
       .catch(() => null);
@@ -123,12 +135,39 @@ export class AuthService {
       fullName: input.fullName.trim(),
       companyId: input.companyId,
       agentCode,
+      // ADR-0158: theirs, on the account. How they work waits here for the office that takes them on.
+      dateOfBirth: input.dateOfBirth,
+      companyJoinMonth: input.companyJoinMonth,
+      gender: input.gender,
+      registeredWorkStatus: input.workStatus,
       status: 'invited',
       platformRole: 'none',
     });
 
     await this.issueVerification(user);
     return user;
+  }
+
+  /**
+   * **A birth date in the past and at least 18 years ago, a join month not in the future** (ADR-0158 §2,
+   * P18.8-T4 AC-4), each refused `400 VALIDATION_FAILED` with the field named — registration's, and
+   * `PATCH /auth/me`'s for whichever of the two it carries.
+   *
+   * Measured against **today in `Asia/Jakarta`**, the one office timezone v1 has (ADR-0016): a person
+   * registering belongs to no office yet, so there is no `kpms.timezone` to read, and the clock is the
+   * injected one, never the server's (invariant §9).
+   */
+  refusePersonalData(input: { dateOfBirth?: string; companyJoinMonth?: string }): void {
+    const today = localDayOf(this.clock.now(), DEFAULT_TENANT_TIMEZONE);
+    const checks = [
+      ['dateOfBirth', input.dateOfBirth === undefined ? null : birthDateProblem(input.dateOfBirth, today)],
+      ['companyJoinMonth', input.companyJoinMonth === undefined ? null : joinMonthProblem(input.companyJoinMonth, today)],
+    ] as const;
+    for (const [field, problem] of checks) {
+      if (problem) {
+        throw new DomainException(ErrorCode.VALIDATION_FAILED, problem, HttpStatus.BAD_REQUEST, { field });
+      }
+    }
   }
 
   // ------------------------------------------------------------------------ login

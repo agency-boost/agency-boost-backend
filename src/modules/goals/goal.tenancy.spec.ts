@@ -493,9 +493,71 @@ describe('the goal record (P8-T1)', () => {
 
       expect(offered.annualApeTargetMinor).toBe(GOAL_DEFAULTS.ANNUAL_APE_TARGET_MINOR);
       expect(offered.caseSizeMinor).toBe(GOAL_DEFAULTS.CASE_SIZE_MINOR);
+      // An office with no ratios of its own: the fallback (ADR-0160 §3).
       expect(offered.leadsToApptPct).toBe(GOAL_DEFAULTS.LEADS_TO_APPOINTMENT_PCT);
+      expect(offered.closingRatePct).toBe(GOAL_DEFAULTS.CLOSING_RATE_PCT);
       expect(offered.savedAt).toBeNull();
       expect(await mongoose.connection.db!.collection('goals').countDocuments()).toBe(0);
+    });
+
+    /*
+     * **The two percentages are the office's benchmarks** (ADR-0160 §3, P18.8-T10 AC-1): *Closing rate* its
+     * *Selling success rate*, *Appointment to Sales meeting* its *Set appointment to meeting* — each office's own,
+     * read through the tenant-scoped repository, and only for a plan nobody has saved.
+     */
+    describe('P18.8-T10 AC-1 — the defaults are the office’s benchmarks', () => {
+      const ratio = (kpmId: string, code: string, benchmark: number, over: Record<string, unknown> = {}) => ({
+        kpmId, code, label: code, numerator: ['SELL_SUBMISSION'], denominator: ['SELL_PRESENTATION'], benchmark,
+        comparison: 'gte', displayUnit: 'percent', displayOrder: 1, version: 1, status: 'active', archivedAt: null,
+        deletedAt: null, ...over,
+      });
+      beforeEach(async () => {
+        await mongoose.connection.db!.collection('ratioDefinitions').insertMany([
+          ratio(KPM_A, 'SELLING_SUCCESS_RATE', 0.3), ratio(KPM_A, 'MEETING_PER_APPROACH', 0.5),
+          ratio(KPM_B, 'SELLING_SUCCESS_RATE', 0.2), ratio(KPM_B, 'MEETING_PER_APPROACH', 0.4),
+        ]);
+      });
+
+      it('opens a new plan on the office’s two benchmarks, as percentages', async () => {
+        const offered = await wired.goals.defaults(A(), '2026');
+        expect(offered).toMatchObject({ closingRatePct: 30, leadsToApptPct: 50 });
+        // With 3.2 months left: 9 policies at 30% is 30 sales meetings, and 30 at 50% is 60 appointments to set.
+        expect(offered.projected).toMatchObject({ policiesPerMonth: 9, appointmentsPerMonth: 30, leadsPerMonth: 60 });
+      });
+
+      it('reads each office’s own, never another’s', async () => {
+        expect(await wired.goals.defaults(B(), '2026')).toMatchObject({ closingRatePct: 20, leadsToApptPct: 40 });
+        await mongoose.connection.db!.collection('ratioDefinitions').deleteMany({ kpmId: KPM_A });
+        // A without ratios falls back; B's are not read for it.
+        expect(await wired.goals.defaults(A(), '2026')).toMatchObject({
+          closingRatePct: GOAL_DEFAULTS.CLOSING_RATE_PCT, leadsToApptPct: GOAL_DEFAULTS.LEADS_TO_APPOINTMENT_PCT,
+        });
+      });
+
+      it('falls back for an archived ratio, and for a deleted one', async () => {
+        await mongoose.connection.db!.collection('ratioDefinitions').updateOne(
+          { kpmId: KPM_A, code: 'SELLING_SUCCESS_RATE' }, { $set: { status: 'archived', archivedAt: NOW } },
+        );
+        await mongoose.connection.db!.collection('ratioDefinitions').updateOne(
+          { kpmId: KPM_A, code: 'MEETING_PER_APPROACH' }, { $set: { deletedAt: NOW } },
+        );
+        expect(await wired.goals.defaults(A(), '2026')).toMatchObject({
+          closingRatePct: GOAL_DEFAULTS.CLOSING_RATE_PCT, leadsToApptPct: GOAL_DEFAULTS.LEADS_TO_APPOINTMENT_PCT,
+        });
+      });
+
+      it('leaves a saved goal’s own percentages as they are', async () => {
+        await save(A(), { leadsToApptPct: 25, closingRatePct: 35 });
+        expect(await wired.goals.read(A(), '2026')).toMatchObject({ leadsToApptPct: 25, closingRatePct: 35 });
+        expect(await wired.goals.planOf(A(), '2026', 'mem-a1')).toMatchObject({ leadsToApptPct: 25, closingRatePct: 35 });
+      });
+
+      it('gives the bulk read the same defaults, beside a saved plan', async () => {
+        await save(A(), { leadsToApptPct: 25, closingRatePct: 35 });
+        const plans = await wired.goals.plansOf(A(), '2026', ['mem-a1', 'mem-a2'], new Map());
+        expect(plans.get('mem-a1')).toMatchObject({ leadsToApptPct: 25, closingRatePct: 35 });
+        expect(plans.get('mem-a2')).toMatchObject({ leadsToApptPct: 50, closingRatePct: 30, savedAt: null });
+      });
     });
   });
 

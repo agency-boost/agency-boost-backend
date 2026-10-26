@@ -10,6 +10,7 @@ import { DEFAULT_TENANT_TIMEZONE, PERIOD } from '@/domain/constants';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
+import { INSURERS_ONLY } from '@/modules/tenants/template-library';
 import { OrgLevelService, type OrgLevelRow } from '@/modules/tenants/org-level.service';
 import { subscriptionStateOf } from '@/modules/tenants/subscription';
 import type { RungCount } from './kpm-overview.service';
@@ -86,7 +87,8 @@ export class PlatformAnalyticsService {
 
     const [kpms, companies, adoption, signIns] = await Promise.all([
       this.kpms.find({ deletedAt: null }).select('code branchName companyId status subscription timezone').lean().exec(),
-      this.companies.find({ deletedAt: null }).select('name').sort({ name: 1 }).lean().exec(),
+      // The insurers: the Template library holds templates and no office (ADR-0164 §3).
+      this.companies.find({ deletedAt: null, ...INSURERS_ONLY }).select('name').sort({ name: 1 }).lean().exec(),
       this.memberships.adoptionPerOfficeAcrossTenants(ctx, this.clock.monthBounds(timezone, month)),
       this.memberships.signInsPerOfficeAcrossTenants(ctx, signedInSince),
     ]);

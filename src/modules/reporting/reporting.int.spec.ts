@@ -14,6 +14,7 @@ import { RemovalService } from '@/modules/org/removal.service';
 import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { GroupService } from '@/modules/org/group.service';
 import { AdminDelegationService } from '@/modules/org/admin-delegation.service';
+import { LeaderLimitRequestService } from '@/modules/org/leader-limit-request.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { declaredPermissions, productionPipe, session, StubAuth, SUPER_ADMIN } from '../../../test/http-permissions';
@@ -80,7 +81,8 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
           provide: DirectoryService,
           useValue: new DirectoryService(wired.memberships, wired.users as never, wired.kpms as never),
         },
-        ...[RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService]
+        // Routes this spec never calls; a bare object keeps Nest from building their graphs.
+        ...[RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService, LeaderLimitRequestService]
           .map((provide) => ({ provide, useValue: {} })),
       ],
     }).compile();
@@ -442,17 +444,78 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
     type Head = { name: string; isReader: boolean; leads: boolean };
     type Agency = Figures & { head: Head; direct: Figures & { head: Head }; aabUnits: (Figures & { head: Head })[] };
 
-    it('P18-T2 AC-10 positive: the Owner and the Admin; negative: every field role, and a Super Admin outside a session', async () => {
+    it('P18-T2 AC-10 positive: the Owner and the Admin; negative: every field member who is no Core Leader, and a Super Admin outside a session', async () => {
       for (const who of ['OWNER', 'ADMIN'] as const) {
         as(who);
         expect((await http().get('/kpm/analytics').expect(200)).body).toMatchObject({ period: 'this_month', month: '2026-09' });
       }
-      for (const who of ['AGUS', 'SARI', 'INDAH'] as const) {
+      // An AB and an AAB hold the grant since ADR-0159 (P18.8-T5 AC-4), and untagged are answered 404 by the service.
+      for (const who of ['AGUS', 'SARI'] as const) {
         as(who);
-        expect((await http().get('/kpm/analytics').expect(403)).body.error.details).toEqual({ permission: 'kpm_analytics:read' });
+        expect((await http().get('/kpm/analytics').expect(404)).body.error.code).toBe('NOT_FOUND');
       }
+      // An Agent holds no grant: the guard.
+      as('INDAH');
+      expect((await http().get('/kpm/analytics').expect(403)).body.error.details).toEqual({ permission: 'kpm_analytics:read' });
       session.current = SUPER_ADMIN;
       expect((await http().get('/kpm/analytics').expect(403)).body.error.code).toBe('TENANT_NO_MEMBERSHIP');
+    });
+
+    describe('P18.8-T5 AC-4, AC-6 — a Core Leader reads the office’s analytics (ADR-0159 §2)', () => {
+      /** `who` as `ContextResolver` resolves them once tagged: the effective flag on the membership. */
+      const tagged = (who: Who): RequestContext => {
+        const base = office.as(who);
+        return new RequestContext(base.userId, 'none', { ...base.membership!, isCoreLeader: true });
+      };
+      const owners = async () => {
+        as('OWNER');
+        return (await http().get('/kpm/analytics').expect(200)).body as { agencies: Agency[]; total: Figures & { abCount: number } };
+      };
+
+      it.each(['AGUS', 'SARI'] as const)('P18.8-T5 AC-4 positive: %s, tagged, reads the whole office — the Owner’s figures, nothing recorded', async (who) => {
+        const theirs = await owners();
+        session.current = tagged(who);
+        const since = await mark();
+        const read = (await http().get('/kpm/analytics').expect(200)).body as typeof theirs;
+        // The office's every agency and total, not their own unit: only who is the reader differs.
+        const heads = (v: typeof theirs) => v.agencies.map((a) => [a.head.name, a.manpower.total]);
+        expect(heads(read)).toEqual(heads(theirs));
+        expect(read.total).toEqual(theirs.total);
+        expect(read.agencies.find((a) => a.head.name === 'Agus Salim')!.head.isReader).toBe(who === 'AGUS');
+        expect(await entriesSince(since)).toEqual([]);
+        // And the period, as the Owner's.
+        expect((await http().get('/kpm/analytics').query({ period: 'previous_month' }).expect(200)).body.period).toBe('previous_month');
+      });
+
+      it.each(['PEER_AB', 'DEWI'] as const)('P18.8-T5 AC-6 negative: %s, a leader not tagged, is answered 404 — the forum’s rule', async (who) => {
+        as(who);
+        const res = await http().get('/kpm/analytics').expect(404);
+        expect(res.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'KPM analytics not found.' });
+      });
+
+      it('P18.8-T5 AC-6 negative: a tagged Agent cannot exist, and a context claiming one holds no grant', async () => {
+        session.current = tagged('INDAH');
+        expect(session.current.isCoreLeader).toBe(false);
+        expect((await http().get('/kpm/analytics').expect(403)).body.error.details).toEqual({ permission: 'kpm_analytics:read' });
+      });
+
+      it('P18.8-T5 AC-6 a support session reads as its member: a tagged AB’s reads, an untagged AAB’s is 404, and nothing is written', async () => {
+        const supported = (base: RequestContext) => new RequestContext(base.userId, 'none', base.membership, 'u-support', null, false, true);
+        session.current = supported(tagged('AGUS'));
+        const before = await db().collection('auditLog').countDocuments();
+        expect((await http().get('/kpm/analytics').expect(200)).body.total.abCount).toBe(4);
+        session.current = supported(office.as('SARI'));
+        expect((await http().get('/kpm/analytics').expect(404)).body.error.code).toBe('NOT_FOUND');
+        expect(await db().collection('auditLog').countDocuments()).toBe(before);
+      });
+
+      it('P18.8-T5 AC-4 cross-tenant: a Core Leader of 0417 reads 0417 alone — no member of 0555 in any row', async () => {
+        session.current = tagged('AGUS');
+        const read = (await http().get('/kpm/analytics').expect(200)).body as { agencies: Agency[] };
+        const names = read.agencies.flatMap((a) => [a.head.name, a.direct.head.name, ...a.aabUnits.map((u) => u.head.name)]);
+        expect(names).not.toContain('Lina Marlina');
+        expect(names).not.toContain('Bayu Saputra');
+      });
     });
 
     it.each([

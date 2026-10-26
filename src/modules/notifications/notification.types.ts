@@ -29,6 +29,12 @@ export const NotificationTemplate = {
   MEMBER_REMOVED: 'member.removed',
   ROLE_CHANGED: 'member.role_changed',
   ADMIN_ACCESS_CHANGED: 'member.admin_access_changed',
+  /*
+   * AgencyBoost's answer to a leader past the office's limit (ADR-0157 §3), to whoever asked. The payload is the
+   * subject's name and, for a decline, the reason — the request says the rest.
+   */
+  LEADER_LIMIT_REQUEST_APPROVED: 'leader_limit_request.approved',
+  LEADER_LIMIT_REQUEST_DECLINED: 'leader_limit_request.declined',
   /**
    * A leader set somebody's goal (§3.6, ADR-0046).
    *
@@ -85,6 +91,8 @@ export const TEMPLATE_CHANNELS: Record<NotificationTemplateId, readonly Notifica
   [NotificationTemplate.MEMBER_REMOVED]: ['in_app', 'email'],
   [NotificationTemplate.ROLE_CHANGED]: ['in_app', 'email'],
   [NotificationTemplate.ADMIN_ACCESS_CHANGED]: ['in_app', 'email'],
+  [NotificationTemplate.LEADER_LIMIT_REQUEST_APPROVED]: ['in_app', 'email'],
+  [NotificationTemplate.LEADER_LIMIT_REQUEST_DECLINED]: ['in_app', 'email'],
   [NotificationTemplate.GOAL_SET_BY_LEADER]: ['in_app', 'email'],
   [NotificationTemplate.COACHING_SESSION_FINALIZED]: ['in_app'],
   // The inbox always, as ADR-0010's authoritative channel; email by the member's preferences.

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
 import type { SeedRecord } from './company-template.schema';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
@@ -10,6 +10,9 @@ import {
 } from '@/domain/constants';
 import { NotFoundException } from '@/common/errors/domain.exception';
 import type { KpmStartedFrom } from '@/modules/tenants/kpm.schema';
+import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
+import { OrgLevelService } from '@/modules/tenants/org-level.service';
+import { refuseUnknownRungs } from './template-rungs';
 import { NamedTemplate, NamedTemplateDocument } from './named-template.schema';
 import {
   OFFICE_TEMPLATE_KINDS, platformDefaultPayload, withCascadeTypes, withPlatformLadder, type OfficeTemplateKind,
@@ -19,6 +22,8 @@ import { ActivityType, ActivityTypeDocument } from './activity-type.schema';
 import { LeadStatus, LeadStatusDocument } from './lead-status.schema';
 import { RatioDefinition, RatioDefinitionDocument } from './ratio-definition.schema';
 import { ConfigSnapshot, ConfigSnapshotDocument } from './config-snapshot.schema';
+import { ActivityBinding, ActivityBindingDocument } from './activity-binding.schema';
+import { bindingOfPayload, bindingProblems, defaultBinding, type CascadeBinding } from './activity-binding';
 import { CompanyTemplate, CompanyTemplateDocument } from './company-template.schema';
 import {
   ActivationTemplate, ActivationTemplateDocument,
@@ -63,6 +68,8 @@ export interface ProvisionedTaxonomy {
   seededFrom: SeedRecord;
   /** The cascade codes the source lacked, added with their platform label (ADR-0115 §2). */
   cascadeAdded: string[];
+  /** The activity binding the office was given: the source's, or the default (ADR-0163 §1). */
+  binding: CascadeBinding;
 }
 
 /** What one kind's seed copied, and from which published version (P5-T12). */
@@ -86,6 +93,12 @@ export interface StartFrom {
   kind: 'template' | 'defaults' | 'empty';
   /** The template, when `kind` is `template`. */
   templateId?: string | null;
+  /**
+   * **A template of the Template library rather than of the office's own company** (ADR-0164 §5), when `kind`
+   * is `template`: `templateId` names one of the library's, absent its default — *Template · Default template*.
+   * Its kinds are copied across companies, every rung they name checked against the office's company's ladder.
+   */
+  templateLibrary?: boolean;
 }
 
 /**
@@ -137,6 +150,13 @@ export function emptySource(templateId: string | null = null): KindSource {
 interface ActivityTaxonomyPayload {
   categories?: SeedActivityCategory[];
   types?: SeedActivityType[];
+  /** Which types each cascade role counts (ADR-0163 §1); absent, the default binding. */
+  bindings?: unknown;
+}
+
+/** The binding a taxonomy source gives an office: its own, or the default when it carries none (ADR-0163 §1). */
+function bindingOfSource(payload: Record<string, unknown> | null): CascadeBinding {
+  return bindingOfPayload(payload) ?? defaultBinding();
 }
 
 /** A section as a template may hold it: the seed's fields, and two an office's own carries (P13.2-T7). */
@@ -221,6 +241,20 @@ export class ProvisioningService {
     // read them — one renderer, so the snapshot and the live read cannot disagree.
     private readonly renderer: TenantConfigService,
     @InjectModel(NamedTemplate.name) private readonly named: Model<NamedTemplateDocument>,
+    /*
+     * ADR-0163 §1: the office's activity binding, copied from the source's taxonomy. The application always
+     * provides it; optional so a hand-built instance need not, and without it no row is written and the office
+     * counts the default binding — what an office provisioned before the binding existed counts.
+     */
+    @Optional() @InjectModel(ActivityBinding.name)
+    private readonly bindings: Model<ActivityBindingDocument> | null = null,
+    /*
+     * ADR-0164 §5: the Template library an office may start from, and the ladder of the office's company that its
+     * rungs are checked against. The application always provides both; optional for the reason `bindings` is, and
+     * without them that one source is refused rather than copied unchecked.
+     */
+    @Optional() @InjectModel(Company.name) private readonly companies: Model<CompanyDocument> | null = null,
+    @Optional() private readonly orgLevels: OrgLevelService | null = null,
   ) {}
 
   /**
@@ -245,17 +279,23 @@ export class ProvisioningService {
         kinds: this.each(() => emptySource()),
       };
     } else {
-      if (startFrom?.kind === 'template' && !startFrom.templateId) {
+      const library = startFrom?.kind === 'template' && startFrom.templateLibrary === true;
+      if (startFrom?.kind === 'template' && !startFrom.templateId && !library) {
         throw new BadRequestException('Choose the template the office starts from.');
       }
-      const template = await this.templateFor(companyId, startFrom?.templateId ?? null);
+      // The company whose template it is: the office's own, or the Template library's (ADR-0164 §5).
+      const sourceCompanyId = library ? await this.libraryCompanyId() : companyId;
+      const template = await this.templateFor(sourceCompanyId, startFrom?.templateId ?? null);
       const templateId = String(template._id);
       const rows = await Promise.all(OFFICE_TEMPLATE_KINDS.map((kind) => this.templates
-        .findOne({ companyId, templateId, kind, status: 'published', deletedAt: null })
+        .findOne({ companyId: sourceCompanyId, templateId, kind, status: 'published', deletedAt: null })
         .sort({ version: -1 })
         .exec()));
       plan = {
-        startedFrom: { source: 'template', templateId, templateName: template.name },
+        startedFrom: {
+          source: 'template', templateId, templateName: template.name,
+          ...(library ? { companyId: sourceCompanyId } : {}),
+        },
         kinds: this.each((_kind, i) => {
           const row = rows[i];
           return row
@@ -263,9 +303,33 @@ export class ProvisioningService {
             : emptySource(templateId);
         }),
       };
+      /*
+       * **Across companies, every rung the kinds name is on the office's company's ladder** — the check the
+       * import makes (ADR-0115 §6), before the office row exists. Within one company the ladder is shared.
+       */
+      if (library) {
+        const kinds = Object.fromEntries(OFFICE_TEMPLATE_KINDS
+          .filter((kind) => plan.kinds[kind].payload)
+          .map((kind) => [kind, plan.kinds[kind].payload!]));
+        await refuseUnknownRungs(kinds, () => this.orgLevels!.activeCodesFor(companyId));
+      }
     }
     this.refuseBrokenPlan(plan);
     return plan;
+  }
+
+  /**
+   * **The Template library's company id** (ADR-0164): the one company of kind `template`. `404` where there is
+   * none — a database migration `0037` has not run on — so an office is never started from a template nobody
+   * can name.
+   */
+  private async libraryCompanyId(): Promise<string> {
+    if (!this.companies || !this.orgLevels) {
+      throw new Error('ProvisioningService was built without the companies model or the ladder service.');
+    }
+    const library = await this.companies.findOne({ kind: 'template', deletedAt: null }, { _id: 1 }).exec();
+    if (!library) throw new NotFoundException('Template library');
+    return String(library._id);
   }
 
   /**
@@ -353,7 +417,8 @@ export class ProvisioningService {
     const say = (what: string, found: string[]) => problems.push(...found.map((p) => `${what}: ${p}`));
 
     const taxonomy = (kinds.activity_taxonomy.payload ?? {}) as ActivityTaxonomyPayload;
-    const { categories, types } = withCascadeTypes(taxonomy.categories ?? [], taxonomy.types ?? []);
+    const binding = bindingOfSource(kinds.activity_taxonomy.payload);
+    const { categories, types } = withCascadeTypes(taxonomy.categories ?? [], taxonomy.types ?? [], binding);
     const conflict = summaryGroupConflict(categories);
     if (conflict) {
       say('Activity types', [`the summary tile ${conflict.summaryGroupCode} is labelled `
@@ -366,6 +431,8 @@ export class ProvisioningService {
     }
     const known = new Set(categories.map((c) => c.code));
     const typeCodes = new Set(types.filter((t) => known.has(t.categoryCode)).map((t) => t.code));
+    // Every code the binding names is one the office will hold (ADR-0163 §1): the same checker as the office's own.
+    say('Activity binding', bindingProblems(binding, typeCodes));
 
     const statuses = (kinds.lead_pipeline.payload as { statuses?: SeedLeadStatus[] } | null)?.statuses;
     if (statuses) say('Lead statuses', leadPipelineProblems(statuses));
@@ -494,7 +561,8 @@ export class ProvisioningService {
     kpmId: string, source: KindSource = defaultSource('activity_taxonomy'),
   ): Promise<ProvisionedTaxonomy> {
     const payload = (source.payload ?? {}) as ActivityTaxonomyPayload;
-    const { categories, types, added } = withCascadeTypes(payload.categories ?? [], payload.types ?? []);
+    const binding = bindingOfSource(source.payload);
+    const { categories, types, added } = withCascadeTypes(payload.categories ?? [], payload.types ?? [], binding);
     if (added.length) {
       this.logger.log(`Office ${kpmId} was given the cascade activity types ${added.join(', ')} (ADR-0115 §2).`);
     }
@@ -569,12 +637,32 @@ export class ProvisioningService {
       updatedBy: null,
     })));
 
+    /*
+     * **The office's activity binding** (ADR-0163 §1): which of the types just written each cascade role counts —
+     * the source's own, or the default binding. Version 1, as every row copied here starts.
+     */
+    if (this.bindings) {
+      await this.bindings.create({
+        kpmId,
+        leads: [...binding.leads],
+        appointments: [...binding.appointments],
+        closings: [...binding.closings],
+        version: 1,
+        status: 'active',
+        archivedAt: null,
+        deletedAt: null,
+        createdBy: null,
+        updatedBy: null,
+      });
+    }
+
     return {
       categories: categories.length,
       types: usable.length,
       typeCodes: usable.map((t) => t.code),
       seededFrom: source.seededFrom,
       cascadeAdded: added,
+      binding,
     };
   }
 

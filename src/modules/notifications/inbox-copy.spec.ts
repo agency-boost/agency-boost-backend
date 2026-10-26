@@ -44,6 +44,32 @@ describe('inbox copy', () => {
       .toBe('You can search for another leader and ask again.');
   });
 
+  it('ADR-0162 §3: a setup session says so, and what it may change, to the person and to the Owner', () => {
+    const subject = describeNotification(NotificationTemplate.IMPERSONATION_STARTED, {
+      reason: 'Setting up the activity types.', isSubject: true, purpose: 'setup',
+    });
+    expect(subject).toEqual({
+      title: 'Somebody from AgencyBoost is setting up your office as you',
+      detail: 'Setting up the activity types. They can change the office\'s settings, import people and upload '
+        + 'production files, and nothing else.',
+    });
+    const owner = describeNotification(NotificationTemplate.IMPERSONATION_STARTED, {
+      reason: 'Setting up the activity types.', isSubject: false, purpose: 'setup',
+    });
+    expect(owner.title).toBe('A setup session started in your office');
+    expect(owner.detail).toContain('import people and upload production files, and nothing else.');
+    // Without a reason, the general sentence — never an empty one.
+    expect(describeNotification(NotificationTemplate.IMPERSONATION_STARTED, { isSubject: true, purpose: 'setup' }).detail)
+      .toMatch(/^A setup session has started\. They can change/);
+    // A support session is unchanged: it only looks.
+    expect(describeNotification(NotificationTemplate.IMPERSONATION_STARTED, {
+      reason: 'Ticket 42.', isSubject: true, purpose: 'support',
+    })).toEqual({
+      title: 'Somebody from AgencyBoost is looking at your screens',
+      detail: 'Ticket 42. They can only look, unless a second person approves otherwise.',
+    });
+  });
+
   it('reads admin access both ways round', () => {
     expect(describeNotification(NotificationTemplate.ADMIN_ACCESS_CHANGED, { granted: true }).title)
       .toBe('You can now administer this office');
@@ -56,6 +82,18 @@ describe('inbox copy', () => {
     expect(describeNotification('something.new', {})).toEqual({
       title: 'Something happened',
       detail: null,
+    });
+  });
+
+  it('P18.8-T2 AC-5 tells whoever asked how AgencyBoost decided a leader past the limit (ADR-0157 §3)', () => {
+    expect(describeNotification(NotificationTemplate.LEADER_LIMIT_REQUEST_APPROVED, { subjectName: 'Budi' })).toEqual({
+      title: 'AgencyBoost approved your request for Budi',
+      detail: 'The change is made: they are a leader now, past your office’s limit.',
+    });
+    expect(describeNotification(NotificationTemplate.LEADER_LIMIT_REQUEST_DECLINED, { subjectName: 'Budi', reason: 'Not now.' }))
+      .toEqual({ title: 'AgencyBoost declined your request for Budi', detail: 'Not now.' });
+    expect(describeNotification(NotificationTemplate.LEADER_LIMIT_REQUEST_DECLINED, {})).toEqual({
+      title: 'AgencyBoost declined your request for a new leader', detail: 'Nothing about them changed.',
     });
   });
 

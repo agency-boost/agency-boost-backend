@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { RequestContext } from '@/common/context/request-context';
-import { NoMembershipException } from '@/common/errors/domain.exception';
+import { RequestContext, type HierarchyRole } from '@/common/context/request-context';
+import { NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import type { MembershipStatus } from '@/modules/org/membership.schema';
@@ -14,6 +14,8 @@ import { OrgLevelService, type OrgLevelRow } from '@/modules/tenants/org-level.s
 export interface OfficePerson {
   membershipId: string;
   orgLevelCode: string;
+  /** The class, from the rung's leader tier (ADR-0156): what the agency and unit partitions read. */
+  role: HierarchyRole;
   leaderId: string | null;
   ancestorIds: string[];
   status: MembershipStatus;
@@ -55,6 +57,19 @@ export class OfficePeople {
     return ctx.membershipId;
   }
 
+  /**
+   * **A reader of KPM analytics** (ADR-0159 §2, P18.8-T5 AC-4): the Owner, an Admin, or a **Core Leader** — tagged,
+   * on a leader rung, as the context reads it on every request. Any other member of the office holding the grant —
+   * an AB or an AAB not tagged — is answered **`404 NOT_FOUND`**, the forum's rule: the refusal does not say there
+   * is a reading they are kept from. `TENANT_NO_MEMBERSHIP` first, as `require`.
+   */
+  static requireAnalyticsReader(ctx: RequestContext): string {
+    const me = OfficePeople.require(ctx);
+    const office = ctx.membership?.isKpmOwner === true || ctx.membership?.isKpmAdmin === true;
+    if (!office && !ctx.isCoreLeader) throw new NotFoundException('KPM analytics');
+    return me;
+  }
+
   async read(ctx: RequestContext, leaversSince: Date | null): Promise<{
     /** Active, and removed since `leaversSince`. */
     everyone: OfficePerson[];
@@ -66,11 +81,12 @@ export class OfficePeople {
       leaversSince === null
         ? { status: 'active' }
         : { $or: [{ status: 'active' }, { status: 'removed', removedAt: { $gte: leaversSince } }] },
-      { projection: { orgLevelCode: 1, leaderId: 1, ancestorIds: 1, status: 1, joinedAt: 1, removedAt: 1 } },
+      { projection: { orgLevelCode: 1, role: 1, leaderId: 1, ancestorIds: 1, status: 1, joinedAt: 1, removedAt: 1 } },
     );
     const everyone = rows.map((row): OfficePerson => ({
       membershipId: String(row._id),
       orgLevelCode: row.orgLevelCode,
+      role: row.role,
       leaderId: row.leaderId ?? null,
       // Hydrated with the schema's default, `[]`, where a row predates the cache.
       ancestorIds: [...row.ancestorIds],

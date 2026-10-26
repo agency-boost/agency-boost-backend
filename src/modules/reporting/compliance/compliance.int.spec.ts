@@ -77,12 +77,31 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       }
     });
 
-    it.each(['AGUS', 'SARI', 'RINA'] as const)('P18.6-T1 AC-1 negative: %s, a field member, is refused by the guard and writes nothing', async (who) => {
-      h.as(who);
+    it('P18.6-T1 AC-1 negative: RINA, an Agent, is refused by the guard and writes nothing', async () => {
+      h.as('RINA');
       const before = await auditCount();
       const res = await http().get('/kpm/analytics/compliance').query({ category: 'activity' }).expect(403);
       expect(res.body.error).toMatchObject({ code: 'PERM_DENIED', details: { permission: 'kpm_analytics:read' } });
       expect(await auditCount()).toBe(before);
+    });
+
+    it.each(['AGUS', 'SARI'] as const)('P18.8-T5 AC-6 negative: %s, a leader not tagged Core Leader, is answered 404 and writes nothing', async (who) => {
+      h.as(who);
+      const before = await auditCount();
+      const res = await http().get('/kpm/analytics/compliance').query({ category: 'activity' }).expect(404);
+      expect(res.body.error.code).toBe('NOT_FOUND');
+      expect(await auditCount()).toBe(before);
+    });
+
+    it.each(['AGUS', 'SARI'] as const)('P18.8-T5 AC-4 positive: %s, a Core Leader, reads the whole office’s tree, read-only (ADR-0159 §2)', async (who) => {
+      const owners = await read({ category: 'goals' });
+      const base = h.ctx(who);
+      h.as(new RequestContext(base.userId, 'none', { ...base.membership!, isCoreLeader: true }));
+      const view = await read({ category: 'goals' });
+      expect([view.people, view.units]).toEqual([owners.people, owners.units]);
+      expect(rows(view).map((r) => r.membershipId).sort()).toEqual(rows(owners).map((r) => r.membershipId).sort());
+      // Read-only: no override offered (`campaign_qualification:override` is no field role's).
+      expect(view.can.override).toBe(false);
     });
 
     it('P18.6-T1 AC-1 negative: a Super Admin outside a support session belongs to no office', async () => {

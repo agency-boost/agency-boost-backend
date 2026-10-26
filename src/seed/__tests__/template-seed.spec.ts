@@ -4,7 +4,8 @@ import { RequestContext } from '@/common/context/request-context';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionFrom } from '../../../test/config-module';
 import { up as namedTemplates } from '@/migrations/0023-named-templates';
-import { SEED_CAPABILITY_STAGES } from '@/domain/constants';
+import { SEED_CAPABILITY_STAGES, SEED_PRODUCTS } from '@/domain/constants';
+import { TEMPLATE_LIBRARY } from '@/modules/tenants/template-library';
 import { BLANK_COMPANY, EMPTY_OFFICE } from '../template-fixture';
 import { BSD_CITY_SETTINGS, seedTemplateCopyFixture } from '../template-copy-fixture';
 import { seedDemo } from '../demo';
@@ -192,5 +193,39 @@ describe('P13.2-T6 the template seed — a run at 10:00 on 7 October 2026 in Jak
       const again = await seedTemplateCopyFixture({ clock, companyId: prudentialId, kpm0417: await kpm0417() });
       expect(again).toMatchObject({ templateId: BSD_CITY_SETTINGS._id, written: 0 });
     });
+  });
+
+  /** Last, because its `--reset` run starts the database over. */
+  describe('P18.9-T3: the Template company (ADR-0164), made by migration 0037', () => {
+    const library = TEMPLATE_LIBRARY.companyId;
+
+    async function expectTheLibrary() {
+      expect(await col('companies').findOne({ slug: 'template', deletedAt: null }))
+        .toMatchObject({ name: 'Template', kind: 'template', usesPlatformDefaults: true, status: 'active' });
+      const templates = await wired.namedTemplates.list(library);
+      expect(templates).toHaveLength(1);
+      expect(templates[0]).toMatchObject({
+        id: TEMPLATE_LIBRARY.defaultTemplateId, name: 'Default template', isDefault: true,
+        origin: { kind: 'defaults' }, officeCount: 0,
+      });
+      expect(Object.values(templates[0].publishedVersions)).toEqual(Array(7).fill(1));
+      expect(await col('products').countDocuments({ companyId: library, deletedAt: null })).toBe(SEED_PRODUCTS.length);
+      expect(await col('recruitmentPlaybooks').countDocuments({ companyId: library, deletedAt: null })).toBe(1);
+      expect(await col('qualificationRules').countDocuments({ companyId: library, deletedAt: null })).toBeGreaterThan(0);
+      const ladder = await col('companyOrgLevels').find({ companyId: library, deletedAt: null }).sort({ displayOrder: 1 }).toArray();
+      expect(ladder.map((r) => [r.code, r.leaderTier])).toEqual([['AGENT', null], ['AAB', 'associate'], ['AB', 'senior']]);
+      // It holds no office, and nobody works for it.
+      expect(await col('kpms').countDocuments({ companyId: library })).toBe(0);
+      expect(await col('users').countDocuments({ companyId: library })).toBe(0);
+    }
+
+    it('AC-7 is in the seed: the library, its company data, and Default template — the default, every kind published', expectTheLibrary);
+
+    it('AC-7 a --reset run empties it with everything else and makes it again, once', async () => {
+      await seedDemo({ clock, reset: true, log: quiet });
+      await expectTheLibrary();
+      expect(await col('companies').countDocuments({ kind: 'template' })).toBe(1);
+      expect(await col('companyTemplates').countDocuments({ companyId: library })).toBe(7);
+    }, RUN_MS);
   });
 });

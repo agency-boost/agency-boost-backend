@@ -129,14 +129,30 @@ export class StartFromDto {
   @ApiProperty({
     enum: ['template', 'defaults', 'empty'],
     description:
-      '`template`: one of the company’s active templates, named by `templateId`. `defaults`: the '
-      + 'AgencyBoost defaults. `empty`: nothing but the three cascade activity types.',
+      '`template`: one of the company’s active templates, named by `templateId` — or, with '
+      + '`templateLibrary`, one of the Template library’s. `defaults`: the AgencyBoost defaults. `empty`: '
+      + 'nothing but the three cascade activity types.',
   })
   @IsIn(['template', 'defaults', 'empty'])
   kind!: 'template' | 'defaults' | 'empty';
 
-  @ApiPropertyOptional({ description: 'Required when `kind` is `template`.' })
-  @ValidateIf((o: StartFromDto) => o.kind === 'template')
+  @ApiPropertyOptional({
+    description:
+      'Required when `kind` is `template`, unless `templateLibrary` is true: then it names one of the '
+      + 'Template library’s active templates, and absent its default.',
+  })
+  @ValidateIf((o: StartFromDto) => o.kind === 'template' && (o.templateId !== undefined || o.templateLibrary !== true))
   @IsMongoId()
   templateId?: string;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    description:
+      'With `kind: template`, the template is the Template library’s rather than the company’s — '
+      + '*Template · Default template*. Its settings are copied across companies, and every role they name '
+      + 'must be on the company’s ladder (409 TEMPLATE_RUNG_UNKNOWN).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  templateLibrary?: boolean;
 }

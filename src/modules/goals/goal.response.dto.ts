@@ -66,19 +66,23 @@ export class GoalProjectionDto implements CascadeResult {
   @ApiProperty({ type: Number })
   policiesPerMonth!: number;
 
-  @ApiProperty({ type: Number, description: 'The screen’s `≈ n/week` sub-line. Ceil, like every step.' })
+  @ApiProperty({
+    type: Number,
+    description: 'Steps 3 and 5’s `≈ n/week`: `policiesPerMonth` ÷ 4.33 to **one decimal**, a whole figure '
+      + 'whole — `1.4` for six a month (ADR-0160 §5).',
+  })
   policiesPerWeek!: number;
 
   @ApiProperty({ type: Number })
   appointmentsPerMonth!: number;
 
-  @ApiProperty({ type: Number })
+  @ApiProperty({ type: Number, description: 'The `≈ n/week` sub-line: ÷ 4.33, rounded up, a whole count.' })
   appointmentsPerWeek!: number;
 
   @ApiProperty({ type: Number })
   leadsPerMonth!: number;
 
-  @ApiProperty({ type: Number })
+  @ApiProperty({ type: Number, description: 'The `≈ n/week` sub-line: ÷ 4.33, rounded up, a whole count.' })
   leadsPerWeek!: number;
 
   @ApiProperty({
@@ -100,6 +104,18 @@ export class GoalCascadeMappingDto {
 
   @ApiProperty({ type: String, example: 'SELL_SUBMISSION' })
   closingsCode!: string;
+}
+
+/** The office's activity binding as the plan's columns count it: each role a list of codes, summed. */
+export class GoalCascadeBindingDto {
+  @ApiProperty({ type: [String], example: ['LEADS_CONTACTED'], description: '*Set appointment*.' })
+  leads!: string[];
+
+  @ApiProperty({ type: [String], example: ['SELL_PRESENTATION'], description: '*Sales meeting*.' })
+  appointments!: string[];
+
+  @ApiProperty({ type: [String], example: ['SELL_SUBMISSION'], description: '*Submission polis*.' })
+  closings!: string[];
 }
 
 export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | 'version'> {
@@ -142,10 +158,18 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
   @ApiProperty({ type: Number })
   caseSizeMinor!: number;
 
-  @ApiProperty({ type: Number })
+  @ApiProperty({
+    type: Number,
+    description: '*Appointment to Sales meeting*, a percentage. Unsaved, the office’s *Set appointment to meeting* '
+      + 'benchmark, or 30 (ADR-0160 §3).',
+  })
   leadsToApptPct!: number;
 
-  @ApiProperty({ type: Number })
+  @ApiProperty({
+    type: Number,
+    description: '*Closing rate*, a percentage. Unsaved, the office’s *Selling success rate* benchmark, or 30 '
+      + '(ADR-0160 §3).',
+  })
   closingRatePct!: number;
 
   @ApiProperty({
@@ -166,13 +190,24 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
   })
   projected!: CascadeResult | null;
 
-  @ApiProperty({ type: GoalCascadeMappingDto, description: 'Activity **codes**, never positions.' })
+  @ApiProperty({
+    type: GoalCascadeMappingDto,
+    description: 'Activity **codes**, never positions: the first code of each role in the office’s binding when the '
+      + 'plan was first saved, kept as its record and never rewritten. Nothing counts from it — see `cascadeBinding`.',
+  })
   cascadeMapping!: { leadsCode: string; appointmentsCode: string; closingsCode: string };
+
+  @ApiProperty({
+    type: GoalCascadeBindingDto,
+    description: 'What the three columns count today: the office’s activity binding, each role a list of codes, '
+      + 'summed. The *Activity #n* chips are drawn from it.',
+  })
+  cascadeBinding!: { leads: string[]; appointments: string[]; closings: string[] };
 
   @ApiProperty({
     type: GoalMeasuredDto,
     nullable: true,
-    description: 'Your own conversion rates over the last 30 days, over **this goal’s** cascade codes — '
+    description: 'Your own conversion rates over the last 30 days, over the office’s cascade binding — '
       + 'printed under the assumptions they measure. Read only: nothing is filled in (ADR-0048, ADR-0055). '
       + '**`null` on anybody else’s plan**: reading or saving somebody else’s goal answers no rate from '
       + 'their log.',

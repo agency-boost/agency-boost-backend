@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { UNIT_DASHBOARD, type UnitDashboardPeriod } from '@/domain/constants';
 import { GOAL_PACE_STATUSES, type GoalPaceStatus } from '@/domain/metrics/goal-pace-status';
-import type { CountAgainst, LeadCountsRow, RolledUpGoal } from '@/domain/metrics/unit-rollup';
+import type { CountAgainst, LeadCountsRow, PairedGoal } from '@/domain/metrics/unit-rollup';
 import type { FollowUp } from '@/modules/coaching/follow-up';
 import { PROVENANCES, type Provenance } from '@/modules/production/monthly-agent-data.schema';
 import type { MonthState } from '@/modules/production/production-months.service';
@@ -159,11 +159,21 @@ export class UnitRowDto implements UnitRow {
   campaigns!: { code: string; title: string }[] | null;
 }
 
-class RolledUpGoalDto implements RolledUpGoal {
-  @ApiProperty({ type: Number, nullable: true, description: 'The rows’ targets summed; `null` when none holds one.' }) targetMinor!: number | null;
-  @ApiProperty({ type: Number, nullable: true, description: 'The rows’ actuals summed; `null` when none holds one.' }) actualMinor!: number | null;
-  @ApiProperty({ type: Number, nullable: true, description: 'From the sums, never averaged.' }) attainmentPct!: number | null;
-  @ApiProperty({ description: 'Rows holding no actual, which the sum leaves out.' }) missing!: number;
+/**
+ * **Paired**: a row's target counts only when its production for the period is held, and the actual is the same rows'
+ * production — so a file not uploaded yet is left out of both, and named, rather than counted as 0.
+ */
+class PairedGoalDto implements PairedGoal {
+  @ApiProperty({
+    type: Number, nullable: true,
+    description: 'The targets of the rows whose production is held, summed — every target held when no row’s production is; '
+      + '`null` when none holds one.',
+  }) targetMinor!: number | null;
+  @ApiProperty({ type: Number, nullable: true, description: 'The rows’ actuals summed; `null` when none holds one: *Not uploaded yet*.' }) actualMinor!: number | null;
+  @ApiProperty({ type: Number, nullable: true, description: 'From the paired sums, never averaged.' }) attainmentPct!: number | null;
+  @ApiProperty({ description: 'Rows holding no actual, which both sums leave out.' }) missing!: number;
+  @ApiProperty({ type: Number, nullable: true, description: 'How far the actual is short of the target; 0 when met; `null` without both.' }) gapMinor!: number | null;
+  @ApiProperty({ type: Number, nullable: true, description: 'How far the actual is over the target; 0 when short; `null` without both.' }) overMinor!: number | null;
 }
 
 class PotentialActiveDto {
@@ -172,7 +182,7 @@ class PotentialActiveDto {
 }
 
 export class UnitTotalDto implements UnitTotal {
-  @ApiProperty({ type: RolledUpGoalDto }) goal!: RolledUpGoal;
+  @ApiProperty({ type: PairedGoalDto }) goal!: PairedGoal;
   @ApiProperty({ type: LeadCountsDto }) leadsCounts!: LeadCountsRow;
   @ApiProperty({ type: CountAgainstDto }) touches!: CountAgainst;
   @ApiProperty({ type: PotentialActiveDto }) potentialActive!: { count: number; of: number };
@@ -193,7 +203,7 @@ class TeamTileDto {
   @ApiProperty({ description: 'Everybody under those units’ heads.' }) underUnits!: number;
 }
 
-class GroupProductionTileDto extends RolledUpGoalDto {
+class GroupProductionTileDto extends PairedGoalDto {
   @ApiProperty({ enum: ['month', 'year'] }) period!: 'month' | 'year';
 }
 

@@ -4,18 +4,20 @@ import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import {
-  CreateLeadDto, CreateLeadQueryDto, ListLeadsQueryDto, SetLeadOutcomeDto, SetLeadStatusDto, UpdateLeadDto,
+  CreateLeadDto, CreateLeadQueryDto, ListLeadsQueryDto, ReorderLeadsDto, SetLeadOutcomeDto, SetLeadStatusDto,
+  UpdateLeadDto,
 } from './lead.dto';
-import { DeletedLeadDto, LeadPageDto, LeadResponseDto } from './lead.response.dto';
+import { DeletedLeadDto, LeadOrderDto, LeadPageDto, LeadResponseDto } from './lead.response.dto';
 import { LeadService } from './lead.service';
 
 /**
  * One person an agent is working (P7-T2, P7-T3).
  *
- * **Seven routes, one screen.** Everything here is called by `/leads`; nothing is an endpoint
+ * **Eight routes, one screen.** Everything here is called by `/leads`; nothing is an endpoint
  * waiting for a consumer, which is the rule `check-api-consumers.py` enforces and the reason
- * P7-T1 shipped with none at all. The eighth, `GET /leads/summary`, lost its only caller when
- * `/leads` went back to the prototype and was retired with it (P10.1-T4).
+ * P7-T1 shipped with none at all. `GET /leads/summary` lost its only caller when `/leads` went back to
+ * the prototype and was retired with it (P10.1-T4); `PATCH /leads/order`, the screen's drag handles,
+ * arrived with P18.8-T7.
  *
  * **Moving and closing are separate routes on separate permissions**, because they are separate
  * acts: a status says where somebody is, an outcome says the work stopped and how it ended. The
@@ -101,6 +103,27 @@ export class LeadController {
     @Ctx() ctx: RequestContext, @Body() body: CreateLeadDto, @Query() query: CreateLeadQueryDto,
   ) {
     return this.leads.create(ctx, body, query.owner);
+  }
+
+  /**
+   * **Declared above `PATCH :id`**, or Nest reads *order* as a lead's id and answers a patch to a lead
+   * that does not exist (the note on `GET :id` above).
+   */
+  @Patch('order')
+  @RequirePermission('lead:update')
+  @ApiOperation({
+    summary: 'Put your leads in your order',
+    description:
+      'Every one of your **open** leads, once each, top first: `GET /leads` without `sort` then answers '
+      + 'in this order, and a lead you add goes to the top (ADR-0161 §1). Your own, whatever your grant '
+      + 'reaches: a leader orders their own leads, not their agents’. A closed or deleted lead, somebody '
+      + 'else’s, another office’s, a repeat or one left out is `VALIDATION_FAILED` (400), and nothing is '
+      + 'written. A place is not a change to the lead: no `version` moves and no editor is named. One '
+      + '`lead.reordered` entry, with how many.',
+  })
+  @ApiResponse({ status: 200, type: LeadOrderDto })
+  async reorder(@Ctx() ctx: RequestContext, @Body() body: ReorderLeadsDto) {
+    return this.leads.reorder(ctx, body.ids);
   }
 
   @Patch(':id')

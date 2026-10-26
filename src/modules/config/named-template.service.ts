@@ -292,6 +292,42 @@ export class NamedTemplateService {
     await this.requireCompany(companyId);
   }
 
+  /**
+   * **The Template library and its default template** (ADR-0164): the one company of kind `template`, which a
+   * new company copies and a new office may start from. `null` where there is none — a database migration
+   * `0037` has not run on, as a spec's may be — and the caller falls back to the AgencyBoost defaults.
+   */
+  async library(): Promise<{ companyId: string; template: NamedTemplateDocument } | null> {
+    const company = await this.companies.findOne({ kind: 'template', deletedAt: null }, { _id: 1 }).exec();
+    if (!company) return null;
+    const companyId = String(company._id);
+    const template = await this.named.findOne({ companyId, isDefault: true, deletedAt: null }).exec();
+    return template ? { companyId, template } : null;
+  }
+
+  /**
+   * **A company-level kind, copied to a new company** (ADR-0164 §4): the source's newest published
+   * `campaign_kinds`, as the new company's published version 1 under no template — so its tab reads what its
+   * carrier rules were copied from, not the platform's. Nothing where the source never published one. A copy,
+   * never a link. `true` when it wrote.
+   */
+  async copyCompanyKind(
+    ctx: RequestContext, kind: 'campaign_kinds', fromCompanyId: string, companyId: string,
+  ): Promise<boolean> {
+    const source = await this.rows
+      .findOne({ companyId: fromCompanyId, templateId: null, kind, status: 'published', deletedAt: null })
+      .sort({ version: -1 })
+      .exec();
+    if (!source) return false;
+    if (await this.rows.exists({ companyId, templateId: null, kind, deletedAt: null }).exec()) return false;
+    await this.rows.create({
+      companyId, templateId: null, kind, version: 1, status: 'published',
+      payload: structuredClone(source.toObject().payload), publishedAt: this.clock.now(),
+      deletedAt: null, createdBy: ctx.userId, updatedBy: ctx.userId,
+    });
+    return true;
+  }
+
   /** One of the company's templates, archived ones included; `404` for any other id. */
   async findOf(companyId: string, templateId: string): Promise<NamedTemplateDocument> {
     return this.find(companyId, templateId);

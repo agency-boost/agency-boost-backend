@@ -68,6 +68,12 @@ import {
 import {
   ConfigSnapshot, ConfigSnapshotSchema,
 } from '@/modules/config/config-snapshot.schema';
+import { ActivityBinding, ActivityBindingSchema } from '@/modules/config/activity-binding.schema';
+import { ActivityBindingRepository } from '@/modules/config/activity.repository';
+import { ActivityBindingService } from '@/modules/config/activity-binding.service';
+import {
+  ActivityBindingAdminController, ActivityBindingReadController,
+} from '@/modules/config/activity-binding.controller';
 import {
   CompanyTemplate, CompanyTemplateSchema,
 } from '@/modules/config/company-template.schema';
@@ -217,13 +223,17 @@ import {
   MembershipHistory, MembershipHistorySchema,
 } from '@/modules/org/membership-history.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import { ProfileLineReader } from '@/modules/org/profile-line';
 import {
-  GroupRepository, JoinRequestRepository, MembershipHistoryRepository,
+  GroupRepository, JoinRequestRepository, LeaderLimitRequestRepository, MembershipHistoryRepository,
 } from '@/modules/org/org.repositories';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { DirectoryService } from '@/modules/org/directory.service';
 import { OrgController } from '@/modules/org/org.controller';
 import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
+import { LeaderLimitRequest, LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
+import { LeaderLimitRequestAdminController } from '@/modules/org/leader-limit-request.controller';
+import { LeaderLimitRequestService } from '@/modules/org/leader-limit-request.service';
 import { OnboardingService } from '@/modules/org/onboarding.service';
 import { OnboardingController } from '@/modules/org/onboarding.controller';
 import { LeaderCodeService } from '@/modules/org/leader-code.service';
@@ -353,12 +363,16 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
       { name: Goal.name, schema: GoalSchema },
       { name: MembershipHistory.name, schema: MembershipHistorySchema },
       { name: JoinRequest.name, schema: JoinRequestSchema },
+      // ADR-0157: a leader past the office's limit, waiting for AgencyBoost.
+      { name: LeaderLimitRequest.name, schema: LeaderLimitRequestSchema },
       { name: Group.name, schema: GroupSchema },
       { name: ActivityCategory.name, schema: ActivityCategorySchema },
       { name: ActivityType.name, schema: ActivityTypeSchema },
       { name: LeadStatus.name, schema: LeadStatusSchema },
       { name: RatioDefinition.name, schema: RatioDefinitionSchema },
       { name: ConfigSnapshot.name, schema: ConfigSnapshotSchema },
+      // ADR-0163: which activity types each cascade role counts, one row per office.
+      { name: ActivityBinding.name, schema: ActivityBindingSchema },
       { name: CompanyTemplate.name, schema: CompanyTemplateSchema },
       // ADR-0115: a company's named templates, each a name over seven kinds of companyTemplates.
       { name: NamedTemplate.name, schema: NamedTemplateSchema },
@@ -414,10 +428,15 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     OfficeTemplateController,
     CompanyController,
     OrgController,
+    // ADR-0157: the Super Admin's queue of leaders past an office's limit.
+    LeaderLimitRequestAdminController,
     OnboardingController,
     NotificationController,
     TenantConfigController,
     TenantConfigReadController,
+    // ADR-0163: an office's activity binding — the Super Admin's per office, the Owner's and Admin's read.
+    ActivityBindingAdminController,
+    ActivityBindingReadController,
     TrainingController,
     // P18.5-T1, T4: the learner's training, and the coach's read of it.
     TrainingProgressController,
@@ -506,6 +525,9 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     ActivityCategoryRepository,
     ActivityTypeRepository,
     ActivityConfigService,
+    // ADR-0163: the activity binding, and `resolveCascadeBinding`, the one reader every cascade count goes through.
+    ActivityBindingRepository,
+    ActivityBindingService,
     LeadStatusRepository,
     LeadStatusService,
     RatioDefinitionRepository,
@@ -617,6 +639,7 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     MembershipRepository,
     GroupRepository,
     JoinRequestRepository,
+    LeaderLimitRequestRepository,
     MembershipHistoryRepository,
     HierarchyService,
     DirectoryService,
@@ -625,6 +648,7 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     MemberNames,
     ApprovalsService,
     RoleChangeService,
+    LeaderLimitRequestService,
     RemovalService,
     OrgTreeService,
     // P11-T3: `COACH(actor, subject)`, and every read of a member's data that goes through it.
@@ -678,6 +702,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     { provide: ActivationEvents, useExisting: ActivationProgressService },
     { provide: ActivationNav, useExisting: ActivationProgressService },
     GroupService,
+    // P18.8-T6: the groups and the office on the sidebar's profile line, read with `/auth/me` (ADR-0159 §5).
+    ProfileLineReader,
     AdminDelegationService,
     /*
      * Phase 15: the Unit Dashboard — one roster read through the readings the person's own screens use, and

@@ -1,6 +1,7 @@
 import { PERFORMANCE, TIME } from '@/domain/constants';
 import { goalSet } from '@/domain/metrics/goal-set';
 import { cascadeCounts, type CascadeCounts } from '@/modules/goals/goal-cascade';
+import { countOf, type CascadeBinding } from '@/modules/config/activity-binding';
 
 /**
  * The Personal Summary's arithmetic (P10-T4). Pure: figures in, figures out, so every rule is a unit
@@ -278,7 +279,8 @@ export interface Pace {
   /** *M*: the month's closing target, from the plan — the closings chip's own target. */
   closingTarget: number;
   /**
-   * *N*, `CLOSINGS_LAST_30_DAYS`: the goal's closing code logged over the last `SUMMARY.PACE_WINDOW_DAYS`,
+   * *N*, `CLOSINGS_LAST_30_DAYS`: the codes the office binds to *Submission polis* (ADR-0163), summed,
+   * logged over the last `SUMMARY.PACE_WINDOW_DAYS`,
    * today included, in the office's calendar — the prototype's `loggedClosing` (`:6316`). Early in a month
    * it counts last month's closings too; that is the prototype's reading, and every day has one.
    */
@@ -335,11 +337,16 @@ export function paceFor(input: {
 /** Which of the cascade's three counts a chip is (`Overall.html:3146-3160`). */
 export type ActivityTargetKey = 'leads' | 'appointments' | 'closings';
 
-/** One of *Your sales activity targets* (P10-T5): a cascade code logged against the period's target. */
+/** One of *Your sales activity targets* (P10-T5): a cascade role's codes logged against the period's target. */
 export interface ActivityTarget {
   key: ActivityTargetKey;
-  /** The goal's own code for this count — `cascadeMapping`, never an item number (invariant §4). */
+  /**
+   * The first code the office binds to this role (ADR-0163) — never an item number (invariant §4). Kept so a
+   * reader naming *the* code has one; `codes` is every code counted.
+   */
   code: string;
+  /** Every code the office binds to this role, in its order. `logged` is their sum. */
+  codes: string[];
   logged: number;
   /**
    * `SUMMARY_ACTIVITY_TARGET`: `null` without an APE target to derive it from. **0 is a month that needs
@@ -352,21 +359,23 @@ export interface ActivityTarget {
 }
 
 /**
- * The three chips, in the prototype's order: leads contacted, appointments, closings.
+ * The three chips, in the prototype's order: *Set appointment*, *Sales meeting*, *Submission polis*.
  *
  * `counts` is the cascade run on the period's APE target — this month's fixed one, or the year's — so
- * the closings chip and the pace sentence name one number. `null` is no target to run it on.
+ * the closings chip and the pace sentence name one number. `null` is no target to run it on. `binding` is
+ * the office's (`resolveCascadeBinding`, ADR-0163): a role bound to `[A, B]` counts both.
  */
 export function activityTargets(
   counts: { leads: number; appointments: number; policies: number } | null,
-  mapping: { leadsCode: string; appointmentsCode: string; closingsCode: string },
+  binding: CascadeBinding,
   logged: ReadonlyMap<string, number>,
 ): ActivityTarget[] {
-  const chip = (key: ActivityTargetKey, code: string, target: number | null): ActivityTarget => {
-    const n = logged.get(code) ?? 0;
+  const chip = (key: ActivityTargetKey, codes: readonly string[], target: number | null): ActivityTarget => {
+    const n = countOf(logged, codes);
     return {
       key,
-      code,
+      code: codes[0] ?? '',
+      codes: [...codes],
       logged: n,
       target,
       attainmentPct: target !== null && target > 0
@@ -375,9 +384,9 @@ export function activityTargets(
     };
   };
   return [
-    chip('leads', mapping.leadsCode, counts?.leads ?? null),
-    chip('appointments', mapping.appointmentsCode, counts?.appointments ?? null),
-    chip('closings', mapping.closingsCode, counts?.policies ?? null),
+    chip('leads', binding.leads, counts?.leads ?? null),
+    chip('appointments', binding.appointments, counts?.appointments ?? null),
+    chip('closings', binding.closings, counts?.policies ?? null),
   ];
 }
 
@@ -391,6 +400,11 @@ export interface ShownSection {
    */
   summaryGroupCode?: string | null;
   summaryGroupLabel?: string | null;
+  /**
+   * `archived` for a section the office archived (ADR-0163 §6): it keeps, on its tile, the types the period holds
+   * counts for — and only those. Absent is active.
+   */
+  status?: 'active' | 'archived';
   types: { code: string; label: string; status: 'active' | 'archived' }[];
 }
 
@@ -420,14 +434,23 @@ export interface SectionChip {
  *
  * A type the office archived stays as a row while the period holds a count against it, so the chip's rows
  * add up to its total; one with nothing in the period is gone, as it is from the log screen.
+ *
+ * **So does a section the office archived** (ADR-0163 §6, P18.9-T2 AC-5): it keeps, on its tile, the types the
+ * period holds counts for, and is gone where it holds none. Its bound types are left to the target chips that
+ * count them, so an archived section never takes a live tile out with it.
  */
 export function sectionChips(
   sections: readonly ShownSection[], counts: ReadonlyMap<string, number>, cascadeCodes: readonly string[],
 ): SectionChip[] {
+  const held = sections.flatMap((section): ShownSection[] => {
+    if ((section.status ?? 'active') === 'active') return [section];
+    const types = section.types.filter((type) => !cascadeCodes.includes(type.code) && (counts.get(type.code) ?? 0) > 0);
+    return types.length ? [{ ...section, types }] : [];
+  });
   // A `Map` keeps insertion order: each tile's first section. Keys are prefixed because a section's own
   // code may equal another section's group code, and the two are different tiles.
   const tiles = new Map<string, { code: string; label: string; sections: ShownSection[] }>();
-  for (const section of sections) {
+  for (const section of held) {
     const group = section.summaryGroupCode?.trim() || null;
     const key = group ? `group:${group}` : `own:${section.code}`;
     const tile = tiles.get(key);

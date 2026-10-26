@@ -27,6 +27,14 @@ import { up as recruitmentPlaybook } from './0025-recruitment-playbook';
 import { up as mocPersistency } from './0026-moc-persistency';
 import { up as campaignKinds } from './0027-campaign-kinds';
 import { up as trainingSalesSubtitle } from './0029-training-sales-subtitle';
+import { up as orgLevelLeaderTier } from './0030-org-level-leader-tier';
+import { up as leadPosition } from './0031-lead-position';
+import { up as cascadeItemWords } from './0032-cascade-item-words';
+import { up as ratioBenchmarksIv } from './0033-ratio-benchmarks-iv';
+import { up as activityBindings } from './0034-activity-bindings';
+import { up as blankPreferredName } from './0035-blank-preferred-name';
+import { up as companyKind } from './0036-company-kind';
+import { up as templateCompany } from './0037-template-company';
 
 /*
  * The list on its own (P18.7-T3), so a spec can run every migration against an empty database without
@@ -66,4 +74,18 @@ export const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Dat
   ['0027-campaign-kinds', campaignKinds],
   // There is no 0028: Phase 18.5's contract held it for events, which needed none. 0029 is training's (OD-150).
   ['0029-training-sales-subtitle', trainingSalesSubtitle],
+  // P18.8-T1: every rung's leader tier, AB senior and AAB associate, so nobody's class moves (ADR-0156 §1).
+  ['0030-org-level-leader-tier', orgLevelLeaderTier],
+  // P18.8-T7: every lead's place in its owner's list, newest registration first (ADR-0161 §1).
+  ['0031-lead-position', leadPosition],
+  // P18.8-T8, T9 (ADR-0160): items 3, 7 and 8 in the client's words; the benchmarks and Set appointment to meeting.
+  ['0032-cascade-item-words', cascadeItemWords],
+  ['0033-ratio-benchmarks-iv', ratioBenchmarksIv],
+  // P18.9-T2 (ADR-0163): every office and template binds today's three codes, one per cascade role.
+  ['0034-activity-bindings', activityBindings],
+  // P18.8-T15 (UI-005): an empty or blank preferred name is stored as none, so the full name shows.
+  ['0035-blank-preferred-name', blankPreferredName],
+  // P18.9-T3 (ADR-0164): every company an insurer, then the Template company, its Default template and its company data.
+  ['0036-company-kind', companyKind],
+  ['0037-template-company', templateCompany],
 ];

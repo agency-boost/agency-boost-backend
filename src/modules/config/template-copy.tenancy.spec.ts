@@ -296,6 +296,8 @@ describe('template copies (P13.2-T7)', () => {
         'kpms', 'companies', 'companyOrgLevels', 'templates', 'companyTemplates', 'auditLog', 'assets',
         'configSnapshots', 'activationTemplates', 'trainingCategories', 'trainingSkills', 'trainingModules',
         'eventTypes', 'capabilityCatalogs',
+        // P18.9-T2 (ADR-0163): the office's live activity binding, configuration the Super Admin keeps.
+        'activityBindings',
       ]);
       expect(touched.has('configSnapshots')).toBe(true);
       expect([...touched].filter((name) => !configuration.has(name))).toEqual([]);

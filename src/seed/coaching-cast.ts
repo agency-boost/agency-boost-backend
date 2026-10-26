@@ -37,7 +37,8 @@ export interface CastPerson {
   /** `agus` is the demo AB; `arief` is the AAB this cast adds. */
   leader: 'agus' | 'arief';
   /**
-   * The insurer's producer id, in the seed's `PRU-8xxxx` shape. **Given, not counted**: `user()`
+   * The insurer's producer id, in the seed's `8xxxx` shape — digits only, as every new code is (ADR-0158 §4).
+   * **Given, not counted**: `user()`
    * numbers the accounts it creates, so an account added to a database that already holds the rest
    * would be numbered from one again and collide with an existing code.
    */
@@ -65,15 +66,15 @@ export interface CastPerson {
  * nobody (`role-change.service.ts`).
  */
 export const COACHING_CAST: readonly CastPerson[] = [
-  { key: 'indah', email: 'indah@kpm0417.test', fullName: 'Indah Permatasari', pronoun: 'she', role: 'agent', leader: 'agus', agentCode: 'PRU-80101', joinedDaysAgo: 97 },
-  { key: 'dimas', email: 'dimas@kpm0417.test', fullName: 'Dimas Pratama', pronoun: 'he', role: 'agent', leader: 'agus', agentCode: 'PRU-80102', joinedDaysAgo: 94 },
-  { key: 'siti', email: 'siti@kpm0417.test', fullName: 'Siti Rahmawati', pronoun: 'she', role: 'agent', leader: 'agus', agentCode: 'PRU-80103', joinedDaysAgo: 101 },
+  { key: 'indah', email: 'indah@kpm0417.test', fullName: 'Indah Permatasari', pronoun: 'she', role: 'agent', leader: 'agus', agentCode: '80101', joinedDaysAgo: 97 },
+  { key: 'dimas', email: 'dimas@kpm0417.test', fullName: 'Dimas Pratama', pronoun: 'he', role: 'agent', leader: 'agus', agentCode: '80102', joinedDaysAgo: 94 },
+  { key: 'siti', email: 'siti@kpm0417.test', fullName: 'Siti Rahmawati', pronoun: 'she', role: 'agent', leader: 'agus', agentCode: '80103', joinedDaysAgo: 101 },
   {
-    key: 'arief', email: 'arief@kpm0417.test', fullName: 'Arief Hidayat', pronoun: 'he', role: 'aab', leader: 'agus', agentCode: 'PRU-80104',
+    key: 'arief', email: 'arief@kpm0417.test', fullName: 'Arief Hidayat', pronoun: 'he', role: 'aab', leader: 'agus', agentCode: '80104',
     joinedDaysAgo: 104, promoted: { daysAgo: 90, reason: 'Ready to lead a unit of his own' },
   },
-  { key: 'novi', email: 'novi@kpm0417.test', fullName: 'Novi Andriani', pronoun: 'she', role: 'agent', leader: 'arief', agentCode: 'PRU-80105', joinedDaysAgo: 84 },
-  { key: 'wahyu', email: 'wahyu@kpm0417.test', fullName: 'Wahyu Saputra', pronoun: 'he', role: 'agent', leader: 'arief', agentCode: 'PRU-80106', joinedDaysAgo: 79 },
+  { key: 'novi', email: 'novi@kpm0417.test', fullName: 'Novi Andriani', pronoun: 'she', role: 'agent', leader: 'arief', agentCode: '80105', joinedDaysAgo: 84 },
+  { key: 'wahyu', email: 'wahyu@kpm0417.test', fullName: 'Wahyu Saputra', pronoun: 'he', role: 'agent', leader: 'arief', agentCode: '80106', joinedDaysAgo: 79 },
 ];
 
 /*

@@ -14,6 +14,7 @@ import { FixedClock, Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
+import { MembershipRepository } from '@/modules/org/membership.repository';
 import { AdminController } from '@/modules/tenants/admin.controller';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
@@ -90,6 +91,8 @@ describe('an ended office over HTTP (P13.2-T3 AC-5)', () => {
         { provide: getModelToken(User.name), useValue: users },
         { provide: getModelToken(Kpm.name), useValue: kpms },
         { provide: getModelToken(Membership.name), useValue: memberships },
+        // `/auth/me` reads the reader's work status off their membership (ADR-0158).
+        MembershipRepository,
         // `/auth/me` reads the user model and the context; nothing it calls on the service runs here.
         { provide: AuthService, useValue: {} },
         { provide: RateLimiter, useValue: { check: () => null } },

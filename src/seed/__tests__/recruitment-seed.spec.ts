@@ -14,6 +14,7 @@ import {
   seedRecruitmentFixture, storageFromEnvironment,
 } from '../recruitment-fixture';
 import { BLANK_COMPANY, EMPTY_OFFICE } from '../template-fixture';
+import { TEMPLATE_LIBRARY } from '@/modules/tenants/template-library';
 
 /**
  * **Phase 17 — recruitment tools, seeded** (P17-T7 AC-1, P17-T9 AC-4, D-seed; `recruitment-fixture.ts`).
@@ -69,7 +70,8 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
 
     it('P17-T7 AC-1 leaves Sejahtera Baru Life, created blank, with none — 0701’s agents meet the empty state', async () => {
       expect(await col('recruitmentPlaybooks').countDocuments({ companyId: BLANK_COMPANY._id })).toBe(0);
-      expect(await col('recruitmentPlaybooks').countDocuments({})).toBe(2);
+      // Prudential's and Allianz Life's; the Template library's, migration 0037's, is not the seed's (P18.9-T3).
+      expect(await col('recruitmentPlaybooks').countDocuments({ companyId: { $ne: TEMPLATE_LIBRARY.companyId } })).toBe(2);
       const nadia = await as('agent@kpm0701.test');
       expect(nadia.kpmId).toBe(EMPTY_OFFICE._id);
       expect(await wired.recruitmentPlans.attackPlan(nadia, BRIEF)).toMatchObject({ hasPlaybook: false, plan: null });
@@ -84,9 +86,10 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
 
     it('P17-T2 AC-3 migration 0025, run twice over the seed, finds both companies given and the blank one blank — and changes nothing', async () => {
       const before = await col('recruitmentPlaybooks').find({}).sort({ _id: 1 }).toArray();
+      // Prudential, Allianz Life and, since P18.9-T3, the Template library (ADR-0164): each holds one already.
       for (const run of [1, 2]) {
         expect([run, await recruitmentPlaybook(mongoose.connection.db!, clock.now())])
-          .toEqual([run, { given: 0, current: 2, blank: 1 }]);
+          .toEqual([run, { given: 0, current: 3, blank: 1 }]);
       }
       expect(await col('recruitmentPlaybooks').find({}).sort({ _id: 1 }).toArray()).toEqual(before);
     });
@@ -207,7 +210,7 @@ describe('Phase 17 the recruitment seed — storage not configured', () => {
   afterAll(stopMongo);
 
   it('D-seed writes the playbooks, and no slot and no brochure without its file — and says so', async () => {
-    expect(await col('recruitmentPlaybooks').countDocuments({})).toBe(2);
+    expect(await col('recruitmentPlaybooks').countDocuments({ companyId: { $ne: TEMPLATE_LIBRARY.companyId } })).toBe(2);
     expect(await col('kpmRecruitmentPitchDocuments').countDocuments({})).toBe(0);
     expect(await col('kpmProductConfigs').countDocuments({ 'documents.brochure': { $exists: true } })).toBe(0);
     expect(await col('assets').countDocuments({})).toBe(0);

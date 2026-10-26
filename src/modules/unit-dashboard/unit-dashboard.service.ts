@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
@@ -10,8 +10,8 @@ import { oneOnOneOverdue } from '@/domain/metrics/coaching-recency';
 import type { GoalPaceStatus } from '@/domain/metrics/goal-pace-status';
 import { subPeriodActivityTarget } from '@/domain/metrics/sub-period-activity-target';
 import {
-  cascadeActivityTouches, potentialMaaCountInUnit, rollUpCounts, rollUpGoal, rollUpLeadCounts,
-  type CountAgainst, type LeadCountsRow, type RolledUpGoal,
+  cascadeActivityTouches, potentialMaaCountInUnit, rollUpCounts, rollUpGoalPaired, rollUpLeadCounts,
+  type CountAgainst, type LeadCountsRow, type PairedGoal,
 } from '@/domain/metrics/unit-rollup';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
@@ -31,6 +31,8 @@ import { ProductionReadings, type MonthLedger, type ReadCell } from '@/modules/p
 import { can, scopeFor, type Scope } from '@/modules/rbac/permissions';
 import { activityTargets, goalFigures, type FigureSource } from '@/modules/summary/summary-figures';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
+import { defaultBinding } from '@/modules/config/activity-binding';
+import { ActivityBindingService } from '@/modules/config/activity-binding.service';
 import { TenantDay, type Office } from '@/modules/tenants/tenant-day.service';
 
 /** A member, by the membership that identifies them (invariant §2). */
@@ -109,9 +111,9 @@ export interface UnitRow extends UnitPerson {
   campaigns: { code: string; title: string }[] | null;
 }
 
-/** A total row: the rows' figures by the rollup rule (`unit-rollup.ts`). */
+/** A total row: the rows' figures by the rollup rule (`unit-rollup.ts`), its goal paired (ADR-0165 §1). */
 export interface UnitTotal {
-  goal: RolledUpGoal;
+  goal: PairedGoal;
   leadsCounts: LeadCountsRow;
   touches: CountAgainst;
   potentialActive: { count: number; of: number };
@@ -140,7 +142,7 @@ export interface UnitDashboardView {
   empty: boolean;
   tiles: {
     team: { total: number; direct: number; units: number; underUnits: number };
-    directGroupProduction: RolledUpGoal & { period: 'month' | 'year' };
+    directGroupProduction: PairedGoal & { period: 'month' | 'year' };
     potentialActive: { count: number; of: number };
     potentialRecruits: { yourUnit: number; aabs: number };
   };
@@ -212,6 +214,12 @@ export class UnitDashboardService {
     private readonly subjectReads: SubjectReadAudit,
     /** P18.5-T7 AC-8: the campaigns module's one named reader of chases, and nothing else of it. */
     private readonly chaseReadings: CampaignChaseReadings,
+    /*
+     * ADR-0163 §4: which activity types each cascade role counts — the office's binding, the one reader. The
+     * application always provides it; optional, the token named (a `X | null` parameter is emitted as `Object`),
+     * and without it the default binding.
+     */
+    @Optional() @Inject(ActivityBindingService) private readonly bindings: ActivityBindingService | null = null,
   ) {}
 
   async read(
@@ -237,7 +245,7 @@ export class UnitDashboardService {
     const campaignScope = scopeFor(ctx, 'campaign_qualification:read');
     const chaseReach = new Set(ids.filter((id) => id === me || campaignScope === 'own-kpm' || campaignScope === 'all'
       || ((campaignScope === 'own-downline' || campaignScope === 'own-unit') && head.coachedByReader.has(id))));
-    const [recency, paces, ledgers, counts, leadCounts, ladder, state, chases] = await Promise.all([
+    const [recency, paces, ledgers, counts, leadCounts, ladder, state, chases, binding] = await Promise.all([
       this.sessions.recencyOf(ctx, coached, office),
       this.paces.paceOf(ctx, ids, { today: office.today, month: office.month, onTrackRatio: office.settings.onTrackPaceThreshold }),
       this.production.ledgersFor(ctx, ids, office.month),
@@ -246,6 +254,8 @@ export class UnitDashboardService {
       office.companyId ? this.orgLevels.list(ctx, office.companyId) : Promise.resolve([]),
       this.months.state(ctx, office.month),
       this.chaseReadings.ofMany(ctx, [...chaseReach]),
+      // The office's binding, once for every row: a role bound to `[A, B]` counts both (ADR-0163 §4).
+      this.bindings ? this.bindings.resolveCascadeBinding(ctx) : Promise.resolve(defaultBinding()),
     ]);
     const latest = [...recency.values()].flatMap((r) => (r.last ? [r.last] : []));
     /*
@@ -300,7 +310,7 @@ export class UnitDashboardService {
         ? subPeriodActivityTarget(figures.plan.monthlyCounts)
         : period === 'month' ? figures.plan.monthlyCounts : figures.plan.yearlyCounts;
       const [leadsChip, appointmentsChip, closingsChip] = activityTargets(
-        targets, plan.cascadeMapping, counts.get(id) ?? new Map(),
+        targets, binding, counts.get(id) ?? new Map(),
       ).map((chip): CountAgainst => ({ logged: chip.logged, target: chip.target }));
 
       const recent = recency.get(id);
@@ -384,7 +394,8 @@ export class UnitDashboardService {
           units: units.length,
           underUnits: everyRow.length - yourUnitRows.length - units.length,
         },
-        directGroupProduction: { ...rollUpGoal(everyRow.map((r) => r.goal)), period: goalPeriod },
+        // Paired, as a unit's total is (ADR-0165 §1): a target counts only beside the production it measures.
+        directGroupProduction: { ...rollUpGoalPaired(everyRow.map((r) => r.goal)), period: goalPeriod },
         potentialActive: potentialMaaCountInUnit(everyRow.map((r) => r.pacingToMaa)),
         potentialRecruits: {
           yourUnit: rollUpLeadCounts(yourUnitRows.map((r) => r.leadsCounts)).recruitNominated,
@@ -550,10 +561,13 @@ function rowsOf(group: UnitGroup): UnitRow[] {
   return [group.head, ...group.members, ...group.units.flatMap(rowsOf)];
 }
 
-/** A total row over some rows, by the rollup rule. */
+/**
+ * A total row over some rows, by the rollup rule — its goal **paired** (ADR-0165 §1, P18.8-T15 AC-6): a member's target
+ * counts only when their production is held, so a late file is named in the tooltip rather than counted as 0.
+ */
 function totalOf(rows: readonly UnitRow[]): UnitTotal {
   return {
-    goal: rollUpGoal(rows.map((r) => r.goal)),
+    goal: rollUpGoalPaired(rows.map((r) => r.goal)),
     leadsCounts: rollUpLeadCounts(rows.map((r) => r.leadsCounts)),
     touches: rollUpCounts(rows.map((r) => r.activity.touches)),
     potentialActive: potentialMaaCountInUnit(rows.map((r) => r.pacingToMaa)),

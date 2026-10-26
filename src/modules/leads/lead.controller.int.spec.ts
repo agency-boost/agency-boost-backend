@@ -22,6 +22,8 @@ const ROUTES: Record<string, string> = {
   list: 'lead:read',
   read: 'lead:read',
   create: 'lead:create',
+  // P18.8-T7: the owner's own order. `lead-order.int.spec.ts` asks whose list it writes.
+  reorder: 'lead:update',
   update: 'lead:update',
   setStatus: 'lead:update',
   setOutcome: 'lead:mark_outcome',

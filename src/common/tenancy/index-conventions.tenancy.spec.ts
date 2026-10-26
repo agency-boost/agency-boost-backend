@@ -13,6 +13,7 @@ import { KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { UserSchema } from '@/modules/users/user.schema';
 import { GroupSchema } from '@/modules/org/group.schema';
 import { JoinRequestSchema } from '@/modules/org/join-request.schema';
+import { LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
 import { MembershipHistorySchema } from '@/modules/org/membership-history.schema';
 import { MembershipSchema } from '@/modules/org/membership.schema';
 import { unclassified } from '@/common/schema/registered-schemas';
@@ -23,6 +24,7 @@ import { ActivityTypeSchema } from '@/modules/config/activity-type.schema';
 import { LeadStatusSchema } from '@/modules/config/lead-status.schema';
 import { RatioDefinitionSchema } from '@/modules/config/ratio-definition.schema';
 import { ConfigSnapshotSchema } from '@/modules/config/config-snapshot.schema';
+import { ActivityBindingSchema } from '@/modules/config/activity-binding.schema';
 import {
   ImpersonationSessionSchema,
 } from '@/modules/auth/impersonation-session.schema';
@@ -110,12 +112,16 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['memberships', MembershipSchema],
   ['membershipHistory', MembershipHistorySchema],
   ['joinRequests', JoinRequestSchema],
+  // ADR-0157: tenant-scoped, unlike `kpmRequests` — the office exists and the subject is its member.
+  ['leaderLimitRequests', LeaderLimitRequestSchema],
   ['groups', GroupSchema],
   ['activityCategories', ActivityCategorySchema],
   ['activityTypes', ActivityTypeSchema],
   ['leadStatuses', LeadStatusSchema],
   ['ratioDefinitions', RatioDefinitionSchema],
   ['configSnapshots', ConfigSnapshotSchema],
+  // ADR-0163: an office's activity binding, one row per office, `kpmId`-led.
+  ['activityBindings', ActivityBindingSchema],
   ['trainingCategories', TrainingCategorySchema],
   ['trainingSkills', TrainingSkillSchema],
   ['trainingModules', TrainingModuleSchema],
@@ -477,6 +483,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [LeadStatusSchema, 'LeadStatusSchema'],
   [RatioDefinitionSchema, 'RatioDefinitionSchema'],
   [ConfigSnapshotSchema, 'ConfigSnapshotSchema'],
+  [ActivityBindingSchema, 'ActivityBindingSchema'],
   [TrainingCategorySchema, 'TrainingCategorySchema'],
   [TrainingSkillSchema, 'TrainingSkillSchema'],
   [TrainingModuleSchema, 'TrainingModuleSchema'],
@@ -537,6 +544,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [UserSchema, 'UserSchema'],
   [GroupSchema, 'GroupSchema'],
   [JoinRequestSchema, 'JoinRequestSchema'],
+  [LeaderLimitRequestSchema, 'LeaderLimitRequestSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [MembershipSchema, 'MembershipSchema'],
   [KpmRequestSchema, 'KpmRequestSchema'],

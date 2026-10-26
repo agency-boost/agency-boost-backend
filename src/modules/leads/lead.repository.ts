@@ -42,4 +42,27 @@ export class LeadRepository extends TenantScopedRepository<LeadDocument> {
       )
       .exec();
   }
+
+  /**
+   * **One owner's leads, given the places `ids` lists them in — one `bulkWrite`** (P18.8-T7, ADR-0161
+   * §1): the first id is place 0, the next 1, and so on.
+   *
+   * Every filter is the tenant's and the owner's, so an id from another office or another member's
+   * list finds nothing here even if a caller got past the service's check. **Nothing else is
+   * written**: not `version`, which a leader's pinned edit would then trip over; not `updatedBy`,
+   * which would take the ✎ away from the leader who last changed the lead; and not `updatedAt`. A
+   * place in a list is how its owner keeps it, not a change to the lead.
+   */
+  async reposition(
+    ctx: RequestContext, ownerMembershipId: string, ids: readonly string[],
+  ): Promise<number> {
+    if (ids.length === 0) return 0;
+    const result = await this.model.bulkWrite(ids.map((id, position) => ({
+      updateOne: {
+        filter: this.scope(ctx, 'reposition', { _id: id, ownerMembershipId } as FilterQuery<LeadDocument>),
+        update: { $set: { position } },
+      },
+    })), { ordered: false, timestamps: false });
+    return result.modifiedCount;
+  }
 }

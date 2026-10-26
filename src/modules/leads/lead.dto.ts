@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { Allow, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import {
+  Allow, ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsInt, IsMongoId, IsOptional, IsString, MaxLength, Min,
+} from 'class-validator';
 import { LEAD_FLAGS, type LeadFlag } from './lead-attention';
 import { LEAD_SORT_KEYS, type LeadSortKey } from './lead-order';
 import { LEAD_OUTCOMES, LEAD_TYPES } from './lead.schema';
@@ -186,13 +188,14 @@ export class ListLeadsQueryDto {
       + 'by the stage’s place in its own ladder as the office last published it, blank first; '
       + 'equal places are ordered by type and then by registration, oldest first. Every order '
       + 'ends on the id, so equal leads keep their places from one page to the next. `desc` '
-      + 'reverses the whole order. Sorted before the page is cut.',
+      + 'reverses the whole order. Sorted before the page is cut. **Omitted, the list is in its '
+      + 'owner’s own order** — where `PATCH /leads/order` put each lead, a new one at the top (ADR-0161 §1).',
   })
   @IsOptional()
   @IsIn(LEAD_SORT_KEYS as unknown as string[])
   sort?: LeadSortKey;
 
-  @ApiPropertyOptional({ enum: ['asc', 'desc'], description: 'Omitted is `desc`.' })
+  @ApiPropertyOptional({ enum: ['asc', 'desc'], description: 'With `sort`; omitted is `desc`. The owner’s own order has no direction.' })
   @IsOptional()
   @IsIn(['asc', 'desc'])
   dir?: 'asc' | 'desc';
@@ -229,4 +232,28 @@ export class CreateLeadQueryDto {
   @IsString()
   @MaxLength(64)
   owner?: string;
+}
+
+
+/**
+ * `PATCH /leads/order` (P18.8-T7, ADR-0161 §1): the caller's open leads, every one, in the order they want them.
+ *
+ * **The shape here, the rule in the service.** The pipe refuses what is not a list of ids; whether those
+ * are exactly the caller's open leads needs the database, so `LeadService.reorder` answers that — with the
+ * same `400 VALIDATION_FAILED`. The ceiling is ten times the 50 open leads an agent is planned for
+ * (`performance-and-scale.md`), and above the 500 an agent holds in a working lifetime.
+ */
+export class ReorderLeadsDto {
+  @ApiProperty({
+    type: [String],
+    example: ['66f0…a1', '66f0…a2'],
+    description:
+      'Every one of your open leads, once each, top first. A closed or deleted lead, somebody else’s, '
+      + 'another office’s, a repeat or one left out is `400 VALIDATION_FAILED`, and nothing is written.',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(1000)
+  @IsMongoId({ each: true })
+  ids!: string[];
 }

@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { preferredNameOf } from '@/modules/users/display-name';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { initialsOf, visibleTo } from './directory.service';
 import { MembershipRepository } from './membership.repository';
@@ -157,7 +158,7 @@ export class OrgTreeService {
       nodes.push({
         membershipId: id,
         fullName,
-        preferredName: named.get(row.userId)?.preferredName ?? null,
+        preferredName: preferredNameOf(named.get(row.userId)?.preferredName),
         initials: initialsOf(fullName),
         agentCode: row.agentCode,
         role: row.role,

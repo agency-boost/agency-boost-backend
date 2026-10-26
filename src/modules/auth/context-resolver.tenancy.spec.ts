@@ -94,6 +94,45 @@ describe('ContextResolver', () => {
     expect((await resolver.resolve(String(u._id))).membership).toBeNull();
   });
 
+  describe('P18.8-T5 AC-1: the effective Core Leader, read on every request (ADR-0159 §4)', () => {
+    async function tagged(role: 'ab' | 'aab' | 'agent', isCoreLeader: boolean) {
+      const u = await makeUser();
+      const kpm = await mongoose.model(Kpm.name).create({ companyId: 'c1', code: '0417', branchName: 'BSD' });
+      const row = await join(String(u._id), String(kpm._id), { role, isCoreLeader });
+      return { userId: String(u._id), row };
+    }
+
+    it.each([['ab'], ['aab']] as const)('a tagged %s is one', async (role) => {
+      const { userId } = await tagged(role, true);
+      const ctx = await resolver.resolve(userId);
+      expect(ctx.membership?.isCoreLeader).toBe(true);
+      expect(ctx.isCoreLeader).toBe(true);
+    });
+
+    it('a tagged Agent is not — the tag on a rung that leads nothing has no effect', async () => {
+      const { userId } = await tagged('agent', true);
+      const ctx = await resolver.resolve(userId);
+      expect(ctx.membership?.isCoreLeader).toBe(false);
+      expect(ctx.isCoreLeader).toBe(false);
+    });
+
+    it('an untagged leader is not', async () => {
+      const { userId } = await tagged('aab', false);
+      expect((await resolver.resolve(userId)).isCoreLeader).toBe(false);
+    });
+
+    it('untagging, or a move off a leader rung, takes effect on the next request', async () => {
+      const { userId, row } = await tagged('ab', true);
+      expect((await resolver.resolve(userId)).isCoreLeader).toBe(true);
+      await mongoose.model(Membership.name).updateOne({ _id: row._id }, { $set: { role: 'agent' } });
+      expect((await resolver.resolve(userId)).isCoreLeader).toBe(false);
+      await mongoose.model(Membership.name).updateOne({ _id: row._id }, { $set: { role: 'aab' } });
+      expect((await resolver.resolve(userId)).isCoreLeader).toBe(true);
+      await mongoose.model(Membership.name).updateOne({ _id: row._id }, { $set: { isCoreLeader: false } });
+      expect((await resolver.resolve(userId)).isCoreLeader).toBe(false);
+    });
+  });
+
   describe('leadership is the graph, not the role (OD-23)', () => {
     it('an AAB with no direct reports is not a leader', async () => {
       const u = await makeUser();
@@ -247,5 +286,20 @@ describe('ContextResolver', () => {
     const ctx = await resolver.resolve(String(u._id), 'sa-1');
     expect(ctx.isImpersonating).toBe(true);
     expect(ctx.auditActors).toEqual({ actorUserId: 'sa-1', effectiveUserId: String(u._id) });
+  });
+
+  it('ADR-0162: carries a setup session\'s write scope, frozen, and never outside a session', async () => {
+    const u = await makeUser();
+    const setup = await resolver.resolve(String(u._id), 'sa-1', true, false, ['tenant_config:write']);
+    expect(setup.impersonationWriteScope).toEqual(['tenant_config:write']);
+    expect(Object.isFrozen(setup.impersonationWriteScope)).toBe(true);
+    expect(setup.impersonationPurpose).toBe('setup');
+
+    const support = await resolver.resolve(String(u._id), 'sa-1', true);
+    expect([support.impersonationWriteScope, support.impersonationPurpose]).toEqual([[], 'support']);
+
+    // Somebody acting as themselves is never given a scope, whatever the caller passes.
+    const themselves = await resolver.resolve(String(u._id), null, false, false, ['tenant_config:write']);
+    expect([themselves.impersonationWriteScope, themselves.impersonationPurpose]).toEqual([[], null]);
   });
 });

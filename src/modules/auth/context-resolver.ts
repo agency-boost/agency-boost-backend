@@ -2,7 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
-import { RequestContext, TenantMembership } from '@/common/context/request-context';
+import { RequestContext, TenantMembership, isEffectiveCoreLeader } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
@@ -45,6 +45,10 @@ export class ContextResolver {
      * an office suspended under it. Ignored outside a session.
      */
     leavingSupport = false,
+    /**
+     * A setup session's write scope, off the same session row (ADR-0162 §2). Ignored outside a session.
+     */
+    impersonationWriteScope: readonly string[] = [],
   ): Promise<RequestContext> {
     const user = await this.users.findOne({ _id: userId, deletedAt: null }).exec();
     if (!user) {
@@ -123,6 +127,7 @@ export class ContextResolver {
       user.mustChangePassword === true,
       // Never outside a session: somebody acting as themselves is not being restrained.
       impersonatorUserId !== null && impersonationReadOnly,
+      impersonatorUserId !== null ? Object.freeze([...impersonationWriteScope]) : [],
     );
   }
 
@@ -159,6 +164,11 @@ export class ContextResolver {
       isKpmAdmin: membership.adminAccess?.isKpmAdmin ?? false,
       // Leadership is the graph, not the role (OD-23).
       directCount: membership.directCounts?.total ?? 0,
+      /*
+       * ADR-0159 §4: **the effective Core Leader**, read from the membership on every request — the tag on a leader
+       * class, so tagging or untagging somebody, or moving them off a leader rung, takes effect on their next call.
+       */
+      isCoreLeader: isEffectiveCoreLeader(membership),
     };
   }
 }

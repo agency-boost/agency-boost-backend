@@ -143,7 +143,7 @@ describe('staged configuration changes (P4-T19)', () => {
         { op: 'type.update', id: followUp.id, expectedVersion: followUp.version, body: { label: 'Tindak lanjut' } },
         { op: 'type.archive', id: type.id, expectedVersion: type.version },
       ])).rejects.toMatchObject({
-        code: 'ACTIVITY_TYPE_RESERVED', status: 409, details: { codes: ['SELL_SUBMISSION'] },
+        code: 'ACTIVITY_TYPE_BOUND', status: 409, details: { codes: ['SELL_SUBMISSION'] },
         message: expect.stringMatching(/^Change 2 \(type\.archive\): “Submission polis” cannot be archived/),
       });
       expect((await typeNamed('SELL_SUBMISSION')).status).toBe('active');
@@ -158,7 +158,7 @@ describe('staged configuration changes (P4-T19)', () => {
 
       await expect(wired.changes.apply(ctx(KPM_A), [
         { op: 'category.archive', id: leads.id, expectedVersion: leads.version },
-      ])).rejects.toMatchObject({ code: 'ACTIVITY_TYPE_RESERVED', details: { codes: ['LEADS_CONTACTED'] } });
+      ])).rejects.toMatchObject({ code: 'ACTIVITY_TYPE_BOUND', details: { codes: ['LEADS_CONTACTED'] } });
 
       await wired.changes.apply(ctx(KPM_A), [
         { op: 'type.update', id: contacted.id, expectedVersion: contacted.version, body: { categoryCode: 'SELLING' } },

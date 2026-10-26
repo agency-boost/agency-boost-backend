@@ -136,24 +136,33 @@ export class ActivityReadings {
    * The rule is ADR-0020's, on the **category**: an active one whose `appliesToOrgLevelCodes` is empty or
    * names the rung. A section the office restricted to leaders is not an agent's to be shown.
    *
+   * **And every archived section, marked `archived`** (ADR-0163 §6, P18.9-T2 AC-5): a period that holds counts
+   * against its types keeps them on its summary tile, as the Activity Dashboard keeps an archived section's rows.
+   * Which of them the period holds counts for is the caller's to know — `sectionChips` keeps those and drops the
+   * rest, so a section archived before the period began shows nothing.
+   *
    * Each carries the summary tile it counts toward (ADR-0064) — `null` for a tile of its own — so the
    * Summary's chips group the way the strips do (P10.1-T6).
    */
   async sectionsShown(ctx: RequestContext, orgLevelCode: string): Promise<{
     code: string; label: string; summaryGroupCode: string | null; summaryGroupLabel: string | null;
+    status: 'active' | 'archived';
     types: { code: string; label: string; status: 'active' | 'archived' }[];
   }[]> {
     const [categories, types] = await Promise.all([
-      this.categories.find(ctx, { status: 'active' }, { sort: { displayOrder: 1 } }),
+      this.categories.find(ctx, {}, { sort: { displayOrder: 1 } }),
       this.types.find(ctx, {}, { sort: { displayOrder: 1 } }),
     ]);
+    const shown = (c: { appliesToOrgLevelCodes?: string[] }) =>
+      (c.appliesToOrgLevelCodes ?? []).length === 0 || (c.appliesToOrgLevelCodes ?? []).includes(orgLevelCode);
     return categories
-      .filter((c) => (c.appliesToOrgLevelCodes ?? []).length === 0 || (c.appliesToOrgLevelCodes ?? []).includes(orgLevelCode))
+      .filter((c) => c.status === 'archived' || shown(c))
       .map((c) => ({
         code: c.code,
         label: c.label,
         summaryGroupCode: c.summaryGroupCode ?? null,
         summaryGroupLabel: c.summaryGroupLabel ?? null,
+        status: c.status,
         types: types
           .filter((t) => t.categoryCode === c.code)
           .map((t) => ({ code: t.code, label: t.label, status: t.status })),

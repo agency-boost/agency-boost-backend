@@ -179,7 +179,7 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
       for (const code of ['SELL_PRESENTATION', 'SELL_SUBMISSION']) {
         const type = selling.types.find((t) => t.code === code)!;
         const res = await http().delete(`/kpm/settings/activity-types/${type.id}`).expect(409);
-        expect(res.body.error).toMatchObject({ code: 'ACTIVITY_TYPE_RESERVED', details: { codes: [code] } });
+        expect(res.body.error).toMatchObject({ code: 'ACTIVITY_TYPE_BOUND', details: { codes: [code] } });
       }
       const contacted = leads.types.find((t) => t.code === 'LEADS_CONTACTED')!;
       await http().delete(`/kpm/settings/activity-types/${contacted.id}`).expect(409);

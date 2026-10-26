@@ -82,7 +82,8 @@ export const SEED_ACTIVITY_CATEGORIES: readonly SeedActivityCategory[] = [
 
 /**
  * The twelve. Labels verbatim from `KPM_Owner.html`, descriptions included where it has them — but
- * for item 7's label, renamed at the client's request (below; `prototype-parity.md`).
+ * for items 3, 7 and 8, renamed at the client's request (below; `prototype-parity.md`), and item 7's
+ * description, dropped with its rename (ADR-0160 §1).
  */
 export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
   {
@@ -102,7 +103,12 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
   {
     code: 'LEADS_CONTACTED',
     categoryCode: 'LEADS_GENERATION',
-    label: 'Menghubungi prospek yang sudah ada',
+    /*
+     * **The client's words, not the prototype's** (ADR-0160 §1, 2026-10-26): `KPM_Owner.html` reads
+     * *"Menghubungi prospek yang sudah ada"*. The cascade's first stage on `/goals` is *Set appointment*,
+     * and the item it counts now says so. The description stays the prototype's.
+     */
+    label: 'Set Appointment',
     description: 'telepon, WhatsApp, tatap muka, dll',
     displayOrder: 3,
   },
@@ -131,22 +137,23 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
     code: 'RECRUIT_PRESENTATION',
     categoryCode: 'RECRUITMENT',
     /*
-     * **The one label that is not the prototype's** (P13.1-T3, 2026-10-07). `KPM_Owner.html:1396`
-     * reads *"Presentasi NBO ke calon agen"*; the client asked for this wording on `/summary`'s
-     * *Recruitment activities*, and the product owner confirmed it is item 7 that changes, not item 9
-     * (*Proses NPA*), whose meaning it resembles (K3). The description stays the prototype's.
+     * **Renamed twice at the client's request.** `KPM_Owner.html:1396` reads *"Presentasi NBO ke calon
+     * agen"*; P13.1-T3 (2026-10-07) made it *"Proses pendaftaran kode agen"* (K3: item 7, not item 9),
+     * and ADR-0160 §1 (2026-10-26) makes it the presentation it counts. The prototype's note, *"secara
+     * mandiri atau melalui BOP"*, went with the second rename: it described registering an agent code.
      *
-     * A default, like every label here: an office provisioned before the change keeps the label it
-     * holds, and an Owner may rename it either way. The code does not move (invariant §3).
+     * A default, like every label here. Migration `0032` gives the words to an office still holding
+     * either seeded wording, and leaves an Owner's own; the code does not move (invariant §3).
      */
-    label: 'Proses pendaftaran kode agen',
-    description: 'secara mandiri atau melalui BOP',
+    label: 'Melakukan presentasi recruitment',
+    description: null,
     displayOrder: 7,
   },
   {
     code: 'RECRUIT_FOLLOWUP',
     categoryCode: 'RECRUITMENT',
-    label: 'Melakukan diskusi follow up dari presentasi NBO sebelumnya',
+    // `KPM_Owner.html` reads *"… dari presentasi NBO sebelumnya"*; the client's word since ADR-0160 §1.
+    label: 'Melakukan diskusi follow up dari presentasi recruitment sebelumnya',
     description: null,
     displayOrder: 8,
   },
@@ -182,6 +189,25 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
     displayOrder: 12,
   },
 ];
+
+/**
+ * **The wordings the seed gave before ADR-0160** (2026-10-26), per code — kept only so migration `0032`
+ * and the prototype spec can recognise the words an office never changed. No office is given them any more.
+ *
+ * Item 7 has two: the prototype's, which every office provisioned before P13.1-T3 holds, and P13.1-T3's.
+ * Its description is the one both carried; it is dropped only where it is still that one.
+ */
+export const SEEDED_ACTIVITY_WORDINGS_BEFORE_ADR_0160: Readonly<Record<
+  'LEADS_CONTACTED' | 'RECRUIT_PRESENTATION' | 'RECRUIT_FOLLOWUP',
+  { readonly labels: readonly string[]; readonly description?: string }
+>> = {
+  LEADS_CONTACTED: { labels: ['Menghubungi prospek yang sudah ada'] },
+  RECRUIT_PRESENTATION: {
+    labels: ['Presentasi NBO ke calon agen', 'Proses pendaftaran kode agen'],
+    description: 'secara mandiri atau melalui BOP',
+  },
+  RECRUIT_FOLLOWUP: { labels: ['Melakukan diskusi follow up dari presentasi NBO sebelumnya'] },
+};
 
 /**
  * The two lead pipelines a new office starts with (P4-T3).
@@ -266,7 +292,7 @@ export interface SeedRatioDefinition {
   /**
    * How the benchmark is written (P4-T25) — the unit `metrics-and-definitions.md` states for
    * each of the five. The stored `benchmark` is a proportion either way; this is what turns
-   * `0.15` into `15.0%` on screen and leaves `0.30` as `0.30`.
+   * `0.30` into `30.0%` on screen and leaves `1.00` as `1.00`.
    */
   readonly displayUnit: RatioDisplayUnit;
   readonly displayOrder: number;
@@ -333,18 +359,40 @@ export const SEED_RATIO_DEFINITIONS: readonly SeedRatioDefinition[] = [
   },
   {
     code: 'MEETING_PER_APPROACH',
-    label: 'Meeting per approach',
+    /*
+     * **The client's name, and a percent** (ADR-0160 §2, 2026-10-26). `KPM_Owner.html:1479` reads
+     * *"Meeting per approach"*, written as the number `1.50`; item 3 is *Set Appointment* now, and the
+     * share of appointments that become a meeting is a percentage. The formula is unchanged.
+     */
+    label: 'Set appointment to meeting',
     numerator: ['SELL_PRESENTATION', 'RECRUIT_PRESENTATION'],
     denominator: ['LEADS_CONTACTED'],
     benchmark: RATIO_BENCHMARKS.MEETING_PER_APPROACH,
     comparison: 'gte',
-    displayUnit: 'decimal',
+    displayUnit: 'percent',
     displayOrder: 5,
   },
 ];
 
 /**
- * What each platform ratio measures, in the prototype's own words (`Overall.html:5215-5268`).
+ * **What the seed gave before ADR-0160** (2026-10-26), per code — the benchmarks `RATIO_BENCHMARKS` held,
+ * and *Meeting per approach*'s label and unit. Kept only so migration `0033` and the prototype spec can
+ * recognise the values an office never changed: each is moved only where it is still this one.
+ */
+export const SEEDED_RATIO_VALUES_BEFORE_ADR_0160: Readonly<Record<
+  'SELLING_SUCCESS_RATE' | 'RECRUITMENT_SUCCESS_RATE' | 'LEADS_PER_ACTIVITY' | 'MEETING_PER_APPROACH',
+  { readonly benchmark: number; readonly label?: string; readonly displayUnit?: RatioDisplayUnit }
+>> = {
+  SELLING_SUCCESS_RATE: { benchmark: 0.15 },
+  RECRUITMENT_SUCCESS_RATE: { benchmark: 0.15 },
+  LEADS_PER_ACTIVITY: { benchmark: 0.3 },
+  MEETING_PER_APPROACH: { benchmark: 1.5, label: 'Meeting per approach', displayUnit: 'decimal' },
+};
+
+/**
+ * What each platform ratio measures, in the prototype's own words (`Overall.html:5215-5268`) — but for
+ * *Set appointment to meeting*'s, which says *set appointment* where the prototype says *pendekatan
+ * prospek*, with its name (ADR-0160 §2).
  *
  * Keyed by code and **shown only for a platform ratio whose formula the office has not changed**: an
  * office that moves `SELLING_SUCCESS_RATE` to count something else has a ratio this sentence no longer
@@ -355,6 +403,6 @@ export const SEED_RATIO_PURPOSES: Readonly<Record<string, string>> = {
   SELLING_SUCCESS_RATE: 'Mengukur tingkat konversi aktivitas selling menjadi submission',
   RECRUITMENT_SUCCESS_RATE: 'Mengukur tingkat konversi aktivitas recruitment menjadi agen baru',
   LEADS_PER_ACTIVITY: 'Mengukur efektivitas aktivitas pencarian prospek dalam menghasilkan prospek baru',
-  MEETING_PER_APPROACH: 'Mengukur efektivitas pendekatan prospek dalam menghasilkan pertemuan',
+  MEETING_PER_APPROACH: 'Mengukur efektivitas set appointment dalam menghasilkan pertemuan',
 };
 

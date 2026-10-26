@@ -1,10 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import { ActivationTemplateRepository } from '@/modules/activation/activation.repository';
 import { AssetRepository } from '@/modules/assets/asset.repository';
 import type { AssetDocument } from '@/modules/assets/asset.schema';
 import { TrainingModuleRepository } from '@/modules/training/training.repository';
-import { ConfigSnapshotRepository } from './activity.repository';
+import { ActivityBindingRepository, ConfigSnapshotRepository } from './activity.repository';
 import type { OfficeSettings } from './office-template';
 
 /**
@@ -32,14 +32,21 @@ export class OfficeSettingsSource {
     private readonly checklists: ActivationTemplateRepository,
     private readonly trainingModules: TrainingModuleRepository,
     private readonly assets: AssetRepository,
+    /*
+     * The office's activity binding (ADR-0163), read live: the Super Admin keeps it and the Owner does not publish
+     * it, so the live row is never an unpublished edit. Optional so a hand-built instance need not; without it the
+     * snapshot's copy is what crosses.
+     */
+    @Optional() @Inject(ActivityBindingRepository) private readonly bindings: ActivityBindingRepository | null = null,
   ) {}
 
   /** What the office's agents read, for `templateKindsFromOffice`. */
   async publishedSettingsOf(ctx: RequestContext, kpmId: string): Promise<OfficeSettings> {
     const newest = { sort: { version: -1 as const }, limit: 1 };
-    const [[snapshot], [checklist]] = await Promise.all([
+    const [[snapshot], [checklist], [binding]] = await Promise.all([
       this.snapshots.findInOfficeAcrossTenants(ctx, kpmId, {}, newest),
       this.checklists.findInOfficeAcrossTenants(ctx, kpmId, { status: 'published' }, newest),
+      this.bindings ? this.bindings.findInOfficeAcrossTenants(ctx, kpmId, { status: 'active' }, { limit: 1 }) : Promise.resolve([]),
     ]);
     const payload = (snapshot?.payload as Record<string, unknown> | undefined) ?? null;
     const codes = offeredModuleCodes(payload);
@@ -49,6 +56,9 @@ export class OfficeSettingsSource {
 
     return {
       snapshot: payload,
+      binding: binding
+        ? { leads: [...binding.leads], appointments: [...binding.appointments], closings: [...binding.closings] }
+        : null,
       checklist: checklist ? checklist.toObject() as unknown as OfficeSettings['checklist'] : null,
       moduleContent: modules.map((m) => {
         const row = m.toObject() as unknown as OfficeSettings['moduleContent'][number];

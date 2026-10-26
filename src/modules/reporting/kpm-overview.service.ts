@@ -22,7 +22,7 @@ import { LeadReadings } from '@/modules/leads/lead-readings';
 import { ProductionReadings, type MonthLedger } from '@/modules/production/production-readings';
 import { goalFigures } from '@/modules/summary/summary-figures';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
-import { AGENCY_RUNG, partitionAgencies } from './agency-partition';
+import { AGENCY_CLASS, partitionAgencies } from './agency-partition';
 import { KpmRecruitTargetRepository } from './kpm-recruit-target.repository';
 import { byName, moneyOf, shiftMonth, type Money, type Person } from './office-figures';
 import { OfficePeople, rungsFor, type OfficeHeader, type OfficePerson } from './office-people';
@@ -322,8 +322,8 @@ export class KpmOverviewService {
   }
 
   /**
-   * *AB coaching frequency* (D-coverage): `LEADER_COACHING_FREQUENCY` over `ROLLING_7D` for every member on the
-   * `AB` rung who leads somebody, over their whole downline now — lowest first, A to Z within a share.
+   * *AB coaching frequency* (D-coverage): `LEADER_COACHING_FREQUENCY` over `ROLLING_7D` for every member of the
+   * `ab` class (a *Senior Leader* rung, ADR-0156) who leads somebody, over their whole downline now — lowest first, A to Z within a share.
    */
   private leaderboard(
     members: readonly OfficePerson[],
@@ -332,7 +332,7 @@ export class KpmOverviewService {
     today: LocalDate,
     daysBetween: (from: string, to: string) => number,
   ): OverviewLeader[] {
-    const leaders = members.filter((p) => p.orgLevelCode === AGENCY_RUNG
+    const leaders = members.filter((p) => p.role === AGENCY_CLASS
       && members.some((q) => q.leaderId === p.membershipId));
     return leaders
       .map((leader) => ({

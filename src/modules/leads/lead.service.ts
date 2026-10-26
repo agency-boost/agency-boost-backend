@@ -17,7 +17,7 @@ import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service'
 import { ActivationEvents, signalActivation } from '@/modules/activation/activation-events.port';
 import { leadFlags, type LeadFlag } from './lead-attention';
 import { checkLead, type CheckedLead } from './lead-input';
-import { isInMemorySort, ladderRanks, leadOrder, type LeadSortKey } from './lead-order';
+import { isInMemorySort, ladderRanks, leadOrder, SAVED_ORDER, type LeadSortKey } from './lead-order';
 import { recruitmentPipelineFacets } from './lead-readings';
 import { LeadRepository } from './lead.repository';
 import type { LeadDocument, LeadType } from './lead.schema';
@@ -305,6 +305,8 @@ export class LeadService {
     const now = this.clock.now();
     const created = await this.leads.create(ctx, {
       ownerMembershipId,
+      // The top of the owner's list (ADR-0161 §1), a coachee's included when a leader adds it.
+      position: await this.firstPlace(ctx, ownerMembershipId),
       name: input.name!,
       type: input.type ?? null,
       // **No `lawfulBasis` and no `consentAt`** (ADR-0108 §1): the schema's nulls, never a ground
@@ -591,6 +593,67 @@ export class LeadService {
   }
 
   /**
+   * **The caller's open leads, in the order they dragged them into** (P18.8-T7, ADR-0161 §1).
+   *
+   * **Every one of them, once each, and nothing else** — the contract every reorder in this product
+   * has (`ActivityService.reorderTypes`, `LeadStatusService.reorder`): a single *move this one to place 4*
+   * would leave the server to infer what happened to the rest, and two tabs dragging at once would
+   * interleave into an order neither asked for. An id that is not one of the caller's open, live leads —
+   * a closed one, a deleted one, a colleague's, a downline's, another office's, or one that never
+   * existed — and a lead left out are each `400 VALIDATION_FAILED`, and nothing is written. The answer is
+   * the same for all of them, so it confirms nothing about an id that is not the caller's.
+   *
+   * **The caller's own, whatever their grant reaches.** `lead:update` lets a leader write a downline's
+   * lead (ADR-0044); the order of a list is its owner's, and a leader dragging on their own `/leads` is
+   * ordering their own leads among their agents'. A coaching session's card has no handles at all.
+   *
+   * One `bulkWrite` (`LeadRepository.reposition`), and one `lead.reordered` entry carrying how many — no
+   * names, as no lead entry carries one.
+   */
+  async reorder(ctx: RequestContext, ids: readonly string[]): Promise<{ ids: string[] }> {
+    const membershipId = this.me(ctx);
+    const open = await this.leads.find(
+      ctx, { ownerMembershipId: membershipId, outcome: null }, { projection: { _id: 1 } },
+    );
+    const mine = new Set(open.map((lead) => String(lead._id)));
+    const sent = new Set(ids);
+
+    const violations: string[] = [];
+    const strangers = ids.filter((id) => !mine.has(id)).length;
+    if (strangers > 0) violations.push(`${strangers} of the ids sent ${strangers === 1 ? 'is' : 'are'} not one of your open leads`);
+    if (sent.size !== ids.length) violations.push('ids names a lead more than once');
+    const missing = [...mine].filter((id) => !sent.has(id)).length;
+    if (missing > 0) violations.push(`${missing} of your open leads ${missing === 1 ? 'is' : 'are'} missing from ids`);
+    if (violations.length > 0) {
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED,
+        'Send every one of your open leads, once each, in the order you want them. Your list may have '
+        + 'changed since you opened it: reload it and try again.',
+        HttpStatus.BAD_REQUEST,
+        { violations },
+      );
+    }
+
+    await this.leads.reposition(ctx, membershipId, ids);
+    await this.record(ctx, 'lead.reordered', membershipId, { count: ids.length });
+    return { ids: [...ids] };
+  }
+
+  /**
+   * **The place a new lead takes: one before the owner's first** (ADR-0161 §1), so it is the top of their
+   * list. `0` for an owner with no placed lead yet. A lead nothing has placed holds `null` and sorts
+   * before it — there is none once migration 0031 has run.
+   */
+  private async firstPlace(ctx: RequestContext, ownerMembershipId: string): Promise<number> {
+    const [first] = await this.leads.find(
+      ctx,
+      { ownerMembershipId, position: { $ne: null } },
+      { sort: { position: 1 }, limit: 1, projection: { position: 1 } },
+    );
+    return typeof first?.position === 'number' ? first.position - 1 : 0;
+  }
+
+  /**
    * One lead of this office. 404 for another office's, never 403.
    *
    * **A lead the caller does not own is another member's data**, read through the leader's reach, so the
@@ -658,8 +721,11 @@ export class LeadService {
     const inMemory = isInMemorySort(query.sort) ? query.sort : null;
     const dir = query.dir === 'asc' ? 1 : -1;
     const found = await this.leads.find(ctx, filter, inMemory ? {} : {
-      // MongoDB promises no order among equal keys, and `/leads` reads 200 at a time.
-      sort: { [query.sort ?? 'dateRegistered']: dir, _id: dir },
+      /*
+       * MongoDB promises no order among equal keys, and `/leads` reads 200 at a time. **No `sort` is the
+       * owner's own order** (P18.8-T7 AC-3), `SAVED_ORDER`; a key asked for orders as it always did.
+       */
+      sort: query.sort ? { [query.sort]: dir, _id: dir } : SAVED_ORDER,
     });
     /*
      * **Over the whole filtered set, before the page is cut**, so page 2 of a status sort carries on

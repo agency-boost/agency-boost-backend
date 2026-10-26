@@ -34,6 +34,8 @@ import {
 } from '@/modules/config/activity.repository';
 import { diverges } from '@/modules/config/ratio.service';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
+import { ActivityBindingService } from '@/modules/config/activity-binding.service';
+import { boundCodes, countOf, defaultBinding, type CascadeBinding } from '@/modules/config/activity-binding';
 import { GoalService } from '@/modules/goals/goal.service';
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import { ProductionReadings } from '@/modules/production/production-readings';
@@ -72,14 +74,17 @@ export interface ActivityDayView {
 }
 
 /**
- * One of the goal's three cascade codes over the window, against its target (P11-T4): the coaching
- * session's Activity card, *{logged} / {target}*, labelled *pro-rated*.
+ * One of the three cascade roles over the window, against its target (P11-T4): the coaching session's
+ * Activity card, *{logged} / {target}*, labelled *pro-rated*. The role's codes are the office's binding
+ * (ADR-0163), summed.
  */
 export interface ActivityWindowTargetView {
   key: ActivityTargetKey;
-  /** The goal's own code for this count — `cascadeMapping`, never an item number (invariant §4). */
+  /** The first code the office binds to this role — never an item number (invariant §4). */
   code: string;
-  /** Every stored entry against the code in the window, archived types included. */
+  /** Every code the office binds to this role; `logged` is their sum. */
+  codes: string[];
+  /** Every stored entry against the role's codes in the window, archived types included. */
   logged: number;
   /**
    * `SUB_PERIOD_ACTIVITY_TARGET` for `ROLLING_7D`: this month's `SUMMARY_ACTIVITY_TARGET` pro-rated.
@@ -277,6 +282,12 @@ export class ActivityService {
      * the save read the draft again (`app.module.int.spec.ts` pins it).
      */
     @Optional() @Inject(TenantConfigService) private readonly published: TenantConfigService | null = null,
+    /*
+     * ADR-0163 §4: which activity types each cascade role counts — the office's binding, through the one resolver.
+     * The application always provides it; optional, with the token named for the reason above, and without it the
+     * default binding.
+     */
+    @Optional() @Inject(ActivityBindingService) private readonly bindings: ActivityBindingService | null = null,
   ) {}
 
   // ------------------------------------------------------------------ reading
@@ -375,9 +386,10 @@ export class ActivityService {
     }
 
     const week = weekly ? subPeriodActivityTarget(plan.monthly) : null;
-    const { leadsCode, appointmentsCode, closingsCode } = plan.mapping;
-    const target = (key: ActivityTargetKey, code: string, of: number | undefined): ActivityWindowTargetView => ({
-      key, code, logged: totals.get(code) ?? 0, target: of ?? null,
+    // The office's binding (ADR-0163 §4): a role bound to `[A, B]` counts both.
+    const { binding } = plan;
+    const target = (key: ActivityTargetKey, codes: string[], of: number | undefined): ActivityWindowTargetView => ({
+      key, code: codes[0] ?? '', codes: [...codes], logged: countOf(totals, codes), target: of ?? null,
     });
 
     return {
@@ -390,11 +402,11 @@ export class ActivityService {
       daysLogged: rows.length,
       totalCount,
       targets: [
-        target('leads', leadsCode, week?.leads),
-        target('appointments', appointmentsCode, week?.appointments),
-        target('closings', closingsCode, week?.policies),
+        target('leads', binding.leads, week?.leads),
+        target('appointments', binding.appointments, week?.appointments),
+        target('closings', binding.closings, week?.policies),
       ],
-      sections: sectionChips(shown, totals, [leadsCode, appointmentsCode, closingsCode]),
+      sections: sectionChips(shown, totals, boundCodes(binding)),
     };
   }
 
@@ -851,30 +863,28 @@ export class ActivityService {
   }
 
   /**
-   * The goal's cascade codes, and — for a 7-day read — this month's `SUMMARY_ACTIVITY_TARGET`, read and
-   * computed exactly as `GET /summary` computes its *Monthly* targets (`summaryPlan`): the plan through
+   * The office's cascade binding (ADR-0163 §4), and — for a 7-day read — this month's `SUMMARY_ACTIVITY_TARGET`,
+   * read and computed exactly as `GET /summary` computes its *Monthly* targets (`summaryPlan`): the plan through
    * `GoalService.planOf`, the year to date through last month and this month's own APE. Another window
    * needs only the codes, so it reads no production.
    */
   private async monthPlan(
     ctx: RequestContext, membershipId: string, today: LocalDate, weekly: boolean,
-  ): Promise<{
-    mapping: { leadsCode: string; appointmentsCode: string; closingsCode: string };
-    monthly: CascadeTargets | null;
-  }> {
+  ): Promise<{ binding: CascadeBinding; monthly: CascadeTargets | null }> {
     const year = today.slice(0, 4);
     const month = today.slice(0, 7);
     const monthNumber = Number(today.slice(5, 7));
     const previous = monthNumber === 1 ? null : `${year}-${String(monthNumber - 1).padStart(2, '0')}`;
-    const [goal, through, thisMonth] = await Promise.all([
+    const [goal, through, thisMonth, binding] = await Promise.all([
       this.goals.planOf(ctx, year, membershipId),
       weekly && previous ? this.production.apeYearToDateThrough(ctx, membershipId, previous) : null,
       weekly ? this.production.apeForMonth(ctx, membershipId, month) : null,
+      this.bindings ? this.bindings.resolveCascadeBinding(ctx) : defaultBinding(),
     ]);
     const plan = weekly
       ? summaryPlan({ goal, month, throughLastMonthMinor: through?.minor ?? null, thisMonthMinor: thisMonth?.minor ?? null })
       : null;
-    return { mapping: goal.cascadeMapping, monthly: plan?.monthlyCounts ?? null };
+    return { binding, monthly: plan?.monthlyCounts ?? null };
   }
 
   private requireMembership(ctx: RequestContext): string {

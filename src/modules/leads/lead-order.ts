@@ -12,6 +12,21 @@ export const LEAD_SORT_KEYS = ['dateRegistered', 'name', 'nextActionDate', 'type
 export type LeadSortKey = (typeof LEAD_SORT_KEYS)[number];
 
 /**
+ * **The order `GET /leads` answers when no `sort` is asked for: the owner's own** (P18.8-T7, ADR-0161 §1).
+ *
+ * `position` smallest first, which is where `PATCH /leads/order` put each lead and where a new one goes.
+ * Not a key a reader can ask for, because it is the absence of one: a column sort is for the visit, and
+ * leaving it shows this again. `dir` does not reverse it.
+ *
+ * **Two ties, both of them real.** A lead nothing has placed yet holds `null`, which sorts first, as a
+ * new lead does; two leads added in the same instant can take one place. Both fall back to the newest
+ * registration and then the id, so equal places keep their order from one page to the next. On a
+ * leader's list, which holds their downline's leads beside their own, each owner's places interleave by
+ * the same rule.
+ */
+export const SAVED_ORDER = { position: 1, dateRegistered: -1, _id: -1 } as const;
+
+/**
  * **The three keys the service orders, not the database.** *Type* and *Status* need the office's
  * ladders beside the row. *Lead name* needs a collation, and a collated query cannot use the
  * tenant's indexes, which compare `kpmId` byte for byte: it scans the whole collection, every

@@ -2,7 +2,8 @@ import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { RequestContext } from '@/common/context/request-context';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { ALLOWED_WHILE_READ_ONLY, REQUIRED_PERMISSION } from './auth.decorators';
+import { ALLOWED_WHILE_READ_ONLY, REFUSED_IN_SUPPORT_SESSION, REQUIRED_PERMISSION } from './auth.decorators';
+import { SETUP_SESSION_WRITE_SCOPE } from '@/modules/rbac/permissions';
 import { PermissionsGuard } from './permissions.guard';
 
 /**
@@ -77,6 +78,62 @@ describe('PermissionsGuard', () => {
 
     it('leaves a public route alone, where there is no context to read', () => {
       expect(guardWith({}).canActivate(execution(undefined, 'POST'))).toBe(true);
+    });
+  });
+
+  /*
+   * ADR-0162 (P18.9-T1 AC-2, AC-3): the method fallback lets a setup session's write through only when the
+   * route's own permission is in its scope, and a person's own account is refused in every session.
+   */
+  describe('a setup session (ADR-0162)', () => {
+    const owner = (readOnly: boolean, writeScope: readonly string[] = SETUP_SESSION_WRITE_SCOPE) =>
+      new RequestContext(
+        'u-owner', 'none',
+        {
+          membershipId: 'mem-o', kpmId: 'kpm-a', orgLevelCode: 'AB', hierarchyRole: 'ab',
+          status: 'active', isKpmOwner: true, isKpmAdmin: false, directCount: 0,
+        },
+        'sa-1', null, false, readOnly, writeScope,
+      );
+
+    it('AC-2 lets a write through when the route declares a permission in the scope', () => {
+      for (const permission of ['tenant_config:write', 'kpm:import_roster', 'data_upload:commit_import']) {
+        const guard = guardWith({ [REQUIRED_PERMISSION]: permission });
+        expect(guard.canActivate(execution(owner(true), 'POST'))).toBe(true);
+      }
+    });
+
+    it('AC-2 refuses a write outside the scope, saying what a setup session may change', () => {
+      const guard = guardWith({ [REQUIRED_PERMISSION]: 'member:change_role' });
+      expect(() => guard.canActivate(execution(owner(true), 'PATCH'))).toThrow(expect.objectContaining({
+        code: ErrorCode.PERM_DENIED,
+        message: expect.stringContaining('change the office\'s settings, import people and upload production files'),
+      }));
+    });
+
+    it('AC-2 refuses a write through a route that declares no permission: the scope names permissions', () => {
+      expect(() => guardWith({}).canActivate(execution(owner(true), 'POST')))
+        .toThrow(expect.objectContaining({ code: ErrorCode.PERM_DENIED }));
+    });
+
+    it('AC-2 a read-only session with no scope is refused the same route', () => {
+      const guard = guardWith({ [REQUIRED_PERMISSION]: 'tenant_config:write' });
+      expect(() => guard.canActivate(execution(owner(true, []), 'POST')))
+        .toThrow(expect.objectContaining({ message: expect.stringContaining('read-only support session') }));
+    });
+
+    it('AC-3 refuses a person\'s own account in every session — read-only, setup and elevated', () => {
+      const guard = guardWith({ [REFUSED_IN_SUPPORT_SESSION]: true });
+      for (const ctx of [member(true), owner(true), owner(false), member(false)]) {
+        expect(() => guard.canActivate(execution(ctx, 'PATCH'))).toThrow(expect.objectContaining({
+          code: ErrorCode.PERM_DENIED, message: expect.stringContaining('own account'),
+        }));
+      }
+    });
+
+    it('AC-3 leaves the same route alone for the person themselves', () => {
+      const guard = guardWith({ [REFUSED_IN_SUPPORT_SESSION]: true });
+      expect(guard.canActivate(execution(member(false, false), 'PATCH'))).toBe(true);
     });
   });
 

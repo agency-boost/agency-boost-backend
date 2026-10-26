@@ -121,6 +121,13 @@ export const ErrorCode = {
    * a member's page and not the Super Admin's.
    */
   IMPERSONATION_OFFICE_UNAVAILABLE: 'IMPERSONATION_OFFICE_UNAVAILABLE',
+  /**
+   * A **setup** session named somebody who is neither an office's Owner nor one of its Admins (ADR-0162 §1):
+   * a setup session acts as the person who configures an office, and anybody else has no settings to change.
+   * `409`, with `details: { purpose: 'setup' }`; nothing is written and nobody is told. A support session as
+   * the same person starts as before.
+   */
+  IMPERSONATION_SETUP_TARGET: 'IMPERSONATION_SETUP_TARGET',
   TENANT_NO_MEMBERSHIP: 'TENANT_NO_MEMBERSHIP',
   TENANT_CODE_TAKEN: 'TENANT_CODE_TAKEN',
   /**
@@ -130,6 +137,11 @@ export const ErrorCode = {
    * name the company they collided with.
    */
   COMPANY_SLUG_TAKEN: 'COMPANY_SLUG_TAKEN',
+  /**
+   * An office was to be made in the Template library (ADR-0164 §3): the company that holds the platform's
+   * templates is not an insurer, and holds no office. `409`, `details: { companyId }`; nothing is written.
+   */
+  COMPANY_IS_TEMPLATE_LIBRARY: 'COMPANY_IS_TEMPLATE_LIBRARY',
   AGENT_CODE_TAKEN: 'AGENT_CODE_TAKEN',
   AUTH_PASSWORD_CHANGE_REQUIRED: 'AUTH_PASSWORD_CHANGE_REQUIRED',
   /**
@@ -144,6 +156,11 @@ export const ErrorCode = {
    * so it is a loud refusal rather than a silent null on the membership.
    */
   ORG_LEVEL_NOT_ON_LADDER: 'ORG_LEVEL_NOT_ON_LADDER',
+  /**
+   * A rung's leader tier was to change while live memberships stand on it (ADR-0156 §5). Each member's class
+   * was derived from the tier, so nobody is re-classed silently: `details.members` is how many to move first.
+   */
+  ORG_LEVEL_TIER_IN_USE: 'ORG_LEVEL_TIER_IN_USE',
   /** Somebody with an open request asked for a second office. */
   TENANT_REQUEST_ALREADY_OPEN: 'TENANT_REQUEST_ALREADY_OPEN',
   /** A KPM request was approved or declined already; the second decision says which. */
@@ -159,6 +176,19 @@ export const ErrorCode = {
    * passes through; `details` carry `maxLeaders` and `leadersUsed`. AB to AAB is never refused.
    */
   LEADER_LIMIT_REACHED: 'LEADER_LIMIT_REACHED',
+  /**
+   * A leader-limit request for a member who already has one waiting (ADR-0157 §2): one open request per subject.
+   * `details.requestId` names the open one.
+   */
+  LEADER_LIMIT_REQUEST_OPEN: 'LEADER_LIMIT_REQUEST_OPEN',
+  /**
+   * An approved leader-limit request whose act no longer applies — the member left, moved rung, or was let in
+   * some other way since it was asked (ADR-0157 §3). Nothing is written for the member; the request is closed as
+   * declined, with that reason.
+   */
+  LEADER_LIMIT_REQUEST_STALE: 'LEADER_LIMIT_REQUEST_STALE',
+  /** A leader-limit request decided or cancelled already; the second answer says which. */
+  LEADER_LIMIT_REQUEST_DECIDED: 'LEADER_LIMIT_REQUEST_DECIDED',
   ORG_LEADER_NOT_IN_KPM: 'ORG_LEADER_NOT_IN_KPM',
   ORG_AGENT_ALREADY_TAGGED: 'ORG_AGENT_ALREADY_TAGGED',
   /**
@@ -183,6 +213,13 @@ export const ErrorCode = {
   ORG_GROUP_NAME_TAKEN: 'ORG_GROUP_NAME_TAKEN',
   ORG_GROUP_OWNER_NOT_IN_KPM: 'ORG_GROUP_OWNER_NOT_IN_KPM',
   ORG_GROUP_NOT_FOUND: 'ORG_GROUP_NOT_FOUND',
+  /**
+   * Tagging *Core Leader* a member whose rung is not a leader rung (ADR-0159 §1, P18.8-T5 AC-2). `400`. The tag is
+   * a leader's: a Core Leader reads the whole office's analytics, and a tagged Agent would read every member's
+   * production without leading anyone. Refused only when the tag is being **set**; a member already tagged and
+   * since moved off a leader rung keeps the flag, and re-saving their other tags is not refused.
+   */
+  CORE_LEADER_NOT_A_LEADER: 'CORE_LEADER_NOT_A_LEADER',
   ORG_ALREADY_ADMIN: 'ORG_ALREADY_ADMIN',
   ORG_NOT_AN_ADMIN: 'ORG_NOT_AN_ADMIN',
   ORG_ADMIN_TARGET_NOT_ACTIVE: 'ORG_ADMIN_TARGET_NOT_ACTIVE',
@@ -293,10 +330,11 @@ export const ErrorCode = {
    * Templates and the cascade types (P13.2-T6; ADR-0115; `functional/tenant-config.md`).
    */
   /**
-   * Archiving `LEADS_CONTACTED`, `SELL_PRESENTATION` or `SELL_SUBMISSION`, or a category while it holds
-   * one (ADR-0115 §2): the goal cascade and the summary count them by code. `409`, `details.codes`.
+   * Archiving an activity type the office's **activity binding** names, or a category while it holds one active
+   * (ADR-0163 §5): the goal cascade, the summary and the pace count it. `409`, `details.codes` and `details.roles`.
+   * It replaced `ACTIVITY_TYPE_RESERVED` (ADR-0115 §2), which refused the three platform codes in themselves.
    */
-  ACTIVITY_TYPE_RESERVED: 'ACTIVITY_TYPE_RESERVED',
+  ACTIVITY_TYPE_BOUND: 'ACTIVITY_TYPE_BOUND',
   /** A name an active template of the same company already has. `409`, `details.name`. */
   TEMPLATE_NAME_TAKEN: 'TEMPLATE_NAME_TAKEN',
   /** Archiving the company's default template: make another the default first. `409`. */

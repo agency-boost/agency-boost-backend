@@ -18,7 +18,7 @@ import { LeadReadings } from '@/modules/leads/lead-readings';
 import { ProductionReadings, type MonthLedger } from '@/modules/production/production-readings';
 import { goalFigures, type PlannedGoal } from '@/modules/summary/summary-figures';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
-import { AGENCY_RUNG, UNIT_RUNG, partitionAgencies } from './agency-partition';
+import { AGENCY_CLASS, AGENT_CLASS, UNIT_CLASS, partitionAgencies } from './agency-partition';
 import {
   byName, dayLabel, monthLabel, moneyOf, shiftMonth, twoMonthsLabel, yearToDateLabel, type Money, type Person,
 } from './office-figures';
@@ -82,8 +82,6 @@ interface MemberFigures {
   leads: LeadCountsRow | null;
 }
 
-const AGENT_RUNG = 'AGENT';
-
 /**
  * **KPM analytics** (Phase 18, P18-T2; `functional/kpm-analytics.md`): *Unit comparison*, MOC, the production
  * clubs and *Monthly production*, `KPM_Owner.html:1225-1260` and its logic `:3090-3445`.
@@ -136,7 +134,8 @@ export class KpmAnalyticsService {
   ) {}
 
   async read(ctx: RequestContext, query: { period?: KpmAnalyticsPeriod } = {}): Promise<KpmAnalyticsView> {
-    const me = OfficePeople.require(ctx);
+    // The Owner, an Admin, or a Core Leader (ADR-0159 §2); any other field member 404.
+    const me = OfficePeople.requireAnalyticsReader(ctx);
     const period = query.period ?? KPM_REPORTING.ANALYTICS_DEFAULT_PERIOD;
     const office = await this.days.office(ctx);
     const { timezone, today, month } = office;
@@ -231,8 +230,9 @@ export class KpmAnalyticsService {
         activeAgents: maaCountInUnit(then.map((id) => member.get(id)!.maa), monthHeld),
         leads: { sales: sum.salesOpen, salesPotential: sum.salesClosing, recruit: sum.recruitOpen, recruitPotential: sum.recruitNominated },
         manpower: {
-          aab: now.filter((id) => byId.get(id)!.orgLevelCode === UNIT_RUNG).length,
-          agents: now.filter((id) => byId.get(id)!.orgLevelCode === AGENT_RUNG).length,
+          // By class (ADR-0156): an *Associate Leader* rung's members are the AABs, whatever it is called.
+          aab: now.filter((id) => byId.get(id)!.role === UNIT_CLASS).length,
+          agents: now.filter((id) => byId.get(id)!.role === AGENT_CLASS).length,
           total: now.length,
         },
       };
@@ -247,13 +247,13 @@ export class KpmAnalyticsService {
     const heldThisYear = held.filter((m) => m.startsWith(year));
     const ytdPeriod = heldThisYear.length === 0 ? year : yearToDateLabel(heldThisYear[heldThisYear.length - 1]);
     const twoPeriod = lastTwo.length < KPM_REPORTING.MONTHLY2_MONTHS ? 'Not uploaded yet' : twoMonthsLabel(lastTwo[0], lastTwo[1]);
-    // The client PRD's scopes (§2): a leader's Direct Unit is their direct reports on the Agent rung; an AB's Direct
-    // Group is the Direct Unit and each AAB reporting to the AB, with that AAB's own Direct Unit.
+    // The client PRD's scopes (§2): a leader's Direct Unit is their direct reports of the Agent class; an AB's Direct
+    // Group is the Direct Unit and each AAB reporting to the AB, with that AAB's own Direct Unit — classes, ADR-0156.
     const directUnit = (leaderId: string) => active
-      .filter((p) => p.leaderId === leaderId && p.orgLevelCode === AGENT_RUNG).map((p) => p.membershipId);
+      .filter((p) => p.leaderId === leaderId && p.role === AGENT_CLASS).map((p) => p.membershipId);
     const directGroup = (abId: string) => [
       ...directUnit(abId),
-      ...active.filter((p) => p.leaderId === abId && p.orgLevelCode === UNIT_RUNG)
+      ...active.filter((p) => p.leaderId === abId && p.role === UNIT_CLASS)
         .flatMap((aab) => [aab.membershipId, ...directUnit(aab.membershipId)]),
     ];
     const netApe = (ids: readonly string[]): MocInput => {
@@ -300,7 +300,7 @@ export class KpmAnalyticsService {
           MONTHLY2_AA_DG: monthly2(group),
           MOC_PERSISTENCY: persistency(agency.headId),
           DIRECT_AB_COUNT: {
-            current: active.filter((p) => p.leaderId === agency.headId && p.orgLevelCode === AGENCY_RUNG).length,
+            current: active.filter((p) => p.leaderId === agency.headId && p.role === AGENCY_CLASS).length,
             period: `As of ${dayLabel(today)}`,
           },
         }),

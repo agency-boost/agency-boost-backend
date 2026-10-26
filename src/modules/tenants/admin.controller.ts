@@ -214,7 +214,9 @@ export class AdminController {
     description:
       'The ladder belongs to the company, not to any office (ADR-0012): a KPM cannot add, ' +
       'rename or remove a rung. `code` is stable and semantic and is never reused \u2014 not ' +
-      'even after archiving \u2014 because it is what every membership holds.',
+      'even after archiving \u2014 because it is what every membership holds. `leaderTier` ' +
+      '(`senior`, `associate` or `null`, absent being `null`) decides the class its members are ' +
+      'given (ADR-0156).',
   })
   async createOrgLevel(@Ctx() ctx: RequestContext, @Body() dto: CreateOrgLevelDto) {
     return this.orgLevels.create(ctx, dto);
@@ -223,10 +225,12 @@ export class AdminController {
   @Patch('org-levels/:id')
   @RequirePermission('org_level:crud')
   @ApiOperation({
-    summary: 'Rename, reorder or archive a rung',
+    summary: 'Rename, reorder, archive or set the leader tier of a rung',
     description:
       'The code is not updatable, by construction \u2014 it is absent from the body. ' +
-      'Archiving retires a rung and keeps every membership that references it readable.',
+      'Archiving retires a rung and keeps every membership that references it readable. ' +
+      'A change of `leaderTier` is refused `409 ORG_LEVEL_TIER_IN_USE`, with `details.members`, ' +
+      'while any live membership stands on the rung: nobody is re-classed silently (ADR-0156 \u00a75).',
   })
   async updateOrgLevel(
     @Ctx() ctx: RequestContext,
@@ -251,11 +255,13 @@ export class AdminController {
       'The only way an office comes into existence — there is no self-service path ' +
       '(ADR-0005). Seeds the per-office settings every prototype screen hardcodes, and its ' +
       'configuration from `startFrom` (ADR-0115): one of the company\'s active templates, the ' +
-      'AgencyBoost defaults, or empty — the company\'s default template when absent. There is no ' +
+      'Template library\'s (`templateLibrary`, ADR-0164), the AgencyBoost defaults, or empty — the ' +
+      'company\'s default template when absent. There is no ' +
       'fallback: a kind the source holds none of is empty in the office, and every office has the ' +
       'three cascade activity types. The whole source is checked before the office is written, so ' +
-      'a refusal (400, naming what is broken; 404 for a template that is not the company\'s) leaves ' +
-      'nothing behind.',
+      'a refusal (400, naming what is broken; 404 for a template that is not the company\'s; 409 ' +
+      'TEMPLATE_RUNG_UNKNOWN for a library template naming a role the company\'s ladder lacks) leaves ' +
+      'nothing behind. The Template library itself holds no office: 409 COMPANY_IS_TEMPLATE_LIBRARY.',
   })
   async createTenant(@Ctx() ctx: RequestContext, @Body() dto: CreateKpmDto) {
     return this.tenants.createKpm(ctx, dto);
@@ -548,14 +554,17 @@ export class AdminController {
     description:
       'Time-boxed to an hour, reason required, and every action it produces records ' +
       'both the real Super Admin and the person acted as. Refused for another Super ' +
-      'Admin — that would erase the attribution the feature depends on.',
+      'Admin — that would erase the attribution the feature depends on. Read-only, unless ' +
+      '`purpose` is `setup`: then it may also write the office\'s settings, its people import ' +
+      'and its production file, and nothing else, without a second Super Admin — for an ' +
+      'active office\'s Owner or one of its Admins only (`409 IMPERSONATION_SETUP_TARGET`).',
   })
   async impersonate(
     @Ctx() ctx: RequestContext,
     @Param('userId') userId: string,
     @Body() dto: ImpersonateDto,
   ) {
-    return this.impersonation.start(ctx, userId, dto.reason, dto.durationMinutes);
+    return this.impersonation.start(ctx, userId, dto.reason, dto.durationMinutes, dto.purpose);
   }
 
 }

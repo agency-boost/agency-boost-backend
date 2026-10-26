@@ -11,6 +11,7 @@ import { User, UserDocument } from '@/modules/users/user.schema';
 import { Company, CompanyDocument } from './company.schema';
 import { KpmRequest, KpmRequestDocument, KpmRequestStatus } from './kpm-request.schema';
 import { TenantService } from './tenant.service';
+import { INSURERS_ONLY } from './template-library';
 
 export interface KpmRequestRow {
   requestId: string;
@@ -86,7 +87,8 @@ export class KpmRequestService {
     }
 
     const company = await this.companies
-      .findOne({ _id: input.companyId, deletedAt: null })
+      // **Not the Template library** (ADR-0164 §3): it holds no office, so nobody may ask for one in it.
+      .findOne({ _id: input.companyId, deletedAt: null, ...INSURERS_ONLY })
       .exec()
       // A malformed id is "not here", not a 500.
       .catch(() => null);

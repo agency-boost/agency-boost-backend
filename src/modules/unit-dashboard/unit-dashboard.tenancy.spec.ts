@@ -4,6 +4,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { UNIT_DASHBOARD_CORRECTION_REASON } from '@/domain/constants';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
+import { NO_CLASS } from '../../../test/http-permissions';
 import {
   buildCoachingOffice, COMPANY, KPM_A, KPM_B, ROSTER_NOW, ROSTER_TODAY, type CoachingOffice, type Who,
 } from '../../../test/coaching-office';
@@ -114,7 +115,9 @@ describe('the Unit Dashboard (Phase 15)', () => {
         expect(view.head).toEqual({ membershipId: office.id[who], name: office.name[who], isReader: true });
         expect(view.tiles).toEqual({
           team: { total: 0, direct: 0, units: 0, underUnits: 0 },
-          directGroupProduction: { targetMinor: null, actualMinor: null, attainmentPct: null, missing: 0, period: 'month' },
+          directGroupProduction: {
+            targetMinor: null, actualMinor: null, attainmentPct: null, missing: 0, gapMinor: null, overMinor: null, period: 'month',
+          },
           potentialActive: { count: 0, of: 0 },
           potentialRecruits: { yourUnit: 0, aabs: 0 },
         });
@@ -175,7 +178,9 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect((await read('ADMIN', { for: office.id.AGUS })).head).toMatchObject({ name: 'Agus Salim', isReader: false });
       expect((await read('OWNER', { for: office.id.PEER_AAB })).yourUnit.rows.map((r) => r.name)).toEqual(['Putu Ayu', 'Yusuf Ramadhan']);
       // An Owner or an Admin with no rung at all holds `own-kpm` alone.
-      const ownerOnly = new RequestContext('u-o', 'none', { ...office.as('ADMIN').membership!, orgLevelCode: 'NO_RUNG' });
+      const ownerOnly = new RequestContext('u-o', 'none', {
+        ...office.as('ADMIN').membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: NO_CLASS,
+      });
       expect((await wired.unitDashboard.read(ownerOnly, { for: office.id.NINA })).head.name).toBe('Nina Lestari');
     });
 
@@ -351,12 +356,18 @@ describe('the Unit Dashboard (Phase 15)', () => {
             const kept = values.filter((v): v is number => v !== null);
             return kept.length ? kept.reduce((a, b) => a + b, 0) : null;
           };
-          const target = held(rows.map((r) => r.goal.targetMinor));
           const actual = held(rows.map((r) => r.goal.actualMinor));
+          // Paired (ADR-0165 §1, P18.8-T15 AC-6): a target counts only beside production held — every target when
+          // nobody's is, so the total reads *Not uploaded yet* beside them as a row does.
+          const counted = actual === null ? rows : rows.filter((r) => r.goal.actualMinor !== null);
+          const target = held(counted.map((r) => r.goal.targetMinor));
+          const both = target !== null && actual !== null;
           expect(total.goal).toEqual({
             targetMinor: target, actualMinor: actual,
             attainmentPct: target && actual !== null ? Math.min(999, Math.round((actual / target) * 100)) : null,
             missing: rows.filter((r) => r.goal.actualMinor === null).length,
+            gapMinor: both ? Math.max(0, target - actual) : null,
+            overMinor: both ? Math.max(0, actual - target) : null,
           });
           for (const key of ['salesOpen', 'salesClosing', 'recruitOpen', 'recruitNominated'] as const) {
             expect(total.leadsCounts[key]).toBe(rows.reduce((s, r) => s + r.leadsCounts[key], 0));
@@ -393,6 +404,18 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect(view.tiles.potentialRecruits).toEqual({ yourUnit: 1, aabs: 1 });
       // Four rows hold this month's APE — Indah, Dimas, Rina and Sari — and seven hold none.
       expect(view.tiles.directGroupProduction).toMatchObject({ actualMinor: 270 * M, missing: 7, period: 'month' });
+    });
+
+    it('P18.8-T15 AC-6 Agus’s Direct Group production pairs: the seven with no production are out of the target too', async () => {
+      const view = await read('AGUS');
+      const all = everyRow(view);
+      const held = all.filter((r) => r.goal.actualMinor !== null);
+      expect(held.map((r) => r.name).sort()).toEqual(['Dimas Pratama', 'Indah Permatasari', 'Rina Wijaya', 'Sari Puspita'].sort());
+      const pairedTarget = held.reduce((s, r) => s + (r.goal.targetMinor ?? 0), 0);
+      expect(view.tiles.directGroupProduction).toMatchObject({
+        targetMinor: pairedTarget, actualMinor: 270 * M, missing: 7,
+        gapMinor: Math.max(0, pairedTarget - 270 * M), overMinor: Math.max(0, 270 * M - pairedTarget),
+      });
     });
 
     it('P15-T1 AC-4 the nested unit, two deep, has its own total inside its parent’s', async () => {

@@ -5,7 +5,8 @@ import type { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { LEADER_RUNG_CODES } from '@/domain/constants';
+import { LEADER_CLASSES } from '@/domain/constants';
+import { can } from '@/modules/rbac/permissions';
 import type { KpmDocument } from '@/modules/tenants/kpm.schema';
 import type { MembershipRepository } from './membership.repository';
 import type { MembershipDocument } from './membership.schema';
@@ -15,8 +16,10 @@ import type { MembershipDocument } from './membership.schema';
  * that makes a leader passes through.
  *
  * *Leaders used* is the office's memberships that are **active** — not pending, removed or deleted —
- * at the **AB or AAB** rung, the Owner and an Admin included at whichever of the two they stand on.
- * A named metric (`metrics-and-definitions.md`), and not ADR-0087's *leader*: an AAB with nobody
+ * whose **class is `ab` or `aab`**, the Owner and an Admin included at whichever of the two they hold.
+ * The class follows the rung's leader tier (ADR-0156 §4, amending ADR-0113 §1), so a member on a rung
+ * the company named `SM` and marked *Senior Leader* counts, and one on `AB` marked *Not a leader* does
+ * not. A named metric (`metrics-and-definitions.md`), and not ADR-0087's *leader*: an AAB with nobody
  * under them counts here, an Agent with a direct report does not.
  *
  * **One definition, read three ways**: the Super Admin's offices list and the *Edit subscription*
@@ -26,12 +29,7 @@ import type { MembershipDocument } from './membership.schema';
 
 /** The filter that is the metric. Soft-deleted rows are excluded by whoever applies it. */
 export function leadersUsedFilter(): FilterQuery<MembershipDocument> {
-  return { status: 'active', orgLevelCode: { $in: [...LEADER_RUNG_CODES] } };
-}
-
-/** Is this rung one the limit counts? A move between two such rungs changes nothing. */
-export function isLeaderRung(orgLevelCode: string | null | undefined): boolean {
-  return (LEADER_RUNG_CODES as readonly string[]).includes(String(orgLevelCode ?? '').toUpperCase());
+  return { status: 'active', role: { $in: [...LEADER_CLASSES] } };
 }
 
 /** *Leaders used* in the caller's own office, through the tenant-scoped repository. */
@@ -54,15 +52,55 @@ export function countLeadersUsedPerOffice(
 /**
  * The refusal (ADR-0113 §2): `409`, the maximum and the count in its details. Its sentence is the
  * API's; each screen writes its own words from the details, for the reader it has (AC-5).
+ *
+ * **`canRequest`** (ADR-0157 §1): whether this reader may ask AgencyBoost to approve the act instead —
+ * true on the two single-member paths that can wait (a role change, approving a pending member) for a
+ * reader who holds `leader_limit_request:create`; false on the roster import and an Owner's assignment,
+ * which cannot.
  */
-export function leaderLimitReached(maxLeaders: number, leadersUsed: number): DomainException {
+export function leaderLimitReached(maxLeaders: number, leadersUsed: number, canRequest = false): DomainException {
   return new DomainException(
     ErrorCode.LEADER_LIMIT_REACHED,
     `This office has reached its limit of ${maxLeaders} leaders — ABs and AABs together, the Owner `
-      + 'included. Nobody else can be made a leader until AgencyBoost raises it.',
+      + (canRequest
+        ? 'included. Ask AgencyBoost to approve this one past the limit, or to raise it.'
+        : 'included. Nobody else can be made a leader until AgencyBoost raises it.'),
     HttpStatus.CONFLICT,
-    { maxLeaders, leadersUsed },
+    { maxLeaders, leadersUsed, canRequest },
   );
+}
+
+/**
+ * **An approved request, carried out past the limit** (ADR-0157 §3): the explicit, named way through the
+ * check, and the only one. The write still takes the office's leader lease, so it is one step to every
+ * other leader write; with the lease held `stillApplies` re-reads what the request was about — and throws
+ * `LEADER_LIMIT_REQUEST_STALE` when it no longer holds — and the count is not asked.
+ */
+export interface ApprovedPastLimit {
+  /** The `leaderLimitRequests` row this write carries out, for the record. */
+  approvedRequestId: string;
+  stillApplies: () => Promise<void>;
+}
+
+/**
+ * **An approved request that no longer applies** (ADR-0157 §3): `409 LEADER_LIMIT_REQUEST_STALE`, with what
+ * changed. Nothing is written for the member; the request is closed as declined with `why`.
+ */
+export function leaderLimitRequestStale(requestId: string, why: string): DomainException {
+  return new DomainException(
+    ErrorCode.LEADER_LIMIT_REQUEST_STALE,
+    `This request no longer applies: ${why} It has been closed, and nothing was changed.`,
+    HttpStatus.CONFLICT,
+    { requestId, why },
+  );
+}
+
+/** How a write that may add a leader meets the limit. */
+export interface LeaderSeatOptions {
+  /** A refusal may be asked about instead (`canRequest`): a role change, or approving a pending member. */
+  requestable?: boolean;
+  /** The Super Admin's approval, carried out. */
+  pastLimit?: ApprovedPastLimit;
 }
 
 /** How long a holder may keep the office's leader writes to itself before anyone may take them. */
@@ -115,6 +153,7 @@ export async function withLeaderSeat<T>(
   ctx: RequestContext,
   work: () => Promise<T>,
   addsLeader: () => Promise<boolean> = () => Promise.resolve(true),
+  options: LeaderSeatOptions = {},
 ): Promise<T> {
   const kpmId = ctx.kpmId;
   if (!kpmId) {
@@ -125,17 +164,31 @@ export async function withLeaderSeat<T>(
     );
   }
 
+  const { pastLimit } = options;
   const office = await deps.kpms.findOne({ _id: kpmId, deletedAt: null }).select('subscription').exec();
   if (!office) throw new NotFoundException('KPM');
-  if (office.subscription?.maxLeaders == null) return work();
+  if (office.subscription?.maxLeaders == null) {
+    // No limit — perhaps raised away while the request waited — and so no lease; the act is still re-checked.
+    if (pastLimit) await pastLimit.stillApplies();
+    return work();
+  }
 
   const { token, maxLeaders } = await takeLease(deps, kpmId);
   try {
+    if (pastLimit) {
+      // AgencyBoost approved this one past the limit (ADR-0157 §3): re-checked with the lease held, never counted.
+      await pastLimit.stillApplies();
+      return await work();
+    }
     // Read with the lease held, so a maximum lowered a moment ago is the one obeyed, and the member's
     // row is the one the write is about to change.
     if (maxLeaders !== null && await addsLeader()) {
       const used = await countLeadersUsed(deps.members, ctx);
-      if (used + 1 > maxLeaders) throw leaderLimitReached(maxLeaders, used);
+      if (used + 1 > maxLeaders) {
+        throw leaderLimitReached(
+          maxLeaders, used, Boolean(options.requestable) && can(ctx, 'leader_limit_request:create'),
+        );
+      }
     }
     return await work();
   } finally {

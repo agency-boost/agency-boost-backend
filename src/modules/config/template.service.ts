@@ -5,7 +5,9 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
-import { activationLinkKinds, resolveDisplayUnit } from '@/domain/constants';
+import {
+  activationLinkKinds, resolveDisplayUnit, SEED_ACTIVITY_TYPES, type SeedActivityCategory, type SeedActivityType,
+} from '@/domain/constants';
 import {
   CompanyTemplate, CompanyTemplateDocument, TemplateKind,
 } from './company-template.schema';
@@ -13,11 +15,12 @@ import { OfficeCounter, type OfficeStanding, type TemplateScope } from './office
 import { NamedTemplateService } from './named-template.service';
 import type { NamedTemplateDocument } from './named-template.schema';
 import {
-  RESERVED_ACTIVITY_CODES, isOfficeTemplateKind, platformDefaultPayload,
+  isOfficeTemplateKind, platformDefaultPayload, withCascadeTypes,
 } from './template-defaults';
 import {
   checkTemplateSummaryGroups, refuseSummaryGroupConflict, type SummaryGrouped,
 } from './summary-group';
+import { bindingOfPayload, bindingProblems, defaultBinding } from './activity-binding';
 import { CampaignKindsApplier } from './campaign-kinds.port';
 import { trainingTaxonomyProblems } from '@/modules/training/training-payload';
 import { activationChecklistProblems } from '@/modules/activation/activation-payload';
@@ -372,6 +375,11 @@ export class TemplateService {
     const { kind } = at;
     this.refuseEmpty(kind, payload);
 
+    if (kind === 'activity_taxonomy') {
+      this.refuseBrokenBinding(payload);
+      return;
+    }
+
     /*
      * The training taxonomy (P5-T1): every row by the checker an office's own write meets
      * (ADR-0030), then the references only a whole payload can break. An empty level is fine.
@@ -424,15 +432,18 @@ export class TemplateService {
     }
 
     /*
-     * Against **this template's published** taxonomy, and the three cascade types every office is
-     * given whatever its source (ADR-0115 §2) — because that is what provisioning copies. Checking
-     * the taxonomy *draft* would pass here and still break the office, which is the defect wearing a
-     * different hat. There is no platform fallback any more: a template with no taxonomy published
-     * gives its offices the three and nothing else (ADR-0115 §1).
+     * Against **this template's published** taxonomy, and the bound types every office is given whatever
+     * its source (ADR-0115 §2, ADR-0163 §5; `withCascadeTypes`) — because that is what provisioning
+     * copies. Checking the taxonomy *draft* would pass here and still break the office, which is the
+     * defect wearing a different hat. There is no platform fallback any more: a template with no taxonomy
+     * published gives its offices the default binding's three and nothing else (ADR-0115 §1).
      */
     const taxonomy = await this.newestPublished({ ...at, kind: 'activity_taxonomy' });
-    const source = (taxonomy?.payload ?? {}) as { types?: { code: string }[] };
-    const known = new Set([...(source.types ?? []).map((t) => t.code), ...RESERVED_ACTIVITY_CODES]);
+    const source = (taxonomy?.payload ?? {}) as { categories?: SeedActivityCategory[]; types?: SeedActivityType[] };
+    const given = withCascadeTypes(
+      source.categories ?? [], source.types ?? [], bindingOfPayload(taxonomy?.payload) ?? defaultBinding(),
+    );
+    const known = new Set(given.types.map((t) => t.code));
 
     const missing = [...new Set(
       ratios.flatMap((r) => [...(r.numerator ?? []), ...(r.denominator ?? [])]),
@@ -467,6 +478,21 @@ export class TemplateService {
         );
       }
     }
+  }
+
+  /**
+   * **The template's activity binding** (ADR-0163 §1, §3): which of its types each cascade role counts, refused
+   * `400` by the checker the office's own binding meets (`bindingProblems`). A code must be one of this
+   * template's activity types, or one of the platform's, which an office made from it is given with it
+   * (`withCascadeTypes`) — the taxonomy provisioning would write. A payload carrying none gives its offices the
+   * default binding, and needs no check.
+   */
+  private refuseBrokenBinding(payload: Record<string, unknown>): void {
+    if (payload.bindings === undefined) return;
+    const own = ((payload.types ?? []) as { code: string }[]).map((t) => t.code);
+    const known = new Set([...own, ...SEED_ACTIVITY_TYPES.map((t) => t.code)]);
+    const problems = bindingProblems(payload.bindings, known);
+    if (problems.length) throw new BadRequestException(`Activity binding: ${problems.join(' ')}`);
   }
 
   /**

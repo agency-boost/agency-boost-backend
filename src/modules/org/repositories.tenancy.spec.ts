@@ -20,6 +20,8 @@ const TENANT_SCOPED_MODELS = [
   'Asset',
   'Group',
   'JoinRequest',
+  // ADR-0157: a leader past the office's limit, from the day the collection exists.
+  'LeaderLimitRequest',
   'MembershipHistory',
   'Membership',
   'ActivityCategory',

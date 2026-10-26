@@ -1,7 +1,7 @@
 import { PERFORMANCE } from '@/domain/constants';
 import { personLeadCounts } from './lead-counts';
 import {
-  cascadeActivityTouches, potentialMaaCountInUnit, rollUpCounts, rollUpGoal, rollUpLeadCounts,
+  cascadeActivityTouches, potentialMaaCountInUnit, rollUpCounts, rollUpGoal, rollUpGoalPaired, rollUpLeadCounts,
 } from './unit-rollup';
 
 const M = 1_000_000 * 100;
@@ -52,6 +52,62 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
         { salesOpen: 1, salesClosing: 0, recruitOpen: 0, recruitNominated: 1 },
       ])).toEqual({ salesOpen: 4, salesClosing: 1, recruitOpen: 2, recruitNominated: 2 });
       expect(rollUpLeadCounts([])).toEqual({ salesOpen: 0, salesClosing: 0, recruitOpen: 0, recruitNominated: 0 });
+    });
+  });
+
+  /*
+   * ADR-0165 §1 (P18.8-T15 AC-6; the client's UI review, UI-004): the Unit Dashboard's totals pair each target with the
+   * production it measures. The client's unit read *5% · Rp 264.666.667 short · Rp 13.000.000 of Rp 277.666.667*: the
+   * target held Budi's Rp 37 jt and Yanti's Rp 98 jt, whose production was not uploaded.
+   */
+  describe('the paired rollup — the Unit Dashboard’s totals (ADR-0165 §1)', () => {
+    it('P18.8-T15 AC-6 counts a member in the target only when their production is held, and works the gap from the pairs', () => {
+      const total = rollUpGoalPaired([
+        { targetMinor: 100 * M, actualMinor: 60 * M },
+        { targetMinor: 50 * M, actualMinor: null },
+        { targetMinor: null, actualMinor: 10 * M },
+      ]);
+      // Not 150 against 70: the 50 whose production is not held is left out of the target too.
+      expect(total).toEqual({
+        targetMinor: 100 * M, actualMinor: 70 * M, attainmentPct: 70, missing: 1, gapMinor: 30 * M, overMinor: 0,
+      });
+    });
+
+    it('P18.8-T15 AC-6 the client’s unit: the two not uploaded no longer make it 5%', () => {
+      const rows = [
+        { targetMinor: 37 * M, actualMinor: null },
+        { targetMinor: 98 * M, actualMinor: null },
+        { targetMinor: 142_666_667_00, actualMinor: 13 * M },
+      ];
+      expect(rollUpGoal(rows)).toMatchObject({ targetMinor: 277_666_667_00, attainmentPct: 5 });
+      expect(rollUpGoalPaired(rows)).toEqual({
+        targetMinor: 142_666_667_00, actualMinor: 13 * M, attainmentPct: 9, missing: 2,
+        gapMinor: 129_666_667_00, overMinor: 0,
+      });
+    });
+
+    it('P18.8-T15 AC-6 a pair over its target is over, not short', () => {
+      expect(rollUpGoalPaired([{ targetMinor: 20 * M, actualMinor: 25 * M }, { targetMinor: 80 * M, actualMinor: null }]))
+        .toEqual({ targetMinor: 20 * M, actualMinor: 25 * M, attainmentPct: 125, missing: 1, gapMinor: 0, overMinor: 5 * M });
+    });
+
+    it('P18.8-T15 AC-6 with nobody’s production held reads Not uploaded yet beside the targets, as a row does', () => {
+      expect(rollUpGoalPaired([{ targetMinor: 37 * M, actualMinor: null }, { targetMinor: 98 * M, actualMinor: null }]))
+        .toEqual({ targetMinor: 135 * M, actualMinor: null, attainmentPct: null, missing: 2, gapMinor: null, overMinor: null });
+      expect(rollUpGoalPaired([{ targetMinor: null, actualMinor: null }]))
+        .toEqual({ targetMinor: null, actualMinor: null, attainmentPct: null, missing: 1, gapMinor: null, overMinor: null });
+      expect(rollUpGoalPaired([]))
+        .toEqual({ targetMinor: null, actualMinor: null, attainmentPct: null, missing: 0, gapMinor: null, overMinor: null });
+    });
+
+    it('P18.8-T15 AC-6 production held for people with no goal is production, and measures no target', () => {
+      expect(rollUpGoalPaired([{ targetMinor: null, actualMinor: 10 * M }, { targetMinor: 40 * M, actualMinor: null }]))
+        .toEqual({ targetMinor: null, actualMinor: 10 * M, attainmentPct: null, missing: 1, gapMinor: null, overMinor: null });
+    });
+
+    it('P18.8-T15 AC-6 everybody held is the rollup rule unchanged, with its gap', () => {
+      const rows = [{ targetMinor: 100 * M, actualMinor: 60 * M }, { targetMinor: 20 * M, actualMinor: 20 * M }];
+      expect(rollUpGoalPaired(rows)).toEqual({ ...rollUpGoal(rows), gapMinor: 40 * M, overMinor: 0 });
     });
   });
 

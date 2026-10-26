@@ -1,10 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { editableUntil, endOfMonth } from '@/common/time/local-day';
-import {
-  CASCADE_ACTIVITY_CODES, metricByKey, type CampaignReading, type CampaignWindow,
-} from '@/domain/constants';
+import { metricByKey, type CampaignReading, type CampaignWindow } from '@/domain/constants';
 import {
   qualify, readingAgreesWithPeriod, requirementProgress,
   type QualificationStatus, type RequirementProgress, type RequirementReading,
@@ -17,6 +15,8 @@ import { metric } from '@/domain/metrics/registry';
 import { computeRatio } from '@/modules/activity/activity-ratios';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { RatioDefinitionRepository } from '@/modules/config/activity.repository';
+import { boundCodes, countOf, defaultBinding } from '@/modules/config/activity-binding';
+import { ActivityBindingService } from '@/modules/config/activity-binding.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { ProductionMonths } from '@/modules/production/production-months.service';
 import { ProductionReadings, type CampaignMonthFigures, type OfficeMonth } from '@/modules/production/production-readings';
@@ -70,8 +70,11 @@ export interface CampaignEvaluated {
   members: Map<string, MemberStanding>;
 }
 
-/** The Agent rung, whose direct members are a leader's Direct Unit (the client PRD's scope, Phase 18). */
-const AGENT_RUNG = 'AGENT';
+/**
+ * The Agent **class**, whose direct members are a leader's Direct Unit (the client PRD's scope, Phase 18) — every
+ * rung of no leader tier, whatever it is called (ADR-0156), as `kpm-analytics.service.ts` reads it.
+ */
+const AGENT_CLASS = 'agent';
 
 /** What is read of each member: whose they are, and on which rung. */
 interface Person { id: string; orgLevelCode: string | null }
@@ -118,6 +121,12 @@ export class CampaignEvaluation {
     private readonly days: TenantDay,
     private readonly clock: Clock,
     private readonly audit: AuditService,
+    /*
+     * ADR-0163 §4: `CASCADE_ACTIVITY_TOUCHES` counts the codes the office binds to the three cascade roles — the
+     * one resolver. Optional, the token named (a `X | null` parameter is emitted as `Object`), and without it the
+     * default binding.
+     */
+    @Optional() @Inject(ActivityBindingService) private readonly bindings: ActivityBindingService | null = null,
   ) {}
 
   /**
@@ -218,11 +227,11 @@ export class CampaignEvaluation {
     }
     const computed = [...people.keys()];
 
-    // A Direct Unit for every member computed, when a requirement reads one: their reports on the Agent rung, leavers
+    // A Direct Unit for every member computed, when a requirement reads one: their reports of the Agent class, leavers
     // included — who was a member at the month's end is `memberAt`'s, Phase 18's one headcount rule (OD-24, ADR-0136).
     const readsUnit = campaigns.some((c) => c.requirements.some((r) => readingOf(r.metricKey)?.subject === 'unit'));
     const unitRows = readsUnit && computed.length > 0 ? await this.memberships.find(
-      ctx, { leaderId: { $in: computed }, orgLevelCode: AGENT_RUNG, status: { $in: ['active', 'removed'] } },
+      ctx, { leaderId: { $in: computed }, role: AGENT_CLASS, status: { $in: ['active', 'removed'] } },
       { projection: { ...PERSON_FIELDS, leaderId: 1 } },
     ) : [];
     const unitOf = new Map<string, string[]>();
@@ -252,6 +261,13 @@ export class CampaignEvaluation {
       const key = `${days.from}..${days.to}`;
       if (!counts.has(key)) counts.set(key, await this.activity.countsOverMany(ctx, computed, days));
     }
+    // The cascade's codes — the office's binding, today, once — when a requirement counts its touches (ADR-0163 §4).
+    const readsTouches = campaigns.some((c) => c.requirements.some((r) => {
+      const how = readingOf(r.metricKey);
+      return how?.source === 'activity' && how.aggregate !== 'ratio';
+    }));
+    const touchCodes = !readsTouches ? []
+      : boundCodes(this.bindings ? await this.bindings.resolveCascadeBinding(ctx) : defaultBinding());
     const readsRatio = campaigns.some((c) => c.requirements.some((r) => readingOf(r.metricKey)?.aggregate === 'ratio'));
     const ratioRows = readsRatio ? await this.ratios.find(ctx, { status: 'active' }) : [];
     const ratioOf = new Map(ratioRows.map((r) => [r.code, r]));
@@ -270,7 +286,7 @@ export class CampaignEvaluation {
           const definition = ratioOf.get(key);
           return { ...base, current: definition ? computeRatio(definition, sums).value : null };
         }
-        return { ...base, current: Object.values(CASCADE_ACTIVITY_CODES).reduce((sum, code) => sum + (sums.get(code) ?? 0), 0) };
+        return { ...base, current: countOf(sums, touchCodes) };
       }
       return {
         ...fileReading(key, how, j.campaign.window, j.window.months, membershipId, {

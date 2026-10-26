@@ -84,6 +84,28 @@ export class TenantDay {
   }
 
   /**
+   * **The office's day and the month it opened**, from one read (P18.8-T11, ADR-0161 §4): the range a reader may
+   * look back over on the Personal Summary, from the office's first month to this one.
+   *
+   * The first month is the month the office's record was created in, **in the office's own zone** — an office
+   * created at 00:30 on 1 February in Jakarta opened in February, though it is still 31 January in UTC. It is
+   * never later than this month: a record stamped by a clock ahead of the request's (a test's, or a seed run on
+   * another day) still leaves the current month to read. A row with no stamp opened this month.
+   */
+  async calendar(ctx: RequestContext): Promise<OfficeDay & { readonly firstMonth: string }> {
+    const row = ctx.kpmId
+      ? await this.kpms.findById(ctx.kpmId).select('timezone createdAt').lean().exec()
+      : null;
+    const kpm = row as { timezone?: string; createdAt?: Date } | null;
+    const timezone = kpm?.timezone ?? DEFAULT_TENANT_TIMEZONE;
+    const today = localDayOf(this.clock.now(), timezone);
+    const month = today.slice(0, 7);
+    const opened = kpm?.createdAt ? localDayOf(kpm.createdAt, timezone).slice(0, 7) : month;
+    // `YYYY-MM` sorts as the calendar does, so the earlier string is the earlier month.
+    return { today, month, timezone, firstMonth: opened < month ? opened : month };
+  }
+
+  /**
    * The office's day **and its settings**, from one read (P11-T6).
    *
    * Each knob falls back to the platform default, `DEFAULT_KPM_SETTINGS`, where the office's row holds

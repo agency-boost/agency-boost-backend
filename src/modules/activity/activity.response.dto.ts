@@ -52,10 +52,16 @@ export class ActivitySummaryTotalDto {
 export class ActivityWindowTargetDto implements ActivityWindowTargetView {
   @ApiProperty({ enum: ['leads', 'appointments', 'closings'] }) key!: 'leads' | 'appointments' | 'closings';
 
-  @ApiProperty({ example: 'LEADS_CONTACTED', description: 'The goal’s own code for this count, never an item number.' })
+  @ApiProperty({ example: 'LEADS_CONTACTED', description: 'The first code the office binds to this role, never an item number.' })
   code!: string;
 
-  @ApiProperty({ example: 14, description: 'Every entry against the code in the window, archived types included.' })
+  @ApiProperty({
+    type: [String], example: ['LEADS_CONTACTED'],
+    description: 'Every code the office binds to this role (its activity binding); `logged` is their sum.',
+  })
+  codes!: string[];
+
+  @ApiProperty({ example: 14, description: 'Every entry against the bound codes in the window, summed, archived types included.' })
   logged!: number;
 
   @ApiProperty({

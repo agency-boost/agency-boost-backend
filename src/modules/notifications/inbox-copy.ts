@@ -62,6 +62,20 @@ export function describeNotification(
       return payload.granted === true
         ? { title: 'You can now administer this office', detail: 'The Owner gave you KPM Admin access.' }
         : { title: 'Your admin access was removed', detail: 'You are still in the office; you just cannot administer it.' };
+    /*
+     * ADR-0157 §3: AgencyBoost's answer to a leader past the office's limit, to whoever asked. Approved, the change
+     * is already made; declined, nothing about the member changed, and the reason is the Super Admin's.
+     */
+    case NotificationTemplate.LEADER_LIMIT_REQUEST_APPROVED:
+      return {
+        title: `AgencyBoost approved your request for ${name(payload, 'subjectName', 'a new leader')}`,
+        detail: 'The change is made: they are a leader now, past your office’s limit.',
+      };
+    case NotificationTemplate.LEADER_LIMIT_REQUEST_DECLINED:
+      return {
+        title: `AgencyBoost declined your request for ${name(payload, 'subjectName', 'a new leader')}`,
+        detail: name(payload, 'reason', 'Nothing about them changed.'),
+      };
     case NotificationTemplate.GOAL_SET_BY_LEADER:
       /*
        * **Not *"accept it"*.** There is nothing to accept: a leader's write is the agent's goal
@@ -87,6 +101,23 @@ export function describeNotification(
         ? { title: 'An entry on your calendar was cancelled', detail: 'It is no longer on your calendar.' }
         : { title: 'An entry on your calendar has moved', detail: 'Open it to see the new time.' };
     case NotificationTemplate.IMPERSONATION_STARTED:
+      /*
+       * **A setup session says so, and what it may change** (ADR-0162 §3): it writes in the person's name, which
+       * a support session does not, so the notice that said *"They can only look"* would be untrue of it.
+       */
+      if (payload.purpose === 'setup') {
+        return payload.isSubject === true
+          ? {
+            title: 'Somebody from AgencyBoost is setting up your office as you',
+            detail: `${name(payload, 'reason', 'A setup session has started.')} `
+              + 'They can change the office\'s settings, import people and upload production files, and nothing else.',
+          }
+          : {
+            title: 'A setup session started in your office',
+            detail: `${name(payload, 'reason', 'Somebody from AgencyBoost is helping set up your office.')} `
+              + 'They can change the office\'s settings, import people and upload production files, and nothing else.',
+          };
+      }
       return payload.isSubject === true
         ? {
           title: 'Somebody from AgencyBoost is looking at your screens',

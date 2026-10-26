@@ -10,9 +10,11 @@ import { NotificationService } from '@/modules/notifications/notification.servic
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { can } from '@/modules/rbac/permissions';
 import { User, UserDocument } from '@/modules/users/user.schema';
+import { isLeaderClass } from '@/domain/constants';
 import { ActivationStarter, startActivation } from './activation-starter.port';
 import { HierarchyService } from './hierarchy.service';
 import { JoinRequestDocument } from './join-request.schema';
+import { leaderLimitRequestStale, type ApprovedPastLimit, type LeaderSeatOptions } from './leader-limit';
 import { JoinRequestRepository } from './org.repositories';
 import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
@@ -332,7 +334,7 @@ export class ApprovalsService {
     await this.attach(ctx, joiner, leaderId, {
       action: 'leader_request.approved',
       requestId,
-    });
+    }, { requestable: true });
 
     // `openRequest` has already proved this row is in `ctx.kpmId`, so the tenant clause
     // changes no outcome today. It is here because a write addressed by `_id` alone is
@@ -436,7 +438,151 @@ export class ApprovalsService {
 
     const target = await this.members.findById(ctx, membershipId);
     if (!target || target.status === 'removed') throw new NotFoundException('Membership');
+    await this.assertTaggable(ctx, target, me);
 
+    await this.attach(ctx, target, me, { action: 'member.tagged_by_leader' }, { requestable: true });
+
+    // Any request they had open is moot — they are in somebody's unit now.
+    await this.requests.updateMany(
+      ctx,
+      { membershipId, status: 'pending' },
+      { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
+    );
+
+    await this.notifications.send({
+      userId: target.userId,
+      kpmId: ctx.kpmId,
+      templateId: NotificationTemplate.MEMBER_TAGGED_BY_LEADER,
+      payload: { leaderMembershipId: me, via: 'tagged' },
+    });
+
+    return this.untagged(ctx);
+  }
+
+  /**
+   * **What letting this pending member in would be, if this reader may do it** (ADR-0157 §1) — for asking
+   * AgencyBoost to approve it past the leader limit.
+   *
+   * Two acts can let a pending leader in, and the ask names whichever this reader could make: **approving their
+   * join request**, when one is open and is theirs to decide (addressed to them, or the office's for the Owner
+   * and an Admin), joining the leader it names; or else **tagging them** into the reader's own unit, refused
+   * wherever `tag` would be. Anybody else's member is not found, as in the inbox. And only an act the limit
+   * stops is asked about: a pending member whose rung leads nobody is let in directly.
+   */
+  async activationFor(
+    ctx: RequestContext,
+    membershipId: string,
+  ): Promise<{ target: MembershipDocument; joinRequestId: string | null; leaderMembershipId: string }> {
+    const me = this.requireLeader(ctx);
+    const target = await this.members.findById(ctx, membershipId);
+    if (!target || target.status === 'removed') throw new NotFoundException('Membership');
+    if (target.status !== 'pending' || !isLeaderClass(target.role)) {
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED,
+        'Letting them in does not make a new leader, so it needs nobody’s approval. Do it directly.',
+        HttpStatus.BAD_REQUEST,
+        { membershipId },
+      );
+    }
+
+    const open = await this.requests.findOne(ctx, { membershipId, status: 'pending' });
+    if (open) {
+      const addressedToMe = open.leaderMembershipId === me || open.routedToMembershipId === me;
+      if (!can(ctx, 'leader_request:approve') || !(addressedToMe || this.isTenantAdmin(ctx))) {
+        throw new NotFoundException('Membership');
+      }
+      // A leader who asked is joined to the leader they asked for: routing places agents, never leaders.
+      return { target, joinRequestId: String(open._id), leaderMembershipId: open.leaderMembershipId };
+    }
+    if (!can(ctx, 'member:add_untagged_to_unit')) throw new NotFoundException('Membership');
+    await this.assertTaggable(ctx, target, me);
+    return { target, joinRequestId: null, leaderMembershipId: me };
+  }
+
+  /**
+   * **AgencyBoost approved it: the approval or the tag the office asked for, made past the limit** (ADR-0157 §3).
+   *
+   * `ctx` is the Super Admin acting in the request's office. The act is the one `approve` or `tag` makes — the
+   * same `attach`, the join request decided by whoever asked, the member's notice — with `pastLimit`, so the
+   * activation re-checks the request with the office's leader lease held and is not counted. A join request
+   * decided since, a member placed since, or a leader who has left makes it stale, and nothing is written.
+   */
+  async carryOutApproved(
+    ctx: RequestContext,
+    request: {
+      requestId: string;
+      subjectMembershipId: string;
+      joinRequestId: string | null;
+      leaderMembershipId: string;
+      requestedByMembershipId: string;
+    },
+    stillApplies: (target: MembershipDocument | null) => Promise<void>,
+  ): Promise<void> {
+    const target = await this.members.findById(ctx, request.subjectMembershipId);
+    await stillApplies(target);
+    const member = target as MembershipDocument;
+    const pastLimit: ApprovedPastLimit = {
+      approvedRequestId: request.requestId,
+      stillApplies: async () => stillApplies(await this.members.findById(ctx, request.subjectMembershipId)),
+    };
+
+    const leader = await this.members.findById(ctx, request.leaderMembershipId);
+    if (!leader || leader.status !== 'active') {
+      throw leaderLimitRequestStale(request.requestId, 'The leader they were to join is no longer an active member.');
+    }
+
+    if (request.joinRequestId) {
+      const joinRequest = await this.requests.findOne(ctx, { _id: request.joinRequestId, status: 'pending' });
+      if (!joinRequest) {
+        throw leaderLimitRequestStale(request.requestId, 'Their request to join was decided or withdrawn since.');
+      }
+      await this.attach(ctx, member, request.leaderMembershipId, {
+        action: 'leader_request.approved',
+        requestId: request.joinRequestId,
+      }, { pastLimit });
+      await this.requests.updateById(ctx, request.joinRequestId, {
+        $set: {
+          status: 'approved',
+          decidedAt: this.clock.now(),
+          // Whoever asked AgencyBoost decided it; the Super Admin is on the audit row.
+          decidedByMembershipId: request.requestedByMembershipId,
+          routedToMembershipId: null,
+        },
+      });
+      await this.notifications.send({
+        userId: member.userId,
+        kpmId: ctx.kpmId,
+        templateId: NotificationTemplate.JOIN_REQUEST_APPROVED,
+        payload: { leaderMembershipId: request.leaderMembershipId },
+      });
+      return;
+    }
+
+    if (member.leaderId) {
+      throw leaderLimitRequestStale(request.requestId, 'They were placed in a unit since.');
+    }
+    await this.attach(ctx, member, request.leaderMembershipId, { action: 'member.tagged_by_leader' }, { pastLimit });
+    await this.requests.updateMany(
+      ctx,
+      { membershipId: request.subjectMembershipId, status: 'pending' },
+      { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
+    );
+    await this.notifications.send({
+      userId: member.userId,
+      kpmId: ctx.kpmId,
+      templateId: NotificationTemplate.MEMBER_TAGGED_BY_LEADER,
+      payload: { leaderMembershipId: request.leaderMembershipId, via: 'tagged' },
+    });
+  }
+
+  /**
+   * Every refusal a tag meets, before anything is written: somebody already in a unit, yourself, the office's
+   * root or Owner, and — for anybody but the office — an orphan who still leads a unit. Shared by `tag` and by
+   * asking AgencyBoost to approve one past the leader limit (`activationFor`), so the ask is refused exactly
+   * where the tag would be.
+   */
+  private async assertTaggable(ctx: RequestContext, target: MembershipDocument, me: string): Promise<void> {
+    const membershipId = String(target._id);
     if (target.leaderId) {
       // Taking somebody out of another leader's unit is a re-parent, not a tag, and it
       // is not a thing you do from a search result.
@@ -496,24 +642,6 @@ export class ApprovalsService {
         { membershipId, directCount: target.directCounts?.total ?? 0 },
       );
     }
-
-    await this.attach(ctx, target, me, { action: 'member.tagged_by_leader' });
-
-    // Any request they had open is moot — they are in somebody's unit now.
-    await this.requests.updateMany(
-      ctx,
-      { membershipId, status: 'pending' },
-      { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
-    );
-
-    await this.notifications.send({
-      userId: target.userId,
-      kpmId: ctx.kpmId,
-      templateId: NotificationTemplate.MEMBER_TAGGED_BY_LEADER,
-      payload: { leaderMembershipId: me, via: 'tagged' },
-    });
-
-    return this.untagged(ctx);
   }
 
   /**
@@ -528,6 +656,7 @@ export class ApprovalsService {
     member: MembershipDocument,
     leaderId: string,
     audit: { action: string; requestId?: string },
+    seat: LeaderSeatOptions = {},
   ): Promise<void> {
     const leader = await this.members.findById(ctx, leaderId);
     if (!leader) throw new NotFoundException('Membership');
@@ -572,7 +701,9 @@ export class ApprovalsService {
       recruitedByMembershipId: member.recruitedByMembershipId ?? leaderId,
     };
     if (member.status !== 'active') {
-      await this.hierarchy.activate(ctx, String(member._id), fields);
+      // `seat`: refused here, an approval or a tag may be asked about instead, and comes back approved past the
+      // limit (ADR-0157 §1, §3).
+      await this.hierarchy.activate(ctx, String(member._id), fields, seat);
     } else {
       await this.members.updateById(ctx, String(member._id), { $set: { status: 'active', ...fields } });
     }
@@ -598,7 +729,11 @@ export class ApprovalsService {
       targetCollection: 'memberships',
       targetId: String(member._id),
       targetMembershipId: String(member._id),
-      after: { leaderId, requestId: audit.requestId },
+      after: {
+        leaderId,
+        requestId: audit.requestId,
+        ...(seat.pastLimit ? { leaderLimitRequestId: seat.pastLimit.approvedRequestId } : {}),
+      },
     });
 
     /*

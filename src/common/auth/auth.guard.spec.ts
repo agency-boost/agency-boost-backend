@@ -49,9 +49,9 @@ describe('AuthGuard', () => {
    * from it, because elevation happens after the token is minted and a flag baked into a
    * JWT could never move.
    */
-  const live = (answer = true, readOnly = true) =>
+  const live = (answer = true, readOnly = true, writeScope?: string[]) =>
     ({
-      liveSession: jest.fn(async () => (answer ? { readOnly } : null)),
+      liveSession: jest.fn(async () => (answer ? { readOnly, writeScope } : null)),
     }) as unknown as ImpersonationService;
 
   beforeEach(() => jest.clearAllMocks());
@@ -105,7 +105,7 @@ describe('AuthGuard', () => {
     // Roles come from `resolve`, which reads the row — that is what makes revoking a
     // grant take effect on the next request rather than at the next sign-in.
     // `false`: a person acting as themselves is not being restrained (P4-T10).
-    expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, false);
+    expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, false, []);
     expect((request.context as RequestContext).userId).toBe(USER);
   });
 
@@ -118,8 +118,21 @@ describe('AuthGuard', () => {
 
     await new AuthGuard(reflector, signer, resolver, live()).canActivate(context);
     // `true`: every session is read-only until a second Super Admin says otherwise.
-    expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, true, false);
+    expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, true, false, []);
     expect((request.context as RequestContext).isImpersonating).toBe(true);
+  });
+
+  it('ADR-0162: carries a setup session\'s write scope off the row, and an empty one off a row with none', async () => {
+    const OPERATOR = '65b1f0c2a4d3e5f6a7b8c9d1';
+    const signer = { verify: jest.fn(() => ({ sub: USER, sid: `imp:${OPERATOR}` })) } as unknown as TokenSigner;
+    const { context, reflector } = execution('Bearer impersonating.token');
+
+    await new AuthGuard(reflector, signer, resolver, live(true, true, ['tenant_config:write'])).canActivate(context);
+    expect(resolver.resolve).toHaveBeenLastCalledWith(USER, OPERATOR, true, false, ['tenant_config:write']);
+
+    // A row from before the scope existed is a support session: it writes nothing.
+    await new AuthGuard(reflector, signer, resolver, live(true, true)).canActivate(context);
+    expect(resolver.resolve).toHaveBeenLastCalledWith(USER, OPERATOR, true, false, []);
   });
 
   /*
@@ -137,14 +150,14 @@ describe('AuthGuard', () => {
       const signer = { verify: jest.fn(() => ({ sub: USER, sid: `imp:${OPERATOR}` })) } as unknown as TokenSigner;
       const { context } = execution('Bearer impersonating.token');
       await new AuthGuard(marked, signer, resolver, live()).canActivate(context);
-      expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, true, true);
+      expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, true, true, []);
     });
 
     it('never for somebody acting as themselves, on the same route', async () => {
       const signer = { verify: jest.fn(() => ({ sub: USER, sid: 'session-1' })) } as unknown as TokenSigner;
       const { context } = execution('Bearer good.token');
       await new AuthGuard(marked, signer, resolver, live()).canActivate(context);
-      expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, false);
+      expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, false, []);
     });
   });
 });

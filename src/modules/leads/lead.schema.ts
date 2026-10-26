@@ -193,6 +193,21 @@ export class Lead {
   source!: string | null;
 
   /**
+   * **Where the lead sits in its owner's list**, smallest first (P18.8-T7, ADR-0161 §1).
+   *
+   * The owner's, and nobody else's: `GET /leads` without `sort` reads it, and `PATCH /leads/order` is
+   * the only route that writes it, with the caller's own open leads in the order they dragged them. A new
+   * lead takes one less than the owner's first, so it goes to the top. Migration 0031 filled it from the
+   * date registered, newest first, so nobody's list moved on the day it arrived.
+   *
+   * **Presentation, so no write here bumps `version` or names an editor.** A leader's pinned edit in a
+   * 1-on-1 does not conflict with the agent tidying their list, and the ✎ still names the leader. `null`
+   * is a lead nothing has placed yet — a row written before 0031 ran — and sorts first, as a new one does.
+   */
+  @Prop({ type: Number, default: null })
+  position!: number | null;
+
+  /**
    * The domain's version, bumped on every write and pinned by the next one (P7-T7).
    *
    * Starts at 1 rather than 0: a client that read a lead and sends `version: 0` back should be
@@ -226,7 +241,8 @@ export const LeadSchema = SchemaFactory.createForClass(Lead);
  * Every index leads with `kpmId` (invariant §1).
  *
  * The agent's own screen is the read this collection exists for: one member's live leads, newest
- * first, which is the prototype's default sort.
+ * first, which is the prototype's default sort — and since P18.8-T7 the `dateRegistered` sort and the
+ * closed cards, the default being the owner's own order (the last index below).
  */
 LeadSchema.index({ kpmId: 1, ownerMembershipId: 1, deletedAt: 1, dateRegistered: -1 });
 
@@ -235,3 +251,9 @@ LeadSchema.index({ kpmId: 1, type: 1, outcome: 1, statusCode: 1, deletedAt: 1 })
 
 /** Triage: what is overdue, across the office or one member's list. */
 LeadSchema.index({ kpmId: 1, ownerMembershipId: 1, nextActionDate: 1, deletedAt: 1 });
+
+/**
+ * The owner's own order (P18.8-T7): `GET /leads` without `sort`, and the first place a new lead takes,
+ * which is one less than the owner's smallest.
+ */
+LeadSchema.index({ kpmId: 1, ownerMembershipId: 1, position: 1 });

@@ -12,6 +12,7 @@ import { KpmSchema } from '@/modules/tenants/kpm.schema';
 import { KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { GroupSchema } from '@/modules/org/group.schema';
 import { JoinRequestSchema } from '@/modules/org/join-request.schema';
+import { LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
 import { MembershipHistorySchema } from '@/modules/org/membership-history.schema';
 import { MembershipSchema } from '@/modules/org/membership.schema';
 import { unclassified } from './registered-schemas';
@@ -22,6 +23,7 @@ import { ActivityTypeSchema } from '@/modules/config/activity-type.schema';
 import { LeadStatusSchema } from '@/modules/config/lead-status.schema';
 import { RatioDefinitionSchema } from '@/modules/config/ratio-definition.schema';
 import { ConfigSnapshotSchema } from '@/modules/config/config-snapshot.schema';
+import { ActivityBindingSchema } from '@/modules/config/activity-binding.schema';
 import {
   ImpersonationSessionSchema,
 } from '@/modules/auth/impersonation-session.schema';
@@ -113,12 +115,16 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['memberships', MembershipSchema],
   ['membershipHistory', MembershipHistorySchema],
   ['joinRequests', JoinRequestSchema],
+  // ADR-0157: a leader past the office's limit, waiting for AgencyBoost.
+  ['leaderLimitRequests', LeaderLimitRequestSchema],
   ['groups', GroupSchema],
   ['activityCategories', ActivityCategorySchema],
   ['activityTypes', ActivityTypeSchema],
   ['leadStatuses', LeadStatusSchema],
   ['ratioDefinitions', RatioDefinitionSchema],
   ['configSnapshots', ConfigSnapshotSchema],
+  // ADR-0163: an office's activity binding, one row per office, `kpmId`-led.
+  ['activityBindings', ActivityBindingSchema],
   ['impersonationSessions', ImpersonationSessionSchema],
   ['companyTemplates', CompanyTemplateSchema],
   ['templates', NamedTemplateSchema],
@@ -417,6 +423,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [LeadStatusSchema, 'LeadStatusSchema'],
   [RatioDefinitionSchema, 'RatioDefinitionSchema'],
   [ConfigSnapshotSchema, 'ConfigSnapshotSchema'],
+  [ActivityBindingSchema, 'ActivityBindingSchema'],
   [ImpersonationSessionSchema, 'ImpersonationSessionSchema'],
   [CompanyTemplateSchema, 'CompanyTemplateSchema'],
   [NamedTemplateSchema, 'NamedTemplateSchema'],
@@ -469,6 +476,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [MembershipSchema, 'MembershipSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [JoinRequestSchema, 'JoinRequestSchema'],
+  [LeaderLimitRequestSchema, 'LeaderLimitRequestSchema'],
   [GroupSchema, 'GroupSchema'],
   [AuditLogSchema, 'AuditLogSchema'],
   [AuthTokenSchema, 'AuthTokenSchema'],

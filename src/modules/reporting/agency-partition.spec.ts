@@ -1,11 +1,16 @@
 import { partitionAgencies, type PlacedMembership } from './agency-partition';
 
-/** Build the office from `who → leader` pairs, root first, each on a rung. */
-function office(rows: [id: string, rung: string, leader: string | null, active?: boolean][]): PlacedMembership[] {
+/**
+ * Build the office from `who → leader` pairs, root first, each on a rung — of the default ladder, whose class is its
+ * code lower-cased, unless the row names the class its rung's tier gives (ADR-0156).
+ */
+function office(
+  rows: [id: string, rung: string, leader: string | null, active?: boolean, role?: PlacedMembership['role']][],
+): PlacedMembership[] {
   const byId = new Map<string, PlacedMembership>();
-  for (const [id, rung, leader, active = true] of rows) {
+  for (const [id, rung, leader, active = true, role = rung.toLowerCase() as PlacedMembership['role']] of rows) {
     const above = leader === null ? [] : [...byId.get(leader)!.ancestorIds, leader];
-    byId.set(id, { membershipId: id, orgLevelCode: rung, leaderId: leader, ancestorIds: above, active });
+    byId.set(id, { membershipId: id, orgLevelCode: rung, role, leaderId: leader, ancestorIds: above, active });
   }
   return [...byId.values()];
 }
@@ -56,6 +61,18 @@ describe('AB agencies (D-units)', () => {
     // A unit head who has left heads no unit, and their people fall to the agency's (Direct) row.
     const gone = partitionAgencies(office([['ab', 'AB', null], ['aab', 'AAB', 'ab', false], ['agent', 'AGENT', 'aab']]));
     expect(gone.agencies[0]).toMatchObject({ directIds: ['ab', 'aab', 'agent'], units: [] });
+  });
+
+  it('P18.8-T1 AC-5 partitions by class, not code: a Senior Leader rung heads an agency, an Associate one a unit', () => {
+    // Allianz's ladder, say: SM (senior), UM (associate), FA (none). And an `AB` rung marked *Not a leader*.
+    const custom = partitionAgencies(office([
+      ['sm', 'SM', null, true, 'ab'], ['um', 'UM', 'sm', true, 'aab'], ['fa', 'FA', 'um', true, 'agent'],
+      ['fa2', 'FA', 'sm', true, 'agent'], ['notab', 'AB', 'sm', true, 'agent'], ['under', 'FA', 'notab', true, 'agent'],
+    ]));
+    expect(custom.agencies.map((a) => a.headId)).toEqual(['sm']);
+    expect(custom.agencies[0].units).toEqual([{ headId: 'um', memberIds: ['um', 'fa'] }]);
+    expect(custom.agencies[0].directIds).toEqual(['sm', 'fa2', 'notab', 'under']);
+    expect(custom.unplacedIds).toEqual([]);
   });
 
   it('P18-T2 AC-2 a unit’s member read before its head still lands in the head’s unit, the head first', () => {

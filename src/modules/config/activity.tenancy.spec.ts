@@ -77,7 +77,7 @@ describe('the office activity taxonomy (P4-T1)', () => {
       expect(taxonomy[0].types.map((t) => t.code)).toEqual(['ONLY_THING']);
       // Each with its platform label, active.
       const contacted = taxonomy[1].types.find((t) => t.code === 'LEADS_CONTACTED')!;
-      expect(contacted).toMatchObject({ label: 'Menghubungi prospek yang sudah ada', status: 'active' });
+      expect(contacted).toMatchObject({ label: 'Set Appointment', status: 'active' });
       expect(taxonomy[2].types.map((t) => t.code)).toEqual(['SELL_PRESENTATION', 'SELL_SUBMISSION']);
     });
 
@@ -262,15 +262,16 @@ describe('the office activity taxonomy (P4-T1)', () => {
       ]);
     });
 
-    it('uses the KPM Owner wording where the two prototypes disagree (AC-3), and the client’s for item 7', async () => {
+    it('uses the KPM Owner wording where the two prototypes disagree (AC-3), and the client’s for items 3, 7 and 8', async () => {
       // The Owner app is the configuration screen — it depicts what an Owner edits — so
-      // its wording is authoritative. The agent app has items 7–9 in English. Item 7's label
-      // is the client's since P13.1-T3 (2026-10-07); its note is still the Owner app's.
+      // its wording is authoritative. The agent app has items 7–9 in English. Items 3, 7 and 8
+      // read the client's words since ADR-0160 (2026-10-26), and item 7 has no note (P18.8-T8 AC-2).
       const types = (await service.list(ctx(KPM_A))).flatMap((c) => c.types);
       const byCode = new Map(types.map((t) => [t.code, t]));
-      expect(byCode.get('RECRUIT_PRESENTATION')!.label).toBe('Proses pendaftaran kode agen');
-      expect(byCode.get('RECRUIT_PRESENTATION')!.description)
-        .toBe('secara mandiri atau melalui BOP');
+      expect(byCode.get('LEADS_CONTACTED')).toMatchObject({ label: 'Set Appointment', description: 'telepon, WhatsApp, tatap muka, dll' });
+      expect(byCode.get('RECRUIT_PRESENTATION')!.label).toBe('Melakukan presentasi recruitment');
+      expect(byCode.get('RECRUIT_PRESENTATION')!.description).toBeNull();
+      expect(byCode.get('RECRUIT_FOLLOWUP')!.label).toBe('Melakukan diskusi follow up dari presentasi recruitment sebelumnya');
       expect(byCode.get('RECRUIT_AGENT_CODE')!.label).toBe('Proses NPA');
     });
 

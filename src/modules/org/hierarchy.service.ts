@@ -5,6 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { isLeaderClass, roleClassOf, tierOfRung, type LeaderTier } from '@/domain/constants';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { EdgeEvent, MembershipHistory } from './membership-history.schema';
@@ -12,16 +13,26 @@ import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { generateLeaderCode } from './leader-code';
-import { isLeaderRung, withLeaderSeat } from './leader-limit';
+import { withLeaderSeat, type ApprovedPastLimit, type LeaderSeatOptions } from './leader-limit';
 import { DirectCounts, HierarchyRole, MembershipDocument } from './membership.schema';
+import type { WorkStatus } from '@/domain/constants';
 
 export interface CreateMembershipInput {
   userId: string;
-  role: HierarchyRole;
+  /**
+   * The rung's code, any case — a lookup key on the company's ladder, never the class stored (ADR-0156): the
+   * default ladder's `ab`, `aab` or `agent`, or a rung the company added, which a roster row may name.
+   */
+  role: string;
   leaderId?: string | null;
   status?: 'active' | 'pending';
   recruitedByMembershipId?: string | null;
   sourceLeadId?: string | null;
+  /**
+   * Full-time or part-time in this office (ADR-0158 §1). The roster import names it; every other
+   * join leaves it out, and the person's answer at registration is copied instead (`insert`).
+   */
+  workStatus?: WorkStatus | null;
 }
 
 /**
@@ -95,6 +106,14 @@ export class HierarchyService {
     );
   }
 
+  /**
+   * The rung code an office's Owner, or somebody joining it, is placed on (ADR-0156): the ladder's own, so a company
+   * whose rungs are not called `AB` and `AGENT` can still be given an Owner and be joined.
+   */
+  async entryRungCode(kpmId: string, purpose: 'owner' | 'joiner'): Promise<string> {
+    return this.orgLevels.entryRungCode(await this.companyOf(kpmId), purpose);
+  }
+
   /** The insurer an office belongs to. The ladder and the agent code both hang off it. */
   private async companyOf(kpmId: string): Promise<string> {
     const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
@@ -117,6 +136,19 @@ export class HierarchyService {
       throw new NotFoundException('KPM');
     }
     return user.agentCode;
+  }
+
+  /**
+   * **Full-time or part-time, as the person said when they registered** (ADR-0158 §1, P18.8-T4).
+   *
+   * Work status is the membership's, but a person registers before any office has them, so their
+   * answer waits on the account (`users.registeredWorkStatus`) and is carried onto the membership they
+   * are given here — through a leader's code, an office's approval, or being made its Owner alike.
+   * `null` for anybody who registered before it was asked.
+   */
+  private async registeredWorkStatusOf(userId: string): Promise<WorkStatus | null> {
+    const user = await this.users.findOne({ _id: userId }).select('registeredWorkStatus').exec();
+    return user?.registeredWorkStatus ?? null;
   }
 
   /**
@@ -165,11 +197,15 @@ export class HierarchyService {
     return Boolean(kpm?.ownerUserId) && kpm!.ownerUserId === membership.userId;
   }
 
-  async setLevel(
+  /**
+   * **The rung a code names on the caller's office's ladder, and the class it gives** (ADR-0156 §2): `senior` →
+   * `ab`, `associate` → `aab`, none → `agent`. Every placement takes its `role` from here — never from the code
+   * it was asked for — so the class always follows the rung, whatever the company called it.
+   */
+  async rungFor(
     ctx: RequestContext,
-    membershipId: string,
-    toRole: HierarchyRole,
-  ): Promise<{ orgLevelId: string; role: HierarchyRole }> {
+    code: string,
+  ): Promise<{ level: Awaited<ReturnType<OrgLevelService['resolveByCode']>>; role: HierarchyRole }> {
     const kpmId = ctx.kpmId;
     if (!kpmId) {
       throw new DomainException(
@@ -180,14 +216,33 @@ export class HierarchyService {
     }
     const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
     if (!kpm) throw new NotFoundException('KPM');
+    const level = await this.orgLevels.resolveByCode(kpm.companyId, code);
+    return { level, role: classOfRung(level) };
+  }
 
-    const level = await this.orgLevels.resolveByCode(kpm.companyId, toRole);
-    const role = level.code.toLowerCase() as HierarchyRole;
+  /**
+   * The class each active rung of an office's company gives, by code — for a caller that must count the leaders
+   * a batch would add before it places anybody (the roster import, ADR-0113 §2).
+   */
+  async rungClassesOf(kpmId: string): Promise<Map<string, HierarchyRole>> {
+    return this.orgLevels.classesByCode(await this.companyOf(kpmId));
+  }
+
+  async setLevel(
+    ctx: RequestContext,
+    membershipId: string,
+    // A rung's code, any case: the default ladder's `ab`, `aab`, `agent`, or a rung the company added (`SM`).
+    toRole: string,
+    pastLimit?: ApprovedPastLimit,
+  ): Promise<{ orgLevelId: string; role: HierarchyRole }> {
+    // `toRole` is the rung's code, lower-cased — a lookup key. The class written is the rung's tier's (ADR-0156).
+    const { level, role } = await this.rungFor(ctx, toRole);
     const write = async () => {
       await this.members.updateById(ctx, membershipId, {
-        // All three together, always. `orgLevelCode` is what a permission grant reads and
-        // `role` is what the display services read; writing one without the others is how
-        // somebody comes to hold rights their badge does not show (P4-T9).
+        // All three together, always. `role` — the class, from the rung's tier — is what a
+        // permission grant reads since ADR-0156, and `orgLevelCode` what the badge and the
+        // ladder-bound config read; writing one without the others is how somebody comes to
+        // hold rights their badge does not show (P4-T9).
         $set: { orgLevelId: String(level._id), orgLevelCode: level.code, role },
       });
       return { orgLevelId: String(level._id), role };
@@ -206,12 +261,19 @@ export class HierarchyService {
      * **The member is read with the lease held** (exit review): two promotions of one Agent at once
      * both read *Agent* before it, and the second was counted as a second leader. A move to Agent never
      * adds one, so it takes no lease at all.
+     *
+     * **By class, since ADR-0156**: a move onto any rung of a leader tier, whatever its code, from a rung of
+     * none, adds a leader; a move between two leader tiers adds nobody.
      */
-    if (!isLeaderRung(level.code)) return write();
+    if (!isLeaderClass(role)) return write();
+    /*
+     * A role change refused here may be asked about instead (ADR-0157 §1, `canRequest`), and an approved ask
+     * comes back through `pastLimit`, carried out with the lease held and never counted (§3).
+     */
     return withLeaderSeat(this.leaderLimit(), ctx, write, async () => {
       const member = await this.members.findById(ctx, membershipId);
-      return member !== null && member.status !== 'removed' && !isLeaderRung(member.orgLevelCode);
-    });
+      return member !== null && member.status !== 'removed' && !isLeaderClass(member.role);
+    }, { requestable: true, pastLimit });
   }
 
   /**
@@ -227,12 +289,19 @@ export class HierarchyService {
    * Whether it adds one is read with the lease held: the row as it stands at the write, not as the
    * caller read it.
    */
-  async activate(ctx: RequestContext, membershipId: string, fields: Record<string, unknown>): Promise<void> {
+  async activate(
+    ctx: RequestContext,
+    membershipId: string,
+    fields: Record<string, unknown>,
+    options: LeaderSeatOptions = {},
+  ): Promise<void> {
     const write = () => this.members.updateById(ctx, membershipId, { $set: { ...fields, status: 'active' } });
+    // `options`: an approval refused here may be asked about, and comes back approved (ADR-0157 §1, §3).
+    // Assigning an Owner passes none: it cannot wait.
     await withLeaderSeat(this.leaderLimit(), ctx, write, async () => {
       const member = await this.members.findById(ctx, membershipId);
-      return member !== null && member.status !== 'active' && isLeaderRung(member.orgLevelCode);
-    });
+      return member !== null && member.status !== 'active' && isLeaderClass(member.role);
+    }, options);
   }
 
   /** What the leader limit's check reads and holds (`leader-limit.ts`). */
@@ -251,7 +320,7 @@ export class HierarchyService {
      */
     // `admission` read the agent code, since the account exists: it is never null here.
     const write = () => this.insert(ctx, input, { leader, agentCode: agentCode as string, level, status });
-    if (status !== 'active' || !isLeaderRung(level.code)) return write();
+    if (status !== 'active' || !isLeaderClass(classOfRung(level))) return write();
     return withLeaderSeat(this.leaderLimit(), ctx, write);
   }
 
@@ -276,7 +345,7 @@ export class HierarchyService {
       const agentCode = await this.agentCodeOf(userId, companyId);
       return this.insert(ctx, { ...input, userId }, { leader, agentCode, level, status });
     };
-    if (status !== 'active' || !isLeaderRung(level.code)) return write();
+    if (status !== 'active' || !isLeaderClass(classOfRung(level))) return write();
     return withLeaderSeat(this.leaderLimit(), ctx, write);
   }
 
@@ -315,9 +384,9 @@ export class HierarchyService {
     // **The level is resolved first, and `role` is taken from what came back.**
     //
     // `input.role` is a lookup key, not the value stored: writing the caller's role
-    // beside a level resolved from it is how the two come to disagree. Taking the code
-    // off the resolved rung means they cannot — there is only one source, and it is the
-    // ladder (ADR-0012).
+    // beside a level resolved from it is how the two come to disagree. Taking the class
+    // off the resolved rung's tier means they cannot — there is only one source, and it
+    // is the ladder (ADR-0012, ADR-0156).
     //
     // Before the increment now, because the leader limit's refusal reads it (P13.2-T4).
     const level = await this.orgLevels.resolveByCode(companyId, input.role);
@@ -331,14 +400,14 @@ export class HierarchyService {
     resolved: {
       leader: MembershipDocument | null;
       agentCode: string;
-      level: { _id: unknown; code: string };
+      level: { _id: unknown; code: string; leaderTier?: LeaderTier | null };
       status: 'active' | 'pending';
     },
   ): Promise<MembershipDocument> {
     const { leader, agentCode, level, status } = resolved;
     const { agentSeq } = await this.nextMemberSeq(ctx.kpmId as string);
     const leaderCode = await this.freshLeaderCode();
-    const role = level.code.toLowerCase() as HierarchyRole;
+    const role = classOfRung(level);
 
     const membership = await this.members.create(ctx, {
       userId: input.userId,
@@ -355,6 +424,8 @@ export class HierarchyService {
       joinedAt: status === 'active' ? this.clock.now() : null,
       recruitedByMembershipId: input.recruitedByMembershipId ?? null,
       sourceLeadId: input.sourceLeadId ?? null,
+      // ADR-0158 §1: what the caller names (a roster row), else what they said when they registered.
+      workStatus: input.workStatus ?? (await this.registeredWorkStatusOf(input.userId)),
     });
 
     await this.recordJoined(ctx, String(membership._id), {
@@ -589,3 +660,12 @@ export class HierarchyService {
 
 /** The edge events that set who the member reports to. A role change keeps the leader it found. */
 const LEADER_EVENTS: EdgeEvent[] = ['joined', 're_parented', 'removed', 'reinstated'];
+
+/**
+ * **The class a rung gives whoever stands on it** (ADR-0156 §2): its tier's — `senior` → `ab`, `associate` → `aab`,
+ * none → `agent` — never its code lower-cased, which is what it was until P18.8-T1 and what made a rung a company
+ * named itself work for nothing.
+ */
+function classOfRung(level: { code: string; leaderTier?: LeaderTier | null }): HierarchyRole {
+  return roleClassOf(tierOfRung(level));
+}

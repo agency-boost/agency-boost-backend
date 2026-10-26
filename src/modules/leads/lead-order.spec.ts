@@ -1,5 +1,5 @@
 import {
-  LEAD_SORT_KEYS, isInMemorySort, ladderRanks, leadOrder, typeOrder, type Orderable,
+  LEAD_SORT_KEYS, SAVED_ORDER, isInMemorySort, ladderRanks, leadOrder, typeOrder, type Orderable,
 } from './lead-order';
 
 /** Two ladders as the published config lists them, in the dropdown's order. */
@@ -101,5 +101,17 @@ describe('leadOrder', () => {
     const rows = [row('a', null, null, '2026-09-01'), row('b', 'recruitment', null, '2026-09-01')];
 
     expect(ids(rows.sort(leadOrder('type', undefined, RANKS)))).toEqual(['b', 'a']);
+  });
+});
+
+/** P18.8-T7 AC-3: the order `GET /leads` answers when no `sort` is asked for. */
+describe('SAVED_ORDER', () => {
+  it('P18.8-T7 AC-3 is the owner’s place, smallest first, then the newest registration, then the id', () => {
+    expect(Object.entries(SAVED_ORDER)).toEqual([['position', 1], ['dateRegistered', -1], ['_id', -1]]);
+  });
+
+  it('P18.8-T7 AC-3 is no key a reader can ask for: it is what asking for none gives', () => {
+    expect(LEAD_SORT_KEYS as readonly string[]).not.toContain('position');
+    expect(isInMemorySort(undefined)).toBe(false);
   });
 });

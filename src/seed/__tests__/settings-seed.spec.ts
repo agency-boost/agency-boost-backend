@@ -59,7 +59,7 @@ describe('P13.1-T3 the seed follows the prototype — a run at 10:00 on 7 Octobe
     expect(statuses.map((s) => [s.code, s.status, s.version]))
       .toEqual(SEED_LEAD_STATUSES.map((s) => [s.code, 'active', 1]));
 
-    // The prototype's five, at its benchmarks: no *Referral rate*, *Selling success rate* at 15%.
+    // The platform's five, at its benchmarks: no *Referral rate*, *Selling success rate* at 30% (ADR-0160).
     const ratios = await col('ratioDefinitions').find({ kpmId }).sort({ displayOrder: 1 }).toArray();
     expect(ratios.map((r) => [r.code, r.label, r.benchmark, r.origin, r.status, r.version]))
       .toEqual(SEED_RATIO_DEFINITIONS.map((r) => [r.code, r.label, r.benchmark, 'platform', 'active', 1]));
@@ -71,7 +71,8 @@ describe('P13.1-T3 the seed follows the prototype — a run at 10:00 on 7 Octobe
 
     const published = await wired.config.readPublished(await as('rina@kpm0417.test'));
     const item7 = published.activity.flatMap((c) => c.types).find((t) => t.code === 'RECRUIT_PRESENTATION');
-    expect(item7).toMatchObject({ label: 'Proses pendaftaran kode agen', description: 'secara mandiri atau melalui BOP' });
+    // The client's words since ADR-0160 (P18.8-T8 AC-2), with no note.
+    expect(item7).toMatchObject({ label: 'Melakukan presentasi recruitment', description: null });
   });
 
   it('AC-2 office 0555 holds the demonstration states, after its publish, so its bar has something to say', async () => {
@@ -81,7 +82,7 @@ describe('P13.1-T3 the seed follows the prototype — a run at 10:00 on 7 Octobe
     expect(await col('leadStatuses').findOne({ kpmId, code: 'APPROVED_NOT_PAID' }))
       .toMatchObject({ status: 'archived', version: 2 });
     expect(await col('ratioDefinitions').findOne({ kpmId, code: 'SELLING_SUCCESS_RATE' }))
-      .toMatchObject({ benchmark: 0.18, version: 2, status: 'active' });
+      .toMatchObject({ benchmark: 0.4, version: 2, status: 'active' });
     expect(await col('ratioDefinitions').findOne({ kpmId, code: 'REFERRAL_RATE' }))
       .toMatchObject({ origin: 'office', label: 'Referral rate', status: 'active' });
 
@@ -90,7 +91,7 @@ describe('P13.1-T3 the seed follows the prototype — a run at 10:00 on 7 Octobe
     // Lina is still on the published copy: the archived type offered, the old benchmark, no office ratio.
     const lina = await wired.config.readPublished(await as('agent@kpm0555.test'));
     expect(lina.activity.flatMap((c) => c.types).map((t) => t.code)).toContain('DEV_COACHING_RECEIVED');
-    expect(lina.ratios.find((r) => r.code === 'SELLING_SUCCESS_RATE')).toMatchObject({ benchmark: 0.15 });
+    expect(lina.ratios.find((r) => r.code === 'SELLING_SUCCESS_RATE')).toMatchObject({ benchmark: 0.3 });
     expect(lina.ratios.map((r) => r.code)).not.toContain('REFERRAL_RATE');
   });
 
@@ -139,6 +140,17 @@ describe('P13.1-T3 the seed follows the prototype — a run at 10:00 on 7 Octobe
     expect(months.size).toBeGreaterThanOrEqual(2);
   });
 
+  it('P18.8-T7 AC-1 Rina’s /leads opens in the order she dragged, and every seeded lead has a place', async () => {
+    const page = await wired.leadRecords.list(await as('rina@kpm0417.test'), { outcome: 'open' });
+    expect(page.rows.map((lead) => lead.name)).toEqual([
+      'Ibu Wulan Sari', 'Pak Hendro Gunawan', 'Ibu Rosa Damayanti', 'Ibu Kartika Dewanti', 'Pak Surya Dharma', 'Pak Bambang',
+    ]);
+    // Not the order registration would give: that is the point of seeding it.
+    const byRegistration = await wired.leadRecords.list(await as('rina@kpm0417.test'), { outcome: 'open', sort: 'dateRegistered' });
+    expect(byRegistration.rows.map((lead) => lead.name)).not.toEqual(page.rows.map((lead) => lead.name));
+    expect(await col('leads').countDocuments({ position: null })).toBe(0);
+  });
+
   it('a second run writes nothing, and leaves a 0555 row somebody restored in a walk as they left it', async () => {
     const kpmId = await office('0555');
     // Restored on the settings screen, which bumps the version: the walker's, not the seed's to undo.
@@ -150,7 +162,7 @@ describe('P13.1-T3 the seed follows the prototype — a run at 10:00 on 7 Octobe
     expect(await col('activityTypes').findOne({ kpmId, code: 'DEV_COACHING_RECEIVED' }))
       .toMatchObject({ status: 'active', version: 3 });
     expect(await col('ratioDefinitions').findOne({ kpmId, code: 'SELLING_SUCCESS_RATE' }))
-      .toMatchObject({ benchmark: 0.18, version: 2 });
+      .toMatchObject({ benchmark: 0.4, version: 2 });
     expect(await col('ratioDefinitions').countDocuments({ kpmId, code: 'REFERRAL_RATE' })).toBe(1);
   }, RUN_MS);
 });

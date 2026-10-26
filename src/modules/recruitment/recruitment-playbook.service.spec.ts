@@ -63,6 +63,19 @@ describe('a company’s recruitment playbook (RecruitmentPlaybookService)', () =
     expect((await rows())[0].body.profileObjections).toEqual({});
   });
 
+  it('ADR-0164 §4 copies a source’s words as a new company’s version 1, once, and a source with none gives none', async () => {
+    await service().seedForCompany(PRUDENTIAL);
+    expect(await service().copyFromCompany(PRUDENTIAL, ALLIANZ)).toBe(true);
+    // A company that already has a playbook is left alone.
+    expect(await service().copyFromCompany(PRUDENTIAL, ALLIANZ)).toBe(false);
+    const copied = (await rows()).find((r) => r.companyId === ALLIANZ);
+    expect(copied).toMatchObject({ version: 1, createdBy: null, body: SEED_RECRUITMENT_PLAYBOOK });
+    // A source with no playbook writes nothing.
+    await db().collection('recruitmentPlaybooks').deleteMany({ companyId: ALLIANZ });
+    expect(await service().copyFromCompany('66f0000000000000000000c9', ALLIANZ)).toBe(false);
+    expect((await rows()).some((r) => r.companyId === ALLIANZ)).toBe(false);
+  });
+
   it('P17-T2 AC-1 reads through the company filter: one company’s row never answers another', async () => {
     await service().seedForCompany(PRUDENTIAL);
     expect(await service().ofCompany(ALLIANZ)).toBeNull();

@@ -31,9 +31,10 @@ const CALLERS: Record<string, { method: Method; makes: string }[]> = {
     { method: 'create', makes: 'AB, assigning an Owner who is not yet a member' },
     { method: 'activate', makes: 'their own rung, assigning an Owner who had registered (pending)' },
   ],
-  'modules/org/role-change.service.ts': [{ method: 'setLevel', makes: 'any (a role change)' }],
+  // Each also carries out a request AgencyBoost approved past the limit (ADR-0157 §3), through the same method.
+  'modules/org/role-change.service.ts': [{ method: 'setLevel', makes: 'any (a role change, or one approved past the limit)' }],
   'modules/org/approvals.service.ts': [
-    { method: 'activate', makes: 'their own rung, approving or tagging a pending member' },
+    { method: 'activate', makes: 'their own rung, approving or tagging a pending member, or one approved past the limit' },
   ],
 };
 
@@ -91,12 +92,38 @@ describe('every caller of the HierarchyService writes that can make a leader is 
   it.each(['modules/org/onboarding.service.ts', 'modules/org/leader-code.service.ts'])(
     '%s, a join path, only ever makes an Agent — which is why it is never refused',
     (file) => {
-      for (const call of found[file]) expect(call.text).toMatch(/role:\s*'agent'/);
+      // The ladder's lowest rung that leads nobody (ADR-0156): `AGENT` on the default ladder, never a leader rung.
+      for (const call of found[file]) expect(call.text).toMatch(/role:\s*await this\.hierarchy\.entryRungCode\(.*'joiner'\)/);
     },
   );
 
   it('assigning an Owner makes the root AB, which the limit counts', () => {
     const create = found['modules/tenants/tenant.service.ts'].find((c) => c.method === 'create');
-    expect(create?.text).toMatch(/role:\s*'ab'/);
+    // The ladder's Senior Leader rung (ADR-0156): `AB` on the default ladder, a rung the limit counts.
+    const tenantService = readFileSync(join(SRC, 'modules/tenants/tenant.service.ts'), 'utf8');
+    expect(tenantService).toMatch(/const role = await this\.hierarchy\.entryRungCode\(kpmId, 'owner'\)/);
+    expect(create?.text).toMatch(/\{ userId, role, leaderId: null, status: 'active' \}/);
+  });
+
+  /*
+   * **The only way past the limit is AgencyBoost's approval** (ADR-0157 §3, P18.8-T2 AC-8). `withLeaderSeat` skips
+   * the count for an `ApprovedPastLimit` alone; one is built — its `approvedRequestId` written — only where an
+   * approved request is carried out, and those two methods are called from the request service alone, after
+   * `leader_limit_request:decide`.
+   */
+  it('builds a past-the-limit write only where an approved request is carried out, called from the decision alone', () => {
+    const building = sources
+      .filter((file) => /approvedRequestId:\s*request\.requestId/.test(readFileSync(file, 'utf8')))
+      .map((file) => relative(SRC, file))
+      .sort();
+    expect(building).toEqual(['modules/org/approvals.service.ts', 'modules/org/role-change.service.ts']);
+
+    const carrying = sources
+      .filter((file) => /\.carryOutApproved\(/.test(readFileSync(file, 'utf8')))
+      .map((file) => relative(SRC, file));
+    expect(carrying).toEqual(['modules/org/leader-limit-request.service.ts']);
+    const decider = readFileSync(join(SRC, 'modules/org/leader-limit-request.service.ts'), 'utf8');
+    const approve = decider.slice(decider.indexOf('async approve('), decider.indexOf('async decline('));
+    expect(approve).toContain("this.requireDecider(ctx, 'leader_limit_request:decide')");
   });
 });

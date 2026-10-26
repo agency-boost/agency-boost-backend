@@ -116,7 +116,7 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'SELLING_SUCCESS_RATE', name: 'Selling success rate', unit: 'ratio', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
   { key: 'RECRUITMENT_SUCCESS_RATE', name: 'Recruitment success rate', unit: 'ratio', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
   { key: 'LEADS_PER_ACTIVITY', name: 'Leads per activity', unit: 'ratio', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
-  { key: 'MEETING_PER_APPROACH', name: 'Meeting per approach', unit: 'ratio', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
+  { key: 'MEETING_PER_APPROACH', name: 'Set appointment to meeting', unit: 'ratio', phase: 6, campaign: { source: 'activity', aggregate: 'ratio', subject: 'self' } },
   { key: 'MEASURED_LEAD_TO_APPOINTMENT_RATE', name: 'Your logged leads-to-appointment rate', unit: 'ratio', phase: 10 },
   { key: 'MEASURED_CLOSING_RATE', name: 'Your logged closing rate', unit: 'ratio', phase: 10 },
   { key: 'MONTHLY_APE_TARGET', name: 'This month’s APE target', unit: 'idr_minor', phase: 10 },

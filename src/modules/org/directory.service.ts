@@ -1,13 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model } from 'mongoose';
-import { RequestContext } from '@/common/context/request-context';
-import { Permission, scopeFor } from '@/modules/rbac/permissions';
+import { RequestContext, isEffectiveCoreLeader } from '@/common/context/request-context';
+import { can, Permission, scopeFor } from '@/modules/rbac/permissions';
 import { NotFoundException } from '@/common/errors/domain.exception';
+import { preferredNameOf } from '@/modules/users/display-name';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole, MembershipDocument, MembershipStatus } from './membership.schema';
+import { isLeaderClass, type Gender, type WorkStatus } from '@/domain/constants';
 
 export interface DirectoryQuery {
   q?: string;
@@ -21,6 +23,8 @@ export interface DirectoryMember {
   membershipId: string;
   agentCode: string;
   role: HierarchyRole;
+  /** The rung, by its ladder code; `role` is the class it gives (ADR-0156). The person page's role select reads it. */
+  orgLevelCode: string;
   status: MembershipStatus;
   fullName: string;
   preferredName: string | null;
@@ -34,6 +38,10 @@ export interface DirectoryMember {
   isLeader: boolean;
   isKpmOwner: boolean;
   isKpmAdmin: boolean;
+  /** A Core Leader now: tagged, on a leader rung (ADR-0159 §1). */
+  isCoreLeader: boolean;
+  /** This viewer may tag or untag them from the row (P18.8-T5 AC-3) — an offer, never the gate. */
+  canTagCoreLeader: boolean;
   joinedAt: string | null;
   /** Set only on a removed row. The Removed tab answers "when", which is the first thing asked. */
   removedAt: string | null;
@@ -53,6 +61,22 @@ export interface DirectoryMember {
   canChangeRole: boolean;
   canPromoteToAb: boolean;
   canRemove: boolean;
+
+  /**
+   * **What the person records** (ADR-0158 §6, P18.8-T4 AC-6): on **one member's read** —
+   * `GET /members/:membershipId`, the person page's *Personal* card — and only to the office's
+   * Owner, its Admins, or the person themselves. Absent from every other read: the roster's rows,
+   * a leader's read of somebody in their unit, the reports list. A `null` inside is *Not recorded*.
+   */
+  personal?: MemberPersonal;
+}
+
+/** A member's birth date, gender, company join month and work status, as the person page shows them. */
+export interface MemberPersonal {
+  dateOfBirth: string | null;
+  gender: Gender | null;
+  companyJoinMonth: string | null;
+  workStatus: WorkStatus | null;
 }
 
 export interface DirectoryPage {
@@ -305,9 +329,10 @@ export class DirectoryService {
       membershipId: String(m._id),
       agentCode: m.agentCode,
       role: m.role,
+      orgLevelCode: m.orgLevelCode,
       status: m.status,
       fullName,
-      preferredName: user?.preferredName ?? null,
+      preferredName: preferredNameOf(user?.preferredName),
       email: user?.email ?? '',
       initials: initialsOf(fullName),
       leaderId: m.leaderId,
@@ -320,6 +345,11 @@ export class DirectoryService {
       isLeader: (m.directCounts?.total ?? 0) > 0,
       isKpmOwner: isOwner,
       isKpmAdmin: m.adminAccess?.isKpmAdmin ?? false,
+      // ADR-0159 §1: the effective flag — the tag on a leader rung — which is what the row's chip says.
+      isCoreLeader: isEffectiveCoreLeader(m),
+      // The row's control (P18.8-T5 AC-3): the viewer may tag, and the member leads by rung and has not left.
+      // `GroupService.setCoreLeader` refuses regardless.
+      canTagCoreLeader: !removed && isLeaderClass(m.role) && ctx !== undefined && can(ctx, 'member:tag_core_leader'),
       joinedAt: m.joinedAt ? m.joinedAt.toISOString() : null,
       removedAt: m.removedAt ? m.removedAt.toISOString() : null,
       // Mirrors `RoleChangeService.permitted` and `RemovalService.remove`, which are
@@ -381,6 +411,22 @@ export class DirectoryService {
     // exist, which is the same leak the cross-tenant rule closes.
     if (!scoped) throw new NotFoundException('Membership');
     const [decorated] = await this.decorate(ctx, [scoped]);
-    return decorated;
+
+    // ADR-0158 §6: the Owner, the Admins and the person — never a leader, whose read of their unit stops here.
+    const office = Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
+    if (!office && String(scoped._id) !== ctx.membershipId) return decorated;
+    const user = await this.users
+      .findOne({ _id: scoped.userId })
+      .select('dateOfBirth gender companyJoinMonth')
+      .exec();
+    return {
+      ...decorated,
+      personal: {
+        dateOfBirth: user?.dateOfBirth ?? null,
+        gender: user?.gender ?? null,
+        companyJoinMonth: user?.companyJoinMonth ?? null,
+        workStatus: scoped.workStatus ?? null,
+      },
+    };
   }
 }

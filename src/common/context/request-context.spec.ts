@@ -1,4 +1,4 @@
-import { RequestContext } from './request-context';
+import { isEffectiveCoreLeader, RequestContext, type HierarchyRole } from './request-context';
 
 /**
  * The factories that mint a context inside a service, rather than from a request.
@@ -135,5 +135,31 @@ describe('request context factories', () => {
       expect(scoped.kpmId).toBe(OFFICE);
       expect(scoped.membershipId).toBeNull();
     });
+  });
+});
+
+/**
+ * **The effective Core Leader** (ADR-0159 §1, §4; P18.8-T5 AC-1): the tag on a leader class — one rule, read by the
+ * context, the directory, the forum and KPM analytics alike.
+ */
+describe('the Core Leader', () => {
+  const member = (role: HierarchyRole, isCoreLeader?: boolean) => new RequestContext('u', 'none', {
+    membershipId: 'm', kpmId: 'k', orgLevelCode: role.toUpperCase(), hierarchyRole: role, status: 'active',
+    isKpmOwner: false, isKpmAdmin: false, directCount: 0, ...(isCoreLeader === undefined ? {} : { isCoreLeader }),
+  });
+
+  it.each([
+    ['ab', true, true], ['aab', true, true], ['agent', true, false],
+    ['ab', false, false], ['aab', undefined, false],
+  ] as const)('a %s tagged %s is one: %s', (role, tagged, expected) => {
+    expect(member(role, tagged).isCoreLeader).toBe(expected);
+    expect(isEffectiveCoreLeader({ role, isCoreLeader: tagged })).toBe(expected);
+  });
+
+  it('nobody outside an office is one, and nothing without a row is', () => {
+    expect(new RequestContext('u', 'none', null).isCoreLeader).toBe(false);
+    expect(RequestContext.platform('root').isCoreLeader).toBe(false);
+    expect(isEffectiveCoreLeader(null)).toBe(false);
+    expect(isEffectiveCoreLeader({ isCoreLeader: true, role: null })).toBe(false);
   });
 });

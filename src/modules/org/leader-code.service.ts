@@ -152,9 +152,9 @@ export class LeaderCodeService {
 
     const membership = await this.hierarchy.create(scoped, {
       userId: ctx.userId,
-      // Flow C forces AGENT: a code is a way into somebody's unit, not a way to choose
-      // your own rank on the way in.
-      role: 'agent',
+      // Flow C forces the ladder's lowest rung that leads nobody (`AGENT` on the default ladder, ADR-0156): a
+      // code is a way into somebody's unit, not a way to choose your own rank on the way in.
+      role: await this.hierarchy.entryRungCode(String(kpm._id), 'joiner'),
       leaderId: String(leader._id),
       status: 'active',
       recruitedByMembershipId: String(leader._id),
