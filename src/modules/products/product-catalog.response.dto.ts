@@ -121,7 +121,7 @@ export class CatalogProductDto extends CatalogCardDto {
   @ApiProperty({ type: [String], example: ['25–34', '35–49'], description: 'The age bands it is eligible for, by label.' })
   ageBands!: string[];
 
-  @ApiProperty({ type: [String], example: ['Rp2M–Rp5M'], description: 'The monthly budget bands it is eligible for, by label.' })
+  @ApiProperty({ type: [String], example: ['Rp 2 jt–Rp 5 jt'], description: 'The monthly budget bands it is eligible for, by label.' })
   budgetBands!: string[];
 
   @ApiProperty({ type: String, nullable: true, description: 'The drawer’s run-off note, for a product in run-off; else null.' })
@@ -163,7 +163,7 @@ export class AttackPlanBriefDto {
   @ApiProperty({ type: Number, minimum: 1, maximum: 5, description: 'The age band, 1 (< 25) to 5 (65+).' })
   age!: number;
 
-  @ApiProperty({ type: Number, minimum: 1, maximum: 7, description: 'The monthly budget band, 1 (< Rp500K) to 7 (Lump-sum).' })
+  @ApiProperty({ type: Number, minimum: 1, maximum: 7, description: 'The monthly budget band, 1 (< Rp 500 rb) to 7 (Lump-sum).' })
   budget!: number;
 }
 

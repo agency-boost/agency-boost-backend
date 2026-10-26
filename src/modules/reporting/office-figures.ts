@@ -1,3 +1,4 @@
+import { formatDate, formatMonth, formatMonthName, formatMonthRange } from '@/common/format/format';
 import type { RolledUpGoal } from '@/domain/metrics/unit-rollup';
 
 /** A member, by the membership that identifies them (invariant §2). */
@@ -27,28 +28,31 @@ export function shiftMonth(month: string, by: number): string {
   return d.toISOString().slice(0, 7);
 }
 
-const SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/*
+ * The periods the Owner's figures name, through the shared formatters (ADR-0167 §1): months and days the Indonesian
+ * way, the words between them English (OD-197).
+ */
 
 /** *Sep 2026*. */
 export function monthLabel(month: string): string {
-  return `${SHORT[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
+  return formatMonth(month);
 }
 
-/** *Aug and Sep 2026*, or *Dec 2025 and Jan 2026*: the two months a `MONTHLY2_AA` count read. */
+/** *Agu and Sep 2026*, or *Des 2025 and Jan 2026*: the two months a `MONTHLY2_AA` count read. */
 export function twoMonthsLabel(first: string, second: string): string {
   return first.slice(0, 4) === second.slice(0, 4)
-    ? `${SHORT[Number(first.slice(5, 7)) - 1]} and ${monthLabel(second)}`
-    : `${monthLabel(first)} and ${monthLabel(second)}`;
+    ? `${formatMonthName(first)} and ${formatMonth(second)}`
+    : `${formatMonth(first)} and ${formatMonth(second)}`;
 }
 
-/** *Jan–Sep 2026*: a year to date through the month it runs to; the month alone in January. */
+/** *Jan – Sep 2026*: a year to date through the month it runs to, a month range; the month alone in January. */
 export function yearToDateLabel(through: string): string {
-  return through.endsWith('-01') ? monthLabel(through) : `Jan–${monthLabel(through)}`;
+  return formatMonthRange(`${through.slice(0, 4)}-01`, through);
 }
 
-/** *9 Oct 2026*: a count read today. */
+/** *9 Okt 2026*: a count read today. */
 export function dayLabel(day: string): string {
-  return `${Number(day.slice(8, 10))} ${monthLabel(day.slice(0, 7))}`;
+  return formatDate(day);
 }
 
 /** A–Z by name, then by id, so two reads never shuffle. */

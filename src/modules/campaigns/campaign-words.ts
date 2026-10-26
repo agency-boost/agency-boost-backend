@@ -1,3 +1,4 @@
+import { formatNumber, formatPercent, formatRupiahCompact } from '@/common/format/format';
 import { MDRT_TOOLTIP, metricByKey } from '@/domain/constants';
 
 /**
@@ -33,14 +34,16 @@ export function campaignOrder(a: Orderable, b: Orderable): number {
   return by || a.title.localeCompare(b.title) || a.code.localeCompare(b.code);
 }
 
-const RUPIAH = new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 });
-
-/** A requirement's target as words: *Rp 2.400.000.000* from sen, *90%*, *3*. */
+/**
+ * A requirement's target as words, through the shared formatters (ADR-0167 §1): *Rp 2,4 M* from sen, *90,0%*, *3*.
+ * **Lossless**: a target is a rule, so one the compact form would round — *Rp 1.250.000.000* — is written in full,
+ * and a percentage keeps every decimal it was set with.
+ */
 export function targetWords(metricKey: string, value: number): string {
   switch (metricByKey(metricKey)?.unit) {
-    case 'idr_minor': return `Rp ${RUPIAH.format(Math.round(value / 100))}`;
-    case 'percentage': return `${value}%`;
-    default: return String(value);
+    case 'idr_minor': return formatRupiahCompact(value, { lossless: true });
+    case 'percentage': return formatPercent(value, { lossless: true });
+    default: return formatNumber(value);
   }
 }
 
@@ -48,8 +51,8 @@ export function targetWords(metricKey: string, value: number): string {
 const NOUN: Readonly<Record<string, string>> = { APE_ACHIEVED: 'APE' };
 
 /**
- * A requirement in words, as ADR-0142 §3 writes one: *"APE of Rp 1.200.000.000 or more"* — the target in rupiah
- * from sen, the comparator in words.
+ * A requirement in words, as ADR-0142 §3 writes one: *"APE of Rp 1,2 M or more"* — the target in rupiah from sen,
+ * written as ADR-0167 §1 writes a sum, the comparator in words.
  */
 export function requirementWords(r: { metricKey: string; comparator: string; value: number }): string {
   const noun = NOUN[r.metricKey] ?? metricByKey(r.metricKey)?.name ?? r.metricKey;

@@ -2,6 +2,7 @@ import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { formatMonth } from '@/common/format/format';
 import { rollingWindow, type LocalDate } from '@/common/time/local-day';
 import {
   MDRT_CAMPAIGN_CODE, PERIOD, UNIT_DASHBOARD, UNIT_DASHBOARD_CORRECTION_REASON, type UnitDashboardPeriod,
@@ -429,7 +430,7 @@ export class UnitDashboardService {
     const me = requireMembership(ctx);
     const office = await this.days.office(ctx);
     if (body.month !== office.month) {
-      throw invalid(`Production can only be updated here for ${office.month}, the agency's current month.`, {
+      throw invalid(`Production can only be updated here for ${formatMonth(office.month)}, the agency's current month.`, {
         field: 'month', month: office.month,
       });
     }

@@ -65,8 +65,8 @@ describe('the Summary’s period (P18.8-T11)', () => {
   });
 
   it.each([
-    [{ month: '2026-11' }, 'month', '2026-11 has not begun yet: the latest month is 2026-10.'],
-    [{ month: '2027-01' }, 'month', '2027-01 has not begun yet: the latest month is 2026-10.'],
+    [{ month: '2026-11' }, 'month', 'Nov 2026 has not begun yet: the latest month is Okt 2026.'],
+    [{ month: '2027-01' }, 'month', 'Jan 2027 has not begun yet: the latest month is Okt 2026.'],
     [{ year: '2027' }, 'year', '2027 has not begun yet: the latest year is 2026.'],
   ])('P18.8-T11 AC-1 refuses the future, %j', (asked, field, message) => {
     expect(refusal(() => summaryPeriod(OFFICE, asked))).toEqual({
@@ -76,8 +76,8 @@ describe('the Summary’s period (P18.8-T11)', () => {
   });
 
   it.each([
-    [{ month: '2025-02' }, 'month', '2025-02 is before the first month there is, 2025-03.'],
-    [{ month: '2024-12' }, 'month', '2024-12 is before the first month there is, 2025-03.'],
+    [{ month: '2025-02' }, 'month', 'Feb 2025 is before the first month there is, Mar 2025.'],
+    [{ month: '2024-12' }, 'month', 'Des 2024 is before the first month there is, Mar 2025.'],
     [{ year: '2024' }, 'year', '2024 is before the first year there is, 2025.'],
   ])('P18.8-T11 AC-1 refuses anything before the office’s first month, %j', (asked, field, message) => {
     const answer = refusal(() => summaryPeriod(OFFICE, asked));

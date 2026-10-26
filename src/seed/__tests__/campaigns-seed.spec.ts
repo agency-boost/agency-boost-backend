@@ -78,14 +78,14 @@ describe('Phase 18.5 the campaigns seed — a run at 10:00 on 10 October 2026 in
     const card = (code: string) => list.campaigns.find((c) => c.code === code)!;
     expect(card('PERSISTENCY_PUSH').chaseBlocked).toBe('ended');
     expect(card('PROMOTION_AAB_AB').chaseBlocked).toBe('not_eligible');
-    expect(card('APE_SPRINT').title).toBe('Aug–Oct APE Sprint');
+    expect(card('APE_SPRINT').title).toBe('Agu–Okt APE Sprint');
     expect(card('APE_CHALLENGE_NEXT').title).toBe('Q1 2027 APE Challenge');
   });
 
   it('P18.5-T8 AC-6 the sprint’s dialog: APE ✓, and New Hire Not uploaded yet over the month before last', async () => {
     const detail = await wired.campaignAgent.detail(await as('0417', 'rina@kpm0417.test'), 'APE_SPRINT');
     expect(detail.progress!.rows.map((r) => [r.metricKey, r.state])).toEqual([['APE_ACHIEVED', 'met'], ['NEW_HIRES', 'not_uploaded']]);
-    expect(detail.progress!.windowLabel).toBe('Aug – Oct 2026');
+    expect(detail.progress!.windowLabel).toBe('Agu – Okt 2026');
   });
 
   it('P18.5-T8 AC-5 the persistency push is final on its first read: Rina qualified, Budi not met, and nobody else stored', async () => {
@@ -119,7 +119,8 @@ describe('Phase 18.5 the campaigns seed — a run at 10:00 on 10 October 2026 in
     const ticked = rows.filter((r) => r.chasingMdrt).map((r) => r.name).sort();
     expect(ticked).toEqual(['Agus Prasetyo', 'Dimas Pratama', 'Rina Wijaya'].sort());
     expect(view.mdrt.running).toBe(true);
-    expect(view.mdrt.tooltip).toMatch(/^Chasing MDRT \(Million Dollar Round Table\) this year — APE of Rp [\d.]+ or more\.$/);
+    // The target as ADR-0167 §1 writes a rule's sum: compact where that is exact, in full where it would round.
+    expect(view.mdrt.tooltip).toMatch(/^Chasing MDRT \(Million Dollar Round Table\) this year — APE of Rp (\d{1,3}(\.\d{3})*(,\d)? (rb|jt|M)|\d{1,3}(\.\d{3})*) or more\.$/);
     const mdrt = (await wired.campaignStandingsReader.ofOffice(agus, { codes: ['MDRT_QUALIFICATION'] })).standings;
     expect(mdrt.filter((s) => s.status === 'qualified')).toHaveLength(1);
   });

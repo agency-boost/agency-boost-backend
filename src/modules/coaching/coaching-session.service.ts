@@ -6,6 +6,7 @@ import {
   DomainException, NoMembershipException, NotFoundException, VersionConflictException,
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { formatDate } from '@/common/format/format';
 import { isLocalDate, type LocalDate } from '@/common/time/local-day';
 import { COACHING } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -535,7 +536,7 @@ export class CoachingSessionService {
     if (!reopenWindowOpen(date, day.today)) {
       throw new DomainException(
         ErrorCode.COACHING_REOPEN_WINDOW_CLOSED,
-        `This session could be reopened until ${reopenableUntil(date)}, ${COACHING.REOPEN_WINDOW_DAYS} days after it was held.`,
+        `This session could be reopened until ${formatDate(reopenableUntil(date))}, ${COACHING.REOPEN_WINDOW_DAYS} days after it was held.`,
         HttpStatus.CONFLICT,
         { date, reopenableUntil: reopenableUntil(date), windowDays: COACHING.REOPEN_WINDOW_DAYS },
       );

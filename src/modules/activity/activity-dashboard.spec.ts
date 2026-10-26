@@ -45,7 +45,7 @@ describe('the Activity Dashboard’s range and columns (P10-T1)', () => {
     it('refuses a range that ends after today', () => {
       const err = refused({ from: '2026-09-20', to: '2026-09-29' });
       expect(err).toMatchObject({ code: 'VALIDATION_FAILED', status: 400, details: { field: 'to', today: TODAY } });
-      expect(err.message).toMatch(/ends after today/);
+      expect(err.message).toBe('The range ends after today, 28 Sep 2026. Nothing has been logged yet.');
     });
 
     it('refuses a range that starts after it ends', () => {

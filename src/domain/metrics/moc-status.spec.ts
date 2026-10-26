@@ -97,14 +97,20 @@ describe('MOC_STATUS (OD-22 → option 1, D-moc)', () => {
     expect(mocStatus(override, { NET_APE: i(1) }).path).toMatch(/reach 9 Direct ABs\.$/);
   });
 
-  it('P18-T2 AC-4 the MOC column’s tooltip, composed from the company’s rules in the prototype’s words (`KPM_Owner.html:1248`)', () => {
+  it('P18-T2 AC-4, P18.95-T1 AC-4 the MOC column’s tooltip, composed from the company’s rules in the prototype’s words (`KPM_Owner.html:1248`), its sums and percentages as ADR-0167 §1 writes them', () => {
     expect(mocRulesText([AAB, AB])).toBe(
-      'AAB: Net APE ≥ Rp200M AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
-      + 'AB: (Net APE ≥ Rp600M AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
+      'AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75,0%.\n'
+      + 'AB: (Net APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75,0%) OR Direct AB (AB on AB) ≥ 5.',
     );
     // A carrier that moves a threshold moves the sentence; no rule, no sentence.
     const raised: MocRule = { ...AAB, criteriaGroups: [{ mode: 'all', criteria: [{ metricKey: 'NET_APE', comparator: 'gt', value: RP(250_500_000) }] }] };
-    expect(mocRulesText([raised])).toBe('AAB: Net APE > Rp250.5M.');
+    expect(mocRulesText([raised])).toBe('AAB: Net APE > Rp 250,5 jt.');
+    // A threshold is a rule: one the compact form would round is written in full, never rounded (lossless).
+    const exact: MocRule = { ...AAB, criteriaGroups: [{ mode: 'all', criteria: [
+      { metricKey: 'NET_APE', comparator: 'gte', value: RP(250_550_000) },
+      { metricKey: 'MOC_PERSISTENCY', comparator: 'gte', value: 75.55 },
+    ] }] };
+    expect(mocRulesText([exact])).toBe('AAB: Net APE ≥ Rp 250.550.000 AND Rolling Persistency DU ≥ 75,55%.');
     expect(mocRulesText([])).toBe('');
     expect(mocRulesText([{ ...AAB, criteriaGroups: [{ mode: 'all', criteria: [] }] }])).toBe('');
   });

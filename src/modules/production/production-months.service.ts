@@ -5,6 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { formatDate, formatMonth } from '@/common/format/format';
 import { editableUntil } from '@/common/time/local-day';
 import { DEFAULT_TENANT_TIMEZONE, PRODUCTION } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -34,12 +35,8 @@ export interface MonthState {
   changedBy: string | null;
 }
 
-const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
-  'September', 'October', 'November', 'December'];
-const monthLabel = (month: string) => {
-  const [y, m] = month.split('-');
-  return `${MONTH_NAMES[Number(m) - 1]} ${y}`;
-};
+/** A month as the refusals name it, through the shared formatter (ADR-0167 §1): *Sep 2026*. */
+const monthLabel = (month: string) => formatMonth(month);
 
 /**
  * A month of production as a thing with a state: its lock, and its revision (P9-T4, ADR-0050).
@@ -100,7 +97,7 @@ export class ProductionMonths {
     const label = monthLabel(state.month);
     const why = state.reason === 'locked_by_hand'
       ? `${label} was locked${state.changedBy ? ` by ${state.changedBy}` : ''}.`
-      : `${label} locked after ${state.editableUntil}, when its window closed.`;
+      : `${label} locked after ${formatDate(state.editableUntil)}, when its window closed.`;
     throw new DomainException(
       ErrorCode.UPLOAD_MONTH_LOCKED,
       `${why} Reopen the month to change its figures.`,

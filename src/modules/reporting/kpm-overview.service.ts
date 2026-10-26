@@ -3,6 +3,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { formatMonth } from '@/common/format/format';
 import { addDays, rollingWindow, type LocalDate } from '@/common/time/local-day';
 import { KPM_REPORTING, PERIOD } from '@/domain/constants';
 import { activityComplianceRate, activityLogged, lastMonthToSameDay } from '@/domain/metrics/activity-logged';
@@ -303,7 +304,7 @@ export class KpmOverviewService {
     if (body.month !== office.month) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        `A recruitment target is set for ${office.month}, the agency's current month.`,
+        `A recruitment target is set for ${formatMonth(office.month)}, the agency's current month.`,
         HttpStatus.BAD_REQUEST,
         { field: 'month', month: office.month },
       );

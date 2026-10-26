@@ -5,6 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext, TenantMembership, isEffectiveCoreLeader } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { formatDate } from '@/common/format/format';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { isEnded } from '@/modules/tenants/subscription';
 import { User, UserDocument } from '@/modules/users/user.schema';
@@ -114,7 +115,7 @@ export class ContextResolver {
       if (kpm && impersonatorUserId === null && isEnded(kpm, this.clock)) {
         throw new DomainException(
           ErrorCode.TENANT_SUBSCRIPTION_ENDED,
-          `This office’s subscription ended on ${kpm.subscription?.endDate}. Nobody in it can use `
+          `This office’s subscription ended on ${formatDate(kpm.subscription?.endDate ?? '')}. Nobody in it can use `
             + 'AgencyBoost until it is renewed. Contact AgencyBoost.',
           HttpStatus.FORBIDDEN,
           { endDate: kpm.subscription?.endDate ?? null, ...office },

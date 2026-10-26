@@ -376,6 +376,10 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       for (const bad of ['2026-09-15', '2025-09-13', '2026-02-30', '14/09/2026', 20260914, null]) {
         expect([bad, (await put(bad).expect(400)).body.error.code]).toEqual([bad, 'VALIDATION_FAILED']);
       }
+      // The bounds in the sentence are written as ADR-0167 §1 writes a date (P18.95-T1 AC-4).
+      expect((await put('2026-09-15').expect(400)).body.error.message).toBe(
+        'startDate must be a day from 14 Sep 2025 to 14 Sep 2026: no later than today, and no more than 365 days before it.',
+      );
     });
 
     it('P13-T5 AC-5 the hire’s own is read-only: a hire has no route to it', async () => {

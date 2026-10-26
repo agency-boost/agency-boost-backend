@@ -123,7 +123,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       const cards = (await http().get('/campaigns').expect(200)).body.campaigns as Record<string, unknown>[];
       const byCode = (code: string) => cards.find((c) => c.code === code)!;
       expect(byCode('APE_SPRINT')).toMatchObject({
-        kind: 'seasonal', subtype: null, window: 'campaign_dates', phase: 'running', duration: 'Aug 1 – Sep 30, 2026',
+        kind: 'seasonal', subtype: null, window: 'campaign_dates', phase: 'running', duration: '1 Agu – 30 Sep 2026',
         poster: { emoji: '🚀', color: 'amber' }, blurb: 'Push for APE.', reward: 'Cash bonus', chasing: false, eligible: true,
         chaseBlocked: null,
         requirements: [
@@ -133,7 +133,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       });
       expect(byCode('MDRT_QUALIFICATION')).toMatchObject({
         kind: 'structural', subtype: 'ongoing', phase: 'running', endsAt: null,
-        duration: 'Standing — evaluated per calendar year (Jan 1 – Dec 31)',
+        duration: 'Standing — evaluated per calendar year (1 Jan – 31 Des)',
       });
       expect(byCode('OLD_PUSH')).toMatchObject({ phase: 'ended', chaseBlocked: 'ended' });
       expect(byCode('NEXT_PUSH')).toMatchObject({ phase: 'upcoming', chaseBlocked: null });
@@ -161,7 +161,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       const res = await http().get('/campaigns/APE_SPRINT').expect(200);
       expect(res.body).toMatchObject({ code: 'APE_SPRINT', description: '', can: { chase: true } });
       expect(res.body.progress).toEqual({
-        windowLabel: 'Aug – Sep 2026', final: false,
+        windowLabel: 'Agu – Sep 2026', final: false,
         rows: [
           // Rina: Rp 20 M in August and Rp 80 M in September, of Rp 150 M — September still open.
           { metricKey: 'APE_ACHIEVED', current: 100 * M, target: 150 * M, unit: 'idr_minor', state: 'in_progress' },
@@ -268,9 +268,9 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       const res = await chasing().expect(200);
       expect(res.body.membershipId).toBe(office.id.RINA);
       expect(res.body.campaigns).toEqual([
-        { code: 'APE_SPRINT', title: 'APE Sprint', kind: 'seasonal', subtype: null, phase: 'running', duration: 'Aug 1 – Sep 30, 2026', poster: { emoji: '🚀', color: 'amber' } },
-        { code: 'NEXT_PUSH', title: 'Q4 Push', kind: 'seasonal', subtype: null, phase: 'upcoming', duration: 'Oct 1 – Dec 31, 2026', poster: { emoji: '🎯', color: 'navy' } },
-        { code: 'MDRT_QUALIFICATION', title: 'MDRT Qualification', kind: 'structural', subtype: 'ongoing', phase: 'running', duration: 'Standing — evaluated per calendar year (Jan 1 – Dec 31)', poster: { emoji: '🏆', color: 'gold' } },
+        { code: 'APE_SPRINT', title: 'APE Sprint', kind: 'seasonal', subtype: null, phase: 'running', duration: '1 Agu – 30 Sep 2026', poster: { emoji: '🚀', color: 'amber' } },
+        { code: 'NEXT_PUSH', title: 'Q4 Push', kind: 'seasonal', subtype: null, phase: 'upcoming', duration: '1 Okt – 31 Des 2026', poster: { emoji: '🎯', color: 'navy' } },
+        { code: 'MDRT_QUALIFICATION', title: 'MDRT Qualification', kind: 'structural', subtype: 'ongoing', phase: 'running', duration: 'Standing — evaluated per calendar year (1 Jan – 31 Des)', poster: { emoji: '🏆', color: 'gold' } },
       ]);
       // Naming herself is her own read.
       expect((await chasing({ for: office.id.RINA }).expect(200)).body).toEqual(res.body);

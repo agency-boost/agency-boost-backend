@@ -21,12 +21,13 @@ describe('campaign windows (P18.5-T8 AC-2, D-windows)', () => {
       expect(monthsFrom('2026-09', '2026-08')).toEqual([]);
     });
 
-    it('P18.5-T8 AC-2 writes ranges as the dialog and the card do', () => {
+    it('P18.5-T8 AC-2, P18.95-T1 AC-4 writes ranges as the dialog and the card do, the Indonesian way', () => {
       expect(monthRangeWords('2026-07', '2026-09')).toBe('Jul – Sep 2026');
       expect(monthRangeWords('2026-11', '2027-01')).toBe('Nov 2026 – Jan 2027');
       expect(monthRangeWords('2026-09', '2026-09')).toBe('Sep 2026');
-      expect(dayRangeWords('2026-07-01', '2026-09-30')).toBe('Jul 1 – Sep 30, 2026');
-      expect(dayRangeWords('2026-11-01', '2027-01-31')).toBe('Nov 1, 2026 – Jan 31, 2027');
+      expect(dayRangeWords('2026-07-01', '2026-09-30')).toBe('1 Jul – 30 Sep 2026');
+      expect(dayRangeWords('2026-11-01', '2027-01-31')).toBe('1 Nov 2026 – 31 Jan 2027');
+      expect(monthRangeWords('2026-08', '2026-10')).toBe('Agu – Okt 2026');
     });
   });
 
@@ -105,7 +106,7 @@ describe('campaign windows (P18.5-T8 AC-2, D-windows)', () => {
     it('P18.5-T8 AC-2 keys a window of activity alone by its days, and reads no day before it begins', () => {
       const dates = { window: 'campaign_dates' as const, startsAt: wib('2026-08-15T00:00:00'), endsAt: wib('2026-09-15T23:59:00') };
       expect(resolveWindow(dates, office('2026-10-10'))).toMatchObject({
-        key: '2026-08-15..2026-09-15', days: { from: '2026-08-15', to: '2026-09-15' }, label: 'Aug 15 – Sep 15, 2026',
+        key: '2026-08-15..2026-09-15', days: { from: '2026-08-15', to: '2026-09-15' }, label: '15 Agu – 15 Sep 2026',
       });
       expect(resolveWindow(dates, office('2026-08-14')).days).toBeNull();
     });
@@ -114,7 +115,7 @@ describe('campaign windows (P18.5-T8 AC-2, D-windows)', () => {
       const mdrt = { window: 'calendar_year' as const, startsAt: wib('2025-01-01T00:00:00'), endsAt: null };
       expect(resolveWindow(mdrt, office('2026-10-10'))).toEqual({
         key: '2026', months: monthsFrom('2026-01', '2026-12'), days: { from: '2026-01-01', to: '2026-10-10' },
-        lastDay: '2026-12-31', label: 'Jan – Dec 2026', finalisable: true,
+        lastDay: '2026-12-31', label: 'Jan – Des 2026', finalisable: true,
       });
       // The year before, as frozen in the January after.
       expect(resolveWindow(mdrt, office('2027-01-20'), '2026')).toMatchObject({
@@ -129,7 +130,7 @@ describe('campaign windows (P18.5-T8 AC-2, D-windows)', () => {
       const promotion = { window: 'rolling_12m' as const, startsAt: wib('2025-01-01T00:00:00'), endsAt: null };
       // P18.5-T8 review item 5: its days are its months' — October 2025 to the end of September — not to today.
       expect(resolveWindow(promotion, office('2026-10-10', '2026-09'))).toMatchObject({
-        key: 'rolling', months: monthsFrom('2025-10', '2026-09'), label: 'Oct 2025 – Sep 2026', finalisable: false,
+        key: 'rolling', months: monthsFrom('2025-10', '2026-09'), label: 'Okt 2025 – Sep 2026', finalisable: false,
         days: { from: '2025-10-01', to: '2026-09-30' }, lastDay: '2026-09-30',
       });
       expect(resolveWindow(promotion, office('2026-10-10', '2026-07')).months[11]).toBe('2026-07');
@@ -142,12 +143,12 @@ describe('campaign windows (P18.5-T8 AC-2, D-windows)', () => {
   describe('the card’s duration', () => {
     it('P18.5-T7 AC-3 composes a seasonal campaign’s dates in Jakarta, and a structural window’s words verbatim', () => {
       expect(durationWords({ window: 'campaign_dates', startsAt: wib('2026-07-01T00:00:00'), endsAt: wib('2026-09-30T23:59:00') }, JKT))
-        .toBe('Jul 1 – Sep 30, 2026');
+        .toBe('1 Jul – 30 Sep 2026');
       expect(durationWords({ window: 'calendar_year', startsAt: wib('2026-01-01T00:00:00'), endsAt: null }, JKT))
-        .toBe('Standing — evaluated per calendar year (Jan 1 – Dec 31)');
+        .toBe('Standing — evaluated per calendar year (1 Jan – 31 Des)');
       expect(durationWords({ window: 'rolling_12m', startsAt: wib('2026-01-01T00:00:00'), endsAt: null }, JKT))
         .toBe('Rolling 12-month window');
-      expect(durationWords({ window: 'campaign_dates', startsAt: wib('2026-07-01T00:00:00'), endsAt: null }, JKT)).toBe('From Jul 1');
+      expect(durationWords({ window: 'campaign_dates', startsAt: wib('2026-07-01T00:00:00'), endsAt: null }, JKT)).toBe('From 1 Jul');
     });
   });
 });

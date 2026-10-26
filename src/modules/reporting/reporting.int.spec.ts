@@ -313,6 +313,14 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
         expect(await db().collection('kpmRecruitTargets').find({}).toArray()).toEqual(before);
       });
 
+      it('P18.95-T1 AC-4 another month is refused in a sentence naming the current one as ADR-0167 §1 writes a month', async () => {
+        as('OWNER');
+        expect((await put({ month: '2026-08', target: 3 }).expect(400)).body.error).toMatchObject({
+          message: 'A recruitment target is set for Sep 2026, the agency\'s current month.',
+          details: { field: 'month', month: '2026-09' },
+        });
+      });
+
       it('P18-T1 AC-1 a read-only support session reads the Overview and is refused the target; an elevated one writes as the member', async () => {
         const owner = office.as('OWNER');
         session.current = new RequestContext(owner.userId, 'none', owner.membership, 'u-support', null, false, true);
@@ -572,7 +580,7 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
         .toEqual(['NET_APE', 'MONTHLY2_AA_DU', 'MONTHLY2_AA_DG', 'MOC_PERSISTENCY', 'DIRECT_AB_COUNT']);
       const net = agus.moc.criteria[0];
       // Agus and his Direct Group: Indah, Dimas (and Lukas, Tari: nothing held), Sari, Dewi, with their Direct Units.
-      expect(net).toMatchObject({ label: 'Net APE', required: 600_000_000 * 100, period: 'Jan–Sep 2026' });
+      expect(net).toMatchObject({ label: 'Net APE', required: 600_000_000 * 100, period: 'Jan – Sep 2026' });
       expect(agus.moc.criteria[3]).toMatchObject({ current: 91, required: 75, met: true, period: 'Sep 2026' });
       expect(agus.moc.criteria[4]).toMatchObject({ label: '— OR — Direct AB (AB on AB)', current: 0, met: false, period: 'As of 14 Sep 2026' });
       const sari = agus.aabUnits.find((u: { head: { name: string } }) => u.head.name === 'Sari Puspita');
@@ -585,8 +593,8 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       as('OWNER');
       const { mocRulesText } = (await http().get('/kpm/analytics').expect(200)).body;
       expect(mocRulesText).toBe(
-        'AAB: Net APE ≥ Rp200M AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
-        + 'AB: (Net APE ≥ Rp600M AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
+        'AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75,0%.\n'
+        + 'AB: (Net APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75,0%) OR Direct AB (AB on AB) ≥ 5.',
       );
     });
 
@@ -596,7 +604,7 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       const agus = agencies.find((a: { head: { name: string } }) => a.head.name === 'Agus Salim');
       // Agus's Direct Unit: Indah and Dimas active in August and September; Lukas and Tari — nothing on file — are not.
       expect(agus.moc.criteria.find((c: { code: string }) => c.code === 'MONTHLY2_AA_DU'))
-        .toMatchObject({ current: 2, required: 4, met: false, period: 'Aug and Sep 2026' });
+        .toMatchObject({ current: 2, required: 4, met: false, period: 'Agu and Sep 2026' });
       // Sari's Direct Unit: Rina active in both; Budi has no row in either held month — a count, not *perhaps*.
       const sari = agus.aabUnits.find((u: { head: { name: string } }) => u.head.name === 'Sari Puspita');
       expect(sari.moc.criteria.find((c: { code: string }) => c.code === 'MONTHLY2_AA')).toMatchObject({ current: 1, met: false });

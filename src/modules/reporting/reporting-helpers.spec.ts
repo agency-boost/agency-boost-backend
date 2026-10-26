@@ -31,14 +31,14 @@ describe('the reporting module’s helpers', () => {
     expect(() => OfficePeople.require(RequestContext.platform('root'))).toThrow(/not joined a KPM/);
   });
 
-  it('P18-T2 AC-4 the labels a period is read over', () => {
+  it('P18-T2 AC-4, P18.95-T1 AC-4 the labels a period is read over, the Indonesian way', () => {
     expect(shiftMonth('2026-01', -1)).toBe('2025-12');
     expect(monthLabel('2026-09')).toBe('Sep 2026');
-    expect(twoMonthsLabel('2026-08', '2026-09')).toBe('Aug and Sep 2026');
-    expect(twoMonthsLabel('2025-12', '2026-01')).toBe('Dec 2025 and Jan 2026');
+    expect(twoMonthsLabel('2026-08', '2026-09')).toBe('Agu and Sep 2026');
+    expect(twoMonthsLabel('2025-12', '2026-01')).toBe('Des 2025 and Jan 2026');
     expect(yearToDateLabel('2026-01')).toBe('Jan 2026');
-    expect(yearToDateLabel('2026-09')).toBe('Jan–Sep 2026');
-    expect(dayLabel('2026-10-09')).toBe('9 Oct 2026');
+    expect(yearToDateLabel('2026-09')).toBe('Jan – Sep 2026');
+    expect(dayLabel('2026-10-09')).toBe('9 Okt 2026');
     const names = new Map([['a', 'Bea'], ['b', 'Ann']]);
     expect(['a', 'b', 'c', 'd'].sort(byName(names))).toEqual(['c', 'd', 'b', 'a']);
   });

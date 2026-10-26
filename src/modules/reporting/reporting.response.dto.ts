@@ -259,7 +259,7 @@ class MocCriterionDto implements MocCriterion {
 
   @ApiProperty({ description: 'The carrier rule’s threshold, in the same unit.' }) required!: number;
   @ApiProperty({ type: Boolean, nullable: true, description: '`null` while its input is not uploaded — never ✕.' }) met!: boolean | null;
-  @ApiProperty({ example: 'Jan–Sep 2026', description: 'What it was read over.' }) period!: string;
+  @ApiProperty({ example: 'Jan – Sep 2026', description: 'What it was read over.' }) period!: string;
 }
 
 class MocDto implements Moc {
@@ -330,8 +330,8 @@ export class KpmAnalyticsDto implements KpmAnalyticsView {
   @ApiProperty({ example: '2026-10', description: 'The period’s month.' }) month!: string;
   @ApiProperty({ type: ReportingThresholdsDto }) thresholds!: { statusSplitPct: number };
   @ApiProperty({
-    example: 'AAB: Net APE ≥ Rp200M AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\nAB: (Net APE ≥ Rp600M AND '
-      + 'Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
+    example: 'AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75,0%.\nAB: (Net APE ≥ Rp 600 jt AND '
+      + 'Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75,0%) OR Direct AB (AB on AB) ≥ 5.',
     description: 'The MOC column’s tooltip, composed from the company’s MOC rules: a line per rule, the junior rung '
       + 'first, separated by `\\n`. Empty when the company has none.',
   })

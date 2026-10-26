@@ -1,4 +1,5 @@
 import { DateTime } from 'luxon';
+import { formatDateRange, formatDayMonth, formatMonthRange } from '@/common/format/format';
 import { addDays, endOfMonth, localDayOf, type LocalDate } from '@/common/time/local-day';
 import {
   CAMPAIGN_DURATION_WORDS, CAMPAIGN_ROLLING_MONTHS, type CampaignWindow,
@@ -33,13 +34,11 @@ export interface ResolvedWindow {
   days: { from: LocalDate; to: LocalDate } | null;
   /** The window's last day, today or not. */
   lastDay: LocalDate;
-  /** The dialog's words for what is read: *Jul – Sep 2026*, *Jan – Dec 2026*, *Oct 2025 – Sep 2026*. */
+  /** The dialog's words for what is read: *Jul – Sep 2026*, *Jan – Des 2026*, *Okt 2025 – Sep 2026*. */
   label: string;
   /** `rolling_12m` never is: it moves with every month held. */
   finalisable: boolean;
 }
-
-const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** `YYYY-MM` plus `n` months. */
 export function addMonths(month: string, n: number): string {
@@ -55,24 +54,17 @@ export function monthsFrom(from: string, to: string): string[] {
   return out;
 }
 
-/** *Sep 2026*. */
-export function monthWords(month: string): string {
-  return `${SHORT_MONTHS[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
-}
-
-/** *Jul – Sep 2026*, *Nov 2026 – Jan 2027*, *Sep 2026*. */
+/** *Jul – Sep 2026*, *Nov 2026 – Jan 2027*, *Sep 2026* — the shared formatter's (ADR-0167 §1). */
 export function monthRangeWords(from: string, to: string): string {
-  if (from === to) return monthWords(from);
-  const [fy, ty] = [from.slice(0, 4), to.slice(0, 4)];
-  const fromName = SHORT_MONTHS[Number(from.slice(5, 7)) - 1];
-  return fy === ty ? `${fromName} – ${monthWords(to)}` : `${monthWords(from)} – ${monthWords(to)}`;
+  return formatMonthRange(from, to);
 }
 
-/** *Jul 1 – Sep 30, 2026*, *Nov 1, 2026 – Jan 31, 2027* — the card's duration (`Overall.html:7930`). */
+/**
+ * *1 Jul – 30 Sep 2026*, *1 Nov 2026 – 31 Jan 2027* — the card's duration (`Overall.html:7930`), written the
+ * Indonesian way through the shared formatter (ADR-0167 §1) where the prototype wrote *Jul 1 – Sep 30, 2026*.
+ */
 export function dayRangeWords(from: LocalDate, to: LocalDate): string {
-  const day = (d: LocalDate) => `${SHORT_MONTHS[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8, 10))}`;
-  if (from.slice(0, 4) === to.slice(0, 4)) return `${day(from)} – ${day(to)}, ${to.slice(0, 4)}`;
-  return `${day(from)}, ${from.slice(0, 4)} – ${day(to)}, ${to.slice(0, 4)}`;
+  return formatDateRange(from, to);
 }
 
 /**
@@ -130,7 +122,7 @@ export function campaignPhase(startsAt: Date, endsAt: Date | null, now: Date): '
 export function durationWords(campaign: CampaignDates, timezone: string): string {
   if (campaign.window !== 'campaign_dates') return CAMPAIGN_DURATION_WORDS[campaign.window];
   const from = localDayOf(campaign.startsAt, timezone);
-  if (campaign.endsAt === null) return `From ${dayRangeWords(from, from).split(' – ')[0]}`;
+  if (campaign.endsAt === null) return `From ${formatDayMonth(from)}`;
   return dayRangeWords(from, lastLocalDay(campaign.endsAt, timezone));
 }
 

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { NotFoundException } from '@/common/errors/domain.exception';
+import { formatDate } from '@/common/format/format';
 import { addDays, isLocalDate } from '@/common/time/local-day';
 import { refuseWith } from '@/common/validation/fields';
 import { ACTIVATION } from '@/domain/constants';
@@ -141,7 +142,7 @@ export class NewHiresService {
     const earliest = addDays(office.today, -ACTIVATION.START_DATE_MAX_DAYS_BACK);
     if (!isLocalDate(startDate) || startDate > office.today || startDate < earliest) {
       refuseWith([
-        `startDate must be a day from ${earliest} to ${office.today}: no later than today, and no more than `
+        `startDate must be a day from ${formatDate(earliest)} to ${formatDate(office.today)}: no later than today, and no more than `
           + `${ACTIVATION.START_DATE_MAX_DAYS_BACK} days before it.`,
       ]);
     }

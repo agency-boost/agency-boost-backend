@@ -3,7 +3,8 @@ import { DateTime } from 'luxon';
 import type { Clock } from '@/common/clock/clock.port';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { DEFAULT_TENANT_TIMEZONE, MINOR_UNITS_PER_MAJOR, SUBSCRIPTION } from '@/domain/constants';
+import { formatNumber, formatRupiah } from '@/common/format/format';
+import { DEFAULT_TENANT_TIMEZONE, SUBSCRIPTION } from '@/domain/constants';
 import type { KpmSubscription } from './kpm.schema';
 
 /**
@@ -75,18 +76,14 @@ function isOfficeDate(value: string): boolean {
 }
 
 /**
- * Rupiah as the dialog shows it, `Rp 100.000.000`: whole rupiah from minor units, grouped with dots
- * (id-ID). The refusals are read by the Super Admin under the field they typed rupiah into, so they
- * name rupiah — never sen, the unit the API carries.
+ * Rupiah as the dialog shows it, `Rp 100.000.000`: **in full**, through the shared formatter (ADR-0167 §1) — the
+ * refusals are read by the Super Admin under the field they typed rupiah into, so a bound is written in the digits
+ * they type, and in rupiah — never sen, the unit the API carries. Every bound is whole rupiah, so nothing rounds.
  */
-function rupiah(minor: number): string {
-  return `Rp ${grouped(Math.floor(minor / MINOR_UNITS_PER_MAJOR))}`;
-}
+const rupiah = (minor: number): string => formatRupiah(minor);
 
-/** `10000` as `10.000`, the grouping the console's number fields use. */
-function grouped(value: number): string {
-  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-}
+/** `10000` as `10.000`, the grouping the console's number fields use (`id-ID`, ADR-0167 §1). */
+const grouped = (value: number): string => formatNumber(value);
 
 function refuse(field: string, message: string): DomainException {
   return new DomainException(

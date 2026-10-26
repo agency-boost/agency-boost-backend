@@ -1,6 +1,7 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { formatDate } from '@/common/format/format';
 import { addDays, daysBetween, isLocalDate, rollingWindow, type LocalDate } from '@/common/time/local-day';
 import { ACTIVITY, PERIOD } from '@/domain/constants';
 
@@ -71,7 +72,7 @@ export function dashboardRange(
   const from = input.from as LocalDate;
   const to = input.to as LocalDate;
   if (from > to) refuse('The range starts after it ends.', { field: 'from', from, to });
-  if (to > today) refuse(`The range ends after today, ${today}. Nothing has been logged yet.`, { field: 'to', to, today });
+  if (to > today) refuse(`The range ends after today, ${formatDate(today)}. Nothing has been logged yet.`, { field: 'to', to, today });
 
   // Counted by arithmetic, **before** anything is built per day: a `from` in the year 0100 is a valid
   // date, and listing seven hundred thousand of them to learn the range is too long took a third of a

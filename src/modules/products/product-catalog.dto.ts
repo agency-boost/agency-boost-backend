@@ -22,7 +22,7 @@ export class AttackPlanQueryDto {
   @Type(() => Number) @IsInt() @IsIn(PRODUCT_AGE_BANDS)
   age!: number;
 
-  @ApiProperty({ enum: PRODUCT_BUDGET_BANDS, description: '*Monthly premium budget*: 1 is < Rp500K, 7 is Lump-sum.' })
+  @ApiProperty({ enum: PRODUCT_BUDGET_BANDS, description: '*Monthly premium budget*: 1 is < Rp 500 rb, 7 is Lump-sum.' })
   @Type(() => Number) @IsInt() @IsIn(PRODUCT_BUDGET_BANDS)
   budget!: number;
 

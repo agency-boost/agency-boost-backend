@@ -115,13 +115,19 @@ export type ProductLifecycle = (typeof PRODUCT_LIFECYCLES)[number];
 export const PRODUCT_AGE_BANDS = [1, 2, 3, 4, 5] as const;
 export const PRODUCT_BUDGET_BANDS = [1, 2, 3, 4, 5, 6, 7] as const;
 
-/** What each band means, from `Overall.html:9527-9533`. The screens read these; nothing keys on them. */
+/**
+ * What each band means, from `Overall.html:9527-9533`. The screens read these; nothing keys on them.
+ *
+ * The budget bands' sums are written compact, as ADR-0167 §1 writes a chip — *Rp 500 rb*, *Rp 2 jt* — where the
+ * prototype wrote *Rp500K* and *Rp2M*, its `M` a million (*juta*, `jt`; `M` is *miliar*). Literal strings, so the
+ * frontend's pin (`lib/product-catalog.spec.ts`) can read them from this file's text.
+ */
 export const PRODUCT_AGE_BAND_LABELS: Readonly<Record<number, string>> = {
   1: '< 25', 2: '25–34', 3: '35–49', 4: '50–64', 5: '65+',
 };
 export const PRODUCT_BUDGET_BAND_LABELS: Readonly<Record<number, string>> = {
-  1: '< Rp500K', 2: 'Rp500K–Rp2M', 3: 'Rp2M–Rp5M', 4: 'Rp5M–Rp10M',
-  5: 'Rp10M–Rp20M', 6: '> Rp20M', 7: 'Lump-sum',
+  1: '< Rp 500 rb', 2: 'Rp 500 rb–Rp 2 jt', 3: 'Rp 2 jt–Rp 5 jt', 4: 'Rp 5 jt–Rp 10 jt',
+  5: 'Rp 10 jt–Rp 20 jt', 6: '> Rp 20 jt', 7: 'Lump-sum',
 };
 
 /** The seven fields the Owner's override modal names, in its order. */

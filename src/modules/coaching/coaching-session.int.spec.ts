@@ -682,6 +682,7 @@ describe('the coaching session over HTTP (P11-T5)', () => {
       const res = await reopen(closed.sessionId, closed.version).expect(409);
       expect(res.body.error).toMatchObject({
         code: 'COACHING_REOPEN_WINDOW_CLOSED',
+        message: 'This session could be reopened until 21 Sep 2026, 7 days after it was held.',
         details: { date: ROSTER_TODAY, reopenableUntil: '2026-09-21', windowDays: 7 },
       });
       // *Edit again* says until when, past the window too.

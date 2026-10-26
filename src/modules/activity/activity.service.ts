@@ -18,6 +18,7 @@ import {
   DomainException, NoMembershipException, NotFoundException,
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { formatDate } from '@/common/format/format';
 import {
   calendarMonth, isFutureDay, isLocalDate, isWithinCorrectionWindow, localDayOf, rollingWindow,
   type LocalDate,
@@ -706,7 +707,7 @@ export class ActivityService {
     if (isFutureDay(date, today)) {
       throw new DomainException(
         ErrorCode.ACTIVITY_FUTURE_DATE,
-        `${date} has not happened yet in this office. A day is logged after it, not before.`,
+        `${formatDate(date)} has not happened yet in this office. A day is logged after it, not before.`,
         HttpStatus.UNPROCESSABLE_ENTITY,
         { date, today },
       );
@@ -718,7 +719,7 @@ export class ActivityService {
       // step, and the screen switches to the correction form rather than showing a message.
       throw new DomainException(
         ErrorCode.ACTIVITY_DATE_OUT_OF_WINDOW,
-        `${date} is closed for editing. Correct it instead, with a reason — the correction stays `
+        `${formatDate(date)} is closed for editing. Correct it instead, with a reason — the correction stays `
         + 'beside the numbers anybody has already read.',
         HttpStatus.UNPROCESSABLE_ENTITY,
         { date, graceDays: grace },
@@ -789,14 +790,14 @@ export class ActivityService {
     const existing = await this.logs.findOne(ctx, { membershipId: me, localDate: date });
     if (!existing) {
       throw new NotFoundException(
-        `There is no entry for ${date} to correct. Log the day instead.`,
+        `There is no entry for ${formatDate(date)} to correct. Log the day instead.`,
       );
     }
 
     const grace = office.settings.activityBackdateGraceDays;
     if (isWithinCorrectionWindow(date, today, grace)) {
       throw new BadRequestException(
-        `${date} is still open — save it normally. A correction is for a day somebody has `
+        `${formatDate(date)} is still open — save it normally. A correction is for a day somebody has `
         + 'already read.',
       );
     }

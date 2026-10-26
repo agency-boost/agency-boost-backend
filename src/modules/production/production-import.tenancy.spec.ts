@@ -280,7 +280,8 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
     it('refuses an import into a locked month, until it is reopened — and audits the reopening', async () => {
       const f = file('aug.csv', ['PRU-001', { 'ape.monthly': '1' }]);
       await expect(importFile(A, '2026-08', f)).rejects.toMatchObject({
-        code: 'UPLOAD_MONTH_LOCKED', details: { month: '2026-08', reason: 'schedule' },
+        code: 'UPLOAD_MONTH_LOCKED', details: { month: '2026-08', reason: 'schedule', editableUntil: '2026-09-07' },
+        message: 'Agu 2026 locked after 7 Sep 2026, when its window closed. Reopen the month to change its figures.',
       });
 
       const reopened = await wired.productionMonths.reopen(A, '2026-08');

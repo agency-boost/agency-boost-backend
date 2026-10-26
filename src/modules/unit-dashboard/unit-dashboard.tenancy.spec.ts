@@ -651,7 +651,11 @@ describe('the Unit Dashboard (Phase 15)', () => {
       const ctx = office.as('SARI');
       const revision = (await state()).revision;
       await expect(wired.unitDashboard.updateProduction(ctx, { month: '2026-08', revision, rows: [{ membershipId: office.id.RINA, apeMonthlyMinor: 1 }] }))
-        .rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'month', month: UNIT_MONTH } });
+        .rejects.toMatchObject({
+          code: 'VALIDATION_FAILED', details: { field: 'month', month: UNIT_MONTH },
+          // The sentence names the month as ADR-0167 §1 writes one; `details` keeps it `YYYY-MM`.
+          message: 'Production can only be updated here for Sep 2026, the agency\'s current month.',
+        });
       await expect(save('SARI', [{ membershipId: office.id.RINA, apeMonthlyMinor: 1 }, { membershipId: office.id.RINA, apeYtdMinor: 300 * M }]))
         .rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'rows[1].membershipId' } });
       await expect(save('SARI', [{ membershipId: office.id.RINA }]))

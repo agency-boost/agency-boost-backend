@@ -59,10 +59,11 @@ export const MDRT_CAMPAIGN_CODE = 'MDRT_QUALIFICATION';
 
 /**
  * **What a window reads as on the card and in the dialog**, verbatim where the prototype writes one
- * (`Overall.html:7972`, `:8012`); a campaign's own dates are composed in the office's calendar instead.
+ * (`Overall.html:7972`, `:8012`) but for its dates, which are written the Indonesian way (ADR-0167 §1) — *1 Jan –
+ * 31 Des* where it wrote *Jan 1 – Dec 31*; a campaign's own dates are composed in the office's calendar instead.
  */
 export const CAMPAIGN_DURATION_WORDS: Readonly<Record<Exclude<CampaignWindow, 'campaign_dates'>, string>> = {
-  calendar_year: 'Standing — evaluated per calendar year (Jan 1 – Dec 31)',
+  calendar_year: 'Standing — evaluated per calendar year (1 Jan – 31 Des)',
   rolling_12m: 'Rolling 12-month window',
 };
 

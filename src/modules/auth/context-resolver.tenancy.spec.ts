@@ -242,6 +242,10 @@ describe('ContextResolver', () => {
         code: 'TENANT_SUBSCRIPTION_ENDED',
         details: { endDate: '2026-10-07', kpmCode: '0601', branch: 'Ended Branch' },
       });
+      // The sentence writes the date as ADR-0167 §1 does; `details` keeps it machine-readable.
+      await expect(resolver.resolve(userId)).rejects.toThrow(
+        'This office’s subscription ended on 7 Okt 2026. Nobody in it can use AgencyBoost until it is renewed. Contact AgencyBoost.',
+      );
     });
 
     it('serves its member on the end date itself', async () => {

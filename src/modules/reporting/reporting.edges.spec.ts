@@ -128,7 +128,7 @@ describe('the Owner’s reporting at its edges', () => {
       // This year has nothing held yet, so the year to date is nobody's.
       expect(december.total.apeAnnual.achievedMinor).toBeNull();
       const moc = december.agencies[0].moc!;
-      expect(moc.criteria.find((c) => c.code === 'MONTHLY2_AA_DU')).toMatchObject({ period: 'Nov and Dec 2026', current: 1 });
+      expect(moc.criteria.find((c) => c.code === 'MONTHLY2_AA_DU')).toMatchObject({ period: 'Nov and Des 2026', current: 1 });
       expect(moc.criteria.find((c) => c.code === 'NET_APE')).toMatchObject({ period: '2027', current: null });
       // A member with no goal for the year is measured against no target, whatever the month.
       const lone = await wired.kpmAnalytics.read(owner, { period: 'this_month' });

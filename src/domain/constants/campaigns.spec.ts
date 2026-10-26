@@ -32,7 +32,7 @@ describe('the campaigns’ constants (Phase 18.5, §B.22)', () => {
       .toBe('Chasing MDRT (Million Dollar Round Table) this year. No MDRT campaign is running.');
     expect(RESERVED_CAMPAIGN_CODES).toEqual(['CHASING']);
     expect(CAMPAIGN_DURATION_WORDS).toEqual({
-      calendar_year: 'Standing — evaluated per calendar year (Jan 1 – Dec 31)',
+      calendar_year: 'Standing — evaluated per calendar year (1 Jan – 31 Des)',
       rolling_12m: 'Rolling 12-month window',
     });
   });

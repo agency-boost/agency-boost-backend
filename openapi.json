@@ -15259,7 +15259,7 @@
             "name": "budget",
             "required": true,
             "in": "query",
-            "description": "*Monthly premium budget*: 1 is < Rp500K, 7 is Lump-sum.",
+            "description": "*Monthly premium budget*: 1 is < Rp 500 rb, 7 is Lump-sum.",
             "schema": {
               "enum": [
                 1,
@@ -30621,7 +30621,7 @@
           },
           "budgetBands": {
             "example": [
-              "Rp2M–Rp5M"
+              "Rp 2 jt–Rp 5 jt"
             ],
             "description": "The monthly budget bands it is eligible for, by label.",
             "type": "array",
@@ -30725,7 +30725,7 @@
             "type": "number",
             "minimum": 1,
             "maximum": 7,
-            "description": "The monthly budget band, 1 (< Rp500K) to 7 (Lump-sum)."
+            "description": "The monthly budget band, 1 (< Rp 500 rb) to 7 (Lump-sum)."
           }
         },
         "required": [
@@ -33022,7 +33022,7 @@
           },
           "duration": {
             "type": "string",
-            "description": "Composed in the office’s calendar — *Jul 1 – Sep 30, 2026* — or the window’s own words: *Rolling 12-month window*, *Standing — evaluated per calendar year (Jan 1 – Dec 31)*."
+            "description": "Composed in the office’s calendar — *1 Jul – 30 Sep 2026* — or the window’s own words: *Rolling 12-month window*, *Standing — evaluated per calendar year (1 Jan – 31 Des)*."
           },
           "poster": {
             "$ref": "#/components/schemas/AgentCampaignPosterDto"
@@ -33233,7 +33233,7 @@
         "properties": {
           "windowLabel": {
             "type": "string",
-            "description": "The months or days read: *Jul – Sep 2026*, *Oct 2025 – Sep 2026*."
+            "description": "The months or days read: *Jul – Sep 2026*, *Okt 2025 – Sep 2026*."
           },
           "final": {
             "type": "boolean",
@@ -33306,7 +33306,7 @@
           },
           "duration": {
             "type": "string",
-            "description": "Composed in the office’s calendar — *Jul 1 – Sep 30, 2026* — or the window’s own words: *Rolling 12-month window*, *Standing — evaluated per calendar year (Jan 1 – Dec 31)*."
+            "description": "Composed in the office’s calendar — *1 Jul – 30 Sep 2026* — or the window’s own words: *Rolling 12-month window*, *Standing — evaluated per calendar year (1 Jan – 31 Des)*."
           },
           "poster": {
             "$ref": "#/components/schemas/AgentCampaignPosterDto"
@@ -37432,7 +37432,7 @@
           },
           "tooltip": {
             "type": "string",
-            "example": "Chasing MDRT (Million Dollar Round Table) this year — APE of Rp 2.400.000.000 or more.",
+            "example": "Chasing MDRT (Million Dollar Round Table) this year — APE of Rp 2,4 M or more.",
             "description": "The header tooltip, composed from that campaign’s requirement, or saying none is running."
           }
         },
@@ -38850,7 +38850,7 @@
           },
           "period": {
             "type": "string",
-            "example": "Jan–Sep 2026",
+            "example": "Jan – Sep 2026",
             "description": "What it was read over."
           }
         },
@@ -39275,7 +39275,7 @@
           },
           "mocRulesText": {
             "type": "string",
-            "example": "AAB: Net APE ≥ Rp200M AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\nAB: (Net APE ≥ Rp600M AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.",
+            "example": "AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75,0%.\nAB: (Net APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75,0%) OR Direct AB (AB on AB) ≥ 5.",
             "description": "The MOC column’s tooltip, composed from the company’s MOC rules: a line per rule, the junior rung first, separated by `\\n`. Empty when the company has none."
           },
           "agencies": {

@@ -68,7 +68,7 @@ describe('the Unit Dashboard’s campaign parts (P18.5-T7)', () => {
 
   it('P18.5-T7 AC-7 the header tooltip is composed from the office’s MDRT campaign (ADR-0142 §3)', async () => {
     expect((await read('AGUS')).mdrt).toEqual({
-      running: true, tooltip: 'Chasing MDRT (Million Dollar Round Table) this year — APE of Rp 2.400.000.000 or more.',
+      running: true, tooltip: 'Chasing MDRT (Million Dollar Round Table) this year — APE of Rp 2,4 M or more.',
     });
     // A member leading nobody is answered an empty unit, the header's words all the same.
     expect((await read('RINA')).mdrt.running).toBe(true);

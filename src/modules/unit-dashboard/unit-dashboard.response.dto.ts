@@ -237,7 +237,7 @@ class UnitProductionStateDto {
 class UnitMdrtDto {
   @ApiProperty({ description: 'The agency’s `MDRT_QUALIFICATION` campaign is running now.' }) running!: boolean;
   @ApiProperty({
-    example: 'Chasing MDRT (Million Dollar Round Table) this year — APE of Rp 2.400.000.000 or more.',
+    example: 'Chasing MDRT (Million Dollar Round Table) this year — APE of Rp 2,4 M or more.',
     description: 'The header tooltip, composed from that campaign’s requirement, or saying none is running.',
   })
   tooltip!: string;

@@ -69,6 +69,9 @@ const config: Config = {
      * wrong date.
      */
     './src/common/time/': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    // **`common/format` is how every sentence the API composes writes a date, a sum or a percentage** (ADR-0167 §1),
+    // and it places an instant on the tenant's clock as `common/time` does: pinned with it, for the same reason.
+    './src/common/format/': { lines: 100, branches: 100, functions: 100, statements: 100 },
     // Business rules and constants: a silently wrong number is worse than a crash.
     //
     // `./src/domain/` alone used to stand for "business-rule modules", and it is sixteen
