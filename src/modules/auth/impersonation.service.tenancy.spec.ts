@@ -366,6 +366,91 @@ describe('ImpersonationService', () => {
   });
 
   /*
+   * ADR-0168 §4 (OD-211): **a double start is refused, not crashed.** Two starts by one Super Admin as the same
+   * person within one second sign the same token — `iat` is in seconds — so the second row's `tokenHash` met the
+   * unique index and the API answered `500`. It is `409 IMPERSONATION_JUST_STARTED` now, and writes nothing.
+   */
+  describe('a double start (ADR-0168 §4)', () => {
+    const Sessions = () => mongoose.model(ImpersonationSession.name);
+    const JUST_STARTED = 'A session as this person started a moment ago. Use that one, or wait a second and start again.';
+
+    /** An Agent in an office with an Owner, so one start tells two people: one round of notices is two. */
+    async function anAgentWithAnOwner() {
+      const ownerUser = await makeUser();
+      const kpm = await mongoose.model(Kpm.name).create({
+        companyId: 'c1', code: '0420', branchName: 'BSD', timezone: 'Asia/Jakarta', locale: 'id-ID', currency: 'IDR',
+        status: 'active', ownerUserId: String(ownerUser._id),
+      } as never) as unknown as { _id: unknown };
+      const target = await makeUser();
+      await mongoose.model(Membership.name).create({
+        kpmId: String(kpm._id), userId: String(target._id), role: 'agent', status: 'active', agentCode: 'A1',
+        agentSeq: 1, orgLevelId: 'level-agent', orgLevelCode: 'AGENT', leaderCode: `LC${Math.floor(Math.random() * 100000)}`,
+      } as never);
+      return String(target._id);
+    }
+
+    // The unique index the collision meets, built before either start rather than racing them.
+    beforeEach(async () => { await Sessions().init(); });
+
+    it('answers the second start in the same second 409, and writes no row, no entry and no notice for it', async () => {
+      const target = await anAgentWithAnOwner();
+      const before = notified.length;
+
+      const first = await service.start(superAdmin, target, 'Ticket 42');
+      const round = notified.length - before;
+      expect(round).toBe(2);
+
+      const refused = await service.start(superAdmin, target, 'Ticket 42').catch((e) => e);
+      expect(refused).toMatchObject({ code: 'IMPERSONATION_JUST_STARTED' });
+      expect(refused.getStatus()).toBe(409);
+      expect(refused.message).toBe(JUST_STARTED);
+
+      expect(await Sessions().countDocuments({})).toBe(1);
+      expect(await mongoose.model(AuditLog.name).countDocuments({ action: 'impersonation.started' })).toBe(1);
+      expect(notified.length - before).toBe(round);
+      // The first session is untouched, and still the one to use.
+      expect((await service.liveSession(first.accessToken))?.get('_id').toString()).toBe(first.sessionId);
+    });
+
+    it('collides whatever the second start asks for: its reason and its kind are not in the token', async () => {
+      const owner = await makeUser();
+      await mongoose.model(Kpm.name).create({
+        companyId: 'c1', code: '0421', branchName: 'BSD', timezone: 'Asia/Jakarta', status: 'active',
+        ownerUserId: String(owner._id),
+      } as never);
+
+      await service.start(superAdmin, String(owner._id), 'Ticket 42');
+      await expect(service.start(superAdmin, String(owner._id), 'Setting up', 60, 'setup'))
+        .rejects.toMatchObject({ code: 'IMPERSONATION_JUST_STARTED' });
+      expect(await Sessions().countDocuments({})).toBe(1);
+    });
+
+    it('starts again a second later, as the message says', async () => {
+      const target = await anAgentWithAnOwner();
+      await service.start(superAdmin, target, 'Ticket 42');
+      clock.advance(1000);
+      await expect(service.start(superAdmin, target, 'Ticket 42')).resolves.toMatchObject({ readOnly: true });
+      expect(await Sessions().countDocuments({})).toBe(2);
+    });
+
+    it('lets every other failure of the write through as it was: another index\'s collision, or no database', async () => {
+      const target = await anAgentWithAnOwner();
+      const otherIndex = Object.assign(new Error('E11000 duplicate key'), { code: 11000, keyPattern: { other: 1 } });
+      const down = new Error('connection closed');
+      const create = jest.spyOn(Sessions(), 'create')
+        .mockRejectedValueOnce(otherIndex as never)
+        .mockRejectedValueOnce(down as never);
+      try {
+        await expect(service.start(superAdmin, target, 'Ticket 42')).rejects.toBe(otherIndex);
+        await expect(service.start(superAdmin, target, 'Ticket 42')).rejects.toBe(down);
+      } finally {
+        create.mockRestore();
+      }
+      expect(await mongoose.model(AuditLog.name).countDocuments({ action: 'impersonation.started' })).toBe(0);
+    });
+  });
+
+  /*
    * ADR-0162 (P18.9-T1 AC-1, AC-4, AC-6): **a setup session** — for an active office's Owner or one of its
    * Admins, read-only with the setup screens' permissions as its scope, started by one Super Admin alone.
    */

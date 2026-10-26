@@ -220,19 +220,18 @@ export class AuthService {
    * refresh token was stolen: the legitimate client and the attacker both hold a
    * descendant of the same family. We cannot tell which is which, so the whole family
    * is revoked and both must sign in again.
+   *
+   * **Every refusal here is one answer, `401 AUTH_SESSION_ENDED`** (ADR-0168 §1): a token was presented, so this
+   * browser had a session, and it has ended — whether the token is unknown or malformed, spent, revoked or
+   * expired. Which of those it was stays here, in the log and the family's `revokedReason`; the answer says only
+   * *ended*. A refresh with no token at all never reaches this (`AuthController.refreshTokenFrom`).
    */
   async refresh(rawToken: string, meta: Meta = {}): Promise<TokenPair> {
     const record = await this.tokens
       .findOne({ tokenHash: this.passwords.hashToken(rawToken), kind: 'refresh' })
       .exec();
 
-    if (!record) {
-      throw new DomainException(
-        ErrorCode.AUTH_TOKEN_INVALID,
-        'Your session is no longer valid. Sign in again.',
-        HttpStatus.UNAUTHORIZED,
-      );
-    }
+    if (!record) throw sessionEnded();
 
     if (record.usedAt || record.revokedAt) {
       await this.revokeFamily(record.familyId, 'refresh token reuse detected');
@@ -240,20 +239,10 @@ export class AuthService {
         { userId: record.userId, familyId: record.familyId },
         'refresh token reuse — family revoked',
       );
-      throw new DomainException(
-        ErrorCode.AUTH_TOKEN_INVALID,
-        'Your session is no longer valid. Sign in again.',
-        HttpStatus.UNAUTHORIZED,
-      );
+      throw sessionEnded();
     }
 
-    if (record.expiresAt.getTime() <= this.clock.now().getTime()) {
-      throw new DomainException(
-        ErrorCode.AUTH_TOKEN_EXPIRED,
-        'Your session has expired. Sign in again.',
-        HttpStatus.UNAUTHORIZED,
-      );
-    }
+    if (record.expiresAt.getTime() <= this.clock.now().getTime()) throw sessionEnded();
 
     record.usedAt = this.clock.now();
     await record.save();
@@ -553,4 +542,16 @@ export class AuthService {
     await record.save();
     return record;
   }
+}
+
+/**
+ * A presented refresh token that no longer works, whatever the reason (ADR-0168 §1): one code and one sentence, so
+ * the answer discloses that the session ended and not whether it expired, was revoked or was reused.
+ */
+function sessionEnded(): DomainException {
+  return new DomainException(
+    ErrorCode.AUTH_SESSION_ENDED,
+    'Your session ended. Sign in again.',
+    HttpStatus.UNAUTHORIZED,
+  );
 }

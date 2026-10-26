@@ -70,6 +70,17 @@ const ORIGIN_REFUSED_RESPONSE = {
   type: ApiErrorEnvelope,
 };
 
+/**
+ * What `/auth/refresh` answers when it cannot refresh (ADR-0168 §1), in its description rather than as a declared
+ * `401`: a public route declares none (`openapi.spec.ts`, AC-3), as `/auth/login` declares none for a wrong password.
+ * Two codes, because the browser tells a reader whose session ended from one who never had one by them, and nothing
+ * more.
+ */
+const REFRESH_REFUSED =
+  'A refusal is `401`. `AUTH_TOKEN_INVALID`: no refresh token at all, in the cookie or the body — there is no '
+  + 'session to refresh. `AUTH_SESSION_ENDED`: a refresh token was presented and no longer works — unknown or '
+  + 'malformed, expired, revoked or already rotated away; which of them is not said.';
+
 /** What `/auth/login` answers a page on a foreign origin (P18.7-T1), cookie or not. */
 const LOGIN_ORIGIN_REFUSED_RESPONSE = {
   status: HttpStatus.FORBIDDEN,
@@ -133,7 +144,14 @@ export class AuthController {
     res.clearCookie(REFRESH_COOKIE, this.refreshCookieOptions());
   }
 
-  /** Cookie first; an explicit body value is accepted for non-browser clients. */
+  /**
+   * Cookie first; an explicit body value is accepted for non-browser clients.
+   *
+   * **No token at all is `AUTH_TOKEN_INVALID`, and only that** (ADR-0168 §1): there was no session to refresh — a
+   * browser that never signed in, or one whose cookie a sign-out cleared. Any token that *is* presented goes on to
+   * `AuthService.refresh`, malformed or not, and a refusal there is `AUTH_SESSION_ENDED`: this browser had a
+   * session, and it ended.
+   */
   private refreshTokenFrom(req: Request, body?: RefreshDto): string {
     const fromCookie = (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
     const token = fromCookie ?? body?.refreshToken;
@@ -262,7 +280,7 @@ export class AuthController {
     summary: 'Rotate the refresh token',
     description:
       'Presenting a token that was already rotated revokes the whole family — the ' +
-      'standard signal that a refresh token was stolen.',
+      `standard signal that a refresh token was stolen. ${REFRESH_REFUSED}`,
   })
   // Stated because a failure is: Swagger drops the success it would infer once any response is declared.
   @ApiResponse({ status: HttpStatus.OK, description: '', type: AccessTokenDto })

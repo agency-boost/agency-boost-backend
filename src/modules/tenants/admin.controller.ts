@@ -7,6 +7,8 @@ import {
   AllowWhileOfficeUnavailable, AllowWhileReadOnly, Ctx, RequirePermission,
 } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
+import { DomainException } from '@/common/errors/domain.exception';
+import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditReadService } from '@/modules/audit/audit-read.service';
 import { ElevateImpersonationDto, ImpersonateDto } from '@/modules/auth/auth.dto';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
@@ -255,8 +257,9 @@ export class AdminController {
       'The only way an office comes into existence — there is no self-service path ' +
       '(ADR-0005). Seeds the per-office settings every prototype screen hardcodes, and its ' +
       'configuration from `startFrom` (ADR-0115): one of the company\'s active templates, the ' +
-      'Template library\'s (`templateLibrary`, ADR-0164), the AgencyBoost defaults, or empty — the ' +
-      'company\'s default template when absent. There is no ' +
+      'Template library\'s (`templateLibrary`, ADR-0164), or empty — the company\'s default template ' +
+      'when absent. `kind: \'defaults\'` is refused 400 VALIDATION_FAILED, `details.field: ' +
+      '\'startFrom.kind\'`: the Template\'s Default template holds the AgencyBoost defaults (ADR-0168 §2). There is no ' +
       'fallback: a kind the source holds none of is empty in the office, and every office has the ' +
       'three cascade activity types. The whole source is checked before the office is written, so ' +
       'a refusal (400, naming what is broken; 404 for a template that is not the company\'s; 409 ' +
@@ -264,7 +267,28 @@ export class AdminController {
       'nothing behind. The Template library itself holds no office: 409 COMPANY_IS_TEMPLATE_LIBRARY.',
   })
   async createTenant(@Ctx() ctx: RequestContext, @Body() dto: CreateKpmDto) {
+    this.refuseTheDefaults(dto);
     return this.tenants.createKpm(ctx, dto);
+  }
+
+  /**
+   * **No office is started from the AgencyBoost defaults through this route** (ADR-0168 §2). The Template's
+   * Default template holds them as data the Super Admin edits, and one editable source is what keeps the two
+   * from drifting apart unseen.
+   *
+   * Refused here, at the request, and nowhere deeper: `ProvisioningService.planFor` keeps its `defaults` source
+   * — the code's own starting point, `platformDefaultPayload`, which migration `0037` builds the Template from —
+   * for the callers that are not a request. `StartFromDto` still admits the value, so the refusal names the field
+   * and says what to choose instead rather than reading as an unknown enum member.
+   */
+  private refuseTheDefaults(dto: CreateKpmDto): void {
+    if (dto.startFrom?.kind !== 'defaults') return;
+    throw new DomainException(
+      ErrorCode.VALIDATION_FAILED,
+      'Start from a template — the Template’s Default template holds the AgencyBoost defaults — or Empty.',
+      HttpStatus.BAD_REQUEST,
+      { field: 'startFrom.kind' },
+    );
   }
 
   // ---- Filling a new office from a spreadsheet (P3.6-T4). ----
@@ -557,7 +581,9 @@ export class AdminController {
       'Admin — that would erase the attribution the feature depends on. Read-only, unless ' +
       '`purpose` is `setup`: then it may also write the office\'s settings, its people import ' +
       'and its production file, and nothing else, without a second Super Admin — for an ' +
-      'active office\'s Owner or one of its Admins only (`409 IMPERSONATION_SETUP_TARGET`).',
+      'active office\'s Owner or one of its Admins only (`409 IMPERSONATION_SETUP_TARGET`). A second start ' +
+      'as the same person within one second would sign the same token, and is refused ' +
+      '(`409 IMPERSONATION_JUST_STARTED`) with nothing written.',
   })
   async impersonate(
     @Ctx() ctx: RequestContext,

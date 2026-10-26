@@ -8,6 +8,7 @@ import { PasswordService } from '@/modules/auth/password.service';
 import { Hs256TokenSigner } from '@/modules/auth/token-signer';
 import { OFFICE_TEMPLATE_KINDS, platformDefaultPayload } from '@/modules/config/template-defaults';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
+import { Membership } from '@/modules/org/membership.schema';
 import { MembershipHistory, MembershipHistorySchema } from '@/modules/org/membership-history.schema';
 import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
 import { up as templateCompany } from '@/migrations/0037-template-company';
@@ -15,6 +16,7 @@ import { configModule } from '../../../test/config-module';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { KpmRequest, KpmRequestSchema } from './kpm-request.schema';
 import { KpmRequestService } from './kpm-request.service';
+import { OrgLevelService } from './org-level.service';
 import { TEMPLATE_LIBRARY } from './template-library';
 import { TenantService } from './tenant.service';
 
@@ -370,6 +372,96 @@ describe('P18.9-T3 the Template library (ADR-0164)', () => {
       await publishInLibrary('activity_taxonomy', renamedTaxonomy('Changed'));
 
       expect(await snapshot()).toEqual(before);
+    });
+  });
+
+  /*
+   * **ADR-0168 §3 (OD-210) — the Template's ladder is edited on `/admin/org-levels`**, as every company's is. The
+   * reads carry it, every write takes it, a tier change is never refused for members — it has no offices — and a
+   * company made afterwards copies the ladder as it then stands, while one made before keeps its own copy (§6).
+   */
+  describe('ADR-0168 §3: its ladder, edited where every ladder is', () => {
+    /** The ladder service as the application wires it: with who stands on a rung, which a tier change asks. */
+    const ladders = () => new OrgLevelService(
+      mongoose.model('CompanyOrgLevelModelForConfig') as never, wired.companies as never, wired.kpms as never,
+      wired.audit, new FixedClock(NOW), wired.memberships,
+    );
+    /** A company's rungs as stored, junior first: code, label, order, tier and status. */
+    const ladderOf = async (companyId: string) =>
+      (await col('companyOrgLevels').find({ companyId, deletedAt: null }).sort({ displayOrder: 1 }).toArray())
+        .map((r) => [r.code, r.label, r.displayOrder, r.leaderTier ?? null, r.status]);
+
+    it('is read with the insurers’ ladders, whole or by company, beside its kind on /admin/companies', async () => {
+      const insurer = String((await prudential())._id);
+      const all = await ladders().list(SA);
+      expect(all.filter((r) => r.companyId === LIBRARY).map((r) => [r.code, r.leaderTier]))
+        .toEqual(DEFAULT_ORG_LADDER.map((r) => [r.code, r.leaderTier]));
+      expect(all.some((r) => r.companyId === insurer)).toBe(true);
+      expect((await ladders().list(SA, LIBRARY)).map((r) => r.companyId)).toEqual(Array(DEFAULT_ORG_LADDER.length).fill(LIBRARY));
+      expect((await tenants.listCompanies(SA)).find((c) => String(c._id) === LIBRARY)).toMatchObject({ kind: 'template' });
+    });
+
+    it('takes every write: a rung added, renamed, reordered, given a tier, archived and restored, each audited', async () => {
+      const service = ladders();
+      let ladder = await service.create(SA, { companyId: LIBRARY, code: 'sm', label: 'SM', displayOrder: 9 });
+      const sm = ladder.find((r) => r.code === 'SM')!;
+      expect(sm).toMatchObject({ companyId: LIBRARY, label: 'SM', displayOrder: 9, leaderTier: null, status: 'active' });
+
+      ladder = await service.update(SA, sm.orgLevelId, { label: 'Senior Manager', displayOrder: 4, leaderTier: 'senior' });
+      expect(ladder.find((r) => r.code === 'SM')).toMatchObject({ label: 'Senior Manager', displayOrder: 4, leaderTier: 'senior' });
+      ladder = await service.update(SA, sm.orgLevelId, { status: 'archived' });
+      expect(ladder.find((r) => r.code === 'SM')).toMatchObject({ status: 'archived', archivedAt: NOW.toISOString() });
+      ladder = await service.update(SA, sm.orgLevelId, { status: 'active' });
+      expect(ladder.find((r) => r.code === 'SM')).toMatchObject({ status: 'active', archivedAt: null });
+
+      const actions = await col('auditLog').find({ targetCollection: 'companyOrgLevels', targetId: sm.orgLevelId })
+        .sort({ _id: 1 }).toArray();
+      expect(actions.map((a) => a.action)).toEqual(['org_level.created', 'org_level.updated', 'org_level.archived', 'org_level.updated']);
+    });
+
+    it('changes a tier with no refusal: nobody stands on its rungs, even where an insurer’s copy of the rung is held', async () => {
+      const insurer = String((await prudential())._id);
+      // Somebody on Prudential's AAB, the copy: a rung of its own, with its own id.
+      const copy = await col('companyOrgLevels').findOne({ companyId: insurer, code: 'AAB' });
+      await mongoose.model(Membership.name).create({
+        kpmId: '66f0000000000000000000a1', userId: 'u-1', agentCode: '1001', agentSeq: 1, leaderCode: 'LC1',
+        orgLevelId: String(copy!._id), orgLevelCode: 'AAB', role: 'aab', status: 'active',
+      });
+      const service = ladders();
+      const aab = (await service.list(SA, LIBRARY)).find((r) => r.code === 'AAB')!;
+
+      const ladder = await service.update(SA, aab.orgLevelId, { leaderTier: null });
+      expect(ladder.find((r) => r.code === 'AAB')).toMatchObject({ leaderTier: null });
+      // The insurer's copy is untouched, and its member with it.
+      expect(await col('companyOrgLevels').findOne({ _id: copy!._id })).toMatchObject({ leaderTier: 'associate' });
+      // That copy's tier, by contrast, is refused while its member stands on it.
+      await expect(service.update(SA, String(copy!._id), { leaderTier: null })).rejects.toMatchObject({
+        status: 409, response: { code: 'ORG_LEVEL_TIER_IN_USE', details: { members: 1 } },
+      });
+    });
+
+    it('a company made afterwards copies the ladder as it then stands; one made before keeps its own copy (ADR-0164 §6)', async () => {
+      const before = String((await prudential())._id);
+      const beforeLadder = await ladderOf(before);
+
+      const service = ladders();
+      const library = await service.list(SA, LIBRARY);
+      await service.update(SA, library.find((r) => r.code === 'AB')!.orgLevelId, { label: 'Agency Builder' });
+      await service.update(SA, library.find((r) => r.code === 'AAB')!.orgLevelId, { leaderTier: null });
+      await service.create(SA, { companyId: LIBRARY, code: 'SM', label: 'Senior Manager', displayOrder: 4, leaderTier: 'senior' });
+      // An archived rung is the Template's history, not a rung to copy.
+      const [um] = (await service.create(SA, { companyId: LIBRARY, code: 'UM', label: 'Unit Manager', displayOrder: 5 }))
+        .filter((r) => r.code === 'UM');
+      await service.update(SA, um.orgLevelId, { status: 'archived' });
+
+      const after = String((await tenants.createCompany(SA, { name: 'Allianz Life', slug: 'allianz-life' }))._id);
+      expect(await ladderOf(after)).toEqual([
+        ['AGENT', DEFAULT_ORG_LADDER[0].label, 1, null, 'active'],
+        ['AAB', DEFAULT_ORG_LADDER[1].label, 2, null, 'active'],
+        ['AB', 'Agency Builder', 3, 'senior', 'active'],
+        ['SM', 'Senior Manager', 4, 'senior', 'active'],
+      ]);
+      expect(await ladderOf(before)).toEqual(beforeLadder);
     });
   });
 

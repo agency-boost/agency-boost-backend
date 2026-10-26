@@ -221,26 +221,44 @@ export class ImpersonationService {
      * guard can ask one indexed question and only for the rare request that carries an
      * `imp:` session.
      */
-    const session = await this.sessions.create({
-      realActorUserId: ctx.userId,
-      effectiveUserId: targetUserId,
-      kpmId,
-      tokenHash: this.passwords.hashToken(accessToken),
-      // Read-only until a *second* Super Admin says otherwise. The operator who wants to
-      // write is not the one who decides they may — except the setup screens' own
-      // permissions, which a setup session names here (ADR-0162 §2).
-      readOnly: true,
-      purpose,
-      writeScope,
-      elevatedByUserId: null,
-      elevatedAt: null,
-      reason: reason.trim(),
-      elevationReason: null,
-      startedAt: this.clock.now(),
-      expiresAt,
-      endedAt: null,
-      deletedAt: null,
-    });
+    /*
+     * **A double start is refused, not crashed** (ADR-0168 §4). Two starts by one Super Admin as the same person
+     * within one second sign the same token (`iat` is in seconds), so this row's `tokenHash` meets the first's
+     * unique index. Only that collision is answered `409`; anything else is still thrown as it was. The row comes
+     * before the audit entry and the notices, so a refused start has written nothing.
+     */
+    let session: ImpersonationSessionDocument;
+    try {
+      session = await this.sessions.create({
+        realActorUserId: ctx.userId,
+        effectiveUserId: targetUserId,
+        kpmId,
+        tokenHash: this.passwords.hashToken(accessToken),
+        // Read-only until a *second* Super Admin says otherwise. The operator who wants to
+        // write is not the one who decides they may — except the setup screens' own
+        // permissions, which a setup session names here (ADR-0162 §2).
+        readOnly: true,
+        purpose,
+        writeScope,
+        elevatedByUserId: null,
+        elevatedAt: null,
+        reason: reason.trim(),
+        elevationReason: null,
+        startedAt: this.clock.now(),
+        expiresAt,
+        endedAt: null,
+        deletedAt: null,
+      });
+    } catch (err) {
+      if (isDuplicateTokenHash(err)) {
+        throw new DomainException(
+          ErrorCode.IMPERSONATION_JUST_STARTED,
+          'A session as this person started a moment ago. Use that one, or wait a second and start again.',
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw err;
+    }
 
     const sessionId = String(session._id);
     /*
@@ -414,4 +432,14 @@ export class ImpersonationService {
       });
     }
   }
+}
+
+/**
+ * Mongo's duplicate-key error (`E11000`) on the session's `tokenHash` index, and nothing else: another index, or any
+ * other failure, is not a start that collided with one a moment ago.
+ */
+function isDuplicateTokenHash(err: unknown): boolean {
+  const e = err as { code?: number; keyPattern?: Record<string, unknown>; keyValue?: Record<string, unknown> } | null;
+  if (e?.code !== 11000) return false;
+  return Boolean(e.keyPattern && 'tokenHash' in e.keyPattern) || Boolean(e.keyValue && 'tokenHash' in e.keyValue);
 }

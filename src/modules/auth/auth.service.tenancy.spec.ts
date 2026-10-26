@@ -250,13 +250,13 @@ describe('AuthService', () => {
 
       // The attacker replays the token the legitimate client already spent.
       await expect(service.refresh(first.refreshToken)).rejects.toMatchObject({
-        code: 'AUTH_TOKEN_INVALID',
+        code: 'AUTH_SESSION_ENDED',
       });
 
       // And the legitimate client's current token dies too — we cannot tell which
       // party is which, so both must sign in again.
       await expect(service.refresh(second.refreshToken)).rejects.toMatchObject({
-        code: 'AUTH_TOKEN_INVALID',
+        code: 'AUTH_SESSION_ENDED',
       });
     });
 
@@ -277,13 +277,13 @@ describe('AuthService', () => {
       const pair = await service.login(email, PASSWORD);
       clock.set(new Date(NOW.getTime() + 31 * 86_400_000));
       await expect(service.refresh(pair.refreshToken)).rejects.toMatchObject({
-        code: 'AUTH_TOKEN_EXPIRED',
+        code: 'AUTH_SESSION_ENDED',
       });
     });
 
     it('rejects an unknown token', async () => {
       await expect(service.refresh('never-issued')).rejects.toMatchObject({
-        code: 'AUTH_TOKEN_INVALID',
+        code: 'AUTH_SESSION_ENDED',
       });
     });
   });
@@ -294,7 +294,7 @@ describe('AuthService', () => {
       const pair = await service.login(email, PASSWORD);
       await service.logout(pair.refreshToken);
       await expect(service.refresh(pair.refreshToken)).rejects.toMatchObject({
-        code: 'AUTH_TOKEN_INVALID',
+        code: 'AUTH_SESSION_ENDED',
       });
     });
 
@@ -307,7 +307,36 @@ describe('AuthService', () => {
       await service.logoutAll(String(user!._id));
 
       for (const pair of [a, b]) {
-        await expect(service.refresh(pair.refreshToken)).rejects.toBeDefined();
+        await expect(service.refresh(pair.refreshToken)).rejects.toMatchObject({ code: 'AUTH_SESSION_ENDED' });
+      }
+    });
+
+    /*
+     * ADR-0168 §1: **a presented token that no longer works is one answer**, `401 AUTH_SESSION_ENDED`, whichever
+     * reason it is — so the browser can say the session ended, and nobody can learn from the answer whether a
+     * token was revoked, reused or simply old.
+     */
+    it('ADR-0168 §1 answers every presented-but-dead token alike: unknown, malformed, spent, signed out everywhere, expired', async () => {
+      const email = await verifiedUser();
+      const user = await mongoose.model(User.name).findOne({ email });
+      const spent = await service.login(email, PASSWORD);
+      await service.refresh(spent.refreshToken);
+      const everywhere = await service.login(email, PASSWORD);
+      await service.logoutAll(String(user!._id));
+      const old = await service.login(email, PASSWORD);
+
+      const refusals = [];
+      for (const token of ['never-issued', '%%%not-a-token%%%', spent.refreshToken, everywhere.refreshToken]) {
+        refusals.push(await service.refresh(token).catch((e) => e));
+      }
+      clock.set(new Date(NOW.getTime() + 31 * 86_400_000));
+      refusals.push(await service.refresh(old.refreshToken).catch((e) => e));
+
+      for (const refused of refusals) {
+        expect(refused).toMatchObject({ code: 'AUTH_SESSION_ENDED' });
+        expect(refused.getStatus()).toBe(401);
+        expect(refused.message).toBe('Your session ended. Sign in again.');
+        expect(refused.details).toBeUndefined();
       }
     });
 

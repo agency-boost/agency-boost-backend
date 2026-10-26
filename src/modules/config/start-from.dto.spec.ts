@@ -33,6 +33,7 @@ describe('P18.9-T3 StartFromDto — the Template library', () => {
   });
 
   it('leaves the other sources as they were', async () => {
+    // Admitted by the DTO, so the route can refuse it by name (ADR-0168 §2; `create-kpm-start-from.int.spec.ts`).
     expect(await refused({ kind: 'defaults' })).toEqual([]);
     expect(await refused({ kind: 'empty' })).toEqual([]);
     expect(await refused({ kind: 'template', templateId: ID })).toEqual([]);

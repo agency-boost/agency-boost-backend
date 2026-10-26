@@ -2132,7 +2132,7 @@
     },
     "/api/v1/auth/refresh": {
       "post": {
-        "description": "Presenting a token that was already rotated revokes the whole family — the standard signal that a refresh token was stolen.",
+        "description": "Presenting a token that was already rotated revokes the whole family — the standard signal that a refresh token was stolen. A refusal is `401`. `AUTH_TOKEN_INVALID`: no refresh token at all, in the cookie or the body — there is no session to refresh. `AUTH_SESSION_ENDED`: a refresh token was presented and no longer works — unknown or malformed, expired, revoked or already rotated away; which of them is not said.",
         "operationId": "AuthController_refresh_v1",
         "parameters": [],
         "requestBody": {
@@ -3837,7 +3837,7 @@
         "description": "**Requires `kpm:list_all`.** See `docs/00-product/roles-and-permissions.md`."
       },
       "post": {
-        "description": "The only way an office comes into existence — there is no self-service path (ADR-0005). Seeds the per-office settings every prototype screen hardcodes, and its configuration from `startFrom` (ADR-0115): one of the company's active templates, the Template library's (`templateLibrary`, ADR-0164), the AgencyBoost defaults, or empty — the company's default template when absent. There is no fallback: a kind the source holds none of is empty in the office, and every office has the three cascade activity types. The whole source is checked before the office is written, so a refusal (400, naming what is broken; 404 for a template that is not the company's; 409 TEMPLATE_RUNG_UNKNOWN for a library template naming a role the company's ladder lacks) leaves nothing behind. The Template library itself holds no office: 409 COMPANY_IS_TEMPLATE_LIBRARY.\n\n**Requires `kpm:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The only way an office comes into existence — there is no self-service path (ADR-0005). Seeds the per-office settings every prototype screen hardcodes, and its configuration from `startFrom` (ADR-0115): one of the company's active templates, the Template library's (`templateLibrary`, ADR-0164), or empty — the company's default template when absent. `kind: 'defaults'` is refused 400 VALIDATION_FAILED, `details.field: 'startFrom.kind'`: the Template's Default template holds the AgencyBoost defaults (ADR-0168 §2). There is no fallback: a kind the source holds none of is empty in the office, and every office has the three cascade activity types. The whole source is checked before the office is written, so a refusal (400, naming what is broken; 404 for a template that is not the company's; 409 TEMPLATE_RUNG_UNKNOWN for a library template naming a role the company's ladder lacks) leaves nothing behind. The Template library itself holds no office: 409 COMPANY_IS_TEMPLATE_LIBRARY.\n\n**Requires `kpm:create`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_createTenant_v1",
         "parameters": [],
         "requestBody": {
@@ -5195,7 +5195,7 @@
     },
     "/api/v1/admin/impersonate/{userId}": {
       "post": {
-        "description": "Time-boxed to an hour, reason required, and every action it produces records both the real Super Admin and the person acted as. Refused for another Super Admin — that would erase the attribution the feature depends on. Read-only, unless `purpose` is `setup`: then it may also write the office's settings, its people import and its production file, and nothing else, without a second Super Admin — for an active office's Owner or one of its Admins only (`409 IMPERSONATION_SETUP_TARGET`).\n\n**Requires `impersonation:start`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Time-boxed to an hour, reason required, and every action it produces records both the real Super Admin and the person acted as. Refused for another Super Admin — that would erase the attribution the feature depends on. Read-only, unless `purpose` is `setup`: then it may also write the office's settings, its people import and its production file, and nothing else, without a second Super Admin — for an active office's Owner or one of its Admins only (`409 IMPERSONATION_SETUP_TARGET`). A second start as the same person within one second would sign the same token, and is refused (`409 IMPERSONATION_JUST_STARTED`) with nothing written.\n\n**Requires `impersonation:start`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_impersonate_v1",
         "parameters": [
           {
@@ -27860,10 +27860,9 @@
             "type": "string",
             "enum": [
               "template",
-              "defaults",
               "empty"
             ],
-            "description": "`template`: one of the company’s active templates, named by `templateId` — or, with `templateLibrary`, one of the Template library’s. `defaults`: the AgencyBoost defaults. `empty`: nothing but the three cascade activity types."
+            "description": "`template`: one of the company’s active templates, named by `templateId` — or, with `templateLibrary`, one of the Template library’s, *Template · Default template*, which holds the AgencyBoost defaults. `empty`: nothing but the three cascade activity types. `defaults` is refused 400 VALIDATION_FAILED, `details.field: startFrom.kind` (ADR-0168 §2)."
           },
           "templateId": {
             "type": "string",

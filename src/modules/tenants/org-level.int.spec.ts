@@ -175,6 +175,27 @@ describe('POST and PATCH /admin/org-levels — the leader tier (P18.8-T1)', () =
     ]);
   });
 
+  /*
+   * ADR-0168 §3: the Template library's ladder is edited here, as every company's. It holds no office, so nobody
+   * stands on its rungs and a tier change is never refused; the read carries its rungs with everybody else's.
+   */
+  it('ADR-0168 §3 takes every write on the Template library’s rungs, and reads them with the rest', async () => {
+    const library = String((await companies.create({ name: 'Template', slug: 'template', kind: 'template' }))._id);
+    const [agent] = (await add({ companyId: library, code: 'AGENT', label: 'Agent', displayOrder: 1 }).expect(201)).body;
+    expect(agent).toMatchObject({ companyId: library, code: 'AGENT', leaderTier: null });
+
+    let res = await patch(agent.orgLevelId, { label: 'Agen', displayOrder: 2, leaderTier: 'associate' }).expect(200);
+    expect(rungOf(res.body, 'AGENT')).toMatchObject({ label: 'Agen', displayOrder: 2, leaderTier: 'associate' });
+    res = await patch(agent.orgLevelId, { status: 'archived' }).expect(200);
+    expect(rungOf(res.body, 'AGENT')).toMatchObject({ status: 'archived' });
+
+    await add({ code: 'AGENT' }).expect(201);
+    const all = await api().get('/api/admin/org-levels').expect(200);
+    expect(all.body.map((l: { companyId: string }) => l.companyId).sort()).toEqual([companyId, library].sort());
+    const only = await api().get(`/api/admin/org-levels?companyId=${library}`).expect(200);
+    expect(only.body.map((l: { code: string; label: string }) => [l.code, l.label])).toEqual([['AGENT', 'Agen']]);
+  });
+
   // The ladder is the company's (ADR-0012): every member of an office is refused, its Owner and Admins included.
   it.each(EVERY_MEMBER)('AC-2 refuses %s either route, 403', async (_label, who) => {
     const [rung] = (await add({ code: 'SM' }).expect(201)).body;

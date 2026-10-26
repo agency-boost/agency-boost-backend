@@ -124,14 +124,20 @@ export class TemplateQueryDto {
 /**
  * **Start from** (ADR-0115 §4): what a new office is built from. Absent on `POST /admin/tenants`, the
  * company's default template.
+ *
+ * **`defaults` is admitted here and refused by the route** (ADR-0168 §2): `AdminController.createTenant`
+ * answers it `400 VALIDATION_FAILED` with `details.field: 'startFrom.kind'` and a sentence saying what to
+ * choose instead, which an `@IsIn` without it could only have called an unknown value. The documented enum is
+ * what the route accepts.
  */
 export class StartFromDto {
   @ApiProperty({
-    enum: ['template', 'defaults', 'empty'],
+    enum: ['template', 'empty'],
     description:
       '`template`: one of the company’s active templates, named by `templateId` — or, with '
-      + '`templateLibrary`, one of the Template library’s. `defaults`: the AgencyBoost defaults. `empty`: '
-      + 'nothing but the three cascade activity types.',
+      + '`templateLibrary`, one of the Template library’s, *Template · Default template*, which holds the '
+      + 'AgencyBoost defaults. `empty`: nothing but the three cascade activity types. `defaults` is refused '
+      + '400 VALIDATION_FAILED, `details.field: startFrom.kind` (ADR-0168 §2).',
   })
   @IsIn(['template', 'defaults', 'empty'])
   kind!: 'template' | 'defaults' | 'empty';

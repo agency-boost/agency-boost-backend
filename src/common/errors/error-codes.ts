@@ -22,6 +22,14 @@ export const ErrorCode = {
    * no `Origin` (a server, curl) is not refused.
    */
   AUTH_ORIGIN_REFUSED: 'AUTH_ORIGIN_REFUSED',
+  /**
+   * `POST /auth/refresh` was **given a refresh token, and it no longer works** (ADR-0168 §1): unknown or malformed,
+   * expired, revoked (signed out, signed out everywhere, a password change) or already rotated away. `401`, one
+   * code and one message for all of them, so the answer says the session ended and nothing of why. The browser
+   * then knows this reader had a session — the sign-in page says *Your session ended. Sign in again.* A refresh
+   * with **no token at all** is still `AUTH_TOKEN_INVALID`: there was no session to end.
+   */
+  AUTH_SESSION_ENDED: 'AUTH_SESSION_ENDED',
 
   /*
    * Activity logging (P6). The catalog carried these four rows from an earlier phase and the
@@ -128,6 +136,13 @@ export const ErrorCode = {
    * the same person starts as before.
    */
   IMPERSONATION_SETUP_TARGET: 'IMPERSONATION_SETUP_TARGET',
+  /**
+   * A second start by the same Super Admin as the same person **within one second** (ADR-0168 §4): `iat` is in
+   * seconds, so the two tokens are identical and the second session row's `tokenHash` collides with the first's.
+   * `409`, and nothing is written for the second start — no row, no `impersonation.started`, no notice. It was a
+   * `500`.
+   */
+  IMPERSONATION_JUST_STARTED: 'IMPERSONATION_JUST_STARTED',
   TENANT_NO_MEMBERSHIP: 'TENANT_NO_MEMBERSHIP',
   TENANT_CODE_TAKEN: 'TENANT_CODE_TAKEN',
   /**

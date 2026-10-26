@@ -785,6 +785,42 @@ describe('auth and admin over HTTP', () => {
         .set({ Authorization: `Bearer ${started.body.accessToken}` }).expect(401);
     });
 
+    it('ADR-0168 §4: a second start as the same person in the same second is 409, not 500, and writes nothing', async () => {
+      /*
+       * `iat` is in seconds, so two starts by one Super Admin as one person within a second sign the same token,
+       * and the second row's `tokenHash` met the unique index: an `E11000` the API answered `500`. The clock is
+       * held still across the two requests, so they cannot straddle a second.
+       */
+      const sa = await makeUser(`sa-twice-${Math.random()}@agencyboost.test`, 'super_admin');
+      const target = await makeUser(`twice-target-${Math.random()}@kpm.test`);
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const sessions = app.get<Model<ImpersonationSessionDocument>>(getModelToken(ImpersonationSession.name));
+      // The unique index the collision meets, built before the two requests rather than racing them.
+      await sessions.syncIndexes();
+      const held = jest.spyOn(app.get(Clock), 'now').mockReturnValue(new Date());
+      try {
+        const first = await api().post(`/api/v1/admin/impersonate/${target.id}`)
+          .set(auth).send({ reason: 'Ticket 42' }).expect(201);
+        const refused = await api().post(`/api/v1/admin/impersonate/${target.id}`)
+          .set(auth).send({ reason: 'Ticket 42' }).expect(409);
+        expect(refused.body.error).toMatchObject({
+          code: 'IMPERSONATION_JUST_STARTED',
+          message: 'A session as this person started a moment ago. Use that one, or wait a second and start again.',
+        });
+
+        expect(await sessions.countDocuments({ effectiveUserId: target.id })).toBe(1);
+        const audit = app.get<Model<unknown>>(getModelToken(AuditLog.name));
+        expect(await audit.countDocuments({ action: 'impersonation.started', targetId: target.id })).toBe(1);
+        const notices = app.get<Model<NotificationDocument>>(getModelToken(Notification.name));
+        expect(await notices.countDocuments({ userId: target.id, templateId: 'impersonation.started' })).toBe(1);
+
+        // The first session is the one to use, and it works.
+        await api().get('/api/v1/auth/me').set({ Authorization: `Bearer ${first.body.accessToken}` }).expect(200);
+      } finally {
+        held.mockRestore();
+      }
+    });
+
     it('P4-T10: a session may look and not touch', async () => {
       /*
        * The control §3.13 described and the code did not honour. A session resolved the
@@ -1481,7 +1517,9 @@ describe('auth and admin over HTTP', () => {
       const auth = { Authorization: `Bearer ${user.accessToken}` };
 
       await api().post('/api/v1/auth/logout-all').set(auth).expect(204);
-      await api().post('/api/v1/auth/refresh').set('Cookie', user.refreshCookie).expect(401);
+      const refused = await api().post('/api/v1/auth/refresh').set('Cookie', user.refreshCookie).expect(401);
+      // A presented cookie that no longer works says the session ended (ADR-0168 §1).
+      expect(refused.body.error.code).toBe('AUTH_SESSION_ENDED');
     });
 
     it('AC-1: resends a verification email, and answers the same either way', async () => {
@@ -2991,11 +3029,73 @@ describe('auth and admin over HTTP', () => {
       expect(rotated.body.refreshToken).toBeUndefined();
 
       // Replaying the cookie the client already spent trips family revocation.
-      await api().post('/api/v1/auth/refresh').set('Cookie', user.refreshCookie).expect(401);
+      const replayed = await api().post('/api/v1/auth/refresh').set('Cookie', user.refreshCookie).expect(401);
+      expect(replayed.body.error.code).toBe('AUTH_SESSION_ENDED');
     });
 
     it('refuses a refresh with no cookie and no body', async () => {
-      await api().post('/api/v1/auth/refresh').expect(401);
+      const res = await api().post('/api/v1/auth/refresh').expect(401);
+      expect(res.body.error.code).toBe('AUTH_TOKEN_INVALID');
+    });
+
+    /*
+     * ADR-0168 §1 (OD-208; the client's UI review, UI-006): **a refresh tells a session that ended from none at
+     * all.** No token is `AUTH_TOKEN_INVALID`, as it always was; a token presented that no longer works — for any
+     * reason — is `AUTH_SESSION_ENDED`, one sentence, so the sign-in page can say the session ended and the answer
+     * says nothing of why.
+     */
+    describe('a session that ended, and none at all (ADR-0168 §1)', () => {
+      const ENDED = { code: 'AUTH_SESSION_ENDED', message: 'Your session ended. Sign in again.' };
+      const refreshWith = (cookie: string) => api().post('/api/v1/auth/refresh').set('Cookie', cookie).expect(401);
+
+      it('no token at all: AUTH_TOKEN_INVALID, an empty body token included', async () => {
+        const none = await api().post('/api/v1/auth/refresh').expect(401);
+        expect(none.body.error).toMatchObject({ code: 'AUTH_TOKEN_INVALID', message: 'No session to refresh. Sign in again.' });
+        const empty = await api().post('/api/v1/auth/refresh').send({ refreshToken: '' }).expect(401);
+        expect(empty.body.error.code).toBe('AUTH_TOKEN_INVALID');
+      });
+
+      it('a malformed or unknown cookie was still presented: AUTH_SESSION_ENDED, and a body token alike', async () => {
+        expect((await refreshWith('agencyboost_refresh=%%%not-a-token%%%')).body.error).toMatchObject(ENDED);
+        expect((await refreshWith('agencyboost_refresh=never-issued')).body.error).toMatchObject(ENDED);
+        const body = await api().post('/api/v1/auth/refresh').send({ refreshToken: 'never-issued' }).expect(401);
+        expect(body.body.error).toMatchObject(ENDED);
+      });
+
+      it('signed out everywhere: AUTH_SESSION_ENDED', async () => {
+        const user = await makeUser(`ended-everywhere-${Math.random()}@kpm.test`);
+        await api().post('/api/v1/auth/logout-all').set({ Authorization: `Bearer ${user.accessToken}` }).expect(204);
+        expect((await refreshWith(user.refreshCookie)).body.error).toMatchObject(ENDED);
+      });
+
+      it('expired: AUTH_SESSION_ENDED, the same sentence — the answer does not say which', async () => {
+        const user = await makeUser(`ended-expired-${Math.random()}@kpm.test`);
+        const later = jest.spyOn(app.get(Clock), 'now').mockReturnValue(new Date(Date.now() + 31 * 86_400_000));
+        try {
+          const res = await refreshWith(user.refreshCookie);
+          expect(res.body.error).toEqual({ ...ENDED, requestId: expect.any(String) });
+        } finally {
+          later.mockRestore();
+        }
+      });
+
+      it('a refused refresh clears no cookie, as before', async () => {
+        const user = await makeUser(`ended-cookie-${Math.random()}@kpm.test`);
+        await api().post('/api/v1/auth/logout-all').set({ Authorization: `Bearer ${user.accessToken}` }).expect(204);
+        const res = await refreshWith(user.refreshCookie);
+        expect(res.headers['set-cookie']).toBeUndefined();
+      });
+
+      it('a deliberate sign-out clears the cookie, so the browser\'s next refresh has none: AUTH_TOKEN_INVALID', async () => {
+        const user = await makeUser(`ended-signout-${Math.random()}@kpm.test`);
+        const out = await api().post('/api/v1/auth/logout').set('Cookie', user.refreshCookie).expect(204);
+        const cleared = (out.headers['set-cookie'] as unknown as string[])[0];
+        expect(cleared).toContain('agencyboost_refresh=;');
+        expect(cleared).toContain('Expires=Thu, 01 Jan 1970');
+        // What the browser sends once that clear has landed: nothing.
+        const next = await api().post('/api/v1/auth/refresh').expect(401);
+        expect(next.body.error.code).toBe('AUTH_TOKEN_INVALID');
+      });
     });
 
     it('clears the cookie on logout', async () => {

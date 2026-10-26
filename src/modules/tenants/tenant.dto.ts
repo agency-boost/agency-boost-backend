@@ -230,8 +230,9 @@ export class CreateKpmDto {
   timezone?: string;
 
   /**
-   * **Start from** (ADR-0115 §4): one of the company's active templates, the AgencyBoost defaults,
-   * or *Empty*. Absent, the company's default template — what approving a KPM request uses.
+   * **Start from** (ADR-0115 §4): one of the company's active templates, the Template library's, or
+   * *Empty*. Absent, the company's default template — what approving a KPM request uses. The AgencyBoost
+   * defaults are refused by the route (ADR-0168 §2; `AdminController.createTenant`).
    */
   @ApiPropertyOptional({
     type: () => StartFromDto,
