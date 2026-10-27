@@ -1,6 +1,6 @@
 import {
   APPROVED_PRODUCT_FIELDS, OVERRIDABLE_PRODUCT_FIELDS, PRODUCT_AGE_BANDS, PRODUCT_AGE_BAND_LABELS,
-  PRODUCT_BUDGET_BANDS, PRODUCT_BUDGET_BAND_LABELS, PRODUCT_CATEGORIES, PRODUCT_CHANNELS,
+  PRODUCT_BUDGET_BANDS, PRODUCT_BUDGET_BAND_LABELS, PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRODUCT_LUMP_SUM_BUDGET_BAND,
   PRODUCT_LIFECYCLES, PRODUCT_NEEDS, PRODUCT_TAGLINE_MAX_LENGTH, SCRIPT_OVERRIDE_FIELDS,
   SEED_PRODUCTS, SEED_REPLY_BY_NEED, PRODUCT_DOCUMENT_FOLDER, PRODUCT_DOCUMENT_LABEL_MAX_LENGTH, RECRUITMENT,
 } from '@/domain/constants';
@@ -79,6 +79,17 @@ describe('the seeded product catalog (P5-T4)', () => {
   it('labels every band, so a screen never renders a bare number', () => {
     for (const band of PRODUCT_AGE_BANDS) expect(PRODUCT_AGE_BAND_LABELS[band]).toBeTruthy();
     for (const band of PRODUCT_BUDGET_BANDS) expect(PRODUCT_BUDGET_BAND_LABELS[band]).toBeTruthy();
+  });
+
+  it('P18.95-T6 AC-3 the lump-sum option and its encoding: band 7, its own option, the number every address and product keeps', () => {
+    // The last band, and the only one that is not a monthly premium (UI-030): the brief asks it apart.
+    expect(PRODUCT_LUMP_SUM_BUDGET_BAND).toBe(7);
+    expect(PRODUCT_BUDGET_BANDS.at(-1)).toBe(PRODUCT_LUMP_SUM_BUDGET_BAND);
+    expect(PRODUCT_BUDGET_BAND_LABELS[PRODUCT_LUMP_SUM_BUDGET_BAND]).toBe('Lump-sum');
+    // The six monthly bands keep their numbers, 1 to 6 — so `?budget=1`…`?budget=7` resolve as before.
+    expect(PRODUCT_BUDGET_BANDS.filter((b) => b !== PRODUCT_LUMP_SUM_BUDGET_BAND)).toEqual([1, 2, 3, 4, 5, 6]);
+    // Products still score against it: the seeded single-premium products name band 7.
+    expect(SEED_PRODUCTS.some((p) => p.eligibleBudgetBands.includes(PRODUCT_LUMP_SUM_BUDGET_BAND))).toBe(true);
   });
 
   it('marks the two products the prototype flags as legacy as closed to new business (AC-4)', () => {

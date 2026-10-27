@@ -129,6 +129,47 @@ describe('inbox copy', () => {
   });
 
   /*
+   * **An event's reminder names its time and place** (P18.95-T7 AC-4; the client's UI review, UI-030). It read *"Check
+   * the time and where it is."* — the two things the reader opened it for, left for them to find.
+   */
+  describe('P18.95-T7 AC-4 an event reminder names its time and place', () => {
+    const kickoff = {
+      eventId: '66f0000000000000000000e1', title: 'Kickoff 2026',
+      startsAt: '2026-11-09T02:00:00.000Z', timezone: 'Asia/Jakarta', location: 'Kantor KPM',
+    };
+
+    it('P18.95-T7 AC-4 its start on the office’s clock and where it is, through the shared formatter', () => {
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, kickoff)).toEqual({
+        title: 'Kickoff 2026 is coming up', detail: '9 Nov 2026, 09.00 · Kantor KPM',
+      });
+    });
+
+    it('P18.95-T7 AC-4 the office’s zone decides the day: 18:30 UTC is the next morning in Jakarta', () => {
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, startsAt: '2026-11-08T18:30:00.000Z' }).detail)
+        .toBe('9 Nov 2026, 01.30 · Kantor KPM');
+    });
+
+    it('P18.95-T7 AC-4 either half alone, when the payload holds only one', () => {
+      const { location: _place, ...timed } = kickoff;
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, timed).detail).toBe('9 Nov 2026, 09.00');
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, location: '   ' }).detail).toBe('9 Nov 2026, 09.00');
+      const { startsAt: _at, ...placed } = kickoff;
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, placed).detail).toBe('Kantor KPM');
+    });
+
+    it('P18.95-T7 AC-4 a time it cannot read is left out, never written in the server’s zone or as Invalid', () => {
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, timezone: 'Not/AZone' }).detail).toBe('Kantor KPM');
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, startsAt: 'soon' }).detail).toBe('Kantor KPM');
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, timezone: undefined }).detail).toBe('Kantor KPM');
+    });
+
+    it('P18.95-T7 AC-4 a reminder written with its title alone keeps the words it had', () => {
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { title: 'Leader Forum' }).detail)
+        .toBe('Check the time and where it is.');
+    });
+  });
+
+  /*
    * **ADR-0078, P11-T10 AC-8: the finalize notice opens the session.** Composed here, beside the words,
    * so the inbox and the manual books read one address. No other item has one.
    */

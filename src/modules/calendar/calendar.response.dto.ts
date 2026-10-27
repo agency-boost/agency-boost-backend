@@ -24,7 +24,7 @@ export class CalendarRungDto {
   @ApiProperty({ example: 'AAB', description: 'The rung’s stable code on the company’s ladder.' })
   code!: string;
 
-  @ApiProperty({ example: 'Associate Agency Builder', description: 'The ladder’s own label for it.' })
+  @ApiProperty({ example: 'AAB', description: 'The ladder’s own label for it.' })
   label!: string;
 }
 

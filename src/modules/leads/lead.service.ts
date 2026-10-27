@@ -677,9 +677,11 @@ export class LeadService {
   /**
    * The caller's own live leads (P7-T2).
    *
-   * **`/leads` sends no search and no filter since P10.1-T4**, because the prototype's table has
-   * neither. The parameters stay for coaching's *Leads* card, which has the prototype's own search
-   * box and type filter (`Overall.html:4258-4266`, ADR-0063).
+   * **`search`, `type` and `statusCode` narrow, and never widen.** Coaching's *Leads* card has sent the
+   * first two since P11-T8 (the prototype's own search box and type filter, `Overall.html:4258-4266`), and
+   * `/leads` sends all three since P18.95-T4 (ADR-0167 §4, the client's UI review of 2026-10-26: UI-016). They
+   * sit beside the owner filter below, never in place of it, so a search reaches only what the caller's
+   * grant already reaches, in their own office (`lead-filters.int.spec.ts`).
    *
    * **Sorting is single-key.** The prototype's own footnote promises *"Sales leads first, then
    * Recruitment"* and its code does no such thing; the code wins and the footnote is not

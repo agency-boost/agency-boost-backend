@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES, SEED_RATIO_DEFINITIONS, SEED_RATIO_PURPOSES,
-  SEEDED_ACTIVITY_WORDINGS_BEFORE_ADR_0160, SEEDED_RATIO_VALUES_BEFORE_ADR_0160,
+  SEEDED_ACTIVITY_WORDINGS_BEFORE_ADR_0160, SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167, SEEDED_RATIO_VALUES_BEFORE_ADR_0160,
 } from './activity-taxonomy';
 import { RATIO_BENCHMARKS } from './benchmarks';
 
@@ -130,6 +130,37 @@ describe('the seeded lead pipelines against the prototype', () => {
   it('matches the sales pipeline exactly', () => {
     const sales = SEED_LEAD_STATUSES.filter((l) => l.pipeline === 'sales');
     expect(sales.map((l) => l.label)).toEqual(labelsIn('leadstatuses-sales'));
+  });
+
+  /*
+   * **One named exception, the client's** (2026-10-26, ADR-0167 §10, OD-205, UI-027; P18.95-T9 AC-6; registered in
+   * `prototype-parity.md`): the recruitment pipeline's first status reads *Not yet approached*, the sales pipeline's
+   * words, where both prototypes say *Not approached*. Pinned by code and by both wordings, so the prototype still
+   * has to say what it said, and another stage drifting from it fails here rather than joining this one.
+   */
+  it('P18.95-T9 AC-6 starts the recruitment pipeline in the sales pipeline’s words, renamed at the client’s request', () => {
+    const overall = readFileSync(join(__dirname, '../../../../prototype/AgencyBoost_Overall.html'), 'utf8');
+    /** One of the agent app's status orders (`Overall.html:5366-5367`), read rather than retyped. */
+    const order = (name: string): string[] =>
+      JSON.parse(new RegExp(`const ${name} = (\\[[^\\]]*\\]);`).exec(overall)![1]) as string[];
+    const agentApp = order('RECRUITMENT_STATUS_ORDER');
+    const settings = labelsIn('leadstatuses-recruitment');
+
+    // The prototype's word, in the Owner's settings and in the agent app alike, and the one the seed gave before.
+    expect(settings[0]).toBe('Not approached');
+    expect(agentApp[0]).toBe('Not approached');
+    expect(SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167).toEqual({
+      NOT_APPROACHED: { pipeline: 'recruitment', labels: [settings[0]] },
+    });
+
+    // Ours: the same code, in the sales pipeline's first words — which the sales pipeline still has verbatim.
+    const recruitment = SEED_LEAD_STATUSES.filter((l) => l.pipeline === 'recruitment');
+    expect(recruitment[0]).toMatchObject({ code: 'NOT_APPROACHED', label: 'Not yet approached', rank: 1 });
+    expect(recruitment[0].label).toBe(order('SALES_STATUS_ORDER')[0]);
+    expect(recruitment[0].label).toBe(labelsIn('leadstatuses-sales')[0]);
+
+    // Every other stage keeps the agent app's words (ADR-0043's seven).
+    expect(recruitment.map((l) => l.label)).toEqual(agentApp.map((label, i) => (i === 0 ? recruitment[0].label : label)));
   });
 
   it('has two recruitment stages the Owner prototype does not — ratified by ADR-0043', () => {

@@ -134,16 +134,17 @@ export class CalendarService {
    * - **With `for`**, a compared pane: `COACH(reader, member)` resolved now, 404 outside it — a peer, a
    *   peer AAB's agent, another office's member, a member who left, nobody's id, and the reader
    *   themselves, since compare never reaches oneself. An empty `for` is the DTO's 400, never the
-   *   reader's own calendar. Week only. In *Who reads what*'s projection
-   *   (`comparedView`), and one §3.5 entry, surface `calendar`, written last, so a refused read writes
-   *   none. **Each organiser in the week who hides their details** (ADR-0110) is read in the same round
-   *   trip as the names, so their entries go out as busy blocks to a reader who is not on them.
+   *   reader's own calendar. A week or a month alike (*amended 2026-10-26, P18.95-T8 AC-2: it was Week
+   *   only — the client asked for compare in Month, UI-020*). In *Who reads what*'s projection
+   *   (`comparedView`), and one §3.5 entry, surface `calendar`, with the period's `from` and `to`,
+   *   written last, so a refused read writes none. **Each organiser in the period who hides their
+   *   details** (ADR-0110) is read in the same round trip as the names, so their entries go out as busy
+   *   blocks to a reader who is not on them.
    */
   async read(ctx: RequestContext, query: CalendarReadQuery): Promise<CalendarPeriodView> {
     const me = requireMembership(ctx);
     const view = query.view ?? 'week';
     const compared = query.for !== undefined;
-    if (compared && view !== 'week') refuseWith(['for is read with view=week only.']);
     const office = await this.days.office(ctx);
     const date = query.date ?? office.today;
     if (!isLocalDate(date)) refuseWith(['date must be a day, written YYYY-MM-DD.']);

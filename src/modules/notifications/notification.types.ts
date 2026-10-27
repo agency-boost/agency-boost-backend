@@ -58,6 +58,12 @@ export const NotificationTemplate = {
   CALENDAR_INVITATION: 'calendar.invitation',
   CALENDAR_BLOCK_PLACED: 'calendar.block_placed',
   CALENDAR_ENTRY_CHANGED: 'calendar.entry_changed',
+  /*
+   * An office event is coming up. The payload is the event as it stood when the reminder went: `eventId`, its
+   * `title`, `startsAt` (the instant, ISO) with the office's `timezone` that instant is read in, and its `location` —
+   * so the notice names its time and place (P18.95-T7 AC-4; `inbox-copy.ts`). A reminder written before those four,
+   * with its title alone, still reads, in the words it had.
+   */
   EVENT_REMINDER: 'event.reminder',
   /*
    * A support session, announced to the person and their Owner (§3.13, P4-T10).

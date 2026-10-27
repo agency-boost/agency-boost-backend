@@ -123,15 +123,20 @@ describe('the calendar over HTTP (P12-T2, P12-T3)', () => {
       expect(ids).toEqual([...[early.entryId, twin.entryId].sort(), late.entryId]);
     });
 
-    it('P12-T2 AC-15 refuses a parameter it does not know, a date that is no day, and `for` with Month', async () => {
+    it('P12-T2 AC-15 refuses a parameter it does not know, a date that is no day, and a view that is neither', async () => {
       h.as('AGUS');
       const unknown = await h.http().get('/calendar/entries').query({ page: 2 }).expect(400);
       expect(JSON.stringify(unknown.body.error.details)).toContain('page');
       expect((await h.http().get('/calendar/entries').query({ date: '2026-02-30' }).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
       expect((await h.http().get('/calendar/entries').query({ date: '14 Sep' }).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
       expect((await h.http().get('/calendar/entries').query({ view: 'day' }).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
-      const month = await h.http().get('/calendar/entries').query({ view: 'month', for: h.id('SARI') }).expect(400);
-      expect(month.body.error.details.violations).toEqual(['for is read with view=week only.']);
+      expect((await h.http().get('/calendar/entries').query({ view: 'day', for: h.id('SARI') }).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('P18.95-T8 AC-2 answers `for` with Month: no longer refused (UI-020, the client asked for compare in Month)', async () => {
+      h.as('AGUS');
+      const month = (await h.http().get('/calendar/entries').query({ view: 'month', for: h.id('SARI') }).expect(200)).body;
+      expect(month).toMatchObject({ view: 'month', subject: { membershipId: h.id('SARI') } });
     });
   });
 

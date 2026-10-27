@@ -3391,16 +3391,18 @@ describe('organisation', () => {
         });
       });
 
-      it('refuses a direct leader making somebody an AB', async () => {
+      it('refuses a direct leader making somebody an AB, naming the rung as a role is called (P18.95-T9 AC-1)', async () => {
         await expect(roles.change(abCtx, agent, 'ab')).rejects.toMatchObject({
           code: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
+          message: 'Only the office’s Owner or an Admin can change somebody’s role to or from AB.',
         });
       });
 
-      it('refuses a direct leader unmaking an AB', async () => {
+      it('refuses a direct leader unmaking an AB, naming the rung they stand on (P18.95-T9 AC-1)', async () => {
         const abReport = await join(KPM_A, 'ab', ab);
         await expect(roles.change(abCtx, abReport, 'agent')).rejects.toMatchObject({
           code: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
+          message: 'Only the office’s Owner or an Admin can change somebody’s role to or from AB.',
         });
       });
 

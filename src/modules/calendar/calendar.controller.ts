@@ -50,7 +50,7 @@ export class CalendarController {
       + 'the week or the month holding `date`, with the period’s days, the dates ‹ and › ask for, and the '
       + 'office’s today and now: nothing is worked out in the browser. Weeks run Monday to Sunday in the '
       + 'office’s zone; a month is padded to whole weeks, and its padding days carry their entries too.\n\n'
-      + 'With `for`, the week of somebody you coach, beside your own: everything they organised in full, and '
+      + 'With `for`, the week or the month of somebody you coach, beside your own: everything they organised in full, and '
       + 'an entry they only attend in full only when you could read it yourself — otherwise as a busy block. '
       + 'An entry organised by somebody who hides their details is a busy block too, unless you are on it. '
       + 'Each such read is recorded.',

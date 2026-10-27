@@ -93,12 +93,12 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
   }
 
   /**
-   * P5-T5's and P5-T10's five decisions, as `demo.ts` writes them for 0417 and 0555: renamed, turned off,
-   * pending, approved-then-edited, sent back.
+   * P5-T5's and P5-T10's five decisions: renamed, turned off, pending, approved-then-edited, sent back — as
+   * `demo.ts` wrote them for 0417 and 0555 until P18.95-T6, which dropped its placeholder rename (UI-023).
    */
   async function fiveStates(kpmId: string) {
     const ctx = owner(kpmId);
-    await wired.kpmProducts.saveOverrides(ctx, ids.PRUMAPAN, { displayName: 'PRUMapan (nama kami)' });
+    await wired.kpmProducts.saveOverrides(ctx, ids.PRUMAPAN, { displayName: 'PRUMapan BSD' });
     await wired.kpmProducts.setActive(ctx, ids.PRUSMART_PLAN, false);
     await wired.kpmProducts.saveOverrides(ctx, ids.PRUFUTURE, {
       opening: 'Halo Pak/Bu, boleh saya cerita sebentar soal proteksi keluarga?',
@@ -124,7 +124,7 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
 
       expect(products.map((p) => p.code)).toEqual(shelf0417().map((p) => p.code));
       expect(products[0]).toEqual({
-        code: 'PRUMAPAN', name: 'PRUMapan (nama kami)',
+        code: 'PRUMAPAN', name: 'PRUMapan BSD',
         tagline: 'Endowment-style life with guaranteed retirement payouts from age 55.',
         category: { code: 'life', label: 'Life' }, channel: 'conventional', lifecycle: 'active', needs: ['retirement'],
       });
@@ -451,7 +451,7 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
       const good = await service.attackPlan(agent(KPM_A), { need: 'retirement', age: 2, budget: 2 });
       expect(good).toMatchObject({
         brief: { need: 'retirement', age: 2, budget: 2 },
-        product: { code: 'PRUMAPAN', name: 'PRUMapan (nama kami)' },
+        product: { code: 'PRUMAPAN', name: 'PRUMapan BSD' },
         verdict: 'good_fit', outside: [], alternatives: [{ code: 'PRUANUGERAH', name: 'PRUAnugerah' }], moreCount: 0,
       });
       const check = await service.attackPlan(agent(KPM_A), { need: 'retirement', age: 5, budget: 6 });
@@ -463,7 +463,7 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
       const switched = await service.attackPlan(agent(KPM_A), { need: 'retirement', age: 2, budget: 2 }, 'pruanugerah');
       expect(switched).toMatchObject({
         product: { code: 'PRUANUGERAH' }, verdict: 'check_fit', outside: ['age', 'budget'],
-        alternatives: [{ code: 'PRUMAPAN', name: 'PRUMapan (nama kami)' }], moreCount: 0,
+        alternatives: [{ code: 'PRUMAPAN', name: 'PRUMapan BSD' }], moreCount: 0,
       });
     });
 

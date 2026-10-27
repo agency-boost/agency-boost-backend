@@ -26,16 +26,16 @@ import { seedObjectId } from './coaching-fixture';
  * | **0417 BSD City's pitch** — the prototype's own (`:626-661`) | *Opportunity Overview*: `Opportunity_Overview_v3.pdf`, *Career Path Ladder* ticked by the Owner and *Support provided* by the Admin — *2/4 confirmed*; *Proof & Credibility*: `Proof_and_Credibility_2026.pdf`, *Uploaded*; *FAQ* and *How to Join* *Missing* | `owner@kpm0417.test` and `admin@kpm0417.test` (Maya Halim) at `/kpm/settings/recruitment-pitch`: the ring *1/4*, *"Recruitment Pitch is incomplete"*, *"2 not uploaded, 1 uploaded but not fully confirmed — not yet ready to rely on for candidates."*; *Replace* clears the two ticks. Rina, Sari and Agus at `/recruitment/pitch-materials`: two *Uploaded* cards with *View PDF*, two *Missing* |
  * | **0555 Kelapa Gading's pitch** | all four uploaded, *Opportunity Overview*'s four items ticked by its Owner | `owner@kpm0555.test`, `agent@kpm0555.test`: *4/4*, *"Recruitment Pitch is complete"* |
  * | **0701 Cempaka Putih** | no pitch document | Hadi and Nadia: *0/4*, *"4 not uploaded — not yet ready to rely on for candidates."* |
- * | **0417's own PRUMapan brochure** (P17-T9) | `Brosur_PRUMapan_BSD.pdf` in *PRUMapan (nama kami)*'s *Brochure* slot, the office's own file | `rina@kpm0417.test` at `/product-catalog/PRUMAPAN` → *Documents*: the brochure opens; the Owner at `/kpm/settings/products`: the row reads as the office's, with *Replace* and *Use Prudential's* |
+ * | **0417's own PRUMapan brochure** (P17-T9) | `Brosur_PRUMapan_BSD.pdf` in *PRUMapan*'s *Brochure* slot, the office's own file | `rina@kpm0417.test` at `/product-catalog/PRUMAPAN` → *Documents*: the brochure opens; the Owner at `/kpm/settings/products`: the row reads as the office's, with *Replace* and *Use Prudential's* |
  *
  * **The briefs the walk uses**, each computed over the seed's words (`recruitment-plan.spec.ts` pins them):
  *
  * | Brief (`/recruitment/attack-plan?…`) | What the plan shows |
  * |---|---|
- * | *Business owner* · *Extra income on the side* · *Already has a stable job* (`type=business-owner&motivation=side-income&hesitation=stable-job`) | one opening, untagged; the business owner's own objection, *"I already have my own thing running — why add this?"* (`:497`) |
- * | *Retiree* · *Flexibility / time freedom*, *Building a team / leadership* · *No network to sell to*, *Worried about time commitment* (`type=retiree&motivation=flexibility,leadership&hesitation=no-network,time`) | *Opening lines*, two tags in the chips' order; the base *no network* objection, and the retiree's own *time* one (`:501`) |
+ * | *Business owner* · *Side income* · *Already has a stable job* (`type=business-owner&motivation=side-income&hesitation=stable-job`) | one opening, untagged; the business owner's own objection, *"I already have my own thing running — why add this?"* (`:497`) |
+ * | *Retiree* · *Flexibility*, *Lead a team* · *No network*, *Worried about time commitment* (`type=retiree&motivation=flexibility,leadership&hesitation=no-network,time`) | *Opening lines*, two tags in the chips' order; the base *no network* objection, and the retiree's own *time* one (`:501`) |
  * | *Fresh grad*, every motivation, every hesitation | four openings, five objections, the summary's *Type* reading *Fresh graduate* |
- * | *Agent (other insurer)* · *Full career change* · *Already has a stable job* | the other insurer's own reply (`:505`) |
+ * | *Agent (other insurer)* · *Career change* · *Already has a stable job* | the other insurer's own reply (`:505`) |
  *
  * **The files are real, and only where storage is** (D-seed). Each is a one-page PDF this file writes, naming
  * its slot and saying it is a demonstration, stored **through the real storage adapter** in the office's own

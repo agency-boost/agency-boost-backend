@@ -46,6 +46,16 @@ export const VALIDATION_PIPE_OPTIONS = {
  * `.claude/rules/backend-then-frontend.md` describes — two halves implementing a contract
  * the other does not — and it would show up only in the environment nobody was testing.
  */
+
+/**
+ * **How long a browser may reuse a preflight's answer** (P18.95-T5's finding, UI-030). Without
+ * `Access-Control-Max-Age` Chrome keeps one for five seconds, so a screen's reads paid an `OPTIONS`
+ * round trip again every few seconds — one more on each of the three serial requests a hard load makes
+ * (refresh, `/auth/me`, then the reads). Ten minutes; Chrome caps it at two hours. A change to
+ * `CORS_ORIGINS` reaches a browser that cached a preflight within that time.
+ */
+export const CORS_PREFLIGHT_MAX_AGE_SECONDS = 600;
+
 export function configureApp(app: INestApplication): void {
   const config = app.get(ConfigService);
 
@@ -81,6 +91,7 @@ export function configureApp(app: INestApplication): void {
   app.enableCors({
     origin: origins.length > 0 ? origins : false,
     credentials: true,
+    maxAge: CORS_PREFLIGHT_MAX_AGE_SECONDS,
   });
 
   if (config.get('NODE_ENV') !== 'production') {

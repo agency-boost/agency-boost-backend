@@ -1,5 +1,7 @@
 import { DateTime } from 'luxon';
-import { formatDateRange, formatDayMonth, formatMonthRange } from '@/common/format/format';
+import {
+  formatDateRange, formatDayMonth, formatMonth, formatMonthName, formatMonthRange,
+} from '@/common/format/format';
 import { addDays, endOfMonth, localDayOf, type LocalDate } from '@/common/time/local-day';
 import {
   CAMPAIGN_DURATION_WORDS, CAMPAIGN_ROLLING_MONTHS, type CampaignWindow,
@@ -124,6 +126,32 @@ export function durationWords(campaign: CampaignDates, timezone: string): string
   const from = localDayOf(campaign.startsAt, timezone);
   if (campaign.endsAt === null) return `From ${formatDayMonth(from)}`;
   return dayRangeWords(from, lastLocalDay(campaign.endsAt, timezone));
+}
+
+/**
+ * **The Personal Summary row's one line: the months the campaign runs** (P18.95-T7 AC-1, ADR-0167 §7; the client's
+ * *Grey text* table, row 23). It read *"Ongoing incentive · Standing — evaluated per calendar year (1 Jan – 31 Des)"*;
+ * the client's line is *Runs Jan–Des*, and each window's is composed the same way, in the office's calendar:
+ *
+ * - `calendar_year` — *Runs Jan – Des*: January to December, no year, because it runs every year;
+ * - `campaign_dates` — the months its own dates touch: *Runs Agu – Okt 2026*, *Runs Okt 2026* for one month,
+ *   *Runs Nov 2026 – Jan 2027* across a year, and *Runs from Okt 2026* with no end;
+ * - `rolling_12m` — *Runs over the last 12 months*: its months move with every file the office holds, so no two
+ *   months would stay true for long.
+ *
+ * Month names and the range's en dash are the shared formatter's (ADR-0167 §1). The card and the dialog keep
+ * `durationWords`, the prototype's words, at every size.
+ */
+export function runsWords(campaign: CampaignDates, timezone: string): string {
+  if (campaign.window === 'calendar_year') {
+    // The formatter's range, its year dropped: `formatMonthRange` would write *Jan – Des 2026*.
+    const [first, last] = [formatMonthName('2000-01'), formatMonthName('2000-12')];
+    return `Runs ${first} – ${last}`;
+  }
+  if (campaign.window === 'rolling_12m') return `Runs over the last ${CAMPAIGN_ROLLING_MONTHS} months`;
+  const from = localDayOf(campaign.startsAt, timezone).slice(0, 7);
+  if (campaign.endsAt === null) return `Runs from ${formatMonth(from)}`;
+  return `Runs ${formatMonthRange(from, lastLocalDay(campaign.endsAt, timezone).slice(0, 7))}`;
 }
 
 /**

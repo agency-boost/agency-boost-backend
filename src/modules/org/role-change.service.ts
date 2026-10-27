@@ -5,7 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { isLeaderClass } from '@/domain/constants';
+import { isLeaderClass, shortOfRung } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
@@ -223,7 +223,7 @@ export class RoleChangeService {
       throw new DomainException(
         ErrorCode.ORG_ROLE_CHANGE_NOT_PERMITTED,
         involvesAb
-          ? 'Only the office’s Owner or an Admin can make somebody an Agency Builder, or stop them being one.'
+          ? `Only the office’s Owner or an Admin can change somebody’s role to or from ${await this.seniorRungName(ctx, target, toClass, level)}.`
           : 'Only somebody’s direct leader can change their role.',
         HttpStatus.FORBIDDEN,
         { membershipId, fromRole: target.role, toRole },
@@ -244,6 +244,29 @@ export class RoleChangeService {
       );
     }
     return { target, toClass, levelCode: level.code };
+  }
+
+  /**
+   * **The senior rung a refused change involves, by the name a role is called** (ADR-0167 §10, OD-205; P18.95-T9
+   * AC-1): the rung asked for when the change is onto it, the one they stand on when it is off it — `shortOfRung`,
+   * so the default ladder says *AB* and a company's own rung its own name. Read only to word the refusal; a rung
+   * since taken off the ladder is named by its code.
+   */
+  private async seniorRungName(
+    ctx: RequestContext,
+    target: MembershipDocument,
+    toClass: HierarchyRole,
+    level: { code: string; label: string },
+  ): Promise<string> {
+    if (toClass === 'ab') return shortOfRung(level);
+    const held = await this.hierarchy.rungFor(ctx, target.orgLevelCode).then(
+      ({ level: rung }) => rung,
+      (err: unknown) => {
+        if (err instanceof DomainException && err.code === ErrorCode.ORG_LEVEL_NOT_ON_LADDER) return null;
+        throw err;
+      },
+    );
+    return shortOfRung(held ?? { code: target.orgLevelCode, label: target.orgLevelCode });
   }
 
   /** The write, once every refusal has been met: the rung, the edge, the counts, the notice and the audit row. */

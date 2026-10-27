@@ -77,6 +77,15 @@ describe('what the transactional mail says (P4-T14)', () => {
       expect(cancelled.body).not.toContain('/notifications');
     });
 
+    it('P18.95-T7 AC-4 an event reminder’s email names its time and place, as its inbox row does', () => {
+      const { subject, body } = renderer.render(NotificationTemplate.EVENT_REMINDER, {
+        title: 'Kickoff 2026', startsAt: '2026-11-09T02:00:00.000Z', timezone: 'Asia/Jakarta', location: 'Kantor KPM',
+      });
+      expect(subject).toBe('[AgencyBoost] Kickoff 2026 is coming up');
+      expect(body).toContain('9 Nov 2026, 09.00 · Kantor KPM');
+      expect(body).not.toContain('Check the time');
+    });
+
     it('renders every template that declares an email channel, with no empty body', () => {
       // A template added without copy would otherwise ship an email saying nothing.
       const emailTemplates = Object.entries(TEMPLATE_CHANNELS)

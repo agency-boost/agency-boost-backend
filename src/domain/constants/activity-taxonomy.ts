@@ -248,6 +248,10 @@ export interface SeedLeadStatus {
  * exist in neither ladder (`metrics-and-definitions.md:302`).
  *
  * The office owns these flags from provisioning onward, like every other field here.
+ *
+ * **Both first statuses say *Not yet approached*** (ADR-0167 §10, OD-205; P18.95-T9 AC-6): the prototype's
+ * recruitment ladder says *Not approached*, and the client asked for one wording. The code stays
+ * `NOT_APPROACHED`, because a lead holds it.
  */
 export const SEED_LEAD_STATUSES: readonly SeedLeadStatus[] = [
   { pipeline: 'sales', code: 'NOT_YET_APPROACHED', label: 'Not yet approached', rank: 1, isTerminal: false, isLateStage: false },
@@ -256,7 +260,7 @@ export const SEED_LEAD_STATUSES: readonly SeedLeadStatus[] = [
   { pipeline: 'sales', code: 'APPROVED_NOT_PAID', label: 'Approved, not paid', rank: 4, isTerminal: false, isLateStage: true },
   { pipeline: 'sales', code: 'PAID_AND_ISSUED', label: 'Paid and issued', rank: 5, isTerminal: true, isLateStage: false },
 
-  { pipeline: 'recruitment', code: 'NOT_APPROACHED', label: 'Not approached', rank: 1, isTerminal: false, isLateStage: false },
+  { pipeline: 'recruitment', code: 'NOT_APPROACHED', label: 'Not yet approached', rank: 1, isTerminal: false, isLateStage: false },
   { pipeline: 'recruitment', code: 'MEETING_SCHEDULED', label: 'Meeting scheduled', rank: 2, isTerminal: false, isLateStage: false },
   { pipeline: 'recruitment', code: 'RECRUITMENT_PRESENTATION', label: 'Recruitment presentation', rank: 3, isTerminal: false, isLateStage: false },
   { pipeline: 'recruitment', code: 'AGENT_CODE_CREATED', label: 'Agent code created', rank: 4, isTerminal: false, isLateStage: true },
@@ -264,6 +268,21 @@ export const SEED_LEAD_STATUSES: readonly SeedLeadStatus[] = [
   { pipeline: 'recruitment', code: 'JOINT_FIELD_WORK_PLANNED', label: 'Joint field work planned', rank: 6, isTerminal: false, isLateStage: true },
   { pipeline: 'recruitment', code: 'NEW_ACTIVE_AGENT', label: 'New active agent', rank: 7, isTerminal: true, isLateStage: false },
 ];
+
+/**
+ * **The wording the seed gave before ADR-0167 §10** (2026-10-26; OD-205; the client's UI review, UI-027;
+ * P18.95-T9 AC-6), per code — kept only so migration `0038` and the prototype spec can recognise the words an
+ * office never changed. No office is given them any more.
+ *
+ * The recruitment pipeline's first status said the prototype's *Not approached*, where the sales pipeline's says
+ * *Not yet approached*. Only that status of that pipeline: another code holding the same words is not it.
+ */
+export const SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167: Readonly<Record<
+  'NOT_APPROACHED',
+  { readonly pipeline: SeedLeadStatus['pipeline']; readonly labels: readonly string[] }
+>> = {
+  NOT_APPROACHED: { pipeline: 'recruitment', labels: ['Not approached'] },
+};
 
 /**
  * The five ratios a new office starts with (P4-T2).

@@ -293,6 +293,8 @@ export {
   SEED_ACTIVITY_CATEGORIES,
   SEED_ACTIVITY_TYPES,
   SEED_LEAD_STATUSES,
+  // P18.95-T9 AC-6 (ADR-0167 §10): the recruitment first status's earlier words, for migration 0038 only.
+  SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167,
   type SeedActivityCategory,
   type SeedActivityType,
   type SeedLeadStatus,
@@ -342,6 +344,8 @@ export {
   PRODUCT_BUDGET_BANDS,
   PRODUCT_AGE_BAND_LABELS,
   PRODUCT_BUDGET_BAND_LABELS,
+  // P18.95-T6 (UI-030): the band the brief asks as its own option, not a monthly one.
+  PRODUCT_LUMP_SUM_BUDGET_BAND,
   SEED_PRODUCTS,
   type SeedProduct,
   type SeedAttackPlan,
@@ -492,8 +496,10 @@ export {
   LEADER_CLASSES,
   LEGACY_TIER_BY_CODE,
   ROLE_CLASS_BY_TIER,
+  RUNG_SHORT_CODE_MAX_LENGTH,
   isLeaderClass,
   roleClassOf,
+  shortOfRung,
   tierOfRung,
   type LeaderTier,
   type RoleClass,

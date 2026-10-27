@@ -2197,7 +2197,9 @@ describe('auth and admin over HTTP', () => {
       const res = await api().patch(`/api/v1/members/${theirs.membershipId}/role`)
         .set(agent.as).send({ toRole: 'ab' }).expect(403);
       expect(res.body.error.code).toBe('ORG_ROLE_CHANGE_NOT_PERMITTED');
-      expect(res.body.error.message).toContain('Agency Builder');
+      // The rung by the name a role is called — the default ladder's *AB* (P18.95-T9 AC-1, ADR-0167 §10).
+      expect(res.body.error.message).toBe('Only the office’s Owner or an Admin can change somebody’s role to or from AB.');
+      expect(res.body.error.message).not.toContain('Agency Builder');
     });
 
     it('refuses somebody who has the permission but is not their leader', async () => {

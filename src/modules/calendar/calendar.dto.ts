@@ -38,7 +38,7 @@ export class CalendarEntriesQueryDto {
   @ApiPropertyOptional({
     minLength: 1, maxLength: CALENDAR.ID_MAX,
     description:
-      'A member you coach, whose week to compare beside your own. `view=week` only. Anybody else — '
+      'A member you coach, whose week or month to compare beside your own. Anybody else — '
       + 'yourself included — is not found; sent empty, it is refused rather than read as your own.',
   })
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(CALENDAR.ID_MAX)

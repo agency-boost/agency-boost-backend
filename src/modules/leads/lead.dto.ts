@@ -133,7 +133,15 @@ export class SetLeadOutcomeDto extends PinnedVersion {
  * and `VALIDATION_PIPE_OPTIONS` says why implicit conversion is off.
  */
 export class ListLeadsQueryDto {
-  @ApiPropertyOptional({ type: String, maxLength: 120, description: 'Over the name and the remarks.' })
+  @ApiPropertyOptional({
+    type: String,
+    maxLength: 120,
+    description:
+      'Over the name and the remarks, ignoring case, as the words typed — never a pattern. Narrows the '
+      + 'leads your grant reaches and never widens them. The leads screen sends it with `type` and '
+      + '`statusCode`; the coaching card with `type`.',
+  })
+  // P18.95-T4 (ADR-0167 §4): `/leads` sends all three since the client's UI review of 2026-10-26 (UI-016).
   @IsOptional()
   @IsString()
   @MaxLength(120)

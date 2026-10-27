@@ -4,7 +4,7 @@ import {
   type RecruitmentPlaybookBody,
 } from '@/domain/constants';
 import {
-  inChipOrder, nonEmptySubsets, PROTOTYPE, prototypeChips, renderPlanPort, type PrototypeWords, type RenderedPlan,
+  inChipOrder, nonEmptySubsets, PROTOTYPE, renderPlanPort, shippedChips, type PrototypeWords, type RenderedPlan,
 } from '../../../test/recruitment-prototype';
 import { readBrief, recruitmentPlanFor, recruitmentVocabulary, type RecruitmentPlan } from './recruitment-plan';
 import { defaultPlaybookBody } from './recruitment-playbook-defaults';
@@ -128,13 +128,13 @@ describe('the recruitment plan (D-plan)', () => {
   });
 
   describe('the walk’s four briefs (Seed; the fixture header)', () => {
-    it('Business owner · Extra income on the side · Already has a stable job — one opening, untagged, and the business owner’s own objection (`:497`)', () => {
+    it('Business owner · Side income · Already has a stable job — one opening, untagged, and the business owner’s own objection (`:497`)', () => {
       const plan = recruitmentPlanFor(SEED_RECRUITMENT_PLAYBOOK, readBrief({
         type: 'business-owner', motivation: 'side-income', hesitation: 'stable-job',
       })!);
       expect(plan.brief).toEqual({
         type: { code: 'business-owner', label: 'Business owner' },
-        motivations: [{ code: 'side-income', label: 'Extra income on the side' }],
+        motivations: [{ code: 'side-income', label: 'Side income' }],
         hesitations: [{ code: 'stable-job', label: 'Already has a stable job' }],
       });
       expect(plan.openings).toHaveLength(1);
@@ -146,11 +146,12 @@ describe('the recruitment plan (D-plan)', () => {
       }]);
     });
 
-    it('Retiree · Flexibility and Building a team · No network and Worried about time — two openings in the chips’ order, the base no network and the retiree’s own time (`:501`)', () => {
+    it('Retiree · Flexibility and Lead a team · No network and Worried about time — two openings in the chips’ order, the base no network and the retiree’s own time (`:501`)', () => {
       const plan = recruitmentPlanFor(SEED_RECRUITMENT_PLAYBOOK, readBrief({
         type: 'retiree', motivation: 'leadership,flexibility', hesitation: 'time,no-network',
       })!);
-      expect(plan.openings.map((o) => o.motivation.label)).toEqual(['Flexibility / time freedom', 'Building a team / leadership']);
+      // The client's shorter words tag the openings as they label the chips (P18.95-T6 AC-2).
+      expect(plan.openings.map((o) => o.motivation.label)).toEqual(['Flexibility', 'Lead a team']);
       expect(plan.objections.map((o) => [o.hesitation.code, o.profileOwn, o.theySay])).toEqual([
         ['no-network', false, 'I don\'t really have a network of people to sell to.'],
         ['time', true, 'I\'m not sure I have much time to give this right now.'],
@@ -169,7 +170,7 @@ describe('the recruitment plan (D-plan)', () => {
       expect(plan.nextAction).toBe(PROTOTYPE.CLOSING);
     });
 
-    it('Agent (other insurer) · Full career change · Already has a stable job — the other insurer’s own reply (`:505`)', () => {
+    it('Agent (other insurer) · Career change · Already has a stable job — the other insurer’s own reply (`:505`)', () => {
       const plan = recruitmentPlanFor(SEED_RECRUITMENT_PLAYBOOK, readBrief({
         type: 'other-insurer', motivation: 'full-career', hesitation: 'stable-job',
       })!);
@@ -224,9 +225,9 @@ describe('the recruitment plan (D-plan)', () => {
     });
   });
 
-  it('serves the vocabulary as the chips draw it, in their order', () => {
+  it('P18.95-T6 AC-2 serves the vocabulary as the chips draw it, in their order, in the client’s shorter words', () => {
     expect(recruitmentVocabulary()).toEqual({
-      types: prototypeChips('type'), motivations: prototypeChips('motivation'), hesitations: prototypeChips('hesitation'),
+      types: shippedChips('type'), motivations: shippedChips('motivation'), hesitations: shippedChips('hesitation'),
     });
   });
 });

@@ -8,7 +8,7 @@ import {
   type CampaignKind, type CampaignPosterColor, type CampaignSubtype, type CampaignWindow, type MetricUnit,
 } from '@/domain/constants';
 import type { RequirementState } from '@/domain/metrics/campaign-qualification';
-import { campaignPhase, durationWords } from '@/domain/metrics/campaign-window';
+import { campaignPhase, durationWords, runsWords } from '@/domain/metrics/campaign-window';
 import { AuditService } from '@/modules/audit/audit.service';
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import { MembershipRepository } from '@/modules/org/membership.repository';
@@ -78,6 +78,11 @@ export interface ChasedCampaignView {
   subtype: CampaignSubtype | null;
   phase: 'upcoming' | 'running';
   duration: string;
+  /**
+   * The months it runs, the Personal Summary row's one line (P18.95-T7 AC-1, ADR-0167 §7): *Runs Jan – Des*, *Runs
+   * Agu – Okt 2026*, *Runs over the last 12 months* (`runsWords`).
+   */
+  runs: string;
   poster: { emoji: string; color: CampaignPosterColor };
 }
 
@@ -303,6 +308,7 @@ function chasedView(c: ChasedCampaign, timezone: string): ChasedCampaignView {
     subtype: c.subtype,
     phase: c.phase,
     duration: durationWords({ window: c.window, startsAt: c.startsAt, endsAt: c.endsAt }, timezone),
+    runs: runsWords({ window: c.window, startsAt: c.startsAt, endsAt: c.endsAt }, timezone),
     poster: c.poster,
   };
 }

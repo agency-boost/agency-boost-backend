@@ -1,6 +1,6 @@
 import {
-  DEFAULT_ORG_LADDER, LEADER_CLASSES, LEADER_TIERS, LEGACY_TIER_BY_CODE, ROLE_CLASS_BY_TIER, isLeaderClass,
-  roleClassOf, tierOfRung,
+  DEFAULT_ORG_LADDER, LEADER_CLASSES, LEADER_TIERS, LEGACY_TIER_BY_CODE, ROLE_CLASS_BY_TIER, RUNG_SHORT_CODE_MAX_LENGTH,
+  isLeaderClass, roleClassOf, shortOfRung, tierOfRung,
 } from './index';
 
 /**
@@ -49,5 +49,17 @@ describe('P18.8-T1 the leader tier (ADR-0156)', () => {
     expect(isLeaderClass('AB')).toBe(false);
     expect(isLeaderClass(null)).toBe(false);
     expect(isLeaderClass(undefined)).toBe(false);
+  });
+});
+
+describe('P18.95-T9 AC-1 what a rung is called in a sentence (ADR-0167 §10)', () => {
+  it('P18.95-T9 AC-1 calls the default ladder AB, AAB and Agent: a short code as itself, a longer one by its label', () => {
+    expect(RUNG_SHORT_CODE_MAX_LENGTH).toBe(4);
+    expect(DEFAULT_ORG_LADDER.map(shortOfRung)).toEqual(['Agent', 'AAB', 'AB']);
+    // A company's own: a code of four or fewer reads as one; five or more is shouted, so its label is used.
+    expect(shortOfRung({ code: 'SM', label: 'Senior Manager' })).toBe('SM');
+    expect(shortOfRung({ code: 'SRUM', label: 'Senior Unit Manager' })).toBe('SRUM');
+    expect(shortOfRung({ code: 'RDIR', label: 'Regional Director' })).toBe('RDIR');
+    expect(shortOfRung({ code: 'REGIONAL', label: 'Regional Director' })).toBe('Regional Director');
   });
 });

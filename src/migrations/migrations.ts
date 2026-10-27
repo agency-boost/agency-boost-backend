@@ -35,6 +35,8 @@ import { up as activityBindings } from './0034-activity-bindings';
 import { up as blankPreferredName } from './0035-blank-preferred-name';
 import { up as companyKind } from './0036-company-kind';
 import { up as templateCompany } from './0037-template-company';
+import { up as firstStatusWording } from './0038-first-status-wording';
+import { up as productNamePlaceholder } from './0039-product-name-placeholder';
 
 /*
  * The list on its own (P18.7-T3), so a spec can run every migration against an empty database without
@@ -88,4 +90,8 @@ export const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Dat
   // P18.9-T3 (ADR-0164): every company an insurer, then the Template company, its Default template and its company data.
   ['0036-company-kind', companyKind],
   ['0037-template-company', templateCompany],
+  // P18.95-T9 (UI-027, ADR-0167 §10): the recruitment pipeline's first status in the sales pipeline's words.
+  ['0038-first-status-wording', firstStatusWording],
+  // P18.95-T6 (UI-023): the demo seed's *PRUMapan (nama kami)* given back to the company's name.
+  ['0039-product-name-placeholder', productNamePlaceholder],
 ];

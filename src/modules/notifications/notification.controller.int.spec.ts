@@ -153,6 +153,31 @@ describe('the inbox over HTTP (P12.1-T4)', () => {
     });
   });
 
+  it('P18.95-T7 AC-4 an event reminder reads its time and place over HTTP, from the payload in the office’s zone', async () => {
+    await mongoose.model(Notification.name).collection.insertMany([
+      {
+        _id: new mongoose.Types.ObjectId(), userId: AGENT.userId, kpmId: AGENT.kpmId, membershipId: AGENT.membershipId,
+        templateId: 'event.reminder',
+        payload: {
+          eventId: new mongoose.Types.ObjectId().toString(), title: 'Kickoff 2026',
+          startsAt: '2026-11-09T02:00:00.000Z', timezone: 'Asia/Jakarta', location: 'Kantor KPM',
+        },
+        delivery: {}, coalesceKey: null, deletedAt: null, readAt: null, createdAt: NOW, updatedAt: NOW,
+      },
+      // Written before the payload carried them: its title alone, and the words it always had.
+      {
+        _id: new mongoose.Types.ObjectId(), userId: AGENT.userId, kpmId: AGENT.kpmId, membershipId: AGENT.membershipId,
+        templateId: 'event.reminder', payload: { title: 'Town Hall' },
+        delivery: {}, coalesceKey: null, deletedAt: null, readAt: null, createdAt: new Date(NOW.getTime() - 60_000), updatedAt: NOW,
+      },
+    ]);
+    const { items } = (await http().get('/notifications').expect(200)).body;
+    expect(items.map((i: { title: string; detail: string }) => [i.title, i.detail])).toEqual([
+      ['Kickoff 2026 is coming up', '9 Nov 2026, 09.00 · Kantor KPM'],
+      ['Town Hall is coming up', 'Check the time and where it is.'],
+    ]);
+  });
+
   it('P12.1-T4 a malformed or unknown id is a 404 too', async () => {
     for (const id of ['not-an-id', new mongoose.Types.ObjectId().toString()]) {
       for (const mark of ['read', 'unread']) {

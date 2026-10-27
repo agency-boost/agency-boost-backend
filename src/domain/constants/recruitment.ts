@@ -7,7 +7,8 @@ import { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from './assets';
  * (invariant §7).
  *
  * `:NNN` is a line of `prototype/AgencyBoost_Recruitment_Section.html`. Every string below is the
- * prototype's, verbatim, and `recruitment.spec.ts` reads each one back out of that file.
+ * prototype's, verbatim, and `recruitment.spec.ts` reads each one back out of that file — except seven chip
+ * labels, the client's shorter words of 2026-10-26 (UI-015, below), which the spec pins as the client gave them.
  */
 
 /**
@@ -23,21 +24,36 @@ export const RECRUITMENT_CANDIDATE_TYPES = [
 ] as const;
 export type RecruitmentTypeCode = (typeof RECRUITMENT_CANDIDATE_TYPES)[number]['code'];
 
-/** *What's driving them* (`:313-321`), in the chips' order. Several may be chosen; at least one. */
+/**
+ * *What's driving them* (`:313-321`), in the chips' order. Several may be chosen; at least one.
+ *
+ * **The labels are the client's shorter words** (ADR-0167; the client's UI review of 2026-10-26, UI-015;
+ * P18.95-T6 AC-2, parity I-421), at every size: the prototype's *Extra income on the side*, *Full career
+ * change*, *Flexibility / time freedom* and *Building a team / leadership* stacked one chip per line on a
+ * phone. **The codes are the prototype's and do not change**: an address, a playbook's openings and every
+ * test key on them, never on a label. The plan prints the same label beside the opening it tags.
+ */
 export const RECRUITMENT_MOTIVATIONS = [
-  { code: 'side-income', label: 'Extra income on the side' },
-  { code: 'full-career', label: 'Full career change' },
-  { code: 'flexibility', label: 'Flexibility / time freedom' },
-  { code: 'leadership', label: 'Building a team / leadership' },
+  { code: 'side-income', label: 'Side income' },
+  { code: 'full-career', label: 'Career change' },
+  { code: 'flexibility', label: 'Flexibility' },
+  { code: 'leadership', label: 'Lead a team' },
 ] as const;
 export type RecruitmentMotivationCode = (typeof RECRUITMENT_MOTIVATIONS)[number]['code'];
 
-/** *Their biggest hesitation* (`:323-332`), in the chips' order. Several may be chosen; at least one. */
+/**
+ * *Their biggest hesitation* (`:323-332`), in the chips' order. Several may be chosen; at least one.
+ *
+ * **Three labels are the client's shorter words** (UI-015, as above): *No sales exp.*, *Bad reputation* and
+ * *No network*. The client gave none for *Already has a stable job* or *Worried about time commitment*, so
+ * those two keep the prototype's words — nothing is invented in their place — and wrap inside their cell of
+ * the phone's two columns. Codes unchanged.
+ */
 export const RECRUITMENT_HESITATIONS = [
-  { code: 'no-experience', label: 'No sales experience' },
+  { code: 'no-experience', label: 'No sales exp.' },
   { code: 'stable-job', label: 'Already has a stable job' },
-  { code: 'reputation', label: 'Insurance has a bad reputation' },
-  { code: 'no-network', label: 'No network to sell to' },
+  { code: 'reputation', label: 'Bad reputation' },
+  { code: 'no-network', label: 'No network' },
   { code: 'time', label: 'Worried about time commitment' },
 ] as const;
 export type RecruitmentHesitationCode = (typeof RECRUITMENT_HESITATIONS)[number]['code'];

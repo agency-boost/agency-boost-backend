@@ -3,7 +3,7 @@ import {
   RECRUITMENT_MOTIVATIONS, RECRUITMENT_PITCH_SLOTS, RECRUITMENT_PITCH_STATES, SEED_RECRUITMENT_PLAYBOOK,
   recruitmentPitchDone, recruitmentPitchState,
 } from '@/domain/constants';
-import { PROTOTYPE, prototypeChips } from '../../../test/recruitment-prototype';
+import { CLIENT_CHIP_WORDS, PROTOTYPE, prototypeChips, shippedChips } from '../../../test/recruitment-prototype';
 
 /**
  * **Phase 17's constants, pinned against the prototype** (D-vocabulary, D-slots; P17-T2 AC-2, P17-T4 AC-1).
@@ -20,15 +20,41 @@ describe('the recruitment constants (Phase 17)', () => {
         .toEqual(['fresh-grad', 'career-switch', 'business-owner', 'retiree', 'other-insurer']);
     });
 
-    it('P17-T2 AC-2 the four motivations are the chips’, in their order', () => {
-      expect(RECRUITMENT_MOTIVATIONS.map((c) => ({ ...c }))).toEqual(prototypeChips('motivation'));
+    it('P17-T2 AC-2, P18.95-T6 AC-2 the four motivations are the chips’, in their order, in the client’s shorter words', () => {
+      expect(RECRUITMENT_MOTIVATIONS.map((c) => ({ ...c }))).toEqual(shippedChips('motivation'));
       expect(RECRUITMENT_MOTIVATIONS.map((c) => c.code)).toEqual(['side-income', 'full-career', 'flexibility', 'leadership']);
     });
 
-    it('P17-T2 AC-2 the five hesitations are the chips’, in their order', () => {
-      expect(RECRUITMENT_HESITATIONS.map((c) => ({ ...c }))).toEqual(prototypeChips('hesitation'));
+    it('P17-T2 AC-2, P18.95-T6 AC-2 the five hesitations are the chips’, in their order, three in the client’s words', () => {
+      expect(RECRUITMENT_HESITATIONS.map((c) => ({ ...c }))).toEqual(shippedChips('hesitation'));
       expect(RECRUITMENT_HESITATIONS.map((c) => c.code))
         .toEqual(['no-experience', 'stable-job', 'reputation', 'no-network', 'time']);
+    });
+  });
+
+  describe('P18.95-T6 AC-2 — the client’s shorter labels (UI-015, ADR-0167; parity I-421)', () => {
+    it('P18.95-T6 AC-2 labels: the seven chips read the client’s words, at every size', () => {
+      expect(RECRUITMENT_MOTIVATIONS.map((c) => c.label)).toEqual(['Side income', 'Career change', 'Flexibility', 'Lead a team']);
+      expect(RECRUITMENT_HESITATIONS.map((c) => c.label))
+        .toEqual(['No sales exp.', 'Already has a stable job', 'Bad reputation', 'No network', 'Worried about time commitment']);
+    });
+
+    it('P18.95-T6 AC-2 codes unchanged: every chip keeps the prototype’s data-val, in its order', () => {
+      for (const [question, shipped] of [['motivation', RECRUITMENT_MOTIVATIONS], ['hesitation', RECRUITMENT_HESITATIONS]] as const) {
+        expect(shipped.map((c) => c.code)).toEqual(prototypeChips(question).map((c) => c.code));
+      }
+      // Each of the client's words replaces a chip that exists, and nothing else departs from the file.
+      const departing = [...RECRUITMENT_MOTIVATIONS, ...RECRUITMENT_HESITATIONS, ...RECRUITMENT_CANDIDATE_TYPES]
+        .filter((c) => ![...prototypeChips('motivation'), ...prototypeChips('hesitation'), ...prototypeChips('type')]
+          .some((p) => p.code === c.code && p.label === c.label))
+        .map((c) => [c.code, c.label]);
+      expect(departing).toEqual(Object.entries(CLIENT_CHIP_WORDS));
+    });
+
+    it('P18.95-T6 AC-2 the two hesitations the client gave no words for keep the prototype’s', () => {
+      const prototype = Object.fromEntries(prototypeChips('hesitation').map((c) => [c.code, c.label]));
+      expect(RECRUITMENT_HESITATIONS.filter((c) => c.code === 'stable-job' || c.code === 'time').map((c) => c.label))
+        .toEqual([prototype['stable-job'], prototype.time]);
     });
   });
 

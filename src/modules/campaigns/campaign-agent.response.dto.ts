@@ -192,6 +192,15 @@ export class ChasedCampaignDto implements ChasedCampaignView {
   @ApiProperty({ type: String })
   duration!: string;
 
+  @ApiProperty({
+    type: String,
+    example: 'Runs Jan – Des',
+    description: 'The months it runs, composed in the office’s calendar — the Personal Summary row’s line: *Runs Jan – '
+      + 'Des* for a calendar year, *Runs Agu – Okt 2026* for its own dates (*Runs from Okt 2026* with no end), *Runs over '
+      + 'the last 12 months* for the rolling window.',
+  })
+  runs!: string;
+
   @ApiProperty({ type: AgentCampaignPosterDto })
   poster!: AgentCampaignPosterDto;
 }

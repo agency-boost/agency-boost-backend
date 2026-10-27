@@ -55,3 +55,17 @@ rules, the recruitment playbook, and **Default template**, the default, each of 
 1 of the AgencyBoost defaults. The parts first, the company last, all under fixed ids, so a run that stopped part-way
 is finished by the next. Once the company exists it writes nothing (`created: false` and zeros). **It stops the run**
 when an insurer already holds the slug `template`, naming it.
+`0038-first-status-wording` (Phase 18.95, P18.95-T9) prints `{ statuses, snapshots, templates }`: the recruitment
+pipelines whose first status, `NOT_APPROACHED`, took the sales pipeline's words, *Not yet approached* (ADR-0167 §10,
+UI-027) — only those still holding the seeded *Not approached*, archived rows included, soft-deleted ones not — and
+the newest snapshots and `lead_pipeline` company templates, draft and published, the Template company's *Default
+template* among them, rewritten the same way. Found by code within the recruitment pipeline; an Owner's own label,
+the sales pipeline's status and another code holding the same words are not touched. No version moves. A second run
+writes none.
+`0039-product-name-placeholder` (Phase 18.95, P18.95-T6) prints `{ cleared }`: the office product rows whose display
+name was exactly the company's name followed by *" (nama kami)"* — the demo seed's rename, which the client read as a
+placeholder on the Product Catalog (UI-023) — given back to the company's name (`$unset`, the version moved once).
+A name an Owner typed, a row of another product and a soft-deleted row are not touched. A second run clears none.
+*Both, the permission review of 2026-10-27:* a value an Owner typed that happens to equal the seeded one — *Not
+approached* for 0038, exactly *"{name} (nama kami)"* for 0039 — cannot be told from it and is rewritten too. Accepted:
+the words are the default's own.

@@ -220,7 +220,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       upsert.mockRestore();
     });
 
-    it('P18.5-T7 AC-5 an ended campaign is 409 CAMPAIGN_NOT_OPEN both ways; an upcoming one is chaseable', async () => {
+    it('P18.5-T7 AC-5, P18.95-T10 AC-2 an ended campaign is 409 CAMPAIGN_NOT_OPEN both ways; an upcoming one is chaseable', async () => {
       as('RINA');
       for (const verb of ['put', 'delete'] as const) {
         expect((await http()[verb]('/campaigns/OLD_PUSH/chase').expect(409)).body.error.code).toBe('CAMPAIGN_NOT_OPEN');
@@ -263,14 +263,14 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       });
     });
 
-    it('P18.5-T7 AC-6 the reader’s own chases, not ended, in order — the Summary card’s rows', async () => {
+    it('P18.5-T7 AC-6, P18.95-T7 AC-1 the reader’s own chases, not ended, in order — the Summary card’s rows, each with the months it runs', async () => {
       as('RINA');
       const res = await chasing().expect(200);
       expect(res.body.membershipId).toBe(office.id.RINA);
       expect(res.body.campaigns).toEqual([
-        { code: 'APE_SPRINT', title: 'APE Sprint', kind: 'seasonal', subtype: null, phase: 'running', duration: '1 Agu – 30 Sep 2026', poster: { emoji: '🚀', color: 'amber' } },
-        { code: 'NEXT_PUSH', title: 'Q4 Push', kind: 'seasonal', subtype: null, phase: 'upcoming', duration: '1 Okt – 31 Des 2026', poster: { emoji: '🎯', color: 'navy' } },
-        { code: 'MDRT_QUALIFICATION', title: 'MDRT Qualification', kind: 'structural', subtype: 'ongoing', phase: 'running', duration: 'Standing — evaluated per calendar year (1 Jan – 31 Des)', poster: { emoji: '🏆', color: 'gold' } },
+        { code: 'APE_SPRINT', title: 'APE Sprint', kind: 'seasonal', subtype: null, phase: 'running', duration: '1 Agu – 30 Sep 2026', runs: 'Runs Agu – Sep 2026', poster: { emoji: '🚀', color: 'amber' } },
+        { code: 'NEXT_PUSH', title: 'Q4 Push', kind: 'seasonal', subtype: null, phase: 'upcoming', duration: '1 Okt – 31 Des 2026', runs: 'Runs Okt – Des 2026', poster: { emoji: '🎯', color: 'navy' } },
+        { code: 'MDRT_QUALIFICATION', title: 'MDRT Qualification', kind: 'structural', subtype: 'ongoing', phase: 'running', duration: 'Standing — evaluated per calendar year (1 Jan – 31 Des)', runs: 'Runs Jan – Des', poster: { emoji: '🏆', color: 'gold' } },
       ]);
       // Naming herself is her own read.
       expect((await chasing({ for: office.id.RINA }).expect(200)).body).toEqual(res.body);

@@ -25,7 +25,7 @@ export class CatalogCardDto {
   @ApiProperty({ type: String, example: 'PRUMAPAN', description: 'The product’s permanent code: its address.' })
   code!: string;
 
-  @ApiProperty({ type: String, example: 'PRUMapan (nama kami)', description: 'The office’s display name, else the company’s name.' })
+  @ApiProperty({ type: String, example: 'PRUMapan', description: 'The office’s display name, else the company’s name.' })
   name!: string;
 
   @ApiProperty({

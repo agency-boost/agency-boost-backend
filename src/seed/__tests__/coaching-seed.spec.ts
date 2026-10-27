@@ -826,6 +826,51 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
   });
 
   /*
+   * P18.95-T7 AC-4 (the client's UI review, UI-030): an event's reminder names its time and place, from the event the
+   * office holds; and the three inboxes open on one notice repeated, the line `/notifications` draws with its count.
+   */
+  it('P18.95-T7 AC-4 every reminder names its event’s time and place, and each inbox opens on three in a row', async () => {
+    const kpmId = await office();
+    const reminders = await col('notifications').find({ kpmId, templateId: NotificationTemplate.EVENT_REMINDER }).toArray();
+    expect(reminders.length).toBeGreaterThan(9);
+    const events = new Map((await col('events').find({ kpmId }).toArray()).map((e) => [String(e._id), e]));
+    for (const { payload } of reminders) {
+      const event = events.get(payload.eventId);
+      expect(event).toBeDefined();
+      expect(payload).toEqual({
+        eventId: String(event!._id), title: event!.title, startsAt: event!.startsAt.toISOString(),
+        timezone: 'Asia/Jakarta', location: event!.location,
+      });
+    }
+    const notificationModel = mongoose.model(Notification.name, NotificationSchema);
+    const inboxes = new NotificationService(
+      notificationModel as never,
+      new NotificationRepository(notificationModel as never),
+      mongoose.model(NotificationPreferences.name, NotificationPreferencesSchema) as never,
+      new NoRenderer(), clock, { record: async () => undefined } as never, [],
+    );
+    for (const email of ['agus@kpm0417.test', 'sari@kpm0417.test', 'rina@kpm0417.test']) {
+      const member = await memberOf(email);
+      const as = new RequestContext(String(member.userId), 'none', {
+        membershipId: String(member._id), kpmId, orgLevelCode: member.orgLevelCode, hierarchyRole: member.role,
+        status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+      } as never);
+      const { items } = await inboxes.inbox(as);
+      // Among the newest, after anything this morning's run sent (Rina's finalized session): three in a row, unread.
+      const first = items.findIndex((i) => i.title === 'Kickoff 2026 is coming up');
+      expect({ email, near: first >= 0 && first <= 2 }).toEqual({ email, near: true });
+      // The kickoff is 14 days out, at 09.00 in Jakarta, at the office: the reminder says when and where.
+      expect({ email, rows: items.slice(first, first + 3).map((i) => [i.title, i.detail, i.readAt]) }).toEqual({
+        email,
+        rows: Array.from({ length: 3 }, () => ['Kickoff 2026 is coming up', '16 Okt 2026, 09.00 · Kantor KPM', null]),
+      });
+      // And the run ends there: the next item is another notice, so the line counts three.
+      expect({ email, next: items[first + 3]?.title === 'Kickoff 2026 is coming up' && items[first + 3]?.detail === items[first].detail })
+        .toEqual({ email, next: false });
+    }
+  });
+
+  /*
    * P18.8-T15 AC-3 (the client's UI review, UI-003): Agus's inbox said *Wilson Tanoto set your goal* seven times beside
    * a Summary saying he has no goal. A *set your goal* notice is written for a goal a leader saved, and nothing else.
    */

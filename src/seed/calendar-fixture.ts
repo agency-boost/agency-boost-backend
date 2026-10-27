@@ -141,7 +141,7 @@ export function buildCalendarFixture(input: CalendarFixtureInput): CalendarFixtu
     { slot: 'w0:client-review', by: 'agus', type: 'client', title: 'Client review — Hartono family', notes: 'Client’s home — Jl. Sudirman No. 12, Surabaya', date: day(0), start: '14:00', end: '15:00' },
     { slot: 'w0:pipeline', by: 'agus', type: 'task', title: 'Pipeline check', notes: 'Desk — review the week’s leads', date: day(0), start: '16:00', end: '16:30' },
     { slot: 'w0:prospecting', by: 'agus', type: 'task', title: 'Prospecting call block', notes: 'Desk — no calls scheduled, personal focus block', date: day(1), start: '10:00', end: '11:30' },
-    { slot: 'w0:goal-review', by: 'agus', type: 'meeting', title: 'Goal review — Q4 planning', notes: 'Office — Conference Room A', date: day(2), start: '09:00', end: '10:00', with: [['sari', 'pending'], ['arief', 'pending']] },
+    { slot: 'w0:goal-review', by: 'agus', type: 'meeting', title: 'Goal review — Q4 planning', notes: 'Office — Conference Room A, or Google Meet: meet.google.com/xqv-pkbt-wmr', date: day(2), start: '09:00', end: '10:00', with: [['sari', 'pending'], ['arief', 'pending']] },
     { slot: 'w0:trip', by: 'agus', type: 'travel', title: 'Client trip — Surabaya', notes: 'Flight GA 312, back Saturday evening', startsOn: day(4), endsOn: day(5) },
     // *Block time* on Indah: the leader's entry, Indah placed on it (ADR-0098).
     { slot: 'w0:block-indah', by: 'agus', type: 'coaching', title: '1:1 with Indah Permatasari', notes: 'Office — Meeting Room 2', date: day(2), start: '15:00', end: '15:30', with: [['indah', 'placed']] },

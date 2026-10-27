@@ -143,6 +143,39 @@ describe('OD-50 — placing a member on a custom rung by its code', () => {
       await expect(roles.change(leader, fa, 'SM')).rejects.toMatchObject({ code: 'ORG_ROLE_CHANGE_NOT_PERMITTED' });
     });
 
+    it('P18.95-T9 AC-1 names the company’s own senior rung in the refusal: its code when short, its label when not', async () => {
+      // A second senior rung with a code too long to read as one (ADR-0167 §10: `shortOfRung`).
+      await mongoose.model(CompanyOrgLevel.name).create({
+        companyId: companyA, code: 'REGIONAL', label: 'Regional Director', displayOrder: 7, leaderTier: 'senior',
+        status: 'active', archivedAt: null, deletedAt: null,
+      });
+      const root = await place(KPM_A, 'REGIONAL');
+      const um = await place(KPM_A, 'UM', root);
+      const fa = await place(KPM_A, 'FA', um);
+      const sm = await place(KPM_A, 'SM', um);
+      const leader = await as(KPM_A, um);
+      const refusal = (rung: string) => `Only the office’s Owner or an Admin can change somebody’s role to or from ${rung}.`;
+
+      // Onto a senior rung: the one asked for.
+      await expect(roles.change(leader, fa, 'SM')).rejects.toMatchObject({
+        code: 'ORG_ROLE_CHANGE_NOT_PERMITTED', message: refusal('SM'),
+      });
+      await expect(roles.change(leader, fa, 'regional')).rejects.toMatchObject({
+        code: 'ORG_ROLE_CHANGE_NOT_PERMITTED', message: refusal('Regional Director'),
+      });
+      // Off one: the one they stand on — and, once the company takes it off the ladder, its code.
+      await expect(roles.change(leader, sm, 'FA')).rejects.toMatchObject({
+        code: 'ORG_ROLE_CHANGE_NOT_PERMITTED', message: refusal('SM'),
+      });
+      await mongoose.model(CompanyOrgLevel.name).updateOne(
+        { companyId: companyA, code: 'SM' }, { $set: { status: 'archived', archivedAt: NOW } },
+      );
+      await expect(roles.change(leader, sm, 'FA')).rejects.toMatchObject({
+        code: 'ORG_ROLE_CHANGE_NOT_PERMITTED', message: refusal('SM'),
+      });
+      expect(await rungOf(KPM_A, sm)).toEqual(['SM', 'ab']);
+    });
+
     it('refuses a code that is no live rung of this company’s ladder', async () => {
       const root = await place(KPM_A, 'SM');
       const fa = await place(KPM_A, 'FA', root);

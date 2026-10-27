@@ -198,7 +198,7 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       expect(res.body.plan.brief.motivations.map((c: { code: string }) => c.code)).toEqual(['flexibility', 'leadership']);
       expect(Object.keys(res.body.plan.profile)).toEqual(['code', 'label', 'tagline', 'goodFitFor', 'benefits']);
       expect(res.body.plan.openings[0]).toEqual({
-        motivation: { code: 'flexibility', label: 'Flexibility / time freedom' },
+        motivation: { code: 'flexibility', label: 'Flexibility' },
         text: SEED_RECRUITMENT_PLAYBOOK.profiles.retiree.openings.flexibility,
       });
       expect(Object.keys(res.body.plan.objections[0])).toEqual(['hesitation', 'theySay', 'youSay', 'profileOwn']);

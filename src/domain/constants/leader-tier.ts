@@ -54,6 +54,22 @@ export function tierOfRung(rung: { code: string; leaderTier?: LeaderTier | null 
   return LEGACY_TIER_BY_CODE[String(rung.code).toUpperCase()] ?? null;
 }
 
+/** The longest rung code that reads as its own short name, as an acronym does: `AB`, `AAB`, `SM`. */
+export const RUNG_SHORT_CODE_MAX_LENGTH = 4;
+
+/**
+ * **What a rung is called wherever a person's role is named in a sentence** (ADR-0167 §10, OD-205; P18.95-T9
+ * AC-1: one name per role). A code that reads as an acronym is already the short form — `AB`, `AAB`; a longer one
+ * would be shouted, so the ladder's label is used instead — `AGENT` is *Agent*. The rung's long label, whole, is
+ * for where the ladder itself is listed and edited.
+ *
+ * **It mirrors `shortOfRung` in `frontend/src/components/ui/role-badge.tsx`**, so a refusal the server words and a
+ * badge the screen draws call a rung by the same name.
+ */
+export function shortOfRung(rung: { code: string; label: string }): string {
+  return rung.code.length <= RUNG_SHORT_CODE_MAX_LENGTH ? rung.code : rung.label;
+}
+
 /** Does this class count as a leader for the leader limit? */
 export function isLeaderClass(role: string | null | undefined): boolean {
   return (LEADER_CLASSES as readonly string[]).includes(String(role ?? ''));

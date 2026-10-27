@@ -4,6 +4,7 @@ import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { KpmProductConfig, KpmProductConfigSchema } from '@/modules/products/kpm-product-config.schema';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
 import { up as attackPlanReply } from '@/migrations/0024-attack-plan-reply';
+import { up as productNamePlaceholder } from '@/migrations/0039-product-name-placeholder';
 import { seedObjectId } from './coaching-fixture';
 
 /**
@@ -15,9 +16,9 @@ import { seedObjectId } from './coaching-fixture';
  *
  * | What | Its state | Who to sign in as, and what they see |
  * |---|---|---|
- * | **0417 BSD City**, the five decisions `configure` gives it | *PRUMapan (nama kami)* under the office's name; *PRUSmart Plan* turned off; *PRUFuture*'s opening **pending**; *PRUWarisan* approved and edited again; *PRUAnugerah* sent back | `rina@kpm0417.test` at `/product-catalog`: *PRUMapan (nama kami)*, no *PRUSmart Plan*, the company's words on *PRUFuture* and *PRUAnugerah*, the approved opening on *PRUWarisan* |
+ * | **0417 BSD City**, the decisions `configure` gives it | *PRUMapan* under the company's name (no rename since P18.95-T6); *PRUSmart Plan* turned off; *PRUFuture*'s opening **pending**; *PRUWarisan* approved and edited again; *PRUAnugerah* sent back | `rina@kpm0417.test` at `/product-catalog`: *PRUMapan*, no *PRUSmart Plan*, the company's words on *PRUFuture* and *PRUAnugerah*, the approved opening on *PRUWarisan* |
  * | **0417 keeps PRULink Generasi Baru (PGB) on** (new) | `active: true` on a product the company closed to new business | `rina@kpm0417.test`: an *In run-off* card under *Investment-linked*, its run-off sentence, no script. 0555 does not keep it on, so its agents do not see it |
- * | **An approved description** (new, OD-136) on *PRUMapan (nama kami)* | the office's *Short description (shown to agents)*, approved by the Owner six days ago | `rina@kpm0417.test`: the office's sentence on the card, the drawer and the plan, in the tagline's place. `owner@kpm0417.test` at `/kpm/settings/products` → *PRUMapan* → *Customize*: the field marked *Yours.*, the row *Approved* |
+ * | **An approved description** (new, OD-136) on *PRUMapan* | the office's *Short description (shown to agents)*, approved by the Owner six days ago | `rina@kpm0417.test`: the office's sentence on the card, the drawer and the plan, in the tagline's place. `owner@kpm0417.test` at `/kpm/settings/products` → *PRUMapan* → *Customize*: the field marked *Yours.*, the row *Approved* |
  * | **A pending description** (new, OD-136) on *PRUFuture* | written beside its pending opening, not yet approved | `rina@kpm0417.test`: the company's tagline still. `owner@kpm0417.test` or `admin@kpm0417.test` at *Script approvals*: *PRUFuture*, its description among the lines to decide; **Approve**, and the agent's next read has both |
  * | **Prudential's commission schedules** (new, OD-135) | *PRUMapan* three years, *PRUFuture* three, *PRULink NextGen* five — **demo figures, not Prudential's** — and every other product none | `rina@kpm0417.test`, the drawer's *Details*: *Commission rate*, a row per year; *PRUWarisan*'s is not set. `superadmin@agencyboost.test` at `/admin/companies` → *Prudential* → *Template* → *Products* → *Edit*: the schedule as percentages, to change |
  * | **0555 Kelapa Gading** | the same five, no PGB and no description | `agent@kpm0555.test`: the other office of the same company |
@@ -29,7 +30,8 @@ import { seedObjectId } from './coaching-fixture';
  *
  * **Migration `0024-attack-plan-reply` runs here**, as a deployed database meets it, so a database seeded
  * before the reply was corrected (D-reply) is corrected by a re-seed without `--reset`; a fresh seed has
- * nothing for it to do.
+ * nothing for it to do. **So does `0039-product-name-placeholder`** (P18.95-T6, UI-023): a database seeded
+ * while `configure` still renamed PRUMapan *"PRUMapan (nama kami)"* is given the company's name back.
  *
  * **Written once, until `--reset`.** Each write leaves the audit row its service would have — the same
  * action names, so `/admin/audit` reads what the demo did — and **that row is the marker**: a decision
@@ -112,6 +114,8 @@ export interface SalesToolsFixture {
   written: number;
   /** What migration `0024` did on this run: nothing on a fresh seed. */
   reply: Awaited<ReturnType<typeof attackPlanReply>>;
+  /** What migration `0039` did on this run: nothing on a fresh seed. */
+  named: Awaited<ReturnType<typeof productNamePlaceholder>>;
   guide: string;
 }
 
@@ -140,6 +144,7 @@ export async function seedSalesToolsFixture(deps: SalesToolsFixtureDeps): Promis
   });
 
   const reply = await attackPlanReply(mongoose.connection.db!, now);
+  const named = await productNamePlaceholder(mongoose.connection.db!, now);
 
   const productIdOf = async (code: string): Promise<string> => {
     const product = await Products.findOne({ companyId, code, deletedAt: null }).select('_id').lean().exec();
@@ -269,8 +274,9 @@ export async function seedSalesToolsFixture(deps: SalesToolsFixtureDeps): Promis
   SALES TOOLS at /product-catalog and /attack-plan  (from src/seed/sales-tools-fixture.ts; walk as an agent
              of 0417, e.g. rina@kpm0417.test. PRUMapan's own brochure is RECRUITMENT's, below, where storage
              is configured; otherwise upload one on /kpm/settings/products as the Owner first)
-    KPM 0417 · BSD City          P5's five decisions: PRUMapan (nama kami); PRUSmart Plan off; PRUFuture's
-                                 opening pending; PRUWarisan approved and edited again; PRUAnugerah sent back.
+    KPM 0417 · BSD City          P5's decisions: PRUSmart Plan off; PRUFuture's opening pending; PRUWarisan
+                                 approved and edited again; PRUAnugerah sent back. PRUMapan under its own name.
+                                 Search the catalog by name ("mapan"); the category pills scroll on a phone.
                                  New: PRULink Generasi Baru (PGB) kept on — an In run-off card. PRUMapan's own
                                  description, approved — on its card in the tagline's place; PRUFuture's,
                                  pending — the company's tagline until the Owner approves it at Script approvals
@@ -280,5 +286,5 @@ export async function seedSalesToolsFixture(deps: SalesToolsFixtureDeps): Promis
                                  rest not set. Edit at /admin/companies → Prudential → Template → Products
 `;
 
-  return { written, reply, guide };
+  return { written, reply, named, guide };
 }

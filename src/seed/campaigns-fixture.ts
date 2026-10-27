@@ -183,16 +183,16 @@ export async function seedCampaignsFixture(deps: CampaignsFixtureDeps): Promise<
     {
       code: 'PROMOTION_AGENT_AAB', title: 'Promotion: Agent → AAB', kind: 'structural', subtype: 'promotion', window: 'rolling_12m',
       from: `${M.slice(0, 4)}-01`, to: null, appliesToOrgLevelCodes: ['AGENT'],
-      description: 'Standing promotion criteria, evaluated over the last twelve months on file, for review as an Associate Agency Builder.',
-      poster: { emoji: '🎖️', color: 'navy' }, blurb: 'Standing criteria to move up to Associate Agency Builder.',
-      reward: 'Review for promotion to Associate Agency Builder', requirements: [ape(1_200 * JT), count('NEW_ACTIVE_AGENTS', 3)],
+      description: 'Standing promotion criteria, evaluated over the last twelve months on file, for review as an AAB.',
+      poster: { emoji: '🎖️', color: 'navy' }, blurb: 'Standing criteria to move up to AAB.',
+      reward: 'Review for promotion to AAB', requirements: [ape(1_200 * JT), count('NEW_ACTIVE_AGENTS', 3)],
     },
     {
       code: 'PROMOTION_AAB_AB', title: 'Promotion: AAB → AB', kind: 'structural', subtype: 'promotion', window: 'rolling_12m',
       from: `${M.slice(0, 4)}-01`, to: null, appliesToOrgLevelCodes: ['AAB'],
-      description: 'Standing promotion criteria, evaluated over the last twelve months on file, for review as an Agency Builder.',
-      poster: { emoji: '🏅', color: 'navy' }, blurb: 'Standing criteria to move up to Agency Builder.',
-      reward: 'Review for promotion to Agency Builder', requirements: [count('MAA_COUNT_IN_UNIT', 5), count('NEW_HIRES', 6)],
+      description: 'Standing promotion criteria, evaluated over the last twelve months on file, for review as an AB.',
+      poster: { emoji: '🏅', color: 'navy' }, blurb: 'Standing criteria to move up to AB.',
+      reward: 'Review for promotion to AB', requirements: [count('MAA_COUNT_IN_UNIT', 5), count('NEW_HIRES', 6)],
     },
     {
       code: 'MDRT_QUALIFICATION', title: 'MDRT Qualification', kind: 'structural', subtype: 'ongoing', window: 'calendar_year',

@@ -1,6 +1,6 @@
 import {
   addMonths, campaignPhase, dayRangeWords, durationWords, inclusiveEnd, isWholeMonths, lastLocalDay, monthRangeWords, monthsFrom,
-  resolveWindow,
+  resolveWindow, runsWords,
 } from './campaign-window';
 
 const JKT = 'Asia/Jakarta';
@@ -149,6 +149,36 @@ describe('campaign windows (P18.5-T8 AC-2, D-windows)', () => {
       expect(durationWords({ window: 'rolling_12m', startsAt: wib('2026-01-01T00:00:00'), endsAt: null }, JKT))
         .toBe('Rolling 12-month window');
       expect(durationWords({ window: 'campaign_dates', startsAt: wib('2026-07-01T00:00:00'), endsAt: null }, JKT)).toBe('From 1 Jul');
+    });
+  });
+
+  describe('the Summary row’s months (P18.95-T7 AC-1, the grey text’s row 23)', () => {
+    it('P18.95-T7 AC-1 a calendar year runs Jan – Des, whatever year it is read in', () => {
+      for (const year of ['2026', '2031']) {
+        expect(runsWords({ window: 'calendar_year', startsAt: wib(`${year}-03-15T09:00:00`), endsAt: null }, JKT)).toBe('Runs Jan – Des');
+      }
+    });
+
+    it('P18.95-T7 AC-1 a campaign’s own dates run over the months they touch, in Jakarta', () => {
+      const runs = (from: string, to: string | null) =>
+        runsWords({ window: 'campaign_dates', startsAt: wib(from), endsAt: to === null ? null : wib(to) }, JKT);
+      expect(runs('2026-08-01T00:00:00', '2026-10-31T23:59:00')).toBe('Runs Agu – Okt 2026');
+      expect(runs('2026-10-05T09:00:00', '2026-10-20T17:00:00')).toBe('Runs Okt 2026');
+      expect(runs('2026-11-01T00:00:00', '2027-01-31T23:59:00')).toBe('Runs Nov 2026 – Jan 2027');
+      // An exclusive midnight end belongs to the day before it: September, not October.
+      expect(runs('2026-07-01T00:00:00', '2026-10-01T00:00:00')).toBe('Runs Jul – Sep 2026');
+      expect(runs('2026-10-01T00:00:00', null)).toBe('Runs from Okt 2026');
+    });
+
+    it('P18.95-T7 AC-1 the edge is the office’s day: 18:00 UTC on 31 July is already August in Jakarta', () => {
+      expect(runsWords({
+        window: 'campaign_dates', startsAt: new Date('2026-07-31T18:00:00Z'), endsAt: wib('2026-09-30T23:59:00'),
+      }, JKT)).toBe('Runs Agu – Sep 2026');
+    });
+
+    it('P18.95-T7 AC-1 the rolling window says how long it is, its months moving with every file', () => {
+      expect(runsWords({ window: 'rolling_12m', startsAt: wib('2026-01-01T00:00:00'), endsAt: null }, JKT))
+        .toBe('Runs over the last 12 months');
     });
   });
 });

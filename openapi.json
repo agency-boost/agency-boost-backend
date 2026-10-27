@@ -122,7 +122,7 @@
             "name": "search",
             "required": false,
             "in": "query",
-            "description": "Over the name and the remarks.",
+            "description": "Over the name and the remarks, ignoring case, as the words typed — never a pattern. Narrows the leads your grant reaches and never widens them. The leads screen sends it with `type` and `statusCode`; the coaching card with `type`.",
             "schema": {
               "maxLength": 120,
               "type": "string"
@@ -15259,7 +15259,7 @@
             "name": "budget",
             "required": true,
             "in": "query",
-            "description": "*Monthly premium budget*: 1 is < Rp 500 rb, 7 is Lump-sum.",
+            "description": "The budget: 1 to 6 the *Monthly premium budget* bands, 1 is < Rp 500 rb; 7 is *Lump-sum*, asked as its own option.",
             "schema": {
               "enum": [
                 1,
@@ -20482,7 +20482,7 @@
     },
     "/api/v1/calendar/entries": {
       "get": {
-        "description": "Your own calendar — every entry you organise, and every one you are on and have not declined — for the week or the month holding `date`, with the period’s days, the dates ‹ and › ask for, and the office’s today and now: nothing is worked out in the browser. Weeks run Monday to Sunday in the office’s zone; a month is padded to whole weeks, and its padding days carry their entries too.\n\nWith `for`, the week of somebody you coach, beside your own: everything they organised in full, and an entry they only attend in full only when you could read it yourself — otherwise as a busy block. An entry organised by somebody who hides their details is a busy block too, unless you are on it. Each such read is recorded.\n\n**Requires `calendar_entry:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Your own calendar — every entry you organise, and every one you are on and have not declined — for the week or the month holding `date`, with the period’s days, the dates ‹ and › ask for, and the office’s today and now: nothing is worked out in the browser. Weeks run Monday to Sunday in the office’s zone; a month is padded to whole weeks, and its padding days carry their entries too.\n\nWith `for`, the week or the month of somebody you coach, beside your own: everything they organised in full, and an entry they only attend in full only when you could read it yourself — otherwise as a busy block. An entry organised by somebody who hides their details is a busy block too, unless you are on it. Each such read is recorded.\n\n**Requires `calendar_entry:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "CalendarController_read_v1",
         "parameters": [
           {
@@ -20513,7 +20513,7 @@
             "name": "for",
             "required": false,
             "in": "query",
-            "description": "A member you coach, whose week to compare beside your own. `view=week` only. Anybody else — yourself included — is not found; sent empty, it is refused rather than read as your own.",
+            "description": "A member you coach, whose week or month to compare beside your own. Anybody else — yourself included — is not found; sent empty, it is refused rather than read as your own.",
             "schema": {
               "minLength": 1,
               "maxLength": 64,
@@ -30383,7 +30383,7 @@
           },
           "name": {
             "type": "string",
-            "example": "PRUMapan (nama kami)",
+            "example": "PRUMapan",
             "description": "The office’s display name, else the company’s name."
           },
           "tagline": {
@@ -30551,7 +30551,7 @@
           },
           "name": {
             "type": "string",
-            "example": "PRUMapan (nama kami)",
+            "example": "PRUMapan",
             "description": "The office’s display name, else the company’s name."
           },
           "tagline": {
@@ -33144,6 +33144,11 @@
           "duration": {
             "type": "string"
           },
+          "runs": {
+            "type": "string",
+            "example": "Runs Jan – Des",
+            "description": "The months it runs, composed in the office’s calendar — the Personal Summary row’s line: *Runs Jan – Des* for a calendar year, *Runs Agu – Okt 2026* for its own dates (*Runs from Okt 2026* with no end), *Runs over the last 12 months* for the rolling window."
+          },
           "poster": {
             "$ref": "#/components/schemas/AgentCampaignPosterDto"
           }
@@ -33155,6 +33160,7 @@
           "subtype",
           "phase",
           "duration",
+          "runs",
           "poster"
         ]
       },
@@ -35536,7 +35542,7 @@
           },
           "label": {
             "type": "string",
-            "example": "Associate Agency Builder",
+            "example": "AAB",
             "description": "The ladder’s own label for it."
           }
         },

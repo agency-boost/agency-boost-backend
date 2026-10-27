@@ -749,9 +749,15 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
      * Five product decisions (P5-T5, P5-T10), so both tabs show every state they have.
      *
      * An office with no rows at all reads as *"everything inherited"*, which is true but shows
-     * none of what the screens are for. So: one product it turned off, one it renamed, and the
-     * three review states the approval queue exists to tell apart — **pending**, **approved**
-     * (its words frozen, which is what agents actually read) and **sent back** with a reason.
+     * none of what the screens are for. So: one product it turned off, and the three review states
+     * the approval queue exists to tell apart — **pending**, **approved** (its words frozen, which is
+     * what agents actually read) and **sent back** with a reason. The first product's row is the one
+     * `sales-tools-fixture.ts` lays 0417's approved description onto.
+     *
+     * *Changed 2026-10-26 (P18.95-T6, UI-023):* that first row no longer renames the product. It read
+     * *"PRUMapan (nama kami)"* — "our name" — which the client took, rightly, for a placeholder on the
+     * catalog; migration `0039-product-name-placeholder` gives a database seeded before this the
+     * company's name back. An office's rename is walked by renaming one on `/kpm/settings/products`.
      */
     const shelf = await Products.find({ companyId: await companyOf(kpmId) })
       .sort({ sortOrder: 1 }).limit(5).lean().exec();
@@ -772,7 +778,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
         {
           kpmId, productId: String(shelf[0]._id),
           active: null,
-          overrides: { displayName: `${String(shelf[0].name)} (nama kami)` },
+          overrides: {},
           reviewState: 'none',
         },
         {
@@ -3205,6 +3211,24 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     const upcoming = titles.filter((title) => daysAgo(-EVENT_STARTS_IN_DAYS[title]).getTime() > at.getTime());
     return upcoming[i % upcoming.length];
   };
+  /*
+   * **A reminder names its event's time and place** (P18.95-T7 AC-4; the client's UI review, UI-030): its payload is
+   * the event as the office holds it — its id, title, start and the zone that start is read in, and its location —
+   * read back from the three events above, so a database whose events an earlier run dated keeps that run's dates.
+   */
+  const remindedEvents = new Map(
+    (await Events.find({ kpmId: id0417, title: { $in: Object.keys(EVENT_STARTS_IN_DAYS) }, deletedAt: null }).lean().exec())
+      .map((event) => [event.title, event]),
+  );
+  const reminderPayload = (title: string): Record<string, unknown> => {
+    const event = remindedEvents.get(title);
+    return event
+      ? {
+        eventId: String(event._id), title, startsAt: event.startsAt.toISOString(),
+        timezone: DEFAULT_TENANT_TIMEZONE, location: event.location,
+      }
+      : { title };
+  };
   const historyRows: Record<string, unknown>[] = [];
   for (const person of historyCast) {
     const to = { userId: String(person.user._id), membershipId: person.membership.id };
@@ -3237,7 +3261,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
           entryId: seedObjectId('inbox-history', person.key, 'entry', String(i)),
           date: officeDate(new Date(at.getTime() + 2 * 24 * hour)), change: 'cancelled',
         }]
-        : [NotificationTemplate.EVENT_REMINDER, { title: reminderFor(person.reminders, at, i) }];
+        : [NotificationTemplate.EVENT_REMINDER, reminderPayload(reminderFor(person.reminders, at, i))];
       // The newest few are unread, and every fourth after them: an inbox somebody keeps up with, mostly.
       const unread = i < 3 || i % 4 === 0;
       historyRows.push({
@@ -3251,8 +3275,41 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       });
     }
   }
+  /*
+   * **Three in a row, the inbox's repeats** (P18.95-T7 AC-4; the client's UI review, UI-030 — *Wilson updated your
+   * goal · 7×*): the office's *Kickoff 2026* reminder sent three times, a quarter of an hour apart, as the newest of
+   * each of the three inboxes and unread. `/notifications` and the bell draw them as one line, *Kickoff 2026 is
+   * coming up · 3×*, that opens to the three. Derived ids, so a re-run writes none, and a database seeded before
+   * them gets them.
+   */
+  for (const person of historyCast) {
+    for (let n = 0; n < 3; n += 1) {
+      const at = new Date(clock.now().getTime() - (n + 1) * 15 * 60 * 1000);
+      historyRows.push({
+        _id: new mongoose.Types.ObjectId(seedObjectId('inbox-repeats', person.key, String(n))),
+        kpmId: id0417, membershipId: person.membership.id, userId: String(person.user._id),
+        templateId: NotificationTemplate.EVENT_REMINDER, payload: reminderPayload('Kickoff 2026'),
+        delivery: Object.fromEntries(
+          (TEMPLATE_CHANNELS[NotificationTemplate.EVENT_REMINDER] ?? []).map((channel) => [channel, { status: 'sent', at }]),
+        ),
+        readAt: null, coalesceKey: null, deletedAt: null, createdAt: at, updatedAt: at,
+      });
+    }
+  }
   for (const row of historyRows) {
-    if (await Notifications.exists({ _id: row._id })) continue;
+    if (await Notifications.exists({ _id: row._id })) {
+      /*
+       * A reminder an earlier run wrote with its title alone takes its event's time and place (P18.95-T7 AC-4): its
+       * payload only, so whether somebody read it in a walk stays as they left it.
+       */
+      if (row.templateId === NotificationTemplate.EVENT_REMINDER && (row.payload as { startsAt?: unknown }).startsAt) {
+        await Notifications.collection.updateOne(
+          { _id: row._id as mongoose.Types.ObjectId, templateId: NotificationTemplate.EVENT_REMINDER, 'payload.startsAt': { $exists: false } },
+          { $set: { payload: row.payload } },
+        );
+      }
+      continue;
+    }
     await Notifications.collection.insertOne(row);
   }
   /*

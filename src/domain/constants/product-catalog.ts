@@ -130,6 +130,18 @@ export const PRODUCT_BUDGET_BAND_LABELS: Readonly<Record<number, string>> = {
   5: 'Rp 10 jt–Rp 20 jt', 6: '> Rp 20 jt', 7: 'Lump-sum',
 };
 
+/**
+ * **The one budget band that is not a monthly premium**: *Lump-sum*, a single payment (ADR-0167; the client's
+ * UI review of 2026-10-26, UI-030; P18.95-T6 AC-3, parity I-422).
+ *
+ * The prototype drew it as the seventh chip under *Monthly premium budget* (`Overall.html:3826-3834`), which
+ * reads a single premium as a monthly one. The brief now asks it as an option of its own, beside that
+ * question. **The band keeps its number**: a product's `eligibleBudgetBands`, the scorer and every address
+ * (`?budget=7`) mean the same thing as before, so nothing stored or linked has to move. Bands 1 to 6 are
+ * the monthly ones.
+ */
+export const PRODUCT_LUMP_SUM_BUDGET_BAND = 7;
+
 /** The seven fields the Owner's override modal names, in its order. */
 export interface SeedAttackPlan {
   readonly goodFit: string;

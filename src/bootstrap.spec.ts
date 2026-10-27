@@ -133,7 +133,14 @@ describe('configureApp', () => {
       expect(r.enableCors).toHaveBeenCalledWith({
         origin: ['https://a.example', 'https://b.example'],
         credentials: true,
+        maxAge: 600,
       });
+    });
+
+    it('P18.95-T5 (UI-030) lets a browser keep a preflight for ten minutes, not Chrome’s five seconds', () => {
+      const r = recordingApp({ NODE_ENV: 'production', CORS_ORIGINS: 'https://a.example' });
+      configureApp(r.app);
+      expect(r.enableCors.mock.calls[0][0]).toMatchObject({ maxAge: 600 });
     });
 
     it('allows no origin at all when none is configured', () => {
@@ -141,7 +148,7 @@ describe('configureApp', () => {
       // that leaks an authenticated session to any site that asks.
       const r = recordingApp({ NODE_ENV: 'production' });
       configureApp(r.app);
-      expect(r.enableCors).toHaveBeenCalledWith({ origin: false, credentials: true });
+      expect(r.enableCors).toHaveBeenCalledWith({ origin: false, credentials: true, maxAge: 600 });
     });
   });
 

@@ -140,6 +140,15 @@ describe('the API behind a proxy, and the refresh cookie on a foreign origin (P1
       expect(other.body.error.code).toBe('AUTH_INVALID_CREDENTIALS');
     });
 
+    it('ADR-0168, the permission review: garbage refresh tokens from one address do not lock out another', async () => {
+      const garbageFrom = (ip: string, n: number) => request(server.getHttpServer()).post('/api/v1/auth/refresh')
+        .set('X-Forwarded-For', ip).send({ refreshToken: `not-a-token-${n}` });
+      for (let n = 0; n < 60; n += 1) await garbageFrom('203.0.113.30', n).expect(401);
+      expect((await garbageFrom('203.0.113.30', 99).expect(429)).body.error.code).toBe('AUTH_RATE_LIMITED');
+      // Another browser with a dead cookie is still told its session ended.
+      expect((await garbageFrom('198.51.100.40', 0).expect(401)).body.error.code).toBe('AUTH_SESSION_ENDED');
+    });
+
     it('P18.7-T1 takes the hop the proxy wrote, not the one a client sent ahead of it', async () => {
       // A client that sends its own X-Forwarded-For: Caddy appends the address it saw, and that one counts.
       for (let n = 0; n < LOGIN_LIMIT; n += 1) {

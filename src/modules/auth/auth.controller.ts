@@ -297,8 +297,15 @@ export class AuthController {
      * — is one session asking over and over.
      */
     const presented = this.refreshTokenFrom(req, dto);
+    /*
+     * A token that names no family — unknown, malformed, spent — is rationed **per address**, not in one bucket
+     * shared by every browser with a dead cookie: since ADR-0168 each of those is told *Your session ended*, and one
+     * caller posting garbage would otherwise have them all answered 429 for the hour (the permission review,
+     * 2026-10-27).
+     */
+    const family = await this.auth.familyOf(presented);
     this.limit(
-      `refresh:${(await this.auth.familyOf(presented)) ?? 'unknown'}`,
+      family ? `refresh:${family}` : `refresh:unknown:${req.ip ?? 'unknown'}`,
       REFRESH_LIMIT,
       REFRESH_WINDOW_SECONDS,
     );

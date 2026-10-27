@@ -3,6 +3,7 @@ import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { SEED_PRODUCTS, SEED_REPLY_BY_NEED } from '@/domain/constants';
 import { up as attackPlanReply } from '@/migrations/0024-attack-plan-reply';
+import { up as productNamePlaceholder } from '@/migrations/0039-product-name-placeholder';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import {
@@ -58,7 +59,8 @@ describe('Phase 14 the sales tools seed — a run at 10:00 on 8 October 2026 in 
       const shelf = await shelfOf(owner0417);
       const by = (code: string) => shelf.find((p) => p.code === code)!;
 
-      expect(by('PRUMAPAN').displayName).toEqual({ value: 'PRUMapan (nama kami)', overridden: true });
+      // P18.95-T6 AC-4 (UI-023): no placeholder rename — the office reads the company's name.
+      expect(by('PRUMAPAN').displayName).toEqual({ value: 'PRUMapan', overridden: false });
       expect(by('PRUSMART_PLAN').active).toEqual({ value: false, overridden: true });
       expect(by('PRUFUTURE').reviewState).toBe('pending');
       expect(by('PRUWARISAN').reviewState).toBe('pending');
@@ -80,8 +82,8 @@ describe('Phase 14 the sales tools seed — a run at 10:00 on 8 October 2026 in 
       const row = await rowOf(owner0417, code);
 
       expect(row).toMatchObject({ reviewState: 'approved', description: { value: description, overridden: true } });
-      // Laid onto the row P5 seeded: the office's name for it stays, and agents read both.
-      expect(row.displayName).toEqual({ value: 'PRUMapan (nama kami)', overridden: true });
+      // Laid onto the row P5 seeded, which renames nothing since P18.95-T6: the company's name, the office's words.
+      expect(row.displayName).toEqual({ value: 'PRUMapan', overridden: false });
       const served = await wired.kpmProducts.effectiveScript(agent0417, row.productId);
       expect(served).toMatchObject({ source: 'kpm', description });
       // Only the description was approved: the script is still the company's.
@@ -147,6 +149,14 @@ describe('Phase 14 the sales tools seed — a run at 10:00 on 8 October 2026 in 
     for (let run = 0; run < 2; run += 1) {
       expect(await attackPlanReply(mongoose.connection.db!, clock.now()))
         .toMatchObject({ rewritten: 0, edited: 0 });
+    }
+  });
+
+  it('P18.95-T6 AC-4 the name fix + migration: no office’s product is named with the placeholder, and 0039 finds nothing to clear', async () => {
+    expect(await col('kpmProductConfigs').countDocuments({ 'overrides.displayName': /\(nama kami\)/ })).toBe(0);
+    expect(await col('products').countDocuments({ name: /\(nama kami\)/ })).toBe(0);
+    for (let run = 0; run < 2; run += 1) {
+      expect(await productNamePlaceholder(mongoose.connection.db!, clock.now())).toEqual({ cleared: 0 });
     }
   });
 

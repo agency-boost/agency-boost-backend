@@ -1,3 +1,4 @@
+import { formatDateTime } from '@/common/format/format';
 import { NotificationTemplate, NotificationTemplateId, TEMPLATE_CHANNELS } from './notification.types';
 
 /** The templates that belong in an inbox: the ones with an `in_app` channel. */
@@ -136,13 +137,31 @@ export function describeNotification(
     case NotificationTemplate.EVENT_REMINDER:
       return {
         title: `${name(payload, 'title', 'An event')} is coming up`,
-        detail: 'Check the time and where it is.',
+        detail: whenAndWhere(payload) ?? 'Check the time and where it is.',
       };
     default:
       // Includes the email-only templates, which the inbox filters out before this is
       // reached — so this is genuinely for a template nobody has written copy for yet.
       return { title: 'Something happened', detail: null };
   }
+}
+
+/**
+ * **An event's time and place**, the reminder's detail (P18.95-T7 AC-4; the client's UI review of 2026-10-26, UI-030):
+ * *9 Nov 2026, 09.00 · Kantor KPM* — its start on the office's clock, through the shared formatter (ADR-0167 §1), and
+ * where it is as the office wrote it. It said *"Check the time and where it is."*, which sent the reader looking for
+ * both. Either half alone when the payload holds one; `null` when it holds neither — a reminder written before the
+ * payload carried them — and the old sentence is still true of it.
+ *
+ * The instant is read in the **office's** zone, which the payload names (invariant §9): never the server's.
+ */
+function whenAndWhere(payload: Record<string, unknown>): string | null {
+  const when = typeof payload.startsAt === 'string' && typeof payload.timezone === 'string'
+    ? formatDateTime(payload.startsAt, payload.timezone)
+    : '';
+  const where = name(payload, 'location', '').trim();
+  const parts = [when, where].filter(Boolean);
+  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 /** An id as a notice carries one: a MongoDB ObjectId, 24 hex characters. */
