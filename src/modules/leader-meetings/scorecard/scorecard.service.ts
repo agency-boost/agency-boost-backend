@@ -14,7 +14,7 @@ import type { Membership } from '@/modules/org/membership.schema';
 import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
 import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
 import {
-  ProductionReadings, type MonthCells, type MonthLedger, type OfficeMonth,
+  ProductionReadings, type HeldFigure, type MonthCells, type OfficeMonth,
 } from '@/modules/production/production-readings';
 import { AGENCY_CLASS, AGENT_CLASS, UNIT_CLASS } from '@/modules/reporting/agency-partition';
 import { shiftMonth } from '@/modules/reporting/office-figures';
@@ -80,18 +80,19 @@ export function columnPeriods(meetingDate: string): Record<ColumnKey, ColumnPeri
  *
  * **Every figure through the function that already computes it** (invariant §8) — the office's people as the Overview
  * reads them (`OfficePeople`), `OFFICE_HEADCOUNT` and the composition by class, the office's file as the analytics
- * sums it (`ProductionReadings.officeMonths`) and the members' year to date as the Overview does (`ledgersFor`),
- * `MONTHLY_ACTIVE_AGENT` and `MAA_COUNT_IN_UNIT` from the month table's cells (`monthCellsFor`) — and the forum's own,
- * each once under `domain/metrics/`. ***YTD {Y−1}* goes through the same functions as *YTD {Y}***, a year earlier
- * (P18.97-T1 AC-1). **A period ends at the earliest of its own last day, the meeting's date and today**: a
- * point-in-time figure is taken on that day; a figure from the file counts the period's months the office holds now,
- * and names the ones it leaves out — but the office's current month, whose file is not due yet. **Exact**: no rounding
- * but money's to whole minor units.
+ * sums it (`ProductionReadings.officeMonths`), the members' year to date by the rule the Overview's `ledgersFor` reads
+ * it with and `MONTHLY_ACTIVE_AGENT` and `MAA_COUNT_IN_UNIT` from the month table's cells, both from one read
+ * (`monthCellsAndYearToDateFor`) — and the forum's own, each once under `domain/metrics/`. ***YTD {Y−1}* goes
+ * through the same functions as *YTD {Y}***, a year earlier (P18.97-T1 AC-1). **A period ends at the earliest of its
+ * own last day, the meeting's date and today**: a point-in-time figure is taken on that day; a figure from the file
+ * counts the period's months the office holds now, and names the ones it leaves out — but the office's current month,
+ * whose file is not due yet. **Exact**: no rounding but money's to whole minor units.
  *
  * **A fixed number of queries whatever the office's size** (`scorecard.performance.spec.ts`): the office's people,
- * then eight reads at once — the file month by month, its policy count, each member's cells, the year to date three
- * times, the new hires and the latest upload — and nothing per member. Read through the tenant repositories, in the
- * office named (invariant §1). Writes nothing.
+ * then five reads at once — the file month by month, its policy count, each member's cells and year to date, the new
+ * hires and the latest upload — and nothing per member. Read through the tenant repositories, in the office named
+ * (invariant §1). Writes nothing. *Since 2026-10-28* (the CI run's 3,217 ms against the meeting read's 3 s): six
+ * queries, where eleven read the year to date three times over, each hydrated, and the people's names no cell uses.
  */
 @Injectable()
 export class LeaderScorecardService {
@@ -116,9 +117,9 @@ export class LeaderScorecardService {
     const periods = this.periodsOf(meetingDate, today);
 
     // ---- The reads: the people since the first period began, then the rest at once.
-    // The office's zone, which the meeting names already: `OfficePeople` reads it again only when it is not given.
-    const roster = await this.people.read(ctx, this.clock.startOfLocalDay(timezone, `${lastYear}-01-01`), timezone);
-    const everyone = roster.everyone;
+    // The office's zone, which the meeting names already: `OfficePeople` reads it again only when it is not given. No
+    // name: no cell names anybody.
+    const everyone = await this.people.everyone(ctx, this.clock.startOfLocalDay(timezone, `${lastYear}-01-01`), timezone);
     const ids = everyone.map((p) => p.membershipId);
     // Production is everybody's who was here in the year, a leaver's included (OD-74), as the Overview's year to date.
     const since = (y: string) => this.clock.startOfLocalDay(timezone, `${y}-01-01`).getTime();
@@ -128,14 +129,11 @@ export class LeaderScorecardService {
     // The file from January of last year to the meeting's month: no period reads past it.
     const range = { from: `${lastYear}-01`, to: month };
     const cohortTo = [periods.fy.end, periods.ytd.end].sort()[1];
-    const [office, policies, cells, fyLedgers, lastYtdLedgers, ytdLedgers, newHires, asOf] = await Promise.all([
+    const [office, policies, file, newHires, asOf] = await Promise.all([
       this.production.officeMonths(ctx, range),
       this.policyMonths(ctx, range),
-      this.production.monthCellsFor(ctx, ids, range),
-      this.yearToDate(ctx, producersIn(lastYear), periods.fy),
-      // P18.97-T1 AC-1: last year's year to date as it stood at the meeting's month a year earlier.
-      this.yearToDate(ctx, producersIn(lastYear), periods.ytdLastYear),
-      this.yearToDate(ctx, producersIn(String(year)), periods.ytd),
+      // Each member's cells and year to date in one read: every year column's months are inside the range.
+      this.production.monthCellsAndYearToDateFor(ctx, ids, range),
       // P18.96-T6: every new hire who joined over the periods, removed or not — a cohort is who joined.
       this.memberships.find(
         ctx,
@@ -144,7 +142,7 @@ export class LeaderScorecardService {
       ),
       this.latestUpload(ctx, range, timezone),
     ]);
-    const reads: Reads = { timezone, everyone, office, policies, cells, bounds: new Map() };
+    const reads: Reads = { timezone, everyone, office, policies, cells: file.cells, bounds: new Map() };
 
     // ---- Each row, column by column. **The office's current month is never named as left out**, as the Overview's
     // `missingMonths` never names it: its file is not due until it ends. *This Month* still reads *pending data* then.
@@ -156,14 +154,16 @@ export class LeaderScorecardService {
     /** A row the table tracks over the year columns alone: *Not tracked* in the *Monthly View*. */
     const yearly = (cell: (period: Period, key: ColumnKey) => ScorecardCell) =>
       columns((period, key) => (MONTH_COLUMN_KEYS.includes(key) ? BLOCKED : cell(period, key)));
-    const ledgers = { fy: fyLedgers, ytdLastYear: lastYtdLedgers, ytd: ytdLedgers } as Partial<Record<ColumnKey, Map<string, MonthLedger>>>;
+    // Whose year to date each year column sums — P18.97-T1 AC-1: *YTD {Y−1}*'s last year's producers, as *Full Year*'s.
+    const lastYears = producersIn(lastYear);
+    const producers = { fy: lastYears, ytdLastYear: lastYears, ytd: producersIn(String(year)) } as Partial<Record<ColumnKey, string[]>>;
 
     const producing = yearly((period) => this.producing(reads, period));
     const cases = columns((period) => this.overHeld(period, (m) => policies.get(m) ?? null, caseSubmissions));
 
     const rows: Record<RowKey, Record<ColumnKey, ScorecardCell>> = {
-      ape: columns((period, key) => (ledgers[key]
-        ? this.apeToDate(reads, period, ledgers[key]!)
+      ape: columns((period, key) => (producers[key]
+        ? this.apeToDate(reads, period, (through) => file.apeYearToDateThrough(producers[key]!, through))
         : this.overHeld(period, (m) => office.get(m)?.apeMonthlyMinor ?? null, (values) => values[0]))),
       manpower: columns((period) => figure(officeHeadcount(everyone, this.clock.endOfLocalDay(timezone, period.end)))),
       // OD-26 is open: no source holds the FLC count for any period.
@@ -203,8 +203,8 @@ export class LeaderScorecardService {
     const ctx = RequestContext.tenantRead(kpmId, 'leader-scorecard');
     const periods = this.periodsOf(meetingDate, this.clock.localDateFor(timezone));
     const lastYear = String(Number(meetingDate.slice(0, 4)) - 1);
-    const roster = await this.people.read(ctx, this.clock.startOfLocalDay(timezone, `${lastYear}-01-01`), timezone);
-    return this.chips(roster.everyone, this.clock.endOfLocalDay(timezone, periods.thisMonth.end)).units;
+    const everyone = await this.people.everyone(ctx, this.clock.startOfLocalDay(timezone, `${lastYear}-01-01`), timezone);
+    return this.chips(everyone, this.clock.endOfLocalDay(timezone, periods.thisMonth.end)).units;
   }
 
   /** Each column's period, as its figures are computed: its months, ending at its own end, the meeting's or today. */
@@ -272,31 +272,23 @@ export class LeaderScorecardService {
 
   /**
    * *APE* over the year columns: **the office's year to date through the period's last month**, as the Overview reads
-   * it — each producer's latest year-to-date figure held no later than that month, summed — a leaver's kept (OD-74).
-   * The carrier's figure is cumulative, so a month with no file of its own before the latest held is inside it: what
-   * the cell leaves out is the period's months after the latest held (the Overview's `missingMonths`, which — as every
-   * cell's — never names the office's current month: `compute`).
+   * it — each producer's latest year-to-date figure held from January to that month, summed — a leaver's kept (OD-74).
+   * `yearToDate` answers each producer's figure (`monthCellsAndYearToDateFor`'s `apeYearToDateThrough`, by the rule
+   * `ledgersFor` reads the Overview's with: December's is the year's latest, any other month's the next month's
+   * *through last month*). The carrier's figure is cumulative, so a month with no file of its own before the latest
+   * held is inside it: what the cell leaves out is the period's months after the latest held (the Overview's
+   * `missingMonths`, which — as every cell's — never names the office's current month: `compute`).
    */
-  private apeToDate(reads: Reads, period: Period, ledgers: Map<string, MonthLedger>): ScorecardCell {
+  private apeToDate(
+    reads: Reads, period: Period, yearToDate: (through: string) => ReadonlyMap<string, HeldFigure | null>,
+  ): ScorecardCell {
     if (period.months.length === 0) return PENDING;
-    const last = period.months[period.months.length - 1];
-    const figures = [...ledgers.values()]
-      .map((ledger) => (last.endsWith('-12') ? ledger.standing.yearToDate : ledger.standing.throughLastMonth))
+    const figures = [...yearToDate(period.months[period.months.length - 1]).values()]
       .filter((held) => held !== null)
       .map((held) => held!.minor);
     if (figures.length === 0) return PENDING;
     const heldMonths = period.months.filter((m) => reads.office.get(m)?.held === true);
     return figure(figures.reduce((sum, v) => sum + v, 0), period.months.filter((m) => !heldMonths.some((h) => h >= m)));
-  }
-
-  /**
-   * The year to date as it stood at the end of the period's last month, through `ledgersFor` — the Overview's own
-   * reading: December's is the year's latest figure; any other month's is the next month's *through last month*.
-   */
-  private async yearToDate(ctx: RequestContext, producers: string[], period: Period): Promise<Map<string, MonthLedger>> {
-    if (period.months.length === 0) return new Map();
-    const last = period.months[period.months.length - 1];
-    return this.production.ledgersFor(ctx, producers, last.endsWith('-12') ? last : shiftMonth(last, 1));
   }
 
   /** A month's bounds in the office's zone (`Clock.monthBounds`), each month's computed once. */

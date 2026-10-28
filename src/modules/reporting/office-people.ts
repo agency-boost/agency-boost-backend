@@ -44,7 +44,8 @@ export interface OfficeHeader {
 /**
  * **The office's people, read once per report** (Phase 18, D-api): every active membership, and the ones removed
  * since a day — a leaver's production stays the office's (OD-74) — in **one** read through the tenant-scoped
- * repository, with the names of the active ones in two more (`MemberNames`), whatever the office's size.
+ * repository, with the names of the active ones in two more (`MemberNames`), whatever the office's size; `everyone`
+ * is the one read alone, for a reader that names nobody.
  *
  * **Each with the instant their join date begins** (ADR-0172 §1, P18.96-T5 AC-1), in the office's zone (invariant §9),
  * so every count of people it feeds counts a member from the day they joined rather than the day the system let them
@@ -92,6 +93,18 @@ export class OfficePeople {
     active: OfficePerson[];
     names: Map<string, string>;
   }> {
+    const everyone = await this.everyone(ctx, leaversSince, timezone);
+    const active = everyone.filter((p) => p.status === 'active');
+    const names = await this.names.byMembershipId(ctx, active.map((p) => p.membershipId));
+    return { everyone, active, names };
+  }
+
+  /**
+   * **`read`'s people without their names** — the one read of the memberships, and of the office's zone where none is
+   * given — for a reader that names nobody: the forum's scorecard counts and sums the office's people, and the two name
+   * reads it made beside them hydrated every one of a 500-member office's memberships whole, for nothing (2026-10-28).
+   */
+  async everyone(ctx: RequestContext, leaversSince: Date | null, timezone?: string): Promise<OfficePerson[]> {
     const [rows, zone] = await Promise.all([
       this.memberships.find(
         ctx,
@@ -102,7 +115,7 @@ export class OfficePeople {
       ),
       timezone === undefined ? this.timezoneOf(ctx) : Promise.resolve(timezone),
     ]);
-    const everyone = rows.map((row): OfficePerson => ({
+    return rows.map((row): OfficePerson => ({
       membershipId: String(row._id),
       orgLevelCode: row.orgLevelCode,
       role: row.role,
@@ -115,9 +128,6 @@ export class OfficePeople {
       joinDateStart: row.joinDate ? this.clock.startOfLocalDay(zone, row.joinDate) : null,
       removedAt: row.removedAt ?? null,
     }));
-    const active = everyone.filter((p) => p.status === 'active');
-    const names = await this.names.byMembershipId(ctx, active.map((p) => p.membershipId));
-    return { everyone, active, names };
   }
 
   /** The office's zone (`kpms.timezone`), or the platform default for a row that names none — `TenantDay.timezoneOf`. */

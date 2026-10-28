@@ -61,6 +61,26 @@ export class MetricValue {
 }
 export const MetricValueSchema = SchemaFactory.createForClass(MetricValue);
 
+/**
+ * **A cell read lean, as a hydrated row holds it** (the forum's scorecard at 500 members, 2026-10-28). A lean read skips
+ * Mongoose's hydration — and with it the defaults above, which this applies: a cell the row lacks is `cell()`'s `{}`
+ * with every field `null`, a field the cell lacks is `null`, and a cell stored as `null` stays `null`, as hydration
+ * leaves it. `MonthlyAgentDataRepository.findCells` reads through it; `monthly-agent-data.repository.tenancy.spec.ts`
+ * pins it to hydration for every shape a row can hold, so a field added above and not here fails there.
+ */
+export function cellAsHydrated(stored: Partial<MetricValue> | null | undefined): MetricValue | null {
+  if (stored === null) return null;
+  return {
+    value: stored?.value ?? null,
+    provenance: stored?.provenance ?? null,
+    sourceBatchId: stored?.sourceBatchId ?? null,
+    correctedBy: stored?.correctedBy ?? null,
+    correctedAt: stored?.correctedAt ?? null,
+    reason: stored?.reason ?? null,
+    replacedValue: stored?.replacedValue ?? null,
+  };
+}
+
 /** The six metrics the carrier's file carries, in the file's own order. */
 export const PRODUCTION_METRICS = [
   'ape', 'persistency', 'recruitment', 'newActiveAgents', 'fyp', 'policyCount',
@@ -69,6 +89,9 @@ export type ProductionMetric = (typeof PRODUCTION_METRICS)[number];
 
 /** Money among them, stored in minor units though the file says *Rp M*. */
 export const MONEY_METRICS: readonly ProductionMetric[] = ['ape', 'fyp'];
+
+/** The twelve cells a row holds, by name: each metric's month and its year to date. */
+export type MonthCellName = `${ProductionMetric}${'Monthly' | 'Ytd'}`;
 
 const cell = () => ({ type: MetricValueSchema, required: true, default: () => ({}) });
 

@@ -168,13 +168,63 @@ export class ProductionReadings {
       { projection: { membershipId: 1, month: 1, apeMonthly: 1, policyCountMonthly: 1, persistencyMonthly: 1 } },
     );
     for (const row of rows) {
-      (out.get(row.membershipId) as Map<string, MonthCells>).set(row.month, {
-        apeMonthly: readCell(row.apeMonthly).value,
-        policyCountMonthly: readCell(row.policyCountMonthly).value,
-        persistencyMonthly: readCell(row.persistencyMonthly).value,
-      });
+      (out.get(row.membershipId) as Map<string, MonthCells>).set(row.month, monthCellsOf(row));
     }
     return out;
+  }
+
+  /**
+   * **`monthCellsFor`'s cells, and each member's year to date through any month of the range — from one read** (the
+   * forum's scorecard at 500 members, 2026-10-28): the scorecard read its members' year to date three times beside its
+   * cells — *Full Year*, *YTD {Y−1}* and *YTD {Y}*, each `ledgersFor`'s whole year, hydrated — every one of them inside
+   * the months its cells read already. One query for the whole list, the range's rows at most, read lean
+   * (`MonthlyAgentDataRepository.findCells`); every member asked about gets an entry, a month absent where the office
+   * holds no row for it.
+   *
+   * **`apeYearToDateThrough(ids, month)`** answers each of those members what the single-member
+   * `apeYearToDateThrough` answers: **the latest year-to-date figure held from the month's January to it** — as
+   * imported or corrected, `null` where none is — the figure `ledgersFor` reads as a December's `yearToDate` and as the
+   * next month's `throughLastMonth`. It refuses a month whose January the range does not reach, or past its end, and a
+   * member not read: each would answer a figure short of months it never read.
+   */
+  async monthCellsAndYearToDateFor(
+    ctx: RequestContext, membershipIds: readonly string[], range: { from: string; to: string },
+  ): Promise<MonthCellsAndYearToDate> {
+    const ids = [...new Set(membershipIds)];
+    const cells = new Map<string, Map<string, MonthCells>>(membershipIds.map((id) => [id, new Map()]));
+    // Each member's months holding a year-to-date figure: a cell emptied by hand, or never given, holds none.
+    const held = new Map<string, { month: string; cell: MetricValue }[]>(ids.map((id) => [id, []]));
+    const rows = ids.length === 0 ? [] : await this.data.findCells(
+      ctx,
+      { membershipId: { $in: ids }, month: { $gte: range.from, $lte: range.to } },
+      ['apeMonthly', 'apeYtd', 'policyCountMonthly', 'persistencyMonthly'],
+    );
+    for (const row of rows) {
+      // Every row read is one of the members asked about: the query names no one else.
+      (cells.get(row.membershipId) as Map<string, MonthCells>).set(row.month, monthCellsOf(row));
+      if (row.apeYtd !== null && row.apeYtd.value !== null) {
+        (held.get(row.membershipId) as { month: string; cell: MetricValue }[]).push({ month: row.month, cell: row.apeYtd });
+      }
+    }
+    const apeYearToDateThrough = (forIds: readonly string[], month: string): Map<string, HeldFigure | null> => {
+      const january = `${month.slice(0, 4)}-01`;
+      if (!/^\d{4}-\d{2}$/.test(month) || january < range.from || month > range.to) {
+        throw new Error(`The year to date through ${month} reads ${january} to ${month}; ${range.from} to ${range.to} was read.`);
+      }
+      const out = new Map<string, HeldFigure | null>();
+      for (const id of forIds) {
+        const months = held.get(id);
+        if (!months) throw new Error(`The year to date of ${id}, whose months were not read.`);
+        // The latest of them from January to the month — the one `ledgersFor`, reading newest first, meets first.
+        let latest: { month: string; cell: MetricValue } | null = null;
+        for (const m of months) {
+          if (m.month >= january && m.month <= month && (latest === null || m.month > latest.month)) latest = m;
+        }
+        out.set(id, latest === null ? null : heldOf(latest.cell, latest.month));
+      }
+      return out;
+    };
+    return { cells, apeYearToDateThrough };
   }
 
   /**
@@ -247,6 +297,25 @@ export interface MonthCells {
   apeMonthly: number | null;
   policyCountMonthly: number | null;
   persistencyMonthly: number | null;
+}
+
+/** A row's three cells `MonthCells` reads, each as the month table reads it (`readCell`). */
+function monthCellsOf(row: {
+  apeMonthly: MetricValue | null; policyCountMonthly: MetricValue | null; persistencyMonthly: MetricValue | null;
+}): MonthCells {
+  return {
+    apeMonthly: readCell(row.apeMonthly).value,
+    policyCountMonthly: readCell(row.policyCountMonthly).value,
+    persistencyMonthly: readCell(row.persistencyMonthly).value,
+  };
+}
+
+/** What `monthCellsAndYearToDateFor` answers: the members' cells over the range, and their year to date through a month of it. */
+export interface MonthCellsAndYearToDate {
+  /** Each member's cells month by month, as `monthCellsFor` answers them. */
+  cells: Map<string, Map<string, MonthCells>>;
+  /** Each member's latest year-to-date figure from `month`'s January to it, as `apeYearToDateThrough`; `null` where none is held. */
+  apeYearToDateThrough(membershipIds: readonly string[], month: string): Map<string, HeldFigure | null>;
 }
 
 /** A member's month as a campaign reads it (Phase 18.5): each cell as the month table reads it — `null` is nothing held. */
