@@ -168,7 +168,7 @@ describe('the reporting module’s helpers', () => {
       const { Company, CompanySchema } = await import('@/modules/tenants/company.schema');
       const people = new OfficePeople(
         {} as never, {} as never, mongoose.model(Kpm.name, KpmSchema) as never, mongoose.model(Company.name, CompanySchema) as never,
-        {} as never,
+        {} as never, {} as never,
       );
       const ctx = new RequestContext('u', 'none', {
         membershipId: 'm', kpmId: String(insertedId), orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',

@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { isValidObjectId } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
@@ -6,6 +6,7 @@ import { DomainException, NotFoundException } from '@/common/errors/domain.excep
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService, type AuditEntry } from '@/modules/audit/audit.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import { SalesEvents, signalSales } from '@/modules/activation/sales-events.port';
 import { MonthlyAgentDataRepository } from './monthly-agent-data.repository';
 import type { MetricValue, ProductionMetric, Provenance } from './monthly-agent-data.schema';
 import type { Cadence } from './production-preview';
@@ -105,6 +106,8 @@ export class ProductionCorrections {
     private readonly memberships: MembershipRepository,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    // P18.96-T4 AC-1: a month's policies corrected above zero may be the member's first sale. Failing open.
+    @Optional() @Inject(SalesEvents) private readonly sales: SalesEvents | null = null,
   ) {}
 
   async correct(ctx: RequestContext, input: CorrectionInput): Promise<CorrectionResult> {
@@ -156,6 +159,13 @@ export class ProductionCorrections {
       held: cells[field],
     });
 
+    /*
+     * P18.96-T4 AC-1 (ADR-0171 §1): a month's policies above zero may be the member's first sale — and, since the P18.96
+     * exit review (M4), a month's policies corrected to none, or cleared, may take away the one the file gave them.
+     */
+    if (metric === 'policyCount' && cadence === 'monthly') {
+      await signalSales(this.sales, ctx, [membershipId]);
+    }
     return {
       membershipId, metric, cadence, changed: true, before,
       after: { value, provenance: 'corrected' },

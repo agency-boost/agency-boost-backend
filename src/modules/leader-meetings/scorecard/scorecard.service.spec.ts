@@ -47,6 +47,9 @@ interface Plan {
   start?: string;
   /** How their activation is written: by the activation module as a placement starts it, or as a row. */
   activation?: 'joined' | 'row';
+  /** P18.96-T6: a new hire (ADR-0169) — every one with an activation, and NEW_SEP — and their first sale's office day. */
+  newHire?: true;
+  sale?: string;
 }
 
 /**
@@ -66,17 +69,17 @@ const PLAN: Record<Key, Plan> = {
   OWNER: { kpmId: KPM_A, role: 'ab', leader: null, joined: '2024-01-02T02:00:00Z', fig: () => ({ ape: 10, pol: 1, nAA: 1 }) },
   AAB: { kpmId: KPM_A, role: 'aab', leader: 'OWNER', joined: '2024-01-02T02:00:00Z' },
   AG: { kpmId: KPM_A, role: 'agent', leader: 'AAB', joined: '2024-01-02T02:00:00Z', fig: () => ({ ape: 5, pol: 2 }) },
-  H25: { kpmId: KPM_A, role: 'agent', leader: 'AAB', joined: '2025-03-10T03:00:00Z', fig: (m) => (m === '2025-06' ? { ape: 3, pol: 1 } : null), activation: 'row' },
-  H25Q: { kpmId: KPM_A, role: 'agent', leader: 'AAB', joined: '2025-04-07T03:00:00Z', fig: (m) => (m === '2025-08' ? { ape: 1, pol: 1 } : null), activation: 'row' },
+  H25: { kpmId: KPM_A, role: 'agent', leader: 'AAB', joined: '2025-03-10T03:00:00Z', fig: (m) => (m === '2025-06' ? { ape: 3, pol: 1 } : null), activation: 'row', sale: '2025-06-01' },
+  H25Q: { kpmId: KPM_A, role: 'agent', leader: 'AAB', joined: '2025-04-07T03:00:00Z', fig: (m) => (m === '2025-08' ? { ape: 1, pol: 1 } : null), activation: 'row', sale: '2025-08-01' },
   LEFT: {
     kpmId: KPM_A, role: 'agent', leader: 'AAB', joined: '2025-05-05T03:00:00Z', removed: '2025-06-15T03:00:00Z',
-    fig: (m) => (m === '2025-06' ? { ape: 2, pol: 1 } : null), activation: 'row',
+    fig: (m) => (m === '2025-06' ? { ape: 2, pol: 1 } : null), activation: 'row', sale: '2025-06-01',
   },
   LEFT_QUIET: { kpmId: KPM_A, role: 'agent', leader: 'AAB', joined: '2025-05-06T03:00:00Z', removed: '2025-06-20T03:00:00Z', activation: 'row' },
-  LATE: { kpmId: KPM_A, role: 'agent', leader: 'OWNER', joined: '2026-01-31T16:59:00Z', fig: (m) => (m === '2026-05' ? { ape: 4, pol: 1 } : null), activation: 'joined' },
-  EARLY: { kpmId: KPM_A, role: 'agent', leader: 'OWNER', joined: '2026-01-31T17:01:00Z', fig: (m) => (m === '2026-05' ? { ape: 4, pol: 1 } : null), activation: 'joined' },
-  NEW_JUL: { kpmId: KPM_A, role: 'agent', leader: 'OWNER', joined: '2026-07-20T03:00:00Z', fig: (m) => (m === '2026-09' ? { ape: 6, pol: 1 } : null), activation: 'joined' },
-  NEW_SEP: { kpmId: KPM_A, role: 'agent', leader: 'OWNER', joined: '2026-09-25T03:00:00Z' },
+  LATE: { kpmId: KPM_A, role: 'agent', leader: 'OWNER', joined: '2026-01-31T16:59:00Z', fig: (m) => (m === '2026-05' ? { ape: 4, pol: 1 } : null), activation: 'joined', sale: '2026-05-01' },
+  EARLY: { kpmId: KPM_A, role: 'agent', leader: 'OWNER', joined: '2026-01-31T17:01:00Z', fig: (m) => (m === '2026-05' ? { ape: 4, pol: 1 } : null), activation: 'joined', sale: '2026-05-01' },
+  NEW_JUL: { kpmId: KPM_A, role: 'agent', leader: 'OWNER', joined: '2026-07-20T03:00:00Z', fig: (m) => (m === '2026-09' ? { ape: 6, pol: 1 } : null), activation: 'joined', sale: '2026-09-01' },
+  NEW_SEP: { kpmId: KPM_A, role: 'agent', leader: 'OWNER', joined: '2026-09-25T03:00:00Z', newHire: true },
   B_OWNER: { kpmId: KPM_B, role: 'ab', leader: null, joined: '2024-01-02T02:00:00Z', fig: (m) => (m.startsWith('2026') ? { ape: 999, pol: 9, nAA: 9 } : null) },
   B_HIRE: { kpmId: KPM_B, role: 'agent', leader: 'B_OWNER', joined: '2025-02-03T03:00:00Z', activation: 'row' },
   C_OWNER: { kpmId: KPM_C, role: 'ab', leader: null, joined: '2024-01-02T02:00:00Z', fig: false },
@@ -88,7 +91,7 @@ const PLAN: Record<Key, Plan> = {
   E_QUIET: { kpmId: KPM_E, role: 'agent', leader: 'E_OWNER', joined: '2025-09-10T03:00:00Z', start: '2025-08-20', activation: 'row' },
   E_ACTIVE: {
     kpmId: KPM_E, role: 'agent', leader: 'E_OWNER', joined: '2025-09-10T03:00:00Z', start: '2025-08-25', activation: 'row',
-    fig: (m) => (m === '2025-10' ? { ape: 3, pol: 1 } : null),
+    fig: (m) => (m === '2025-10' ? { ape: 3, pol: 1 } : null), sale: '2025-10-01',
   },
 };
 
@@ -127,6 +130,13 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
         orgLevelId: 'x', orgLevelCode: p.role.toUpperCase(), role: p.role, leaderId: leader, ancestorIds: above, depth: above.length,
         directCounts: { total: 0 }, subtreeCount: 0, status: p.removed ? 'removed' : 'active',
         joinedAt: new Date(p.joined), removedAt: p.removed ? new Date(p.removed) : null, deletedAt: null,
+        // As a placement writes them since P18.96-T2 (ADR-0169): joined that day in the office's calendar, and a new
+        // hire when the activation module is to start their activation — it starts a new hire's alone.
+        joinDate: clock().localDateFor(JAKARTA, new Date(p.joined)),
+        // P18.96-T6: every hire with an activation is a new hire, as migration 0040 makes them, with the first sale the
+        // file gives them (`FIRST_SALE_DATE`) — written as it stood, so no write after day 90 is needed to find it.
+        joinedAs: p.activation || p.newHire ? 'new_hire' : 'existing_agent',
+        firstSaleDate: p.sale ?? null, firstSaleSource: p.sale ? 'monthly_file' : null,
       });
       id[key] = String(membershipId);
     }
@@ -168,7 +178,7 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
 
     scorecard = new LeaderScorecardService(
       wired.officePeople, wired.productionReadings,
-      new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.activationRows, wired.clock,
+      new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.memberships, wired.clock,
     );
   }, 120_000);
 
@@ -275,14 +285,18 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
       expect(cell(card, 'average_case_size', 'ytd')).toEqual(fig(Math.round((134 * M) / 27), ['2026-08']));
     });
 
-    it('P18.1-T1 AC-2 3M new agent %: last year 2 of 3 — LEFT producing before they left, LEFT_QUIET left out', () => {
-      // LEFT_QUIET's four months are all held: the cell waits on no month, so it names none.
-      expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(67));
+    /*
+     * P18.96-T6 (ADR-0171 §2): *3M new agent %* is `ACTIVATION_3M_PCT` — the year's new hires by their join date, a first
+     * sale by day 90 activated — not the retired four months of the file. It names no month: nothing waits on one.
+     */
+    it('P18.96-T6 AC-2 3M new agent %: last year 2 of 4 — H25 and LEFT sold by day 90, H25Q on day 117, LEFT_QUIET never', () => {
+      // LEFT was removed in June, after selling: a removal is not leaving, and the 90 days decided it.
+      expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(50));
     });
 
-    it('P18.1-T1 AC-2 3M new agent %: this year 1 of 2 — EARLY’s four months reach May, LATE’s stop at April; NEW_JUL left out', () => {
-      // NEW_JUL waits on August and October, the two of July to October not held — October the current month, not named.
-      expect(cell(card, 'new_agent_3m', 'ytd')).toEqual(fig(50, ['2026-08']));
+    it('P18.96-T6 AC-2 3M new agent %: this year 1 of 2 — EARLY’s first sale is day 90, LATE’s the same day is day 91; NEW_JUL in progress', () => {
+      // LATE joined at 23:59 on 31 January and EARLY at 00:01 on 1 February, Jakarta: 1 May is day 91 and day 90.
+      expect(cell(card, 'new_agent_3m', 'ytd')).toEqual(fig(50));
     });
   });
 
@@ -304,7 +318,8 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     expect(card.periods).toEqual({ fy: '2026', ytd: '2027', thisMonthLastYear: '2026-01', lastMonth: '2026-12', thisMonth: '2027-01' });
     // FY 2026 runs to today: the year to date as it stands.
     expect(cell(card, 'ape', 'fy')).toEqual(fig(134 * M));
-    expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(50, ['2026-08']));
+    // P18.96-T6: 2026's new hires as they stand today — EARLY activated, LATE not, two in progress.
+    expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(50));
     expect(cell(card, 'ape', 'thisMonthLastYear')).toEqual(fig(15 * M));
     for (const key of ['ape', 'new_aa', 'avg_monthly_aa', 'case_submission'] as const) {
       expect([key, cell(card, key, 'ytd'), cell(card, key, 'lastMonth'), cell(card, key, 'thisMonth')]).toEqual([key, PENDING, PENDING, PENDING]);
@@ -328,10 +343,11 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     expect(cell(card, 'avg_monthly_aa', 'thisMonth')).toEqual(fig(2));
     // Nobody started on 1 or 2 January: the cohort is empty, pending.
     expect(cell(card, 'new_agent_3m', 'ytd')).toEqual(PENDING);
-    expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(67));
+    // P18.96-T6: 2025's four as they stood on 5 January, every one past day 90.
+    expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(50));
   });
 
-  it('P18.1-T1 AC-2 another office’s hire never in this office’s cohort; theirs counted not producing, a counted 0%', async () => {
+  it('P18.96-T6 AC-2 another office’s new hire never in this office’s figure; theirs not activated, a decided 0%', async () => {
     const card = await compute('2026-10-13', KPM_B);
     expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(0));
     // Held months with no policy at all: a ratio over nothing — none, never a division by zero.
@@ -361,8 +377,7 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     expect(cell(card, 'producing_agents', 'ytd')).toEqual(fig(1, ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08']));
   });
 
-  it('P18.1-T1 AC-2 a start a leader corrected back before the join (OD-118): judged on its four months — quiet not producing, active producing', async () => {
-    // August is before either joined: still one of their four months — belonging is judged by leaving alone (Noted 4).
+  it('P18.96-T6 AC-2 read by the join date, a start corrected back before it (OD-118) changes nothing: one sold by day 90, one never', async () => {
     const card = await compute('2026-10-13', KPM_E);
     expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(50));
   });
@@ -373,7 +388,8 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     // October is past now, and not held: every year-to-date figure says so; the November it is read in is not named.
     expect(cell(card, 'ape', 'ytd')).toEqual(fig(134 * M, ['2026-10']));
     expect(cell(card, 'case_submission', 'ytd')).toEqual(fig(27, ['2026-08', '2026-10']));
-    expect(cell(card, 'new_agent_3m', 'ytd')).toEqual(fig(50, ['2026-08', '2026-10']));
+    // P18.96-T6: read on 2 November — NEW_JUL's day 90 (17 October) has passed, her September sale inside it: 2 of 3.
+    expect(cell(card, 'new_agent_3m', 'ytd')).toEqual(fig(67));
     expect(cell(card, 'case_submission', 'thisMonth')).toEqual(PENDING);
   });
 
@@ -383,5 +399,16 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     const before = await counts();
     await compute('2026-10-13');
     expect(await counts()).toEqual(before);
+    // P18.96-T6: and keeps no 3M result — the scorecard reads them, `/new-hires` and the writes keep them.
+    expect(await db().collection('memberships').countDocuments({ activation3M: { $ne: null } })).toBe(0);
+  });
+
+  it('P18.96-T6 AC-2 a kept result is read as kept: a new hire whose lock says not activated is not, whatever their first sale says', async () => {
+    await db().collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id.EARLY) }, { $set: { activation3M: 'not_activated' } });
+    try {
+      expect(cell(await compute('2026-10-13'), 'new_agent_3m', 'ytd')).toEqual(fig(0));
+    } finally {
+      await db().collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id.EARLY) }, { $set: { activation3M: null } });
+    }
   });
 });

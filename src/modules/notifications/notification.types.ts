@@ -26,6 +26,14 @@ export const NotificationTemplate = {
   JOIN_REQUEST_APPROVED: 'join_request.approved',
   JOIN_REQUEST_DECLINED: 'join_request.declined',
   MEMBER_TAGGED_BY_LEADER: 'member.tagged_by_leader',
+  /*
+   * P18.96-T3 (ADR-0170): the invitee accepted a leader's invite and is in their unit, to the leader; a transfer
+   * request, to the office's Owner and Admins; and its decision — to whoever asked, and when approved to the member and
+   * the leader they left (`payload.audience`). The payload names people by their names and ids, never a phone.
+   */
+  MEMBER_INVITE_ACCEPTED: 'member_invite.accepted',
+  TRANSFER_REQUEST_RECEIVED: 'transfer_request.received',
+  TRANSFER_REQUEST_DECIDED: 'transfer_request.decided',
   MEMBER_REMOVED: 'member.removed',
   ROLE_CHANGED: 'member.role_changed',
   ADMIN_ACCESS_CHANGED: 'member.admin_access_changed',
@@ -94,6 +102,9 @@ export const TEMPLATE_CHANNELS: Record<NotificationTemplateId, readonly Notifica
   [NotificationTemplate.JOIN_REQUEST_APPROVED]: ['in_app', 'email'],
   [NotificationTemplate.JOIN_REQUEST_DECLINED]: ['in_app', 'email'],
   [NotificationTemplate.MEMBER_TAGGED_BY_LEADER]: ['in_app', 'email'],
+  [NotificationTemplate.MEMBER_INVITE_ACCEPTED]: ['in_app', 'email'],
+  [NotificationTemplate.TRANSFER_REQUEST_RECEIVED]: ['in_app', 'email'],
+  [NotificationTemplate.TRANSFER_REQUEST_DECIDED]: ['in_app', 'email'],
   [NotificationTemplate.MEMBER_REMOVED]: ['in_app', 'email'],
   [NotificationTemplate.ROLE_CHANGED]: ['in_app', 'email'],
   [NotificationTemplate.ADMIN_ACCESS_CHANGED]: ['in_app', 'email'],

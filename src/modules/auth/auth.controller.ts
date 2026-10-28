@@ -13,6 +13,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
+import { REGISTRATION } from '@/domain/constants';
 import { corsOriginsOf } from '@/config/cors-origins';
 import { initialsOf, User, UserDocument } from '@/modules/users/user.schema';
 import { preferredNameOf } from '@/modules/users/display-name';
@@ -23,6 +24,7 @@ import { AccessTokenDto } from '@/modules/auth/session.response.dto';
 import { can, PERMISSIONS, Permission } from '@/modules/rbac/permissions';
 import { ActivationNav, activationNavFor } from '@/modules/activation/activation-nav.port';
 import { ProfileLineReader, profileLineFor } from '@/modules/org/profile-line';
+import { InvitesService } from '@/modules/org/invites.service';
 import { AuthService } from './auth.service';
 import { RateLimiter } from './rate-limiter';
 import {
@@ -81,6 +83,9 @@ const REFRESH_REFUSED =
   + 'session to refresh. `AUTH_SESSION_ENDED`: a refresh token was presented and no longer works — unknown or '
   + 'malformed, expired, revoked or already rotated away; which of them is not said.';
 
+/** The limiter's key for sign-ups from one client address (`REGISTRATION`; the P18.96 exit review, L2). */
+export const registrationLimitKey = (ip: string): string => `register:ip:${ip}`;
+
 /** What `/auth/login` answers a page on a foreign origin (P18.7-T1), cookie or not. */
 const LOGIN_ORIGIN_REFUSED_RESPONSE = {
   status: HttpStatus.FORBIDDEN,
@@ -110,6 +115,11 @@ export class AuthController {
      * as the port above, so a harness without it answers the role alone.
      */
     @Optional() @Inject(ProfileLineReader) private readonly profileLine: ProfileLineReader | null = null,
+    /*
+     * P18.96-T3 AC-4: registration on a leader's invite joins the office. By its token, as the ports above, so a
+     * harness that never registers on an invite builds this without the org module's graph.
+     */
+    @Optional() @Inject(InvitesService) private readonly invites: InvitesService | null = null,
   ) {}
 
   /**
@@ -217,11 +227,40 @@ export class AuthController {
     summary: 'Create an account',
     description:
       'Always succeeds in shape, even for an address that already exists — confirming ' +
-      'that would let anyone enumerate accounts. A verification email follows.',
+      'that would let anyone enumerate accounts. A verification email follows. Rate limited per client address, ' +
+      `${REGISTRATION.MAX_PER_ADDRESS} attempts an hour, refused or not.`,
   })
   @ApiResponse({ status: 201, description: 'Account created; verification sent.' })
-  async register(@Body() dto: RegisterDto) {
-    await this.auth.register(dto);
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description:
+      '`NOT_FOUND` — with `inviteToken`, a link that opens nothing (unknown, cancelled, used or expired), said in plain '
+      + 'words, before any account is made — answered as a link into another office is.',
+    type: ApiErrorEnvelope,
+  })
+  @ApiResponse({
+    status: HttpStatus.TOO_MANY_REQUESTS,
+    description: '`AUTH_RATE_LIMITED` — too many sign-ups from this address in the hour; `details.retryAfterSeconds`.',
+    type: ApiErrorEnvelope,
+  })
+  async register(@Body() dto: RegisterDto, @Req() req: Request) {
+    // Per client address, before anything is read (the P18.96 exit review, L2): a script making accounts, or walking
+    // agent codes against `AGENT_CODE_TAKEN`, is stopped here, as an invite link's banner stops one walking tokens.
+    this.limit(registrationLimitKey(req.ip ?? 'unknown'), REGISTRATION.MAX_PER_ADDRESS, REGISTRATION.WINDOW_SECONDS);
+    const { inviteToken, ...input } = dto;
+    if (!inviteToken || !this.invites) {
+      await this.auth.register(input);
+      return { status: 'verification_sent' };
+    }
+    /*
+     * **On a leader's invite** (ADR-0170 §3, P18.96-T3 AC-4): the invite's insurer and code, whatever the form sent,
+     * and the membership made at once under the leader — for an account made here and now. An address that already
+     * exists answers as it always has, and joins nobody to anything: that would let anybody holding a link attach
+     * somebody else's account to an office.
+     */
+    const held = await this.invites.forRegistration(inviteToken);
+    const { user, created } = await this.auth.registerAccount({ ...input, ...held });
+    if (created) await this.invites.acceptForNewAccount(inviteToken, String(user._id));
     return { status: 'verification_sent' };
   }
 

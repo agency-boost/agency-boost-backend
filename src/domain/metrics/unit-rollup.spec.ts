@@ -2,6 +2,7 @@ import { PERFORMANCE } from '@/domain/constants';
 import { personLeadCounts } from './lead-counts';
 import {
   cascadeActivityTouches, potentialMaaCountInUnit, rollUpCounts, rollUpGoal, rollUpGoalPaired, rollUpLeadCounts,
+  rollUpProduction, type ProductionRow,
 } from './unit-rollup';
 
 const M = 1_000_000 * 100;
@@ -132,6 +133,55 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
     it('P15-T1 AC-3 counts who is pacing, out of everybody the group holds — somebody with no target included', () => {
       expect(potentialMaaCountInUnit([true, false, null, true])).toEqual({ count: 2, of: 4 });
       expect(potentialMaaCountInUnit([])).toEqual({ count: 0, of: 0 });
+    });
+  });
+
+  /**
+   * **ADR-0172 §2, P18.96-T5 AC-2** — the totals read the people who can sell. A new hire before their first sale is in
+   * the team and in neither figure: the seed's Yanti, rejoined 28 days ago, *on pace* and with no sale yet.
+   */
+  describe('the totals over the people who count for production (ADR-0172 §2)', () => {
+    const row = (over: Partial<ProductionRow>): ProductionRow => ({
+      goal: { targetMinor: 50 * M, actualMinor: 20 * M }, pacingToMaa: true, newHireBeforeFirstSale: false, ...over,
+    });
+
+    it('P18.96-T5 AC-2 leaves a new hire before a first sale out of the target, the production and on pace — both sides', () => {
+      const rows = [
+        row({}),
+        row({ goal: { targetMinor: 100 * M, actualMinor: 0 }, pacingToMaa: true, newHireBeforeFirstSale: true }),
+        row({ goal: { targetMinor: 30 * M, actualMinor: 30 * M }, pacingToMaa: false }),
+      ];
+      expect(rollUpProduction(rows)).toEqual({
+        goal: rollUpGoalPaired([rows[0].goal, rows[2].goal]),
+        potentialActive: { count: 1, of: 2 },
+        newHires: 1,
+      });
+      // Counted, the new hire's Rp 100 jt target with nothing sold would read 28%, not 63%.
+      expect(rollUpGoalPaired(rows.map((r) => r.goal)).attainmentPct).toBe(28);
+      expect(rollUpProduction(rows).goal).toMatchObject({ targetMinor: 80 * M, actualMinor: 50 * M, attainmentPct: 63, missing: 0 });
+    });
+
+    it('P18.96-T5 AC-2 a new hire with no production held is left out, not counted as missing', () => {
+      const rows = [row({ goal: { targetMinor: 98 * M, actualMinor: null }, newHireBeforeFirstSale: true }), row({})];
+      expect(rollUpProduction(rows).goal).toMatchObject({ targetMinor: 50 * M, actualMinor: 20 * M, missing: 0 });
+      expect(rollUpProduction(rows).newHires).toBe(1);
+    });
+
+    it('P18.96-T5 AC-2 nobody left out is the paired rollup and the potential count unchanged', () => {
+      const rows = [row({}), row({ goal: { targetMinor: 40 * M, actualMinor: null }, pacingToMaa: null })];
+      expect(rollUpProduction(rows)).toEqual({
+        goal: rollUpGoalPaired(rows.map((r) => r.goal)),
+        potentialActive: potentialMaaCountInUnit(rows.map((r) => r.pacingToMaa)),
+        newHires: 0,
+      });
+    });
+
+    it('P18.96-T5 AC-2 a unit of new hires only is a total of nobody: Not uploaded yet, 0 of 0 on pace', () => {
+      expect(rollUpProduction([row({ newHireBeforeFirstSale: true }), row({ newHireBeforeFirstSale: true })])).toEqual({
+        goal: { targetMinor: null, actualMinor: null, attainmentPct: null, missing: 0, gapMinor: null, overMinor: null },
+        potentialActive: { count: 0, of: 0 },
+        newHires: 2,
+      });
     });
   });
 

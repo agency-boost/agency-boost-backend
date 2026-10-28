@@ -2,8 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { endOfMonth, type LocalDate } from '@/common/time/local-day';
-import { NEW_AGENT_ACTIVE_MONTHS } from '@/domain/constants/metrics';
-import { activationCohort, cohortOutcome, newAgent3mActive, type CohortMonth } from '@/domain/metrics/activation-cohort';
+import { activation3MOf, activation3MShare } from '@/domain/metrics/activation-3m';
 import {
   averageCaseSizeRealised, caseSubmissions, maaMonthlyAvg, newActiveAgentsMonthlyAvg,
 } from '@/domain/metrics/held-months';
@@ -11,7 +10,8 @@ import { maaCountInUnit } from '@/domain/metrics/maa-count-in-unit';
 import { monthlyActiveAgent } from '@/domain/metrics/monthly-active-agent';
 import { memberAt, officeHeadcount } from '@/domain/metrics/office-headcount';
 import { belongedDuring, producingAgents } from '@/domain/metrics/producing-agents';
-import { ActivationProgressRepository } from '@/modules/activation/activation-progress.repository';
+import { MembershipRepository } from '@/modules/org/membership.repository';
+import type { Membership } from '@/modules/org/membership.schema';
 import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
 import {
   ProductionReadings, type MonthCells, type MonthLedger, type OfficeMonth,
@@ -82,7 +82,8 @@ export class LeaderScorecardService {
     private readonly people: OfficePeople,
     private readonly production: ProductionReadings,
     private readonly monthRows: MonthlyAgentDataRepository,
-    private readonly activations: ActivationProgressRepository,
+    // P18.96-T6: the office's new hires, for *3M new agent %* (`ACTIVATION_3M_PCT`) — read here, written by nobody here.
+    private readonly memberships: MembershipRepository,
     private readonly clock: Clock,
   ) {}
 
@@ -110,7 +111,8 @@ export class LeaderScorecardService {
     };
 
     // ---- The reads: the people since the first period began, then the rest at once.
-    const roster = await this.people.read(ctx, this.clock.startOfLocalDay(timezone, `${lastYear}-01-01`));
+    // The office's zone, which the meeting names already: `OfficePeople` reads it again only when it is not given.
+    const roster = await this.people.read(ctx, this.clock.startOfLocalDay(timezone, `${lastYear}-01-01`), timezone);
     const everyone = roster.everyone;
     const ids = everyone.map((p) => p.membershipId);
     // Production is everybody's who was here in the year, a leaver's included (OD-74), as the Overview's year to date.
@@ -118,19 +120,20 @@ export class LeaderScorecardService {
     const producersIn = (y: string) => everyone
       .filter((p) => p.status === 'active' || (p.removedAt !== null && p.removedAt.getTime() >= since(y)))
       .map((p) => p.membershipId);
-    // The file from January of last year to three months past the meeting's: a hire's four months from their start.
-    const range = { from: `${lastYear}-01`, to: shiftMonth(month, NEW_AGENT_ACTIVE_MONTHS - 1) };
+    // The file from January of last year to the meeting's month: no period reads past it.
+    const range = { from: `${lastYear}-01`, to: month };
     const cohortTo = [periods.fy.end, periods.ytd.end].sort()[1];
-    const [office, file, cells, fyLedgers, ytdLedgers, started] = await Promise.all([
+    const [office, file, cells, fyLedgers, ytdLedgers, newHires] = await Promise.all([
       this.production.officeMonths(ctx, range),
       this.fileMonths(ctx, range),
       this.production.monthCellsFor(ctx, ids, range),
       this.yearToDate(ctx, producersIn(lastYear), periods.fy),
       this.yearToDate(ctx, producersIn(String(year)), periods.ytd),
-      this.activations.find(
+      // P18.96-T6: every new hire who joined over the two periods, removed or not — a cohort is who joined.
+      this.memberships.find(
         ctx,
-        { startDate: { $gte: periods.fy.from, $lte: cohortTo } },
-        { projection: { membershipId: 1, startDate: 1 } },
+        { joinedAs: 'new_hire', joinDate: { $gte: periods.fy.from, $lte: cohortTo } },
+        { projection: { joinedAs: 1, joinDate: 1, firstSaleDate: 1, leftAt: 1, activation3M: 1 } },
       ),
     ]);
     const reads: Reads = {
@@ -171,7 +174,7 @@ export class LeaderScorecardService {
       },
       new_agent_3m: {
         unit: 'percentage',
-        cells: yearly((period) => this.newAgent3m(reads, period, started)),
+        cells: yearly((period) => this.newAgent3m(reads, period, today, newHires)),
       },
       avg_monthly_aa: {
         unit: 'count',
@@ -312,39 +315,26 @@ export class LeaderScorecardService {
   }
 
   /**
-   * `NEW_AGENT_3M_ACTIVE_PCT` over the period's cohort (`ACTIVATION_COHORT`): each hire's start month and the three
-   * after it, read as the office holds them now. *Pending data* while nobody is counted; what it leaves out is named by
-   * **the months not held that the hires it does not count yet are waiting on** — every month of their four whose file
-   * the office does not hold, an empty month or one still to come — so the cell never names a month that is uploaded.
+   * ***3M new agent %*** — **`ACTIVATION_3M_PCT`** since P18.96-T6 (ADR-0171 §2, which retired `NEW_AGENT_3M_ACTIVE_PCT`):
+   * of the office's new hires who joined in the period — by their join date in the office's calendar, removed or not —
+   * activated ÷ (activated + not activated), each hire's `ACTIVATION_3M` as it stands on the office's today: the result
+   * kept on the membership where one is, computed the same where none is yet. Nothing is written here. *Pending data*
+   * while none of them is decided; **it names no month left out** — a hire still in their 90 days is in neither part,
+   * and waits on no file.
    */
-  private newAgent3m(reads: Reads, period: Period, started: readonly { membershipId: string; startDate: string }[]): ScorecardCell {
+  private newAgent3m(
+    reads: Reads, period: Period, today: LocalDate,
+    newHires: readonly Pick<Membership, 'joinDate' | 'firstSaleDate' | 'leftAt' | 'activation3M'>[],
+  ): ScorecardCell {
     if (period.months.length === 0) return PENDING;
-    const cohort = activationCohort(started, { from: period.from, to: period.end });
-    // Each hire's start in the period: the one activation the cohort counted them by.
-    const startOf = new Map<string, string>();
-    for (const a of started) {
-      if (a.startDate >= period.from && a.startDate <= period.end && !startOf.has(a.membershipId)) startOf.set(a.membershipId, a.startDate);
-    }
-    const hires = cohort.map((id) => {
-      const person = reads.byId.get(id);
-      return Array.from({ length: NEW_AGENT_ACTIVE_MONTHS }, (_, i): CohortMonth => {
-        const m = shiftMonth(startOf.get(id)!.slice(0, 7), i);
-        const bounds = this.boundsOf(reads, m);
-        return {
-          held: reads.office.get(m)?.held === true,
-          // Judged by leaving alone (the spec's *Noted* 4): the activation's start is when the hire began, and a leader
-          // may move it before the join (OD-118) — a month before `joinedAt` is still one of theirs.
-          belonged: person !== undefined && belongedDuring({ ...person, joinedAt: null }, bounds.start, bounds.endExclusive),
-          active: this.activeIn(reads, id, m),
-        };
-      });
-    });
-    const share = newAgent3mActive(hires);
-    if (share.pct === null) return PENDING;
-    const waitingOn = cohort.flatMap((id, i) => (cohortOutcome(hires[i]) === 'left_out'
-      ? hires[i].map((m, k) => (m.held ? null : shiftMonth(startOf.get(id)!.slice(0, 7), k))).filter((m): m is string => m !== null)
-      : []));
-    return figure(share.pct, [...new Set(waitingOn)].sort());
+    const cohort = newHires.filter((m) => m.joinDate !== null && m.joinDate >= period.from && m.joinDate <= period.end);
+    const share = activation3MShare(cohort.map((m) => activation3MOf({
+      joinDate: m.joinDate!,
+      firstSaleDate: m.firstSaleDate ?? null,
+      leftOn: m.leftAt ? this.clock.localDateFor(reads.timezone, m.leftAt) : null,
+      locked: m.activation3M ?? null,
+    }, today)));
+    return share.pct === null ? PENDING : figure(share.pct);
   }
 
   /**

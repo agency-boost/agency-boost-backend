@@ -66,6 +66,14 @@ writes none.
 name was exactly the company's name followed by *" (nama kami)"* — the demo seed's rename, which the client read as a
 placeholder on the Product Catalog (UI-023) — given back to the company's name (`$unset`, the version moved once).
 A name an Owner typed, a row of another product and a soft-deleted row are not touched. A second run clears none.
+`0040-membership-join-date` (Phase 18.96, P18.96-T2) prints `{ newHires, existingAgents, waiting }`: the memberships
+with no `joinedAs` given a join date and a classification (ADR-0169 §6) — a `new_hire` from its activation's start date
+where it has an activation, an `existing_agent` from `joinedAt` as an office date where it has none — and the pending
+ones nobody has let in, left for their approval to write. A second run classifies none; the pending stay waiting.
+`0042-membership-first-sale` (Phase 18.96, P18.96-T4) prints `{ written, unchanged }`: the memberships given a first
+sale, or an earlier one than they held (ADR-0171 §1) — a sales lead's first *Paid and issued* day, else the first month
+the production file shows a policy — and those whose first sale stood. Never later, so a second run writes none. There
+is no `0041`: Phase 18.96-T3 held the number and needed no migration.
 *Both, the permission review of 2026-10-27:* a value an Owner typed that happens to equal the seeded one — *Not
 approached* for 0038, exactly *"{name} (nama kami)"* for 0039 — cannot be told from it and is rewritten too. Accepted:
 the words are the default's own.

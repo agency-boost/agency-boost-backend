@@ -177,6 +177,10 @@ export async function startComplianceHarness(): Promise<ComplianceHarness> {
     start: async (who, startDate, over = {}) => {
       const job = RequestContext.forJob(kpmOf(who), 'compliance-harness');
       const version = (await wired.activation.findVersion(job, 1))!;
+      // P18.96-T6: the new hire a placement makes them, joined that day (ADR-0169 §2), as `/new-hires` lists them.
+      await db.collection('memberships').updateOne(
+        { _id: new mongoose.Types.ObjectId(id(who)), kpmId: kpmOf(who) }, { $set: { joinDate: startDate, joinedAs: 'new_hire' } },
+      );
       return wired.activationRows.create(job, {
         membershipId: id(who),
         templateId: version.id,

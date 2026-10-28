@@ -114,7 +114,7 @@ describe('the Unit Dashboard (Phase 15)', () => {
         expect({ who, empty: view.empty, rows: view.yourUnit.rows, units: view.units }).toEqual({ who, empty: true, rows: [], units: [] });
         expect(view.head).toEqual({ membershipId: office.id[who], name: office.name[who], isReader: true });
         expect(view.tiles).toEqual({
-          team: { total: 0, direct: 0, units: 0, underUnits: 0 },
+          team: { total: 0, direct: 0, units: 0, underUnits: 0, newHires: 0 },
           directGroupProduction: {
             targetMinor: null, actualMinor: null, attainmentPct: null, missing: 0, gapMinor: null, overMinor: null, period: 'month',
           },
@@ -351,11 +351,14 @@ describe('the Unit Dashboard (Phase 15)', () => {
     it.each(['7d', 'month', 'year'] as const)('P15-T1 AC-4 every unit, every tile, %s', async (period) => {
       for (const who of ['AGUS', 'SARI', 'OWNER'] as const) {
         const view = await read(who, { period });
-        const check = (rows: UnitRow[], total: UnitDashboardView['yourUnit']['total']) => {
+        const check = (everybody: UnitRow[], total: UnitDashboardView['yourUnit']['total']) => {
           const held = (values: (number | null)[]) => {
             const kept = values.filter((v): v is number => v !== null);
             return kept.length ? kept.reduce((a, b) => a + b, 0) : null;
           };
+          // The goal and *on pace* over the people who count for production (ADR-0172 §2, P18.96-T5 AC-2).
+          const rows = everybody.filter((r) => !r.newHireBeforeFirstSale);
+          expect(total.newHires).toBe(everybody.length - rows.length);
           const actual = held(rows.map((r) => r.goal.actualMinor));
           // Paired (ADR-0165 §1, P18.8-T15 AC-6): a target counts only beside production held — every target when
           // nobody's is, so the total reads *Not uploaded yet* beside them as a row does.
@@ -370,11 +373,11 @@ describe('the Unit Dashboard (Phase 15)', () => {
             overMinor: both ? Math.max(0, actual - target) : null,
           });
           for (const key of ['salesOpen', 'salesClosing', 'recruitOpen', 'recruitNominated'] as const) {
-            expect(total.leadsCounts[key]).toBe(rows.reduce((s, r) => s + r.leadsCounts[key], 0));
+            expect(total.leadsCounts[key]).toBe(everybody.reduce((s, r) => s + r.leadsCounts[key], 0));
           }
           expect(total.touches).toEqual({
-            logged: rows.reduce((s, r) => s + r.activity.touches.logged, 0),
-            target: held(rows.map((r) => r.activity.touches.target)),
+            logged: everybody.reduce((s, r) => s + r.activity.touches.logged, 0),
+            target: held(everybody.map((r) => r.activity.touches.target)),
           });
           expect(total.potentialActive).toEqual({ count: rows.filter((r) => r.pacingToMaa === true).length, of: rows.length });
         };
@@ -386,10 +389,14 @@ describe('the Unit Dashboard (Phase 15)', () => {
         const all = everyRow(view);
         const { period: tilePeriod, ...production } = view.tiles.directGroupProduction;
         expect(tilePeriod).toBe(period === 'year' ? 'year' : 'month');
-        check(all, { goal: production, leadsCounts: sumLeads(all), touches: sumTouches(all), potentialActive: view.tiles.potentialActive });
+        check(all, {
+          goal: production, leadsCounts: sumLeads(all), touches: sumTouches(all), potentialActive: view.tiles.potentialActive,
+          newHires: view.tiles.team.newHires,
+        });
         expect(view.tiles.team).toEqual({
           total: all.length, direct: view.yourUnit.rows.length, units: view.units.length,
           underUnits: all.length - view.yourUnit.rows.length - view.units.length,
+          newHires: all.filter((r) => r.newHireBeforeFirstSale).length,
         });
         expect(view.tiles.potentialRecruits).toEqual({
           yourUnit: view.yourUnit.rows.reduce((s, r) => s + r.leadsCounts.recruitNominated, 0),
@@ -400,7 +407,7 @@ describe('the Unit Dashboard (Phase 15)', () => {
 
     it('P15-T1 AC-4 Agus’s tiles, worked: eleven people; Indah’s nomination in his unit, Rina’s in Sari’s', async () => {
       const view = await read('AGUS');
-      expect(view.tiles.team).toEqual({ total: 11, direct: 3, units: 3, underUnits: 5 });
+      expect(view.tiles.team).toEqual({ total: 11, direct: 3, units: 3, underUnits: 5, newHires: 0 });
       expect(view.tiles.potentialRecruits).toEqual({ yourUnit: 1, aabs: 1 });
       // Four rows hold this month's APE — Indah, Dimas, Rina and Sari — and seven hold none.
       expect(view.tiles.directGroupProduction).toMatchObject({ actualMinor: 270 * M, missing: 7, period: 'month' });
@@ -425,6 +432,89 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect(nina.total.potentialActive.of).toBe(2);
       expect(sari.total.potentialActive.of).toBe(5);
       expect(sari.total.leadsCounts).toEqual({ salesOpen: 3, salesClosing: 1, recruitOpen: 3, recruitNominated: 1 });
+    });
+  });
+
+  /**
+   * **ADR-0172, P18.96-T5** — a new hire counts in the team from their join date, and in production and *on pace* from
+   * their first sale's day. Dimas holds this month's production and a target, and is pacing: the case the client saw.
+   */
+  describe('P18.96-T5 — who counts where (ADR-0172)', () => {
+    const memberships = () => db().collection('memberships');
+    const mark = (who: Who, set: Record<string, unknown>) =>
+      memberships().updateOne({ _id: new mongoose.Types.ObjectId(office.id[who]) }, { $set: set });
+    afterEach(async () => {
+      await memberships().updateMany({ kpmId: KPM_A }, { $unset: { joinedAs: '', firstSaleDate: '' } });
+    });
+
+    it('P18.96-T5 AC-1, AC-2 a new hire with no first sale is in the team, tagged, and in neither production nor on pace', async () => {
+      const before = await read('AGUS');
+      const dimas = rowFor(before, 'DIMAS');
+      expect([dimas.goal.actualMinor !== null, dimas.goal.targetMinor !== null, dimas.newHireBeforeFirstSale]).toEqual([true, true, false]);
+
+      await mark('DIMAS', { joinedAs: 'new_hire', firstSaleDate: null });
+      const view = await read('AGUS');
+      expect(rowFor(view, 'DIMAS').newHireBeforeFirstSale).toBe(true);
+      // AC-1: the team still counts him.
+      expect(view.tiles.team).toEqual({ ...before.tiles.team, newHires: 1 });
+      expect(view.yourUnit.rows.map((r) => r.name)).toEqual(before.yourUnit.rows.map((r) => r.name));
+      // AC-2: his target and his production leave Your Unit's total and the tile; he is not missing either.
+      const others = before.yourUnit.rows.filter((r) => r.membershipId !== office.id.DIMAS);
+      const actual = others.map((r) => r.goal.actualMinor).filter((v): v is number => v !== null).reduce((a, b) => a + b, 0);
+      expect(view.yourUnit.total).toMatchObject({ newHires: 1, goal: { actualMinor: actual, missing: before.yourUnit.total.goal.missing } });
+      expect(view.tiles.directGroupProduction.actualMinor).toBe(before.tiles.directGroupProduction.actualMinor! - dimas.goal.actualMinor!);
+      expect(view.tiles.directGroupProduction.targetMinor).toBe(before.tiles.directGroupProduction.targetMinor! - dimas.goal.targetMinor!);
+      // On pace: out of the count and out of `of`.
+      const pacing = dimas.pacingToMaa === true ? 1 : 0;
+      expect(view.tiles.potentialActive).toEqual({
+        count: before.tiles.potentialActive.count - pacing, of: before.tiles.potentialActive.of - 1,
+      });
+      expect(view.yourUnit.total.potentialActive.of).toBe(before.yourUnit.total.potentialActive.of - 1);
+      // The leads and the goal activities are still everybody's.
+      expect(view.yourUnit.total.leadsCounts).toEqual(before.yourUnit.total.leadsCounts);
+      expect(view.yourUnit.total.touches).toEqual(before.yourUnit.total.touches);
+    });
+
+    it('P18.96-T5 AC-2, AC-3 from the first sale’s day: not the day after today, but today and before', async () => {
+      const counted = async (firstSaleDate: string) => {
+        await mark('DIMAS', { joinedAs: 'new_hire', firstSaleDate });
+        const view = await read('AGUS');
+        return { tag: rowFor(view, 'DIMAS').newHireBeforeFirstSale, newHires: view.tiles.team.newHires, of: view.tiles.potentialActive.of };
+      };
+      const all = everyRow(await read('AGUS')).length;
+      expect(await counted('2026-09-15')).toEqual({ tag: true, newHires: 1, of: all - 1 });
+      expect(await counted(ROSTER_TODAY)).toEqual({ tag: false, newHires: 0, of: all });
+      expect(await counted('2026-08-20')).toEqual({ tag: false, newHires: 0, of: all });
+    });
+
+    it('P18.96-T5 AC-2 an existing agent with no first sale counts, as today (ADR-0172 §4)', async () => {
+      const before = await read('AGUS');
+      await mark('DIMAS', { joinedAs: 'existing_agent', firstSaleDate: null });
+      const view = await read('AGUS');
+      expect(rowFor(view, 'DIMAS').newHireBeforeFirstSale).toBe(false);
+      expect([view.tiles.directGroupProduction, view.tiles.potentialActive, view.yourUnit.total])
+        .toEqual([before.tiles.directGroupProduction, before.tiles.potentialActive, before.yourUnit.total]);
+    });
+
+    it('P18.96-T5 AC-2 every total above a new hire leaves them out — Rina in Sari’s unit, and on Sari’s own dashboard', async () => {
+      await mark('RINA', { joinedAs: 'new_hire', firstSaleDate: null });
+      const agus = await read('AGUS');
+      const sari = agus.units[2];
+      expect(sari.total.newHires).toBe(1);
+      expect(sari.total.potentialActive.of).toBe(rowsOf(sari).length - 1);
+      expect(sari.units[0].total.newHires).toBe(0);
+      const own = await read('SARI');
+      expect(own.yourUnit.total.newHires).toBe(1);
+      expect(own.tiles.team.newHires).toBe(1);
+      expect(own.tiles.potentialActive.of).toBe(everyRow(own).length - 1);
+    });
+
+    it('P18.96-T5 AC-3 the head is read too: a new-hire leader before a first sale is tagged on their own dashboard', async () => {
+      await mark('SARI', { joinedAs: 'new_hire', firstSaleDate: null });
+      const own = await read('SARI');
+      expect(own.yourUnit.rows[0]).toMatchObject({ isReader: true, newHireBeforeFirstSale: true });
+      expect((await read('AGUS')).units[2].head.newHireBeforeFirstSale).toBe(true);
+      expect((await read('AGUS', { for: office.id.SARI })).yourUnit.rows[0].newHireBeforeFirstSale).toBe(true);
     });
   });
 

@@ -91,6 +91,22 @@ export class InviteCodeQueryDto {
   code!: string;
 }
 
+/** An office date, as every date field in a body is written. Whether it is a real day is the service's check. */
+const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
+const JOIN_DATE_MESSAGE = 'joinDate must be a real date, written YYYY-MM-DD.';
+
+/** The join date a leader gives when letting somebody in (ADR-0169, P18.96-T2), on an approval and on a tag. */
+const JOIN_DATE_PROPERTY = {
+  type: String,
+  format: 'date',
+  example: '2026-10-27',
+  description:
+    'The day they joined, an office date: the office\u2019s today at the latest, and not before 1980 \u2014 an existing '
+    + 'agent may have joined years ago. Omitted, the office\u2019s today. It decides once whether they are a new hire '
+    + '(no more than 90 days back) or an existing agent, and a new hire\u2019s activation starts on it. Ignored for '
+    + 'somebody who already has a join date in this office.',
+} as const;
+
 export class ApproveRequestDto {
   @ApiPropertyOptional({
     description:
@@ -101,6 +117,20 @@ export class ApproveRequestDto {
   @IsOptional()
   @IsString()
   routeToMembershipId?: string;
+
+  @ApiPropertyOptional(JOIN_DATE_PROPERTY)
+  @IsOptional()
+  @IsString()
+  @Matches(DATE_SHAPE, { message: JOIN_DATE_MESSAGE })
+  joinDate?: string;
+}
+
+export class TagUntaggedDto {
+  @ApiPropertyOptional(JOIN_DATE_PROPERTY)
+  @IsOptional()
+  @IsString()
+  @Matches(DATE_SHAPE, { message: JOIN_DATE_MESSAGE })
+  joinDate?: string;
 }
 
 export class DeclineRequestDto {

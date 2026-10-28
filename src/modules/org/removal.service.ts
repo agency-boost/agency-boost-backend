@@ -9,6 +9,7 @@ import { NotificationTemplate } from '@/modules/notifications/notification.types
 import { HierarchyService } from './hierarchy.service';
 import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
+import type { MembershipDocument } from './membership.schema';
 import { MemberDeparture } from './member-departure.port';
 import { visibleTo } from './directory.service';
 import { RoleChangeService, TeamMember } from './role-change.service';
@@ -112,37 +113,7 @@ export class RemovalService {
       );
     }
 
-    // The root has no leader, so removing it leaves the whole office pointing at nothing
-    // and no one able to put it back. Transferring the office is a Super Admin operation
-    // on the tenant, not a member operation inside it.
-    if (target.leaderId === null) {
-      throw new DomainException(
-        ErrorCode.ORG_REMOVAL_NOT_PERMITTED,
-        'The office’s root member cannot be removed. Reassign the office first.',
-        HttpStatus.FORBIDDEN,
-        { membershipId },
-      );
-    }
-
-    /**
-     * **The office's owner cannot be removed from inside the office.**
-     *
-     * The root check above catches them *usually*, because `ensureOwnerMembership`
-     * creates an owner with no leader. It does not catch the ordinary transfer case: when
-     * ownership moves to somebody who is already a member, their existing row keeps its
-     * `leaderId`. A KPM Admin could then remove them — leaving `kpms.ownerUserId` naming
-     * somebody with no membership, so nobody resolves as Owner, and `kpm_admin:grant` is
-     * Owner-reserved. The office would have no working administration until a Super Admin
-     * re-ran `assignOwner`.
-     */
-    if (await this.hierarchy.ownsTheOffice(ctx, target)) {
-      throw new DomainException(
-        ErrorCode.ORG_REMOVAL_NOT_PERMITTED,
-        'They own this office. Transfer it first — only the platform can do that.',
-        HttpStatus.FORBIDDEN,
-        { membershipId },
-      );
-    }
+    await this.refuseTheOffice(ctx, target);
 
     const tenantAdmin = Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
     if (!tenantAdmin && target.leaderId !== me) {
@@ -218,7 +189,70 @@ export class RemovalService {
       }
     }
 
-    const now = this.clock.now();
+    await this.depart(ctx, target, {
+      at: this.clock.now(),
+      reason: input.reason?.trim() ?? null,
+      after: { subtree: reports.length > 0 ? (input.subtree ?? null) : null, reportsMoved: reports.length },
+    });
+
+    return this.roles.team(ctx);
+  }
+
+  /**
+   * **Nobody leaves who holds the office up** — `remove`'s two rules, shared with every other way out of the office
+   * that ends in `depart` (*Mark left*, `Activation3MService.markLeft`; the P18.96 exit review, M1), so none of them can
+   * take out somebody `remove` would refuse. `403 ORG_REMOVAL_NOT_PERMITTED` for both.
+   */
+  async refuseTheOffice(ctx: RequestContext, target: MembershipDocument): Promise<void> {
+    const membershipId = String(target._id);
+    // The root has no leader, so removing it leaves the whole office pointing at nothing
+    // and no one able to put it back. Transferring the office is a Super Admin operation
+    // on the tenant, not a member operation inside it.
+    if (target.leaderId === null) {
+      throw new DomainException(
+        ErrorCode.ORG_REMOVAL_NOT_PERMITTED,
+        'The office’s root member cannot be removed. Reassign the office first.',
+        HttpStatus.FORBIDDEN,
+        { membershipId },
+      );
+    }
+
+    /**
+     * **The office's owner cannot be removed from inside the office.**
+     *
+     * The root check above catches them *usually*, because `ensureOwnerMembership`
+     * creates an owner with no leader. It does not catch the ordinary transfer case: when
+     * ownership moves to somebody who is already a member, their existing row keeps its
+     * `leaderId`. A KPM Admin could then remove them — leaving `kpms.ownerUserId` naming
+     * somebody with no membership, so nobody resolves as Owner, and `kpm_admin:grant` is
+     * Owner-reserved. The office would have no working administration until a Super Admin
+     * re-ran `assignOwner`.
+     */
+    if (await this.hierarchy.ownsTheOffice(ctx, target)) {
+      throw new DomainException(
+        ErrorCode.ORG_REMOVAL_NOT_PERMITTED,
+        'They own this office. Transfer it first — only the platform can do that.',
+        HttpStatus.FORBIDDEN,
+        { membershipId },
+      );
+    }
+  }
+
+  /**
+   * **The removal itself, once every rule above has let it through** (P18.96-T6): the status and `removedAt`, the open
+   * edge closed and a `removed` event opened, the leader's counts, the person's notice, the audit row and the departure
+   * hook — **never with reports**, whom the caller has moved first. `remove` calls it after its own checks; *Mark left*
+   * (`Activation3MService.markLeft`, ADR-0173 §3 as amended) calls it for a new hire who leads nobody, after
+   * `refuseTheOffice`, so a leaver leaves every count of people through the one path ADR-0136's leaver counting reads.
+   */
+  async depart(
+    ctx: RequestContext,
+    target: MembershipDocument,
+    input: { at: Date; reason: string | null; after?: Record<string, unknown> },
+  ): Promise<void> {
+    const me = ctx.membershipId!;
+    const membershipId = String(target._id);
+    const now = input.at;
     const formerLeaderId = target.leaderId;
 
     await this.members.updateById(ctx, membershipId, {
@@ -238,17 +272,17 @@ export class RemovalService {
       validTo: null,
       actorMembershipId: me,
       actorUserId: ctx.auditActors.actorUserId,
-      reason: input.reason?.trim() || null,
+      reason: input.reason || null,
     });
 
     await this.hierarchy.refreshCounts(ctx, formerLeaderId);
 
     await this.notifications.send({
       userId: target.userId,
-      kpmId: ctx.kpmId,
+      kpmId: ctx.kpmId!,
       templateId: NotificationTemplate.MEMBER_REMOVED,
       payload: {
-        reason: input.reason?.trim() ?? null,
+        reason: input.reason ?? null,
         // What the prototype's own copy tells them to do next.
         nextStep:
           'Search for a leader and request to join again if you want to come back.',
@@ -261,12 +295,7 @@ export class RemovalService {
       targetId: membershipId,
       targetMembershipId: membershipId,
       before: { status: target.status, leaderId: formerLeaderId, role: target.role },
-      after: {
-        status: 'removed',
-        reason: input.reason?.trim() ?? null,
-        subtree: reports.length > 0 ? (input.subtree ?? null) : null,
-        reportsMoved: reports.length,
-      },
+      after: { status: 'removed', reason: input.reason ?? null, subtree: null, reportsMoved: 0, ...(input.after ?? {}) },
     });
 
     // D-leave: the modules that keep per-member records, after the removal is written. Never its failure.
@@ -277,7 +306,5 @@ export class RemovalService {
         this.logger.error({ err, membershipId }, 'failed to settle a departing member’s records');
       }
     }
-
-    return this.roles.team(ctx);
   }
 }

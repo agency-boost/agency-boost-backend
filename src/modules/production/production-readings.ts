@@ -129,6 +129,29 @@ export class ProductionReadings {
   }
 
   /**
+   * **The months the production file shows a policy for each member** (P18.96-T4 AC-1; ADR-0171 §1): every month row
+   * whose `policyCountMonthly` is above zero — as imported, or as corrected by hand — with its id and the count, oldest
+   * first. What a first sale *from the monthly file* and the file's closings read. One query for the whole list, on
+   * the `(kpmId, membershipId, month)` index, four fields each; every member asked about gets an entry.
+   */
+  async policyMonthsOfMany(
+    ctx: RequestContext, membershipIds: readonly string[],
+  ): Promise<Map<string, { month: string; id: string; policies: number }[]>> {
+    const ids = [...new Set(membershipIds)];
+    const out = new Map<string, { month: string; id: string; policies: number }[]>(ids.map((id) => [id, []]));
+    if (ids.length === 0) return out;
+    const rows = await this.data.find(
+      ctx,
+      { membershipId: { $in: ids }, 'policyCountMonthly.value': { $gt: 0 } },
+      { sort: { month: 1 }, projection: { membershipId: 1, month: 1, policyCountMonthly: 1 } },
+    );
+    for (const row of rows) {
+      out.get(row.membershipId)!.push({ month: row.month, id: String(row._id), policies: row.policyCountMonthly.value as number });
+    }
+    return out;
+  }
+
+  /**
    * **Each member's monthly cells over a range of months, for many members at once** (Phase 18, D-period,
    * D-moc): `MAA_COUNT_IN_UNIT` for the period's month, `MONTHLY2_AA` over the last two months held, and the
    * latest rolling persistency a leader's row holds. One query for the whole list, the range's rows at most;

@@ -4,9 +4,10 @@ import type { ActivationFeatureLink } from '@/domain/constants';
 
 /**
  * Which kind of link a write can complete: one of the three feature links, or — since P18.5-T3 — `training`,
- * any `training:<moduleCode>` link, signalled when a member marks a module *Done*.
+ * any `training:<moduleCode>` link, signalled when a member marks a module *Done* — or, since P18.96-T4, `coaching`,
+ * a 1:1 finalized or logged with the member (`coaching:weekly:4`). A sale is `SalesEvents`' (`sales-events.port.ts`).
  */
-export type ActivationSignal = ActivationFeatureLink | 'training';
+export type ActivationSignal = ActivationFeatureLink | 'training' | 'coaching';
 
 /**
  * **A write a linked activation item waits for has happened** (P13-T3 AC-5, D-links).

@@ -5,6 +5,7 @@ import { DEFAULT_TENANT_TIMEZONE, mayTickByHand } from '@/domain/constants';
 import type { ActivationItemState } from '@/modules/activation/activation-progress.schema';
 import { ActivationProgress, ActivationProgressSchema } from '@/modules/activation/activation-progress.schema';
 import { seedObjectId } from './coaching-fixture';
+import { markNewHires } from './join-dates';
 import type { ReportingKey } from './reporting-fixture';
 
 /**
@@ -114,6 +115,10 @@ export async function seedActivationCohort(deps: CohortSeedDeps): Promise<Cohort
     });
     written += 2;
   }
+
+  // ADR-0169: each of the twelve with an activation is a new hire, joined on its start — written or found, so a re-run
+  // gives the same answer. Their join dates are long past; `/new-hires` shows a year of them (ADR-0173).
+  await markNewHires(COHORT_HIRES.map((key) => deps.cast[key].id));
 
   const lastYear = String(Number(clock.localDateFor(tz, now).slice(0, 4)) - 1);
   const startedLastYear = COHORT_HIRES.filter((key) => starts[key]?.startsWith(lastYear)).length;

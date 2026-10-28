@@ -8,6 +8,9 @@ import { configModule } from '../../../test/config-module';
 import { buildForumServices, type ForumServices } from '../../../test/forum-office';
 import { seedDemo, type SeedResult } from '../demo';
 import { FORUM_TOKENS, seedLeaderForumFixture } from '../leader-forum-fixture';
+import { LeaderScorecardService } from '@/modules/leader-meetings/scorecard/scorecard.service';
+import { MonthlyAgentData } from '@/modules/production/monthly-agent-data.schema';
+import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
 
 const RUN_MS = 300_000;
 const quiet = () => undefined;
@@ -96,10 +99,27 @@ describe('Phase 18.1 the Strategic Leader Forum seed — a run at 10:00 on 10 Oc
   it('P18.1-T2 AC-10 #13: frozen the morning after its day by the function a read runs; its three rows; #12 All clear', async () => {
     const stored = await col('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(views[13].id) });
     expect(stored!.frozenAt).toEqual(new Date('2026-09-27T02:00:00Z'));
-    const again = await forum.scorecards.compute({ kpmId: owner.kpmId!, timezone: 'Asia/Jakarta', meetingDate: '2026-09-26' });
-    // The same function over the same records, asked as of today rather than that morning: the periods end at the
-    // meeting's date either way, so it answers what was frozen.
-    expect(stored!.frozenScorecard).toEqual(again);
+    // The same function over the same records, asked that morning: what was frozen.
+    const thatMorning = new LeaderScorecardService(
+      wired.officePeople, wired.productionReadings,
+      new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.memberships,
+      new FixedClock(stored!.frozenAt as Date),
+    );
+    const input = { kpmId: owner.kpmId!, timezone: 'Asia/Jakarta', meetingDate: '2026-09-26' };
+    expect(stored!.frozenScorecard).toEqual(await thatMorning.compute(input));
+    /*
+     * Asked today, every row but *3M new agent %* answers the same: the periods end at the meeting's date either way.
+     * That row reads each new hire's 3M activation as it stands (P18.96-T6, `ACTIVATION_3M_PCT`), and three of the
+     * year's — Indah, Dimas and Siti — passed day 90 since that morning: a live read would count them. The frozen one does
+     * not move (ADR-0129 §7): 1 of 4 that morning, Pandu; 4 of 8 today.
+     */
+    const again = await forum.scorecards.compute(input);
+    const others = (card: { rows: { key: string }[] }) => ({ ...card, rows: card.rows.filter((r) => r.key !== 'new_agent_3m') });
+    expect(others(stored!.frozenScorecard)).toEqual(others(again));
+    const ytd = (card: { rows: { key: string; cells: Record<string, unknown> }[] }) => card.rows.find((r) => r.key === 'new_agent_3m')!.cells.ytd;
+    expect([ytd(stored!.frozenScorecard), ytd(again)]).toEqual([
+      { kind: 'figure', value: 25, leavesOut: [] }, { kind: 'figure', value: 50, leavesOut: [] },
+    ]);
     expect(views[13].actionItems.map((r) => r.status)).toEqual(['not_planned', 'planned', 'implemented']);
     expect(views[13].agenda.preparation.map((i) => i.text)).toEqual(['Compile follow-ups from August session', 'Prepare August performance data']);
     expect(views[12].openItems).toBe(0);

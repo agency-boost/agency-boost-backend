@@ -93,7 +93,7 @@ describe('a write that loses a race with a graduation, and a name the office no 
   it('Phase 13 exit review N2 an untick that lands between graduation’s read and its write: refused ACTIVATION_INCOMPLETE on a re-read, nothing graduated', async () => {
     const doc = await complete();
     // Sari unticks one of Budi's items after his graduation has read him at 100%, before it writes.
-    interleave(() => h.wired.newHires.tick(h.office.as('SARI'), id('BUDI'), 'ROLE_PLAY', false));
+    interleave(() => h.wired.newHires.tick(h.office.as('SARI'), id('BUDI'), 'ROLE_PLAY', { done: false }));
     h.as('BUDI');
     const res = await h.http().post('/activation/me/graduate').expect(409);
     expect(res.body.error).toMatchObject({ code: 'ACTIVATION_INCOMPLETE', details: { done: 15, total: 16 } });

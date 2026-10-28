@@ -32,7 +32,11 @@ export class RegisterDto {
   @MinLength(1)
   fullName!: string;
 
-  @ApiProperty({ description: 'From GET /companies.', example: '65f1a0c2e4b0a1b2c3d4e5f6' })
+  @ApiProperty({
+    description: 'From GET /companies. With `inviteToken`, the invite’s office’s insurer is used, whatever this says.',
+    example: '65f1a0c2e4b0a1b2c3d4e5f6',
+  })
+  @ValidateIf((o: RegisterDto) => !o.inviteToken)
   @IsMongoId()
   companyId!: string;
 
@@ -44,11 +48,26 @@ export class RegisterDto {
    * and codes registered under it keep their letters; nothing re-checks one already held.
    * Trimmed on the way in, because it is read off a contract and typed by hand.
    */
-  @ApiProperty({ example: '88213', minLength: 3, maxLength: 32, pattern: AGENT_CODE_PATTERN.source })
+  @ApiProperty({
+    example: '88213', minLength: 3, maxLength: 32, pattern: AGENT_CODE_PATTERN.source,
+    description: 'With `inviteToken`, the invite’s agent code is used, whatever this says.',
+  })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @ValidateIf((o: RegisterDto) => !o.inviteToken)
   @IsString()
   @Matches(AGENT_CODE_PATTERN, { message: 'agentCode must be digits only, 3 to 32 of them' })
   agentCode!: string;
+
+  /**
+   * **Registering on a leader's invite** (ADR-0170 §3, P18.96-T3 AC-4): the token from `/register?invite=`. The
+   * account takes the invite's insurer and agent code, and its membership in the office is made active under the
+   * leader at once, with the invite's join date. A link that opens nothing is refused `404` before any account is made.
+   */
+  @ApiPropertyOptional({ description: 'The token from an invite link, `/register?invite=…`.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  inviteToken?: string;
 
   /*
    * What a person records (ADR-0158, P18.8-T4 AC-3), all four required at registration.

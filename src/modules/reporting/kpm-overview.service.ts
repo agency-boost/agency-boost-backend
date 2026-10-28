@@ -145,7 +145,8 @@ export class KpmOverviewService {
     const engagementFrom = [lastMonthWindow.from, week.from].sort()[0];
     // Leavers since the earlier of January and last month's first day: this year's production, and last month's headcount.
     const since = [`${year}-01`, lastMonth].sort()[0];
-    const roster = await this.people.read(ctx, this.clock.startOfLocalDay(timezone, `${since}-01`));
+    // Each member counted from their join date, in the office's zone (ADR-0172 §1).
+    const roster = await this.people.read(ctx, this.clock.startOfLocalDay(timezone, `${since}-01`), timezone);
     const members = roster.everyone.filter((p) => memberAt(p, endOfToday));
     const memberIds = members.map((p) => p.membershipId);
     const membersThen = roster.everyone.filter((p) => memberAt(p, this.clock.endOfLocalDay(timezone, lastMonthWindow.to)));
@@ -260,7 +261,7 @@ export class KpmOverviewService {
   async notLogged(ctx: RequestContext): Promise<NotLoggedView> {
     OfficePeople.require(ctx);
     const office = await this.days.office(ctx);
-    const roster = await this.people.read(ctx, null);
+    const roster = await this.people.read(ctx, null, office.timezone);
     const ids = roster.active.map((p) => p.membershipId);
     const [ladder, latest] = await Promise.all([
       this.people.ladder(ctx, office.companyId),

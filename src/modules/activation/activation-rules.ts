@@ -152,6 +152,21 @@ export function activityWeeksCompletedOn<D extends { date: LocalDate }>(
 }
 
 /**
+ * **`coaching:weekly:4`'s predicate** (P18.96-T4 AC-2, ADR-0171 §3): the `n`th 1:1 with the hire **since their join
+ * date** — a coaching session finalized at least once, on its office `date` (`CoachingReadings.countedSince`), a draft
+ * never — oldest first, ties by session id so two reads agree. Two 1:1s on one day are two (ADR-0081). `null` before
+ * there are `n`. A session dated before the start is not the hire's activation's.
+ */
+export function nthOneOnOne<S extends { date: LocalDate; sessionId: string }>(
+  sessions: readonly S[], startDate: LocalDate, n: number,
+): S | null {
+  const since = sessions
+    .filter((s) => s.date >= startDate)
+    .sort((a, b) => (a.date !== b.date ? (a.date < b.date ? -1 : 1) : a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0));
+  return since.length >= n ? since[n - 1] : null;
+}
+
+/**
  * An item's row as it reads before anybody touched it: not done, by nobody, nothing written by the hire.
  * An activation is written with one per item of its pinned version — by a placement, the backfill and the
  * seed alike — so every later write addresses its item's row by code.

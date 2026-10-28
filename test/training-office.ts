@@ -10,6 +10,7 @@ import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import type { LocalDate } from '@/common/time/local-day';
 import { ActivationProgressController } from '@/modules/activation/activation-progress.controller';
 import { ActivationProgressService } from '@/modules/activation/activation-progress.service';
+import { ActivationItemRecords } from '@/modules/activation/activation-records.service';
 import type { ActivationProgressDocument } from '@/modules/activation/activation-progress.schema';
 import { freshItemState } from '@/modules/activation/activation-rules';
 import { NewHiresController } from '@/modules/activation/new-hires.controller';
@@ -93,6 +94,7 @@ export async function startTrainingHarness(): Promise<TrainingHarness> {
       { provide: TrainingService, useValue: wired.training },
       { provide: ActivationProgressService, useValue: wired.activationProgress },
       { provide: NewHiresService, useValue: wired.newHires },
+      { provide: ActivationItemRecords, useValue: wired.activationRecords },
     ],
   }).compile();
   const app = moduleRef.createNestApplication();

@@ -164,7 +164,8 @@ describe('the subscription seed', () => {
 
   it('the new offices add no hire to the activation demo: everybody in them joined over six months ago', () => {
     // The activation fixture's nine, and Phase 18.1's cohort of 0417's graduated hires (`cohort-fixture.ts`).
-    expect(first.written.activationProgress).toBe(9 + COHORT_HIRES.length);
+    // And P18.96-T6's two new hires (`activation-3m-fixture.ts`), Lukman and Tari, in 0417.
+    expect(first.written.activationProgress).toBe(9 + COHORT_HIRES.length + 2);
   });
 
   it('a second run on the same day writes nothing, and keeps a subscription a walk edited', async () => {

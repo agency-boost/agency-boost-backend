@@ -19,6 +19,7 @@ import mongoose, { Connection, Model } from 'mongoose';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import { Clock, SystemClock } from '@/common/clock/clock.port';
+import { addDays, localDayOf } from '@/common/time/local-day';
 import { AuthGuard } from '@/common/auth/auth.guard';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
@@ -83,7 +84,7 @@ import {
 import {
   NotificationChannel, NotificationChannelAdapter, RenderedMessage, SendRequest,
 } from '@/modules/notifications/notification.types';
-import { AuthController } from './auth.controller';
+import { AuthController, registrationLimitKey } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ContextResolver } from './context-resolver';
 import { ImpersonationService } from './impersonation.service';
@@ -358,6 +359,8 @@ describe('auth and admin over HTTP', () => {
       Object.values(connection.collections).map((c) => c.deleteMany({})),
     );
     app.get(RateLimiter).prune();
+    // The P18.96 exit review, L2: sign-ups are limited per address, and every test here signs up from the loopback.
+    for (const ip of ['127.0.0.1', '::ffff:127.0.0.1', '::1']) app.get(RateLimiter).reset(registrationLimitKey(ip));
   });
 
   const api = () => request(app.getHttpServer());
@@ -2093,6 +2096,61 @@ describe('auth and admin over HTTP', () => {
 
       await api().post(`/api/v1/join/requests/${inbox.body[0].requestId}/approve`)
         .set(mine.auth).send({}).expect(404);
+    });
+
+    /** The office's today in Jakarta, as the server works it out (ADR-0016). */
+    const officeToday = () => localDayOf(new Date(), 'Asia/Jakarta');
+    const membershipRow = (id: string) =>
+      app.get<Connection>(getConnectionToken()).collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(id) });
+
+    it('P18.96-T2 AC-1: an approval carries the join date the leader gives; a bad one is refused 400 naming it, and nothing moves', async () => {
+      const { kpmId, auth } = await officeWithLeader();
+      const list = await api().get('/api/v1/members').set(auth).expect(200);
+      const { asJoiner } = await asked(kpmId, list.body.members[0].membershipId);
+      const inbox = await api().get('/api/v1/join/requests').set(auth).expect(200);
+      const { requestId, membershipId } = inbox.body[0];
+
+      for (const bad of [addDays(officeToday(), 1), '1979-12-31', '2026-02-30', '27/10/2026', 20261027]) {
+        const res = await api().post(`/api/v1/join/requests/${requestId}/approve`).set(auth).send({ joinDate: bad }).expect(400);
+        expect([bad, res.body.error.code, res.body.error.message]).toEqual([bad, 'VALIDATION_FAILED', expect.stringContaining('joinDate')]);
+      }
+      expect((await api().get('/api/v1/join/requests').set(auth).expect(200)).body).toHaveLength(1);
+      expect((await api().get('/api/v1/join/me').set(asJoiner).expect(200)).body.status).toBe('pending');
+
+      // An existing agent who joined years ago: accepted, and classified once.
+      await api().post(`/api/v1/join/requests/${requestId}/approve`).set(auth).send({ joinDate: '2009-03-01' }).expect(200);
+      const member = await api().get(`/api/v1/members/${membershipId}`).set(auth).expect(200);
+      expect(member.body).toMatchObject({ status: 'active', joinDate: '2009-03-01' });
+      expect(await membershipRow(membershipId))
+        .toMatchObject({ joinDate: '2009-03-01', joinedAs: 'existing_agent' });
+    });
+
+    it('P18.96-T2 AC-1: a tag carries one too; omitted, the office’s today — a new hire', async () => {
+      const { kpmId, auth } = await officeWithLeader();
+      const joiner = await makeUser(`dated-${Math.random()}@kpm.test`);
+      await api().post('/api/v1/join/kpm').set({ Authorization: `Bearer ${joiner.accessToken}` }).send({ kpmId }).expect(200);
+      const pool = await api().get('/api/v1/join/untagged').set(auth).expect(200);
+      const { membershipId } = pool.body[0];
+
+      const refused = await api().post(`/api/v1/join/untagged/${membershipId}`).set(auth).send({ joinDate: 'yesterday' }).expect(400);
+      expect(refused.body.error.code).toBe('VALIDATION_FAILED');
+      await api().post(`/api/v1/join/untagged/${membershipId}`).set(auth).expect(200);
+      expect(await membershipRow(membershipId))
+        .toMatchObject({ joinDate: officeToday(), joinedAs: 'new_hire' });
+    });
+
+    it('P18.96-T2 AC-1: another office’s member is not reached with a join date either, and nothing is written there', async () => {
+      const mine = await officeWithLeader();
+      const theirs = await officeWithLeader();
+      const list = await api().get('/api/v1/members').set(theirs.auth).expect(200);
+      await asked(theirs.kpmId, list.body.members[0].membershipId);
+      const inbox = await api().get('/api/v1/join/requests').set(theirs.auth).expect(200);
+      const { requestId, membershipId } = inbox.body[0];
+
+      await api().post(`/api/v1/join/requests/${requestId}/approve`).set(mine.auth).send({ joinDate: '2026-01-05' }).expect(404);
+      await api().post(`/api/v1/join/untagged/${membershipId}`).set(mine.auth).send({ joinDate: '2026-01-05' }).expect(404);
+      expect(await membershipRow(membershipId))
+        .toMatchObject({ status: 'pending', joinDate: null, joinedAs: null });
     });
   });
 

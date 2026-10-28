@@ -10,6 +10,10 @@ export type LeadType = (typeof LEAD_TYPES)[number];
 export const LEAD_OUTCOMES = ['won', 'lost'] as const;
 export type LeadOutcome = (typeof LEAD_OUTCOMES)[number];
 
+/** Where a lead was written other than the Leads screen: a closing logged from the checklist (P18.96-T4). */
+export const LEAD_ORIGINS = ['activation_checklist'] as const;
+export type LeadOrigin = (typeof LEAD_ORIGINS)[number];
+
 /**
  * Why this person's details may be held (UU 27/2022) — **as recorded until 2026-10-07.**
  *
@@ -223,6 +227,16 @@ export class Lead {
    */
   @Prop({ type: [LeadTransitionSchema], default: [] })
   transitions!: LeadTransition[];
+
+  /**
+   * **A closing logged from the 90-day checklist** (P18.96-T4 AC-3, ADR-0171 §3): `activation_checklist` for a sales
+   * lead its owner or a leader created from *Which case? → Log a new closing*, straight at *Paid and issued* on the
+   * day they gave, rather than walked up the ladder. It is the ADR's *manual tick that names a closing*: it counts as
+   * a first sale marked `manual`, and **not as the data that confirms one** (`firstSaleOf`'s `dataOnly`). `null` for
+   * every other lead.
+   */
+  @Prop({ type: String, enum: [...LEAD_ORIGINS, null], default: null })
+  loggedFrom!: LeadOrigin | null;
 
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;

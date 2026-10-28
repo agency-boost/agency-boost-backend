@@ -14,6 +14,8 @@ import { UserSchema } from '@/modules/users/user.schema';
 import { GroupSchema } from '@/modules/org/group.schema';
 import { JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
+import { MemberInviteSchema } from '@/modules/org/member-invite.schema';
+import { TransferRequestSchema } from '@/modules/org/transfer-request.schema';
 import { MembershipHistorySchema } from '@/modules/org/membership-history.schema';
 import { MembershipSchema } from '@/modules/org/membership.schema';
 import { unclassified } from '@/common/schema/registered-schemas';
@@ -114,6 +116,9 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['joinRequests', JoinRequestSchema],
   // ADR-0157: tenant-scoped, unlike `kpmRequests` — the office exists and the subject is its member.
   ['leaderLimitRequests', LeaderLimitRequestSchema],
+  // P18.96-T3 (ADR-0170): a leader's invites — opened by `(kpmId, tokenHash)` — and the requests to move a member.
+  ['memberInvites', MemberInviteSchema],
+  ['transferRequests', TransferRequestSchema],
   ['groups', GroupSchema],
   ['activityCategories', ActivityCategorySchema],
   ['activityTypes', ActivityTypeSchema],
@@ -545,6 +550,8 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [GroupSchema, 'GroupSchema'],
   [JoinRequestSchema, 'JoinRequestSchema'],
   [LeaderLimitRequestSchema, 'LeaderLimitRequestSchema'],
+  [MemberInviteSchema, 'MemberInviteSchema'],
+  [TransferRequestSchema, 'TransferRequestSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [MembershipSchema, 'MembershipSchema'],
   [KpmRequestSchema, 'KpmRequestSchema'],

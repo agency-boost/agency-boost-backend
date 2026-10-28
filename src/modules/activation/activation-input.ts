@@ -2,7 +2,7 @@ import {
   CODE_MESSAGE, CODE_PATTERN, Fields, refuseWith, type Bounds,
 } from '@/common/validation/fields';
 import {
-  ACTIVATION_FEATURE_LINKS, ACTIVATION_TRAINING_LINK_PREFIX, activationLinkKind,
+  ACTIVATION_FEATURE_LINKS, ACTIVATION_TRAINING_LINK_PREFIX, activationLinkKind, isActivationDataLink,
 } from '@/domain/constants';
 
 /**
@@ -68,6 +68,15 @@ function checkLink(raw: unknown, where: string, violations: string[]): string | 
       return null;
     }
     return `${ACTIVATION_TRAINING_LINK_PREFIX}${moduleCode.toUpperCase()}`;
+  }
+
+  // P18.96-T4: a data kind is bound by an item's code (`ACTIVATION_CODE_BOUND_LINKS`), never stored on one.
+  if (isActivationDataLink(link)) {
+    violations.push(
+      `${where}: ${link} is not chosen for an item. It belongs to the item whose code it is bound to, `
+        + 'which reads it on its own.',
+    );
+    return null;
   }
 
   if (activationLinkKind(link) === undefined) {

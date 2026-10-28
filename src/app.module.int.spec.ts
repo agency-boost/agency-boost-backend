@@ -26,6 +26,7 @@ import { LeaderCodeService } from './modules/org/leader-code.service';
 import { MemberDeparture, MemberDepartures } from './modules/org/member-departure.port';
 import { CampaignChaseDeparture } from './modules/campaigns/campaign-departure';
 import { RemovalService } from './modules/org/removal.service';
+import { InvitesService } from './modules/org/invites.service';
 
 /**
  * Boots the real AppModule.
@@ -87,6 +88,27 @@ describe('AppModule boots', () => {
     expect(departures.each[1] === app.get(CampaignChaseDeparture, { strict: false })).toBe(true);
     // P18.5-T3 AC-2: a module marked done reaches the hire's activation through the same port.
     expect(port(TrainingProgressService, 'activation')).toBe(activation);
+    // P18.96-T3 AC-4: registration on an invite's link reaches the invites, by token.
+    expect(port(AuthController, 'invites') === app.get(InvitesService, { strict: false })).toBe(true);
+    expect(port(InvitesService, 'activations')).toBe(activation);
+  });
+
+  /*
+   * **P18.96-T3: `/new-hires/invites` and `/new-hires/transfers` are their own routes, not a hire's id.** Express takes
+   * the first route that matches in the order they were registered, and `NewHiresController` declares
+   * `GET /new-hires/:membershipId`: registered before *+ Add agent*'s controller, it would read `invites` as a
+   * membership and answer 404. Both are guarded, so a request cannot tell them apart; the router's own order can.
+   */
+  it('P18.96-T3 registers GET /new-hires/invites and /new-hires/transfers before GET /new-hires/:membershipId', () => {
+    const stack = (app.getHttpAdapter().getInstance() as { _router: { stack: { route?: { path: string; methods: Record<string, boolean> } }[] } })
+      ._router.stack;
+    const at = (path: string) => stack.findIndex((layer) => layer.route?.path === path && layer.route.methods.get);
+    const hire = at('/api/v1/new-hires/:membershipId');
+    expect(hire).toBeGreaterThan(-1);
+    expect(at('/api/v1/new-hires/invites')).toBeGreaterThan(-1);
+    expect(at('/api/v1/new-hires/invites')).toBeLessThan(hire);
+    expect(at('/api/v1/new-hires/transfers')).toBeLessThan(hire);
+    expect(at('/api/v1/new-hires/transfers')).toBeGreaterThan(-1);
   });
 
   /*

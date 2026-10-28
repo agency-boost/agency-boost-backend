@@ -14,7 +14,9 @@ export class ActivationLinkDto implements ActivationLinkView {
 
   @ApiProperty({
     type: String, nullable: true, example: '/goals',
-    description: '`null` for a training link to a module you are not offered — withdrawn, or not yet published: draw no *Go to*.',
+    description:
+      '`null` for a training link to a module you are not offered — withdrawn, or not yet published — and for a '
+      + 'data-backed item, whose way in is its own form: draw no *Go to*.',
   })
   route!: string | null;
 
@@ -25,9 +27,18 @@ export class ActivationLinkDto implements ActivationLinkView {
     type: Boolean,
     description:
       'Whether an evaluator exists yet. While it does not, a leader ticks the item by hand and the '
-      + 'tick is recorded as manual; once it is live, no role may tick it.',
+      + 'tick is recorded as manual; once it is live, no role may tick it — except a data-backed item, with its record.',
   })
   live!: boolean;
+
+  @ApiProperty({
+    type: String, enum: ['closing', 'one_on_one'], nullable: true,
+    description:
+      'The form a hand tick opens: `closing` — *Which case?*, an existing closing or a new one — or '
+      + '`one_on_one` — *Log 1:1*, a date and a note — for a data-backed item, which is ticked by hand only with its '
+      + 'record; `null` for every other link.',
+  })
+  form!: 'closing' | 'one_on_one' | null;
 }
 
 export class ActivationItemDto implements ActivationItemView {
@@ -40,10 +51,21 @@ export class ActivationItemDto implements ActivationItemView {
   @ApiProperty({ type: Number, description: 'Within its aspect. Presentation only.' })
   displayOrder!: number;
 
-  @ApiProperty({ type: String, nullable: true, example: 'feature:goals' })
+  @ApiProperty({
+    type: String, nullable: true, example: 'feature:goals',
+    description:
+      'In the settings read, the link as stored — what a draft saves back, `null` for the three data-backed items, '
+      + 'whose kind is bound by their code and never stored. In every other read, the link the item is evaluated by.',
+  })
   autoLink!: string | null;
 
-  @ApiProperty({ type: ActivationLinkDto, nullable: true, description: 'The link, resolved.' })
+  @ApiProperty({
+    type: ActivationLinkDto, nullable: true,
+    description:
+      'The link, resolved: what completes the item. For *Close first case independently*, *Reach Independent Agent '
+      + 'milestone* and *Weekly 1-on-1 check-in*, storing no link of their own, the data kind their code binds — in '
+      + 'the settings read too, where `autoLink` stays `null`.',
+  })
   link!: ActivationLinkDto | null;
 }
 

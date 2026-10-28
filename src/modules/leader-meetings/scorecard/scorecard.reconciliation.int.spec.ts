@@ -95,7 +95,7 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
 
     scorecard = new LeaderScorecardService(
       wired.officePeople, wired.productionReadings,
-      new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.activationRows, wired.clock,
+      new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.memberships, wired.clock,
     );
   }, 120_000);
 

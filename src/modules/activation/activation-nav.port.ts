@@ -9,7 +9,10 @@ import { RequestContext } from '@/common/context/request-context';
 export interface ActivationNavFacts {
   /** `null` when the reader has none; `open` is false once graduated or expired; `complete` is 100%. */
   activation: { open: boolean; complete: boolean } | null;
-  /** The reader reaches at least one open activation through `COACH` (OD-122). */
+  /**
+   * The reader reaches at least one new hire through `COACH` whose join date is in the last twelve months (OD-122;
+   * since P18.96-T6, ADR-0173 §1 — it was an open activation): what `GET /new-hires` lists.
+   */
   newHires: boolean;
 }
 

@@ -31,6 +31,7 @@ import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
 import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
 import { up as leadPosition } from '@/migrations/0031-lead-position';
+import { up as membershipJoinDate } from '@/migrations/0040-membership-join-date';
 import { Goal, GoalSchema } from '@/modules/goals/goal.schema';
 import {
   KpmProductConfig, KpmProductConfigSchema,
@@ -46,7 +47,7 @@ import {
   capabilitySeedDocument, defaultCapabilityLadder,
 } from '@/modules/capability/capability-payload';
 import {
-  CASCADE_ACTIVITY_CODES, DEFAULT_ORG_LADDER, DEFAULT_TENANT_TIMEZONE,
+  CASCADE_ACTIVITY_CODES, DEFAULT_ORG_LADDER, DEFAULT_TENANT_TIMEZONE, FIRST_SALE_STAGE_CODE,
 } from '@/domain/constants';
 import { annualTargetOf, computeCascade, defaultMonthsLeft } from '@/modules/goals/goal-cascade';
 import { monthlyApeTarget } from '@/modules/summary/summary-figures';
@@ -75,11 +76,16 @@ import {
   placeReportingCast, reportingMonthFigures, seedReportingFixture, type ReportingKey,
 } from './reporting-fixture';
 import { seedActivationCohort } from './cohort-fixture';
+import { seedActivation3MFixture, type Activation3MSeed } from './activation-3m-fixture';
+import { markNewHires } from './join-dates';
+import { buildFirstSaleFixture, type FirstSaleFixture } from './first-sale-fixture';
+import { up as backfillFirstSales } from '../migrations/0042-membership-first-sale';
 import { seedLeaderForumFixture, type LeaderForumFixture } from './leader-forum-fixture';
 import { seedTrainingFixture, type TrainingFixture } from './training-fixture';
 import { seedEventsFixture, type EventsFixture } from './events-fixture';
 import { seedCampaignsFixture, type CampaignsFixture } from './campaigns-fixture';
 import { seedComplianceFixture, type ComplianceFixture } from './compliance-fixture';
+import { seedJoiningFixture, type JoiningFixture } from './joining-fixture';
 import { planSeed } from './seed-guard';
 import type { StoragePort } from '@/modules/assets/storage.port';
 import { LONG_PIPELINE } from './long-pipeline';
@@ -250,6 +256,8 @@ const OWNED_COLLECTIONS = [
   'campaignChases', 'campaignStandings',
   // Phase 18.8, with the writer that fills it (`subscription-fixture.ts`): 0603's leaders past its limit (ADR-0157).
   'leaderLimitRequests',
+  // P18.96-T3, with the writer that fills them (`joining-fixture.ts`): Agus's invites and his transfer request (ADR-0170).
+  'memberInvites', 'transferRequests',
 ] as const;
 
 /**
@@ -300,6 +308,12 @@ export interface SeedResult {
   campaigns: CampaignsFixture;
   /** Phase 18.6: training for Phase 18's cast and D-seed's override (`compliance-fixture.ts`). */
   compliance: ComplianceFixture;
+  /** P18.96-T3: Agus's pending and cancelled invites, and his transfer request for Raka (`joining-fixture.ts`). */
+  joining: JoiningFixture;
+  /** P18.96-T4: the first sales on day 20 and day 120, Rina's fourth 1:1 (`first-sale-fixture.ts`). */
+  firstSales: FirstSaleFixture;
+  /** P18.96-T6: Lukman, not activated by a sale on day 96, and Tari, marked left (`activation-3m-fixture.ts`). */
+  activation3M: Activation3MSeed;
 }
 
 async function countRows(): Promise<Record<string, number>> {
@@ -1120,6 +1134,14 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       depth: leader ? leader.depth + 1 : 0,
       status,
       joinedAt: status === 'pending' ? null : joined,
+      /*
+       * ADR-0169: the join date is the day the join is backdated to, in the office's calendar, and everybody is an
+       * existing agent here — the fixtures that give somebody an activation make them a new hire, from its start
+       * (`markNewHires`), as migration 0040 classifies a database written before the fields. Not `opts.joinedAs`,
+       * which is the rung on the `joined` edge. A pending row has neither: nobody has let them in.
+       */
+      joinDate: status === 'pending' ? null : clock.localDateFor(DEFAULT_TENANT_TIMEZONE, joined),
+      joinedAs: status === 'pending' ? null : 'existing_agent',
       removedAt: status === 'removed' ? daysAgo(opts.removedDaysAgo ?? 0) : null,
       recruitedByMembershipId: leaderId,
       // Full-time or part-time in this office (ADR-0158 §1), from the same derivation as the person's
@@ -2073,6 +2095,13 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
 
     // Everybody else's month: `production-figures.ts`, which the reporting fixture's history months read too.
     const figures = seedMonthFigures;
+    /*
+     * **Yanti's first weeks back sold nothing** (P18.96-T5; ADR-0172, `functional/unit-dashboard.md`, *Seed*): last
+     * month's file lists her live membership with no APE and no policy, and this month's leaves her out (below), so
+     * she is a new hire with no first sale — the roster's *New hire*, in Agus's and Sari's team and in neither total's
+     * production nor *On pace to be active*. Her year to date is the carrier's, from before she left.
+     */
+    const quietLastMonth = new Set([yanti.id]);
 
     /**
      * **A coaching cast member's month** (P11-T2 AC-4): last month the plan's base; this month the planned
@@ -2124,7 +2153,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       }
       return key
         ? castFigures(key, String(member._id), month, scale)
-        : figures(earlier.indexOf(member), month, scale);
+        : figures(earlier.indexOf(member), month, scale, { quiet: month === lastMonth && quietLastMonth.has(String(member._id)) });
     };
     // A member a month's file leaves out is not on it: no row (`reportingMonthFigures`).
     const rowsFor = async (members: readonly RosterRow[], month: string, scale = 1) => {
@@ -3042,6 +3071,37 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    * computation. The backfill fills only a snapshot still missing: a re-run writes none.
    */
   const CoachingSessions = mongoose.model(CoachingSession.name, CoachingSessionSchema, undefined, RECOMPILE);
+  /*
+   * **P18.96-T4: the first sales and the data-backed items' rows** (`first-sale-fixture.ts`): Novi's closing on day 20,
+   * Raka's on day 120, and Rina's fourth 1:1 — inserted here, before the sessions' snapshots are taken, so hers carries
+   * one as every finalized session does. Each under its derived `_id`, and only when absent.
+   */
+  const rakaJoinedAt = (await Memberships.findOne({ _id: reportingCast.raka.id }).lean().exec() as { joinedAt?: Date } | null)?.joinedAt;
+  const firstSales = buildFirstSaleFixture({
+    clock, timezone: DEFAULT_TENANT_TIMEZONE, kpmId: id0417,
+    members: { novi: cast.novi.id, raka: reportingCast.raka.id, rina: rina.id, sari: sari.id },
+    joined: {
+      novi: addLocalDays(clock.localDateFor(DEFAULT_TENANT_TIMEZONE), -COACHING_CAST.find((p) => p.key === 'novi')!.joinedDaysAgo),
+      raka: clock.localDateFor(DEFAULT_TENANT_TIMEZONE, rakaJoinedAt ?? daysAgo(220)),
+    },
+  });
+  const paidAndIssued = await LeadStatuses.findOne({ kpmId: id0417, code: FIRST_SALE_STAGE_CODE }).lean().exec() as { _id: unknown } | null;
+  for (const seed of firstSales.leads) {
+    const _id = new mongoose.Types.ObjectId(seed._id);
+    if (await Leads.exists({ _id }) || await Leads.exists({ kpmId: id0417, name: seed.name })) continue;
+    const doc = new Leads({ ...seed, _id, statusId: paidAndIssued ? String(paidAndIssued._id) : null }, null, { strict: 'throw' });
+    await doc.validate();
+    await Leads.collection.insertOne({ ...doc.toObject(), createdAt: seed.createdAt, updatedAt: seed.updatedAt });
+  }
+  // Their places in their owners' lists, as every seeded lead has one (P18.8-T7): migration 0031, which places none twice.
+  await leadPosition(mongoose.connection.db!);
+  for (const seed of firstSales.sessions) {
+    const _id = new mongoose.Types.ObjectId(seed._id);
+    if (await CoachingSessions.exists({ _id })) continue;
+    const doc = new CoachingSessions({ ...seed, _id }, null, { strict: 'throw' });
+    await doc.validate();
+    await CoachingSessions.collection.insertOne({ ...doc.toObject(), createdAt: seed.createdAt, updatedAt: seed.updatedAt });
+  }
   for (const seed of coaching.sessions) {
     const _id = new mongoose.Types.ObjectId(seed._id);
     if (await CoachingSessions.exists({ _id })) continue;
@@ -3390,10 +3450,29 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   });
   await insertFixtureRows(ActivationRows as unknown as mongoose.Model<object>, activation.activations);
   await insertFixtureRows(Audit as unknown as mongoose.Model<object>, activation.audits);
+  // ADR-0169: each of them a new hire, joined on their activation's start — Wahyu's corrected one included.
+  await markNewHires(activation.activations.map((a) => a.membershipId));
 
   // ------------------- the activation cohort the forum's *3M new agent %* reads (Phase 18.1; `cohort-fixture.ts`)
 
   const cohort = await seedActivationCohort({ clock, kpmId: id0417, cast: reportingCast });
+
+  // ------------------- P18.96-T6 — 3M activation (`activation-3m-fixture.ts`): the two results nobody under Agus had —
+  // Lukman, not activated by a sale on day 96, and Tari, marked left before one. Placed after every other 0417 member,
+  // so nobody's agent sequence moves; before the forum, so #12's and #13's frozen scorecards count them as a read would.
+  const activation3M = await seedActivation3MFixture({
+    clock, kpmId: id0417, office0417, agus: ab, arief: cast.arief, ariefUserId: await userOf(cast.arief.id),
+    user: (email, fullName, opts) => user(email, fullName, opts),
+    place: (kpm, userId, role, leader, opts) => place(kpm, userId, role, leader, opts),
+    recount,
+  });
+
+  /*
+   * P18.96-T6: the first sales the seed holds so far — every lead and production month above — computed before the forum
+   * freezes #12's and #13's scorecards, whose *3M new agent %* reads them (`ACTIVATION_3M_PCT`). Migration 0042's own
+   * backfill, run again over the finished seed below; it writes only what is earlier, so the second finds nothing.
+   */
+  await backfillFirstSales(mongoose.connection.db!);
 
   // ------------------- the Strategic Leader Forum: 0417's three meetings, two links, 0555's one (Phase 18.1;
   // `leader-forum-fixture.ts`). After the cohort, so #12's and #13's frozen scorecards carry it.
@@ -3465,6 +3544,25 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     budi: budi.id,
     cast: Object.fromEntries((Object.entries(reportingCast) as [ReportingKey, Placed][]).map(([key, placed]) => [key, placed.id])),
   });
+  // ------------------- P18.96-T3 — adding an agent (`joining-fixture.ts`): Agus's invite waiting to join, one he
+  // cancelled, and his transfer request for Raka Aditama, who reports to Satria — the Owner's and the Admin's to decide.
+  const joining = await seedJoiningFixture({
+    clock,
+    kpmId: id0417,
+    companyId: office0417.companyId,
+    agus: { membershipId: ab.id },
+    raka: { membershipId: reportingCast.raka.id },
+    satria: { membershipId: reportingCast.satria.id },
+    deciders: [
+      { userId: String(ownerUser._id), membershipId: owner.id },
+      { userId: String(adminUser._id), membershipId: admin.id },
+    ],
+    notify,
+  });
+  // P18.96-T2: migration 0040 after the fixtures, as a deploy runs it. On a fresh seed every membership has its join
+  // date and classification already, so it leaves only the pending ones, waiting; on a re-seed over an older
+  // database it classifies the rows `place()` adopted, as it would have on that database's deploy.
+  await membershipJoinDate(mongoose.connection.db!);
   const storedActivations = await ActivationRows.countDocuments({ deletedAt: null }).exec();
 
   /** What each long inbox holds now, as the bell counts it, for the summary below. */
@@ -3515,7 +3613,12 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     arief@kpm0417.test                                 AAB under Agus, promoted from Agent, leading two:
     novi@ · wahyu@kpm0417.test                         Agents under Arief
     pending@kpm0417.test                               Registered, request sent to Sari, waiting
-    untagged@kpm0417.test                              Registered, has asked nobody
+    untagged@kpm0417.test                              Registered, has asked nobody — Putri and Fajar stay
+                                                       leaderless, so + Add agent with either code links them
+    ADDING AN AGENT (Agus, /new-hires)                 Yusuf Hidayat invited (80777), waiting to join;
+                                                       Raka Aditama, Transfer requested — the Owner's and
+                                                       the Admin's to decide on All Members › Pending
+    Yusuf's link                                       ${joining.invitePath}
     removed@kpm0417.test                               Removed once, rejoined — two memberships,
                                                        two agent codes, one person (P3-T7 AC-4)
 
@@ -3727,6 +3830,15 @@ Sign in at POST /api/v1/auth/login, then send the access token as
    * **What this run wrote** (P11-T2 AC-6): every counted collection before and after. A second run
    * without `--reset` on the same day prints zero; a run on a later day writes that day's activity.
    */
+  /*
+   * **P18.96-T4: every member's first sale, computed from what the seed holds** — the leads, the production file — by
+   * migration 0042's own backfill, which is `firstSaleOf`: a fresh seed and a migrated database say the same thing, and
+   * a re-run, or the migration after it, finds nothing earlier to write (`first-sale-fixture.ts`).
+   */
+  await backfillFirstSales(mongoose.connection.db!);
+  log(firstSales.guide);
+  log(activation3M.guide);
+
   const after = await countRows();
   const written = Object.fromEntries(COUNTED_COLLECTIONS
     .map((name) => [name, after[name] - before[name]] as const)
@@ -3737,7 +3849,10 @@ Sign in at POST /api/v1/auth/login, then send the access token as
     ? 'This run wrote 0 rows: everything it seeds was already there.'
     : `This run wrote ${total} rows: ${Object.entries(written).map(([name, added]) => `${name} +${added}`).join(', ')}`);
 
-  return { written, pronounsSet, coaching, calendar, activation, recruitment, forum, training, events, campaigns, compliance };
+  return {
+    written, pronounsSet, coaching, calendar, activation, recruitment, forum, training, events, campaigns, compliance, joining,
+    firstSales, activation3M,
+  };
 }
 
 async function main(): Promise<void> {

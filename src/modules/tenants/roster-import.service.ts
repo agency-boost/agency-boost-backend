@@ -371,6 +371,9 @@ export class RosterImportService {
         status: 'active',
         // How they work in this office is the membership's (ADR-0158 §1), not the account's.
         workStatus: row.workStatus,
+        // An existing agent, joined on the day of the import (ADR-0169 §6): a roster is the office's people as
+        // they already are, so nobody on it is a new hire, and nobody on it is given an activation (ADR-0103).
+        joining: { joinedAs: 'existing_agent' },
       }, makeAccount);
       madeInThisRun.set(row.agentCode, String(membership._id));
 

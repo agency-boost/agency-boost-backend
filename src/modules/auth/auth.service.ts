@@ -40,6 +40,19 @@ export interface SessionView {
   current: boolean;
 }
 
+/** What registration takes (`RegisterDto`), the insurer and the code already settled. */
+export interface RegistrationInput {
+  email: string;
+  password: string;
+  fullName: string;
+  companyId: string;
+  agentCode: string;
+  dateOfBirth: string;
+  companyJoinMonth: string;
+  workStatus: WorkStatus;
+  gender: Gender;
+}
+
 const ACCESS_TTL_SECONDS = 15 * 60;
 const REFRESH_TTL_DAYS = 30;
 const VERIFICATION_TTL_HOURS = 24;
@@ -61,17 +74,16 @@ export class AuthService {
 
   // ---------------------------------------------------------------- registration
 
-  async register(input: {
-    email: string;
-    password: string;
-    fullName: string;
-    companyId: string;
-    agentCode: string;
-    dateOfBirth: string;
-    companyJoinMonth: string;
-    workStatus: WorkStatus;
-    gender: Gender;
-  }): Promise<UserDocument> {
+  async register(input: RegistrationInput): Promise<UserDocument> {
+    return (await this.registerAccount(input)).user;
+  }
+
+  /**
+   * **`register`, saying whether it made the account** (P18.96-T3 AC-4). Registration on an invite's link joins the
+   * office only for an account made here and now: an address that already exists answers the same shape as ever —
+   * confirming it would be the enumeration oracle `register` refuses to be — and must not join anybody to anything.
+   */
+  async registerAccount(input: RegistrationInput): Promise<{ user: UserDocument; created: boolean }> {
     const problems = this.passwords.validate(input.password);
     if (problems.length) {
       throw new DomainException(
@@ -92,7 +104,7 @@ export class AuthService {
       // caller gets the same shape as a success, and the real account owner gets an
       // email telling them someone tried.
       this.logger.warn({ email }, 'registration attempted for an existing address');
-      return existing;
+      return { user: existing, created: false };
     }
 
     // The insurer has to exist before we can hold somebody's code against it. **The Template library is not
@@ -145,7 +157,7 @@ export class AuthService {
     });
 
     await this.issueVerification(user);
-    return user;
+    return { user, created: true };
   }
 
   /**

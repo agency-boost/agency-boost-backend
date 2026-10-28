@@ -2,7 +2,7 @@ import { FixedClock } from '@/common/clock/clock.port';
 import { addDays } from '@/common/time/local-day';
 import {
   activationDay, activationEndsOn, activationState, activityWeeksCompletedOn, firstCaseClosed, isOverdue,
-  officeMondayOf, progressOf,
+  nthOneOnOne, officeMondayOf, progressOf,
 } from './activation-rules';
 
 const J = 'Asia/Jakarta';
@@ -136,5 +136,23 @@ describe('the activation’s arithmetic (Phase 13)', () => {
       expect(activityWeeksCompletedOn(days('2026-12-14', '2026-12-21', '2026-12-31', '2027-01-03', '2027-01-04'), mondayOf)?.date)
         .toBe('2027-01-04');
     });
+  });
+});
+
+describe('nthOneOnOne — Weekly 1-on-1 check-in (P18.96-T4 AC-2)', () => {
+  const s = (date: string, sessionId: string) => ({ date, sessionId });
+
+  it('P18.96-T4 AC-2 is the fourth 1:1 since the start, oldest first, and null before it', () => {
+    const three = [s('2026-08-10', 'b'), s('2026-08-03', 'a'), s('2026-08-17', 'c')];
+    expect(nthOneOnOne(three, '2026-08-01', 4)).toBeNull();
+    expect(nthOneOnOne([...three, s('2026-08-24', 'd')], '2026-08-01', 4)).toEqual(s('2026-08-24', 'd'));
+  });
+
+  it('P18.96-T4 AC-2 counts none before the start, and two on one day as two, by id', () => {
+    const sessions = [s('2026-07-31', 'x'), s('2026-08-03', 'a'), s('2026-08-03', 'b'), s('2026-08-04', 'c'), s('2026-08-05', 'd')];
+    expect(nthOneOnOne(sessions, '2026-08-01', 4)).toEqual(s('2026-08-05', 'd'));
+    expect(nthOneOnOne(sessions, '2026-08-01', 2)).toEqual(s('2026-08-03', 'b'));
+    // On the start date itself, it counts.
+    expect(nthOneOnOne([s('2026-08-01', 'z')], '2026-08-01', 1)).toEqual(s('2026-08-01', 'z'));
   });
 });

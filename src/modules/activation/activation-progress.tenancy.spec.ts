@@ -20,6 +20,7 @@ import { RoleChangeService } from '@/modules/org/role-change.service';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
+import { addDays } from '@/common/time/local-day';
 import { clearCollections, seedLadder, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
 import type { ActivationProgressDocument } from './activation-progress.schema';
@@ -302,6 +303,134 @@ describe('the activation instance (P13-T1)', () => {
     it('P13-T1 AC-8 a query with no office fails closed rather than reading across offices', async () => {
       await expect(wired.activationRows.find(RequestContext.platform('root'), {})).rejects.toBeInstanceOf(MissingTenantContextError);
       await expect(wired.activationRows.updateItems(RequestContext.platform('root'), {}, { $set: {} })).rejects.toBeInstanceOf(MissingTenantContextError);
+    });
+  });
+
+  /*
+   * P18.96-T2 (ADR-0169): every path that makes a membership active writes its join date and classification, once,
+   * in the office's calendar — and only a new hire is given an activation, by a placement or by a heal.
+   */
+  describe('the join date and who it makes them (P18.96-T2, ADR-0169)', () => {
+    /** The office's today at NOW: 23:30 UTC on the 14th is the 15th in Jakarta. */
+    const TODAY = '2026-09-15';
+    const read = async (kpmId: string, id: string) => (await members.findById(office(kpmId), id))!;
+    const VALIDATION = { code: 'VALIDATION_FAILED', status: 400 };
+
+    it('P18.96-T2 AC-1 an approval with no date joins them today, in the office’s calendar, a new hire with an activation from it', async () => {
+      const leader = await member(KPM_A, 'aab', null);
+      const joiner = await member(KPM_A, 'agent', null, 'pending');
+      expect(await read(KPM_A, joiner.id)).toMatchObject({ joinDate: null, joinedAs: null });
+      await approvals.approve(leader.ctx, await requestFrom(joiner.id, leader.id));
+      // Not the 14th, which it still is in UTC.
+      expect(await read(KPM_A, joiner.id)).toMatchObject({ joinDate: TODAY, joinedAs: 'new_hire' });
+      expect((await activations()).map((r) => [r.membershipId, r.startDate])).toEqual([[joiner.id, TODAY]]);
+    });
+
+    it('P18.96-T2 AC-1 the boundary: 90 days back is a new hire, started on that day; 91 is an existing agent, with none', async () => {
+      const leader = await member(KPM_A, 'aab', null);
+      const ninety = await member(KPM_A, 'agent', null, 'pending');
+      const ninetyOne = await member(KPM_A, 'agent', null, 'pending');
+      await approvals.approve(leader.ctx, await requestFrom(ninety.id, leader.id), undefined, addDays(TODAY, -90));
+      await approvals.tag(leader.ctx, ninetyOne.id, addDays(TODAY, -91));
+
+      expect(await read(KPM_A, ninety.id)).toMatchObject({ joinDate: '2026-06-17', joinedAs: 'new_hire' });
+      expect(await read(KPM_A, ninetyOne.id)).toMatchObject({ joinDate: '2026-06-16', joinedAs: 'existing_agent', status: 'active' });
+      // The new hire's activation starts on the join date a leader gave, not on the day they were let in.
+      expect((await activations()).map((r) => [r.membershipId, r.startDate])).toEqual([[ninety.id, '2026-06-17']]);
+    });
+
+    it('P18.96-T2 AC-1 the boundary is the office’s day: at 23:30 UTC on the 14th, 16 June is 91 days back, not the UTC day’s 90', async () => {
+      const leader = await member(KPM_A, 'aab', null);
+      const joiner = await member(KPM_A, 'agent', null, 'pending');
+      // Counted from the UTC date, the 14th, it would be 90 days back and a new hire: the office's 15th decides.
+      await approvals.tag(leader.ctx, joiner.id, '2026-06-16');
+      expect((await read(KPM_A, joiner.id)).joinedAs).toBe('existing_agent');
+      // An hour and a half earlier it is still the 14th in Jakarta too, and the same date is 90 days back.
+      (wired.clock as FixedClock).set(new Date('2026-09-14T15:00:00Z'));
+      const earlier = await member(KPM_A, 'agent', null, 'pending');
+      await approvals.tag(leader.ctx, earlier.id, '2026-06-16');
+      expect((await read(KPM_A, earlier.id)).joinedAs).toBe('new_hire');
+    });
+
+    it('P18.96-T2 AC-1 an existing agent may have joined years ago: accepted, classified once, given no activation', async () => {
+      const leader = await member(KPM_A, 'aab', null);
+      const veteran = await member(KPM_A, 'agent', null, 'pending');
+      await approvals.tag(leader.ctx, veteran.id, '2009-03-01');
+      expect(await read(KPM_A, veteran.id)).toMatchObject({ joinDate: '2009-03-01', joinedAs: 'existing_agent', status: 'active' });
+      expect(await activations()).toEqual([]);
+      // And no later call heals one into being: the starter itself turns an existing agent away.
+      await wired.activationProgress.joined(leader.ctx, veteran.id);
+      expect(await activations()).toEqual([]);
+    });
+
+    it('P18.96-T2 AC-1 a date after the office’s today, before 1980 or not a day is refused 400 naming joinDate, and nothing is written', async () => {
+      const leader = await member(KPM_A, 'aab', null);
+      const joiner = await member(KPM_A, 'agent', null, 'pending');
+      const requestId = await requestFrom(joiner.id, leader.id);
+      for (const [bad, words] of [
+        ['2026-09-16', 'joinDate cannot be after today.'],
+        ['1979-12-31', 'joinDate cannot be before 1980.'],
+        ['2026-02-30', 'joinDate must be a real date, written YYYY-MM-DD.'],
+      ]) {
+        await expect(approvals.approve(leader.ctx, requestId, undefined, bad)).rejects.toMatchObject({ ...VALIDATION, message: words });
+        await expect(approvals.tag(leader.ctx, joiner.id, bad)).rejects.toMatchObject({ ...VALIDATION, message: words });
+      }
+      // Today is not after today, in the office's calendar: the 15th is accepted though UTC says the 14th.
+      expect(await read(KPM_A, joiner.id)).toMatchObject({ status: 'pending', joinDate: null, joinedAs: null, leaderId: null });
+      expect(await mongoose.model(JoinRequest.name, JoinRequestSchema).findById(requestId).lean()).toMatchObject({ status: 'pending' });
+      expect(await activations()).toEqual([]);
+      await approvals.approve(leader.ctx, requestId, undefined, TODAY);
+      expect(await read(KPM_A, joiner.id)).toMatchObject({ joinDate: TODAY, joinedAs: 'new_hire' });
+    });
+
+    it('P18.96-T2 AC-1 is set once: somebody who already has a join date keeps it and their classification through a later placement', async () => {
+      const leader = await member(KPM_A, 'aab', null);
+      const other = await member(KPM_A, 'aab', null);
+      const joiner = await member(KPM_A, 'agent', null, 'pending');
+      await approvals.tag(leader.ctx, joiner.id, '2026-09-01');
+      // Left without a leader — as a removal that orphans a unit leaves them — then picked up by another leader, with
+      // a date given: a move is not a join, and the date and the classification stand.
+      await members.updateById(office(KPM_A), joiner.id, { $set: { leaderId: null, ancestorIds: [], depth: 0 } });
+      await approvals.tag(other.ctx, joiner.id, '2010-01-01');
+      expect(await read(KPM_A, joiner.id)).toMatchObject({ joinDate: '2026-09-01', joinedAs: 'new_hire' });
+    });
+
+    it('P18.96-T2 AC-1 a leader’s code joins them today, a new hire; the roster import and the Owner are existing agents', async () => {
+      const leader = await member(KPM_A, 'aab', null);
+      const userId = await person();
+      await codes.redeem(new RequestContext(userId, 'none', null), leader.leaderCode);
+      const coded = (await members.find(office(KPM_A), { userId }))[0];
+      expect(coded).toMatchObject({ joinDate: TODAY, joinedAs: 'new_hire' });
+      expect((await activations()).map((r) => [r.membershipId, r.startDate])).toEqual([[String(coded._id), TODAY]]);
+
+      // What `RosterImportService` and `TenantService` pass (ADR-0169 §6).
+      const imported = await hierarchy.create(office(KPM_A), {
+        userId: await person(), role: 'agent', leaderId: leader.id, status: 'active', joining: { joinedAs: 'existing_agent' },
+      });
+      const owner = await hierarchy.create(office(KPM_A), {
+        userId: await person(), role: 'ab', leaderId: null, status: 'active', joining: { joinedAs: 'existing_agent' },
+      });
+      for (const m of [imported, owner]) expect(m).toMatchObject({ joinDate: TODAY, joinedAs: 'existing_agent' });
+      // A pending registration has neither: nobody has let them in.
+      expect(await hierarchy.create(office(KPM_A), { userId: await person(), role: 'agent', status: 'pending' }))
+        .toMatchObject({ joinDate: null, joinedAs: null });
+      await wired.activationProgress.joined(leader.ctx, String(imported._id));
+      expect(await activations()).toHaveLength(1);
+    });
+
+    it('P18.96-T2 AC-1 cross-tenant: office A approving or tagging office B’s member with a join date reaches nothing, and writes nothing there', async () => {
+      const leaderA = await member(KPM_A, 'aab', null);
+      const leaderB = await member(KPM_B, 'aab', null);
+      const joinerB = await member(KPM_B, 'agent', null, 'pending');
+      const requestB = String((await mongoose.model(JoinRequest.name, JoinRequestSchema).create({
+        kpmId: KPM_B, membershipId: joinerB.id, leaderMembershipId: leaderB.id, status: 'pending',
+      }))._id);
+      await expect(approvals.approve(leaderA.ctx, requestB, undefined, '2026-09-01')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(approvals.tag(leaderA.ctx, joinerB.id, '2026-09-01')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      // A refused date is not even read: the reach is refused first, and answers as an absent row does.
+      await expect(approvals.tag(leaderA.ctx, joinerB.id, '2099-01-01')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      expect(await read(KPM_B, joinerB.id)).toMatchObject({ status: 'pending', joinDate: null, joinedAs: null });
+      expect(await activations({ kpmId: KPM_B })).toEqual([]);
     });
   });
 });

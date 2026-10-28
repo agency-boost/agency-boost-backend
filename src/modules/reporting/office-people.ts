@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { Clock } from '@/common/clock/clock.port';
 import { RequestContext, type HierarchyRole } from '@/common/context/request-context';
+import type { LocalDate } from '@/common/time/local-day';
+import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
 import { NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
@@ -19,7 +22,15 @@ export interface OfficePerson {
   leaderId: string | null;
   ancestorIds: string[];
   status: MembershipStatus;
+  /** The system's stamp: when the membership was made active. A headcount reads it only where `joinDate` is null. */
   joinedAt: Date | null;
+  /** ***Join date***, the office date their leader gave (ADR-0169 §1); `null` on a row older than the field. */
+  joinDate: LocalDate | null;
+  /**
+   * **The instant `joinDate` begins in the office's zone** — what `OFFICE_HEADCOUNT`, `memberAt` and `belongedDuring`
+   * count from (ADR-0172 §1); `null` with no join date, which counts from `joinedAt`.
+   */
+  joinDateStart: Date | null;
   removedAt: Date | null;
 }
 
@@ -34,6 +45,10 @@ export interface OfficeHeader {
  * **The office's people, read once per report** (Phase 18, D-api): every active membership, and the ones removed
  * since a day — a leaver's production stays the office's (OD-74) — in **one** read through the tenant-scoped
  * repository, with the names of the active ones in two more (`MemberNames`), whatever the office's size.
+ *
+ * **Each with the instant their join date begins** (ADR-0172 §1, P18.96-T5 AC-1), in the office's zone (invariant §9),
+ * so every count of people it feeds counts a member from the day they joined rather than the day the system let them
+ * in. A caller that holds the office's zone passes it; one that does not costs one read of the office's row.
  */
 @Injectable()
 export class OfficePeople {
@@ -44,6 +59,7 @@ export class OfficePeople {
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
     @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
     private readonly orgLevels: OrgLevelService,
+    private readonly clock: Clock,
   ) {}
 
   /** The office's company's ladder, archived rungs included; none for an office whose row names no company. */
@@ -70,19 +86,22 @@ export class OfficePeople {
     return me;
   }
 
-  async read(ctx: RequestContext, leaversSince: Date | null): Promise<{
+  async read(ctx: RequestContext, leaversSince: Date | null, timezone?: string): Promise<{
     /** Active, and removed since `leaversSince`. */
     everyone: OfficePerson[];
     active: OfficePerson[];
     names: Map<string, string>;
   }> {
-    const rows = await this.memberships.find(
-      ctx,
-      leaversSince === null
-        ? { status: 'active' }
-        : { $or: [{ status: 'active' }, { status: 'removed', removedAt: { $gte: leaversSince } }] },
-      { projection: { orgLevelCode: 1, role: 1, leaderId: 1, ancestorIds: 1, status: 1, joinedAt: 1, removedAt: 1 } },
-    );
+    const [rows, zone] = await Promise.all([
+      this.memberships.find(
+        ctx,
+        leaversSince === null
+          ? { status: 'active' }
+          : { $or: [{ status: 'active' }, { status: 'removed', removedAt: { $gte: leaversSince } }] },
+        { projection: { orgLevelCode: 1, role: 1, leaderId: 1, ancestorIds: 1, status: 1, joinedAt: 1, joinDate: 1, removedAt: 1 } },
+      ),
+      timezone === undefined ? this.timezoneOf(ctx) : Promise.resolve(timezone),
+    ]);
     const everyone = rows.map((row): OfficePerson => ({
       membershipId: String(row._id),
       orgLevelCode: row.orgLevelCode,
@@ -92,11 +111,19 @@ export class OfficePeople {
       ancestorIds: [...row.ancestorIds],
       status: row.status,
       joinedAt: row.joinedAt ?? null,
+      joinDate: row.joinDate ?? null,
+      joinDateStart: row.joinDate ? this.clock.startOfLocalDay(zone, row.joinDate) : null,
       removedAt: row.removedAt ?? null,
     }));
     const active = everyone.filter((p) => p.status === 'active');
     const names = await this.names.byMembershipId(ctx, active.map((p) => p.membershipId));
     return { everyone, active, names };
+  }
+
+  /** The office's zone (`kpms.timezone`), or the platform default for a row that names none — `TenantDay.timezoneOf`. */
+  private async timezoneOf(ctx: RequestContext): Promise<string> {
+    const kpm = await this.kpms.findById(ctx.kpmId).select('timezone').lean().exec();
+    return (kpm as { timezone?: string } | null)?.timezone ?? DEFAULT_TENANT_TIMEZONE;
   }
 
   /** The office's name parts. An office with no company row reads an empty company name rather than failing. */

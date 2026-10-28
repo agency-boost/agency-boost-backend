@@ -39,7 +39,7 @@ import {
 } from '@/modules/training/training-progress.response.dto';
 import { ActivationChecklistDto } from '@/modules/activation/activation.response.dto';
 import {
-  ActivationNoteSavedDto, ActivationViewDto, NewHiresRosterDto,
+  ActivationClosingsDto, ActivationNoteSavedDto, ActivationViewDto, NewHireMarkedLeftDto, NewHiresRosterDto,
 } from '@/modules/activation/activation-progress.response.dto';
 import { ProductResponseDto } from '@/modules/products/product.response.dto';
 import {
@@ -63,6 +63,10 @@ import {
 } from '@/modules/campaigns/campaign-agent.response.dto';
 import { CapabilityCatalogDto } from '@/modules/capability/capability.response.dto';
 import { BillingPricesDto } from '@/modules/billing/billing.response.dto';
+import {
+  AcceptedInviteDto, AddAgentResultDto, InviteBannerDto, InviteListDto, RequestedTransferDto, SharedInviteDto,
+  TransferDto,
+} from '@/modules/org/invites.response.dto';
 
 /** What one operation answers with: a class, and whether it comes back as an array. */
 export interface ResponseShape {
@@ -184,6 +188,11 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   NewHiresController_tick: { type: ActivationViewDto },
   NewHiresController_correctStart: { type: ActivationViewDto },
   NewHiresController_saveNote: { type: ActivationNoteSavedDto },
+  // P18.96-T4: the closings *Which case?* names — the hire's own, and a hire's for a leader.
+  ActivationProgressController_closings: { type: ActivationClosingsDto },
+  NewHiresController_closings: { type: ActivationClosingsDto },
+  // P18.96-T6 AC-4: *Mark left*.
+  NewHiresController_markLeft: { type: NewHireMarkedLeftDto },
   AuthController_resendVerification: { type: StatusAckDto },
   AuthController_sessions: { type: SessionDto, isArray: true },
   HealthController_live: { type: StatusAckDto },
@@ -222,6 +231,17 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   OnboardingController_decline: { type: PendingRequestDto, isArray: true },
   OnboardingController_untagged: { type: UntaggedMemberDto, isArray: true },
   OnboardingController_tag: { type: UntaggedMemberDto, isArray: true },
+  // P18.96-T3 (ADR-0170): + Add agent, its invites and transfers; an invite's link; the office's transfer requests.
+  NewHireAgentsController_add: { type: AddAgentResultDto },
+  NewHireAgentsController_list: { type: InviteListDto },
+  NewHireAgentsController_resend: { type: SharedInviteDto },
+  NewHireAgentsController_cancel: { type: InviteListDto },
+  NewHireAgentsController_myTransfers: { type: RequestedTransferDto, isArray: true },
+  InviteLinkController_banner: { type: InviteBannerDto },
+  InviteLinkController_accept: { type: AcceptedInviteDto },
+  TransferRequestsController_queue: { type: TransferDto, isArray: true },
+  TransferRequestsController_approve: { type: TransferDto, isArray: true },
+  TransferRequestsController_decline: { type: TransferDto, isArray: true },
 
   TenantConfigController_listActivityTypes: { type: ActivityCategoryDto, isArray: true },
   TenantConfigController_createCategory: { type: ActivityCategoryDto },

@@ -82,10 +82,12 @@ export interface CampaignReading {
  * `idr_minor` is integer sen, never a float and never a display string (invariant §9): the
  * prototype stores *"Rp 600,000,000"* and one campaign's reward in **pesos**. `tri_state` is
  * boolean-or-unknown, and the unknown is load-bearing: an office that has not uploaded a month has
- * no Monthly Active Agents to count, which is not zero of them. `months` is a decimal count of them.
+ * no Monthly Active Agents to count, which is not zero of them. `months` is a decimal count of them. `date` is an
+ * office date, `YYYY-MM-DD` — since P18.96-T4, the first sale's day.
  */
 export const METRIC_UNITS = [
   'boolean', 'tri_state', 'count', 'percentage', 'percentage_points', 'ratio', 'days', 'months', 'idr_minor', 'enum', 'score',
+  'date',
 ] as const;
 export type MetricUnit = (typeof METRIC_UNITS)[number];
 
@@ -191,15 +193,16 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'MOC_PERSISTENCY', name: 'MOC rolling persistency', unit: 'percentage', phase: 18 },
   /*
    * Phase 18.1 (P18.1-T1 AC-1, AC-4; D-cohort, OD-144): the Strategic Leader Forum's scorecard, and the activation
-   * cohort two of its rows read. Each is computed once under `domain/metrics/` (`activation-cohort.ts`,
-   * `producing-agents.ts`, `held-months.ts`) and pinned there.
+   * cohort its *3M new agent %* row read until P18.96-T6. Each is computed once under `domain/metrics/`
+   * (`activation-cohort.ts`, `producing-agents.ts`, `held-months.ts`) and pinned there.
    *
-   * **All seven are `requirable: false`**, as the office's headcount is: each is computed over an office — the
+   * **All of them are `requirable: false`**, as the office's headcount is: each is computed over an office — the
    * scorecard is the office's, `functional/leader-forum.md` — and nothing computes one for a member, so a requirement
    * naming one could never be evaluated for anybody.
    */
   { key: 'ACTIVATION_COHORT', name: 'Activation cohort', unit: 'count', phase: 18.1, requirable: false },
-  { key: 'NEW_AGENT_3M_ACTIVE_PCT', name: '3M new agent %', unit: 'percentage', phase: 18.1, requirable: false },
+  // `NEW_AGENT_3M_ACTIVE_PCT` (*3M new agent %*, 18.1) was here: retired by ADR-0171 §2 (P18.96-T6) for
+  // `ACTIVATION_3M_PCT`, below — the one 3M metric, which the forum's row reads now (invariant §8).
   { key: 'NEW_ACTIVE_AGENTS_MONTHLY_AVG', name: 'New AA (avg. monthly)', unit: 'count', phase: 18.1, requirable: false },
   { key: 'PRODUCING_AGENTS', name: 'Producing agents', unit: 'count', phase: 18.1, requirable: false },
   { key: 'MAA_MONTHLY_AVG', name: 'Avg. Monthly AA', unit: 'count', phase: 18.1, requirable: false },
@@ -213,6 +216,27 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
    */
   { key: 'ACTIVATION_COMPLETION_RATE', name: 'Activation completion rate', unit: 'percentage', phase: 18.6, requirable: false },
   { key: 'GOAL_SET_RATE', name: 'Goal set', unit: 'percentage', phase: 18.6, requirable: false },
+  /*
+   * Phase 18.96 (P18.96-T4 AC-1; ADR-0171 §1): a person's first sale — a paid and issued case — kept on the membership
+   * and computed once (`domain/metrics/first-sale.ts`). **`requirable: false`**: a day, not something anybody achieves
+   * over a window, so no campaign requirement names it.
+   */
+  { key: 'FIRST_SALE_DATE', name: 'First sale', unit: 'date', phase: 18.96, requirable: false },
+  /*
+   * Phase 18.96 (P18.96-T5 AC-2; ADR-0172 §2): who a unit's production totals and *On pace to be active* read — an
+   * existing agent always, a new hire from their first sale's day — computed once (`counts-for-production.ts`).
+   * **`requirable: false`**: a rule about whom a total covers, not something anybody achieves over a window.
+   */
+  { key: 'COUNTS_FOR_PRODUCTION', name: 'Counts for production', unit: 'boolean', phase: 18.96, requirable: false },
+  /*
+   * Phase 18.96 (P18.96-T6 AC-1, AC-2; ADR-0171 §2, ADR-0173): a new hire's **3M activation** — in progress through day
+   * 90 of the join date, then locked *activated* or *not activated* — and the share of new hires activated, by join
+   * month, unit and office. Computed once (`domain/metrics/activation-3m.ts`); the share replaces
+   * `NEW_AGENT_3M_ACTIVE_PCT`. **Both `requirable: false`**: a result decided once, and a share of a set of members —
+   * nobody achieves either over a window.
+   */
+  { key: 'ACTIVATION_3M', name: '3M activation', unit: 'enum', phase: 18.96, requirable: false },
+  { key: 'ACTIVATION_3M_PCT', name: '3M activation %', unit: 'percentage', phase: 18.96, requirable: false },
 ];
 
 export const metricByKey = (key: string): MetricDefinition | undefined =>
@@ -309,12 +333,10 @@ export const SEED_PRODUCTION_CLUB_TIERS = [
  */
 export const MOC_PERSISTENCY_MIN_PCT = 75;
 
-/**
- * `NEW_AGENT_ACTIVE_MONTHS` (Phase 18.1, D-cohort): the months `NEW_AGENT_3M_ACTIVE_PCT` reads of a hire — **the
- * start month and the three after it**, the prototype's *"their join month or the following three months"*
- * (`KPM_Owner.html:2474`). Calendar months in the office's zone, each read from the office's file. Fixed.
+/*
+ * `NEW_AGENT_ACTIVE_MONTHS` (4, Phase 18.1) was here: the months `NEW_AGENT_3M_ACTIVE_PCT` read of a hire. Retired with
+ * it by ADR-0171 §2 (P18.96-T6); 3M activation counts days from the join date (`ACTIVATION_3M.DAYS`, `joining.ts`).
  */
-export const NEW_AGENT_ACTIVE_MONTHS = 4;
 
 /**
  * Maintenance of Contract, as the carrier states it (ADR-0026, P5-T7 AC-6).

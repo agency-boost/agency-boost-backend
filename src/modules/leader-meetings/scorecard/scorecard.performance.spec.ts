@@ -108,7 +108,7 @@ describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4)', () 
 
     scorecard = new LeaderScorecardService(
       wired.officePeople, wired.productionReadings,
-      new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.activationRows, wired.clock,
+      new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.memberships, wired.clock,
     );
     await compute(KPM_A);
     await compute(KPM_B);

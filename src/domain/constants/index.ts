@@ -329,6 +329,21 @@ export {
   activationLinkKind,
   activationLinkKinds,
   mayTickByHand,
+  // P18.96-T4 (ADR-0171 §3): the data-backed items, bound by code.
+  ACTIVATION_DATA_LINKS,
+  type ActivationDataLink,
+  type ActivationNamedLink,
+  ACTIVATION_DATA_LINK_KINDS,
+  type ActivationDataLinkKind,
+  ACTIVATION_CODE_BOUND_LINKS,
+  ACTIVATION_INDEPENDENT_CLOSINGS,
+  ACTIVATION_WEEKLY_CHECK_INS,
+  FIRST_SALE_STAGE_CODE,
+  type ActivationRecordForm,
+  isActivationDataLink,
+  effectiveAutoLink,
+  recordFormOf,
+  dataItemHandWrite,
 } from './activation-checklist';
 
 export {
@@ -504,6 +519,20 @@ export {
   type LeaderTier,
   type RoleClass,
 } from './leader-tier';
+
+/** A person's join date in an office and who it makes them, decided once (ADR-0169; P18.96-T2). */
+export {
+  JOINING,
+  INVITES,
+  // The P18.96 exit review, L2: sign-ups from one address an hour.
+  REGISTRATION,
+  // P18.96-T6 (ADR-0171 §2, ADR-0173): the 90 days a first sale activates in, and the year `/new-hires` lists.
+  ACTIVATION_3M,
+  JOINED_AS,
+  type JoinedAs,
+  joinedAsFor,
+  joinDateViolation,
+} from './joining';
 
 /** A named template's name bounds (ADR-0115 §3; P13.2-T6, T7), which the frontend's constant is pinned to. */
 export { TEMPLATE } from './templates';

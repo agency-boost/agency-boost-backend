@@ -139,6 +139,11 @@ export class MembershipRepository extends TenantScopedRepository<MembershipDocum
    * than an absent filter, and this is one. The caller must be a Super Admin. **Counts, never a row**: by office
    * and rung code the active memberships, and by office the memberships that began and that were removed inside
    * `[monthStart, monthEndExclusive)` — no membership id, no name, nothing a member did (ADR-0011's line).
+   *
+   * **Began by `joinedAt`, the system's stamp — not the join date** (P18.96-T5 AC-1, kept deliberately): this is the
+   * platform's *adoption*, when people started on AgencyBoost, beside *left* by `removedAt`, another stamp. An office's
+   * own counts of people read the join date (ADR-0172 §1); here an existing agent added today with a join date years
+   * back is a member the platform gained this month.
    */
   async adoptionPerOfficeAcrossTenants(
     ctx: RequestContext, month: { start: Date; endExclusive: Date },

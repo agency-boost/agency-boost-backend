@@ -43,6 +43,11 @@ export interface DirectoryMember {
   /** This viewer may tag or untag them from the row (P18.8-T5 AC-3) — an offer, never the gate. */
   canTagCoreLeader: boolean;
   joinedAt: string | null;
+  /**
+   * The person's **join date** in this office, an office date (ADR-0169 §1): what the person page prints as *Join
+   * date*. `null` while pending. Not `joinedAt`, the system's stamp.
+   */
+  joinDate: string | null;
   /** Set only on a removed row. The Removed tab answers "when", which is the first thing asked. */
   removedAt: string | null;
 
@@ -351,6 +356,7 @@ export class DirectoryService {
       // `GroupService.setCoreLeader` refuses regardless.
       canTagCoreLeader: !removed && isLeaderClass(m.role) && ctx !== undefined && can(ctx, 'member:tag_core_leader'),
       joinedAt: m.joinedAt ? m.joinedAt.toISOString() : null,
+      joinDate: m.joinDate ?? null,
       removedAt: m.removedAt ? m.removedAt.toISOString() : null,
       // Mirrors `RoleChangeService.permitted` and `RemovalService.remove`, which are
       // where these are actually enforced. A refusal the screen did not anticipate is a

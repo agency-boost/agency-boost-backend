@@ -202,6 +202,44 @@ describe('the activation’s linked items complete from real writes (Phase 13 ex
       expect(view.done).toBe(3);
     });
 
+    it('P18.96-T7 AC-1 (UI-007) the leader’s first read of a hire left unhealed answers the settled counts — Initial Setup 3/4, never the stored 1/4 — and so do two first reads at once', async () => {
+      // Dimas's shape on staging: his leader ticked *Set up company CRM system*, and his goal and his lead were written
+      // straight into their collections, as the seed writes them — no write signalled the engine — so the stored row
+      // holds one of Initial Setup's four.
+      const kpmId = h.office.as('BUDI').kpmId!;
+      const crm = { done: true, doneAt: new Date('2026-07-30T03:00:00Z'), source: 'leader', doneByMembershipId: id('SARI') };
+      const doc = await h.start('BUDI', '2026-07-15');
+      await h.col('activationProgress').updateOne(
+        { _id: doc._id, 'items.code': 'CRM_SETUP' },
+        { $set: Object.fromEntries(Object.entries(crm).map(([k, v]) => [`items.$.${k}`, v])) },
+      );
+      const at = new Date('2026-07-20T03:00:00Z');
+      await h.col('goals').insertOne({
+        kpmId, membershipId: id('BUDI'), year: 2026, savedAt: at, savedByMembershipId: id('BUDI'), deletedAt: null, createdAt: at,
+      });
+      await h.col('leads').insertOne({
+        kpmId, ownerMembershipId: id('BUDI'), name: 'Ibu Melinda', type: 'sales', dateRegistered: at, createdBy: id('BUDI'),
+        deletedAt: null, createdAt: at,
+      });
+      const initialSetup = (view: { aspects: { code: string; done: number; total: number; status: string }[] }) =>
+        view.aspects.find((a) => a.code === 'INITIAL_SETUP')!;
+      expect((await stored('BUDI', 'GOAL_SETTING')).done).toBe(false);
+
+      h.as('SARI');
+      const first = (await h.http().get(`/new-hires/${id('BUDI')}`).expect(200)).body;
+      expect(initialSetup(first)).toMatchObject({ done: 3, total: 4, status: 'in_progress' });
+      expect(['GOAL_SETTING', 'ADD_PROSPECTS'].map((c) => item(first, c))).toEqual([
+        expect.objectContaining({ done: true, source: 'link' }), expect.objectContaining({ done: true, source: 'link' }),
+      ]);
+
+      // Unhealed again, and read twice at once: each read evaluates on its own, and neither answers the stored 1/4.
+      await h.col('activationProgress').updateOne({ _id: doc._id }, {
+        $set: { 'items.$[g].done': false, 'items.$[g].source': null, 'items.$[g].doneAt': null },
+      }, { arrayFilters: [{ 'g.code': { $in: ['GOAL_SETTING', 'ADD_PROSPECTS'] } }] });
+      const both = await Promise.all([1, 2].map(() => h.http().get(`/new-hires/${id('BUDI')}`).expect(200)));
+      expect(both.map((res) => [initialSetup(res.body).done, res.body.done])).toEqual([[3, 3], [3, 3]]);
+    });
+
     it('P13-T3 AC-5 a write for a member with no activation evaluates nothing and answers as before', async () => {
       h.as('BUDI');
       await h.http().put('/goals/2026').send(GOAL).expect(200);
@@ -236,7 +274,8 @@ describe('the activation’s linked items complete from real writes (Phase 13 ex
       const bayu = (await h.col('memberships').findOne({ _id: lina }))!;
       const newcomer = await h.col('memberships').insertOne({
         ...bayu, _id: new mongoose.Types.ObjectId(), userId: new mongoose.Types.ObjectId().toString(), agentSeq: 99,
-        leaderCode: 'NEWCOMER', joinedAt: new Date('2026-09-10T02:00:00Z'),
+        // Joined on 10 September, a new hire (ADR-0169), as a placement writes them.
+        leaderCode: 'NEWCOMER', joinedAt: new Date('2026-09-10T02:00:00Z'), joinDate: '2026-09-10', joinedAs: 'new_hire',
       });
       const asNewcomer = new RequestContext('u-newcomer', 'none', {
         ...h.office.as('B_AGENT').membership!, membershipId: String(newcomer.insertedId),
@@ -315,7 +354,7 @@ describe('the four reads agree (Phase 13 exit criterion 2)', () => {
         await h.http().put('/activity/log').send({ date: '2026-09-07', counts: { LEADS_CONTACTED: 1 } }).expect(200);
         await h.http().put('/activity/log').send({ date: '2026-09-14', counts: { LEADS_CONTACTED: 1 } }).expect(200);
       }],
-      ['a manual tick by his leader', async () => { h.as('SARI'); await h.http().put(`/new-hires/${id('BUDI')}/items/FIRST_CASE_CLOSED`).send({ done: true }).expect(200); }],
+      ['a manual tick by his leader', async () => { h.as('SARI'); await h.http().put(`/new-hires/${id('BUDI')}/items/ROLE_PLAY`).send({ done: true }).expect(200); }],
       ['a manual tick by him', async () => { h.as('BUDI'); await h.http().put('/activation/me/items/CRM_SETUP').send({ done: true }).expect(200); }],
     ];
     let done = 0;

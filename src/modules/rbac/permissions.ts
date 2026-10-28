@@ -797,6 +797,22 @@ export const PERMISSIONS = {
     { grantee: AAB, scope: 'own-downline' },
     { grantee: AGENT, scope: 'own-downline' },
   ],
+  /*
+   * ***Mark left*** (P18.96-T6 AC-4; ADR-0173 §3, ADR-0169 §4 as amended): `POST /new-hires/:membershipId/left` records
+   * that a new hire has left — `leftAt`, which decides their 3M activation — and removes them through the removal's own
+   * path, so they leave every count of people; their history stays. Not `member:remove_from_team`'s rules: a leader
+   * above the direct one may mark it, and a new hire who leads somebody is refused. **A leader's for the new hires they coach** (`COACH`, as
+   * `new_hires:read_roster` lists them): an AB and an AAB. **The Owner and an Admin for the office's**, at `own-kpm` —
+   * a fact about a membership, not the checklist ADR-0148 keeps them from changing. **Not an Agent who leads**, whose
+   * roster shows the row without it, and not the Super Admin's. A write: a read-only support session is refused it, an
+   * elevated one writes as its member with both actors audited (§3.13).
+   */
+  'new_hire:mark_left': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-downline' },
+  ],
 
   /*
    * ---- Training progress (P18.5-T1, T4; roles §3.7; `functional/training.md`, *The permissions*). ----
@@ -1106,6 +1122,31 @@ export const PERMISSIONS = {
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
+  ],
+  /*
+   * **+ Add agent** (ADR-0170 §1, P18.96-T3 AC-1): the one form — `POST /new-hires/agents` — and the invites it makes,
+   * listed, resent and cancelled, and the transfer requests it asked for. An AB and an AAB for **their own unit**:
+   * the person joins under them, and nobody else's unit is theirs to add to, nor anybody else's invite theirs to read.
+   * The Owner and an Admin for the office: any active member's unit, named in the body. **Not the Agent's**, whose
+   * code still lets anybody walk in. **Not the Super Admin's**, and not a setup session's (`SETUP_SESSION_WRITE_SCOPE`
+   * names the office's settings, its import and its production file, never a person): a support session reaches the
+   * office as its member, and a write by its verb is refused to a read-only one. Revived in P18.96-T3 after its
+   * retirement in P3.6-T1, for a different thing — an invite to one named person, not a reusable code.
+   */
+  'member:invite': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-unit' },
+    { grantee: AAB, scope: 'own-unit' },
+  ],
+  /*
+   * **Deciding a transfer request** (ADR-0170 §4, P18.96-T3 AC-3): the office's queue, and approving — which moves the
+   * member through `HierarchyService.reparent`, with history — or declining. The Owner's and an Admin's alone: no
+   * leader moves a member directly, so the leader who asked never decides their own request.
+   */
+  'member:transfer_approve': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
   // The Owner and an Admin decide anywhere in the office — a request whose leader never
   // looks is the failure the queue exists to prevent. This matched the matrix nowhere

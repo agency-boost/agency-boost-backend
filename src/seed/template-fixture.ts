@@ -232,6 +232,16 @@ export async function seedTemplateFixture(deps: TemplateFixtureDeps): Promise<Te
     { kpmId, membershipId: agent.id, eventType: 'joined', actorUserId: { $in: [null, undefined] } },
     { $set: { actorUserId: String(agentUser._id) } },
   );
+  /*
+   * And a leader's code makes her a **new hire** (ADR-0169 §3: joined a week ago, within 90 days), which is what lets
+   * that read give her one — an existing agent is never given an activation. The seed's one new hire with no
+   * activation: migration 0040, which reads activations, could not tell her from an existing agent, and a fresh
+   * seed writes what the redemption writes.
+   */
+  await mongoose.connection.collection('memberships').updateOne(
+    { _id: new mongoose.Types.ObjectId(agent.id), kpmId },
+    { $set: { joinedAs: 'new_hire' } },
+  );
 
   const guide = `
   TEMPLATES at /admin/companies → Template  (Super Admin; from src/seed/template-fixture.ts)

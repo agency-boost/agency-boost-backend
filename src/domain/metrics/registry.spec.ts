@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ACTIVATION, PERFORMANCE, RATIO_BENCHMARKS } from '@/domain/constants';
+import { ACTIVATION, ACTIVATION_3M, PERFORMANCE, RATIO_BENCHMARKS } from '@/domain/constants';
 import {
   CAMPAIGN_EVALUATION_PHASE, CAMPAIGN_METRICS, METRIC_REGISTRY as SERVED, REQUIREMENT_METRICS, isCampaignMetric,
 } from '@/domain/constants/metrics';
@@ -277,7 +277,7 @@ describe('the metric registry (P4-T4)', () => {
       MOC_PERSISTENCY: 18,
       // P18.1-T1 (D-cohort, OD-144): the Strategic Leader Forum's scorecard, and the cohort it reads.
       ACTIVATION_COHORT: 18.1,
-      NEW_AGENT_3M_ACTIVE_PCT: 18.1,
+      // `NEW_AGENT_3M_ACTIVE_PCT` (18.1) retired by ADR-0171 §2 (P18.96-T6) for `ACTIVATION_3M_PCT`, below.
       NEW_ACTIVE_AGENTS_MONTHLY_AVG: 18.1,
       PRODUCING_AGENTS: 18.1,
       MAA_MONTHLY_AVG: 18.1,
@@ -288,6 +288,13 @@ describe('the metric registry (P4-T4)', () => {
       // P18.6-T1 (OD-159, OD-160): the Owner's compliance tree's two chips that needed a definition.
       ACTIVATION_COMPLETION_RATE: 18.6,
       GOAL_SET_RATE: 18.6,
+      // P18.96-T4 (ADR-0171 §1): the first sale's day, kept on the membership.
+      FIRST_SALE_DATE: 18.96,
+      // P18.96-T5 (ADR-0172 §2): who a unit's production and *on pace* read.
+      COUNTS_FOR_PRODUCTION: 18.96,
+      // P18.96-T6 (ADR-0171 §2): a new hire's 3M result, and the share activated — the one 3M metric.
+      ACTIVATION_3M: 18.96,
+      ACTIVATION_3M_PCT: 18.96,
     };
     const existedBefore = (id: string) => !(id in REGISTERED_SINCE);
 
@@ -327,8 +334,9 @@ describe('the metric registry (P4-T4)', () => {
       // And no phase that plan gave no metric to: an old-plan 12 left behind would have read as
       // Calendar's, 16 was Billing, 17 Recruitment tools, 19 go-live. Today's set is pinned below.
       const phases = [...new Set(METRIC_IDS.map(sept29Phase))].sort((a, b) => a - b);
-      // 18.5 since P18.5-T8 registered *New Hire* (`NEW_HIRES`), a metric that plan never had; 18.6 since P18.6-T1.
-      expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 14, 15, 18, 18.1, 18.5, 18.6]);
+      // 18.5 since P18.5-T8 registered *New Hire* (`NEW_HIRES`), a metric that plan never had; 18.6 since P18.6-T1;
+      // 18.96 since P18.96-T4 (`FIRST_SALE_DATE`).
+      expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 14, 15, 18, 18.1, 18.5, 18.6, 18.96]);
     });
 
     it('evaluated campaigns in Phase 14 under that plan, the old plan’s 12: where campaign qualification is computed', () => {
@@ -358,9 +366,15 @@ describe('the metric registry (P4-T4)', () => {
         'LEADERS_USED', 'OFFICE_HEADCOUNT', 'OFFICE_NEW_MEMBERS_THIS_MONTH',
         // Since Phase 18.1 the forum's seven, each computed over an office alone (P18.1-T1 AC-4).
         'ACTIVATION_COHORT', 'AVERAGE_CASE_SIZE_REALISED', 'CASE_SUBMISSIONS', 'MAA_MONTHLY_AVG',
-        'NEW_ACTIVE_AGENTS_MONTHLY_AVG', 'NEW_AGENT_3M_ACTIVE_PCT', 'PRODUCING_AGENTS',
+        'NEW_ACTIVE_AGENTS_MONTHLY_AVG', 'PRODUCING_AGENTS',
         // Since Phase 18.6 the compliance tree's two shares of a set (P18.6-T1 AC-5, AC-7).
         'ACTIVATION_COMPLETION_RATE', 'GOAL_SET_RATE',
+        // Since Phase 18.96 a person's first sale: a day, not something achieved over a window (P18.96-T4 AC-1).
+        'FIRST_SALE_DATE',
+        // And whom a unit's production covers: a rule about a total, nobody's achievement (P18.96-T5 AC-2).
+        'COUNTS_FOR_PRODUCTION',
+        // And 3M activation: a result decided once, and a share of a set (P18.96-T6 AC-1, AC-2).
+        'ACTIVATION_3M', 'ACTIVATION_3M_PCT',
       ].sort());
     });
 
@@ -400,8 +414,9 @@ describe('the metric registry (P4-T4)', () => {
         // And no phase the plan gives no metric to. Phase 14 is Sales tools now and computes none;
         // 12 is Calendar's, 16 is retired, 17 Recruitment tools, 19 hardening.
         const phases = [...new Set(METRIC_IDS.map((id) => metric(id).phase))].sort((a, b) => a - b);
-        // 18.6 since P18.6-T1: the compliance tree's two, after campaign evaluation and no requirement's (below).
-        expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 15, 18, 18.1, 18.5, 18.6]);
+        // 18.6 since P18.6-T1: the compliance tree's two, after campaign evaluation and no requirement's (below); 18.96
+        // since P18.96-T4, the first sale's day, no requirement's either.
+        expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 15, 18, 18.1, 18.5, 18.6, 18.96]);
       });
 
       it('pins, by key, every metric measured by the time a campaign is evaluated: all of them', () => {
@@ -442,7 +457,7 @@ describe('the metric registry (P4-T4)', () => {
         expect(METRIC_IDS.filter((id) => metric(id).phase > CAMPAIGN_EVALUATION_PHASE && !NOT_REQUIRABLE.includes(id))).toEqual([]);
         // P18.6-T1: the two registered after it are shares of a set, which no requirement may name whatever its phase.
         expect(METRIC_IDS.filter((id) => metric(id).phase > CAMPAIGN_EVALUATION_PHASE).sort())
-          .toEqual(['ACTIVATION_COMPLETION_RATE', 'GOAL_SET_RATE']);
+          .toEqual(['ACTIVATION_3M', 'ACTIVATION_3M_PCT', 'ACTIVATION_COMPLETION_RATE', 'COUNTS_FOR_PRODUCTION', 'FIRST_SALE_DATE', 'GOAL_SET_RATE']);
       });
 
       it('changed that set in exactly one way, decided: the unit rollups (15) and the Owner’s reporting metrics (18) precede campaigns now, so a campaign may require them', () => {
@@ -552,7 +567,7 @@ describe('the metric registry (P4-T4)', () => {
   describe('P18.1-T1 AC-4 — the forum registers the cohort and the scorecard’s metrics before it serves them (D-cohort, OD-144)', () => {
     const FORUM: Record<string, { label: string; unit: string; period: string }> = {
       ACTIVATION_COHORT: { label: 'Activation cohort', unit: 'count', period: 'CALENDAR_YEAR' },
-      NEW_AGENT_3M_ACTIVE_PCT: { label: '3M new agent %', unit: 'percentage', period: 'CALENDAR_YEAR' },
+      // `NEW_AGENT_3M_ACTIVE_PCT` was the seventh, retired by ADR-0171 §2 (P18.96-T6): the row reads `ACTIVATION_3M_PCT`.
       NEW_ACTIVE_AGENTS_MONTHLY_AVG: { label: 'New AA (avg. monthly)', unit: 'count', period: 'CALENDAR_MONTH' },
       PRODUCING_AGENTS: { label: 'Producing agents', unit: 'count', period: 'CALENDAR_YEAR' },
       MAA_MONTHLY_AVG: { label: 'Avg. Monthly AA', unit: 'count', period: 'CALENDAR_MONTH' },
@@ -560,7 +575,7 @@ describe('the metric registry (P4-T4)', () => {
       AVERAGE_CASE_SIZE_REALISED: { label: 'Average Case Size', unit: 'idr_minor', period: 'CALENDAR_YEAR' },
     };
 
-    it('P18.1-T1 AC-4 registers the seven at Phase 18.1, each with its period, its unit, the prototype’s name and no threshold', () => {
+    it('P18.1-T1 AC-4 registers the six still served at Phase 18.1, each with its period, its unit, the prototype’s name and no threshold', () => {
       for (const [id, want] of Object.entries(FORUM)) {
         expect(metric(id)).toEqual({ id, ...want, phase: 18.1, threshold: null });
       }
@@ -570,7 +585,7 @@ describe('the metric registry (P4-T4)', () => {
 
     it('P18.1-T1 AC-4 the three the prototype draws over FY and YTD alone, and the cohort, are a year’s; the three in every column a month’s', () => {
       // Blocked to the right of *YTD* (`KPM_Owner.html:2465`, `:2468`, `:2472`): a year, or a year to date.
-      for (const id of ['PRODUCING_AGENTS', 'NEW_AGENT_3M_ACTIVE_PCT', 'AVERAGE_CASE_SIZE_REALISED', 'ACTIVATION_COHORT']) {
+      for (const id of ['PRODUCING_AGENTS', 'AVERAGE_CASE_SIZE_REALISED', 'ACTIVATION_COHORT']) {
         expect([id, metric(id).period]).toEqual([id, 'CALENDAR_YEAR']);
       }
       for (const id of ['NEW_ACTIVE_AGENTS_MONTHLY_AVG', 'MAA_MONTHLY_AVG', 'CASE_SUBMISSIONS']) {
@@ -578,7 +593,7 @@ describe('the metric registry (P4-T4)', () => {
       }
     });
 
-    it('P18.1-T1 AC-4 keeps all seven out of every requirement: each is computed over an office alone', () => {
+    it('P18.1-T1 AC-4 keeps all six out of every requirement: each is computed over an office alone', () => {
       const requirable = REQUIREMENT_METRICS.map((m) => m.key);
       for (const id of Object.keys(FORUM)) {
         expect([id, SERVED.find((m) => m.key === id)?.requirable, requirable.includes(id)]).toEqual([id, false, false]);
@@ -688,6 +703,64 @@ describe('the metric registry (P4-T4)', () => {
       }
       // And nothing else is Phase 18.6's.
       expect(METRIC_IDS.filter((id) => metric(id).phase === 18.6).sort()).toEqual(['ACTIVATION_COMPLETION_RATE', 'GOAL_SET_RATE']);
+    });
+  });
+
+  describe('P18.96-T4 AC-1 — the first sale registers before anything reads it (ADR-0171 §1)', () => {
+    it('P18.96-T4 AC-1 registers FIRST_SALE_DATE at 18.96: a date, point in time, no threshold, no requirement’s', () => {
+      expect(metric('FIRST_SALE_DATE')).toEqual({
+        id: 'FIRST_SALE_DATE', label: 'First sale', unit: 'date', period: 'POINT_IN_TIME', threshold: null, phase: 18.96,
+      });
+      expect([SERVED.find((m) => m.key === 'FIRST_SALE_DATE')?.requirable, isCampaignMetric('FIRST_SALE_DATE')]).toEqual([false, false]);
+      expect(METRIC_IDS.filter((id) => metric(id).phase === 18.96)).toContain('FIRST_SALE_DATE');
+    });
+
+    it('P18.96-T4 AC-1 keeps a first sale apart from a Monthly Active Agent: neither is named by the other (ADR-0171 §4)', () => {
+      expect(metric('FIRST_SALE_DATE').label).not.toBe(metric('MONTHLY_ACTIVE_AGENT').label);
+      expect(metric('MONTHLY_ACTIVE_AGENT').unit).toBe('tri_state');
+    });
+  });
+
+  describe('P18.96-T5 AC-4 — who a unit’s production reads registers before the dashboard reads it (ADR-0172 §2)', () => {
+    it('P18.96-T5 AC-4 registers COUNTS_FOR_PRODUCTION at 18.96: a boolean, point in time, no threshold, no requirement’s', () => {
+      expect(metric('COUNTS_FOR_PRODUCTION')).toEqual({
+        id: 'COUNTS_FOR_PRODUCTION', label: 'Counts for production', unit: 'boolean', period: 'POINT_IN_TIME', threshold: null,
+        phase: 18.96,
+      });
+      expect([SERVED.find((m) => m.key === 'COUNTS_FOR_PRODUCTION')?.requirable, isCampaignMetric('COUNTS_FOR_PRODUCTION')])
+        .toEqual([false, false]);
+    });
+
+    it('P18.96-T5 AC-4 is not a Monthly Active Agent, nor the potential count it narrows (invariant §8)', () => {
+      for (const id of ['MONTHLY_ACTIVE_AGENT', 'MAA_COUNT_IN_UNIT', 'POTENTIAL_MAA_COUNT_IN_UNIT', 'PACING_TO_MAA']) {
+        expect([id, metric('COUNTS_FOR_PRODUCTION').label]).not.toEqual([id, metric(id).label]);
+      }
+    });
+  });
+
+  describe('P18.96-T6 AC-1, AC-2 — 3M activation is one metric, and the forum’s old one is retired (ADR-0171 §2)', () => {
+    it('P18.96-T6 AC-1 registers ACTIVATION_3M at 18.96: an enum over the first 90 days, locked on day 90, no requirement’s', () => {
+      expect(metric('ACTIVATION_3M')).toEqual({
+        id: 'ACTIVATION_3M', label: '3M activation', unit: 'enum', period: 'PROGRAMME_WINDOW', threshold: ACTIVATION_3M.DAYS,
+        phase: 18.96,
+      });
+      expect(metric('ACTIVATION_3M').threshold).toBe(90);
+    });
+
+    it('P18.96-T6 AC-2 registers ACTIVATION_3M_PCT at 18.96: a percentage by join month, no threshold, no requirement’s', () => {
+      expect(metric('ACTIVATION_3M_PCT')).toEqual({
+        id: 'ACTIVATION_3M_PCT', label: '3M activation %', unit: 'percentage', period: 'CALENDAR_MONTH', threshold: null, phase: 18.96,
+      });
+      for (const id of ['ACTIVATION_3M', 'ACTIVATION_3M_PCT']) {
+        expect([id, SERVED.find((m) => m.key === id)?.requirable, isCampaignMetric(id)]).toEqual([id, false, false]);
+      }
+    });
+
+    it('P18.96-T6 AC-2 retires NEW_AGENT_3M_ACTIVE_PCT: no longer served or computed, so nothing can read a second 3M', () => {
+      expect(() => metric('NEW_AGENT_3M_ACTIVE_PCT')).toThrow(/No metric called NEW_AGENT_3M_ACTIVE_PCT/);
+      expect(SERVED.some((m) => m.key === 'NEW_AGENT_3M_ACTIVE_PCT')).toBe(false);
+      // One 3M metric (invariant §8): the result and its share, nothing else named for three months.
+      expect(METRIC_IDS.filter((id) => id.includes('3M')).sort()).toEqual(['ACTIVATION_3M', 'ACTIVATION_3M_PCT']);
     });
   });
 

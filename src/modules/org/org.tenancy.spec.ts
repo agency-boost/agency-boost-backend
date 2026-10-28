@@ -19,6 +19,7 @@ import { OrgTreeService, ORG_TREE_MAX_NODES } from './org-tree.service';
 import { RemovalService } from './removal.service';
 import { RoleChangeService } from './role-change.service';
 import { AuditService } from '@/modules/audit/audit.service';
+import { describeNotification, inboxAddress } from '@/modules/notifications/inbox-copy';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import {
   CompanyOrgLevel, CompanyOrgLevelSchema,
@@ -1017,6 +1018,16 @@ describe('organisation', () => {
         });
       });
 
+      it('P18.96-T1 AC-3: the leader reads who asked, and the notice opens their request inbox', async () => {
+        // The sender's payload through the inbox's own words: the template read a key the sender never wrote,
+        // and every real request said "Somebody asked to join your unit".
+        await onboarding.requestLeader(joinerCtx, ab);
+        const [notice] = sent;
+        expect(notice.payload).toMatchObject({ askerName: 'Joining Person' });
+        expect(describeNotification(notice.templateId, notice.payload ?? {}).title).toBe('Joining Person asked to join your unit');
+        expect(inboxAddress(notice.templateId, notice.payload ?? {})).toBe('/new-hires?review=requests');
+      });
+
       it('marks the row it was sent to, so the screen can say so', async () => {
         await onboarding.requestLeader(joinerCtx, ab);
         const choices = await onboarding.leaders(joinerCtx);
@@ -1204,6 +1215,9 @@ describe('organisation', () => {
         userId: leaderRow!.get('userId'),
         templateId: 'member.tagged_by_leader',
       });
+      // P18.96-T1 AC-3: the leader reads who joined, not the member's "A leader added you to their unit".
+      expect(describeNotification(sent[0].templateId, sent[0].payload ?? {}).title)
+        .toBe('Rina Wijaya joined your unit with your leader code');
     });
 
     describe('codes are unique across the platform, not just the office', () => {
@@ -3778,8 +3792,12 @@ describe('organisation', () => {
         membershipId: orphanLeader, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
         isKpmOwner: false, isKpmAdmin: false, directCount: 1,
       });
-      // Allowed to ask: they have no leader, and `below` is an active AAB.
-      await onboarding.requestLeader(asOrphan, below);
+      // Since P18.96-T3 AC-6 the loop is refused when it is asked (ADR-0170 §6), and nobody is notified.
+      await expect(onboarding.requestLeader(asOrphan, below)).rejects.toMatchObject({ code: 'ORG_CYCLE_DETECTED' });
+      // A request asked before that — still open in an office's inbox — is refused at the approval as ever.
+      await mongoose.model(JoinRequest.name).create({
+        kpmId: KPM_A, membershipId: orphanLeader, leaderMembershipId: below, status: 'pending',
+      });
 
       const asBelow = new RequestContext(belowUser, 'none', {
         membershipId: below, kpmId: KPM_A, orgLevelCode: 'AAB', hierarchyRole: 'aab', status: 'active',

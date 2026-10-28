@@ -16,6 +16,7 @@ import {
   RedeemInviteDto,
   RegisterKpmDto,
   RequestLeaderDto,
+  TagUntaggedDto,
   UntaggedSearchDto,
 } from './org.dto';
 import { LeaderCodeService } from './leader-code.service';
@@ -235,14 +236,16 @@ export class OnboardingController {
     summary: 'Approve a request',
     description:
       'Returns the inbox as it now stands. Deciding one that was already decided is a ' +
-      '409 naming which way it went — two leaders can have this open at once.',
+      '409 naming which way it went — two leaders can have this open at once. `joinDate` ' +
+      'is the day they joined (today when omitted); a date after today or before 1980 is ' +
+      'refused 400 `VALIDATION_FAILED` before anything is written.',
   })
   async approve(
     @Ctx() ctx: RequestContext,
     @Param('requestId') requestId: string,
     @Body() dto: ApproveRequestDto,
   ) {
-    return this.approvals.approve(ctx, requestId, dto.routeToMembershipId);
+    return this.approvals.approve(ctx, requestId, dto.routeToMembershipId, dto.joinDate);
   }
 
   @Post('requests/:requestId/decline')
@@ -282,10 +285,15 @@ export class OnboardingController {
     description:
       'No approval from them — the office already admitted them, and being placed under ' +
       'a leader is not a change they have standing to refuse. Somebody who already ' +
-      'reports to another leader is refused: moving them is a different operation.',
+      'reports to another leader is refused: moving them is a different operation. ' +
+      '`joinDate` as approving a request takes it.',
   })
-  async tag(@Ctx() ctx: RequestContext, @Param('membershipId') membershipId: string) {
-    return this.approvals.tag(ctx, membershipId);
+  async tag(
+    @Ctx() ctx: RequestContext,
+    @Param('membershipId') membershipId: string,
+    @Body() dto: TagUntaggedDto,
+  ) {
+    return this.approvals.tag(ctx, membershipId, dto.joinDate);
   }
 
   @Post('redeem')

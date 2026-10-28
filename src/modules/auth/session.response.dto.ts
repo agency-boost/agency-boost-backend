@@ -250,7 +250,7 @@ export class MeDto {
 
   @ApiProperty({
     type: Boolean,
-    description: 'You coach somebody whose activation is open: the *New hires* menu item.',
+    description: 'You coach a new hire who joined in the last twelve months: the *New hires* menu item.',
   })
   newHires!: boolean;
 }

@@ -74,6 +74,9 @@ export interface PairedGoal extends RolledUpGoal {
  *
  * Only the Unit Dashboard pairs. The Owner's office figures (`kpm-overview`, `kpm-analytics`) keep `rollUpGoal` and
  * their own documented rules, which name the months not held separately.
+ *
+ * **The Unit Dashboard passes only the people who count for production** (`rollUpProduction`, ADR-0172 §2): a new hire
+ * before their first sale is in neither sum, nor in `missing`.
  */
 export function rollUpGoalPaired(rows: readonly GoalFigure[]): PairedGoal {
   const held = rows.filter((row) => row.actualMinor !== null);
@@ -133,10 +136,44 @@ export function rollUpCounts(rows: readonly CountAgainst[]): CountAgainst {
  * **`POTENTIAL_MAA_COUNT_IN_UNIT`** — how many of a group are `PACING_TO_MAA`, out of how many people the
  * group holds (`Overall.html:7239`, `:7465`). A person with no target (`null`) is in `of` and not in
  * `count`. Always labelled *potential* (§A.1): it projects, it does not count the month's file, so it is
- * never `MAA_COUNT_IN_UNIT`.
+ * never `MAA_COUNT_IN_UNIT`. **The Unit Dashboard passes only the people who count for production**
+ * (`rollUpProduction`, ADR-0172 §2): a new hire before their first sale is in neither `count` nor `of`.
  */
 export function potentialMaaCountInUnit(pacing: readonly (boolean | null)[]): { count: number; of: number } {
   return { count: pacing.filter((p) => p === true).length, of: pacing.length };
+}
+
+/** What a unit's production and *on pace* read of a row (ADR-0172 §2). */
+export interface ProductionRow {
+  goal: GoalFigure;
+  /** `PACING_TO_MAA`; `null` without a target. */
+  pacingToMaa: boolean | null;
+  /** `!COUNTS_FOR_PRODUCTION` on the office's day (`counts-for-production.ts`): left out of both figures below. */
+  newHireBeforeFirstSale: boolean;
+}
+
+/** A unit's production and *on pace*, over the rows that count for production, and how many it left out. */
+export interface ProductionRollup {
+  goal: PairedGoal;
+  potentialActive: { count: number; of: number };
+  /** The new hires before a first sale it left out — named in the totals' ⓘ, never counted as missing. */
+  newHires: number;
+}
+
+/**
+ * **A unit's production total and *On pace to be active*, over the people who can sell** (ADR-0172 §2, P18.96-T5
+ * AC-2). A new hire before their first sale is in the team (§1) and **in neither figure**: not their target, not their
+ * production, not in `missing`, and not in *on pace*'s `count` or its `of`. Everybody else is the paired rollup
+ * (`rollUpGoalPaired`) and `POTENTIAL_MAA_COUNT_IN_UNIT` unchanged. The rows left out are counted in `newHires`, so the
+ * total can say so. Who is left out is decided once, by `newHireBeforeFirstSale`, before a row reaches here.
+ */
+export function rollUpProduction(rows: readonly ProductionRow[]): ProductionRollup {
+  const selling = rows.filter((row) => !row.newHireBeforeFirstSale);
+  return {
+    goal: rollUpGoalPaired(selling.map((row) => row.goal)),
+    potentialActive: potentialMaaCountInUnit(selling.map((row) => row.pacingToMaa)),
+    newHires: rows.length - selling.length,
+  };
 }
 
 /** A person's four lead counts (D-leads; `lead-counts.ts`). */

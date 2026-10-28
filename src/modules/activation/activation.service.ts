@@ -4,8 +4,8 @@ import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import {
-  ACTIVATION_LINK_KINDS, ACTIVATION_TRAINING_LINK, ACTIVATION_TRAINING_LINK_PREFIX,
-  type ActivationFeatureLink,
+  ACTIVATION_DATA_LINK_KINDS, ACTIVATION_LINK_KINDS, ACTIVATION_TRAINING_LINK, ACTIVATION_TRAINING_LINK_PREFIX,
+  effectiveAutoLink, isActivationDataLink, type ActivationFeatureLink, type ActivationRecordForm,
 } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Kpm } from '@/modules/tenants/kpm.schema';
@@ -60,6 +60,11 @@ export interface ActivationLinkView {
    * never when**: the phase that makes it live is not served (P10.1-T2 AC-13, ADR-0062 §3).
    */
   live: boolean;
+  /**
+   * **The form a hand tick opens** (P18.96-T4 AC-3): `closing` — *Which case?* — or `one_on_one` — *Log 1:1* — for
+   * a data-backed item, which is ticked by hand only with its record; `null` for every other link.
+   */
+  form: ActivationRecordForm | null;
 }
 
 export interface ActivationItemView {
@@ -357,13 +362,26 @@ export class ActivationService {
           displayOrder: aspect.displayOrder,
           items: [...aspect.items]
             .sort((a, b) => a.displayOrder - b.displayOrder)
-            .map((item) => ({
-              code: item.code,
-              label: item.label,
-              displayOrder: item.displayOrder,
-              autoLink: item.autoLink,
-              link: this.linkView(item.autoLink, titles),
-            })),
+            .map((item) => {
+              /*
+               * P18.96-T4 AC-2 (ADR-0171 §3): a field reader's item reads the kind its code is bound to where it
+               * stores none — *Close first case independently* and its two siblings complete from the office's
+               * sales and coaching records, and no published version is edited for it. The settings read keeps
+               * what is stored in `autoLink`: it is what the Owner edits and saves back.
+               *
+               * P18.96-T7 G2: **its `link` is what completes the item, in every read** — the settings' too, so the
+               * Owner's screen draws the three as data-backed (*From Sales data*) rather than *No link (manual)*,
+               * while the stored `autoLink` it saves back stays `null`.
+               */
+              const bound = effectiveAutoLink(item.code, item.autoLink);
+              return {
+                code: item.code,
+                label: item.label,
+                displayOrder: item.displayOrder,
+                autoLink: source === 'settings' ? item.autoLink : bound,
+                link: this.linkView(bound, titles),
+              };
+            }),
         })),
     };
   }
@@ -406,6 +424,7 @@ export class ActivationService {
       const module = titles.get(moduleCode);
       return {
         ...ACTIVATION_TRAINING_LINK,
+        form: null,
         kind: link,
         // The module's own title, or its code where the module has since been removed from view.
         label: module?.title ?? moduleCode,
@@ -416,8 +435,10 @@ export class ActivationService {
       };
     }
 
+    // P18.96-T4: a data kind resolves from its own registry, with no route — its way in is its own form.
+    if (isActivationDataLink(link)) return { ...ACTIVATION_DATA_LINK_KINDS[link], kind: link };
     const kind = ACTIVATION_LINK_KINDS[link as ActivationFeatureLink];
-    return kind ? { ...kind, kind: link } : null;
+    return kind ? { ...kind, form: null, kind: link } : null;
   }
 }
 

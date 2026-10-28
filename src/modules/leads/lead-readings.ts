@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { FIRST_SALE_STAGE_CODE } from '@/domain/constants';
 import { personLeadCounts, personLeadCountsAt, type CountedLead, type DatedLead } from '@/domain/metrics/lead-counts';
 import { recruitmentClosedIn } from '@/domain/metrics/recruitment-closed';
 import type { LeadCountsRow } from '@/domain/metrics/unit-rollup';
@@ -9,6 +10,47 @@ import type { OfficeDay } from '@/modules/tenants/tenant-day.service';
 import { leadFlags, type LeadFlag } from './lead-attention';
 import { LeadRepository } from './lead.repository';
 import type { LeadType } from './lead.schema';
+
+/**
+ * **One closing, as another module reads it** (P18.96-T4): a sales lead that reached *Paid and issued*, the instant it
+ * first did and who moved it there, and whether it was logged from the checklist rather than walked up the ladder.
+ */
+export interface LeadClosing {
+  leadId: string;
+  name: string;
+  at: Date;
+  byMembershipId: string;
+  logged: boolean;
+}
+
+/** What a closing is read from: a sales lead's id, owner, name, moves and origin. */
+export const CLOSING_FIELDS = { ownerMembershipId: 1, name: 1, transitions: 1, loggedFrom: 1 } as const;
+
+/** The filter every closing read shares: sales leads that have been on *Paid and issued*. */
+export const CLOSING_FILTER = { type: 'sales', 'transitions.toStatusCode': FIRST_SALE_STAGE_CODE } as const;
+
+/** A lead's closing — its first move to *Paid and issued* — or `null` for one that never made it. */
+export function closingOf(row: {
+  _id: unknown; name: string; transitions?: readonly { toStatusCode: string; at: Date; byMembershipId: string }[];
+  loggedFrom?: string | null;
+}): LeadClosing | null {
+  const reached = [...(row.transitions ?? [])]
+    .filter((t) => t.toStatusCode === FIRST_SALE_STAGE_CODE)
+    .sort((a, b) => a.at.getTime() - b.at.getTime())[0];
+  if (!reached) return null;
+  return {
+    leadId: String(row._id),
+    name: row.name,
+    at: reached.at,
+    byMembershipId: reached.byMembershipId,
+    logged: row.loggedFrom === 'activation_checklist',
+  };
+}
+
+/** Oldest closing first, ties by id, so two reads agree. */
+export function byClosedAt(a: LeadClosing, b: LeadClosing): number {
+  return a.at.getTime() - b.at.getTime() || (a.leadId < b.leadId ? -1 : a.leadId > b.leadId ? 1 : 0);
+}
 
 /** One open lead, as another module reads it — the Personal Summary's *Leads that need you* (P10-T6). */
 export interface OpenLead {
@@ -228,6 +270,28 @@ export class LeadReadings {
       { projection: { type: 1, outcome: 1, outcomeAt: 1 } },
     );
     return recruitmentClosedIn(rows, month);
+  }
+
+  /**
+   * **Each member's closings, for many members at once** (P18.96-T4 AC-1, AC-2): every **sales** lead of theirs that
+   * has reached *Paid and issued* (`FIRST_SALE_STAGE_CODE`), with the instant it **first** did, who moved it there,
+   * and whether it was logged from the checklist (`loggedFrom`). A recruitment lead never: it is a person joining, not
+   * a case. A deleted lead is not among them. One read for the whole list, on the `(kpmId, ownerMembershipId, …)`
+   * index, five fields each; oldest first. Every member asked about gets an entry, empty where they have none.
+   */
+  async closingsOfMany(ctx: RequestContext, membershipIds: readonly string[]): Promise<Map<string, LeadClosing[]>> {
+    const ids = [...new Set(membershipIds)];
+    const out = new Map<string, LeadClosing[]>(ids.map((id) => [id, []]));
+    if (ids.length === 0) return out;
+    const rows = await this.leads.find(
+      ctx, { ownerMembershipId: { $in: ids }, ...CLOSING_FILTER }, { projection: { ...CLOSING_FIELDS } },
+    );
+    for (const row of rows) {
+      const closing = closingOf(row);
+      if (closing) out.get(row.ownerMembershipId)!.push(closing);
+    }
+    for (const list of out.values()) list.sort(byClosedAt);
+    return out;
   }
 
   /**

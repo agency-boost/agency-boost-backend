@@ -14,7 +14,8 @@ const owner = new RequestContext('u-owner', 'none', {
 } as never);
 const person = (membershipId: string, orgLevelCode: string, leaderId: string | null, ancestorIds: string[]): OfficePerson => ({
   // The default ladder's rungs, whose class is the code lower-cased (ADR-0156).
-  membershipId, orgLevelCode, role: orgLevelCode.toLowerCase() as OfficePerson['role'], leaderId, ancestorIds, status: 'active', joinedAt: new Date('2026-01-02T02:00:00Z'), removedAt: null,
+  membershipId, orgLevelCode, role: orgLevelCode.toLowerCase() as OfficePerson['role'], leaderId, ancestorIds, status: 'active', joinedAt: new Date('2026-01-02T02:00:00Z'),
+  joinDate: '2026-01-02', joinDateStart: new Date('2026-01-01T17:00:00Z'), removedAt: null,
 });
 
 /** A category answering what it is told to, and remembering what it was asked. */

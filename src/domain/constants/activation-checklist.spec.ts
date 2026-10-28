@@ -3,6 +3,9 @@ import { join } from 'node:path';
 import {
   ACTIVATION_ACTIVITY_WEEKS, ACTIVATION_LINK_KINDS, ACTIVATION_TRAINING_LINK,
   SEED_ACTIVATION_ASPECTS, SEED_ACTIVATION_ITEMS, activationLinkKind, mayTickByHand, ACTIVATION_FIRST_CASE_CODE,
+  ACTIVATION_CODE_BOUND_LINKS, ACTIVATION_DATA_LINK_KINDS, ACTIVATION_DATA_LINKS, ACTIVATION_INDEPENDENT_CLOSINGS,
+  ACTIVATION_WEEKLY_CHECK_INS, FIRST_SALE_STAGE_CODE, dataItemHandWrite, effectiveAutoLink, isActivationDataLink,
+  recordFormOf, SEED_LEAD_STATUSES,
 // Through the barrel, the way every caller reaches them.
 } from '@/domain/constants';
 
@@ -129,7 +132,7 @@ describe('the link registry (P5-T3 AC-7)', () => {
     });
     for (const kind of Object.values(ACTIVATION_LINK_KINDS)) {
       expect(kind.completesWhen.length).toBeGreaterThan(10);
-      expect(kind.route.startsWith('/')).toBe(true);
+      expect(kind.route?.startsWith('/')).toBe(true);
     }
   });
 
@@ -230,5 +233,65 @@ describe('the link registry (P5-T3 AC-7)', () => {
     for (const kind of [...Object.values(ACTIVATION_LINK_KINDS), ACTIVATION_TRAINING_LINK]) {
       expect(Object.keys(kind).sort()).toEqual(['completesWhen', 'label', 'live', 'route']);
     }
+  });
+});
+
+/** P18.96-T4 (ADR-0171 §3): the three data-backed items, bound by code, ticked by hand only with their record. */
+describe('the data-backed items (P18.96-T4 AC-2, AC-3)', () => {
+  it('P18.96-T4 AC-2 binds the platform’s three items by code, and the words the items carry say what each waits for', () => {
+    expect(ACTIVATION_CODE_BOUND_LINKS).toEqual({
+      FIRST_CASE_CLOSED: 'sales:first', INDEPENDENT_AGENT_MILESTONE: 'sales:closings:3', WEEKLY_CHECK_IN: 'coaching:weekly:4',
+    });
+    // Each bound code is a seeded item, and its label holds the number its kind counts to.
+    const labels = new Map(SEED_ACTIVATION_ITEMS.map((i) => [i.code, i.label]));
+    expect(Object.keys(ACTIVATION_CODE_BOUND_LINKS).every((code) => labels.has(code))).toBe(true);
+    expect(labels.get('INDEPENDENT_AGENT_MILESTONE')).toContain(`${ACTIVATION_INDEPENDENT_CLOSINGS} independent closings`);
+    expect(labels.get('WEEKLY_CHECK_IN')).toContain(`${ACTIVATION_WEEKLY_CHECK_INS} weeks`);
+    expect(ACTIVATION_FIRST_CASE_CODE).toBe('FIRST_CASE_CLOSED');
+  });
+
+  it('P18.96-T4 AC-2 pins the constants: three closings, four 1:1s, and the sales ladder’s Paid and issued by its code', () => {
+    expect([ACTIVATION_INDEPENDENT_CLOSINGS, ACTIVATION_WEEKLY_CHECK_INS, FIRST_SALE_STAGE_CODE]).toEqual([3, 4, 'PAID_AND_ISSUED']);
+    expect(SEED_LEAD_STATUSES.find((s) => s.code === FIRST_SALE_STAGE_CODE)).toMatchObject({ pipeline: 'sales', isTerminal: true });
+  });
+
+  it('P18.96-T4 AC-2 reads an item’s own link first, else the kind its code is bound to, else none — the seed stores none', () => {
+    expect(effectiveAutoLink('FIRST_CASE_CLOSED', null)).toBe('sales:first');
+    expect(effectiveAutoLink('WEEKLY_CHECK_IN', null)).toBe('coaching:weekly:4');
+    // An office's own choice for the item stays.
+    expect(effectiveAutoLink('FIRST_CASE_CLOSED', 'feature:leads')).toBe('feature:leads');
+    expect(effectiveAutoLink('CRM_SETUP', null)).toBeNull();
+    expect(effectiveAutoLink('toString', null)).toBeNull();
+    for (const code of Object.keys(ACTIVATION_CODE_BOUND_LINKS)) {
+      expect(SEED_ACTIVATION_ITEMS.find((i) => i.code === code)!.autoLink).toBeNull();
+    }
+  });
+
+  it('P18.96-T4 AC-2 registers each data kind live, with its source line’s words, no route, and its form', () => {
+    expect(ACTIVATION_DATA_LINKS).toEqual(['sales:first', 'sales:closings:3', 'coaching:weekly:4']);
+    expect(ACTIVATION_DATA_LINK_KINDS['sales:first']).toMatchObject({ label: 'Sales data', route: null, live: true, form: 'closing' });
+    expect(ACTIVATION_DATA_LINK_KINDS['sales:closings:3']).toMatchObject({ label: 'Sales data', form: 'closing' });
+    expect(ACTIVATION_DATA_LINK_KINDS['coaching:weekly:4']).toMatchObject({ label: 'Coaching sessions', form: 'one_on_one' });
+    for (const link of ACTIVATION_DATA_LINKS) {
+      expect(isActivationDataLink(link)).toBe(true);
+      expect(activationLinkKind(link)).toBe(ACTIVATION_DATA_LINK_KINDS[link]);
+      // Live, so a bare hand tick is refused like any live link's — `dataItemHandWrite` is the way in.
+      expect(mayTickByHand(link)).toBe(false);
+    }
+    expect(isActivationDataLink('feature:goals')).toBe(false);
+    expect(isActivationDataLink(null)).toBe(false);
+    expect(recordFormOf('sales:first')).toBe('closing');
+    expect(recordFormOf('coaching:weekly:4')).toBe('one_on_one');
+    expect(recordFormOf('feature:goals')).toBeNull();
+  });
+
+  it('P18.96-T4 AC-3 a hand write to a data item: a tick needs its record, an untick is free, one its data completed is refused', () => {
+    expect(dataItemHandWrite('sales:first', true, false)).toBe('needs_record');
+    expect(dataItemHandWrite('coaching:weekly:4', false, false)).toBe('free');
+    expect(dataItemHandWrite('sales:closings:3', true, true)).toBe('refused');
+    expect(dataItemHandWrite('sales:closings:3', false, true)).toBe('refused');
+    // Any other link is `mayTickByHand`'s.
+    expect(dataItemHandWrite('feature:leads', true, false)).toBeNull();
+    expect(dataItemHandWrite(null, true, false)).toBeNull();
   });
 });

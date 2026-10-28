@@ -1,8 +1,14 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { officeHeadcount } from '@/domain/metrics/office-headcount';
+import { MemberNames } from '@/modules/org/member-names.service';
+import { MembershipRepository } from '@/modules/org/membership.repository';
+import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
+import { User, UserSchema } from '@/modules/users/user.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
+import { OfficePeople } from './office-people';
 
 const M = 1_000_000 * 100;
 const COMPANY = '66f0000000000000000000c9';
@@ -12,6 +18,8 @@ const JAN = '66f0000000000000000000e3';
 const NEW = '66f0000000000000000000e4';
 const NOBODY = '66f0000000000000000000e5';
 const NAMELESS = '66f0000000000000000000e6';
+/** P18.96-T5: an office of a company that is gone, so the platform's company count below is untouched. */
+const JOINING = '66f0000000000000000000e7';
 
 /**
  * **The states the prototype lacks, and the edges of the calendar** (P18-T1 AC-9, P18-T2 AC-9): an office with
@@ -238,6 +246,43 @@ describe('the Owner’s reporting at its edges', () => {
       await db().collection('memberships').deleteMany({ kpmId: NOBODY });
       await db().collection('kpmRecruitTargets').deleteMany({ kpmId: NOBODY });
     }
+  });
+
+  it('P18.96-T5 AC-1 manpower counts each member from their join date, not the day the system let them in (ADR-0172 §1)', async () => {
+    await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create(
+      { _id: JOINING, companyId: '66f0000000000000000000fe', code: '0707', branchName: 'Join dates', timezone: 'Asia/Jakarta' },
+    );
+    const owner = await place(JOINING, { joinDate: '2020-01-02', joinedAs: 'existing_agent', leaderCode: 'JOIN0001' });
+    const today = new Date('2026-10-09T03:00:00Z');
+    const agent = (seq: number, over: Record<string, unknown>) => place(JOINING, {
+      orgLevelCode: 'AGENT', role: 'agent', leaderId: owner.membershipId, ancestorIds: [owner.membershipId], depth: 1,
+      agentSeq: seq, leaderCode: `JOIN000${seq}`, joinedAt: today, ...over,
+    });
+    // All three let in today: an existing agent of eleven years, a hire who started in September, one who started on 5 October.
+    await agent(2, { joinDate: '2015-03-02', joinedAs: 'existing_agent' });
+    const september = await agent(3, { joinDate: '2026-09-20', joinedAs: 'new_hire' });
+    await agent(4, { joinDate: '2026-10-05', joinedAs: 'new_hire' });
+
+    // *Total members* is everybody; *new this month* only the one whose join date is in October.
+    expect((await wired.kpmOverview.read(owner)).composition).toMatchObject({ total: 4, newThisMonth: 1 });
+
+    // A reader that does not pass the office's zone reads it (the forum's scorecard): September's last day held three.
+    const memberships = new MembershipRepository(mongoose.model(Membership.name, MembershipSchema, undefined, { overwriteModels: true }) as never);
+    const people = new OfficePeople(
+      memberships, new MemberNames(memberships, mongoose.model(User.name, UserSchema, undefined, { overwriteModels: true }) as never),
+      wired.kpms as never, {} as never, {} as never, new FixedClock(today),
+    );
+    const { everyone } = await people.read(owner, null);
+    expect(everyone.find((p) => p.membershipId === september.membershipId))
+      .toMatchObject({ joinDate: '2026-09-20', joinDateStart: new Date('2026-09-19T17:00:00Z') });
+    expect(officeHeadcount(everyone, new Date('2026-09-30T17:00:00Z'))).toBe(3);
+    expect(officeHeadcount(everyone, new Date('2026-09-19T17:00:00Z'))).toBe(2);
+    // The same with the zone given: one answer.
+    expect((await people.read(owner, null, 'Asia/Jakarta')).everyone).toEqual(everyone);
+
+    // The platform's adoption is when people started on AgencyBoost: all three joined it this month (kept on `joinedAt`).
+    const platform = await wired.platformAnalytics.read(RequestContext.platform('root'));
+    expect(platform.offices.find((o) => o.code === '0707')).toMatchObject({ members: 4, joinedThisMonth: 3 });
   });
 
   it('P18-T8 AC-2 the platform with an office of a company that is gone, and a company with no office', async () => {

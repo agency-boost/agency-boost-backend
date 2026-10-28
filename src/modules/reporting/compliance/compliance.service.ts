@@ -129,7 +129,7 @@ export class ComplianceService {
     const office = await this.days.office(ctx);
     const { today, timezone } = office;
     const year = today.slice(0, 4);
-    const roster = await this.people.read(ctx, null);
+    const roster = await this.people.read(ctx, null, timezone);
     const endOfToday = this.clock.endOfLocalDay(timezone, today);
     const members = roster.active.filter((p) => memberAt(p, endOfToday));
     const names = roster.names;

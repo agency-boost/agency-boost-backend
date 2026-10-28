@@ -5,7 +5,11 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { isLeaderClass, roleClassOf, tierOfRung, type LeaderTier } from '@/domain/constants';
+import { refuseWith } from '@/common/validation/fields';
+import type { LocalDate } from '@/common/time/local-day';
+import {
+  DEFAULT_TENANT_TIMEZONE, isLeaderClass, joinDateViolation, joinedAsFor, roleClassOf, tierOfRung, type JoinedAs, type LeaderTier,
+} from '@/domain/constants';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { EdgeEvent, MembershipHistory } from './membership-history.schema';
@@ -33,6 +37,29 @@ export interface CreateMembershipInput {
    * join leaves it out, and the person's answer at registration is copied instead (`insert`).
    */
   workStatus?: WorkStatus | null;
+  /**
+   * **The join date and who it makes them** (ADR-0169), for a membership made active here. Omitted, the office's
+   * today and the classification it gives — a leader's code. A roster import and an Owner name `existing_agent`.
+   * Ignored for a pending membership: nobody has let them in yet.
+   */
+  joining?: JoiningInput;
+}
+
+/**
+ * What a placement says about a person's join (ADR-0169, P18.96-T2): the date a leader gave, and — for a path that
+ * is never a new hire's — the classification it forces.
+ */
+export interface JoiningInput {
+  /** An office date `YYYY-MM-DD`, checked: a real day, not after the office's today, not before 1980. Omitted: today. */
+  joinDate?: string;
+  /** Forced, for a roster import and an Owner (ADR-0169 §6, ADR-0103). Omitted: from the date, once. */
+  joinedAs?: JoinedAs;
+}
+
+/** The two fields a membership made active is written with (ADR-0169 §1, §3). */
+export interface JoiningFields {
+  joinDate: LocalDate;
+  joinedAs: JoinedAs;
 }
 
 /**
@@ -277,6 +304,35 @@ export class HierarchyService {
   }
 
   /**
+   * **The join date and the classification a membership made active now is written with** (ADR-0169, P18.96-T2).
+   *
+   * The date is the one given — a leader's, on an approval or a tag — or the **office's today** in `kpms.timezone`,
+   * read through the injected clock (invariant §9). A given date is refused `400 VALIDATION_FAILED` naming
+   * `joinDate` when it is not a real day, is after the office's today, or is before 1980; an existing agent may have
+   * joined decades ago, so there is no other lower bound. `joinedAs` is the forced one where a path names it, else
+   * `new_hire` when the date is no more than 90 days before today and `existing_agent` otherwise — computed here,
+   * once, and written beside the date; nothing recomputes it.
+   *
+   * Asked **before anything is written**, so a refused date leaves the membership, the request and the counter as
+   * they were.
+   */
+  async joining(ctx: RequestContext, given: JoiningInput = {}): Promise<JoiningFields> {
+    const today = await this.officeToday(ctx);
+    if (given.joinDate !== undefined) {
+      const violation = joinDateViolation(given.joinDate, today);
+      if (violation) refuseWith([violation]);
+    }
+    const joinDate = given.joinDate ?? today;
+    return { joinDate, joinedAs: given.joinedAs ?? joinedAsFor(joinDate, today) };
+  }
+
+  /** The office's today, in its own zone. A row that names none reads the platform's (ADR-0016). */
+  private async officeToday(ctx: RequestContext): Promise<LocalDate> {
+    const kpm = ctx.kpmId ? await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).exec() : null;
+    return this.clock.localDateFor(kpm?.timezone ?? DEFAULT_TENANT_TIMEZONE);
+  }
+
+  /**
    * **Make a member who is not active, active** — an approval, a tag, an Owner assigned who had
    * registered — under the leader limit (ADR-0113 §2, P13.2 exit review).
    *
@@ -310,7 +366,7 @@ export class HierarchyService {
   }
 
   async create(ctx: RequestContext, input: CreateMembershipInput): Promise<MembershipDocument> {
-    const { leader, agentCode, level, status } = await this.admission(ctx, input, input.userId);
+    const { leader, agentCode, level, status, joining } = await this.admission(ctx, input, input.userId);
 
     /*
      * **The leader limit** (ADR-0113 §2, P13.2-T4): an **active** member made at AB or AAB adds a
@@ -319,7 +375,7 @@ export class HierarchyService {
      * join path makes a pending or active Agent, so none of them is ever refused here.
      */
     // `admission` read the agent code, since the account exists: it is never null here.
-    const write = () => this.insert(ctx, input, { leader, agentCode: agentCode as string, level, status });
+    const write = () => this.insert(ctx, input, { leader, agentCode: agentCode as string, level, status, joining });
     if (status !== 'active' || !isLeaderClass(classOfRung(level))) return write();
     return withLeaderSeat(this.leaderLimit(), ctx, write);
   }
@@ -339,11 +395,11 @@ export class HierarchyService {
     input: Omit<CreateMembershipInput, 'userId'>,
     makeAccount: () => Promise<string>,
   ): Promise<MembershipDocument> {
-    const { leader, companyId, level, status } = await this.admission(ctx, input, null);
+    const { leader, companyId, level, status, joining } = await this.admission(ctx, input, null);
     const write = async () => {
       const userId = await makeAccount();
       const agentCode = await this.agentCodeOf(userId, companyId);
-      return this.insert(ctx, { ...input, userId }, { leader, agentCode, level, status });
+      return this.insert(ctx, { ...input, userId }, { leader, agentCode, level, status, joining });
     };
     if (status !== 'active' || !isLeaderClass(classOfRung(level))) return write();
     return withLeaderSeat(this.leaderLimit(), ctx, write);
@@ -363,6 +419,7 @@ export class HierarchyService {
     agentCode: string | null;
     level: Awaited<ReturnType<OrgLevelService['resolveByCode']>>;
     status: 'active' | 'pending';
+    joining: JoiningFields | null;
   }> {
     const kpmId = ctx.kpmId;
     if (!kpmId) {
@@ -390,7 +447,11 @@ export class HierarchyService {
     //
     // Before the increment now, because the leader limit's refusal reads it (P13.2-T4).
     const level = await this.orgLevels.resolveByCode(companyId, input.role);
-    return { leader, companyId, agentCode, level, status: input.status ?? 'pending' };
+    const status = input.status ?? 'pending';
+    // ADR-0169: an active membership is given its join date and classification here, before the increment, so a
+    // refused date spends nothing. A pending one waits for whoever lets them in.
+    const joining = status === 'active' ? await this.joining(ctx, input.joining) : null;
+    return { leader, companyId, agentCode, level, status, joining };
   }
 
   /** `create`'s write, once every refusal it can meet has been met. */
@@ -402,9 +463,10 @@ export class HierarchyService {
       agentCode: string;
       level: { _id: unknown; code: string; leaderTier?: LeaderTier | null };
       status: 'active' | 'pending';
+      joining: JoiningFields | null;
     },
   ): Promise<MembershipDocument> {
-    const { leader, agentCode, level, status } = resolved;
+    const { leader, agentCode, level, status, joining } = resolved;
     const { agentSeq } = await this.nextMemberSeq(ctx.kpmId as string);
     const leaderCode = await this.freshLeaderCode();
     const role = classOfRung(level);
@@ -422,6 +484,8 @@ export class HierarchyService {
       depth: leader ? leader.depth + 1 : 0,
       status,
       joinedAt: status === 'active' ? this.clock.now() : null,
+      joinDate: joining?.joinDate ?? null,
+      joinedAs: joining?.joinedAs ?? null,
       recruitedByMembershipId: input.recruitedByMembershipId ?? null,
       sourceLeadId: input.sourceLeadId ?? null,
       // ADR-0158 §1: what the caller names (a roster row), else what they said when they registered.

@@ -13,6 +13,8 @@ import { KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { GroupSchema } from '@/modules/org/group.schema';
 import { JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
+import { MemberInviteSchema } from '@/modules/org/member-invite.schema';
+import { TransferRequestSchema } from '@/modules/org/transfer-request.schema';
 import { MembershipHistorySchema } from '@/modules/org/membership-history.schema';
 import { MembershipSchema } from '@/modules/org/membership.schema';
 import { unclassified } from './registered-schemas';
@@ -117,6 +119,9 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['joinRequests', JoinRequestSchema],
   // ADR-0157: a leader past the office's limit, waiting for AgencyBoost.
   ['leaderLimitRequests', LeaderLimitRequestSchema],
+  // P18.96-T3 (ADR-0170): a cancelled invite and a decided transfer stay, as the record of who asked for what.
+  ['memberInvites', MemberInviteSchema],
+  ['transferRequests', TransferRequestSchema],
   ['groups', GroupSchema],
   ['activityCategories', ActivityCategorySchema],
   ['activityTypes', ActivityTypeSchema],
@@ -477,6 +482,8 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [JoinRequestSchema, 'JoinRequestSchema'],
   [LeaderLimitRequestSchema, 'LeaderLimitRequestSchema'],
+  [MemberInviteSchema, 'MemberInviteSchema'],
+  [TransferRequestSchema, 'TransferRequestSchema'],
   [GroupSchema, 'GroupSchema'],
   [AuditLogSchema, 'AuditLogSchema'],
   [AuthTokenSchema, 'AuthTokenSchema'],

@@ -17,12 +17,29 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
   const id = (who: Who) => h.id(who);
   const reads = () => h.col('auditLog').find({ action: 'activity_log.read_raw', 'after.surface': 'activation' }).toArray();
   const writes = () => h.col('auditLog').find({ action: { $regex: '^activation\\.' } }).sort({ createdAt: 1 }).toArray();
+  type Row = {
+    hire: { membershipId: string; name: string }; unit: { kind: string; leader: { membershipId: string; name: string } | null };
+    joinDate: string; day: number; firstSaleDate: string | null; activation3M: string; leftOn: string | null;
+    checklist: { state: string; done: number; total: number; pct: number; overdue: boolean } | null;
+  };
   const roster = async () => (await h.http().get('/new-hires').expect(200)).body as {
     today: string;
-    groups: { kind: string; leader: { membershipId: string; name: string } | null; hires: { hire: { name: string }; day: number; pct: number; overdue: boolean; firstCaseClosed: boolean; startDate: string; window: number }[] }[];
+    sections: Record<'inProgress' | 'activated' | 'notActivated', Row[]>;
+    units: { kind: string; leader: { membershipId: string; name: string } | null }[];
   };
-  const shape = (r: Awaited<ReturnType<typeof roster>>) =>
-    r.groups.map((g) => [g.kind, g.leader?.name ?? null, g.hires.map((x) => `${x.hire.name} ${x.day}`)]);
+  /**
+   * P18.96-T6 (ADR-0173): the roster is sections by 3M result now, each row naming its unit. `shape` keeps the D-group
+   * grouping these tests pin — the units in their order, each with its rows by day, highest first.
+   */
+  const shape = (r: Awaited<ReturnType<typeof roster>>) => {
+    const rows = Object.values(r.sections).flat();
+    return r.units.map((u) => [
+      u.kind, u.leader?.name ?? null,
+      rows.filter((x) => (x.unit.leader?.membershipId ?? null) === (u.leader?.membershipId ?? null))
+        .sort((a, b) => b.day - a.day).map((x) => `${x.hire.name} ${x.day}`),
+    ]);
+  };
+  const rowOf = (r: Awaited<ReturnType<typeof roster>>, name: string) => Object.values(r.sections).flat().find((x) => x.hire.name === name)!;
 
   /** Six hires across Agus's downline, each a different day. */
   async function sixHires() {
@@ -52,11 +69,13 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
         ['aab', 'Nina Lestari', ['Dodi Kurniawan 14']],
         ['aab', 'Sari Puspita', ['Budi Santoso 62', 'Rina Wijaya 59']],
       ]);
-      expect(r.groups[0].hires[0]).toEqual({
-        hire: { membershipId: id('INDAH'), name: 'Indah Permatasari' }, startDate: '2026-06-10', day: 97, window: 90,
-        overdue: true, pct: 6, firstCaseClosed: false,
+      // P18.96-T6: past day 90 with no first sale, Indah is not activated; her checklist is overdue as before.
+      expect(rowOf(r, 'Indah Permatasari')).toEqual({
+        hire: { membershipId: id('INDAH'), name: 'Indah Permatasari' }, unit: { kind: 'direct', leader: null },
+        joinDate: '2026-06-10', day: 97, firstSaleDate: null, activation3M: 'not_activated', leftOn: null,
+        checklist: { state: 'open', done: 1, total: 16, pct: 6, overdue: true },
       });
-      expect(r.groups[2].leader).toEqual({ membershipId: id('SARI'), name: 'Sari Puspita' });
+      expect(r.units[2].leader).toEqual({ membershipId: id('SARI'), name: 'Sari Puspita' });
     });
 
     it('Phase 13 exit review the leader cards are A to Z by the leader’s full name, Direct Unit first — not in COACH’s order, nearest first', async () => {
@@ -65,14 +84,13 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       h.as('OWNER');
       // COACH's order would put Agus (nearest) first, then Sari and Nina and Putu at the next depths.
       const r = await roster();
-      expect(r.groups.map((g) => [g.kind, g.leader?.name ?? null])).toEqual([
+      expect(r.units.map((g) => [g.kind, g.leader?.name ?? null])).toEqual([
         ['ab', 'Agus Salim'], ['aab', 'Nina Lestari'], ['aab', 'Putu Ayu'], ['aab', 'Sari Puspita'],
       ]);
-      // Hires inside each card stay by day, highest first.
-      expect(r.groups.map((g) => g.hires.map((x) => x.day))).toEqual([[97, 45, 26], [14], [36], [62, 59]]);
+      expect(shape(r).map(([, , rows]) => (rows as string[]).map((x) => Number(x.split(' ').pop())))).toEqual([[97, 45, 26], [14], [36], [62, 59]]);
       // And the reader's own Direct Unit always leads.
       h.as('SARI');
-      expect((await roster()).groups.map((g) => [g.kind, g.leader?.name ?? null])).toEqual([['direct', null], ['aab', 'Nina Lestari']]);
+      expect((await roster()).units.map((g) => [g.kind, g.leader?.name ?? null])).toEqual([['direct', null], ['aab', 'Nina Lestari']]);
     });
 
     it('P13-T5 AC-2 an AB under the reader names the rung: the Owner’s roster has an AB card for Agus', async () => {
@@ -99,20 +117,28 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
     it('P13-T5 AC-2 Active Agent is FIRST_CASE_CLOSED done, whoever ticked it', async () => {
       await sixHires();
       h.as('SARI');
-      await h.http().put(`/new-hires/${id('BUDI')}/items/FIRST_CASE_CLOSED`).send({ done: true }).expect(200);
-      const budi = (await roster()).groups[0].hires[0];
-      expect(budi).toMatchObject({ hire: { name: 'Budi Santoso' }, firstCaseClosed: true, pct: 6 });
+      // P18.96-T4 AC-3: ticked by hand with the closing it names, logged in Budi's leads — waiting for data, and done.
+      await h.http().put(`/new-hires/${id('BUDI')}/items/FIRST_CASE_CLOSED`)
+        .send({ done: true, record: { kind: 'closing', name: 'Ibu Ratna', date: '2026-09-01' } }).expect(200);
+      const budi = rowOf(await roster(), 'Budi Santoso');
+      // Two of sixteen: the closing is a lead in his pipeline, so *Add prospects* completes from it too. P18.96-T6: the
+      // row carries his first sale — the logged closing's day — where the *Active Agent* ✓ was.
+      expect(budi).toMatchObject({ firstSaleDate: '2026-09-01', activation3M: 'in_progress', checklist: { pct: 13 } });
     });
 
-    it('P13-T5 AC-3 graduated and expired activations leave the roster', async () => {
+    it('P18.96-T6 AC-3 a graduated or expired checklist no longer takes its hire off: the year lists them, by result', async () => {
+      // Amends P13-T5 AC-3 (ADR-0173 §1): the page lists new hires of the last twelve months, not open activations.
       await h.start('RINA', '2026-07-18', { graduatedAt: new Date('2026-09-10T02:00:00Z'), graduatedByMembershipId: id('RINA') });
       await h.start('BUDI', '2026-03-10');
       await h.start('DODI', '2026-09-01');
       h.as('SARI');
-      expect(shape(await roster())).toEqual([['aab', 'Nina Lestari', ['Dodi Kurniawan 14']]]);
+      const r = await roster();
+      expect(shape(r)).toEqual([['direct', null, ['Budi Santoso 189', 'Rina Wijaya 59']], ['aab', 'Nina Lestari', ['Dodi Kurniawan 14']]]);
+      expect(rowOf(r, 'Rina Wijaya').checklist).toMatchObject({ state: 'graduated', overdue: false });
+      expect(rowOf(r, 'Budi Santoso')).toMatchObject({ activation3M: 'not_activated', checklist: { state: 'expired', overdue: false } });
     });
 
-    it('P13-T5 AC-8 404 for a reader who reaches no open activation — an Agent and an AAB who lead nobody, a peer — and no read is recorded', async () => {
+    it('P13-T5 AC-8 404 for a reader who reaches no new hire of the year — an Agent and an AAB who lead nobody, a peer — and no read is recorded', async () => {
       await sixHires();
       for (const who of ['INDAH', 'DEWI', 'PEER_AB', 'ADMIN'] as const) {
         h.as(who);
@@ -127,6 +153,7 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       await roster();
       const rows = await reads();
       expect(rows.map((r) => [r.targetMembershipId, r.actorMembershipId, r.after]).sort()).toEqual([
+        // From each one's join date, which is their activation's start (ADR-0169 §2).
         [id('BUDI'), id('SARI'), { surface: 'activation', from: '2026-07-15', to: TODAY }],
         [id('DODI'), id('SARI'), { surface: 'activation', from: '2026-09-01', to: TODAY }],
         [id('RINA'), id('SARI'), { surface: 'activation', from: '2026-07-18', to: TODAY }],
@@ -260,7 +287,7 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       await h.start('B_AGENT', '2026-08-01');
       h.as('B_AB');
       expect((await h.http().get(`/new-hires/${id('B_AGENT')}`).expect(200)).body.hire.name).toBe('Bayu Saputra');
-      expect((await h.http().get('/new-hires').expect(200)).body.groups).toHaveLength(1);
+      expect((await h.http().get('/new-hires').expect(200)).body.units).toHaveLength(1);
       h.as('OWNER');
       for (const res of [
         await h.http().get(`/new-hires/${id('B_AGENT')}`),
@@ -360,11 +387,35 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
         startDate: '2026-07-01', day: 76, endsOn: '2027-01-01',
         startCorrected: { by: { membershipId: id('SARI'), name: 'Sari Puspita' }, at: h.clock.now().toISOString() },
       });
+      // P18.96-T2 AC-3: one audit row, the activation's start and the membership's join date before and after.
       expect((await writes()).map((r) => [r.action, r.targetId, r.targetMembershipId, r.before, r.after])).toEqual([
-        ['activation.start_date_corrected', String(doc._id), id('RINA'), { startDate: '2026-07-18' }, { startDate: '2026-07-01' }],
+        ['activation.start_date_corrected', String(doc._id), id('RINA'),
+          { startDate: '2026-07-18', joinDate: '2026-07-18' }, { startDate: '2026-07-01', joinDate: '2026-07-01' }],
       ]);
       h.as('RINA');
       expect((await h.http().get('/activation/me').expect(200)).body.startCorrected.by.membershipId).toBe(id('SARI'));
+    });
+
+    it('P18.96-T2 AC-3 the correction moves the membership’s join date with the start, and never reclassifies', async () => {
+      await h.start('RINA', '2026-07-18');
+      const rina = () => h.col('memberships').findOne({ _id: new mongoose.Types.ObjectId(id('RINA')) });
+      expect(await rina()).toMatchObject({ joinDate: '2026-07-18', joinedAs: 'new_hire' });
+      h.as('SARI');
+      // 365 days back, well over 90: still a new hire, because the classification was made once, when she joined.
+      await h.http().put(`/new-hires/${id('RINA')}/start-date`).send({ startDate: '2025-09-14' }).expect(200);
+      expect(await rina()).toMatchObject({ joinDate: '2025-09-14', joinedAs: 'new_hire' });
+      expect((await h.col('activationProgress').findOne({ membershipId: id('RINA') }))!.startDate).toBe('2025-09-14');
+      // A refused correction moves neither.
+      await h.http().put(`/new-hires/${id('RINA')}/start-date`).send({ startDate: '2026-09-15' }).expect(400);
+      expect(await rina()).toMatchObject({ joinDate: '2025-09-14' });
+    });
+
+    it('P18.96-T2 AC-3 a correction in another office reaches nobody, and moves no join date there', async () => {
+      await h.start('B_AGENT', '2026-08-01');
+      h.as('SARI');
+      const res = await h.http().put(`/new-hires/${id('B_AGENT')}/start-date`).send({ startDate: '2026-07-01' });
+      expect([res.status, res.body.error.code]).toEqual([404, 'NOT_FOUND']);
+      expect(await h.col('memberships').findOne({ _id: new mongoose.Types.ObjectId(id('B_AGENT')) })).toMatchObject({ joinDate: '2026-08-01' });
     });
 
     it('P13-T5 AC-5 the bounds: the office’s today at the latest, 365 days before it at the earliest, and a real day', async () => {
@@ -378,7 +429,8 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       }
       // The bounds in the sentence are written as ADR-0167 §1 writes a date (P18.95-T1 AC-4).
       expect((await put('2026-09-15').expect(400)).body.error.message).toBe(
-        'startDate must be a day from 14 Sep 2025 to 14 Sep 2026: no later than today, and no more than 365 days before it.',
+        // P18.96-T2 AC-5: the date is named as the reader knows it, the join date.
+        'The join date must be a day from 14 Sep 2025 to 14 Sep 2026: no later than today, and no more than 365 days before it.',
       );
     });
 

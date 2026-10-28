@@ -15,10 +15,15 @@ import type { LeadStatusView } from '@/modules/config/lead-status.service';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
 import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
 import { ActivationEvents, signalActivation } from '@/modules/activation/activation-events.port';
+import { SalesEvents, signalSales } from '@/modules/activation/sales-events.port';
+import { FIRST_SALE_STAGE_CODE } from '@/domain/constants';
+import { isLocalDate, type LocalDate } from '@/common/time/local-day';
 import { leadFlags, type LeadFlag } from './lead-attention';
 import { checkLead, type CheckedLead } from './lead-input';
 import { isInMemorySort, ladderRanks, leadOrder, SAVED_ORDER, type LeadSortKey } from './lead-order';
-import { recruitmentPipelineFacets } from './lead-readings';
+import {
+  byClosedAt, CLOSING_FIELDS, CLOSING_FILTER, closingOf, recruitmentPipelineFacets, type LeadClosing,
+} from './lead-readings';
 import { LeadRepository } from './lead.repository';
 import type { LeadDocument, LeadType } from './lead.schema';
 
@@ -167,6 +172,11 @@ export class LeadService {
      * the activation module answers, so leads does not depend on it; optional, failing open.
      */
     @Optional() @Inject(ActivationEvents) private readonly activation: ActivationEvents | null = null,
+    /*
+     * P18.96-T4 AC-1: a sales lead reaching *Paid and issued*, or a closing logged from the checklist, may be the
+     * owner's first sale. A port the activation module answers; optional, failing open.
+     */
+    @Optional() @Inject(SalesEvents) private readonly sales: SalesEvents | null = null,
   ) {}
 
   /**
@@ -345,6 +355,100 @@ export class LeadService {
     );
   }
 
+  /**
+   * **A closing logged from the 90-day checklist** (P18.96-T4 AC-3; ADR-0171 §3): *Which case? → Log a new closing*,
+   * a name and the day it was paid and issued. The owner's own, or — with `owner` — a coachee's, resolved on
+   * `lead:create` exactly as `create`'s is (`coachedOwner`: `COACH` and nothing wider, anybody else a 404).
+   *
+   * **A minimal sales lead, closed**: on the office's published *Paid and issued* stage — one move, from no stage,
+   * dated the day given (noon in the office's zone, never after now) — and won on it, so it is a closed case in the
+   * owner's *Closed* card and in no open count. `loggedFrom: 'activation_checklist'` says it was not walked up the
+   * ladder: it is the *manual* first sale, and not the data that confirms one (`firstSaleOf`). The day is an office
+   * date, not after the office's today; the caller holds it to the join date. An office whose published sales ladder
+   * has no *Paid and issued* stage refuses it, 404 `NOT_FOUND` on the status, as a move to it would be.
+   *
+   * The ordinary audit entry, `lead.created`, carrying the origin, the stage and the outcome; the activation signals
+   * every lead write sends (`feature:leads`), and the sale (`SalesEvents`).
+   */
+  async logClosing(
+    ctx: RequestContext, input: { name: string; date: string }, owner?: string,
+  ): Promise<{ id: string; name: string; date: LocalDate }> {
+    const membershipId = this.me(ctx);
+    const checked = checkLead({ name: input.name, type: 'sales' });
+    const ownerMembershipId = owner === undefined ? membershipId : await this.coachedOwner(ctx, owner);
+    const day = await this.days.for(ctx);
+    if (!isLocalDate(input.date) || input.date > day.today) {
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED,
+        'The day it was paid and issued is a date, written YYYY-MM-DD, and no later than today.',
+        HttpStatus.BAD_REQUEST,
+        { violations: ['date must be a day no later than today'] },
+      );
+    }
+    const status = await this.publishedStage(ctx, FIRST_SALE_STAGE_CODE);
+    if (!status || status.pipeline !== 'sales' || status.status === 'archived') {
+      throw new NotFoundException('Lead status', { code: FIRST_SALE_STAGE_CODE });
+    }
+
+    const now = this.clock.now();
+    const noon = new Date(this.clock.startOfLocalDay(day.timezone, input.date).getTime() + 12 * 3_600_000);
+    const at = noon < now ? noon : now;
+    const created = await this.leads.create(ctx, {
+      ownerMembershipId,
+      position: await this.firstPlace(ctx, ownerMembershipId),
+      name: checked.name!,
+      type: 'sales',
+      contact: { phone: null, email: null },
+      remarks: null,
+      nextActionDate: null,
+      nextActionNote: null,
+      source: null,
+      commitments: [],
+      statusCode: FIRST_SALE_STAGE_CODE,
+      statusId: status.id,
+      outcome: 'won',
+      outcomeAt: at,
+      dateRegistered: now,
+      loggedFrom: 'activation_checklist',
+      version: 1,
+      transitions: [{ fromStatusCode: null, toStatusCode: FIRST_SALE_STAGE_CODE, at, byMembershipId: membershipId }],
+      createdBy: membershipId,
+      updatedBy: membershipId,
+    } as Partial<LeadDocument>);
+    const id = String(created._id);
+
+    await this.record(ctx, 'lead.created', id, {
+      type: 'sales',
+      hasContact: false,
+      loggedFrom: 'activation_checklist',
+      statusCode: FIRST_SALE_STAGE_CODE,
+      outcome: 'won',
+      ...(ownerMembershipId !== membershipId ? { ownerMembershipId } : {}),
+    });
+    await signalActivation(this.activation, ctx, ownerMembershipId, 'feature:leads');
+    await signalSales(this.sales, ctx, [ownerMembershipId]);
+    return { id, name: created.name, date: input.date };
+  }
+
+  /**
+   * **A member's closings, newest first** (P18.96-T4 AC-3): their sales leads that reached *Paid and issued*, with the
+   * office day each first did — what the checklist's *Which case?* offers to name. The caller's own, or — with
+   * `owner` — a member whose leads the caller reads (`lead:read`, `COACH`; anybody else a 404), recorded as any read
+   * of somebody else's leads is (§3.5). Ids, names and days; nothing else of a lead leaves here.
+   */
+  async closingsOf(ctx: RequestContext, owner?: string): Promise<(LeadClosing & { date: LocalDate })[]> {
+    const subject = await this.coach.subject(ctx, owner, 'lead:read', 'Membership');
+    const day = await this.days.for(ctx);
+    const rows = await this.leads.find(
+      ctx, { ownerMembershipId: subject.membershipId, ...CLOSING_FILTER }, { projection: { ...CLOSING_FIELDS } },
+    );
+    const closings = rows.map(closingOf).filter((c): c is LeadClosing => c !== null).sort(byClosedAt).reverse();
+    if (!subject.self) {
+      await this.subjectReads.record(ctx, { membershipId: subject.membershipId }, 'leads', { from: null, to: day.today });
+    }
+    return closings.map((c) => ({ ...c, date: this.clock.localDateFor(day.timezone, c.at) }));
+  }
+
   async update(ctx: RequestContext, id: string, body: unknown): Promise<LeadView> {
     const membershipId = this.me(ctx);
     const input = checkLead(body, { partial: true });
@@ -487,6 +591,8 @@ export class LeadService {
     await this.record(ctx, 'lead.status_changed', id, {
       from: lead.statusCode ?? null, to: wanted, byMembershipId: membershipId,
     });
+    // P18.96-T4 AC-1: a sales lead at *Paid and issued* may be its owner's first sale, and a closing (ADR-0171 §1).
+    if (wanted === FIRST_SALE_STAGE_CODE && lead.type === 'sales') await signalSales(this.sales, ctx, [lead.ownerMembershipId]);
     return this.view(updated, await this.days.for(ctx), await this.attribution(ctx, [updated]));
   }
 

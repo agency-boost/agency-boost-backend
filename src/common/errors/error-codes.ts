@@ -217,6 +217,23 @@ export const ErrorCode = {
   // three they hit.
   ORG_INVITE_EXPIRED: 'ORG_INVITE_EXPIRED',
   ORG_INVITE_EXHAUSTED: 'ORG_INVITE_EXHAUSTED',
+  /**
+   * *+ Add agent* for an agent code that already has an invite waiting in the company — this office's or another's
+   * (ADR-0170 §2, P18.96-T3 AC-2). `409`. An agent code belongs to one person, so two invites for it could only let
+   * two people try to be them. Resend the one waiting, or cancel it first.
+   */
+  ORG_INVITE_PENDING: 'ORG_INVITE_PENDING',
+  /**
+   * A transfer request for a member who already has one waiting (ADR-0170 §4, P18.96-T3 AC-3). `409`, one per member:
+   * two would let the Owner approve both and move them twice. `details.transferId` names the open one.
+   */
+  ORG_TRANSFER_PENDING: 'ORG_TRANSFER_PENDING',
+  /**
+   * Approving a transfer request whose member **no longer reports to the leader it was asked from** (the P18.96 exit
+   * review, L4): somebody moved them since. `409`, and the request is closed, `cancelled` — approving it would move
+   * them from a unit nobody asked about. `details.transferId`. Whoever wants the move asks again.
+   */
+  ORG_TRANSFER_STALE: 'ORG_TRANSFER_STALE',
   ORG_REQUEST_ALREADY_DECIDED: 'ORG_REQUEST_ALREADY_DECIDED',
   ORG_ROLE_CHANGE_NOT_PERMITTED: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
   ORG_HAS_DIRECT_REPORTS: 'ORG_HAS_DIRECT_REPORTS',
@@ -340,6 +357,33 @@ export const ErrorCode = {
   ACTIVATION_CLOSED: 'ACTIVATION_CLOSED',
   /** A graduation below 100%: every item, the linked ones included, is done first (OD-28). `409`. */
   ACTIVATION_INCOMPLETE: 'ACTIVATION_INCOMPLETE',
+  /**
+   * A bare hand tick of a **data-backed item** (P18.96-T4 AC-3, ADR-0171 §3): *Close first case independently*, *Reach
+   * Independent Agent milestone* and *Weekly 1-on-1 check-in* are ticked by hand only with their record — the closing
+   * it names, or the 1:1 — saved together. `422`, `details.code` and `details.form` (`closing` | `one_on_one`).
+   */
+  ACTIVATION_RECORD_REQUIRED: 'ACTIVATION_RECORD_REQUIRED',
+  /**
+   * *Mark left* for a new hire already marked (P18.96-T6 AC-4, ADR-0173 §3): leaving is recorded once. `409`,
+   * `details.leftOn`, the office day it was.
+   */
+  NEW_HIRE_ALREADY_LEFT: 'NEW_HIRE_ALREADY_LEFT',
+  /**
+   * *Mark left* for an **existing agent** (P18.96-T6 AC-4, ADR-0169 §3): only a new hire has a 3M activation for leaving
+   * to end. `409`.
+   */
+  NOT_A_NEW_HIRE: 'NOT_A_NEW_HIRE',
+  /**
+   * *Mark left* for a new hire who **leads somebody** (P18.96-T6 AC-4): leaving removes them from the office, and a
+   * removal says where reports go — so move them first. `409`, `details.directCount`.
+   */
+  NEW_HIRE_HAS_REPORTS: 'NEW_HIRE_HAS_REPORTS',
+  /**
+   * *Mark left* for a new hire `/new-hires` no longer lists (the P18.96 exit review, M2; ADR-0173 §1, §3): their join
+   * date is **outside the page's year** (`details.reason: 'past_the_year'`, `details.joinDate`). They leave through the
+   * removal, which only their direct leader or the office makes. `409`.
+   */
+  NEW_HIRE_NOT_MARKABLE: 'NEW_HIRE_NOT_MARKABLE',
 
   /*
    * Templates and the cascade types (P13.2-T6; ADR-0115; `functional/tenant-config.md`).

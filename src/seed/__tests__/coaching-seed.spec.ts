@@ -154,6 +154,8 @@ const WOMEN = [
   'maya@agencyboost.test', 'newcomer@agencyboost.test',
   // P13.2: offices 0601 and 0602, and P18.8's 0603 (`subscription-fixture.ts`).
   ...subscriptionPeople('she'),
+  // P18.96-T6: Tari, Arief's new hire marked left (`activation-3m-fixture.ts`).
+  'tari@kpm0417.test',
   // P13.2-T6: office 0701 (`template-fixture.ts`).
   ...templatePeople('she'),
 ];
@@ -161,6 +163,8 @@ const MEN = [
   'owner@kpm0417.test', 'agus@kpm0417.test', 'budi@kpm0417.test', 'untagged@kpm0417.test', 'dimas@kpm0417.test',
   'arief@kpm0417.test', 'wahyu@kpm0417.test', 'owner@kpm0555.test', 'owner@kpm0999.test', 'ade@agencyboost.test',
   'tomi@agencyboost.test',
+  // P18.96-T6: Lukman, Agus's new hire not activated by a sale on day 96 (`activation-3m-fixture.ts`).
+  'lukman@kpm0417.test',
   ...subscriptionPeople('he'),
   ...templatePeople('he'),
 ];
@@ -209,16 +213,19 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     const directs = await col('memberships').find({ kpmId: await office(), leaderId: String(agus._id), status: 'active' }).toArray();
     const agents = directs.filter((d) => d.role === 'agent');
     const aabs = directs.filter((d) => d.role === 'aab');
-    expect(agents.map((a) => String(a._id)).sort()).toEqual([ids.indah, ids.dimas, ids.siti].sort());
+    // P18.96-T6 adds Lukman, a new hire not activated (`activation-3m-fixture.ts`).
+    const lukman = String((await memberOf('lukman@kpm0417.test'))._id);
+    expect(agents.map((a) => String(a._id)).sort()).toEqual([ids.indah, ids.dimas, ids.siti, lukman].sort());
     expect(aabs.map((a) => String(a._id)).sort()).toEqual([ids.sari, ids.dewi, ids.arief].sort());
     // The counts the roster and the tree read are recounted, not left at what they were.
-    expect(agus.directCounts).toEqual({ ab: 0, aab: 3, agent: 3, total: 6 });
+    expect(agus.directCounts).toEqual({ ab: 0, aab: 3, agent: 4, total: 7 });
   });
 
   it("P11-T2 AC-1 an AAB's unit has agents of its own, and Dewi still leads nobody (ADR-0087)", async () => {
     const kpmId = await office();
     const under = async (id: string) => (await col('memberships').find({ kpmId, leaderId: id, status: 'active' }).toArray())
       .map((m) => String(m._id)).sort();
+    // P18.96-T6's Tari, Arief's new hire, was marked left — and so removed (`activation-3m-fixture.ts`): not his now.
     expect(await under(ids.arief)).toEqual([ids.novi, ids.wahyu].sort());
     expect(await under(ids.sari)).toEqual(expect.arrayContaining([ids.rina, ids.budi, ids.yanti]));
     expect(await under(ids.dewi)).toEqual([]);
@@ -471,7 +478,10 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     const coaches = new Set((await col('memberships').find({ userId: { $in: accounts.map((a) => String(a._id)) } }).toArray())
       .map((m) => String(m._id)));
     const kpm0417 = String((await col('kpms').findOne({ code: '0417' }))!._id);
-    return (s: { coachMembershipId: string; kpmId: string }) => coaches.has(s.coachMembershipId) || s.kpmId !== kpm0417;
+    // P18.96-T4: Rina's fourth 1:1 is the first-sale fixture's (`first-sale-fixture.ts`), not the coaching fixture's.
+    const firstSales = new Set(first.firstSales.sessions.map((row) => row._id));
+    return (s: { _id?: unknown; coachMembershipId: string; kpmId: string }) =>
+      coaches.has(s.coachMembershipId) || s.kpmId !== kpm0417 || firstSales.has(String(s._id));
   };
 
   it('P11-T5 AC-10 the fixture’s sessions are stored, each under its own id, as the fixture writes them', async () => {
@@ -532,7 +542,8 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     } as never));
     const rows = [...view.directAgents, ...view.units.flatMap((u) => [u.head, ...u.members])];
 
-    expect(view.directAgents.map((r) => r.name)).toEqual(['Dimas Pratama', 'Indah Permatasari', 'Siti Rahmawati']);
+    // P18.96-T6: and Lukman Hakim, a new hire with no goal (`activation-3m-fixture.ts`).
+    expect(view.directAgents.map((r) => r.name)).toEqual(['Dimas Pratama', 'Indah Permatasari', 'Lukman Hakim', 'Siti Rahmawati']);
     expect(view.units.map((u) => u.head.name)).toEqual(['Arief Hidayat', 'Dewi Lestari', 'Sari Puspita']);
     for (const key of KEYS) {
       const row = rows.find((r) => r.membershipId === ids[key])!;

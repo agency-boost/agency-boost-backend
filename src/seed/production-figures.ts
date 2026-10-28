@@ -15,7 +15,11 @@ export const monthField = (metric: string, cadence: 'monthly' | 'ytd') => `${met
  *
  * `i` is the member's place among the members the seed had before the coaching cast, by agent sequence.
  */
-export function seedMonthFigures(i: number, month: string, scale = 1): Record<string, number> {
+export function seedMonthFigures(
+  i: number, month: string, scale = 1,
+  /** A quiet month whatever `i` says (P18.96-T5): a new hire's first weeks, before a first sale. */
+  options: { quiet?: boolean } = {},
+): Record<string, number> {
   const m = Number(month.slice(5));
   const apeM = (8 + ((i * 13 + m * 5) % 55)) * scale;
   const usual: Record<string, number> = {
@@ -26,7 +30,7 @@ export function seedMonthFigures(i: number, month: string, scale = 1): Record<st
     fyp: Math.round(apeM * 0.6 * MINOR_UNITS_PER_RP_MILLION),
     policyCount: 1 + ((i * 3 + m) % 5),
   };
-  const quiet = i % 6 === 3;
+  const quiet = options.quiet === true || i % 6 === 3;
   const sold = ['ape', 'fyp', 'policyCount'];
   const monthly = quiet ? { ...usual, ape: 0, fyp: 0, policyCount: 0 } : usual;
   const ytd = (metric: string) => {

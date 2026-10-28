@@ -24,6 +24,8 @@ type Method = 'create' | 'createWithAccount' | 'setLevel' | 'activate';
 const CALLERS: Record<string, { method: Method; makes: string }[]> = {
   'modules/org/onboarding.service.ts': [{ method: 'create', makes: 'Agent, pending (registration)' }],
   'modules/org/leader-code.service.ts': [{ method: 'create', makes: 'Agent (a leader’s code)' }],
+  // P18.96-T3 (ADR-0170 §3): an invite accepted places its person at the ladder's joining rung, active.
+  'modules/org/invites.service.ts': [{ method: 'create', makes: 'Agent (an invite accepted)' }],
   'modules/tenants/roster-import.service.ts': [
     { method: 'createWithAccount', makes: 'any, from the role column, the account made with the seat' },
   ],
@@ -89,7 +91,7 @@ describe('every caller of the HierarchyService writes that can make a leader is 
     expect(own).not.toMatch(/this\.(create|createWithAccount|setLevel|activate)\(/);
   });
 
-  it.each(['modules/org/onboarding.service.ts', 'modules/org/leader-code.service.ts'])(
+  it.each(['modules/org/onboarding.service.ts', 'modules/org/leader-code.service.ts', 'modules/org/invites.service.ts'])(
     '%s, a join path, only ever makes an Agent — which is why it is never refused',
     (file) => {
       // The ladder's lowest rung that leads nobody (ADR-0156): `AGENT` on the default ladder, never a leader rung.
@@ -102,7 +104,8 @@ describe('every caller of the HierarchyService writes that can make a leader is 
     // The ladder's Senior Leader rung (ADR-0156): `AB` on the default ladder, a rung the limit counts.
     const tenantService = readFileSync(join(SRC, 'modules/tenants/tenant.service.ts'), 'utf8');
     expect(tenantService).toMatch(/const role = await this\.hierarchy\.entryRungCode\(kpmId, 'owner'\)/);
-    expect(create?.text).toMatch(/\{ userId, role, leaderId: null, status: 'active' \}/);
+    // P18.96-T2: and an existing agent, joined today (ADR-0169 §6) — the classification rides along, the rung does not move.
+    expect(create?.text).toMatch(/\{\s*userId, role, leaderId: null, status: 'active', joining: \{ joinedAs: 'existing_agent' \},\s*\}/);
   });
 
   /*

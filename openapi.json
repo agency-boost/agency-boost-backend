@@ -2016,7 +2016,7 @@
     },
     "/api/v1/auth/register": {
       "post": {
-        "description": "Always succeeds in shape, even for an address that already exists — confirming that would let anyone enumerate accounts. A verification email follows.",
+        "description": "Always succeeds in shape, even for an address that already exists — confirming that would let anyone enumerate accounts. A verification email follows. Rate limited per client address, 20 attempts an hour, refused or not.",
         "operationId": "AuthController_register_v1",
         "parameters": [],
         "requestBody": {
@@ -2042,6 +2042,26 @@
           },
           "400": {
             "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — with `inviteToken`, a link that opens nothing (unknown, cancelled, used or expired), said in plain words, before any account is made — answered as a link into another office is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`AUTH_RATE_LIMITED` — too many sign-ups from this address in the hour; `details.retryAfterSeconds`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8655,7 +8675,7 @@
     },
     "/api/v1/join/requests/{requestId}/approve": {
       "post": {
-        "description": "Returns the inbox as it now stands. Deciding one that was already decided is a 409 naming which way it went — two leaders can have this open at once.\n\n**Requires `leader_request:approve`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Returns the inbox as it now stands. Deciding one that was already decided is a 409 naming which way it went — two leaders can have this open at once. `joinDate` is the day they joined (today when omitted); a date after today or before 1980 is refused 400 `VALIDATION_FAILED` before anything is written.\n\n**Requires `leader_request:approve`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "OnboardingController_approve_v1",
         "parameters": [
           {
@@ -8939,7 +8959,7 @@
     },
     "/api/v1/join/untagged/{membershipId}": {
       "post": {
-        "description": "No approval from them — the office already admitted them, and being placed under a leader is not a change they have standing to refuse. Somebody who already reports to another leader is refused: moving them is a different operation.\n\n**Requires `member:add_untagged_to_unit`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "No approval from them — the office already admitted them, and being placed under a leader is not a change they have standing to refuse. Somebody who already reports to another leader is refused: moving them is a different operation. `joinDate` as approving a request takes it.\n\n**Requires `member:add_untagged_to_unit`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "OnboardingController_tag_v1",
         "parameters": [
           {
@@ -8951,6 +8971,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagUntaggedDto"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "",
@@ -8961,6 +8991,16 @@
                   "items": {
                     "$ref": "#/components/schemas/UntaggedMemberDto"
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
                 }
               }
             }
@@ -9095,6 +9135,450 @@
           "joining an office"
         ],
         "x-required-permission": "join_via_code_link_qr"
+      }
+    },
+    "/api/v1/invites/{token}": {
+      "get": {
+        "description": "The banner the sign-up page shows: the leader’s name, the office, the insurer, the agent code and join date (read-only on the form) and the invitee’s name. **Public** — the person opening it has no account yet — and rate limited per address, sixty an hour. A link that opens nothing — unknown, cancelled, used or expired — is `404 NOT_FOUND`, its sentence saying which in plain words: a token is 192 random bits, so its holder learns nothing a prober could use. The token is redacted from every log line.",
+        "operationId": "InviteLinkController_banner_v1",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteBannerDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — the link opens nothing: unknown, cancelled, used, expired, or an office that has stopped — answered as a link into another office is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`AUTH_RATE_LIMITED` — too many link openings from this address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "summary": "What an invite link is for",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/invites/{token}/accept": {
+      "post": {
+        "description": "For an account the invite’s agent code belongs to: joins the office under the leader at once, with the invite’s join date, and tells the leader. An invite for another code is 404. Somebody already in an office is refused `409 ORG_AGENT_ALREADY_TAGGED`. Rate limited per account, as a leader’s code is.\n\n**Requires `join_via_code_link_qr`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "InviteLinkController_accept_v1",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedInviteDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `join_via_code_link_qr`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — the link opens nothing, or it is for another agent code — answered as a link into another office is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_AGENT_ALREADY_TAGGED` — you already belong to an office. `AGENT_CODE_TAKEN` — somebody else holds the code. `ORG_REQUEST_ALREADY_DECIDED` — the invite was accepted a moment ago, by a second tap or another tab.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`ORG_LEADER_NOT_IN_KPM` — the leader who invited you has left the office.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`AUTH_RATE_LIMITED` — too many attempts from this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Accept an invite, signed in",
+        "tags": [
+          "joining an office"
+        ],
+        "x-required-permission": "join_via_code_link_qr"
+      }
+    },
+    "/api/v1/transfer-requests": {
+      "get": {
+        "description": "Every transfer a leader asked for that nobody has decided, oldest first.\n\n**Requires `member:transfer_approve`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TransferRequestsController_queue_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TransferDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:transfer_approve`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Transfer requests waiting on the office",
+        "tags": [
+          "joining an office"
+        ],
+        "x-required-permission": "member:transfer_approve"
+      }
+    },
+    "/api/v1/transfer-requests/{transferId}/approve": {
+      "post": {
+        "description": "Moves the member, and everybody under them, to the new leader: their open edge closes and a `re_parented` one opens (history kept), both leaders’ counts are refreshed, and the member, the leader they left and whoever asked are told. A move that fails leaves the request waiting. Answers the queue as it now stands. Audited.\n\n**Requires `member:transfer_approve`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TransferRequestsController_approve_v1",
+        "parameters": [
+          {
+            "name": "transferId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TransferDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`ORG_NOT_PERMITTED_TO_TAG` — they own the office now; moving its owner is the platform’s.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such request in this office, answered exactly as one in another office.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_REQUEST_ALREADY_DECIDED` — decided already, which way said. `ORG_CYCLE_DETECTED` — the move would make a loop. `ORG_ALREADY_REMOVED` — they have left; the request is closed. `ORG_TRANSFER_STALE` — they report to somebody else since it was asked; the request is closed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`ORG_LEADER_NOT_IN_KPM` — the new leader has left the office.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Approve a transfer",
+        "tags": [
+          "joining an office"
+        ],
+        "x-required-permission": "member:transfer_approve"
+      }
+    },
+    "/api/v1/transfer-requests/{transferId}/decline": {
+      "post": {
+        "description": "Nothing about the member changes. Whoever asked is told, with the reason. Answers the queue. Audited.\n\n**Requires `member:transfer_approve`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TransferRequestsController_decline_v1",
+        "parameters": [
+          {
+            "name": "transferId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclineTransferDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TransferDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:transfer_approve`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such request in this office, answered exactly as one in another office.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_REQUEST_ALREADY_DECIDED` — decided already, which way said.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Decline a transfer",
+        "tags": [
+          "joining an office"
+        ],
+        "x-required-permission": "member:transfer_approve"
       }
     },
     "/api/v1/notifications": {
@@ -21554,9 +22038,78 @@
         "x-required-permission": "activation:read"
       }
     },
+    "/api/v1/activation/me/closings": {
+      "get": {
+        "description": "Your sales leads that reached Paid and issued, newest first, with the day each first did: what *Which case?* offers when you tick *Close first case independently* or *Reach Independent Agent milestone* by hand.\n\n**Requires `activation:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "ActivationProgressController_closings_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivationClosingsDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activation:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — you have no activation: one starts when you join an office as an Agent under a leader. Answered exactly as a record in another office is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Your closings",
+        "tags": [
+          "activation"
+        ],
+        "x-required-permission": "activation:read"
+      }
+    },
     "/api/v1/activation/me/items/{code}": {
       "put": {
-        "description": "Sets one manual item done or not, with your optional note and date. An item that completes on its own — a goal, a lead, four weeks of activity — is never ticked by hand.\n\n**Requires `activation:update_manual_item`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Sets one manual item done or not, with your optional note and date. An item that completes on its own — a goal, a lead, four weeks of activity — is never ticked by hand. **An item that completes from sales or coaching data is ticked with its record** (`record`): the closing it names — one of yours, or a new one logged in your leads — or your 1:1, its day and a note on the item. The tick and the record are saved together, and the tick reads *waiting for data* until the data confirms it.\n\n**Requires `activation:update_manual_item`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ActivationProgressController_tick_v1",
         "parameters": [
           {
@@ -21590,7 +22143,7 @@
             }
           },
           "400": {
-            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "description": "`VALIDATION_FAILED` — a record on an item that takes none, a record of the wrong kind, or its day outside your join date to today; a new closing without a name, or a 1:1 without a note.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21631,6 +22184,16 @@
           },
           "409": {
             "description": "`ACTIVATION_ITEM_AUTOMATIC` — the item completes on its own. `ACTIVATION_CLOSED` — your activation is complete, or its six months are over: nothing on it changes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`ACTIVATION_RECORD_REQUIRED` — a tick of an item that completes from sales or coaching data, sent without its record. `details.form` says which: `closing` or `one_on_one`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21734,16 +22297,422 @@
             "bearer": []
           }
         ],
-        "summary": "Mark your activation complete",
+        "summary": "Mark your checklist complete",
         "tags": [
           "activation"
         ],
         "x-required-permission": "activation:graduate"
       }
     },
+    "/api/v1/new-hires/agents": {
+      "post": {
+        "description": "The one form: agent code, name, WhatsApp number and join date. Decided by the code, within the office’s company: nobody holds it → an invite, with its link (`invited`); an account with no leader here → placed under the leader now, with the join date (`linked`); an account reporting to another leader here → a transfer request for the Owner and the Admins (`transfer_requested`), answered with the name you typed and never the account’s own or its leader; an account with no membership here → an invite they accept signed in (`invited`). Your own unit as an AB or AAB; any active member’s unit, as `leaderMembershipId`, for the Owner or an Admin. Audited.\n\n**Requires `member:invite`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NewHireAgentsController_add_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddAgentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddAgentResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field’s shape, or a join date after the office’s today or before 1980.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:invite`. `ORG_NOT_PERMITTED_TO_TAG` — the office’s root or its owner, whom nobody adds to a unit, or an orphan who leads a unit, for anybody but the office.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — naming another leader’s unit as an AB or an AAB, or a member who is nobody’s, or in another office — answered alike.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_CYCLE_DETECTED` — your own code, or a move that would make a loop. `ORG_AGENT_ALREADY_TAGGED` — they already report to that leader. `ORG_INVITE_PENDING` — the code already has an invite waiting in the company. `ORG_TRANSFER_PENDING` — a transfer for them is already waiting.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`ORG_LEADER_NOT_IN_KPM` — the unit named is not an active member’s.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add an agent",
+        "tags": [
+          "joining an office"
+        ],
+        "x-required-permission": "member:invite"
+      }
+    },
+    "/api/v1/new-hires/invites": {
+      "get": {
+        "description": "Pending and expired invites into your unit — the office’s, for the Owner or an Admin — newest first, with the office’s today. Never a link: only a token’s hash is kept, so *Resend* makes a new one. An invite counts in nothing until it is accepted.\n\n**Requires `member:invite`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NewHireAgentsController_list_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteListDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:invite`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Your invites, waiting to join",
+        "tags": [
+          "joining an office"
+        ],
+        "x-required-permission": "member:invite"
+      }
+    },
+    "/api/v1/new-hires/invites/{inviteId}/resend": {
+      "post": {
+        "description": "A new link and 14 days more; the old link opens nothing now. Answers the link, once. Audited.\n\n**Requires `member:invite`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NewHireAgentsController_resend_v1",
+        "parameters": [
+          {
+            "name": "inviteId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedInviteDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:invite`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — an invite outside your reach: another leader’s unit for an AB or an AAB, an id that is nobody’s, or one in another office, which is answered exactly alike.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_REQUEST_ALREADY_DECIDED` — it was accepted or cancelled. `ORG_INVITE_PENDING` — an expired invite whose code has another invite waiting since.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Resend an invite",
+        "tags": [
+          "joining an office"
+        ],
+        "x-required-permission": "member:invite"
+      }
+    },
+    "/api/v1/new-hires/invites/{inviteId}": {
+      "delete": {
+        "description": "Its link opens nothing from now on, and it leaves nothing behind in any count — it never counted. The row stays, cancelled, as the record of who invited whom. Answers your invites as they now stand. Audited.\n\n**Requires `member:invite`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NewHireAgentsController_cancel_v1",
+        "parameters": [
+          {
+            "name": "inviteId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteListDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:invite`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — an invite outside your reach: another leader’s unit for an AB or an AAB, an id that is nobody’s, or one in another office, which is answered exactly alike.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_REQUEST_ALREADY_DECIDED` — it was accepted or cancelled already.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancel an invite",
+        "tags": [
+          "joining an office"
+        ],
+        "x-required-permission": "member:invite"
+      }
+    },
+    "/api/v1/new-hires/transfers": {
+      "get": {
+        "description": "The transfers you asked for that the office has not decided: *Transfer requested* on `/new-hires`. The member stays with their leader until the Owner or an Admin approves. Each as you asked for it — the name you typed, the agent code and the unit — and never the account’s own name or the leader they report to.\n\n**Requires `member:invite`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NewHireAgentsController_myTransfers_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequestedTransferDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:invite`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Your transfer requests, waiting",
+        "tags": [
+          "joining an office"
+        ],
+        "x-required-permission": "member:invite"
+      }
+    },
     "/api/v1/new-hires": {
       "get": {
-        "description": "The open activations of everybody you coach, at any depth: your direct unit first, then a card per leader below you, each hire under the nearest AAB above them. Rows by day, highest first, with the start date, the percentage, the day against the office’s window, and whether the first case is closed. Each hire shown is a recorded read.\n\n**Requires `new_hires:read_roster`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every new hire you coach, at any depth, whose join date is in the last twelve months — never an existing agent — in three sections by their 3M activation: in progress (days 1 to 90), activated (a first paid and issued case by day 90) and not activated (none by then, or they left before one). Each row: the join date, the day, the first sale, the result, the day they left and their checklist where they have one. At the top, the 3M activation % of everybody listed and of each unit — your direct unit, then each AAB’s or AB’s below you — overall and by join month. A result decided is kept, and never changes after. Each new hire shown is a recorded read.\n\n**Requires `new_hires:read_roster`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "NewHiresController_roster_v1",
         "parameters": [],
         "responses": {
@@ -21778,7 +22747,7 @@
             }
           },
           "404": {
-            "description": "`NOT_FOUND` — you coach nobody with an open activation, so there is no roster to show. Answered exactly as a record in another office is.",
+            "description": "`NOT_FOUND` — you coach no new hire who joined in the last twelve months, so there is nobody to show. Answered exactly as a record in another office is.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21808,6 +22777,94 @@
           "activation"
         ],
         "x-required-permission": "new_hires:read_roster"
+      }
+    },
+    "/api/v1/new-hires/{membershipId}/left": {
+      "post": {
+        "description": "Records that a new hire has left, today: their 3M activation is decided — not activated unless their first sale came first — and kept, and they are removed from the office as a removal removes anybody, so they leave every count of people. Their checklist and history stay, and New Hires lists them for the rest of their year. Only for a new hire New Hires lists: one who joined in the last twelve months. Audited.\n\n**Requires `new_hire:mark_left`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NewHiresController_markLeft_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewHireMarkedLeftDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — an Agent who leads, or a read-only support session. `ORG_REMOVAL_NOT_PERMITTED` — the office’s root member or its owner, whom nobody removes from inside the office.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — nobody you may mark: somebody you do not coach, a member who has left the office, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`NOT_A_NEW_HIRE` — they joined as an existing agent. `NEW_HIRE_NOT_MARKABLE` — they joined more than twelve months ago, so New Hires no longer lists them (`details.reason: past_the_year`); remove them instead. `NEW_HIRE_HAS_REPORTS` — somebody reports to them: move them first; `details.directCount` says how many. `NEW_HIRE_ALREADY_LEFT` — they are marked as left already; `details.leftOn` says when.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark a new hire as left",
+        "tags": [
+          "activation"
+        ],
+        "x-required-permission": "new_hire:mark_left"
       }
     },
     "/api/v1/new-hires/{membershipId}": {
@@ -21888,9 +22945,87 @@
         "x-required-permission": "activation:read"
       }
     },
+    "/api/v1/new-hires/{membershipId}/closings": {
+      "get": {
+        "description": "Their sales leads that reached Paid and issued, newest first, with the day each first did: what *Which case?* offers when you tick *Close first case independently* or *Reach Independent Agent milestone* for them. For a leader who reads their leads; a recorded read.\n\n**Requires `activation:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NewHiresController_closings_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivationClosingsDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `activation:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists. Or you do not read their leads.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A hire’s closings",
+        "tags": [
+          "activation"
+        ],
+        "x-required-permission": "activation:read"
+      }
+    },
     "/api/v1/new-hires/{membershipId}/items/{code}": {
       "put": {
-        "description": "Sets one manual item of a hire you coach done or not, in your name. An item that completes on its own is never ticked by hand.\n\n**Requires `activation:update_manual_item`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Sets one manual item of a hire you coach done or not, in your name. An item that completes on its own is never ticked by hand. **An item that completes from sales or coaching data is ticked with its record** (`record`): the closing it names — one of theirs, or a new one logged in their leads — or the 1:1, saved as a coaching session with them. The tick and the record are saved together, and the tick reads *waiting for data* until the data confirms it.\n\n**Requires `activation:update_manual_item`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "NewHiresController_tick_v1",
         "parameters": [
           {
@@ -21932,7 +23067,7 @@
             }
           },
           "400": {
-            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "description": "`VALIDATION_FAILED` — a record on an item that takes none, a record of the wrong kind, or its day outside the hire’s join date to today; a new closing without a name, or a 1:1 without a note.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21952,7 +23087,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `activation:update_manual_item`. `details.permission` names it.",
+            "description": "`PERM_DENIED` — a 1:1 logged by a leader who runs no coaching sessions: an Agent who leads.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21962,7 +23097,7 @@
             }
           },
           "404": {
-            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists. Or their checklist has no item with that code.",
+            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists. Or their checklist has no item with that code, or the closing named is not theirs.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21973,6 +23108,16 @@
           },
           "409": {
             "description": "`ACTIVATION_ITEM_AUTOMATIC` — the item completes on its own. `ACTIVATION_CLOSED` — the activation is complete, or its six months are over: nothing on it changes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`ACTIVATION_RECORD_REQUIRED` — a tick of an item that completes from sales or coaching data, sent without its record. `details.form` says which: `closing` or `one_on_one`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -22006,7 +23151,7 @@
     },
     "/api/v1/new-hires/{membershipId}/start-date": {
       "put": {
-        "description": "The day their activation started, when it was not the day they joined here. The day and the end are recomputed; who corrected it and when are kept, and the old and new dates recorded.\n\n**Requires `activation:set_start_date`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The day they joined, when it was not the day they were added here. It moves their join date and their activation’s start, which is the join date, together; it does not change whether they are a new hire, which was decided once. The day and the end are recomputed; who corrected it and when are kept, and the old and new dates recorded. The body’s field keeps its name, `startDate`.\n\n**Requires `activation:set_start_date`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "NewHiresController_correctStart_v1",
         "parameters": [
           {
@@ -22105,7 +23250,7 @@
             "bearer": []
           }
         ],
-        "summary": "Correct a hire’s start date",
+        "summary": "Correct a hire’s join date",
         "tags": [
           "activation"
         ],
@@ -27502,7 +28647,7 @@
           },
           "companyId": {
             "type": "string",
-            "description": "From GET /companies.",
+            "description": "From GET /companies. With `inviteToken`, the invite’s office’s insurer is used, whatever this says.",
             "example": "65f1a0c2e4b0a1b2c3d4e5f6"
           },
           "agentCode": {
@@ -27510,7 +28655,12 @@
             "example": "88213",
             "minLength": 3,
             "maxLength": 32,
-            "pattern": "^\\d{3,32}$"
+            "pattern": "^\\d{3,32}$",
+            "description": "With `inviteToken`, the invite’s agent code is used, whatever this says."
+          },
+          "inviteToken": {
+            "type": "string",
+            "description": "The token from an invite link, `/register?invite=…`."
           },
           "dateOfBirth": {
             "type": "string",
@@ -28388,6 +29538,12 @@
           "routeToMembershipId": {
             "type": "string",
             "description": "One of your own AABs, from GET /join/requests/routing. Omitted adds them to your own unit. Ignored for an AB or AAB requester — a leader is not placed in a unit, they are tagged to you directly."
+          },
+          "joinDate": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-27",
+            "description": "The day they joined, an office date: the office’s today at the latest, and not before 1980 — an existing agent may have joined years ago. Omitted, the office’s today. It decides once whether they are a new hire (no more than 90 days back) or an existing agent, and a new hire’s activation starts on it. Ignored for somebody who already has a join date in this office."
           }
         }
       },
@@ -28398,6 +29554,17 @@
             "type": "string",
             "example": "Not in my patch — try Sari",
             "description": "Sent to them. The prototype captures none, which leaves a decline unexplainable."
+          }
+        }
+      },
+      "TagUntaggedDto": {
+        "type": "object",
+        "properties": {
+          "joinDate": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-27",
+            "description": "The day they joined, an office date: the office’s today at the latest, and not before 1980 — an existing agent may have joined years ago. Omitted, the office’s today. It decides once whether they are a new hire (no more than 90 days back) or an existing agent, and a new hire’s activation starts on it. Ignored for somebody who already has a join date in this office."
           }
         }
       },
@@ -28413,6 +29580,16 @@
         "required": [
           "code"
         ]
+      },
+      "DeclineTransferDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "example": "Keep him with Sari until his first case closes.",
+            "maxLength": 300
+          }
+        }
       },
       "ConfigChangeDto": {
         "type": "object",
@@ -32862,7 +34039,8 @@
               "months",
               "idr_minor",
               "enum",
-              "score"
+              "score",
+              "date"
             ],
             "description": "`idr_minor` is integer sen, never a float and never a display string."
           },
@@ -32951,7 +34129,8 @@
               "months",
               "idr_minor",
               "enum",
-              "score"
+              "score",
+              "date"
             ]
           },
           "measured": {
@@ -33210,7 +34389,8 @@
               "months",
               "idr_minor",
               "enum",
-              "score"
+              "score",
+              "date"
             ]
           },
           "state": {
@@ -36242,7 +37422,7 @@
             "type": "string",
             "nullable": true,
             "example": "/goals",
-            "description": "`null` for a training link to a module you are not offered — withdrawn, or not yet published: draw no *Go to*."
+            "description": "`null` for a training link to a module you are not offered — withdrawn, or not yet published — and for a data-backed item, whose way in is its own form: draw no *Go to*."
           },
           "completesWhen": {
             "type": "string",
@@ -36250,7 +37430,16 @@
           },
           "live": {
             "type": "boolean",
-            "description": "Whether an evaluator exists yet. While it does not, a leader ticks the item by hand and the tick is recorded as manual; once it is live, no role may tick it."
+            "description": "Whether an evaluator exists yet. While it does not, a leader ticks the item by hand and the tick is recorded as manual; once it is live, no role may tick it — except a data-backed item, with its record."
+          },
+          "form": {
+            "type": "string",
+            "enum": [
+              "closing",
+              "one_on_one"
+            ],
+            "nullable": true,
+            "description": "The form a hand tick opens: `closing` — *Which case?*, an existing closing or a new one — or `one_on_one` — *Log 1:1*, a date and a note — for a data-backed item, which is ticked by hand only with its record; `null` for every other link."
           }
         },
         "required": [
@@ -36258,7 +37447,33 @@
           "label",
           "route",
           "completesWhen",
-          "live"
+          "live",
+          "form"
+        ]
+      },
+      "ActivationItemRecordDto": {
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "enum": [
+              "goals",
+              "leads",
+              "activityLogs",
+              "trainingProgress",
+              "monthlyAgentData",
+              "coachingSessions"
+            ],
+            "example": "leads",
+            "description": "Where the record is: a lead, a coaching session, or a month of the production file (`monthlyAgentData`)."
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "collection",
+          "id"
         ]
       },
       "ActivationItemProgressDto": {
@@ -36319,6 +37534,19 @@
             "nullable": true,
             "example": "2026-09-29",
             "description": "The hire’s own date, an office date: only in their own read."
+          },
+          "waiting": {
+            "type": "boolean",
+            "description": "*Ticked by {name}, waiting for data*: a data-backed item ticked by hand that its data has not confirmed yet. From the read its data appears on, it is the link’s: `source: link` and this `false`."
+          },
+          "record": {
+            "nullable": true,
+            "description": "The record a done data-backed item names, for its source line (*\"Completed from Sales data · {date}\"*): the lead, the coaching session, or the production file’s month. `null` for every other item, and for one not done.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationItemRecordDto"
+              }
+            ]
           }
         },
         "required": [
@@ -36330,7 +37558,9 @@
           "source",
           "doneBy",
           "note",
-          "date"
+          "date",
+          "waiting",
+          "record"
         ]
       },
       "ActivationAspectProgressDto": {
@@ -36412,11 +37642,11 @@
           "startDate": {
             "type": "string",
             "example": "2026-08-06",
-            "description": "Day 1, an office date."
+            "description": "Day 1, an office date: the hire’s **join date** (ADR-0169 §2), the membership’s `joinDate`."
           },
           "startCorrected": {
             "nullable": true,
-            "description": "A leader’s correction of the start date: who, and when. `null` while it is the join date.",
+            "description": "A leader’s correction of the join date: who, and when. `null` while it is the date the hire was added with.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ActivationStartCorrectedDto"
@@ -36512,6 +37742,80 @@
           "note"
         ]
       },
+      "ActivationClosingDto": {
+        "type": "object",
+        "properties": {
+          "leadId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Ibu Ratna Kusuma",
+            "description": "The lead’s name: who the case was sold to."
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-09-02",
+            "description": "The office day it first reached *Paid and issued*."
+          }
+        },
+        "required": [
+          "leadId",
+          "name",
+          "date"
+        ]
+      },
+      "ActivationClosingsDto": {
+        "type": "object",
+        "properties": {
+          "closings": {
+            "description": "The member’s sales leads that reached *Paid and issued*, newest first: what *Which case?* names.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivationClosingDto"
+            }
+          }
+        },
+        "required": [
+          "closings"
+        ]
+      },
+      "ActivationItemRecordInputDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "closing",
+              "one_on_one"
+            ]
+          },
+          "leadId": {
+            "type": "string",
+            "description": "`closing`: an existing closing of the member’s, by its lead id."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 500,
+            "example": "Ibu Ratna Kusuma",
+            "description": "`closing`, a new one: who the case was sold to — the lead’s name."
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-10-20",
+            "description": "A new `closing`: the day it was paid and issued. `one_on_one`: the day it was held. An office date."
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500,
+            "example": "Went through his first two presentations.",
+            "description": "`one_on_one`: what the 1:1 covered, trimmed, 1 to 500 characters."
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
       "TickOwnActivationItemDto": {
         "type": "object",
         "properties": {
@@ -36531,51 +37835,165 @@
             "nullable": true,
             "example": "2026-09-29",
             "description": "The hire’s own date for the item, an office date; `null` clears it, absent leaves it. No leader reads it."
+          },
+          "record": {
+            "description": "A data-backed item’s tick only: the closing it names, or the 1:1. Saved with the tick, or neither is. Refused on any other item.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationItemRecordInputDto"
+              }
+            ]
           }
         },
         "required": [
           "done"
         ]
       },
-      "NewHireRowDto": {
+      "AddAgentDto": {
         "type": "object",
         "properties": {
-          "hire": {
-            "$ref": "#/components/schemas/ActivationPersonDto"
-          },
-          "startDate": {
+          "agentCode": {
             "type": "string",
-            "example": "2026-08-06",
-            "description": "What *Joined* prints."
+            "example": "80777",
+            "minLength": 3,
+            "maxLength": 32,
+            "pattern": "^\\d{3,32}$",
+            "description": "Issued by the company: digits only."
           },
-          "day": {
-            "type": "number"
+          "fullName": {
+            "type": "string",
+            "example": "Hendra Wijaya",
+            "maxLength": 120
           },
-          "window": {
-            "type": "number"
+          "phone": {
+            "type": "string",
+            "example": "0812-3456-7890",
+            "description": "Their WhatsApp number, as typed. The share link reads it."
           },
-          "overdue": {
-            "type": "boolean"
+          "joinDate": {
+            "type": "string",
+            "example": "2026-10-27",
+            "description": "The day they joined, an office date. The office’s today when omitted; never after it, never before 1980."
           },
-          "pct": {
-            "type": "number"
-          },
-          "firstCaseClosed": {
-            "type": "boolean",
-            "description": "*Active Agent*: the item coded `FIRST_CASE_CLOSED` is done."
+          "leaderMembershipId": {
+            "type": "string",
+            "description": "The Owner’s or an Admin’s choice of unit: any active member of the office. A leader adds to their own unit, and naming anybody else is 404."
           }
         },
         "required": [
-          "hire",
-          "startDate",
-          "day",
-          "window",
-          "overdue",
-          "pct",
-          "firstCaseClosed"
+          "agentCode",
+          "fullName",
+          "phone"
         ]
       },
-      "NewHireGroupDto": {
+      "NewHiresWindowDto": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "example": "2025-10-28",
+            "description": "The earliest join date listed."
+          },
+          "to": {
+            "type": "string",
+            "example": "2026-10-27",
+            "description": "Today."
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ]
+      },
+      "Activation3MShareDto": {
+        "type": "object",
+        "properties": {
+          "activated": {
+            "type": "number",
+            "description": "Their first sale was on or before day 90 of the join date."
+          },
+          "notActivated": {
+            "type": "number",
+            "description": "No first sale by day 90 — or they left before one."
+          },
+          "inProgress": {
+            "type": "number",
+            "description": "Still within their 90 days: in neither part of the share."
+          },
+          "pct": {
+            "type": "number",
+            "nullable": true,
+            "example": 60,
+            "description": "Activated ÷ (activated + not activated), a whole percent; `null` while none of them is decided — never 0."
+          }
+        },
+        "required": [
+          "activated",
+          "notActivated",
+          "inProgress",
+          "pct"
+        ]
+      },
+      "Activation3MMonthDto": {
+        "type": "object",
+        "properties": {
+          "activated": {
+            "type": "number",
+            "description": "Their first sale was on or before day 90 of the join date."
+          },
+          "notActivated": {
+            "type": "number",
+            "description": "No first sale by day 90 — or they left before one."
+          },
+          "inProgress": {
+            "type": "number",
+            "description": "Still within their 90 days: in neither part of the share."
+          },
+          "pct": {
+            "type": "number",
+            "nullable": true,
+            "example": 60,
+            "description": "Activated ÷ (activated + not activated), a whole percent; `null` while none of them is decided — never 0."
+          },
+          "month": {
+            "type": "string",
+            "example": "2026-07",
+            "description": "The join month: its new hires are its cohort."
+          }
+        },
+        "required": [
+          "activated",
+          "notActivated",
+          "inProgress",
+          "pct",
+          "month"
+        ]
+      },
+      "Activation3MFiguresDto": {
+        "type": "object",
+        "properties": {
+          "all": {
+            "description": "Every new hire of the set.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Activation3MShareDto"
+              }
+            ]
+          },
+          "byMonth": {
+            "description": "Each join month with a new hire in the set, newest first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Activation3MMonthDto"
+            }
+          }
+        },
+        "required": [
+          "all",
+          "byMonth"
+        ]
+      },
+      "NewHireUnitDto": {
         "type": "object",
         "properties": {
           "kind": {
@@ -36585,7 +38003,7 @@
               "aab",
               "ab"
             ],
-            "description": "*Direct Unit*, or the nearest leader below you: an AAB, or an AB under an AB — the card names the rung."
+            "description": "*Direct Unit*, or the nearest leader below you: an AAB, or an AB under an AB — named by the rung."
           },
           "leader": {
             "nullable": true,
@@ -36596,8 +38014,164 @@
               }
             ]
           },
-          "hires": {
-            "description": "By day, highest first.",
+          "activation3M": {
+            "description": "The 3M activation % of the new hires listed in this unit.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Activation3MFiguresDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "leader",
+          "activation3M"
+        ]
+      },
+      "NewHireUnitRefDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "aab",
+              "ab"
+            ],
+            "description": "*Direct Unit*, or the nearest leader below you: an AAB, or an AB under an AB — named by the rung."
+          },
+          "leader": {
+            "nullable": true,
+            "description": "`null` for *Direct Unit*.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationPersonDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "leader"
+        ]
+      },
+      "NewHireChecklistDto": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "graduated",
+              "expired"
+            ]
+          },
+          "done": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number"
+          },
+          "pct": {
+            "type": "number"
+          },
+          "overdue": {
+            "type": "boolean",
+            "description": "Open, past the window, below 100%."
+          }
+        },
+        "required": [
+          "state",
+          "done",
+          "total",
+          "pct",
+          "overdue"
+        ]
+      },
+      "NewHireRowDto": {
+        "type": "object",
+        "properties": {
+          "hire": {
+            "$ref": "#/components/schemas/ActivationPersonDto"
+          },
+          "unit": {
+            "description": "The unit they are counted in.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NewHireUnitRefDto"
+              }
+            ]
+          },
+          "joinDate": {
+            "type": "string",
+            "example": "2026-08-06",
+            "description": "The join date, day 1: what *Join date* prints."
+          },
+          "day": {
+            "type": "number",
+            "description": "Which day of their first 90 today is, the join date day 1."
+          },
+          "firstSaleDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-08-25",
+            "description": "The first paid and issued case; `null` with none."
+          },
+          "activation3M": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "activated",
+              "not_activated"
+            ],
+            "description": "In progress through day 90; then activated (a first sale by day 90) or not — kept once decided."
+          },
+          "leftOn": {
+            "type": "string",
+            "nullable": true,
+            "description": "The day they were marked left; `null` while not."
+          },
+          "checklist": {
+            "nullable": true,
+            "description": "Their checklist; `null` for a new hire with none — an AB or an AAB, or nothing published.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NewHireChecklistDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "hire",
+          "unit",
+          "joinDate",
+          "day",
+          "firstSaleDate",
+          "activation3M",
+          "leftOn",
+          "checklist"
+        ]
+      },
+      "NewHiresSectionsDto": {
+        "type": "object",
+        "properties": {
+          "inProgress": {
+            "description": "Days 1 to 90, by day, highest first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NewHireRowDto"
+            }
+          },
+          "activated": {
+            "description": "By join date, newest first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NewHireRowDto"
+            }
+          },
+          "notActivated": {
+            "description": "By join date, newest first — the ones who left among them.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/NewHireRowDto"
@@ -36605,29 +38179,88 @@
           }
         },
         "required": [
-          "kind",
-          "leader",
-          "hires"
+          "inProgress",
+          "activated",
+          "notActivated"
         ]
       },
       "NewHiresRosterDto": {
         "type": "object",
         "properties": {
-          "groups": {
-            "description": "Empty groups are omitted.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NewHireGroupDto"
-            }
-          },
           "today": {
             "type": "string",
-            "example": "2026-10-03"
+            "example": "2026-10-27"
+          },
+          "window": {
+            "description": "The join dates listed: the last twelve months.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NewHiresWindowDto"
+              }
+            ]
+          },
+          "days": {
+            "type": "number",
+            "example": 90,
+            "description": "The day 3M activation is decided after."
+          },
+          "activation3M": {
+            "description": "The 3M activation % of every new hire listed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Activation3MFiguresDto"
+              }
+            ]
+          },
+          "units": {
+            "description": "*Direct Unit* first, then each leader below you A to Z; a unit with nobody listed omitted.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NewHireUnitDto"
+            }
+          },
+          "sections": {
+            "$ref": "#/components/schemas/NewHiresSectionsDto"
           }
         },
         "required": [
-          "groups",
-          "today"
+          "today",
+          "window",
+          "days",
+          "activation3M",
+          "units",
+          "sections"
+        ]
+      },
+      "NewHireMarkedLeftDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "leftAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "leftOn": {
+            "type": "string",
+            "example": "2026-10-27",
+            "description": "The day it fell on."
+          },
+          "activation3M": {
+            "type": "string",
+            "enum": [
+              "activated",
+              "not_activated"
+            ],
+            "description": "Their 3M activation, decided now."
+          }
+        },
+        "required": [
+          "membershipId",
+          "leftAt",
+          "leftOn",
+          "activation3M"
         ]
       },
       "TickHireActivationItemDto": {
@@ -36636,6 +38269,14 @@
           "done": {
             "type": "boolean",
             "description": "Done or not. Sets the item rather than toggling it."
+          },
+          "record": {
+            "description": "A data-backed item’s tick only: the closing it names — the hire’s, or a new one logged in their pipeline — or the 1:1, saved as a coaching session with them. Saved with the tick, or neither is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationItemRecordInputDto"
+              }
+            ]
           }
         },
         "required": [
@@ -36648,7 +38289,7 @@
           "startDate": {
             "type": "string",
             "example": "2026-07-01",
-            "description": "The day the activation started, an office date: the office’s today at the latest, and at most 365 days before it."
+            "description": "The hire’s **join date**, which their activation starts on (ADR-0169 §2), an office date: the office’s today at the latest, and at most 365 days before it. Named `startDate` for the callers that already send it."
           }
         },
         "required": [
@@ -36738,13 +38379,18 @@
           "underUnits": {
             "type": "number",
             "description": "Everybody under those units’ heads."
+          },
+          "newHires": {
+            "type": "number",
+            "description": "Of `total`, the new hires before a first sale: in the team, and left out of *Direct Group production* and *On pace to be active (Group)*."
           }
         },
         "required": [
           "total",
           "direct",
           "units",
-          "underUnits"
+          "underUnits",
+          "newHires"
         ]
       },
       "GroupProductionTileDto": {
@@ -36767,7 +38413,7 @@
           },
           "missing": {
             "type": "number",
-            "description": "Rows holding no actual, which both sums leave out."
+            "description": "Rows holding no actual, which both sums leave out. A new hire before a first sale is not one: they are left out by `newHires`."
           },
           "gapMinor": {
             "type": "number",
@@ -36802,11 +38448,11 @@
         "properties": {
           "count": {
             "type": "number",
-            "description": "`POTENTIAL_MAA_COUNT_IN_UNIT`."
+            "description": "`POTENTIAL_MAA_COUNT_IN_UNIT`, over the people who count for production."
           },
           "of": {
             "type": "number",
-            "description": "Everybody the group holds."
+            "description": "Everybody the group holds but a new hire before a first sale."
           }
         },
         "required": [
@@ -37239,6 +38885,10 @@
             "nullable": true,
             "description": "`PACING_TO_MAA`; `null` without a target."
           },
+          "newHireBeforeFirstSale": {
+            "type": "boolean",
+            "description": "*New hire*: a new hire with no first sale by today (`COUNTS_FOR_PRODUCTION` false). In the team, tagged on the roster, and left out of every total’s goal and *On pace to be active*. `false` from the first sale’s day."
+          },
           "followUp": {
             "nullable": true,
             "description": "The next open action item of their latest finalized coaching session.",
@@ -37277,6 +38927,7 @@
           "lastOneOnOne",
           "status",
           "pacingToMaa",
+          "newHireBeforeFirstSale",
           "followUp",
           "chasingMdrt",
           "campaigns"
@@ -37302,7 +38953,7 @@
           },
           "missing": {
             "type": "number",
-            "description": "Rows holding no actual, which both sums leave out."
+            "description": "Rows holding no actual, which both sums leave out. A new hire before a first sale is not one: they are left out by `newHires`."
           },
           "gapMinor": {
             "type": "number",
@@ -37328,7 +38979,12 @@
         "type": "object",
         "properties": {
           "goal": {
-            "$ref": "#/components/schemas/PairedGoalDto"
+            "description": "Over the people who count for production: no new hire before a first sale.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PairedGoalDto"
+              }
+            ]
           },
           "leadsCounts": {
             "$ref": "#/components/schemas/LeadCountsDto"
@@ -37338,13 +38994,18 @@
           },
           "potentialActive": {
             "$ref": "#/components/schemas/PotentialActiveDto"
+          },
+          "newHires": {
+            "type": "number",
+            "description": "New hires before a first sale whom `goal` and `potentialActive` leave out."
           }
         },
         "required": [
           "goal",
           "leadsCounts",
           "touches",
-          "potentialActive"
+          "potentialActive",
+          "newHires"
         ]
       },
       "YourUnitDto": {
@@ -41369,7 +43030,7 @@
           },
           "newHires": {
             "type": "boolean",
-            "description": "You coach somebody whose activation is open: the *New hires* menu item."
+            "description": "You coach a new hire who joined in the last twelve months: the *New hires* menu item."
           }
         },
         "required": [
@@ -41742,6 +43403,376 @@
           "email",
           "agentCode",
           "role"
+        ]
+      },
+      "InviteLeaderDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "membershipId",
+          "name"
+        ]
+      },
+      "InviteDto": {
+        "type": "object",
+        "properties": {
+          "inviteId": {
+            "type": "string"
+          },
+          "fullName": {
+            "type": "string",
+            "description": "The name the leader typed."
+          },
+          "agentCode": {
+            "type": "string"
+          },
+          "phone": {
+            "type": "string",
+            "description": "Their WhatsApp number, as typed."
+          },
+          "joinDate": {
+            "type": "string",
+            "description": "An office date: the join date they are given when they accept."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "expired"
+            ],
+            "description": "*Invited, waiting to join*, or *Invite expired* past its 14 days."
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "The instant its link stops opening."
+          },
+          "invitedAt": {
+            "type": "string"
+          },
+          "leader": {
+            "description": "The unit they join: its leader.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InviteLeaderDto"
+              }
+            ]
+          },
+          "existingAccount": {
+            "type": "boolean",
+            "description": "An account holds the code: the link opens the signed-in page rather than registration."
+          }
+        },
+        "required": [
+          "inviteId",
+          "fullName",
+          "agentCode",
+          "phone",
+          "joinDate",
+          "status",
+          "expiresAt",
+          "invitedAt",
+          "leader",
+          "existingAccount"
+        ]
+      },
+      "LinkedMemberDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "fullName": {
+            "type": "string",
+            "description": "The account’s own name, whatever the form said."
+          }
+        },
+        "required": [
+          "membershipId",
+          "fullName"
+        ]
+      },
+      "TransferPersonDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "membershipId",
+          "name"
+        ]
+      },
+      "RequestedTransferDto": {
+        "type": "object",
+        "properties": {
+          "transferId": {
+            "type": "string"
+          },
+          "requestedName": {
+            "type": "string",
+            "nullable": true,
+            "description": "The name they typed in the form. `null` on a request made before it was kept: show the code."
+          },
+          "agentCode": {
+            "type": "string",
+            "description": "The agent code they typed."
+          },
+          "to": {
+            "description": "The unit they asked for: its leader.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransferPersonDto"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "declined",
+              "cancelled"
+            ]
+          },
+          "requestedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transferId",
+          "requestedName",
+          "agentCode",
+          "to",
+          "status",
+          "requestedAt"
+        ]
+      },
+      "AddAgentResultDto": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "invited",
+              "linked",
+              "transfer_requested"
+            ],
+            "description": "`invited`: nobody in the office holds the code, so an invite was made (`invite`, `link`). `linked`: an account with no leader here was placed under the leader now (`member`). `transfer_requested`: an account reporting to another leader here, so the Owner and the Admins were asked to move them (`transfer`) — answered with what was typed, never the account’s own name or its leader."
+          },
+          "invite": {
+            "$ref": "#/components/schemas/InviteDto"
+          },
+          "link": {
+            "type": "string",
+            "description": "With `invited`: the link, shown once."
+          },
+          "member": {
+            "$ref": "#/components/schemas/LinkedMemberDto"
+          },
+          "transfer": {
+            "$ref": "#/components/schemas/RequestedTransferDto"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "InviteListDto": {
+        "type": "object",
+        "properties": {
+          "today": {
+            "type": "string",
+            "description": "The office’s today: the form’s default join date and its latest."
+          },
+          "invites": {
+            "description": "Pending and expired invites the reader reaches, newest first. Never a link.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InviteDto"
+            }
+          }
+        },
+        "required": [
+          "today",
+          "invites"
+        ]
+      },
+      "SharedInviteDto": {
+        "type": "object",
+        "properties": {
+          "invite": {
+            "$ref": "#/components/schemas/InviteDto"
+          },
+          "link": {
+            "type": "string",
+            "description": "The link that carries the token, in this answer and nowhere else: only the token’s hash is kept."
+          }
+        },
+        "required": [
+          "invite",
+          "link"
+        ]
+      },
+      "InviteOfficeDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "branchName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "branchName"
+        ]
+      },
+      "InviteBannerDto": {
+        "type": "object",
+        "properties": {
+          "leaderName": {
+            "type": "string",
+            "description": "The leader they would join, by the name they go by."
+          },
+          "kpm": {
+            "$ref": "#/components/schemas/InviteOfficeDto"
+          },
+          "companyId": {
+            "type": "string",
+            "description": "The insurer: registration on the link takes it, read-only."
+          },
+          "companyName": {
+            "type": "string"
+          },
+          "agentCode": {
+            "type": "string",
+            "description": "Read-only on the form: the server takes the invite’s."
+          },
+          "joinDate": {
+            "type": "string",
+            "description": "Read-only on the form: the membership is given it."
+          },
+          "fullName": {
+            "type": "string",
+            "description": "The name the leader typed: filled in, and theirs to correct."
+          },
+          "existingAccount": {
+            "type": "boolean",
+            "description": "An account holds the code: sign in and accept rather than register."
+          },
+          "expiresAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "leaderName",
+          "kpm",
+          "companyId",
+          "companyName",
+          "agentCode",
+          "joinDate",
+          "fullName",
+          "existingAccount",
+          "expiresAt"
+        ]
+      },
+      "AcceptedInviteDto": {
+        "type": "object",
+        "properties": {
+          "kpmId": {
+            "type": "string"
+          },
+          "leaderName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kpmId",
+          "leaderName"
+        ]
+      },
+      "TransferMemberDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "agentCode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "agentCode"
+        ]
+      },
+      "TransferDto": {
+        "type": "object",
+        "properties": {
+          "transferId": {
+            "type": "string"
+          },
+          "member": {
+            "description": "Who would move.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransferMemberDto"
+              }
+            ]
+          },
+          "from": {
+            "nullable": true,
+            "description": "Their leader when it was asked.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransferPersonDto"
+              }
+            ]
+          },
+          "to": {
+            "description": "The leader they would move under.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransferPersonDto"
+              }
+            ]
+          },
+          "requestedBy": {
+            "$ref": "#/components/schemas/TransferPersonDto"
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "requestedName": {
+            "type": "string",
+            "nullable": true,
+            "description": "The name whoever asked typed in the form, which may not be the account’s — shown beside the account’s own name where they differ, so a code typed for somebody else is seen. `null` on a request made before it was kept."
+          }
+        },
+        "required": [
+          "transferId",
+          "member",
+          "from",
+          "to",
+          "requestedBy",
+          "requestedAt",
+          "requestedName"
         ]
       },
       "ActivityTypeDto": {
@@ -42265,11 +44296,12 @@
           "autoLink": {
             "type": "string",
             "nullable": true,
-            "example": "feature:goals"
+            "example": "feature:goals",
+            "description": "In the settings read, the link as stored — what a draft saves back, `null` for the three data-backed items, whose kind is bound by their code and never stored. In every other read, the link the item is evaluated by."
           },
           "link": {
             "nullable": true,
-            "description": "The link, resolved.",
+            "description": "The link, resolved: what completes the item. For *Close first case independently*, *Reach Independent Agent milestone* and *Weekly 1-on-1 check-in*, storing no link of their own, the data kind their code binds — in the settings read too, where `autoLink` stays `null`.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ActivationLinkDto"
@@ -43749,7 +45781,14 @@
           },
           "joinedAt": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The system’s stamp: the instant the membership was made active."
+          },
+          "joinDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-07-14",
+            "description": "The person’s **join date** in this office, an office date their leader gave (ADR-0169): what *Join date* prints. `null` while they are pending."
           },
           "removedAt": {
             "type": "string",
@@ -43815,6 +45854,7 @@
           "isCoreLeader",
           "canTagCoreLeader",
           "joinedAt",
+          "joinDate",
           "removedAt",
           "canChangeRole",
           "canPromoteToAb",

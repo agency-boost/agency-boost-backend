@@ -62,7 +62,7 @@ export async function buildForumServices(wired: ReturnType<typeof configModule>)
   );
   const scorecards = new LeaderScorecardService(
     wired.officePeople, wired.productionReadings,
-    new MonthlyAgentDataRepository(model(MonthlyAgentData.name, MonthlyAgentDataSchema)), wired.activationRows, wired.clock,
+    new MonthlyAgentDataRepository(model(MonthlyAgentData.name, MonthlyAgentDataSchema)), wired.memberships, wired.clock,
   );
   const forum = new LeaderMeetingsService(meetings, people, scorecards, wired.audit, wired.clock);
   const minutes = new LeaderMeetingMinutes(meetings, people, wired.audit, wired.clock);

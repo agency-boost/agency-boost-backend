@@ -140,6 +140,12 @@ export class UnitRowDto implements UnitRow {
   pacingToMaa!: boolean | null;
 
   @ApiProperty({
+    description: '*New hire*: a new hire with no first sale by today (`COUNTS_FOR_PRODUCTION` false). In the team, tagged '
+      + 'on the roster, and left out of every total’s goal and *On pace to be active*. `false` from the first sale’s day.',
+  })
+  newHireBeforeFirstSale!: boolean;
+
+  @ApiProperty({
     type: FollowUpDto, nullable: true,
     description: 'The next open action item of their latest finalized coaching session.',
   })
@@ -171,21 +177,26 @@ class PairedGoalDto implements PairedGoal {
   }) targetMinor!: number | null;
   @ApiProperty({ type: Number, nullable: true, description: 'The rows’ actuals summed; `null` when none holds one: *Not uploaded yet*.' }) actualMinor!: number | null;
   @ApiProperty({ type: Number, nullable: true, description: 'From the paired sums, never averaged.' }) attainmentPct!: number | null;
-  @ApiProperty({ description: 'Rows holding no actual, which both sums leave out.' }) missing!: number;
+  @ApiProperty({
+    description: 'Rows holding no actual, which both sums leave out. A new hire before a first sale is not one: they are '
+      + 'left out by `newHires`.',
+  }) missing!: number;
   @ApiProperty({ type: Number, nullable: true, description: 'How far the actual is short of the target; 0 when met; `null` without both.' }) gapMinor!: number | null;
   @ApiProperty({ type: Number, nullable: true, description: 'How far the actual is over the target; 0 when short; `null` without both.' }) overMinor!: number | null;
 }
 
 class PotentialActiveDto {
-  @ApiProperty({ description: '`POTENTIAL_MAA_COUNT_IN_UNIT`.' }) count!: number;
-  @ApiProperty({ description: 'Everybody the group holds.' }) of!: number;
+  @ApiProperty({ description: '`POTENTIAL_MAA_COUNT_IN_UNIT`, over the people who count for production.' }) count!: number;
+  @ApiProperty({ description: 'Everybody the group holds but a new hire before a first sale.' }) of!: number;
 }
 
 export class UnitTotalDto implements UnitTotal {
-  @ApiProperty({ type: PairedGoalDto }) goal!: PairedGoal;
+  @ApiProperty({ type: PairedGoalDto, description: 'Over the people who count for production: no new hire before a first sale.' })
+  goal!: PairedGoal;
   @ApiProperty({ type: LeadCountsDto }) leadsCounts!: LeadCountsRow;
   @ApiProperty({ type: CountAgainstDto }) touches!: CountAgainst;
   @ApiProperty({ type: PotentialActiveDto }) potentialActive!: { count: number; of: number };
+  @ApiProperty({ description: 'New hires before a first sale whom `goal` and `potentialActive` leave out.' }) newHires!: number;
 }
 
 export class UnitGroupDto implements UnitGroup {
@@ -201,6 +212,10 @@ class TeamTileDto {
   @ApiProperty({ description: '*Your Unit*’s rows, the head included.' }) direct!: number;
   @ApiProperty({ description: 'The units below the head.' }) units!: number;
   @ApiProperty({ description: 'Everybody under those units’ heads.' }) underUnits!: number;
+  @ApiProperty({
+    description: 'Of `total`, the new hires before a first sale: in the team, and left out of *Direct Group production* '
+      + 'and *On pace to be active (Group)*.',
+  }) newHires!: number;
 }
 
 class GroupProductionTileDto extends PairedGoalDto {

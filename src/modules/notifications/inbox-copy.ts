@@ -11,6 +11,25 @@ function name(payload: Record<string, unknown>, key: string, fallback: string): 
   return typeof value === 'string' && value.trim() ? value : fallback;
 }
 
+/** The first of these keys the payload holds a name under, or the fallback: one notice, written by two senders. */
+function nameOf(payload: Record<string, unknown>, keys: readonly string[], fallback: string): string {
+  for (const key of keys) {
+    const value = name(payload, key, '');
+    if (value) return value;
+  }
+  return fallback;
+}
+
+/**
+ * **Who asked to join** (P18.96-T1 AC-3). `requestLeader` writes the asker's name as `askerName`; the demo seed and
+ * every notice stored before this read wrote `fullName`. The template read only `fullName`, so every real request
+ * said *"Somebody asked to join your unit"*. Either is the asker's name; `askerName` first, as the sender writes it.
+ */
+const ASKER_KEYS = ['askerName', 'fullName'] as const;
+
+/** **Who walked in with the leader's code** (`LeaderCodeService.redeem`), the one `MEMBER_TAGGED_BY_LEADER` sent to a leader. */
+const JOINER_KEYS = ['joinerName', 'fullName'] as const;
+
 /**
  * What a notification says, in words.
  *
@@ -34,8 +53,9 @@ export function describeNotification(
   switch (templateId) {
     case NotificationTemplate.JOIN_REQUEST_RECEIVED:
       return {
-        title: `${name(payload, 'fullName', 'Somebody')} asked to join your unit`,
-        detail: 'Approve or decline it on Pending requests.',
+        title: `${nameOf(payload, ASKER_KEYS, 'Somebody')} asked to join your unit`,
+        // The tab's own name: the row opens it (`inboxAddress`).
+        detail: 'Approve or decline it under Review requests on New hires.',
       };
     case NotificationTemplate.JOIN_REQUEST_APPROVED:
       return { title: 'You are in', detail: 'Your request was approved. You now have a leader.' };
@@ -45,10 +65,38 @@ export function describeNotification(
         detail: name(payload, 'reason', 'You can search for another leader and ask again.'),
       };
     case NotificationTemplate.MEMBER_TAGGED_BY_LEADER:
+      /*
+       * **One template, two readers** (P18.96-T1 AC-3). A tag (`ApprovalsService.tag`, or AgencyBoost approving one
+       * past the leader limit) tells the member, `via: 'tagged'`; a leader code redeemed (`LeaderCodeService.redeem`)
+       * tells the **leader** whose code it was, `via: 'leader-code'`. The member's sentence reached the leader, who
+       * read *"A leader added you to their unit"* about somebody joining theirs.
+       */
+      if (payload.via === 'leader-code') {
+        return {
+          title: `${nameOf(payload, JOINER_KEYS, 'Somebody')} joined your unit with your leader code`,
+          detail: 'A leader code needs no approval, so they are in your unit already.',
+        };
+      }
       return {
         title: 'A leader added you to their unit',
         detail: 'You did not have to ask — they picked you up from the unassigned list.',
       };
+    /*
+     * P18.96-T3 (ADR-0170 §2, §4): an invite accepted, a transfer asked for, and its decision — which reads by who it
+     * is addressed to (`audience`): whoever asked, the member who moved, or the leader they left.
+     */
+    case NotificationTemplate.MEMBER_INVITE_ACCEPTED:
+      return {
+        title: `${nameOf(payload, JOINER_KEYS, 'Somebody')} accepted your invite and joined your unit`,
+        detail: 'They are in your unit now, with the join date you gave.',
+      };
+    case NotificationTemplate.TRANSFER_REQUEST_RECEIVED:
+      return {
+        title: `${name(payload, 'requesterName', 'A leader')} asked to move ${name(payload, 'memberName', 'a member')} into their unit`,
+        detail: 'Approve or decline it on All Members, under Pending.',
+      };
+    case NotificationTemplate.TRANSFER_REQUEST_DECIDED:
+      return transferDecided(payload);
     case NotificationTemplate.MEMBER_REMOVED:
       return {
         title: 'You were removed from your unit',
@@ -146,6 +194,21 @@ export function describeNotification(
   }
 }
 
+/** **A transfer request's decision** (ADR-0170 §4), in the words of whoever it is addressed to. */
+function transferDecided(payload: Record<string, unknown>): { title: string; detail: string | null } {
+  const member = name(payload, 'memberName', 'a member');
+  const to = name(payload, 'toLeaderName', 'another leader');
+  if (payload.audience === 'member') {
+    return { title: `You now report to ${to}`, detail: 'Your office moved you to their unit. Your history stays with you.' };
+  }
+  if (payload.audience === 'from_leader') {
+    return { title: `${member} moved to ${to}’s unit`, detail: 'Your office approved a transfer, so they have left your unit.' };
+  }
+  return payload.decision === 'approved'
+    ? { title: `Your request to move ${member} was approved`, detail: 'They are in your unit now.' }
+    : { title: `Your request to move ${member} was declined`, detail: name(payload, 'reason', 'They stay where they are.') };
+}
+
 /**
  * **An event's time and place**, the reminder's detail (P18.95-T7 AC-4; the client's UI review of 2026-10-26, UI-030):
  * *9 Nov 2026, 09.00 · Kantor KPM* — its start on the office's clock, through the shared formatter (ADR-0167 §1), and
@@ -163,6 +226,12 @@ function whenAndWhere(payload: Record<string, unknown>): string | null {
   const parts = [when, where].filter(Boolean);
   return parts.length > 0 ? parts.join(' · ') : null;
 }
+
+/**
+ * The leader's request inbox: **`/new-hires`'s *Review requests***, opened by `?review=requests` (P18.96-T3 AC-5,
+ * ADR-0170 §5). It was the *Pending Requests* tab of User management, which lists the same requests and stays.
+ */
+export const JOIN_REQUEST_INBOX = '/new-hires?review=requests';
 
 /** An id as a notice carries one: a MongoDB ObjectId, 24 hex characters. */
 const OBJECT_ID = /^[0-9a-f]{24}$/i;
@@ -183,6 +252,12 @@ const wellFormed = (value: unknown, shape: RegExp): value is string => typeof va
  *   week, `/calendar?entry={entryId}&date={date}`; a cancellation opens the week it was in,
  *   `/calendar?date={date}`, since the entry no longer reads. A payload without a well-formed id or date
  *   opens `/calendar`.
+ * - **A join request** (P18.96-T1 AC-3) opens the leader's request inbox, `/new-hires?review=requests` since P18.96-T3
+ *   (*Review requests* on *New hires*; `/user-management/pending` until then), where it is
+ *   approved or declined. It goes only to an AB or an AAB, who reach that route. The payload names nobody's row,
+ *   so the address names none either.
+ * - **A transfer request** (P18.96-T3, ADR-0170 §4) opens the office's *All Members* on its *Pending* tab,
+ *   `/people/members?tab=pending`, where the Owner and the Admins decide it; **an accepted invite** opens `/new-hires`.
  * - **Every other item is `null`**.
  */
 export function inboxAddress(templateId: string, payload: Record<string, unknown>): string | null {
@@ -197,6 +272,13 @@ export function inboxAddress(templateId: string, payload: Record<string, unknown
     case NotificationTemplate.CALENDAR_INVITATION:
     case NotificationTemplate.CALENDAR_BLOCK_PLACED:
       return calendarEntryAddress(payload);
+    case NotificationTemplate.JOIN_REQUEST_RECEIVED:
+      return JOIN_REQUEST_INBOX;
+    // P18.96-T3: a transfer waits on the office's Pending tab; an accepted invite is in the leader's unit.
+    case NotificationTemplate.TRANSFER_REQUEST_RECEIVED:
+      return '/people/members?tab=pending';
+    case NotificationTemplate.MEMBER_INVITE_ACCEPTED:
+      return '/new-hires';
     default:
       return null;
   }

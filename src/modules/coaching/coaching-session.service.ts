@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
@@ -9,6 +9,7 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { formatDate } from '@/common/format/format';
 import { isLocalDate, type LocalDate } from '@/common/time/local-day';
 import { COACHING } from '@/domain/constants';
+import { ActivationEvents, signalActivation } from '@/modules/activation/activation-events.port';
 import { AuditService } from '@/modules/audit/audit.service';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { LeadRepository } from '@/modules/leads/lead.repository';
@@ -17,9 +18,10 @@ import { NotificationTemplate } from '@/modules/notifications/notification.types
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import type { MembershipDocument } from '@/modules/org/membership.schema';
 import { MemberNames } from '@/modules/org/member-names.service';
-import { scopeFor, type Permission } from '@/modules/rbac/permissions';
+import { can, scopeFor, type Permission } from '@/modules/rbac/permissions';
 import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
 import { sessionFinalized } from './coaching-session.gate';
+import { SESSION_LIMITS } from './coaching-session.dto';
 import { CoachingSessionRepository } from './coaching-session.repository';
 import {
   carryForward, coalesceKeyOf, finalizeRefusal, finalizeSentence, latestFinalized, leadActionsOf,
@@ -284,6 +286,11 @@ export class CoachingSessionService {
     private readonly subjectReads: SubjectReadAudit,
     private readonly notifications: NotificationService,
     private readonly clock: Clock,
+    /*
+     * P18.96-T4 AC-2: a 1:1 finalized or logged with a new hire counts toward their checklist's *Weekly 1-on-1
+     * check-in*. A port the activation module answers, so coaching does not depend on it; optional, failing open.
+     */
+    @Optional() @Inject(ActivationEvents) private readonly activation: ActivationEvents | null = null,
   ) {}
 
   // ------------------------------------------------------------------ reading
@@ -502,7 +509,87 @@ export class CoachingSessionService {
       after: { version: saved.version, date: saved.date, correction: saved.corrections.length > 0 },
     });
     await this.announceFinalized(ctx, saved, coachee);
+    // P18.96-T4 AC-2: a first finalize is a 1:1 that counts from its `date`; a new hire's checklist may tick from it.
+    if (first) await signalActivation(this.activation, ctx, saved.coacheeMembershipId, 'coaching');
     return this.answer(ctx, saved, standing, day, leads);
+  }
+
+  /**
+   * **A 1:1 logged after it was held** (P18.96-T4 AC-3; ADR-0171 §3): the checklist's *Log 1:1*, a date and a note, by
+   * a leader who coaches the coachee now (`COACH`, else 404) and holds the grants a session needs —
+   * `coaching_session:create` and `:finalize`, an AB's or an AAB's (an Agent who leads holds neither, and is
+   * refused `403 FORBIDDEN`).
+   *
+   * **The session model, kept whole**: one record, its coach the caller, **finalized as it is written** — a 1:1 that
+   * happened has nothing left to draft — so it counts in every coaching metric from its `date`, as any finalized one
+   * does, and reads as any other on the coachee's history, the archive and `/coaching/me`. Three things differ, each
+   * because nothing else is true of a logged 1:1:
+   *
+   * - **`date` is the day the leader says it was held** — the office's today at the latest — where a session
+   *   finalized in the workspace takes the day of its first finalize. It is still the day the 1:1 happened, which is
+   *   what every metric counts; nothing moves it after (ADR-0079).
+   * - **The note is its one tip**, the session's own free text, carried forward to the pair's next *Start* as every
+   *   tip is (ADR-0081). There are no action items: none was agreed here, and finalize's five checks are the
+   *   workspace's, for a 1:1 run in it.
+   * - **No snapshot** (`null`): the snapshot is what the 1:1 was held *over*, taken at its finalize, and today's figures
+   *   are not what a 1:1 held last week looked at. Every reader already draws a session without one.
+   *
+   * Audited `coaching_session.logged` with its date; the coachee is told as for any finalize, and the activation
+   * signalled (`coaching`). Answers the session's id and date.
+   */
+  async logOneOnOne(
+    ctx: RequestContext, coacheeId: string, input: { date: string; note: string },
+  ): Promise<{ sessionId: string; date: LocalDate }> {
+    const me = requireMe(ctx);
+    const coachee = await this.coach.coachee(ctx, me, coacheeId);
+    if (!coachee) throw new NotFoundException('Membership');
+    if (!can(ctx, 'coaching_session:create') || !can(ctx, 'coaching_session:finalize')) {
+      throw new DomainException(
+        ErrorCode.PERM_DENIED,
+        'A 1:1 is logged by a leader who runs coaching sessions: an AB or an AAB.',
+        HttpStatus.FORBIDDEN,
+        { permission: 'coaching_session:create' },
+      );
+    }
+    const day = await this.days.for(ctx);
+    const note = input.note.trim();
+    if (!isLocalDate(input.date) || input.date > day.today) {
+      throw invalid('The day the 1:1 was held is a date, written YYYY-MM-DD, and no later than today.', { field: 'date' });
+    }
+    if (note.length === 0 || note.length > SESSION_LIMITS.TEXT_MAX) {
+      throw invalid(`The note is 1 to ${SESSION_LIMITS.TEXT_MAX} characters once trimmed.`, { field: 'note' });
+    }
+
+    const now = this.clock.now();
+    const created = await this.sessions.create(ctx, {
+      coachMembershipId: me,
+      coacheeMembershipId: coacheeId,
+      status: 'finalized',
+      date: input.date,
+      lastWeek: null,
+      lastWeekItems: [],
+      actionItems: [],
+      tips: [{ tipId: newId(), text: note, carriedFromTipId: null }],
+      leadActions: [],
+      snapshot: null,
+      finalizedAt: now,
+      finalizedByMembershipId: me,
+      version: 1,
+      frozenAt: now,
+      corrections: [],
+    } as never);
+    const sessionId = String(created._id);
+
+    await this.audit.record(ctx, {
+      action: 'coaching_session.logged',
+      targetCollection: 'coachingSessions',
+      targetId: sessionId,
+      targetMembershipId: coacheeId,
+      after: { version: 1, date: input.date },
+    });
+    await this.announceFinalized(ctx, created, coachee);
+    await signalActivation(this.activation, ctx, coacheeId, 'coaching');
+    return { sessionId, date: input.date };
   }
 
   /**

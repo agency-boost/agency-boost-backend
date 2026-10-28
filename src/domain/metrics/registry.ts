@@ -1,4 +1,4 @@
-import { ACTIVATION, PERFORMANCE, RATIO_BENCHMARKS, TIME } from '@/domain/constants';
+import { ACTIVATION, ACTIVATION_3M, PERFORMANCE, RATIO_BENCHMARKS, TIME } from '@/domain/constants';
 import { METRIC_REGISTRY as SERVED, type MetricUnit } from '@/domain/constants/metrics';
 
 /**
@@ -307,7 +307,7 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
    * by its start day in the office's calendar (`activation-cohort.ts`).
    */
   ACTIVATION_COHORT: { period: 'CALENDAR_YEAR', threshold: null },
-  NEW_AGENT_3M_ACTIVE_PCT: { period: 'CALENDAR_YEAR', threshold: null },
+  // `NEW_AGENT_3M_ACTIVE_PCT` retired (ADR-0171 §2, P18.96-T6): the row reads `ACTIVATION_3M_PCT`, below.
   PRODUCING_AGENTS: { period: 'CALENDAR_YEAR', threshold: null },
   AVERAGE_CASE_SIZE_REALISED: { period: 'CALENDAR_YEAR', threshold: null },
   /*
@@ -329,6 +329,20 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   ACTIVATION_COMPLETION_RATE: { period: 'POINT_IN_TIME', threshold: null },
   // A goal saved for the office's calendar year with an annual target above zero (OD-160; `goal-set.ts`).
   GOAL_SET_RATE: { period: 'CALENDAR_YEAR', threshold: null },
+
+  // ---- New hire activation (Phase 18.96, P18.96-T4; ADR-0171 §1) ----
+  // The day of the first paid and issued case, kept on the membership and moved only earlier (`first-sale.ts`).
+  FIRST_SALE_DATE: { period: 'POINT_IN_TIME', threshold: null },
+  // P18.96-T5 (ADR-0172 §2): on the office's day, an existing agent, or a new hire on or after their first sale
+  // (`counts-for-production.ts`) — the people a unit's production and *on pace* read.
+  COUNTS_FOR_PRODUCTION: { period: 'POINT_IN_TIME', threshold: null },
+  /*
+   * P18.96-T6 (ADR-0171 §2; `activation-3m.ts`): **a new hire's result over their first 90 days**, the programme's own
+   * window — its threshold the day it locks on — and **the share activated, by join month**: a month's new hires are
+   * its cohort, and a year's or a unit's figure is the same definition over theirs.
+   */
+  ACTIVATION_3M: { period: 'PROGRAMME_WINDOW', threshold: ACTIVATION_3M.DAYS },
+  ACTIVATION_3M_PCT: { period: 'CALENDAR_MONTH', threshold: null },
 };
 
 export const METRIC_REGISTRY = define(join(SERVED, COMPUTATIONS));

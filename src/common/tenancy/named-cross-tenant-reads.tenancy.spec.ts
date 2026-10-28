@@ -46,6 +46,11 @@ const CALLERS: Record<string, Record<string, string>> = {
       'deciding one leader-limit request (ADR-0157 §3): the route names the request, and the office it names is the '
       + 'one the approval then acts in, through the scoped repository with that office named',
   },
+  'org/invites.service.ts': {
+    pendingCodeAcrossTenants:
+      '*+ Add agent* (P18.96-T3, ADR-0170 §2): whether an agent code already has an invite waiting anywhere in the '
+      + 'company — the insurer issued the code and spans offices — answered as a boolean, never a row, an office or a name',
+  },
   'org/leader-limit.ts': {
     countPerOfficeAcrossTenants:
       '*Leaders used* per office on the Super Admin\'s offices list (P13.2-T3, ADR-0113): counts, never '

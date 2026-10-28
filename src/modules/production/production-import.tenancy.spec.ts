@@ -428,4 +428,53 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
       await expect(wired.productionImport.revert(A, '66f0000000000000000000ff')).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
   });
+
+  /*
+   * The P18.96 exit review, M4 (ADR-0171 §1 as noted 2026-10-27): a first sale only moves earlier — but one read from the
+   * file, whose month a revert takes back, is recomputed from what remains, while no 3M result is kept.
+   */
+  describe('P18.96-T8 M4 — a reverted file takes back the first sale it gave', () => {
+    const member = (membershipId: string) => db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(membershipId) });
+    const sale = async (membershipId: string) => {
+      const m = (await member(membershipId))!;
+      return [m.firstSaleDate ?? null, m.firstSaleSource ?? null, m.firstSaleRecordCollection ?? null];
+    };
+
+    it('P18.96-T8 M4 revert recomputes a first sale read from the reverted month: gone, with nothing else to read', async () => {
+      const { batch } = await importFile(A, '2026-09', file('sep.csv', ['PRU-001', { 'policyCount.monthly': '1' }]));
+      expect(await sale(A1)).toEqual(['2026-09-01', 'monthly_file', 'monthlyAgentData']);
+      await wired.productionImport.revert(A, batch.id);
+      expect(await sale(A1)).toEqual([null, null, null]);
+    });
+
+    it('P18.96-T8 M4 what remains after a revert is the first sale: the month of the file still standing', async () => {
+      await wired.productionMonths.reopen(A, '2026-08'); // closed on 7 September
+      const august = await importFile(A, '2026-08', file('aug.csv', ['PRU-001', { 'policyCount.monthly': '2' }]));
+      const september = await importFile(A, '2026-09', file('sep.csv', ['PRU-001', { 'policyCount.monthly': '1' }]));
+      expect(await sale(A1)).toEqual(['2026-08-01', 'monthly_file', 'monthlyAgentData']);
+      // August's was the wrong file: the first sale is September's now — later, because the earlier one was never true.
+      await wired.productionImport.revert(A, august.batch.id);
+      expect(await sale(A1)).toEqual(['2026-09-01', 'monthly_file', 'monthlyAgentData']);
+      await wired.productionImport.revert(A, september.batch.id);
+      expect(await sale(A1)).toEqual([null, null, null]);
+    });
+
+    it('P18.96-T8 M4 a kept 3M result stays through a revert, and so does the first sale it was decided by', async () => {
+      const { batch } = await importFile(A, '2026-09', file('sep.csv', ['PRU-001', { 'policyCount.monthly': '1' }]));
+      await db().collection('memberships').updateOne(
+        { _id: new mongoose.Types.ObjectId(A1) }, { $set: { joinedAs: 'new_hire', activation3M: 'activated' } },
+      );
+      await wired.productionImport.revert(A, batch.id);
+      expect(await sale(A1)).toEqual(['2026-09-01', 'monthly_file', 'monthlyAgentData']);
+      expect((await member(A1))!.activation3M).toBe('activated');
+    });
+
+    it('P18.96-T8 M4 another office’s revert moves nobody here', async () => {
+      await importFile(A, '2026-09', file('sep.csv', ['PRU-001', { 'policyCount.monthly': '1' }]));
+      const { batch } = await importFile(B, '2026-09', file('sep.csv', ['PRU-900', { 'policyCount.monthly': '1' }]));
+      await wired.productionImport.revert(B, batch.id);
+      expect(await sale(A1)).toEqual(['2026-09-01', 'monthly_file', 'monthlyAgentData']);
+      expect(await sale(B1)).toEqual([null, null, null]);
+    });
+  });
 });

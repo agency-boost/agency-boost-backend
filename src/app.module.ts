@@ -130,6 +130,10 @@ import { ActivationProgressController } from '@/modules/activation/activation-pr
 import { NewHiresController } from '@/modules/activation/new-hires.controller';
 import { BillingController } from '@/modules/billing/billing.controller';
 import { ActivationEvents } from '@/modules/activation/activation-events.port';
+import { ActivationItemRecords } from '@/modules/activation/activation-records.service';
+import { FirstSaleService } from '@/modules/activation/first-sale.service';
+import { Activation3MService } from '@/modules/activation/activation-3m.service';
+import { SalesEvents } from '@/modules/activation/sales-events.port';
 import { ActivationNav } from '@/modules/activation/activation-nav.port';
 import { ActivationStarter } from '@/modules/org/activation-starter.port';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
@@ -225,8 +229,16 @@ import {
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { ProfileLineReader } from '@/modules/org/profile-line';
 import {
-  GroupRepository, JoinRequestRepository, LeaderLimitRequestRepository, MembershipHistoryRepository,
+  GroupRepository, JoinRequestRepository, LeaderLimitRequestRepository, MemberInviteRepository, MembershipHistoryRepository,
+  TransferRequestRepository,
 } from '@/modules/org/org.repositories';
+import { MemberInvite, MemberInviteSchema } from '@/modules/org/member-invite.schema';
+import { TransferRequest, TransferRequestSchema } from '@/modules/org/transfer-request.schema';
+import {
+  InviteLinkController, NewHireAgentsController, TransferRequestsController,
+} from '@/modules/org/invites.controller';
+import { InvitesService } from '@/modules/org/invites.service';
+import { TransfersService } from '@/modules/org/transfers.service';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { DirectoryService } from '@/modules/org/directory.service';
 import { OrgController } from '@/modules/org/org.controller';
@@ -365,6 +377,9 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
       { name: JoinRequest.name, schema: JoinRequestSchema },
       // ADR-0157: a leader past the office's limit, waiting for AgencyBoost.
       { name: LeaderLimitRequest.name, schema: LeaderLimitRequestSchema },
+      // P18.96-T3 (ADR-0170): a leader's invites, and the requests to move a member to another leader.
+      { name: MemberInvite.name, schema: MemberInviteSchema },
+      { name: TransferRequest.name, schema: TransferRequestSchema },
       { name: Group.name, schema: GroupSchema },
       { name: ActivityCategory.name, schema: ActivityCategorySchema },
       { name: ActivityType.name, schema: ActivityTypeSchema },
@@ -431,6 +446,9 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     // ADR-0157: the Super Admin's queue of leaders past an office's limit.
     LeaderLimitRequestAdminController,
     OnboardingController,
+    // P18.96-T3: an invite's link, and the office's transfer requests (ADR-0170 §3, §4).
+    InviteLinkController,
+    TransferRequestsController,
     NotificationController,
     TenantConfigController,
     TenantConfigReadController,
@@ -462,6 +480,11 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     CalendarController,
     // Phase 13: the hire's own activation, and a leader's new hires.
     ActivationProgressController,
+    /*
+     * P18.96-T3: *+ Add agent*, its invites and its transfers, under `/new-hires` — **before** `NewHiresController`, whose
+     * `GET /new-hires/:membershipId` would otherwise read `invites` and `transfers` as an id (`app.module.int.spec.ts`).
+     */
+    NewHireAgentsController,
     NewHiresController,
     // P13.2-T2: the quote tool's price read; it stores nothing (ADR-0111).
     BillingController,
@@ -647,6 +670,11 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     LeaderCodeService,
     MemberNames,
     ApprovalsService,
+    // P18.96-T3 (ADR-0170): + Add agent, the invites it makes, and the transfers it asks for.
+    MemberInviteRepository,
+    TransferRequestRepository,
+    InvitesService,
+    TransfersService,
     RoleChangeService,
     LeaderLimitRequestService,
     RemovalService,
@@ -701,6 +729,15 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     { provide: ActivationStarter, useExisting: ActivationProgressService },
     { provide: ActivationEvents, useExisting: ActivationProgressService },
     { provide: ActivationNav, useExisting: ActivationProgressService },
+    /*
+     * P18.96-T4 (ADR-0171 §1, §3): each person's first sale, kept on the membership and answered to the leads' and the
+     * production file's writes through `SalesEvents`; and a data-backed item's hand tick, saved with its record.
+     */
+    FirstSaleService,
+    { provide: SalesEvents, useExisting: FirstSaleService },
+    ActivationItemRecords,
+    // P18.96-T6 (ADR-0171 §2, ADR-0173 §3): each new hire's 3M activation, kept once decided, and *Mark left*.
+    Activation3MService,
     GroupService,
     // P18.8-T6: the groups and the office on the sidebar's profile line, read with `/auth/me` (ADR-0159 §5).
     ProfileLineReader,

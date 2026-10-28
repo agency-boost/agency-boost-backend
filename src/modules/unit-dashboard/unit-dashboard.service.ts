@@ -8,10 +8,11 @@ import {
   MDRT_CAMPAIGN_CODE, PERIOD, UNIT_DASHBOARD, UNIT_DASHBOARD_CORRECTION_REASON, type UnitDashboardPeriod,
 } from '@/domain/constants';
 import { oneOnOneOverdue } from '@/domain/metrics/coaching-recency';
+import { newHireBeforeFirstSale, type ProductionStanding } from '@/domain/metrics/counts-for-production';
 import type { GoalPaceStatus } from '@/domain/metrics/goal-pace-status';
 import { subPeriodActivityTarget } from '@/domain/metrics/sub-period-activity-target';
 import {
-  cascadeActivityTouches, potentialMaaCountInUnit, rollUpCounts, rollUpGoalPaired, rollUpLeadCounts,
+  cascadeActivityTouches, rollUpCounts, rollUpLeadCounts, rollUpProduction,
   type CountAgainst, type LeadCountsRow, type PairedGoal,
 } from '@/domain/metrics/unit-rollup';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
@@ -25,6 +26,7 @@ import { GoalService } from '@/modules/goals/goal.service';
 import { LeadReadings } from '@/modules/leads/lead-readings';
 import { CoachResolver, type Coachee } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
+import { MembershipRepository } from '@/modules/org/membership.repository';
 import type { Provenance } from '@/modules/production/monthly-agent-data.schema';
 import { ProductionCorrections } from '@/modules/production/production-correction.service';
 import { type MonthState, ProductionMonths } from '@/modules/production/production-months.service';
@@ -101,6 +103,12 @@ export interface UnitRow extends UnitPerson {
   status: GoalPaceStatus;
   /** `PACING_TO_MAA`; `null` without a target. */
   pacingToMaa: boolean | null;
+  /**
+   * ***New hire*** (ADR-0172 §2–3, P18.96-T5 AC-3): a new hire with no first sale by the office's today —
+   * `!COUNTS_FOR_PRODUCTION`. The row is in the team and tagged; every total above it leaves it out of the production
+   * and of *On pace to be active*. `false` from the first sale's day.
+   */
+  newHireBeforeFirstSale: boolean;
   /** The next open action item of their latest finalized session (OD-140). */
   followUp: FollowUp | null;
   /**
@@ -112,12 +120,17 @@ export interface UnitRow extends UnitPerson {
   campaigns: { code: string; title: string }[] | null;
 }
 
-/** A total row: the rows' figures by the rollup rule (`unit-rollup.ts`), its goal paired (ADR-0165 §1). */
+/**
+ * A total row: the rows' figures by the rollup rule (`unit-rollup.ts`), its goal paired (ADR-0165 §1) — the goal and
+ * *on pace* over the people who count for production (ADR-0172 §2), the leads and the goal activities over everybody.
+ */
 export interface UnitTotal {
   goal: PairedGoal;
   leadsCounts: LeadCountsRow;
   touches: CountAgainst;
   potentialActive: { count: number; of: number };
+  /** The new hires before a first sale the goal and *on pace* leave out — named in their ⓘ (P18.96-T5 AC-4). */
+  newHires: number;
 }
 
 /** A unit below the reader: its head, the head's members who lead nobody, and the units of those who do. */
@@ -142,7 +155,11 @@ export interface UnitDashboardView {
   /** The head leads nobody: no rows, and the screen draws its empty state. */
   empty: boolean;
   tiles: {
-    team: { total: number; direct: number; units: number; underUnits: number };
+    /**
+     * Everybody on the roster, a new hire from their join date (ADR-0172 §1); `newHires` of them before a first sale,
+     * whom *Direct Group production* and *On pace to be active (Group)* leave out (§2).
+     */
+    team: { total: number; direct: number; units: number; underUnits: number; newHires: number };
     directGroupProduction: PairedGoal & { period: 'month' | 'year' };
     potentialActive: { count: number; of: number };
     potentialRecruits: { yourUnit: number; aabs: number };
@@ -215,6 +232,8 @@ export class UnitDashboardService {
     private readonly subjectReads: SubjectReadAudit,
     /** P18.5-T7 AC-8: the campaigns module's one named reader of chases, and nothing else of it. */
     private readonly chaseReadings: CampaignChaseReadings,
+    /** P18.96-T5: the head's own membership, for whether they count for production yet — coachees carry theirs. */
+    private readonly memberships: MembershipRepository,
     /*
      * ADR-0163 §4: which activity types each cascade role counts — the office's binding, the one reader. The
      * application always provides it; optional, the token named (a `X | null` parameter is emitted as `Object`),
@@ -246,7 +265,7 @@ export class UnitDashboardService {
     const campaignScope = scopeFor(ctx, 'campaign_qualification:read');
     const chaseReach = new Set(ids.filter((id) => id === me || campaignScope === 'own-kpm' || campaignScope === 'all'
       || ((campaignScope === 'own-downline' || campaignScope === 'own-unit') && head.coachedByReader.has(id))));
-    const [recency, paces, ledgers, counts, leadCounts, ladder, state, chases, binding] = await Promise.all([
+    const [recency, paces, ledgers, counts, leadCounts, ladder, state, chases, binding, headMembership] = await Promise.all([
       this.sessions.recencyOf(ctx, coached, office),
       this.paces.paceOf(ctx, ids, { today: office.today, month: office.month, onTrackRatio: office.settings.onTrackPaceThreshold }),
       this.production.ledgersFor(ctx, ids, office.month),
@@ -257,7 +276,20 @@ export class UnitDashboardService {
       this.chaseReadings.ofMany(ctx, [...chaseReach]),
       // The office's binding, once for every row: a role bound to `[A, B]` counts both (ADR-0163 §4).
       this.bindings ? this.bindings.resolveCascadeBinding(ctx) : Promise.resolve(defaultBinding()),
+      // The head's own classification and first sale (ADR-0172 §2): a coachee's arrive on their membership.
+      this.memberships.findById(ctx, head.membershipId),
     ]);
+    /*
+     * **Who counts for production on the office's today** (ADR-0172 §2, P18.96-T5 AC-2): `COUNTS_FOR_PRODUCTION`, decided
+     * once per row here and read by every total and tile below (`rollUpProduction`). A new hire before their first sale
+     * is in the team and tagged, and in no production total and no *on pace*.
+     */
+    const standings = new Map<string, ProductionStanding>([
+      [head.membershipId, standingOf(headMembership)],
+      ...head.coachees.map((c): [string, ProductionStanding] => [c.membershipId, standingOf(c.membership)]),
+    ]);
+    // Every row's id is the head's or a coachee's, so each has its standing.
+    const newHire = (id: string) => newHireBeforeFirstSale(standings.get(id)!, office.today);
     const latest = [...recency.values()].flatMap((r) => (r.last ? [r.last] : []));
     /*
      * **Lead text only to a reader who may read the person's leads** (roles §3.7; the exit review's B1): the
@@ -350,6 +382,7 @@ export class UnitDashboardService {
         },
         status: pace.status,
         pacingToMaa: pace.pacingToMaa,
+        newHireBeforeFirstSale: newHire(id),
         followUp: followUps.get(id) ?? null,
         ...chaseCells(chases, chaseReach, id),
       };
@@ -384,20 +417,24 @@ export class UnitDashboardService {
     ];
     const units = direct.filter((c) => c.membership.role !== 'agent' || leadsSomebody(c)).map(group);
     const everyRow = [...yourUnitRows, ...units.flatMap(rowsOf)];
+    // The tiles' production and *on pace*, over the people who count for production (ADR-0172 §2).
+    const roster = rollUpProduction(everyRow);
 
     const view: UnitDashboardView = {
       ...this.frame(ctx, office, period, window, head, nameOf(head.membershipId), state),
       empty: false,
       tiles: {
+        // Everybody, a new hire included from their join date (ADR-0172 §1).
         team: {
           total: everyRow.length,
           direct: yourUnitRows.length,
           units: units.length,
           underUnits: everyRow.length - yourUnitRows.length - units.length,
+          newHires: roster.newHires,
         },
         // Paired, as a unit's total is (ADR-0165 §1): a target counts only beside the production it measures.
-        directGroupProduction: { ...rollUpGoalPaired(everyRow.map((r) => r.goal)), period: goalPeriod },
-        potentialActive: potentialMaaCountInUnit(everyRow.map((r) => r.pacingToMaa)),
+        directGroupProduction: { ...roster.goal, period: goalPeriod },
+        potentialActive: roster.potentialActive,
         potentialRecruits: {
           yourUnit: rollUpLeadCounts(yourUnitRows.map((r) => r.leadsCounts)).recruitNominated,
           aabs: rollUpLeadCounts(units.flatMap(rowsOf).map((r) => r.leadsCounts)).recruitNominated,
@@ -529,7 +566,7 @@ export class UnitDashboardService {
       ...this.frame(ctx, office, period, window, head, names.get(head.membershipId) ?? '', state),
       empty: true,
       tiles: {
-        team: { total: 0, direct: 0, units: 0, underUnits: 0 },
+        team: { total: 0, direct: 0, units: 0, underUnits: 0, newHires: 0 },
         directGroupProduction: { ...nothing.goal, period: period === 'year' ? 'year' : 'month' },
         potentialActive: nothing.potentialActive,
         potentialRecruits: { yourUnit: 0, aabs: 0 },
@@ -564,15 +601,24 @@ function rowsOf(group: UnitGroup): UnitRow[] {
 
 /**
  * A total row over some rows, by the rollup rule — its goal **paired** (ADR-0165 §1, P18.8-T15 AC-6): a member's target
- * counts only when their production is held, so a late file is named in the tooltip rather than counted as 0.
+ * counts only when their production is held, so a late file is named in the tooltip rather than counted as 0. **The
+ * goal and *on pace* read the people who count for production** (`rollUpProduction`, ADR-0172 §2): a new hire before
+ * their first sale is in neither, and counted in `newHires`; the leads and the goal activities are everybody's.
  */
 function totalOf(rows: readonly UnitRow[]): UnitTotal {
+  const production = rollUpProduction(rows);
   return {
-    goal: rollUpGoalPaired(rows.map((r) => r.goal)),
+    goal: production.goal,
     leadsCounts: rollUpLeadCounts(rows.map((r) => r.leadsCounts)),
     touches: rollUpCounts(rows.map((r) => r.activity.touches)),
-    potentialActive: potentialMaaCountInUnit(rows.map((r) => r.pacingToMaa)),
+    potentialActive: production.potentialActive,
+    newHires: production.newHires,
   };
+}
+
+/** What `COUNTS_FOR_PRODUCTION` reads of a membership; nobody's new hire when there is none to read. */
+function standingOf(m: { joinedAs?: ProductionStanding['joinedAs']; firstSaleDate?: string | null } | null): ProductionStanding {
+  return { joinedAs: m?.joinedAs ?? null, firstSaleDate: m?.firstSaleDate ?? null };
 }
 
 /** The activity window a period counts over, in the office's calendar (D-period). */

@@ -1,7 +1,11 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { baseSchemaOptions } from '@/common/schema/base.schema';
-import { WORK_STATUSES, type WorkStatus } from '@/domain/constants';
+import { JOINED_AS, WORK_STATUSES, type JoinedAs, type WorkStatus } from '@/domain/constants';
+import { ACTIVATION_3M_LOCKS, type Activation3MLock } from '@/domain/metrics/activation-3m';
+import {
+  FIRST_SALE_SOURCES, type FirstSaleRecordCollection, type FirstSaleSource,
+} from '@/domain/metrics/first-sale';
 
 export type MembershipDocument = HydratedDocument<Membership>;
 
@@ -161,8 +165,77 @@ export class Membership {
   @Prop({ type: String, enum: ['active', 'pending', 'removed'], default: 'pending', index: true })
   status!: MembershipStatus;
 
+  /**
+   * **The system's stamp**: the instant the membership was made active (ADR-0169 §5). Not the person's join date,
+   * which is `joinDate` — the two can differ, and every business rule reads `joinDate`.
+   */
   @Prop({ type: Date, default: null })
   joinedAt!: Date | null;
+
+  /**
+   * ***Join date*: the day this person joined the office, as their leader gives it** (ADR-0169 §1, P18.96-T2). An
+   * **office date** `YYYY-MM-DD` in `kpms.timezone`, never an instant (invariant §9), set when the membership is
+   * made active — an approval, a tag, a leader's code, a roster import, an Owner assigned — and the office's today
+   * unless a leader named another. A new hire's activation starts on it, and a leader's correction moves both
+   * (ADR-0102 as noted). `null` while the membership is pending: nobody has let them in yet.
+   */
+  @Prop({ type: String, default: null })
+  joinDate!: string | null;
+
+  /**
+   * ***New hire* or *existing agent*, decided once** (ADR-0169 §3): `new_hire` when `joinDate` was no more than
+   * `JOINING.NEW_HIRE_MAX_DAYS_BACK` days before the office's today when it was first set, else `existing_agent`.
+   * **Nothing recomputes it**: a later correction of the date does not reclassify. Only a new hire is given an
+   * activation. A roster import and an office's Owner are existing agents. `null` while pending.
+   */
+  @Prop({ type: String, enum: [...JOINED_AS, null], default: null })
+  joinedAs!: JoinedAs | null;
+
+  /**
+   * **The instant a leader marked this new hire as having left** (ADR-0169 §4 as amended 2026-10-27, ADR-0173): written
+   * by *Mark left* (P18.96-T6), which then removes the membership through the removal's own path — `status: removed`,
+   * `removedAt` the same instant — so a leaver leaves every count of people. The record and its history stay, and a
+   * removed membership with `leftAt` is a new hire who left, which `/new-hires` lists for their year. `null` until then.
+   */
+  @Prop({ type: Date, default: null })
+  leftAt!: Date | null;
+
+  /**
+   * **`FIRST_SALE_DATE`: the day of this person's first sale since joining** (ADR-0171 §1, P18.96-T4 AC-1) — an office
+   * date, the earliest of a sales lead reaching *Paid and issued*, a closing logged by a checklist tick, and — failing
+   * both — the production file's first month with a policy. Computed by `firstSaleOf` and written by
+   * `FirstSaleService` from the leads, the production file and migration 0042; **it only ever moves earlier**: a
+   * lead deleted or moved back, or an import reverted, leaves it where it is. `null` until there is one.
+   */
+  @Prop({ type: String, default: null })
+  firstSaleDate!: string | null;
+
+  /** Where the first sale came from: `lead`, `manual` (a checklist tick) or `monthly_file`. `null` with no date. */
+  @Prop({ type: String, enum: [...FIRST_SALE_SOURCES, null], default: null })
+  firstSaleSource!: FirstSaleSource | null;
+
+  /** The record it came from: a lead, or the production file's month row. Both `null` with no date. */
+  @Prop({ type: String, enum: ['leads', 'monthlyAgentData', null], default: null })
+  firstSaleRecordCollection!: FirstSaleRecordCollection | null;
+
+  @Prop({ type: String, default: null })
+  firstSaleRecordId!: string | null;
+
+  /**
+   * **`ACTIVATION_3M`, kept once decided** (ADR-0171 §2, P18.96-T6 AC-1; `metrics-and-definitions.md`, *3M
+   * activation*): `activated` or `not_activated` — decided after day 90 of the join date, or on the day a new hire
+   * left within it — and **never written over**, so a closing logged later with an earlier day, a production file
+   * uploaded late or a corrected join date moves nothing. `null` while in progress, for an existing agent, and for a
+   * decided result nothing has kept yet, which `activation3MOf` computes the same. Written by `Activation3MService`
+   * alone, in a conditional write on `null`: before any write that would change its inputs, by *Mark left*, and by
+   * the `/new-hires` read.
+   */
+  @Prop({ type: String, enum: [...ACTIVATION_3M_LOCKS, null], default: null })
+  activation3M!: Activation3MLock | null;
+
+  /** When the result was kept. `null` with none. */
+  @Prop({ type: Date, default: null })
+  activation3MLockedAt!: Date | null;
 
   @Prop({ type: Date, default: null })
   removedAt!: Date | null;

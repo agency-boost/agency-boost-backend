@@ -148,7 +148,8 @@ export class KpmAnalyticsService {
       : this.clock.monthBounds(timezone, periodMonth).endExclusive;
     // The rows hold members (D-units, OD-74): a member who has left is in none of today's figures, their production
     // the Overview's — read here to say how much of it the total leaves out, and for the period below.
-    const roster = await this.people.read(ctx, this.clock.startOfLocalDay(timezone, `${year}-01-01`));
+    // Each member counted from their join date, in the office's zone (ADR-0172 §1).
+    const roster = await this.people.read(ctx, this.clock.startOfLocalDay(timezone, `${year}-01-01`), timezone);
     const leaverIds = roster.everyone.filter((p) => p.status === 'removed').map((p) => p.membershipId);
     const active = roster.active;
     const activeIds = active.map((p) => p.membershipId);

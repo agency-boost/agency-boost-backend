@@ -124,7 +124,9 @@ export class CoachingReadings {
    */
   async countedSince(
     ctx: RequestContext, coacheeIds: readonly string[], from: LocalDate,
-  ): Promise<{ coacheeMembershipId: string; coachMembershipId: string; status: 'finalized' | 'reopened'; date: LocalDate }[]> {
+  ): Promise<{
+    sessionId: string; coacheeMembershipId: string; coachMembershipId: string; status: 'finalized' | 'reopened'; date: LocalDate;
+  }[]> {
     if (coacheeIds.length === 0) return [];
     const rows = await this.sessions.find(
       ctx,
@@ -132,6 +134,8 @@ export class CoachingReadings {
       { projection: { coacheeMembershipId: 1, coachMembershipId: 1, status: 1, date: 1 } },
     );
     return rows.map((row) => ({
+      // P18.96-T4: which session, so the checklist's *Weekly 1-on-1 check-in* can name the fourth.
+      sessionId: String(row._id),
       coacheeMembershipId: row.coacheeMembershipId,
       coachMembershipId: row.coachMembershipId,
       status: row.status as 'finalized' | 'reopened',

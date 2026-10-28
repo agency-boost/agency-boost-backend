@@ -146,14 +146,19 @@ describe('the compliance tree against the surfaces that own each fact (P18.6-T1,
       }
     });
 
-    it('P18.6-T1 AC-7 every hire on a leader’s roster reads Overdue in the tree exactly when the roster’s day is red', async () => {
+    it('P18.6-T1 AC-7 every hire on a leader’s roster reads Overdue in the tree exactly when the roster’s checklist is', async () => {
       const view = await read(h.ctx('OWNER'), { category: 'activation' });
       const roster = await h.wired.newHires.roster(h.ctx('AGUS'));
-      const hires = roster.groups.flatMap((g) => g.hires);
-      expect(hires.map((r) => r.hire.membershipId).sort()).toEqual([h.id('BUDI'), h.id('RINA')].sort());
+      // P18.96-T6: the roster lists the year's new hires by 3M result, each with their checklist's state and overdue.
+      const hires = [...roster.sections.inProgress, ...roster.sections.activated, ...roster.sections.notActivated]
+        .filter((r) => r.checklist !== null);
+      expect(hires.map((r) => r.hire.membershipId)).toEqual(expect.arrayContaining([h.id('BUDI'), h.id('RINA')]));
+      const DRAWN: Record<string, string> = {
+        'graduated|false': 'completed', 'open|false': 'in_progress', 'open|true': 'overdue', 'expired|false': 'overdue',
+      };
       for (const row of hires) {
         const cell = rows(view).find((r) => r.membershipId === row.hire.membershipId)!.cell;
-        expect([row.hire.name, cell.status]).toEqual([row.hire.name, row.overdue ? 'overdue' : 'in_progress']);
+        expect([row.hire.name, cell.status]).toEqual([row.hire.name, DRAWN[`${row.checklist!.state}|${row.checklist!.overdue}`]]);
       }
     });
   });

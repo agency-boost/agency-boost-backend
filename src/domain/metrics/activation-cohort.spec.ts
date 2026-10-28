@@ -1,22 +1,9 @@
 import { FixedClock } from '@/common/clock/clock.port';
-import { NEW_AGENT_ACTIVE_MONTHS } from '@/domain/constants/metrics';
-import {
-  activationCohort, cohortOutcome, newAgent3mActive, type CohortActivation, type CohortMonth,
-} from './activation-cohort';
+import { activationCohort, type CohortActivation } from './activation-cohort';
 
 const JAKARTA = 'Asia/Jakarta';
-/** A month a hire was here for, as the office's file holds it. */
-const month = (active: boolean | null, over: Partial<CohortMonth> = {}): CohortMonth => ({ held: true, belonged: true, active, ...over });
-const ON = month(true);
-const OFF = month(false);
-const SILENT = month(null);
-const NOT_HELD = month(null, { held: false });
-const GONE = month(null, { belonged: false });
 
-describe('ACTIVATION_COHORT and NEW_AGENT_3M_ACTIVE_PCT (P18.1-T1; D-cohort, ADR-0102, ADR-0103)', () => {
-  it('P18.1-T1 AC-2 reads a hire’s start month and the three after it: four months', () => {
-    expect(NEW_AGENT_ACTIVE_MONTHS).toBe(4);
-  });
+describe('ACTIVATION_COHORT (P18.1-T1; D-cohort, ADR-0102, ADR-0103)', () => {
 
   describe('the cohort (AC-1)', () => {
     const started: CohortActivation[] = [
@@ -50,50 +37,6 @@ describe('ACTIVATION_COHORT and NEW_AGENT_3M_ACTIVE_PCT (P18.1-T1; D-cohort, ADR
       expect(activationCohort(hires, { from: '2026-02-01', to: '2026-02-28' })).toEqual(['early']);
     });
   });
-
-  describe('one hire’s four months (AC-2)', () => {
-    it('P18.1-T1 AC-2 a hire active in any of the four is producing — the start month, or the fourth', () => {
-      expect(cohortOutcome([ON, OFF, OFF, OFF])).toBe('producing');
-      expect(cohortOutcome([OFF, OFF, OFF, ON])).toBe('producing');
-    });
-
-    it('P18.1-T1 AC-2 a hire active only in their fifth month is not producing: the four are what count', () => {
-      expect(cohortOutcome([OFF, OFF, OFF, OFF, ON])).toBe('not_producing');
-    });
-
-    it('P18.1-T1 AC-2 a held month whose file says nothing of them is not one they were active in', () => {
-      expect(cohortOutcome([SILENT, SILENT, OFF, SILENT])).toBe('not_producing');
-    });
-
-    it('P18.1-T1 AC-2 a hire whose four months are not all held is left out — even one already active — never not producing', () => {
-      expect(cohortOutcome([OFF, OFF, NOT_HELD, OFF])).toBe('left_out');
-      expect(cohortOutcome([ON, NOT_HELD, NOT_HELD, NOT_HELD])).toBe('left_out');
-      expect(cohortOutcome([OFF, OFF])).toBe('left_out');
-    });
-
-    it('P18.1-T1 AC-2 Noted 4: a hire who left within their four months is producing on a held month they belonged in', () => {
-      expect(cohortOutcome([OFF, ON, GONE, GONE])).toBe('producing');
-      // Active in a month whose file is not held does not count; neither does a month after they left.
-      expect(cohortOutcome([OFF, month(true, { held: false }), GONE, GONE])).toBe('left_out');
-      expect(cohortOutcome([OFF, OFF, month(true, { belonged: false }), GONE])).toBe('left_out');
-    });
-
-    it('P18.1-T1 AC-2 Noted 4: a leaver active in none of their months is left out, not counted as not producing', () => {
-      expect(cohortOutcome([OFF, OFF, GONE, GONE])).toBe('left_out');
-      expect(cohortOutcome([GONE, GONE, GONE, GONE])).toBe('left_out');
-    });
-  });
-
-  describe('the share (AC-2)', () => {
-    it('P18.1-T1 AC-2 is producing over counted, a whole percentage, the left out in neither', () => {
-      expect(newAgent3mActive([[ON, OFF, OFF, OFF], [OFF, OFF, OFF, OFF], [OFF, SILENT, OFF, OFF], [ON, NOT_HELD, OFF, OFF]]))
-        .toEqual({ count: 1, of: 3, pct: 33, leftOut: 1 });
-      expect(newAgent3mActive([[ON, ON, ON, ON], [OFF, ON, GONE, GONE]])).toEqual({ count: 2, of: 2, pct: 100, leftOut: 0 });
-    });
-
-    it('P18.1-T1 AC-2 is pending — pct null, never 0% — while nobody is counted, an empty cohort included', () => {
-      expect(newAgent3mActive([[OFF, NOT_HELD, NOT_HELD, NOT_HELD]])).toEqual({ count: 0, of: 0, pct: null, leftOut: 1 });
-      expect(newAgent3mActive([])).toEqual({ count: 0, of: 0, pct: null, leftOut: 0 });
-    });
-  });
+  // P18.96-T6: the four months and the share were `NEW_AGENT_3M_ACTIVE_PCT`'s, retired by ADR-0171 §2 for `ACTIVATION_3M_PCT`
+  // (`activation-3m.spec.ts`). The cohort stays, for `ACTIVATION_COMPLETION_RATE`.
 });

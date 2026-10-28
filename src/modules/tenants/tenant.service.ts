@@ -772,14 +772,22 @@ export class TenantService {
        * `assignOwner` writes after this.
        */
       if (existing.status !== 'active') {
-        await this.hierarchy.activate(scoped, String(existing._id), { joinedAt: this.clock.now() });
+        /*
+         * An Owner is never a new hire (ADR-0169 §6, ADR-0103): joined today, an existing agent, and given no
+         * activation. One who already had a join date here keeps it — it is set once.
+         */
+        const joining = existing.joinedAs ? {} : await this.hierarchy.joining(scoped, { joinedAs: 'existing_agent' });
+        await this.hierarchy.activate(scoped, String(existing._id), { joinedAt: this.clock.now(), ...joining });
       }
       return;
     }
 
     // The ladder's Senior Leader rung: `AB` on the default ladder, whatever a custom one calls it (ADR-0156).
     const role = await this.hierarchy.entryRungCode(kpmId, 'owner');
-    await this.hierarchy.create(scoped, { userId, role, leaderId: null, status: 'active' });
+    // An existing agent, joined today (ADR-0169 §6): the office's creation is nobody's hire (ADR-0103).
+    await this.hierarchy.create(scoped, {
+      userId, role, leaderId: null, status: 'active', joining: { joinedAs: 'existing_agent' },
+    });
   }
 
   private async resolveOwner(who: { userId?: string; email?: string }): Promise<UserDocument> {

@@ -3,8 +3,6 @@ import mongoose from 'mongoose';
 import { Clock, FixedClock } from '@/common/clock/clock.port';
 import { addDays } from '@/common/time/local-day';
 import { DEFAULT_TENANT_TIMEZONE, LEADER_MEETING_SHARE_DAYS, TIME } from '@/domain/constants';
-import { ActivationProgress, ActivationProgressSchema } from '@/modules/activation/activation-progress.schema';
-import { ActivationProgressRepository } from '@/modules/activation/activation-progress.repository';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
 import { firstAgendaTexts, monthBefore } from '@/modules/leader-meetings/leader-meeting-agenda';
@@ -157,10 +155,9 @@ function scorecardService(clock: Clock): LeaderScorecardService {
   const memberships = new MembershipRepository(model(Membership.name, MembershipSchema));
   const audit = new AuditService(model(AuditLog.name, AuditLogSchema));
   const orgLevels = new OrgLevelService(model(CompanyOrgLevel.name, CompanyOrgLevelSchema), companies, kpms, audit, clock);
-  const people = new OfficePeople(memberships, new MemberNames(memberships, model(User.name, UserSchema)), kpms, companies, orgLevels);
+  const people = new OfficePeople(memberships, new MemberNames(memberships, model(User.name, UserSchema)), kpms, companies, orgLevels, clock);
   const monthRows = new MonthlyAgentDataRepository(model(MonthlyAgentData.name, MonthlyAgentDataSchema));
-  const activations = new ActivationProgressRepository(model(ActivationProgress.name, ActivationProgressSchema));
-  return new LeaderScorecardService(people, new ProductionReadings(monthRows), monthRows, activations, clock);
+  return new LeaderScorecardService(people, new ProductionReadings(monthRows), monthRows, memberships, clock);
 }
 
 export async function seedLeaderForumFixture(deps: LeaderForumFixtureDeps): Promise<LeaderForumFixture> {

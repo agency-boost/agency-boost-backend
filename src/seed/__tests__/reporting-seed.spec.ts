@@ -73,12 +73,13 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     expect(overview.coaching.leaderboard.find((l) => l.name === 'Yosef Tambunan')!.coached).toBe(3);
   });
 
-  it('P18-T1 AC-13 who hasn’t logged: the two who never have, then the longest silent — the Admin, 13 days ago', async () => {
+  it('P18-T1 AC-13 who hasn’t logged: the ones who never have first — Agus, Lukman, Raka — then the longest silent', async () => {
     const list = await wired.kpmOverview.notLogged(await as('0417', 'owner@kpm0417.test', { owner: true }));
+    // P18.96-T6 adds two new hires who have logged nothing (`activation-3m-fixture.ts`): Lukman, and Tari after him.
     expect(list.members.map((m) => [m.name, m.daysSince])).toEqual([
-      ['Agus Prasetyo', null], ['Raka Aditama', null], ['Maya Halim', 13],
+      ['Agus Prasetyo', null], ['Lukman Hakim', null], ['Raka Aditama', null],
     ]);
-    expect(list.total).toBeGreaterThan(3);
+    expect(list.total).toBeGreaterThan(4);
   });
 
   it('P18-T1 AC-13 the Owner and Maya logged weeks ago and not since; Gilang left Yosef’s agency last month', async () => {

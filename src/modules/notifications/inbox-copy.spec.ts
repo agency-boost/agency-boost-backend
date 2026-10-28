@@ -1,4 +1,4 @@
-import { describeNotification, IN_APP_TEMPLATES, inboxAddress } from './inbox-copy';
+import { describeNotification, IN_APP_TEMPLATES, inboxAddress, JOIN_REQUEST_INBOX } from './inbox-copy';
 import { NotificationTemplate, TEMPLATE_CHANNELS } from './notification.types';
 
 /**
@@ -34,6 +34,41 @@ describe('inbox copy', () => {
       .toBe('Somebody asked to join your unit');
     expect(describeNotification(NotificationTemplate.JOIN_REQUEST_RECEIVED, {}).title)
       .toBe('Somebody asked to join your unit');
+  });
+
+  /*
+   * **P18.96-T1 AC-3: the name the sender writes.** `requestLeader` stores `askerName`; the template read `fullName`
+   * alone, so every request a real person sent read *"Somebody asked to join your unit"*. The seed and older rows
+   * carry `fullName`, and still read.
+   */
+  it('P18.96-T1 AC-3 a join request names who asked, from askerName as the sender writes it, else fullName', () => {
+    expect(describeNotification(NotificationTemplate.JOIN_REQUEST_RECEIVED, { askerName: 'Rina Wijaya', membershipId: 'm1' }))
+      .toEqual({ title: 'Rina Wijaya asked to join your unit', detail: 'Approve or decline it under Review requests on New hires.' });
+    expect(describeNotification(NotificationTemplate.JOIN_REQUEST_RECEIVED, { askerName: 'Rina Wijaya', fullName: 'Old' }).title)
+      .toBe('Rina Wijaya asked to join your unit');
+    expect(describeNotification(NotificationTemplate.JOIN_REQUEST_RECEIVED, { askerName: '  ', fullName: 'Putri' }).title)
+      .toBe('Putri asked to join your unit');
+    expect(describeNotification(NotificationTemplate.JOIN_REQUEST_RECEIVED, { askerName: 42 }).title)
+      .toBe('Somebody asked to join your unit');
+  });
+
+  it('P18.96-T1 AC-3 a member tagged reads that a leader added them; a leader whose code was used reads who joined', () => {
+    expect(describeNotification(NotificationTemplate.MEMBER_TAGGED_BY_LEADER, { leaderMembershipId: 'm1', via: 'tagged' }))
+      .toEqual({
+        title: 'A leader added you to their unit',
+        detail: 'You did not have to ask — they picked you up from the unassigned list.',
+      });
+    // `LeaderCodeService.redeem` sends this template to the code's owner: never the member's sentence.
+    const leader = describeNotification(NotificationTemplate.MEMBER_TAGGED_BY_LEADER, {
+      joinerName: 'Dimas Saputra', via: 'leader-code', code: 'JOR417',
+    });
+    expect(leader).toEqual({
+      title: 'Dimas Saputra joined your unit with your leader code',
+      detail: 'A leader code needs no approval, so they are in your unit already.',
+    });
+    expect(leader.title).not.toMatch(/added you/);
+    expect(describeNotification(NotificationTemplate.MEMBER_TAGGED_BY_LEADER, { via: 'leader-code' }).title)
+      .toBe('Somebody joined your unit with your leader code');
   });
 
   it('prefers the reason somebody wrote over the general sentence', () => {
@@ -187,10 +222,21 @@ describe('inbox copy', () => {
       }
     });
 
-    it('P11-T10 AC-8 no other inbox item changes: every template but the session’s and the calendar’s opens nowhere', () => {
+    it('P18.96-T1 AC-3 a join request opens the leader’s request inbox, whatever its payload holds', () => {
+      // P18.96-T3 AC-5: the inbox moved to New hires' Review requests, as ADR-0170 §5 places it.
+      expect(JOIN_REQUEST_INBOX).toBe('/new-hires?review=requests');
+      for (const payload of [{}, { askerName: 'Rina Wijaya', membershipId: SESSION }, { fullName: 'Putri' }]) {
+        expect(inboxAddress(NotificationTemplate.JOIN_REQUEST_RECEIVED, payload)).toBe('/new-hires?review=requests');
+      }
+    });
+
+    it('P11-T10 AC-8 no other inbox item changes: every template but the session’s, the calendar’s and the join request’s opens nowhere', () => {
       const ADDRESSED: string[] = [
         NotificationTemplate.COACHING_SESSION_FINALIZED, NotificationTemplate.CALENDAR_INVITATION,
         NotificationTemplate.CALENDAR_BLOCK_PLACED, NotificationTemplate.CALENDAR_ENTRY_CHANGED,
+        NotificationTemplate.JOIN_REQUEST_RECEIVED,
+        // P18.96-T3: a transfer waits on All Members; an accepted invite is on New hires.
+        NotificationTemplate.TRANSFER_REQUEST_RECEIVED, NotificationTemplate.MEMBER_INVITE_ACCEPTED,
       ];
       for (const id of IN_APP_TEMPLATES.filter((t) => !ADDRESSED.includes(t))) {
         expect([id, inboxAddress(id, { sessionId: SESSION, entryId: SESSION, date: '2026-10-05' })]).toEqual([id, null]);
@@ -265,5 +311,41 @@ describe('inbox copy', () => {
         expect(IN_APP_TEMPLATES).toContain(id);
       }
     });
+  });
+});
+
+describe('P18.96-T3 the notices of joining by invite and of a transfer (ADR-0170)', () => {
+  it('P18.96-T3 AC-4 an accepted invite tells the leader who joined, and opens New hires', () => {
+    expect(describeNotification(NotificationTemplate.MEMBER_INVITE_ACCEPTED, { joinerName: 'Hendra Wijaya' })).toEqual({
+      title: 'Hendra Wijaya accepted your invite and joined your unit', detail: 'They are in your unit now, with the join date you gave.',
+    });
+    expect(describeNotification(NotificationTemplate.MEMBER_INVITE_ACCEPTED, {}).title).toBe('Somebody accepted your invite and joined your unit');
+    expect(inboxAddress(NotificationTemplate.MEMBER_INVITE_ACCEPTED, {})).toBe('/new-hires');
+  });
+
+  it('P18.96-T3 AC-3 a transfer request names who asked and who would move, and opens All Members on Pending', () => {
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_RECEIVED, { requesterName: 'Agus Prasetyo', memberName: 'Lina Marlina' }))
+      .toEqual({ title: 'Agus Prasetyo asked to move Lina Marlina into their unit', detail: 'Approve or decline it on All Members, under Pending.' });
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_RECEIVED, {}).title).toBe('A leader asked to move a member into their unit');
+    expect(inboxAddress(NotificationTemplate.TRANSFER_REQUEST_RECEIVED, {})).toBe('/people/members?tab=pending');
+  });
+
+  it('P18.96-T3 AC-3 a decision reads by whom it is for: whoever asked, the member who moved, the leader they left', () => {
+    const base = { memberName: 'Lina Marlina', toLeaderName: 'Agus Prasetyo' };
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...base, decision: 'approved', audience: 'requester' }).title)
+      .toBe('Your request to move Lina Marlina was approved');
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...base, decision: 'declined', audience: 'requester', reason: 'Not now.' }))
+      .toEqual({ title: 'Your request to move Lina Marlina was declined', detail: 'Not now.' });
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...base, decision: 'declined', audience: 'requester' }).detail)
+      .toBe('They stay where they are.');
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...base, decision: 'approved', audience: 'member' }).title)
+      .toBe('You now report to Agus Prasetyo');
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...base, decision: 'approved', audience: 'from_leader' }).title)
+      .toBe('Lina Marlina moved to Agus Prasetyo’s unit');
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { audience: 'member' }).title).toBe('You now report to another leader');
+    expect(inboxAddress(NotificationTemplate.TRANSFER_REQUEST_DECIDED, base)).toBeNull();
+    for (const id of [NotificationTemplate.MEMBER_INVITE_ACCEPTED, NotificationTemplate.TRANSFER_REQUEST_RECEIVED, NotificationTemplate.TRANSFER_REQUEST_DECIDED]) {
+      expect([id, TEMPLATE_CHANNELS[id]]).toEqual([id, ['in_app', 'email']]);
+    }
   });
 });

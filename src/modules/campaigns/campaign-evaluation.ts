@@ -79,11 +79,20 @@ const AGENT_CLASS = 'agent';
 /** What is read of each member: whose they are, and on which rung. */
 interface Person { id: string; orgLevelCode: string | null }
 
-/** What is read of a membership: its rung, and the dates the headcount rule reads. */
-const PERSON_FIELDS = { _id: 1, orgLevelCode: 1, status: 1, joinedAt: 1, removedAt: 1 } as const;
+/** What is read of a membership: its rung, and the dates the headcount rule reads — the join date first (ADR-0172 §1). */
+const PERSON_FIELDS = { _id: 1, orgLevelCode: 1, status: 1, joinedAt: 1, joinDate: 1, removedAt: 1 } as const;
 
-function countedOf(m: { status: string; joinedAt?: Date | null; removedAt?: Date | null }): CountedMembership {
-  return { status: m.status as CountedMembership['status'], joinedAt: m.joinedAt ?? null, removedAt: m.removedAt ?? null };
+/** A membership as the headcount rule reads it: from its join date's first instant in the office's zone, or `joinedAt`. */
+function countedOf(
+  m: { status: string; joinedAt?: Date | null; joinDate?: string | null; removedAt?: Date | null },
+  startOfDay: (date: string) => Date,
+): CountedMembership {
+  return {
+    status: m.status as CountedMembership['status'],
+    joinedAt: m.joinedAt ?? null,
+    joinDateStart: m.joinDate ? startOfDay(m.joinDate) : null,
+    removedAt: m.removedAt ?? null,
+  };
 }
 
 /**
@@ -221,14 +230,16 @@ export class CampaignEvaluation {
     );
     const people = new Map<string, Person>(everyone.map((id) => [id, { id, orgLevelCode: null }]));
     const dated = new Map<string, CountedMembership>();
+    const startOfDay = (date: string) => this.clock.startOfLocalDay(office.timezone, date);
     for (const m of rows) {
       people.set(String(m._id), { id: String(m._id), orgLevelCode: m.orgLevelCode });
-      dated.set(String(m._id), countedOf(m));
+      dated.set(String(m._id), countedOf(m, startOfDay));
     }
     const computed = [...people.keys()];
 
     // A Direct Unit for every member computed, when a requirement reads one: their reports of the Agent class, leavers
-    // included — who was a member at the month's end is `memberAt`'s, Phase 18's one headcount rule (OD-24, ADR-0136).
+    // included — who was a member at the month's end is `memberAt`'s, Phase 18's one headcount rule (OD-24, ADR-0136),
+    // from each one's join date (ADR-0172 §1).
     const readsUnit = campaigns.some((c) => c.requirements.some((r) => readingOf(r.metricKey)?.subject === 'unit'));
     const unitRows = readsUnit && computed.length > 0 ? await this.memberships.find(
       ctx, { leaderId: { $in: computed }, role: AGENT_CLASS, status: { $in: ['active', 'removed'] } },
@@ -238,7 +249,7 @@ export class CampaignEvaluation {
     for (const row of unitRows) {
       const leader = String(row.leaderId);
       unitOf.set(leader, [...(unitOf.get(leader) ?? []), String(row._id)]);
-      dated.set(String(row._id), countedOf(row));
+      dated.set(String(row._id), countedOf(row, startOfDay));
     }
     const memberAtEndOf = (id: string, month: string) => {
       const m = dated.get(id);

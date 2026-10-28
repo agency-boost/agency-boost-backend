@@ -37,6 +37,8 @@ import { up as companyKind } from './0036-company-kind';
 import { up as templateCompany } from './0037-template-company';
 import { up as firstStatusWording } from './0038-first-status-wording';
 import { up as productNamePlaceholder } from './0039-product-name-placeholder';
+import { up as membershipJoinDate } from './0040-membership-join-date';
+import { up as membershipFirstSale } from './0042-membership-first-sale';
 
 /*
  * The list on its own (P18.7-T3), so a spec can run every migration against an empty database without
@@ -94,4 +96,9 @@ export const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Dat
   ['0038-first-status-wording', firstStatusWording],
   // P18.95-T6 (UI-023): the demo seed's *PRUMapan (nama kami)* given back to the company's name.
   ['0039-product-name-placeholder', productNamePlaceholder],
+  // P18.96-T2 (ADR-0169 §6): every membership's join date, and new hire or existing agent, from its activation.
+  ['0040-membership-join-date', membershipJoinDate],
+  // P18.96-T4 (ADR-0171 §1): every membership's first sale, from its leads and the production file. No 0041: T3, which
+  // held the number, needed no migration — the list runs in order and keeps no ledger, so the gap changes nothing.
+  ['0042-membership-first-sale', membershipFirstSale],
 ];

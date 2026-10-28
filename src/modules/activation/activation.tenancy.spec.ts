@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { SEED_ACTIVATION_ITEMS } from '@/domain/constants';
 import type { ActivationService } from './activation.service';
@@ -73,8 +74,71 @@ describe('the office activation checklist (P5-T3)', () => {
         route: '/goals',
         completesWhen: 'the hire has saved any goal since joining',
         live: true,
+        // P18.96-T4: no form — only a data-backed item opens one when ticked by hand.
+        form: null,
       });
       expect(items.find((i) => i.code === 'CRM_SETUP')!.link).toBeNull();
+    });
+
+    it('P18.96-T4 AC-2 keeps the Owner’s settings as stored: the three data-backed items store no link there, and their published version is not edited', async () => {
+      const view = await activation.read(ctx(KPM_A));
+      const items = view.published!.aspects.flatMap((a) => a.items);
+      for (const code of ['FIRST_CASE_CLOSED', 'INDEPENDENT_AGENT_MILESTONE', 'WEEKLY_CHECK_IN']) {
+        expect([code, items.find((i) => i.code === code)!.autoLink]).toEqual([code, null]);
+      }
+      const template = await mongoose.connection.db!.collection('activationTemplates').findOne({ kpmId: KPM_A, version: 1 });
+      const storedItems = (template!.aspects as { items: { code: string; autoLink: string | null }[] }[]).flatMap((a) => a.items);
+      expect(storedItems.find((i) => i.code === 'FIRST_CASE_CLOSED')!.autoLink).toBeNull();
+    });
+
+    it('P18.96-T7 G2 serves the Owner’s settings what completes the three: each item’s link is its bound data kind, its autoLink still null', async () => {
+      const view = await activation.read(ctx(KPM_A));
+      const byCode = new Map(view.published!.aspects.flatMap((a) => a.items).map((i) => [i.code, i]));
+      expect(byCode.get('FIRST_CASE_CLOSED')).toMatchObject({
+        autoLink: null, link: { kind: 'sales:first', label: 'Sales data', route: null, live: true, form: 'closing' },
+      });
+      expect(byCode.get('INDEPENDENT_AGENT_MILESTONE')).toMatchObject({
+        autoLink: null, link: { kind: 'sales:closings:3', label: 'Sales data', live: true, form: 'closing' },
+      });
+      expect(byCode.get('WEEKLY_CHECK_IN')).toMatchObject({
+        autoLink: null, link: { kind: 'coaching:weekly:4', label: 'Coaching sessions', live: true, form: 'one_on_one' },
+      });
+      // Every other item reads as it did: its stored link, resolved, or none.
+      expect(byCode.get('GOAL_SETTING')).toMatchObject({ autoLink: 'feature:goals', link: { kind: 'feature:goals', form: null } });
+      expect(byCode.get('CRM_SETUP')).toMatchObject({ autoLink: null, link: null });
+      // The draft the screen saves back is what is stored: saving it as read stores no data kind.
+      const draft = {
+        aspects: view.published!.aspects.map((a) => ({
+          code: a.code, label: a.label, items: a.items.map((i) => ({ code: i.code, label: i.label, autoLink: i.autoLink })),
+        })),
+      };
+      const saved = await activation.saveDraft(ctx(KPM_A), draft);
+      expect(saved.draft!.aspects.flatMap((a) => a.items).find((i) => i.code === 'WEEKLY_CHECK_IN')).toMatchObject({
+        autoLink: null, link: { kind: 'coaching:weekly:4' },
+      });
+    });
+
+    it('P18.96-T4 AC-2 binds them by code for a field reader: the version a hire pins reads each with its data kind', async () => {
+      const version = (await activation.findVersion(ctx(KPM_A), 1))!;
+      const byCode = new Map(version.aspects.flatMap((a) => a.items).map((i) => [i.code, i]));
+      expect(byCode.get('FIRST_CASE_CLOSED')).toMatchObject({
+        autoLink: 'sales:first', link: { kind: 'sales:first', label: 'Sales data', route: null, live: true, form: 'closing' },
+      });
+      expect(byCode.get('INDEPENDENT_AGENT_MILESTONE')).toMatchObject({
+        autoLink: 'sales:closings:3', link: { kind: 'sales:closings:3', label: 'Sales data', form: 'closing' },
+      });
+      expect(byCode.get('WEEKLY_CHECK_IN')).toMatchObject({
+        autoLink: 'coaching:weekly:4', link: { kind: 'coaching:weekly:4', label: 'Coaching sessions', form: 'one_on_one' },
+      });
+      // Everything else reads as it is stored.
+      expect(byCode.get('GOAL_SETTING')!.autoLink).toBe('feature:goals');
+      expect(byCode.get('CRM_SETUP')!.link).toBeNull();
+    });
+
+    it('P18.96-T4 AC-2 refuses a data kind in a stored link: it belongs to the item its code names', async () => {
+      await expect(activation.saveDraft(ctx(KPM_A), {
+        aspects: [{ code: 'START', label: 'Start', items: [{ code: 'MY_SALE', label: 'My sale', autoLink: 'sales:first' }] }],
+      })).rejects.toThrow(/sales:first is not chosen for an item/);
     });
 
     it('reads the office’s own activation window beside it', async () => {
@@ -262,6 +326,7 @@ describe('the office activation checklist (P5-T3)', () => {
         route: '/training/SALES/PROSPECT_LIST',
         completesWhen: 'the hire has completed that training module',
         live: true,
+        form: null,
       });
     });
 

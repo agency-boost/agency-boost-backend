@@ -28,8 +28,8 @@ export const ACTIVATION_TRAINING_LINK_PREFIX = 'training:';
 export interface ActivationLinkKind {
   /** What the agent's screen calls it in *"Go to {label} →"* (P13-T4). */
   readonly label: string;
-  /** Where that link sends them. */
-  readonly route: string;
+  /** Where that link sends them; `null` for a data kind, whose way in is its own form (P18.96-T4 AC-3). */
+  readonly route: string | null;
   /** What completes it, in one sentence — the screens and the manual both read this. */
   readonly completesWhen: string;
   /**
@@ -173,12 +173,116 @@ export const SEED_ACTIVATION_ITEMS: readonly SeedActivationItem[] = [
  */
 export const ACTIVATION_FIRST_CASE_CODE = 'FIRST_CASE_CLOSED';
 
+/*
+ * ── The data-backed items (ADR-0171 §3, P18.96-T4) ──────────────────────────────────────────────────
+ */
+
+/**
+ * **The three kinds that complete from the office's sales and coaching records** (ADR-0171 §3, P18.96-T4 AC-2):
+ *
+ * - `sales:first` — the hire's **first sale since joining**, from the data: a sales lead that reached *Paid and
+ *   issued* through the leads flow, or — failing that — a policy in the monthly production file (`firstSaleOf`);
+ * - `sales:closings:3` — `ACTIVATION_INDEPENDENT_CLOSINGS` sales leads the leads flow took to *Paid and issued* since
+ *   joining (`nthClosingOf`; the production file names no case, so it counts here for nothing);
+ * - `coaching:weekly:4` — `ACTIVATION_WEEKLY_CHECK_INS` 1:1s with the hire in coaching sessions since joining.
+ *
+ * **Bound by an item's code, never chosen in the editor** (`ACTIVATION_CODE_BOUND_LINKS`): a published version is
+ * never edited, so the platform's three items read their kind from their code, and an office's own item keeps
+ * whatever `autoLink` it was given. `checkActivationChecklist` refuses one in a stored `autoLink`.
+ */
+export const ACTIVATION_DATA_LINKS = ['sales:first', 'sales:closings:3', 'coaching:weekly:4'] as const;
+export type ActivationDataLink = (typeof ACTIVATION_DATA_LINKS)[number];
+
+/** Every kind the engine evaluates by name: the three feature kinds and the three data kinds. */
+export type ActivationNamedLink = ActivationFeatureLink | ActivationDataLink;
+
+/** *Reach Independent Agent milestone (3 independent closings)*: how many closings `sales:closings:3` waits for. */
+export const ACTIVATION_INDEPENDENT_CLOSINGS = 3;
+
+/** *Weekly 1-on-1 check-in (4 weeks)*: how many 1:1s in coaching sessions `coaching:weekly:4` waits for. */
+export const ACTIVATION_WEEKLY_CHECK_INS = 4;
+
+/**
+ * **The sales stage a first sale and a closing are** (ADR-0171 §1): *Paid and issued*, the sales ladder's own code
+ * (`activity-taxonomy.ts`), by code and never by its rank (invariant §4). An office whose sales ladder has no such
+ * stage has first sales from the production file and from checklist ticks only.
+ */
+export const FIRST_SALE_STAGE_CODE = 'PAID_AND_ISSUED';
+
+/** What a hand tick of a data-backed item is saved with (P18.96-T4 AC-3): a closing, or a 1:1. */
+export type ActivationRecordForm = 'closing' | 'one_on_one';
+
+/** A data kind's registry entry: the link's, the form a hand tick opens, and the words of its source line. */
+export interface ActivationDataLinkKind extends ActivationLinkKind {
+  readonly form: ActivationRecordForm;
+}
+
+/**
+ * **The data kinds' entries** (P18.96-T4 AC-2). `label` is the source line's — *"Completed from {label} · {date}"*
+ * (`functional/activation.md`, *Data-backed items*) — and `route` is `null`: the item's way in is its own form, not
+ * a *Go to* (AC-3).
+ */
+export const ACTIVATION_DATA_LINK_KINDS: Readonly<Record<ActivationDataLink, ActivationDataLinkKind>> = {
+  'sales:first': {
+    label: 'Sales data',
+    route: null,
+    completesWhen: 'the hire has a first sale since joining: a sales lead paid and issued, or a policy in the production file',
+    live: true,
+    form: 'closing',
+  },
+  'sales:closings:3': {
+    label: 'Sales data',
+    route: null,
+    completesWhen: `the hire has ${ACTIVATION_INDEPENDENT_CLOSINGS} sales leads paid and issued since joining`,
+    live: true,
+    form: 'closing',
+  },
+  'coaching:weekly:4': {
+    label: 'Coaching sessions',
+    route: null,
+    completesWhen: `${ACTIVATION_WEEKLY_CHECK_INS} 1:1s with the hire are recorded in coaching sessions since joining`,
+    live: true,
+    form: 'one_on_one',
+  },
+} as const;
+
+/**
+ * **The platform's three data-backed items, by code** (ADR-0171 §3; invariant §4, codes and never positions). Their
+ * published versions carry `autoLink: null`; a read gives each its kind from here (`effectiveAutoLink`), so no
+ * published version is edited and an office that kept the codes gets the links.
+ */
+export const ACTIVATION_CODE_BOUND_LINKS: Readonly<Record<string, ActivationDataLink>> = {
+  [ACTIVATION_FIRST_CASE_CODE]: 'sales:first',
+  INDEPENDENT_AGENT_MILESTONE: 'sales:closings:3',
+  WEEKLY_CHECK_IN: 'coaching:weekly:4',
+};
+
+/** Whether a link is one of the three data kinds. */
+export function isActivationDataLink(link: string | null): link is ActivationDataLink {
+  return link !== null && (ACTIVATION_DATA_LINKS as readonly string[]).includes(link);
+}
+
+/**
+ * **The link an item is read with** (P18.96-T4 AC-2): its own `autoLink` where it has one — an office's own choice
+ * stays — else the kind its code is bound to, else none.
+ */
+export function effectiveAutoLink(code: string, autoLink: string | null): string | null {
+  if (autoLink !== null) return autoLink;
+  return Object.prototype.hasOwnProperty.call(ACTIVATION_CODE_BOUND_LINKS, code) ? ACTIVATION_CODE_BOUND_LINKS[code] : null;
+}
+
+/** The form a hand tick of this link opens, or `null` for a link ticked by nobody, or without a record. */
+export function recordFormOf(link: string | null): ActivationRecordForm | null {
+  return isActivationDataLink(link) ? ACTIVATION_DATA_LINK_KINDS[link].form : null;
+}
+
 /** A link's registry entry, or `undefined` for a kind nothing declares. Training links resolve here. */
 export function activationLinkKind(link: string | null): ActivationLinkKind | undefined {
   if (link === null) return undefined;
   if (link.startsWith(ACTIVATION_TRAINING_LINK_PREFIX)) {
     return link.length > ACTIVATION_TRAINING_LINK_PREFIX.length ? ACTIVATION_TRAINING_LINK : undefined;
   }
+  if (isActivationDataLink(link)) return ACTIVATION_DATA_LINK_KINDS[link];
   return ACTIVATION_LINK_KINDS[link as ActivationFeatureLink];
 }
 
@@ -204,4 +308,21 @@ export function mayTickByHand(link: string | null, offered = true, completedByLi
   if (kind === undefined) return true;
   if (kind === ACTIVATION_TRAINING_LINK && !offered) return true;
   return !kind.live;
+}
+
+/**
+ * **A hand write to a data-backed item** (P18.96-T4 AC-3): which ones are taken.
+ *
+ * - `refused` — its data already completed it (`completedByLink`): nobody edits it by hand, as any link's;
+ * - `needs_record` — a tick: taken only with its record, the closing it names or the 1:1, saved together;
+ * - `free` — an untick of a tick saved by hand, which leaves the record it named where it is.
+ *
+ * `null` for any other link, which `mayTickByHand` decides.
+ */
+export function dataItemHandWrite(
+  link: string | null, done: boolean, completedByLink: boolean,
+): 'refused' | 'needs_record' | 'free' | null {
+  if (!isActivationDataLink(link)) return null;
+  if (completedByLink) return 'refused';
+  return done ? 'needs_record' : 'free';
 }

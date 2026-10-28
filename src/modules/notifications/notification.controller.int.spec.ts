@@ -178,6 +178,26 @@ describe('the inbox over HTTP (P12.1-T4)', () => {
     ]);
   });
 
+  it('P18.96-T1 AC-3 a join request reads who asked and opens the request inbox, over HTTP; an older row still reads its name', async () => {
+    session.current = OWNER;
+    const row = (payload: Record<string, unknown>, at: number) => ({
+      _id: new mongoose.Types.ObjectId(), userId: OWNER.userId, kpmId: OWNER.kpmId, membershipId: OWNER.membershipId,
+      templateId: 'join_request.received', payload,
+      delivery: {}, coalesceKey: null, deletedAt: null, readAt: null, createdAt: new Date(NOW.getTime() - at), updatedAt: NOW,
+    });
+    await mongoose.model(Notification.name).collection.insertMany([
+      // As `requestLeader` writes it.
+      row({ askerName: 'Rina Wijaya', membershipId: new mongoose.Types.ObjectId().toString() }, 0),
+      // As the demo seed, and rows from before, wrote it.
+      row({ fullName: 'Putri Lestari' }, 60_000),
+    ]);
+    const { items } = (await http().get('/notifications').expect(200)).body;
+    expect(items.map((i: { title: string; detail: string; href: string | null }) => [i.title, i.detail, i.href])).toEqual([
+      ['Rina Wijaya asked to join your unit', 'Approve or decline it under Review requests on New hires.', '/new-hires?review=requests'],
+      ['Putri Lestari asked to join your unit', 'Approve or decline it under Review requests on New hires.', '/new-hires?review=requests'],
+    ]);
+  });
+
   it('P12.1-T4 a malformed or unknown id is a 404 too', async () => {
     for (const id of ['not-an-id', new mongoose.Types.ObjectId().toString()]) {
       for (const mark of ['read', 'unread']) {

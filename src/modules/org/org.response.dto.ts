@@ -138,8 +138,16 @@ export class DirectoryMemberDto implements DirectoryMember {
   })
   canTagCoreLeader!: boolean;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({ type: String, nullable: true, description: 'The system’s stamp: the instant the membership was made active.' })
   joinedAt!: string | null;
+
+  @ApiProperty({
+    type: String, nullable: true, example: '2026-07-14',
+    description:
+      'The person’s **join date** in this office, an office date their leader gave (ADR-0169): what *Join date* '
+      + 'prints. `null` while they are pending.',
+  })
+  joinDate!: string | null;
 
   @ApiProperty({ type: String, nullable: true })
   removedAt!: string | null;

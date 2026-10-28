@@ -143,7 +143,17 @@ describe('P18.1-T1 the cohort seed — a run at 10:00 on 10 October 2026 in Jaka
       'owner new hires', 'agus new hires', 'sari new hires', 'arief new hires', 'owner nav', 'agus nav',
       'owner coaching roster', 'agus coaching roster', 'sari coaching roster', 'owner unit dashboard', 'agus unit dashboard',
     ]));
-    expect(after).toEqual(before);
+    /*
+     * P18.96-T6 (ADR-0173 §1): `/new-hires` lists the year's new hires by their 3M result, the cohort's among them, so the
+     * one thing the cohort's activations add there is each such row's checklist — nothing else on any walk moves.
+     */
+    const cohortIds = new Set(COHORT_HIRES.map((key) => cast[key].id));
+    const withoutCohortChecklists = (walk: Record<string, unknown>) => JSON.parse(JSON.stringify(walk, (_key, value) => (
+      value && typeof value === 'object' && 'hire' in value && 'checklist' in value
+        && cohortIds.has((value as { hire: { membershipId: string } }).hire.membershipId)
+        ? { ...value, checklist: 'the cohort’s' } : value
+    ))) as unknown;
+    expect(withoutCohortChecklists(after)).toEqual(withoutCohortChecklists(before));
   });
 
   it('P18.1-T1 a re-run writes nothing', async () => {
@@ -155,32 +165,35 @@ describe('P18.1-T1 the cohort seed — a run at 10:00 on 10 October 2026 in Jaka
     beforeAll(async () => {
       const scorecard = new LeaderScorecardService(
         wired.officePeople, wired.productionReadings,
-        new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.activationRows, wired.clock,
+        new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.memberships, wired.clock,
       );
       card = await scorecard.compute({ kpmId, timezone: TZ, meetingDate: addDays(today, 3) });
     });
     const cell = (column: 'fy' | 'ytd') => card.rows.find((r) => r.key === 'new_agent_3m')!.cells[column];
 
-    it('P18.1-T1 3M new agent % has a figure in FY: last year’s nine, every one producing in their first four months', () => {
+    /*
+     * P18.96-T6 (ADR-0171 §2): the row reads `ACTIVATION_3M_PCT` — a first sale by day 90 of the join date — not the
+     * retired four months of the file; frozen scorecards keep what they froze (ADR-0129 §7).
+     */
+    it('P18.96-T6 AC-2 3M new agent % in FY: last year’s nine new hires, every one with a first sale on their join day', () => {
       expect(cell('fy')).toEqual({ kind: 'figure', value: 100, leavesOut: [] });
     });
 
-    it('P18.1-T1 AC-2 and in YTD: Pandu producing, Kemal and Raka not — Phase 13’s hires left out, naming the months not held', () => {
-      // Their four months wait on August, the empty file, and on November and December, still to come — never on a
-      // month whose file is in.
-      expect(cell('ytd')).toEqual({ kind: 'figure', value: 33, leavesOut: ['2026-08', '2026-11', '2026-12'] });
+    it('P18.96-T6 AC-2 and in YTD: 4 of 8 decided — Indah, Dimas, Siti and Pandu activated; Kemal, Raka (day 120), Lukman, Tari not', () => {
+      // Those still in their 90 days (Novi, Wahyu, Budi, Rina, Yanti) are in neither part, and wait on no month.
+      expect(cell('ytd')).toEqual({ kind: 'figure', value: 50, leavesOut: [] });
     });
 
     it('P18.1-T1 AC-2 a meeting two weeks ago (the seed’s #13), frozen today, reads the same two cells', async () => {
       const scorecard = new LeaderScorecardService(
         wired.officePeople, wired.productionReadings,
-        new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.activationRows, wired.clock,
+        new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.memberships, wired.clock,
       );
       const thirteen = await scorecard.compute({ kpmId, timezone: TZ, meetingDate: addDays(today, -14) });
       const at = (column: 'fy' | 'ytd') => thirteen.rows.find((r) => r.key === 'new_agent_3m')!.cells[column];
       expect([at('fy'), at('ytd')]).toEqual([
         { kind: 'figure', value: 100, leavesOut: [] },
-        { kind: 'figure', value: 33, leavesOut: ['2026-08', '2026-11', '2026-12'] },
+        { kind: 'figure', value: 50, leavesOut: [] },
       ]);
     });
 

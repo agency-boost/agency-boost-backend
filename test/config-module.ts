@@ -54,6 +54,12 @@ import {
 } from '@/modules/activation/activation-template.schema';
 import { ActivationTemplateRepository } from '@/modules/activation/activation.repository';
 import { ActivationService } from '@/modules/activation/activation.service';
+import { ActivationItemRecords } from '@/modules/activation/activation-records.service';
+import { FirstSaleService } from '@/modules/activation/first-sale.service';
+import { Activation3MService } from '@/modules/activation/activation-3m.service';
+import { RoleChangeService } from '@/modules/org/role-change.service';
+import { RemovalService } from '@/modules/org/removal.service';
+import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { ProductSchema } from '@/modules/products/product.schema';
 import { KpmProductConfigSchema } from '@/modules/products/kpm-product-config.schema';
 import { KpmProductConfigRepository } from '@/modules/products/kpm-product.repository';
@@ -398,6 +404,9 @@ export function configModule(
     clock,
     // P18.5-T3: a training-linked item completes from the hire's progress.
     trainingReadings,
+    // P18.96-T4: the data-backed items read the production file and the coaching sessions.
+    productionReadings,
+    new CoachingReadings(new CoachingSessionRepository(model(CoachingSession.name, CoachingSessionSchema) as never), clock),
   );
   const activationProgress = new ActivationProgressService(
     activationRows, activation, activationEngine, memberships,
@@ -411,9 +420,30 @@ export function configModule(
     trainingProgressRows, trainingReadings, offeredTraining, training, coach, subjectReads,
     new TenantDay(kpms as never, clock), audit, clock, activationProgress,
   );
-  const newHires = new NewHiresService(
-    activationProgress, activationRows, coach, new MemberNames(memberships, users as never),
-    new TenantDay(kpms as never, clock), subjectReads, audit, clock,
+  /*
+   * P18.96-T4: each person's first sale, answered to the leads' and the production file's writes — the real one, so a
+   * spec that moves a lead to *Paid and issued* watches the membership and the checklist move, as the app does.
+   */
+  // P18.96-T6: each new hire's 3M activation, kept once decided — before a first sale, a join date or leaving moves it.
+  // *Mark left* removes the new hire through the removal's own path (no departure hook here: no calendar in these specs).
+  const leaverHistory = new MembershipHistoryRepository(model(MembershipHistory.name, MembershipHistorySchema) as never);
+  const leaverHierarchy = new HierarchyService(memberships, kpms as never, users as never, leaverHistory, clock, orgLevels);
+  const leaverRemoval = new RemovalService(
+    memberships, leaverHierarchy,
+    new RoleChangeService(memberships, leaverHierarchy, leaverHistory, users as never, audit, notifier, clock),
+    leaverHistory, audit, notifier, clock,
+  );
+  const activation3M = new Activation3MService(
+    memberships, new TenantDay(kpms as never, clock), clock, coach, audit, leaverRemoval,
+  );
+  const firstSale = new FirstSaleService(
+    memberships,
+    new LeadReadings(new LeadRepository(model(Lead.name, LeadSchema) as never), new LeadStatusRepository(leadStatuses as never), clock),
+    productionReadings,
+    new TenantDay(kpms as never, clock),
+    clock,
+    activationProgress,
+    activation3M,
   );
 
   const goals = new GoalService(
@@ -517,6 +547,8 @@ export function configModule(
     subjectReads,
     notifier,
     clock,
+    // P18.96-T4: a 1:1 finalized or logged with a new hire counts toward their *Weekly 1-on-1 check-in*.
+    activationProgress,
   );
   // P11-T10: a finalized session's print, and the reader's own coaching.
   const coachingRecord = new CoachingRecordService(
@@ -541,9 +573,11 @@ export function configModule(
     productionNames,
     audit,
     clock,
+    // P18.96-T4: a policy in the file may be a member's first sale.
+    firstSale,
   );
   // P9-T5: one figure by hand.
-  const productionCorrections = new ProductionCorrections(productionMonths, monthRows, memberships, audit, clock);
+  const productionCorrections = new ProductionCorrections(productionMonths, monthRows, memberships, audit, clock, firstSale);
   // P5-T7: the office's campaigns, and the carrier rules it is measured against.
   const campaigns = new CampaignService(
     new CampaignRepository(model(Campaign.name, CampaignSchema) as never),
@@ -604,6 +638,16 @@ export function configModule(
     subjectReads,
     // P13-T3: a lead in a hire's pipeline completes their `feature:leads` item.
     activationProgress,
+    // P18.96-T4: a sales lead at *Paid and issued* may be its owner's first sale.
+    firstSale,
+  );
+  // P18.96-T4: a data-backed item's hand tick, with its record — through the leads and the coaching sessions.
+  const activationRecords = new ActivationItemRecords(
+    activationProgress, leadRecords, coachingSession, new TenantDay(kpms as never, clock),
+  );
+  const newHires = new NewHiresService(
+    activationProgress, activationRows, coach, new MemberNames(memberships, users as never),
+    new TenantDay(kpms as never, clock), subjectReads, audit, clock, memberships, activationRecords, activation3M,
   );
   const provisioning = new ProvisioningService(
     categories as never,
@@ -740,6 +784,8 @@ export function configModule(
     ),
     subjectReads,
     campaignChaseReadings,
+    // P18.96-T5: the head's own membership, for whether they count for production yet.
+    memberships,
     // P18.9-T2: the activity cells count the office's binding.
     activityBindings,
   );
@@ -774,7 +820,7 @@ export function configModule(
   const recruitTargets = new KpmRecruitTargetRepository(model(KpmRecruitTarget.name, KpmRecruitTargetSchema) as never);
   const officePeople = new OfficePeople(
     memberships, new MemberNames(memberships, users as never), kpms as never,
-    model('CompanyModelForConfig', CompanySchema) as never, orgLevels,
+    model('CompanyModelForConfig', CompanySchema) as never, orgLevels, clock,
   );
   const carrierRules = new CarrierRules(model(QualificationRule.name, QualificationRuleSchema) as never, kpms as never);
   const kpmOverview = new KpmOverviewService(
@@ -805,7 +851,7 @@ export function configModule(
     coachingProfiles, coachingProfile, leaderNoteRows, leaderNotes,
     coachingRecord,
     calendarEntries, calendarNotices, calendar, calendarPeople, calendarLeave,
-    activationRows, activationEngine, activationProgress, newHires,
+    activationRows, activationEngine, activationProgress, newHires, firstSale, activationRecords, activation3M,
     trainingProgressRows, offeredTraining, trainingReadings, trainingProgress,
     unitDashboard,
     campaignRows, campaignChases, campaignStandings, campaignChaseReadings, campaignEvaluation, campaignAgent,
