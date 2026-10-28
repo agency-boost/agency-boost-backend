@@ -10,8 +10,9 @@ import { SEED_RATIO_DEFINITIONS } from './activity-taxonomy';
  * screens printed the stored value, so an Owner read `0.15` where the prototype and the
  * metric registry both say `15.0%`. Nothing in the value says which of the two a ratio is.
  *
- * - `percent` — the proportion × 100, to one decimal: `15.0%`.
- * - `decimal` — the number itself, to two decimals: `0.30`, `1.50`.
+ * - `percent` — the proportion × 100, **as typed** since ADR-0174 §2: `15%`, `15,5%` (it read `15.0%`, then `15,0%`);
+ *   a computed ratio beside it keeps its tenth, `14,8%`.
+ * - `decimal` — the number itself, to two decimals: `0,30`, `1,50`.
  * - `points` — percentage points either side of an even split: `±30 points`.
  *
  * The decimal places belong to the one formatter that writes them

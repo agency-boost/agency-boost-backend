@@ -35,9 +35,9 @@ export function campaignOrder(a: Orderable, b: Orderable): number {
 }
 
 /**
- * A requirement's target as words, through the shared formatters (ADR-0167 §1): *Rp 2,4 M* from sen, *90,0%*, *3*.
- * **Lossless**: a target is a rule, so one the compact form would round — *Rp 1.250.000.000* — is written in full,
- * and a percentage keeps every decimal it was set with.
+ * A requirement's target as words, through the shared formatters (ADR-0167 §1, ADR-0174): *Rp 2,4 M* from sen, *90%*,
+ * *3*. **Lossless**: a target is a rule, so one the compact form would round — *Rp 1.250.000.000* — is written in full,
+ * and a percentage keeps every decimal it was set with and no *,0* (ADR-0174 §3).
  */
 export function targetWords(metricKey: string, value: number): string {
   switch (metricByKey(metricKey)?.unit) {

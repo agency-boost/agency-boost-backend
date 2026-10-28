@@ -467,11 +467,13 @@ export {
   type KpmAnalyticsPeriod,
 } from './reporting';
 
-// Phase 18.1: the Strategic Leader Forum — how long a shared link opens, and the bounds of what leaders type.
+// Phase 18.1: the Strategic Leader Forum — how long a shared link opens, and the bounds of what leaders type; since
+// P18.97-T1, the places a Monthly Target's rate is typed and kept to.
 export {
   LEADER_MEETING_SHARE_DAYS,
   LEADER_MEETING_SHARE_TOKEN_BYTES,
   LEADER_MEETING_LIMITS,
+  LEADER_MEETING_TARGET_RATE_DECIMALS,
 } from './leader-forum';
 
 export {
@@ -537,8 +539,9 @@ export {
 /** A named template's name bounds (ADR-0115 §3; P13.2-T6, T7), which the frontend's constant is pinned to. */
 export { TEMPLATE } from './templates';
 
-// Phase 17: the candidate brief's vocabulary, the office's four pitch slots and their completion rule, and
-// the playbook a company started from the defaults is given (D-vocabulary, D-slots, OD-88).
+// Phase 17: the candidate brief's vocabulary, the office's pitch slots — four required, and since Phase 18.97
+// two optional (ADR-0177) — their completion rule and what the banner counts, and the playbook a company
+// started from the defaults is given (D-vocabulary, D-slots, OD-88).
 export {
   RECRUITMENT,
   RECRUITMENT_CANDIDATE_TYPES,
@@ -549,6 +552,8 @@ export {
   SEED_RECRUITMENT_PLAYBOOK,
   recruitmentPitchState,
   recruitmentPitchDone,
+  recruitmentPitchSummary,
+  type RecruitmentPitchSummary,
   type RecruitmentTypeCode,
   type RecruitmentMotivationCode,
   type RecruitmentHesitationCode,

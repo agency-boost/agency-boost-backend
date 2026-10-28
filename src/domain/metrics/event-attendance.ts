@@ -1,4 +1,5 @@
 import type { EventAttendanceStatus } from '@/domain/constants';
+import { rateOver } from './rate';
 
 /**
  * `EVENT_ATTENDANCE_STATUS` and `EVENT_ATTENDANCE_RATE` (P18.5-T5 AC-8; OD-31, D-status; `metrics-and-definitions.md`).
@@ -47,4 +48,17 @@ export function eventAttendanceRate(
   // Whole numbers until the one division (the exit review): `attended / n * 1000` carries the quotient's float error
   // into the rounding, and 201 of 400 read 50.2 where it is 50.25 → 50.3.
   return Math.round((attended * 1000) / statuses.length) / 10;
+}
+
+/**
+ * **`EVENT_ATTENDANCE_RATE` as a reader is shown it** (ADR-0174 §1, P18.97-T3 AC-2): a whole percent, **rounded once,
+ * from the counts** (`rateOver`) — never the tenth above rounded again, which moves a tie: 5 of 11 is 45,45%, its tenth
+ * 45,5 and that rounded 46, where rounded once it is 45. `null` exactly where the rate is: before the end, and over
+ * nobody. The tenth stays the metric's own (`metrics-and-definitions.md`); this is what the API serves for display.
+ */
+export function eventAttendanceRateShown(
+  statuses: readonly EventAttendanceStatus[], ended: boolean,
+): number | null {
+  if (!ended || statuses.length === 0) return null;
+  return rateOver(statuses.filter((s) => s === 'attended').length, statuses.length).pct;
 }

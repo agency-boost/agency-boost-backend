@@ -55,6 +55,14 @@ const config: Config = {
     // read whose data, so it is permissions code held to the permissions floor, although it lives in
     // `modules/org` beside the tree — whose own floor is lower, and says why.
     './src/modules/org/coach-resolver.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    // P18.97-T8 L2 (the Phase 18.97 exit permission review): which memberships a reader may see — the roster, one
+    // member's read, their reports, the *Rejoined* mark, the tree and a removal's destination all narrow through it —
+    // and who administers the office, the Owner's grant and revoke. Permissions code, held where the resolver is
+    // although `modules/org` around them is not. `reader-visibility.ts` was `visibleTo` and its compositions inside
+    // `directory.service.ts`, whose own floor is the module's; `admin-delegation.service.ts` stood at 77% branch,
+    // its gaps an admin nobody granted (now tested) and two arms no input reaches (removed).
+    './src/modules/org/reader-visibility.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/org/admin-delegation.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     // P11-T3: the §3.5 seam every coach read of a coachee's data calls — who read whose data, and
     // the self-read it skips. It decides what the record of disclosures holds, so it is held where
     // the resolver is, although `modules/audit` around it runs under the global floor.

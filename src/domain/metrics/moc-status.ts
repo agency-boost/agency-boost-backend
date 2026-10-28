@@ -142,9 +142,9 @@ export function mocStatus(rule: MocRule, inputs: Readonly<Record<string, MocInpu
 const SYMBOLS: Readonly<Record<string, string>> = { gte: '≥', gt: '>', lte: '≤', lt: '<' };
 
 /**
- * A threshold as the column's tooltip writes it, through the shared formatters (ADR-0167 §1): *Rp 200 jt*, *75,0%*,
- * *5* — where the prototype wrote *Rp200M*, its `M` a million. **Lossless**: a threshold is a rule, so one the
- * compact form would round is written in full, and a percentage keeps every decimal it was set with.
+ * A threshold as the column's tooltip writes it, through the shared formatters (ADR-0167 §1, ADR-0174): *Rp 200 jt*,
+ * *75%*, *5* — where the prototype wrote *Rp200M*, its `M` a million. **Lossless**: a threshold is a rule, so one the
+ * compact form would round is written in full, and a percentage keeps every decimal it was set with and no *,0*.
  */
 function thresholdText(metricKey: string, value: number): string {
   switch (metricByKey(metricKey)?.unit) {
@@ -177,7 +177,7 @@ function groupText(rule: MocRule, criteria: readonly MocRuleCriterion[]): string
 /**
  * **The MOC column's tooltip** (`KPM_Owner.html:1248`), composed from the company's `moc` rules rather than
  * typed (item 8 of the Phase 18 exit review): a line per rule, in the order given — *"AAB: Net APE ≥ Rp 200 jt AND
- * Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75,0%."* — an OR of groups with each group of several criteria in
+ * Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%."* — an OR of groups with each group of several criteria in
  * brackets, as the prototype writes the AB's. A carrier that changes a threshold changes the sentence with it.
  * No rule, no sentence: `''`.
  */

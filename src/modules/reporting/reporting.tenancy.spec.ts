@@ -106,6 +106,29 @@ describe('the Owner’s reporting, isolated (invariant §1)', () => {
       .toEqual([{ kpmId: KPM_B, target: 99 }]);
   });
 
+  it('P18.97-T3 AC-5, AC-10 every AB on a board is the reader’s office’s own; another office’s AB who leads nobody is never listed', async () => {
+    // 0555 gains an AB under its root who leads nobody: a *No team* row of 0555's.
+    const lonely = new mongoose.Types.ObjectId();
+    await db().collection('memberships').insertOne({
+      _id: lonely, kpmId: KPM_B, userId: String(new mongoose.Types.ObjectId()), agentCode: 'BLONE', agentSeq: 500, leaderCode: 'BLONE001',
+      orgLevelId: 'x', orgLevelCode: 'AB', role: 'ab', leaderId: office.id.B_AB, ancestorIds: [office.id.B_AB], depth: 1,
+      status: 'active', joinedAt: new Date('2026-01-05T02:00:00Z'), deletedAt: null,
+    });
+
+    const of0417 = (await wired.kpmOverview.read(office.as('OWNER'))).coaching.leaderboard;
+    expect(of0417.map((row) => row.membershipId).sort())
+      .toEqual([office.id.OWNER, office.id.ADMIN, office.id.AGUS, office.id.PEER_AB].sort());
+    expect(of0417.find((row) => !row.leads)!.membershipId).toBe(office.id.ADMIN);
+
+    const of0555 = (await wired.kpmOverview.read(office.ownerOfB())).coaching.leaderboard;
+    expect(of0555.map((row) => [row.membershipId, row.leads, row.pct])).toEqual([
+      [office.id.B_AB, true, expect.any(Number)], [String(lonely), false, null],
+    ]);
+    // The analytics' served shares stay each office's own: 0555's twenty-odd producers reach none of 0417's rows.
+    const analytics = await wired.kpmAnalytics.read(office.as('OWNER'));
+    expect(analytics.total).toMatchObject({ activeAgents: 5, activePct: 31, manpower: { total: 16 } });
+  });
+
   it('P18-T1 AC-12 the target’s repository refuses a read or a write with no office in the context', async () => {
     const nobody = RequestContext.platform('root');
     await expect(wired.recruitTargets.standingFor(nobody, '2026-09')).rejects.toBeInstanceOf(MissingTenantContextError);

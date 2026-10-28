@@ -81,6 +81,12 @@ describe('the activation’s arithmetic (Phase 13)', () => {
       expect(progress.aspects[0].items.map((i) => [i.item.code, i.done])).toEqual([['A1', true], ['A2', true]]);
     });
 
+    it('P18.97-T3 F-254 rounds an exact half up in integers: 23 of 40 items is 58%, which Math.round read 57', () => {
+      const forty = [{ code: 'X', label: '1. X', items: Array.from({ length: 40 }, (_, i) => ({ code: `X${i}` })) }];
+      const progress = progressOf(forty, new Set(Array.from({ length: 23 }, (_, i) => `X${i}`)));
+      expect([progress.done, progress.total, progress.pct]).toEqual([23, 40, 58]);
+    });
+
     it('P13-T2 AC-5 a version with no items reads 0%, never a division by zero', () => {
       expect(progressOf([], new Set()).pct).toBe(0);
     });

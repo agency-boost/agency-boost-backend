@@ -1,5 +1,6 @@
 import { PERFORMANCE, TIME } from '@/domain/constants';
 import { goalSet } from '@/domain/metrics/goal-set';
+import { wholePercent } from '@/domain/metrics/rate';
 import { cascadeCounts, type CascadeCounts } from '@/modules/goals/goal-cascade';
 import { countOf, type CascadeBinding } from '@/modules/config/activity-binding';
 
@@ -40,7 +41,8 @@ export function periodFigures(
   return {
     targetMinor,
     actualMinor,
-    attainmentPct: Math.min(PERFORMANCE.ATTAINMENT_PCT_CAP, Math.round((actualMinor / targetMinor) * 100)),
+    // Half up in integers (P18.97-T3, parity F-254): Rp 23 jt of Rp 40 jt is 58%, which the float read 57.
+    attainmentPct: Math.min(PERFORMANCE.ATTAINMENT_PCT_CAP, wholePercent(actualMinor, targetMinor)),
     gapMinor: gap,
     overMinor: Math.max(0, actualMinor - targetMinor),
     policiesNeeded: caseSizeMinor > 0 ? Math.ceil(gap / caseSizeMinor) : null,
@@ -379,7 +381,7 @@ export function activityTargets(
       logged: n,
       target,
       attainmentPct: target !== null && target > 0
-        ? Math.min(PERFORMANCE.ATTAINMENT_PCT_CAP, Math.round((n / target) * 100)) : null,
+        ? Math.min(PERFORMANCE.ATTAINMENT_PCT_CAP, wholePercent(n, target)) : null,
       targetMet: target !== null && n >= target,
     };
   };

@@ -1,8 +1,7 @@
 import mongoose from 'mongoose';
-import { MonthlyAgentData } from '@/modules/production/monthly-agent-data.schema';
-import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
 import { clearCollections, startMongo, stopMongo } from '../../../../test/mongo';
 import { configModule } from '../../../../test/config-module';
+import { scorecardServiceOf } from '../../../../test/forum-office';
 import { LeaderScorecardService } from './scorecard.service';
 
 /** 10:00 on 14 September 2026 in Jakarta, a meeting in two days: the live scorecard every read computes. */
@@ -16,21 +15,25 @@ const M = 1_000_000 * 100;
 const MONTHS = Array.from({ length: 21 }, (_, i) => new Date(Date.UTC(2025, i, 1)).toISOString().slice(0, 7));
 
 /** Collections every row of which belongs to one office: a scan of one is a read of every office. */
-const TENANT_COLLECTIONS = new Set(['memberships', 'monthlyAgentData', 'activationProgress', 'auditLog']);
+const TENANT_COLLECTIONS = new Set(['memberships', 'monthlyAgentData', 'activationProgress', 'auditLog', 'dataUploadBatches']);
 
 interface Query { collection: string; method: string; args: unknown[] }
 
 /**
  * **P18.1-T2 AC-4 — the scorecard in a fixed number of queries whatever the office's size** (`performance-and-scale.md`;
  * the forum's part of P18.1-T4 AC-3, whose meeting read adds the meeting's own): an office of **500 members** beside
- * one of **50**, each with every month from January last year on file and an activation for every fourth Agent.
+ * one of **50**, each with every month from January last year on file, an upload a month, and an activation for every
+ * fourth Agent.
  *
  * - the same queries for 500 as for 50, none per member, bounded;
  * - no `COLLSCAN` on a tenant collection: every query it sends is explained;
  * - nothing written: no audit row, no §3.5 entry;
  * - its p95 of twenty at 500, printed for `performance-and-scale.md`.
+ *
+ * *Measured again 2026-10-28 (P18.97-T1 AC-21; ADR-0175):* the reference slide's table adds **two reads** — last year's
+ * year to date for *YTD {Y−1}*, and the latest upload for *AS OF* — and the bound moves from 10 to 12 with them.
  */
-describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4)', () => {
+describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4, P18.97-T1 AC-21)', () => {
   let wired: ReturnType<typeof configModule>;
   let scorecard: LeaderScorecardService;
   const compute = (kpmId: string) => scorecard.compute({ kpmId, timezone: 'Asia/Jakarta', meetingDate: MEETING });
@@ -49,6 +52,7 @@ describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4)', () 
     const members: Record<string, unknown>[] = [];
     const rows: Record<string, unknown>[] = [];
     const activations: Record<string, unknown>[] = [];
+    const batches: Record<string, unknown>[] = [];
     const cell = (value: number) => ({ value, provenance: 'imported', sourceBatchId: null });
     let seq = 0;
     const office = (kpmId: string, size: number) => {
@@ -91,6 +95,19 @@ describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4)', () 
     };
     office(KPM_A, 500);
     office(KPM_B, 50);
+    // An upload a month, on the 5th of the next, as the import writes one: what *AS OF* reads (P18.97-T1 AC-13).
+    for (const kpmId of [KPM_A, KPM_B]) {
+      for (const [i, month] of MONTHS.entries()) {
+        if (month > '2026-09' || month === '2026-08') continue;
+        const at = new Date(`${MONTHS[i + 1]}-05T03:00:00Z`);
+        batches.push({
+          kpmId, month, status: 'committed', filename: `${month}.csv`, fileSha256: `${kpmId}-${month}`, templateVersion: 1,
+          encoding: 'utf-8', delimiter: ',', basedOnRevision: 0, monthRevision: 1, rowCount: 1, writtenRowCount: 1, cellCount: 1,
+          issueCount: 0, startedAt: at, committedAt: at, deletedAt: null,
+        });
+      }
+    }
+    await db.collection('dataUploadBatches').insertMany(batches);
     await db.collection('users').insertMany(users);
     await db.collection('memberships').insertMany(members);
     await db.collection('monthlyAgentData').insertMany(rows);
@@ -102,14 +119,11 @@ describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4)', () 
      * the reads use are synced, then both offices are read once, so the captures below hold the reads and nothing else.
      */
     await Promise.all(mongoose.modelNames().map((name) => mongoose.model(name).init()));
-    await Promise.all(['Membership', 'MonthlyAgentData', 'ActivationProgress', 'User', 'AuditLog']
+    await Promise.all(['Membership', 'MonthlyAgentData', 'ActivationProgress', 'User', 'AuditLog', 'DataUploadBatch']
       .filter((name) => mongoose.modelNames().includes(name))
       .map((name) => mongoose.model(name).syncIndexes()));
 
-    scorecard = new LeaderScorecardService(
-      wired.officePeople, wired.productionReadings,
-      new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.memberships, wired.clock,
-    );
+    scorecard = scorecardServiceOf(wired);
     await compute(KPM_A);
     await compute(KPM_B);
   }, 600_000);
@@ -131,20 +145,24 @@ describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4)', () 
     }
   };
 
-  it('P18.1-T2 AC-4 sends the same queries for 50 members as for 500: none per member', async () => {
+  it('P18.1-T2 AC-4, P18.97-T1 AC-21 sends the same queries for 50 members as for 500, the two new reads among them: none per member', async () => {
     const large = await counted(() => compute(KPM_A));
     const small = await counted(() => compute(KPM_B));
     const shape = (qs: Query[]) => qs.map((q) => `${q.collection}.${q.method}`).sort();
     expect(shape(large)).toEqual(shape(small));
     // eslint-disable-next-line no-console
     console.log(`  scorecard: ${large.length} queries at 500 and ${small.length} at 50 — ${shape(large).join(', ')}`);
-    expect(large.length).toBeLessThanOrEqual(10);
+    expect(large.length).toBeLessThanOrEqual(12);
+    // The two reads the reference slide's table adds: *AS OF*'s, and a third year to date (*YTD {Y−1}*).
+    expect(large.filter((q) => q.collection === 'dataUploadBatches')).toHaveLength(1);
+    // July's file, uploaded on 5 August: August's is not held, and September's is not in by 14 September.
+    expect((await compute(KPM_A)).asOf).toBe('2026-08-05');
     // A read of the office's records: nothing written, nobody's disclosure recorded.
     expect(large.filter((q) => q.collection === 'auditLog' || !['find', 'findOne', 'aggregate', 'countDocuments'].includes(q.method)))
       .toEqual([]);
   });
 
-  it('P18.1-T2 AC-4 scans no tenant collection: every query explained', async () => {
+  it('P18.1-T2 AC-4, P18.97-T1 AC-21 scans no tenant collection: every query explained', async () => {
     const db = mongoose.connection.db!;
     const scans: string[] = [];
     for (const q of await counted(() => compute(KPM_A))) {
@@ -161,7 +179,7 @@ describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4)', () 
     expect(scans).toEqual([]);
   }, 120_000);
 
-  it('P18.1-T2 AC-4 computes the 500-member scorecard well inside the meeting read’s 3 s; its p95 of twenty recorded', async () => {
+  it('P18.1-T2 AC-4, P18.97-T1 AC-21 computes the 500-member scorecard well inside the meeting read’s 3 s; its p95 of twenty recorded', async () => {
     await compute(KPM_A);
     const times: number[] = [];
     for (let i = 0; i < 20; i += 1) {

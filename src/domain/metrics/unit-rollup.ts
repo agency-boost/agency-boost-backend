@@ -1,4 +1,5 @@
 import { PERFORMANCE } from '@/domain/constants';
+import { wholePercent } from './rate';
 
 /**
  * **The Unit Dashboard's rollups** (Phase 15, D-metrics; `metrics-and-definitions.md`, *the rollup rule*,
@@ -26,7 +27,10 @@ export interface RolledUpGoal {
   targetMinor: number | null;
   /** The sum of the actuals the rows hold; `null` when none holds one. */
   actualMinor: number | null;
-  /** `APE_ATTAINMENT_PCT` of the two sums, capped as the row's is; `null` without both, or on a zero target. */
+  /**
+   * `APE_ATTAINMENT_PCT` of the two sums, capped as the row's is, half up in integers (`wholePercent`; P18.97-T3,
+   * parity F-254); `null` without both, or on a zero target.
+   */
   attainmentPct: number | null;
   /** How many rows hold no actual — named in the total's tooltip, never counted as 0. */
   missing: number;
@@ -46,7 +50,7 @@ export function rollUpGoal(rows: readonly GoalFigure[]): RolledUpGoal {
     targetMinor,
     actualMinor,
     attainmentPct: targetMinor !== null && targetMinor > 0 && actualMinor !== null
-      ? Math.min(PERFORMANCE.ATTAINMENT_PCT_CAP, Math.round((actualMinor / targetMinor) * 100))
+      ? Math.min(PERFORMANCE.ATTAINMENT_PCT_CAP, wholePercent(actualMinor, targetMinor))
       : null,
     missing: rows.filter((row) => row.actualMinor === null).length,
   };

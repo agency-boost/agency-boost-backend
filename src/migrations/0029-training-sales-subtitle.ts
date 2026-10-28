@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import {
-  SEED_TRAINING_CATEGORIES, SEEDED_SALES_SUBTITLE_BEFORE_OD_150,
+  SEEDED_SALES_SUBTITLE_BEFORE_OD_150, SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97,
 } from '@/domain/constants/training-taxonomy';
 
 /**
@@ -22,7 +22,8 @@ import {
  */
 export async function up(db: mongoose.mongo.Db): Promise<{ categories: number; snapshots: number; templates: number }> {
   const before = SEEDED_SALES_SUBTITLE_BEFORE_OD_150;
-  const after = SEED_TRAINING_CATEGORIES.find((c) => c.code === 'SALES')!.description;
+  // The words OD-150 gave, pinned: the seed's own moved on in P18.97-T4, and migration 0045 takes them from here.
+  const after = SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97.SALES;
 
   const categories = await db.collection('trainingCategories').updateMany(
     { code: 'SALES', description: before },

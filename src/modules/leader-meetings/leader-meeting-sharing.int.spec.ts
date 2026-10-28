@@ -103,7 +103,7 @@ describe('a meeting’s shared link (P18.1-T3, exit test 3)', () => {
     for (const res of [
       await http().post(`/leader-meetings/shared/${token}/action-items`),
       await http().patch(`/leader-meetings/shared/${token}`).send({ title: 'x', version: 1 }),
-      await http().put(`/leader-meetings/shared/${token}/monthly-targets/ape`).send({ value: 'x', version: 0 }),
+      await http().put(`/leader-meetings/shared/${token}/monthly-targets/ape`).send({ rate: 1, version: 0 }),
     ]) {
       expect(res.status).toBe(404);
     }

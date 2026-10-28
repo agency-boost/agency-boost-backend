@@ -11,7 +11,7 @@ import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import type { MembershipDocument } from './membership.schema';
 import { MemberDeparture } from './member-departure.port';
-import { visibleTo } from './directory.service';
+import { visibleTo } from './reader-visibility';
 import { RoleChangeService, TeamMember } from './role-change.service';
 
 /** Where the reports of somebody being removed are to go. */

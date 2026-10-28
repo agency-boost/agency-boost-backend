@@ -39,6 +39,8 @@ import { up as firstStatusWording } from './0038-first-status-wording';
 import { up as productNamePlaceholder } from './0039-product-name-placeholder';
 import { up as membershipJoinDate } from './0040-membership-join-date';
 import { up as membershipFirstSale } from './0042-membership-first-sale';
+import { up as leaderMeetingTargetRates } from './0043-leader-meeting-target-rates';
+import { up as trainingCategoryDescriptions } from './0045-training-category-descriptions';
 
 /*
  * The list on its own (P18.7-T3), so a spec can run every migration against an empty database without
@@ -101,4 +103,9 @@ export const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Dat
   // P18.96-T4 (ADR-0171 §1): every membership's first sale, from its leads and the production file. No 0041: T3, which
   // held the number, needed no migration — the list runs in order and keeps no ledger, so the gap changes nothing.
   ['0042-membership-first-sale', membershipFirstSale],
+  // P18.97-T1 (ADR-0175 §4, UI-008): the forum's typed targets as rates per unit — "{n} ({r} @ unit)" the rate r, TBD none.
+  ['0043-leader-meeting-target-rates', leaderMeetingTargetRates],
+  // P18.97-T4 (ADR-0176 §9, UI-031): a real line for each default training category, where the seeded words are still held.
+  // No 0044: it was held for P18.97-T1's frozen scorecards, which are read tolerantly and need none (AC-19).
+  ['0045-training-category-descriptions', trainingCategoryDescriptions],
 ];

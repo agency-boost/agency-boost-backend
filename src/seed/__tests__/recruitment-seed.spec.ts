@@ -96,15 +96,18 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
   });
 
   describe('the pitch documents', () => {
-    it('P17-T7 AC-1 0417 shows the prototype’s pitch: 2/4 confirmed, uploaded, two missing — the ring 1/4', async () => {
+    it('P17-T7 AC-1, P18.97-T5 AC-5 0417 shows the prototype’s pitch — partial, uploaded, two missing, the ring 1/4 — and its Company Profile', async () => {
       const view = await wired.recruitmentPitch.read(await as('rina@kpm0417.test'));
       expect(view.slots.map((s) => [s.slot, s.state, s.file?.name ?? null])).toEqual([
         ['opportunity', 'partial', 'Opportunity_Overview_v3.pdf'],
         ['proof', 'uploaded', 'Proof_and_Credibility_2026.pdf'],
         ['faq', 'missing', null],
         ['howtojoin', 'missing', null],
+        ['company', 'uploaded', 'Company_Profile_2026.pdf'],
+        ['agency', 'missing', null],
       ]);
       expect(view.slots[0].checklist.filter((i) => i.ticked).map((i) => i.code)).toEqual(['career-path', 'support']);
+      // The banner counts the four required alone: the Company Profile moves nothing (ADR-0177 §3).
       expect(view.summary).toEqual({ done: 1, total: 4, missing: 2, unconfirmed: 1 });
     });
 
@@ -121,18 +124,52 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
       expect(row!.confirmations.map((c: { item: string; byMembershipId: string }) => [c.item, c.byMembershipId]))
         .toEqual([['career-path', owner.membershipId], ['support', admin.membershipId]]);
       expect(await col('auditLog').countDocuments({ action: 'recruitment_pitch.ticked', kpmId: owner.kpmId })).toBe(2);
-      expect(await col('auditLog').countDocuments({ action: 'recruitment_pitch.attached', kpmId: owner.kpmId })).toBe(2);
+      // Opportunity Overview, Proof & Credibility and the Company Profile, each attached by the Owner.
+      expect(await col('auditLog').countDocuments({ action: 'recruitment_pitch.attached', kpmId: owner.kpmId })).toBe(3);
     });
 
-    it('P17-T7 AC-1 0555 shows all four, Opportunity Overview’s four ticked: 4/4, complete', async () => {
+    it('P17-T7 AC-1, P18.97-T5 AC-5 0555 shows all four, Opportunity Overview’s four ticked — 4/4, complete — and both optional documents', async () => {
       const view = await wired.recruitmentPitch.read(await as('agent@kpm0555.test'));
-      expect(view.slots.map((s) => s.state)).toEqual(['complete', 'uploaded', 'uploaded', 'uploaded']);
+      expect(view.slots.map((s) => [s.slot, s.state, s.file?.name ?? null])).toEqual([
+        ['opportunity', 'complete', 'Kelapa_Gading_Opportunity_Overview.pdf'],
+        ['proof', 'uploaded', 'Kelapa_Gading_Proof_and_Credibility.pdf'],
+        ['faq', 'uploaded', 'Kelapa_Gading_FAQ.pdf'],
+        ['howtojoin', 'uploaded', 'Kelapa_Gading_How_to_Join.pdf'],
+        ['company', 'uploaded', 'Kelapa_Gading_Company_Profile.pdf'],
+        ['agency', 'uploaded', 'Kelapa_Gading_Agency_Profile.pdf'],
+      ]);
       expect(view.summary).toEqual({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
     });
 
-    it('P17-T7 AC-1 0701 has none: 0/4', async () => {
+    it('P17-T7 AC-1 0701 has none: 0/4, and its two optional slots empty', async () => {
       const view = await wired.recruitmentPitch.read(await as('agent@kpm0701.test'));
       expect(view.summary).toEqual({ done: 0, total: 4, missing: 4, unconfirmed: 0 });
+      expect(view.slots.map((s) => [s.slot, s.required, s.state])).toEqual([
+        ['opportunity', true, 'missing'], ['proof', true, 'missing'], ['faq', true, 'missing'], ['howtojoin', true, 'missing'],
+        ['company', false, 'missing'], ['agency', false, 'missing'],
+      ]);
+    });
+
+    it('P18.97-T5 AC-5 0417’s Company Profile is uploaded and its Agency Profile empty; 0555 holds both — the seed’s optional documents', async () => {
+      expect(RECRUITMENT_SEED_PITCH['0417'].filter((s) => s.slot === 'company' || s.slot === 'agency').map((s) => s.slot)).toEqual(['company']);
+      expect(RECRUITMENT_SEED_PITCH['0555'].filter((s) => s.slot === 'company' || s.slot === 'agency').map((s) => s.slot)).toEqual(['company', 'agency']);
+      const rina = await as('rina@kpm0417.test');
+      const company = (await wired.recruitmentPitch.read(rina)).slots.find((s) => s.slot === 'company')!;
+      expect(company).toMatchObject({ required: false, state: 'uploaded', version: 1, checklist: [] });
+      expect(company.file!.uploadedOn).toBe(localDayOf(new Date(clock.now().getTime() - 33 * DAY_MS), 'Asia/Jakarta'));
+      // It opens for every member, as the four do; the empty Agency Profile has nothing to open.
+      expect((await wired.recruitmentPitch.url(rina, 'company')).url).toContain('/recruitment-pitch/company-demonstration');
+      await expect(wired.recruitmentPitch.url(rina, 'agency')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('P18.97-T5 AC-4 every seeded file is a one-page PDF under 1 KB, its size the one storage reported — which a card reads “< 1 KB”', async () => {
+      const rows = await col('kpmRecruitmentPitchDocuments').find({}).toArray();
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        const stored = await storage.describe(row.storageKey);
+        expect([row.slot, row.bytes]).toEqual([row.slot, stored!.bytes]);
+        expect([row.slot, row.bytes < 1024]).toEqual([row.slot, true]);
+      }
     });
 
     it('D-seed every file is stored in its office’s own folder, a one-page PDF naming its slot and saying it is a demonstration, registered as the office’s confirmed asset', async () => {

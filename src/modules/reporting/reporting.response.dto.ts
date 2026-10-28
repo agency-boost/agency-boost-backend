@@ -102,9 +102,19 @@ class OverviewEngagementDto {
 }
 
 class LeaderboardRowDto extends PersonDto implements OverviewLeader {
-  @ApiProperty({ description: 'Everybody below them now, at any depth.' }) teamSize!: number;
+  @ApiProperty({ description: 'Everybody below them now, at any depth; 0 for an AB who leads nobody.' }) teamSize!: number;
   @ApiProperty({ description: 'Of those, how many they led a 1:1 with in the last 7 days.' }) coached!: number;
-  @ApiProperty({ type: Number, nullable: true, description: '`LEADER_COACHING_FREQUENCY`, a whole percent.' }) pct!: number | null;
+  @ApiProperty({
+    type: Number, nullable: true,
+    description: '`LEADER_COACHING_FREQUENCY`, a whole percent rounded half up in integers; `null` for an AB who leads nobody — '
+      + 'no rate, never 0%.',
+  })
+  pct!: number | null;
+
+  @ApiProperty({
+    description: 'They have an active direct report (ADR-0087). `false` is an AB who leads nobody: listed last, read as *No team*.',
+  })
+  leads!: boolean;
 }
 
 class OverviewCoachingDto {
@@ -112,7 +122,8 @@ class OverviewCoachingDto {
   @ApiProperty({ type: RateDto, description: 'The same over the last 30 days.' }) coverage30d!: Rate;
   @ApiProperty({
     type: [LeaderboardRowDto],
-    description: 'Every AB who leads somebody, lowest share first. The whole ranking: the card shows four and expands.',
+    description: 'Every member of the `ab` class: those who lead somebody lowest share first, then those who lead nobody '
+      + '(`leads: false`), A to Z. The whole ranking: the card shows four and expands.',
   })
   leaderboard!: OverviewLeader[];
 }
@@ -245,6 +256,13 @@ class AnalyticsFiguresDto implements Figures {
   })
   activeAgents!: number | null;
 
+  @ApiProperty({
+    type: Number, nullable: true, example: 68,
+    description: '*Producing this month*’s share: `activeAgents` over `manpower.total`, a whole percent rounded half up in '
+      + 'integers (`rateOver`); `null` while the month is not uploaded, or over nobody.',
+  })
+  activePct!: number | null;
+
   @ApiProperty({ type: AnalyticsLeadsDto, description: 'As they stood at the period’s end, over the members it had then.' })
   leads!: Figures['leads'];
 
@@ -330,8 +348,8 @@ export class KpmAnalyticsDto implements KpmAnalyticsView {
   @ApiProperty({ example: '2026-10', description: 'The period’s month.' }) month!: string;
   @ApiProperty({ type: ReportingThresholdsDto }) thresholds!: { statusSplitPct: number };
   @ApiProperty({
-    example: 'AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75,0%.\nAB: (Net APE ≥ Rp 600 jt AND '
-      + 'Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75,0%) OR Direct AB (AB on AB) ≥ 5.',
+    example: 'AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\nAB: (Net APE ≥ Rp 600 jt AND '
+      + 'Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
     description: 'The MOC column’s tooltip, composed from the company’s MOC rules: a line per rule, the junior rung '
       + 'first, separated by `\\n`. Empty when the company has none.',
   })

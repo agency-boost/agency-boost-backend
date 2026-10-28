@@ -4,12 +4,10 @@ import { RequestContext } from '@/common/context/request-context';
 import { addDays } from '@/common/time/local-day';
 import { cohortCompletionRate, lastFinishedYear } from '@/domain/metrics/activation-completion-rate';
 import { activationEndsOn, activationState } from '@/modules/activation/activation-rules';
-import { MonthlyAgentData } from '@/modules/production/monthly-agent-data.schema';
-import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
-import { LeaderScorecardService } from '@/modules/leader-meetings/scorecard/scorecard.service';
 import type { ComputedScorecard } from '@/modules/leader-meetings/scorecard/scorecard.types';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
+import { scorecardServiceOf } from '../../../test/forum-office';
 import { COHORT_HIRES, seedActivationCohort, type CohortSeed } from '../cohort-fixture';
 import { seedObjectId } from '../coaching-fixture';
 import { seedDemo } from '../demo';
@@ -163,10 +161,7 @@ describe('P18.1-T1 the cohort seed — a run at 10:00 on 10 October 2026 in Jaka
   describe('what a meeting in three days reads (the seed’s #14)', () => {
     let card: ComputedScorecard;
     beforeAll(async () => {
-      const scorecard = new LeaderScorecardService(
-        wired.officePeople, wired.productionReadings,
-        new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.memberships, wired.clock,
-      );
+      const scorecard = scorecardServiceOf(wired);
       card = await scorecard.compute({ kpmId, timezone: TZ, meetingDate: addDays(today, 3) });
     });
     const cell = (column: 'fy' | 'ytd') => card.rows.find((r) => r.key === 'new_agent_3m')!.cells[column];
@@ -185,10 +180,7 @@ describe('P18.1-T1 the cohort seed — a run at 10:00 on 10 October 2026 in Jaka
     });
 
     it('P18.1-T1 AC-2 a meeting two weeks ago (the seed’s #13), frozen today, reads the same two cells', async () => {
-      const scorecard = new LeaderScorecardService(
-        wired.officePeople, wired.productionReadings,
-        new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.memberships, wired.clock,
-      );
+      const scorecard = scorecardServiceOf(wired);
       const thirteen = await scorecard.compute({ kpmId, timezone: TZ, meetingDate: addDays(today, -14) });
       const at = (column: 'fy' | 'ytd') => thirteen.rows.find((r) => r.key === 'new_agent_3m')!.cells[column];
       expect([at('fy'), at('ytd')]).toEqual([
@@ -199,13 +191,15 @@ describe('P18.1-T1 the cohort seed — a run at 10:00 on 10 October 2026 in Jaka
 
     it('P18.1-T1 the rest of the scorecard has the figures the seed’s files give it', () => {
       const kinds = Object.fromEntries(card.rows.map((r) => [r.key, Object.values(r.cells).map((x) => x.kind).join(' ')]));
+      // P18.97-T1 AC-20: last year is on file every month (`reporting-fixture.ts`), so *YTD {Y−1}* reads figures too.
       expect(kinds).toMatchObject({
-        ape: 'figure figure figure figure figure',
-        manpower: 'figure figure figure figure figure',
-        flc: 'pending pending pending pending pending',
-        producing_agents: 'figure figure blocked blocked blocked',
-        new_agent_3m: 'figure figure blocked blocked blocked',
-        average_case_size: 'figure figure blocked blocked blocked',
+        ape: 'figure figure figure figure figure figure',
+        manpower: 'figure figure figure figure figure figure',
+        flc: 'pending pending pending pending pending pending',
+        producing_agents: 'figure figure figure blocked blocked blocked',
+        new_agent_3m: 'figure figure figure blocked blocked blocked',
+        cases_per_producing_agent: 'figure figure figure blocked blocked blocked',
+        average_case_size: 'figure figure figure blocked blocked blocked',
       });
       // A YTD cell names the month it leaves out: August, the month before last, empty.
       expect(card.rows.find((r) => r.key === 'case_submission')!.cells.ytd).toMatchObject({ kind: 'figure', leavesOut: ['2026-08'] });

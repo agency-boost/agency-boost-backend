@@ -78,6 +78,14 @@ describe('COACHING_COVERAGE (§A.3, P11-T10 AC-5)', () => {
     expect(coverage(eight, [held('e0', 0)])[0].pct).toBe(13);
   });
 
+  it('P18.97-T3 F-254 rounds an exact half up in integers: 23 of 40 is 58%, which Math.round(23 / 40 * 100) reads 57', () => {
+    const forty = Array.from({ length: 40 }, (_, i) => `f${i}`);
+    const [week] = coverage(forty, forty.slice(0, 23).map((id) => held(id, 2)), null);
+
+    expect(Math.round((23 / 40) * 100)).toBe(57);
+    expect(week).toEqual({ windowDays: 7, coached: 23, members: 40, pct: 58 });
+  });
+
   it('P11-T10 AC-5 counts finalized sessions only — a reopened one keeps counting from its date, a draft never', () => {
     const [week] = coverage(['a', 'b', 'c'], [
       held('a', 2, 'reopened'),

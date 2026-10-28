@@ -152,6 +152,16 @@ export class DirectoryMemberDto implements DirectoryMember {
   @ApiProperty({ type: String, nullable: true })
   removedAt!: string | null;
 
+  @ApiProperty({
+    type: String, nullable: true, example: '2026-09-30',
+    description:
+      'The office date the person **came back** to this office, if they did: on a live membership that follows a '
+      + 'removed one of the same person, its own join date — the directory’s *Rejoined*; on a removed membership the '
+      + 'person has since returned from, the later membership’s join date — *Rejoined {date}*. `null` otherwise, and '
+      + 'while the later membership is pending. Read only from memberships this reader may see.',
+  })
+  rejoinedOn!: string | null;
+
   /*
    * *Last activity* and *Last coached* (D-directory): on every row of `GET /members` — the roster — and on no
    * other read of a member, which is why they are optional here. The page's read records one §3.5 entry per

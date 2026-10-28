@@ -77,3 +77,18 @@ is no `0041`: Phase 18.96-T3 held the number and needed no migration.
 *Both, the permission review of 2026-10-27:* a value an Owner typed that happens to equal the seeded one — *Not
 approached* for 0038, exactly *"{name} (nama kami)"* for 0039 — cannot be told from it and is rewritten too. Accepted:
 the words are the default's own.
+`0043-leader-meeting-target-rates` (Phase 18.97, P18.97-T1 AC-11) prints `{ meetings, rates, none, kept, current }`: the
+forum's meetings whose *Monthly Target* cells it read, and each cell's reading — a rate where it read *"{n} ({r} @ unit)"*
+(the rate *r*, in sen for *APE*, ADR-0175 §4), no target for *TBD* or an empty cell, the text kept as typed for anything
+else — and the cells already a rate. Only the five rows that take one; a *New AA* cell, the scorecard, the version and
+every timestamp are left as they are. A second run reads every cell as `current`. No frozen scorecard is migrated:
+it is read tolerantly and no key of it is renamed (ADR-0175 §8, P18.97-T1 AC-19), so the number held for that, `0044`,
+goes unused.
+`0045-training-category-descriptions` (Phase 18.97, P18.97-T4 AC-9) prints `{ categories, snapshots, templates }`: the
+training categories given their one line of description (ADR-0176 §9, UI-031) — Sales where it still read exactly
+*"Structured modules — tracked here."*, and *Product*, *Recruiting*, *Team Management*, *Soft Skills* and *Company and
+KPM* where they still had none and had never been edited (version 1), archived rows included — then each office's newest
+snapshot rewritten the same way, and the `training_taxonomy` company templates, draft and published, whose Sales still
+held the seeded sentence (the Template company's *Default template* among them). An office's own words, a description an
+Owner cleared, and a template somebody edited are not touched. No version moves. A second run writes none. There is
+no `0044`: it was held for P18.97-T1's frozen scorecards, which are read tolerantly and needed none (AC-19).

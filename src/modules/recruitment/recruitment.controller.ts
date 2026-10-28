@@ -27,8 +27,9 @@ const READERS =
 
 /**
  * **The agents' *Recruitment*** (`/recruitment/attack-plan`, `/recruitment/pitch-materials`;
- * `functional/recruitment.md`, the Data contract): the plan for a candidate brief, the office's four pitch
- * documents, and a document's short-lived link. Field reads under `recruitment:read`; nothing here writes.
+ * `functional/recruitment.md`, the Data contract): the plan for a candidate brief, the office's six pitch
+ * documents — four required, two optional (ADR-0177) — and a document's short-lived link. Field reads under
+ * `recruitment:read`; nothing here writes.
  */
 @ApiTags('recruitment')
 @ApiBearerAuth()
@@ -59,12 +60,13 @@ export class RecruitmentController {
   @Get('pitch-materials')
   @RequirePermission('recruitment:read')
   @ApiOperation({
-    summary: 'The office’s four recruitment pitch documents',
+    summary: 'The office’s recruitment pitch documents',
     description:
-      'The four slots in order — each with its state (*missing*, *complete*, *partial*, *uploaded*), its file '
-      + '(name, size and upload day in the office’s calendar) or `null`, and whether each item of its '
-      + 'checklist is ticked — and the banner’s counts. The agents’ tab and the settings page read the same '
-      + `answer. ${READERS}`,
+      'The six slots in order — the four the office’s readiness counts, then *Company Profile* and *Agency '
+      + 'Profile*, optional — each with whether it is `required`, its state (*missing*, *complete*, *partial*, '
+      + '*uploaded*), its file (name, size as storage reported it, and upload day in the office’s calendar) or '
+      + '`null`, and whether each item of its checklist is ticked; and the banner’s counts, over the four '
+      + `required alone. The agents’ tab and the settings page read the same answer. ${READERS}`,
   })
   @ApiResponse({ status: 200, type: PitchMaterialsDto })
   async pitchMaterials(@Ctx() ctx: RequestContext) {
@@ -118,10 +120,11 @@ export class RecruitmentPitchController {
   @ApiOperation({
     summary: 'Attach a PDF to a slot, or replace the one it holds',
     description:
-      'The upload is confirmed against what storage holds first; then, in one write, the file replaces what '
-      + 'the slot held, **every confirmation of the slot is cleared**, and `version` moves by one. The file it '
-      + 'replaced is released, never deleted. Audited (`recruitment_pitch.attached`) with the items it cleared. '
-      + 'Attaching the file the slot already holds changes nothing.',
+      'Any of the six slots, the two optional ones as the four. The upload is confirmed against what storage '
+      + 'holds first; then, in one write, the file replaces what the slot held, **every confirmation of the slot '
+      + 'is cleared**, and `version` moves by one. The file it replaced is released, never deleted. Audited '
+      + '(`recruitment_pitch.attached`) with the items it cleared. Attaching the file the slot already holds '
+      + 'changes nothing.',
   })
   @ApiResponse({ status: 200, type: PitchSlotDto })
   @ApiResponse(refusal(

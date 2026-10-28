@@ -67,7 +67,7 @@ export class CreateRatioDto {
   @ApiPropertyOptional({
     enum: RATIO_DISPLAY_UNITS,
     description:
-      'How the benchmark is written: `percent` (0.15 as 15.0%), `decimal` (0.30 as 0.30) or '
+      'How the benchmark is written: `percent` (0.15 as 15%, as typed), `decimal` (0.30 as 0,30) or '
       + '`points` (30 as ±30 points). A `band` ratio is always `points` and a `gte` ratio '
       + 'never is; omitted, a `gte` ratio keeps what it had, or starts as `decimal`.',
   })
@@ -137,7 +137,7 @@ export class UpdateRatioDto {
   @ApiPropertyOptional({
     enum: RATIO_DISPLAY_UNITS,
     description:
-      'How the benchmark is written: `percent` (0.15 as 15.0%), `decimal` (0.30 as 0.30) or '
+      'How the benchmark is written: `percent` (0.15 as 15%, as typed), `decimal` (0.30 as 0,30) or '
       + '`points` (30 as ±30 points). A `band` ratio is always `points` and a `gte` ratio '
       + 'never is; omitted, a `gte` ratio keeps what it had, or starts as `decimal`.',
   })

@@ -5,12 +5,9 @@ import { RequestContext } from '@/common/context/request-context';
 import type { MeetingView } from '@/modules/leader-meetings/leader-meeting.view';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
-import { buildForumServices, type ForumServices } from '../../../test/forum-office';
+import { buildForumServices, scorecardServiceOf, type ForumServices } from '../../../test/forum-office';
 import { seedDemo, type SeedResult } from '../demo';
 import { FORUM_TOKENS, seedLeaderForumFixture } from '../leader-forum-fixture';
-import { LeaderScorecardService } from '@/modules/leader-meetings/scorecard/scorecard.service';
-import { MonthlyAgentData } from '@/modules/production/monthly-agent-data.schema';
-import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
 
 const RUN_MS = 300_000;
 const quiet = () => undefined;
@@ -67,21 +64,53 @@ describe('Phase 18.1 the Strategic Leader Forum seed — a run at 10:00 on 10 Oc
     expect(list.can.create).toBe(true);
   });
 
-  it('P18.1-T2 AC-10 #14: live; the ten items naming September; the prototype’s four rows; Monthly Target as drawn, Manpower empty', () => {
+  it('P18.1-T2 AC-10, P18.97-T2 AC-4 #14: live; the ten items naming October, its own month; the four rows, the first remark dated from it', () => {
     const view = views[14];
     expect(view.scorecard.frozenAt).toBeNull();
-    expect(view.agenda.preparation.map((i) => i.text)[1]).toBe('Prepare September performance data');
+    expect(view.agenda.preparation.map((i) => i.text)[1]).toBe('Prepare October performance data');
     expect([view.agenda.preparation, view.agenda.during, view.agenda.post].map((s) => s.length)).toEqual([3, 5, 2]);
     expect([...view.agenda.preparation, ...view.agenda.during, ...view.agenda.post].every((i) => i.pic === '' && !i.done)).toBe(true);
     expect(view.actionItems.map((r) => [r.initiative, r.status])).toEqual([
       ['Activity tracking tool adoption', 'planned'], ['Activity tracking tool adoption', 'planned'],
       ['Leads Generation Playbook', 'not_planned'], ['Team Management Playbook', 'not_planned'],
     ]);
-    expect(Object.fromEntries(view.scorecard.rows.map((r) => [r.key, r.monthlyTarget?.value ?? null]))).toEqual({
-      ape: 'TBD', manpower: '', flc: '8 (1 @ unit)', producing_agents: null, new_aa: 'TBD', new_agent_3m: null,
-      avg_monthly_aa: '22 (3 @ unit)', case_submission: 'TBD', average_case_size: null,
+    // A week after #14's 13 October, where the prototype's *"Scheduled for 2 Sept"* stood still.
+    expect(view.actionItems[0].remarks).toBe('Scheduled for 20 Okt');
+  });
+
+  it('P18.97-T1 AC-20 #14’s targets are rates — the prototype’s as migration 0043 reads them — × its 9 units; New AA’s kept, not drawn', async () => {
+    const view = views[14];
+    expect(view.scorecard.chips).toMatchObject({ units: view.scorecard.chips.ab + view.scorecard.chips.aab });
+    const units = view.scorecard.chips.units;
+    expect(Object.fromEntries(view.scorecard.rows.map((r) => [r.key, r.monthlyTarget]))).toEqual({
+      ape: { rate: null, value: null, typed: null, version: 1 },
+      manpower: { rate: null, value: null, typed: null, version: 0 },
+      flc: { rate: 1, value: units, typed: null, version: 1 },
+      producing_agents: null,
+      new_agent_3m: null,
+      avg_monthly_aa: { rate: 3, value: 3 * units, typed: null, version: 1 },
+      case_submission: { rate: null, value: null, typed: null, version: 1 },
+      cases_per_producing_agent: null,
+      average_case_size: null,
     });
-    expect(view.scorecard.rows.find((r) => r.key === 'manpower')!.monthlyTarget).toEqual({ value: '', version: 0 });
+    const stored = await col('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(view.id) });
+    expect(stored!.monthlyTargets.new_aa).toEqual({ value: 'TBD', version: 1 });
+  });
+
+  it('P18.97-T1 AC-20 0417’s file holds every month of last year, so Full Year and YTD 2025 read whole years: no (*) note on either', async () => {
+    const months = (await col('productionMonths').find({ kpmId: owner.kpmId, month: { $regex: '^2025-' }, deletedAt: null }).toArray())
+      .map((m) => m.month as string).sort();
+    expect(months).toEqual(Array.from({ length: 12 }, (_, i) => `2025-${String(i + 1).padStart(2, '0')}`));
+    const view = views[14];
+    expect(view.scorecard.partialPeriods.map((p) => p.column)).not.toEqual(expect.arrayContaining(['fy']));
+    expect(view.scorecard.partialPeriods.map((p) => p.column)).not.toContain('ytdLastYear');
+    for (const key of ['ape', 'producing_agents', 'avg_monthly_aa', 'case_submission', 'cases_per_producing_agent', 'average_case_size'] as const) {
+      const row = view.scorecard.rows.find((r) => r.key === key)!;
+      expect([key, row.cells.fy.kind, row.cells.ytdLastYear.kind]).toEqual([key, 'figure', 'figure']);
+    }
+    // *AS OF*: yesterday's corrected upload of this month's file.
+    expect(view.scorecard.asOf).toEqual({ kind: 'date', date: '2026-10-09' });
+    expect(view.scorecard.rows.find((r) => r.key === 'ape')!.ytdChange.kind).toBe('figure');
   });
 
   it('P18.1-T2 AC-10 the editors: live on #14 — the Owner, Maya Halim, Agus, Sari and Yosef, "3 core leaders tagged"; #13’s frozen before Yosef', () => {
@@ -100,11 +129,7 @@ describe('Phase 18.1 the Strategic Leader Forum seed — a run at 10:00 on 10 Oc
     const stored = await col('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(views[13].id) });
     expect(stored!.frozenAt).toEqual(new Date('2026-09-27T02:00:00Z'));
     // The same function over the same records, asked that morning: what was frozen.
-    const thatMorning = new LeaderScorecardService(
-      wired.officePeople, wired.productionReadings,
-      new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.memberships,
-      new FixedClock(stored!.frozenAt as Date),
-    );
+    const thatMorning = scorecardServiceOf(wired, new FixedClock(stored!.frozenAt as Date));
     const input = { kpmId: owner.kpmId!, timezone: 'Asia/Jakarta', meetingDate: '2026-09-26' };
     expect(stored!.frozenScorecard).toEqual(await thatMorning.compute(input));
     /*
@@ -121,12 +146,39 @@ describe('Phase 18.1 the Strategic Leader Forum seed — a run at 10:00 on 10 Oc
       { kind: 'figure', value: 25, leavesOut: [] }, { kind: 'figure', value: 50, leavesOut: [] },
     ]);
     expect(views[13].actionItems.map((r) => r.status)).toEqual(['not_planned', 'planned', 'implemented']);
-    expect(views[13].agenda.preparation.map((i) => i.text)).toEqual(['Compile follow-ups from August session', 'Prepare August performance data']);
+    // P18.97-T2 AC-4: the follow-ups the session before's; the month item #13's own month.
+    expect(views[13].agenda.preparation.map((i) => i.text)).toEqual(['Compile follow-ups from August session', 'Prepare September performance data']);
+    expect(views[13].actionItems[1].remarks).toBe('Scheduled for 3 Okt');
     expect(views[12].openItems).toBe(0);
+    expect(views[12].actionItems[0].remarks).toBe('Done 5 Sep');
     expect(views[12].scorecard.frozenAt).toBe(new Date('2026-09-13T02:00:00Z').toISOString());
     // *3M new agent %* has a figure in FY: the cohort is seeded before the freeze.
     const threeMonths = views[13].scorecard.rows.find((r) => r.key === 'new_agent_3m')!;
     expect(threeMonths.cells.fy.kind).toBe('figure');
+  });
+
+  it('P18.97-T1 AC-19, AC-20 #12 keeps a scorecard frozen in the old shape, read tolerantly: — where it lacks, its own 5 units', async () => {
+    const stored = await col('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(views[12].id) });
+    const frozen = stored!.frozenScorecard as { periods: Record<string, unknown>; chips: Record<string, number>; rows: { key: string; cells: Record<string, unknown> }[] };
+    // The shape before the reference slide: five columns, nine rows with New AA, # of units the AB agencies, no AS OF.
+    expect(frozen.periods).toEqual({ fy: '2025', ytd: '2026', thisMonthLastYear: '2025-09', lastMonth: '2026-08', thisMonth: '2026-09' });
+    expect(frozen.rows.map((r) => r.key)).toEqual([
+      'ape', 'manpower', 'flc', 'producing_agents', 'new_aa', 'new_agent_3m', 'avg_monthly_aa', 'case_submission', 'average_case_size',
+    ]);
+    expect(frozen.rows.every((r) => Object.keys(r.cells).join() === 'fy,ytd,thisMonthLastYear,lastMonth,thisMonth')).toBe(true);
+    expect(frozen.chips.units).toBe(frozen.chips.ab);
+    expect('asOf' in frozen).toBe(false);
+    expect(frozen.rows.find((r) => r.key === 'new_aa')!.cells.fy).toMatchObject({ kind: 'figure' });
+
+    const view = views[12].scorecard;
+    expect(view.rows.map((r) => r.cells.ytdLastYear.kind)).toEqual(Array(9).fill('unrecorded'));
+    expect(view.rows.find((r) => r.key === 'cases_per_producing_agent')!.cells.fy).toEqual({ kind: 'unrecorded' });
+    expect(view.asOf).toEqual({ kind: 'unrecorded' });
+    expect(view.chips.units).toBe(frozen.chips.ab);
+    expect(view.rows.find((r) => r.key === 'flc')!.monthlyTarget).toMatchObject({ rate: 1, value: frozen.chips.ab });
+    // #13 froze in today's shape, its AS OF the day of the upload before its morning.
+    expect(views[13].scorecard.asOf.kind).toBe('date');
+    expect(views[13].scorecard.rows.find((r) => r.key === 'cases_per_producing_agent')!.cells.fy.kind).toBe('figure');
   });
 
   it('P18.1-T3 AC-1 the links: #13’s opens read-only for Rina, not tagged; #12’s expired; the raw tokens are nowhere stored', async () => {

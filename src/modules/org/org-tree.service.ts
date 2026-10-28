@@ -6,9 +6,10 @@ import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { preferredNameOf } from '@/modules/users/display-name';
 import { User, UserDocument } from '@/modules/users/user.schema';
-import { initialsOf, visibleTo } from './directory.service';
+import { initialsOf } from './directory.service';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole } from './membership.schema';
+import { visibleTo } from './reader-visibility';
 
 export interface OrgTreeNode {
   membershipId: string;

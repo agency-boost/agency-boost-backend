@@ -64,23 +64,65 @@ export interface SeedTrainingModule {
 export const SEEDED_SALES_SUBTITLE_BEFORE_OD_150 = 'Structured modules — tracked here, and later in your Skill Tracker.';
 
 /**
- * `KPM_Owner.html:4267`. Sales's subtitle is `Training Section.html:1201` **less its promise** (OD-150, answered
- * 2026-10-10 as recommended): *"…and later in your Skill Tracker"* names a link no feature makes — the only Skill
- * tracker is the leader's private grid (ADR-0073) — so a new office is given *"Structured modules — tracked here."*,
- * and migration `0029` rewrites an existing office's only where it still holds the seeded words.
+ * **What each default category was seeded with before P18.97-T4** (ADR-0176 §9; the client's UI-031: Sales's
+ * *"Structured modules — tracked here."* is generic): Sales's OD-150 sentence, and no description for the other five.
+ * Kept only so migration `0045` can recognise a category an office never changed, and so `0029` still writes the words
+ * it was written for; no office is given them any more.
+ */
+export const SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97: Readonly<Record<string, string | null>> = {
+  SALES: 'Structured modules — tracked here.',
+  PRODUCT: null,
+  RECRUITING: null,
+  TEAM_MANAGEMENT: null,
+  SOFT_SKILLS: null,
+  COMPANY_AND_KPM: null,
+};
+
+/**
+ * `KPM_Owner.html:4267`, the six categories in its order. **Each carries one real line saying what it teaches**
+ * (P18.97-T4 AC-9, ADR-0176 §9; UI-031), shown under a category's title on an agent's training page and under its name
+ * in the Owner's settings. Sales's read *"Structured modules — tracked here."* — `Training Section.html:1201` less
+ * OD-150's Skill Tracker promise — and the other five nothing. A new office is given these; migration `0045` gives
+ * them to an existing office only where it still holds the seeded words. **Drafted 2026-10-28, for the product owner
+ * to confirm at the walk.**
  */
 export const SEED_TRAINING_CATEGORIES: readonly SeedTrainingCategory[] = [
   {
     code: 'SALES',
     label: 'Sales',
-    description: 'Structured modules — tracked here.',
+    description: 'Find prospects, uncover their needs, answer objections and close.',
     displayOrder: 1,
   },
-  { code: 'PRODUCT', label: 'Product', description: null, displayOrder: 2 },
-  { code: 'RECRUITING', label: 'Recruiting', description: null, displayOrder: 3 },
-  { code: 'TEAM_MANAGEMENT', label: 'Team Management', description: null, displayOrder: 4 },
-  { code: 'SOFT_SKILLS', label: 'Soft Skills', description: null, displayOrder: 5 },
-  { code: 'COMPANY_AND_KPM', label: 'Company and KPM', description: null, displayOrder: 6 },
+  {
+    code: 'PRODUCT',
+    label: 'Product',
+    description: 'What each product covers, who it suits and how to explain it.',
+    displayOrder: 2,
+  },
+  {
+    code: 'RECRUITING',
+    label: 'Recruiting',
+    description: 'Find, approach and bring in the people who will build your team.',
+    displayOrder: 3,
+  },
+  {
+    code: 'TEAM_MANAGEMENT',
+    label: 'Team Management',
+    description: 'Lead your unit: set goals, coach your agents and help new ones start.',
+    displayOrder: 4,
+  },
+  {
+    code: 'SOFT_SKILLS',
+    label: 'Soft Skills',
+    description: 'Communication, confidence and the daily habits behind steady selling.',
+    displayOrder: 5,
+  },
+  {
+    code: 'COMPANY_AND_KPM',
+    label: 'Company and KPM',
+    description: 'How your insurer and this office work, and who to ask for what.',
+    displayOrder: 6,
+  },
 ];
 
 /** `KPM_Owner.html:4272-4277`. Only Sales has skills; the rest start empty. */

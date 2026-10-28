@@ -23743,7 +23743,7 @@
     },
     "/api/v1/recruitment/pitch-materials": {
       "get": {
-        "description": "The four slots in order — each with its state (*missing*, *complete*, *partial*, *uploaded*), its file (name, size and upload day in the office’s calendar) or `null`, and whether each item of its checklist is ticked — and the banner’s counts. The agents’ tab and the settings page read the same answer. Every member of the office — the Owner and the Admin through their field view, an AB, an AAB and an Agent — and a support session acting as one, read-only included. A Super Admin outside a support session belongs to no office and is refused `403 TENANT_NO_MEMBERSHIP`.\n\n**Requires `recruitment:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The six slots in order — the four the office’s readiness counts, then *Company Profile* and *Agency Profile*, optional — each with whether it is `required`, its state (*missing*, *complete*, *partial*, *uploaded*), its file (name, size as storage reported it, and upload day in the office’s calendar) or `null`, and whether each item of its checklist is ticked; and the banner’s counts, over the four required alone. The agents’ tab and the settings page read the same answer. Every member of the office — the Owner and the Admin through their field view, an AB, an AAB and an Agent — and a support session acting as one, read-only included. A Super Admin outside a support session belongs to no office and is refused `403 TENANT_NO_MEMBERSHIP`.\n\n**Requires `recruitment:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "RecruitmentController_pitchMaterials_v1",
         "parameters": [],
         "responses": {
@@ -23793,7 +23793,7 @@
             "bearer": []
           }
         ],
-        "summary": "The office’s four recruitment pitch documents",
+        "summary": "The office’s recruitment pitch documents",
         "tags": [
           "recruitment"
         ],
@@ -23979,7 +23979,7 @@
     },
     "/api/v1/kpm/settings/recruitment-pitch/{slot}": {
       "put": {
-        "description": "The upload is confirmed against what storage holds first; then, in one write, the file replaces what the slot held, **every confirmation of the slot is cleared**, and `version` moves by one. The file it replaced is released, never deleted. Audited (`recruitment_pitch.attached`) with the items it cleared. Attaching the file the slot already holds changes nothing.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Any of the six slots, the two optional ones as the four. The upload is confirmed against what storage holds first; then, in one write, the file replaces what the slot held, **every confirmation of the slot is cleared**, and `version` moves by one. The file it replaced is released, never deleted. Audited (`recruitment_pitch.attached`) with the items it cleared. Attaching the file the slot already holds changes nothing.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "RecruitmentPitchController_attach_v1",
         "parameters": [
           {
@@ -26039,7 +26039,7 @@
     },
     "/api/v1/leader-meetings/{meetingId}/monthly-targets/{row}": {
       "put": {
-        "description": "The leaders’ own target for one of the six rows the scorecard leaves open — `ape`, `manpower`, `flc`, `new_aa`, `avg_monthly_aa`, `case_submission` — with the cell’s version, 0 for one never typed. Never kept with the scorecard: it stays editable. Audited with before and after.\n\n**Requires `leader_meeting:edit`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The leaders’ own target for one of the five rows that take one — `ape`, `manpower`, `flc`, `avg_monthly_aa`, `case_submission` — **typed as a rate per unit**, in the row’s unit, or `null` to clear it, with the cell’s version, 0 for one never typed. Answered as the table draws it: the rate and its value, the rate times the meeting’s *# of units* — the ones it was kept with, once it is over. Never kept with the scorecard: it stays editable. Audited with before and after.\n\n**Requires `leader_meeting:edit`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "LeaderMeetingsController_saveMonthlyTarget_v1",
         "parameters": [
           {
@@ -26081,7 +26081,7 @@
             }
           },
           "400": {
-            "description": "`VALIDATION_FAILED` — a row the scorecard blocks or does not have, or a value too long.",
+            "description": "`VALIDATION_FAILED` — a row that takes no target or does not exist, a rate that is not a number from 0 (a text included), more than two places, or `ape`’s not in whole minor units.",
             "content": {
               "application/json": {
                 "schema": {
@@ -29945,7 +29945,7 @@
               "decimal",
               "points"
             ],
-            "description": "How the benchmark is written: `percent` (0.15 as 15.0%), `decimal` (0.30 as 0.30) or `points` (30 as ±30 points). A `band` ratio is always `points` and a `gte` ratio never is; omitted, a `gte` ratio keeps what it had, or starts as `decimal`."
+            "description": "How the benchmark is written: `percent` (0.15 as 15%, as typed), `decimal` (0.30 as 0,30) or `points` (30 as ±30 points). A `band` ratio is always `points` and a `gte` ratio never is; omitted, a `gte` ratio keeps what it had, or starts as `decimal`."
           },
           "appliesToOrgLevelCodes": {
             "example": [
@@ -30008,7 +30008,7 @@
               "decimal",
               "points"
             ],
-            "description": "How the benchmark is written: `percent` (0.15 as 15.0%), `decimal` (0.30 as 0.30) or `points` (30 as ±30 points). A `band` ratio is always `points` and a `gte` ratio never is; omitted, a `gte` ratio keeps what it had, or starts as `decimal`."
+            "description": "How the benchmark is written: `percent` (0.15 as 15%, as typed), `decimal` (0.30 as 0,30) or `points` (30 as ±30 points). A `band` ratio is always `points` and a `gte` ratio never is; omitted, a `gte` ratio keeps what it had, or starts as `decimal`."
           },
           "appliesToOrgLevelCodes": {
             "example": [
@@ -30439,7 +30439,7 @@
           },
           "offered": {
             "type": "boolean",
-            "description": "`false` only for a skill no longer offered that still holds this member’s history."
+            "description": "`false` for a skill no longer offered that still holds this member’s history, and for a skill of a category with no published module."
           },
           "done": {
             "type": "number",
@@ -30498,7 +30498,7 @@
           },
           "offered": {
             "type": "boolean",
-            "description": "`false` only for a category no longer offered that still holds this member’s history."
+            "description": "`false` for a category no longer offered, or with no published module, that still holds this member’s history."
           },
           "done": {
             "type": "number",
@@ -30553,7 +30553,7 @@
             "description": "`done / total` as a whole percent (`TRAINING_COMPLETION_PCT`); `null` when the scope offers nothing — draw (0/0), never 0%."
           },
           "categories": {
-            "description": "Every offered category in display order — an empty one included — then any no longer offered that hold history.",
+            "description": "Every offered category in display order — a category with no published module is not offered, and is left out — then any no longer offered that hold history.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TrainingCategoryProgressDto"
@@ -32352,7 +32352,7 @@
           "attendanceRate": {
             "type": "number",
             "nullable": true,
-            "description": "`EVENT_ATTENDANCE_RATE`, one decimal; null before the end or for nobody."
+            "description": "`EVENT_ATTENDANCE_RATE` as a reader is shown it: a whole percent, rounded once from the counts (ADR-0174 §1) — never its tenth rounded again; null before the end or for nobody."
           },
           "can": {
             "$ref": "#/components/schemas/RollCallCanDto"
@@ -39522,7 +39522,9 @@
               "opportunity",
               "proof",
               "faq",
-              "howtojoin"
+              "howtojoin",
+              "company",
+              "agency"
             ]
           },
           "title": {
@@ -39530,6 +39532,10 @@
           },
           "line": {
             "type": "string"
+          },
+          "required": {
+            "type": "boolean",
+            "description": "True for the four documents the office’s readiness counts; false for the two optional ones, *Company Profile* and *Agency Profile*, which count in neither the ring nor the banner."
           },
           "state": {
             "type": "string",
@@ -39565,6 +39571,7 @@
           "slot",
           "title",
           "line",
+          "required",
           "state",
           "file",
           "checklist",
@@ -39576,19 +39583,20 @@
         "properties": {
           "done": {
             "type": "number",
-            "description": "Slots complete, or uploaded with nothing to confirm."
+            "description": "Required slots complete, or uploaded with nothing to confirm."
           },
           "total": {
             "type": "number",
-            "example": 4
+            "example": 4,
+            "description": "How many slots are required: the four."
           },
           "missing": {
             "type": "number",
-            "description": "Slots with no file."
+            "description": "Required slots with no file."
           },
           "unconfirmed": {
             "type": "number",
-            "description": "Slots with a file and an item still open."
+            "description": "Required slots with a file and an item still open."
           }
         },
         "required": [
@@ -39602,7 +39610,7 @@
         "type": "object",
         "properties": {
           "slots": {
-            "description": "The four, in order.",
+            "description": "The six, in order: the four required, then *Company Profile* and *Agency Profile*, optional.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/PitchSlotDto"
@@ -39982,7 +39990,7 @@
           },
           "teamSize": {
             "type": "number",
-            "description": "Everybody below them now, at any depth."
+            "description": "Everybody below them now, at any depth; 0 for an AB who leads nobody."
           },
           "coached": {
             "type": "number",
@@ -39991,7 +39999,11 @@
           "pct": {
             "type": "number",
             "nullable": true,
-            "description": "`LEADER_COACHING_FREQUENCY`, a whole percent."
+            "description": "`LEADER_COACHING_FREQUENCY`, a whole percent rounded half up in integers; `null` for an AB who leads nobody — no rate, never 0%."
+          },
+          "leads": {
+            "type": "boolean",
+            "description": "They have an active direct report (ADR-0087). `false` is an AB who leads nobody: listed last, read as *No team*."
           }
         },
         "required": [
@@ -39999,7 +40011,8 @@
           "name",
           "teamSize",
           "coached",
-          "pct"
+          "pct",
+          "leads"
         ]
       },
       "OverviewCoachingDto": {
@@ -40022,7 +40035,7 @@
             ]
           },
           "leaderboard": {
-            "description": "Every AB who leads somebody, lowest share first. The whole ranking: the card shows four and expands.",
+            "description": "Every member of the `ab` class: those who lead somebody lowest share first, then those who lead nobody (`leads: false`), A to Z. The whole ranking: the card shows four and expands.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/LeaderboardRowDto"
@@ -40596,6 +40609,12 @@
             "nullable": true,
             "description": "`MAA_COUNT_IN_UNIT` for the period’s month, over its members on the month’s last day; `null` is *Not uploaded yet*."
           },
+          "activePct": {
+            "type": "number",
+            "nullable": true,
+            "example": 68,
+            "description": "*Producing this month*’s share: `activeAgents` over `manpower.total`, a whole percent rounded half up in integers (`rateOver`); `null` while the month is not uploaded, or over nobody."
+          },
           "leads": {
             "description": "As they stood at the period’s end, over the members it had then.",
             "allOf": [
@@ -40621,6 +40640,7 @@
           "apeAnnual",
           "coached7d",
           "activeAgents",
+          "activePct",
           "leads",
           "manpower",
           "head"
@@ -40658,6 +40678,12 @@
             "nullable": true,
             "description": "`MAA_COUNT_IN_UNIT` for the period’s month, over its members on the month’s last day; `null` is *Not uploaded yet*."
           },
+          "activePct": {
+            "type": "number",
+            "nullable": true,
+            "example": 68,
+            "description": "*Producing this month*’s share: `activeAgents` over `manpower.total`, a whole percent rounded half up in integers (`rateOver`); `null` while the month is not uploaded, or over nobody."
+          },
           "leads": {
             "description": "As they stood at the period’s end, over the members it had then.",
             "allOf": [
@@ -40692,6 +40718,7 @@
           "apeAnnual",
           "coached7d",
           "activeAgents",
+          "activePct",
           "leads",
           "manpower",
           "head",
@@ -40750,6 +40777,12 @@
             "type": "number",
             "nullable": true,
             "description": "`MAA_COUNT_IN_UNIT` for the period’s month, over its members on the month’s last day; `null` is *Not uploaded yet*."
+          },
+          "activePct": {
+            "type": "number",
+            "nullable": true,
+            "example": 68,
+            "description": "*Producing this month*’s share: `activeAgents` over `manpower.total`, a whole percent rounded half up in integers (`rateOver`); `null` while the month is not uploaded, or over nobody."
           },
           "leads": {
             "description": "As they stood at the period’s end, over the members it had then.",
@@ -40815,6 +40848,7 @@
           "apeAnnual",
           "coached7d",
           "activeAgents",
+          "activePct",
           "leads",
           "manpower",
           "head",
@@ -40857,6 +40891,12 @@
             "nullable": true,
             "description": "`MAA_COUNT_IN_UNIT` for the period’s month, over its members on the month’s last day; `null` is *Not uploaded yet*."
           },
+          "activePct": {
+            "type": "number",
+            "nullable": true,
+            "example": 68,
+            "description": "*Producing this month*’s share: `activeAgents` over `manpower.total`, a whole percent rounded half up in integers (`rateOver`); `null` while the month is not uploaded, or over nobody."
+          },
           "leads": {
             "description": "As they stood at the period’s end, over the members it had then.",
             "allOf": [
@@ -40896,6 +40936,7 @@
           "apeAnnual",
           "coached7d",
           "activeAgents",
+          "activePct",
           "leads",
           "manpower",
           "abCount",
@@ -40942,7 +40983,7 @@
           },
           "mocRulesText": {
             "type": "string",
-            "example": "AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75,0%.\nAB: (Net APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75,0%) OR Direct AB (AB on AB) ≥ 5.",
+            "example": "AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\nAB: (Net APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.",
             "description": "The MOC column’s tooltip, composed from the company’s MOC rules: a line per rule, the junior rung first, separated by `\\n`. Empty when the company has none."
           },
           "agencies": {
@@ -41971,34 +42012,65 @@
           "date"
         ]
       },
+      "ColumnPeriodDto": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "example": "2026-01",
+            "description": "The column’s first month, `YYYY-MM`."
+          },
+          "to": {
+            "type": "string",
+            "example": "2026-10",
+            "description": "Its last, `YYYY-MM`: the same for a single month."
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ]
+      },
       "ScorecardPeriodsDto": {
         "type": "object",
         "properties": {
           "fy": {
-            "type": "string",
-            "example": "2025",
-            "description": "*FY {year}*: the year before the meeting’s."
+            "description": "*Full Year*: January to December of the year before the meeting’s.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ColumnPeriodDto"
+              }
+            ]
+          },
+          "ytdLastYear": {
+            "description": "*YTD* of the year before: January to the meeting’s month, a year earlier.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ColumnPeriodDto"
+              }
+            ]
           },
           "ytd": {
-            "type": "string",
-            "example": "2026",
-            "description": "*YTD {year}*: the meeting’s year, January to its month."
+            "description": "*YTD*: the meeting’s year, January to its month.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ColumnPeriodDto"
+              }
+            ]
           },
           "thisMonthLastYear": {
-            "type": "string",
-            "example": "2025-10"
+            "$ref": "#/components/schemas/ColumnPeriodDto"
           },
           "lastMonth": {
-            "type": "string",
-            "example": "2026-09"
+            "$ref": "#/components/schemas/ColumnPeriodDto"
           },
           "thisMonth": {
-            "type": "string",
-            "example": "2026-10"
+            "$ref": "#/components/schemas/ColumnPeriodDto"
           }
         },
         "required": [
           "fy",
+          "ytdLastYear",
           "ytd",
           "thisMonthLastYear",
           "lastMonth",
@@ -42015,7 +42087,8 @@
             "type": "number"
           },
           "units": {
-            "type": "number"
+            "type": "number",
+            "description": "*# of units*: *# of AB* + *# of AAB* — or, on a scorecard kept before that, the number it was kept with."
           },
           "ab": {
             "type": "number"
@@ -42032,13 +42105,54 @@
           "aab"
         ]
       },
+      "YtdChangeDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "figure",
+              "none"
+            ],
+            "description": "`none` *—*: either year is no figure, or — a change in `percent` — last year’s is 0."
+          },
+          "value": {
+            "type": "number",
+            "example": 18,
+            "description": "On a `figure`: this year’s to date against last year’s, whole and signed, in `unit`. Rounded half up."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "percent",
+              "points"
+            ],
+            "description": "On a `figure`: `percent`, a percentage of last year’s figure (*+18%*); `points`, on a row whose own figure is a percentage (`unit: percentage`), the difference in percentage points (*-40 points* for 60% against 100%), since a percentage of a percentage would read as either."
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
       "MonthlyTargetDto": {
         "type": "object",
         "properties": {
+          "rate": {
+            "type": "number",
+            "nullable": true,
+            "example": 1,
+            "description": "The rate per unit an editor typed, in the row’s unit — IDR minor units for `ape`, a count for the others; `null` for none (`ape` then reads *TBD*, every other row blank)."
+          },
           "value": {
+            "type": "number",
+            "nullable": true,
+            "example": 9,
+            "description": "`rate × # of units`, the meeting’s own units — the ones it was kept with, once it is over. `null` with no rate."
+          },
+          "typed": {
             "type": "string",
-            "example": "8 (1 @ unit)",
-            "description": "Typed by an editor; *TBD* is a value. Plain text."
+            "nullable": true,
+            "description": "A target typed as text before rates that could not be read as one: shown as typed, as plain text, until an editor enters a rate. `null` otherwise."
           },
           "version": {
             "type": "number",
@@ -42047,7 +42161,9 @@
           }
         },
         "required": [
+          "rate",
           "value",
+          "typed",
           "version"
         ]
       },
@@ -42061,10 +42177,10 @@
               "manpower",
               "flc",
               "producing_agents",
-              "new_aa",
               "new_agent_3m",
               "avg_monthly_aa",
               "case_submission",
+              "cases_per_producing_agent",
               "average_case_size"
             ]
           },
@@ -42073,7 +42189,8 @@
             "enum": [
               "idr_minor",
               "count",
-              "percentage"
+              "percentage",
+              "ratio"
             ]
           },
           "cells": {
@@ -42081,11 +42198,19 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/ScorecardCellDto"
             },
-            "description": "One cell per column: fy, ytd, thisMonthLastYear, lastMonth, thisMonth."
+            "description": "One cell per column: fy, ytdLastYear, ytd, thisMonthLastYear, lastMonth, thisMonth."
+          },
+          "ytdChange": {
+            "description": "What a phone’s card for the row reads: this year to date against last year’s.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/YtdChangeDto"
+              }
+            ]
           },
           "monthlyTarget": {
             "nullable": true,
-            "description": "`null` where the prototype blocks the cell.",
+            "description": "`null` on a row the table does not track month by month, which takes no target.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/MonthlyTargetDto"
@@ -42097,23 +42222,93 @@
           "key",
           "unit",
           "cells",
+          "ytdChange",
           "monthlyTarget"
+        ]
+      },
+      "ScorecardAsOfDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "date",
+              "none",
+              "unrecorded"
+            ],
+            "description": "`date` the agency’s day its latest production file was uploaded; `none` no file yet — nothing is drawn; `unrecorded` *—*, a scorecard kept before the date was recorded."
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-10-26",
+            "description": "On a `date`: `YYYY-MM-DD`, the agency’s calendar."
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "PartialPeriodDto": {
+        "type": "object",
+        "properties": {
+          "column": {
+            "type": "string",
+            "enum": [
+              "fy",
+              "ytdLastYear",
+              "ytd",
+              "thisMonthLastYear",
+              "lastMonth",
+              "thisMonth"
+            ]
+          },
+          "leavesOut": {
+            "description": "Every month, `YYYY-MM`, one of the column’s figures leaves out: its *(*)* note.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "column",
+          "leavesOut"
         ]
       },
       "ScorecardDto": {
         "type": "object",
         "properties": {
           "periods": {
-            "$ref": "#/components/schemas/ScorecardPeriodsDto"
+            "description": "Each column’s months, from the meeting’s month.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ScorecardPeriodsDto"
+              }
+            ]
           },
           "chips": {
             "$ref": "#/components/schemas/ScorecardChipsDto"
           },
           "rows": {
-            "description": "Nine, in the prototype’s order.",
+            "description": "Nine, in the reference slide’s order.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ScorecardRowDto"
+            }
+          },
+          "asOf": {
+            "description": "*AS OF*, beside the title.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ScorecardAsOfDto"
+              }
+            ]
+          },
+          "partialPeriods": {
+            "description": "The periods a figure of which leaves months out, in column order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PartialPeriodDto"
             }
           },
           "frozenAt": {
@@ -42126,6 +42321,8 @@
           "periods",
           "chips",
           "rows",
+          "asOf",
+          "partialPeriods",
           "frozenAt"
         ]
       },
@@ -42560,11 +42757,12 @@
       "SaveMonthlyTargetDto": {
         "type": "object",
         "properties": {
-          "value": {
-            "type": "string",
-            "example": "8 (1 @ unit)",
-            "maxLength": 40,
-            "description": "Plain text; *TBD* is a value, empty clears it."
+          "rate": {
+            "type": "number",
+            "nullable": true,
+            "minimum": 0,
+            "example": 1,
+            "description": "The rate per unit, in the row’s unit: IDR minor units for `ape` (whole sen), a count to two places for the others. `null` clears the target. Not a number: `400 VALIDATION_FAILED`."
           },
           "version": {
             "type": "number",
@@ -42573,17 +42771,29 @@
           }
         },
         "required": [
-          "value",
+          "rate",
           "version"
         ]
       },
       "MonthlyTargetSavedDto": {
         "type": "object",
         "properties": {
+          "rate": {
+            "type": "number",
+            "nullable": true,
+            "example": 1,
+            "description": "The rate per unit an editor typed, in the row’s unit — IDR minor units for `ape`, a count for the others; `null` for none (`ape` then reads *TBD*, every other row blank)."
+          },
           "value": {
+            "type": "number",
+            "nullable": true,
+            "example": 9,
+            "description": "`rate × # of units`, the meeting’s own units — the ones it was kept with, once it is over. `null` with no rate."
+          },
+          "typed": {
             "type": "string",
-            "example": "8 (1 @ unit)",
-            "description": "Typed by an editor; *TBD* is a value. Plain text."
+            "nullable": true,
+            "description": "A target typed as text before rates that could not be read as one: shown as typed, as plain text, until an editor enters a rate. `null` otherwise."
           },
           "version": {
             "type": "number",
@@ -42592,7 +42802,9 @@
           }
         },
         "required": [
+          "rate",
           "value",
+          "typed",
           "version"
         ]
       },
@@ -44009,7 +44221,7 @@
               "decimal",
               "points"
             ],
-            "description": "How to write `benchmark` for a reader. `percent`: × 100 to one decimal (15.0%). `decimal`: two decimals (0.30). `points`: ± percentage points (±30 points). Always `points` on a `band` ratio."
+            "description": "How to write `benchmark` for a reader. `percent`: × 100, as typed (15%, 15,5%; ADR-0174 §2). `decimal`: two decimals (0,30). `points`: ± percentage points (±30 points). Always `points` on a `band` ratio."
           },
           "displayOrder": {
             "type": "number"
@@ -44245,8 +44457,8 @@
           "description": {
             "type": "string",
             "nullable": true,
-            "example": "Structured modules — tracked here.",
-            "description": "The subtitle an agent's category page shows."
+            "example": "Find prospects, uncover their needs, answer objections and close.",
+            "description": "The subtitle an agent's category page shows: one line saying what the category teaches."
           },
           "displayOrder": {
             "type": "number"
@@ -45794,6 +46006,12 @@
             "type": "string",
             "nullable": true
           },
+          "rejoinedOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-30",
+            "description": "The office date the person **came back** to this office, if they did: on a live membership that follows a removed one of the same person, its own join date — the directory’s *Rejoined*; on a removed membership the person has since returned from, the later membership’s join date — *Rejoined {date}*. `null` otherwise, and while the later membership is pending. Read only from memberships this reader may see."
+          },
           "lastActivityOn": {
             "type": "string",
             "nullable": true,
@@ -45856,6 +46074,7 @@
           "joinedAt",
           "joinDate",
           "removedAt",
+          "rejoinedOn",
           "canChangeRole",
           "canPromoteToAb",
           "canRemove"
@@ -46793,13 +47012,14 @@
               "figure",
               "pending",
               "none",
-              "blocked"
+              "blocked",
+              "unrecorded"
             ],
-            "description": "`figure` a value; `pending` *pending data* — no source holds it for its period, never 0; `none` *—*, a ratio over nothing; `blocked`, as the prototype draws it."
+            "description": "`figure` a value; `pending` *pending data* — no source holds it for its period, never 0; `none` *—*, a ratio over nothing; `blocked` *Not tracked*, a row the table leaves empty in this column; `unrecorded` *—*, a column or a row a scorecard kept before it existed does not hold — never computed for it."
           },
           "value": {
             "type": "number",
-            "description": "On a `figure`: exact — IDR minor units, a count, or a whole percentage."
+            "description": "On a `figure`: exact — IDR minor units, a count, a ratio or a whole percentage."
           },
           "leavesOut": {
             "description": "On a `figure`: the months of its period, `YYYY-MM`, not uploaded yet.",

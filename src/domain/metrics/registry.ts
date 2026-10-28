@@ -310,12 +310,14 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   // `NEW_AGENT_3M_ACTIVE_PCT` retired (ADR-0171 §2, P18.96-T6): the row reads `ACTIVATION_3M_PCT`, below.
   PRODUCING_AGENTS: { period: 'CALENDAR_YEAR', threshold: null },
   AVERAGE_CASE_SIZE_REALISED: { period: 'CALENDAR_YEAR', threshold: null },
+  // P18.97-T1 AC-5 (ADR-0175 §2): over the same periods as `PRODUCING_AGENTS`, its denominator — *Full Year* and *YTD*.
+  CASES_PER_PRODUCING_AGENT: { period: 'CALENDAR_YEAR', threshold: null },
   /*
-   * **The three drawn in every column** are `CALENDAR_MONTH`: each month's figure from the office's file, and over
-   * *FY* or *YTD* the months held summed or averaged — the same definition over a year, as `SUMMARY_ACTIVITY_TARGET`'s
-   * *Yearly* view is (`held-months.ts`).
+   * **The two drawn in every column** are `CALENDAR_MONTH`: each month's figure from the office's file, and over
+   * *Full Year* or *YTD* the months held summed or averaged — the same definition over a year, as
+   * `SUMMARY_ACTIVITY_TARGET`'s *Yearly* view is (`held-months.ts`).
    */
-  NEW_ACTIVE_AGENTS_MONTHLY_AVG: { period: 'CALENDAR_MONTH', threshold: null },
+  // `NEW_ACTIVE_AGENTS_MONTHLY_AVG` retired (ADR-0175 §2, P18.97-T1 AC-6): no table draws *New AA (avg. monthly)*.
   MAA_MONTHLY_AVG: { period: 'CALENDAR_MONTH', threshold: null },
   CASE_SUBMISSIONS: { period: 'CALENDAR_MONTH', threshold: null },
 

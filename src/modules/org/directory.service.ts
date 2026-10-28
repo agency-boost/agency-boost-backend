@@ -2,13 +2,15 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model } from 'mongoose';
 import { RequestContext, isEffectiveCoreLeader } from '@/common/context/request-context';
-import { can, Permission, scopeFor } from '@/modules/rbac/permissions';
+import { can } from '@/modules/rbac/permissions';
 import { NotFoundException } from '@/common/errors/domain.exception';
 import { preferredNameOf } from '@/modules/users/display-name';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole, MembershipDocument, MembershipStatus } from './membership.schema';
+import { rejoinedOn, type RejoinFacts } from './rejoined';
+import { DIRECTORY_READ, siblingsWithinReach, visibleTo, withinReach } from './reader-visibility';
 import { isLeaderClass, type Gender, type WorkStatus } from '@/domain/constants';
 
 export interface DirectoryQuery {
@@ -50,6 +52,14 @@ export interface DirectoryMember {
   joinDate: string | null;
   /** Set only on a removed row. The Removed tab answers "when", which is the first thing asked. */
   removedAt: string | null;
+  /**
+   * **The day the person came back to this office, if they did** (P18.97-T4 AC-3, ADR-0176 §5; `rejoinedOn` in
+   * `rejoined.ts`): on a live membership that follows a removed one, its own join date — the directory's *Rejoined*;
+   * on a removed membership the person has since returned from, the later one's — *Rejoined {date}* under
+   * *Removed*. `null` otherwise. Read from the memberships of the same person this reader may see, so it says nothing
+   * about a unit outside their reach.
+   */
+  rejoinedOn: string | null;
 
   /**
    * What **this viewer** may do to **this person** (P3.5-T13).
@@ -101,64 +111,6 @@ export const DIRECTORY_PAGE_SIZE = 25;
 export const DIRECTORY_MAX_PAGE_SIZE = 100;
 
 /**
- * Who this requester may see, as a filter fragment.
- *
- * It is exported and shared because the roster and the org tree must narrow
- * **identically** — two copies of a visibility rule drift, and the drift is a cross-unit
- * leak rather than a rendering bug.
- *
- * **The scope comes from the grant list**, resolved for the permission the caller was
- * gated on, so the matrix column is the implementation rather than a description of one.
- * It was not until 2026-09-06: this returned self-plus-whole-downline for everybody who
- * was not a tenant admin, and no caller passed a scope because it took none.
- *
- * **`own-unit` resolves to the subtree here, and that is deliberate.** The matrix's rules
- * 1 and 2 (`roles-and-permissions.md:187-196`) say so in as many words: *"`own-unit` for
- * an AB resolves to `own-downline`"*, with role change and removal named as the only
- * exceptions, and for an AAB *"`own-downline` is still the correct token"* even where a
- * KPM nests AAB under AAB. This function serves **reading** — the roster and the org
- * tree — and neither is one of those exceptions. The exceptions act on the leader edge
- * the actor owns and check `leaderId` directly; they never come through here.
- *
- * A first pass on 2026-09-06 read the matrix *cells* and not the rules beneath them, and
- * narrowed an AAB to their direct reports. That is a real narrowing: a nested AAB would
- * have lost sight of their own grandchildren in the group tree, on a screen whose manual
- * says it draws "your unit and everyone below it". Corrected the same day, with the test
- * below rewritten to assert the downline rather than the narrowing.
- *
- * Somebody with no membership sees nothing, and says so as an impossible filter rather
- * than an absent one — an absent filter would return the office.
- */
-export function visibleTo(
-  ctx: RequestContext,
-  permission: Permission = 'member:read_profile',
-): FilterQuery<MembershipDocument> {
-  if (ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin || ctx.isSuperAdmin) return {};
-  const self = ctx.membershipId;
-  if (!self) return { _id: null };
-
-  switch (scopeFor(ctx, permission)) {
-    case 'all':
-    case 'own-kpm':
-      return {};
-    // `ancestorIds` makes the downline arm a single indexed lookup on
-    // `(kpmId, ancestorIds, status)`.
-    //
-    // Both tokens land here: see the note above on rules 1 and 2. A leader reads their
-    // subtree; the rules that are genuinely limited to direct reports do not use this.
-    case 'own-downline':
-    case 'own-unit':
-      return { $or: [{ _id: self }, { ancestorIds: self }] };
-    case 'own':
-      return { _id: self };
-    // No grant at all. The guard refuses these before a service is reached; a filter
-    // that fails closed is the backstop for the day one is not behind the guard.
-    default:
-      return { _id: null };
-  }
-}
-
-/**
  * Avatar initials.
  *
  * Exported so the whitespace case can be tested directly: `users.fullName` is required
@@ -198,22 +150,13 @@ export class DirectoryService {
     return kpm?.ownerUserId ?? null;
   }
 
-  /**
-   * What this requester may see.
-   *
-   * A tenant admin — Owner or KPM Admin — sees everyone. Below that it is the scope
-   * `member:read_profile` grants — the permission the roster route is gated on, and
-   * documented at the same scopes as `member:list_directory`: an AB their downline, an AAB their own unit. Both
-   * arms are an `$or` so an indexed lookup still does the work.
-   */
-  private visibility(ctx: RequestContext): FilterQuery<MembershipDocument> {
-    return visibleTo(ctx, 'member:read_profile');
-  }
-
   async list(ctx: RequestContext, query: DirectoryQuery = {}): Promise<DirectoryPage> {
     const limit = Math.min(Math.max(query.limit ?? DIRECTORY_PAGE_SIZE, 1), DIRECTORY_MAX_PAGE_SIZE);
 
-    const filter: FilterQuery<MembershipDocument> = { ...this.visibility(ctx) };
+    // What this requester may see (`reader-visibility.ts`): a tenant admin the office, below that the scope
+    // `DIRECTORY_READ` grants. Spread, because no key of a narrowing is one this page adds; a filter that names an id
+    // goes through `withinReach` instead.
+    const filter: FilterQuery<MembershipDocument> = { ...visibleTo(ctx, DIRECTORY_READ) };
     // **Active only.** The roster's question is who is here now, and somebody still
     // waiting for a leader is not here yet — they have registered, nothing more.
     //
@@ -238,7 +181,7 @@ export class DirectoryService {
     });
 
     const page = rows.slice(0, limit);
-    const visible = this.visibility(ctx);
+    const visible = visibleTo(ctx, DIRECTORY_READ);
     const [directory, pending, removed] = await Promise.all([
       this.members.count(ctx, { ...visible, status: 'active' }),
       this.members.count(ctx, { ...visible, status: 'pending' }),
@@ -310,9 +253,27 @@ export class DirectoryService {
     );
 
     const owner = await this.ownerUserId(ctx);
-    return rows.map((m) =>
-      this.present(m, byUser.get(m.userId), leaderName.get(m.leaderId ?? '') ?? null, ctx, owner),
+    const returns = await this.returnsOf(ctx, rows);
+    return rows.map((m) => ({
+      ...this.present(m, byUser.get(m.userId), leaderName.get(m.leaderId ?? '') ?? null, ctx, owner),
+      rejoinedOn: rejoinedOn(rejoinFacts(m), returns.get(m.userId) ?? []),
+    }));
+  }
+
+  /**
+   * **Every membership of these people in this office that the reader may see** (P18.97-T4 AC-3), in one query and
+   * whatever their state, by person — what `rejoinedOn` reads to say who came back. Narrowed as the page was
+   * (`siblingsWithinReach`), so a leader's roster says nothing of a membership outside their unit.
+   */
+  private async returnsOf(ctx: RequestContext, rows: MembershipDocument[]): Promise<Map<string, RejoinFacts[]>> {
+    const siblings = await this.members.find(
+      ctx,
+      siblingsWithinReach(ctx, rows.map((r) => r.userId)),
+      { projection: { userId: 1, status: 1, joinDate: 1, joinedAt: 1, createdAt: 1 } },
     );
+    const out = new Map<string, RejoinFacts[]>();
+    for (const sibling of siblings) out.set(sibling.userId, [...(out.get(sibling.userId) ?? []), rejoinFacts(sibling)]);
+    return out;
   }
 
   private present(
@@ -321,7 +282,7 @@ export class DirectoryService {
     leaderNameValue: string | null,
     ctx?: RequestContext,
     ownerUserId?: string | null,
-  ): DirectoryMember {
+  ): Omit<DirectoryMember, 'rejoinedOn'> {
     const fullName = user?.fullName ?? 'Unknown';
     const tenantAdmin = Boolean(ctx?.membership?.isKpmOwner || ctx?.membership?.isKpmAdmin);
     const isDirectLeader = Boolean(ctx?.membershipId) && m.leaderId === ctx?.membershipId;
@@ -396,23 +357,18 @@ export class DirectoryService {
     // it are precisely the ones you may not read.
     const rows = await this.members.find(
       ctx,
-      {
-        $and: [{ leaderId: membershipId, status: { $ne: 'removed' } }, this.visibility(ctx)],
-      },
+      withinReach(ctx, { leaderId: membershipId, status: { $ne: 'removed' } }),
       { sort: { agentSeq: 1 } },
     );
     return this.decorate(ctx, rows);
   }
 
   async read(ctx: RequestContext, membershipId: string): Promise<DirectoryMember> {
-    // `$and`, not a spread. The narrowing for `own` is `{ _id: self }`, which is the one
-    // filter shape that collides with the id being asked for — spread second, it replaced
-    // the id and the read answered about the caller while claiming to be about somebody
-    // else. Under `$and` a colliding narrowing can only ever match nothing, which is the
-    // direction a visibility filter must fail in.
-    const scoped = await this.members.findOne(ctx, {
-      $and: [{ _id: membershipId }, this.visibility(ctx)],
-    });
+    // `$and`, not a spread (`withinReach`). The narrowing for `own` is `{ _id: self }`, which is
+    // the one filter shape that collides with the id being asked for — spread second, it
+    // replaced the id and the read answered about the caller while claiming to be about
+    // somebody else. Under `$and` a colliding narrowing can only ever match nothing.
+    const scoped = await this.members.findOne(ctx, withinReach(ctx, { _id: membershipId }));
     // 404 rather than 403 for someone outside your scope: a 403 would confirm they
     // exist, which is the same leak the cross-tenant rule closes.
     if (!scoped) throw new NotFoundException('Membership');
@@ -435,4 +391,16 @@ export class DirectoryService {
       },
     };
   }
+}
+
+/** What `rejoinedOn` reads of a membership: begun when it was made active, else when it was made. */
+function rejoinFacts(m: MembershipDocument): RejoinFacts {
+  const made = (m as unknown as { createdAt?: Date }).createdAt;
+  return {
+    id: String(m._id),
+    userId: m.userId,
+    status: m.status,
+    joinDate: m.joinDate ?? null,
+    startedAt: m.joinedAt ?? made ?? new Date(0),
+  };
 }

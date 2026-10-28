@@ -48,12 +48,12 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
   afterEach(() => (wired.clock as FixedClock).set(ROSTER_NOW));
 
   describe('P18.1-T2 AC-5, ADR-0130 §3 the agenda a new meeting starts from', () => {
-    it('P18.1-T2 AC-5 an office’s first: the prototype’s ten, PICs empty, the month before the meeting’s; no rows, nothing written', async () => {
+    it('P18.1-T2 AC-5, P18.97-T2 AC-4 an office’s first: the prototype’s ten, PICs empty, the meeting’s own month; no rows, nothing written', async () => {
       const first = await office.forum.create(office.ownerOfB(), { title: 'Strategic Check-in — #1', date: '2026-10-13' });
       expect(first.number).toBe(1);
       const view = await office.forum.read(office.ownerOfB(), first.id);
       expect(view.agenda.preparation.map((i) => i.text)).toEqual([
-        'Compile follow-ups & commitments from prior session', 'Prepare September performance data', 'Review scorecard, draft talking points',
+        'Compile follow-ups & commitments from prior session', 'Prepare October performance data', 'Review scorecard, draft talking points',
       ]);
       expect(view.agenda.during.map((i) => i.text)).toEqual([
         'Process update — review prior follow-ups', 'Performance review vs. key thresholds', 'Strategic priorities (Corporate)',
@@ -80,6 +80,25 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
       expect(copied.agenda.during[0]).toMatchObject({ text: during.text, pic: 'Wilson', done: false, version: 1 });
       expect(copied.agenda.during[0].id).not.toBe(during.id);
       expect([copied.actionItems, copied.writtenIn]).toEqual([[], false]);
+    });
+
+    it('P18.97-T2 AC-4 every new meeting re-dates the month item, a copied agenda included — across a year’s edge — and copies the rest as typed', async () => {
+      as('OWNER');
+      const december = (await http().post('/leader-meetings').send({ title: 'December', date: '2026-12-29' }).expect(201)).body;
+      const decemberAgenda = (await read(december.id)).agenda;
+      expect(decemberAgenda.preparation[1].text).toBe('Prepare December performance data');
+      // A leader's own wording of another item travels as typed.
+      const review = decemberAgenda.preparation[2];
+      await http().patch(`/leader-meetings/${december.id}/agenda-items/${review.id}`).send({ text: 'Review the December scorecard', version: review.version }).expect(200);
+      const january = (await http().post('/leader-meetings').send({ title: 'January', date: '2027-01-12' }).expect(201)).body;
+      const copied = (await read(january.id)).agenda;
+      expect(copied.preparation.map((i: { text: string }) => i.text)).toEqual([
+        decemberAgenda.preparation[0].text, 'Prepare January performance data', 'Review the December scorecard',
+      ]);
+      expect(copied.during.map((i: { text: string }) => i.text)).toEqual(decemberAgenda.during.map((i: { text: string }) => i.text));
+      await db().collection('leaderMeetings').updateMany(
+        { _id: { $in: [december.id, january.id].map((id) => new mongoose.Types.ObjectId(id)) } }, { $set: { deletedAt: new Date() } },
+      );
     });
   });
 
@@ -266,28 +285,83 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
     });
   });
 
-  describe('P18.1-T2 AC-4 the Monthly Target cells', () => {
-    it('P18.1-T2 AC-4 a cell never typed is version 0; a write lands at 1; a stale one is 409; blocked and unknown rows 400', async () => {
+  describe('P18.97-T1 AC-10 the Monthly Target cells, typed as a rate per unit (ADR-0175 §4)', () => {
+    /** Rp 1 *miliar* in sen: *APE (Rp M)*'s rate, typed in the row's unit, travels in minor units. */
+    const MILIAR = 1_000_000_000 * 100;
+
+    it('P18.97-T1 AC-10 a rate × the meeting’s # of units; never typed is version 0; a stale write 409; cleared with null; audited', async () => {
       const { id } = await make('Targets', '2026-10-05');
       as('ADMIN');
-      const saved = (await http().put(`/leader-meetings/${id}/monthly-targets/avg_monthly_aa`).send({ value: ' 22 (3 @ unit) ', version: 0 }).expect(200)).body;
-      expect(saved).toEqual({ value: '22 (3 @ unit)', version: 1 });
+      const units = (await read(id)).scorecard.chips.units;
+      expect(units).toBeGreaterThan(0);
+      const saved = (await http().put(`/leader-meetings/${id}/monthly-targets/avg_monthly_aa`).send({ rate: 3, version: 0 }).expect(200)).body;
+      expect(saved).toEqual({ rate: 3, value: 3 * units, typed: null, version: 1 });
       const row = (await read(id)).scorecard.rows.find((r: { key: string }) => r.key === 'avg_monthly_aa');
-      expect(row.monthlyTarget).toEqual({ value: '22 (3 @ unit)', version: 1 });
-      expect((await http().put(`/leader-meetings/${id}/monthly-targets/avg_monthly_aa`).send({ value: 'TBD', version: 0 }).expect(409)).body.error)
+      expect(row.monthlyTarget).toEqual(saved);
+      expect((await http().put(`/leader-meetings/${id}/monthly-targets/avg_monthly_aa`).send({ rate: 1, version: 0 }).expect(409)).body.error)
         .toMatchObject({ code: 'VERSION_CONFLICT', details: { expectedVersion: 0, actualVersion: 1 } });
-      await http().put(`/leader-meetings/${id}/monthly-targets/avg_monthly_aa`).send({ value: 'TBD', version: 1 }).expect(200);
-      for (const [row, value] of [
-        ['producing_agents', '9'], ['average_case_size', '9'], ['new_agent_3m', '9'], ['agents', '9'], ['ape', 'x'.repeat(LEADER_MEETING_LIMITS.targetMax + 1)],
+      // A count's rate to two places; APE's in whole sen — Rp 0,15 M a unit.
+      expect((await http().put(`/leader-meetings/${id}/monthly-targets/flc`).send({ rate: 1.25, version: 0 }).expect(200)).body.value)
+        .toBe(Math.round(1.25 * units * 100) / 100);
+      const ape = (await http().put(`/leader-meetings/${id}/monthly-targets/ape`).send({ rate: 0.15 * 1e9 * 100, version: 0 }).expect(200)).body;
+      expect(ape).toEqual({ rate: 15 * MILIAR / 100, value: (15 * MILIAR / 100) * units, typed: null, version: 1 });
+      // Cleared: no rate — *APE* reads *TBD* and every other row is blank on the screen.
+      const cleared = (await http().put(`/leader-meetings/${id}/monthly-targets/avg_monthly_aa`).send({ rate: null, version: 1 }).expect(200)).body;
+      expect(cleared).toEqual({ rate: null, value: null, typed: null, version: 2 });
+      const entries = await auditOf(id, 'leader_meeting.monthly_target_saved');
+      expect(entries.filter((e) => e.after.row === 'avg_monthly_aa').map((e) => [e.before, e.after])).toEqual([
+        [{ row: 'avg_monthly_aa', rate: null, typed: null, version: 0 }, { row: 'avg_monthly_aa', rate: 3, typed: null, version: 1 }],
+        [{ row: 'avg_monthly_aa', rate: 3, typed: null, version: 1 }, { row: 'avg_monthly_aa', rate: null, typed: null, version: 2 }],
+      ]);
+    });
+
+    it('P18.97-T1 AC-10 a rate that is not a number is refused 400 VALIDATION_FAILED — a text, the old free text included — and nothing is written', async () => {
+      const { id } = await make('Refused targets', '2026-10-06');
+      as('OWNER');
+      const before = await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(id) });
+      for (const body of [
+        { rate: 'abc', version: 0 }, { rate: '5', version: 0 }, { rate: '1,5', version: 0 }, { rate: true, version: 0 }, { rate: {}, version: 0 },
+        { rate: [1], version: 0 }, { version: 0 }, { value: '8 (1 @ unit)', version: 0 }, { rate: 1, value: 'TBD', version: 0 },
+        // From 0, to two places.
+        { rate: -1, version: 0 }, { rate: 1.234, version: 0 },
       ]) {
-        const res = await http().put(`/leader-meetings/${id}/monthly-targets/${row}`).send({ value, version: 0 });
+        const res = await http().put(`/leader-meetings/${id}/monthly-targets/flc`).send(body);
+        expect([JSON.stringify(body), res.status, res.body.error.code]).toEqual([JSON.stringify(body), 400, 'VALIDATION_FAILED']);
+      }
+      // APE's is whole sen: a fraction of one is refused.
+      expect((await http().put(`/leader-meetings/${id}/monthly-targets/ape`).send({ rate: 1.5, version: 0 }).expect(400)).body.error.code)
+        .toBe('VALIDATION_FAILED');
+      // A row that takes no target — New AA's among them since it left the table (AC-6) — or does not exist.
+      for (const row of ['new_aa', 'producing_agents', 'new_agent_3m', 'cases_per_producing_agent', 'average_case_size', 'agents']) {
+        const res = await http().put(`/leader-meetings/${id}/monthly-targets/${row}`).send({ rate: 1, version: 0 });
         expect([row, res.status, res.body.error.code]).toEqual([row, 400, 'VALIDATION_FAILED']);
       }
-      const entries = await auditOf(id, 'leader_meeting.monthly_target_saved');
-      expect(entries.map((e) => [e.before, e.after])).toEqual([
-        [{ row: 'avg_monthly_aa', value: '', version: 0 }, { row: 'avg_monthly_aa', value: '22 (3 @ unit)', version: 1 }],
-        [{ row: 'avg_monthly_aa', value: '22 (3 @ unit)', version: 1 }, { row: 'avg_monthly_aa', value: 'TBD', version: 2 }],
-      ]);
+      expect(await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(id) })).toEqual(before);
+      expect(await auditOf(id, 'leader_meeting.monthly_target_saved')).toEqual([]);
+    });
+
+    it('P18.97-T1 AC-10 an editor alone types one: the Owner, an Admin and a Core Leader yes; an untagged member 404, a read-only session 403, another office 404', async () => {
+      const { id } = await make('Who types targets', '2026-10-07');
+      const write = async (version: number) => http().put(`/leader-meetings/${id}/monthly-targets/case_submission`).send({ rate: 2, version });
+      let version = 0;
+      for (const who of ['OWNER', 'ADMIN', 'AGUS', 'SARI'] as const) {
+        as(who);
+        const res = await write(version);
+        expect([who, res.status, res.body.version]).toEqual([who, 200, version + 1]);
+        version += 1;
+      }
+      const stored = async () => (await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(id) }))!.monthlyTargets;
+      const kept = await stored();
+      for (const who of ['RINA', 'DEWI', 'PEER_AB'] as const) {
+        as(who);
+        const res = await write(version);
+        expect([who, res.status, res.body.error.code]).toEqual([who, 404, 'NOT_FOUND']);
+      }
+      session.current = office.supported('OWNER');
+      expect([(await write(version)).status]).toEqual([403]);
+      session.current = office.ownerOfB();
+      expect((await write(version)).body.error.code).toBe('NOT_FOUND');
+      expect(await stored()).toEqual(kept);
     });
   });
 
@@ -304,14 +378,16 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
       await http().patch(`/leader-meetings/${meeting.id}/agenda-items/${item.id}`).send({ pic: bold, version: 2 }).expect(200);
       const row = (await http().post(`/leader-meetings/${meeting.id}/action-items`).expect(201)).body;
       await http().patch(`/leader-meetings/${meeting.id}/action-items/${row.id}`).send({ action: script, version: 1 }).expect(200);
-      await http().put(`/leader-meetings/${meeting.id}/monthly-targets/ape`).send({ value: bold, version: 0 }).expect(200);
+      // A target is a number since P18.97-T1 (AC-10): markup is refused as any text is, and nothing is stored.
+      expect((await http().put(`/leader-meetings/${meeting.id}/monthly-targets/ape`).send({ rate: bold, version: 0 }).expect(400)).body.error.code)
+        .toBe('VALIDATION_FAILED');
       const after = await read(meeting.id);
       expect(after.title).toBe(`${bold} ${script}`);
       expect(after.agenda.during[0]).toMatchObject({ text: script, pic: bold });
       expect(after.actionItems[0].action).toBe(script);
-      expect(after.scorecard.rows[0].monthlyTarget.value).toBe(bold);
+      expect(after.scorecard.rows[0].monthlyTarget).toEqual({ rate: null, value: null, typed: null, version: 0 });
       const stored = await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(meeting.id) });
-      expect([stored!.title, stored!.agenda.during[0].text, stored!.monthlyTargets.ape.value]).toEqual([`${bold} ${script}`, script, bold]);
+      expect([stored!.title, stored!.agenda.during[0].text, stored!.monthlyTargets ?? {}]).toEqual([`${bold} ${script}`, script, {}]);
     });
   });
 
@@ -325,7 +401,7 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
       as('SARI');
       const saved = (await http().patch(`/leader-meetings/${past.id}/action-items/${row.id}`).send({ status: 'implemented', version: 1 }).expect(200)).body;
       expect(saved.status).toBe('implemented');
-      await http().put(`/leader-meetings/${past.id}/monthly-targets/flc`).send({ value: '8 (1 @ unit)', version: 0 }).expect(200);
+      await http().put(`/leader-meetings/${past.id}/monthly-targets/flc`).send({ rate: 1, version: 0 }).expect(200);
       const [entry] = await auditOf(past.id, 'leader_meeting.action_item_saved');
       expect(entry).toMatchObject({ before: { item: { status: 'not_planned' } }, after: { item: { status: 'implemented' } }, actorMembershipId: office.id.SARI });
       expect(LeaderMeetingSchema.path('lockedAt')).toBeUndefined();

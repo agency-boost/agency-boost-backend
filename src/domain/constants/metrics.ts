@@ -203,11 +203,19 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'ACTIVATION_COHORT', name: 'Activation cohort', unit: 'count', phase: 18.1, requirable: false },
   // `NEW_AGENT_3M_ACTIVE_PCT` (*3M new agent %*, 18.1) was here: retired by ADR-0171 §2 (P18.96-T6) for
   // `ACTIVATION_3M_PCT`, below — the one 3M metric, which the forum's row reads now (invariant §8).
-  { key: 'NEW_ACTIVE_AGENTS_MONTHLY_AVG', name: 'New AA (avg. monthly)', unit: 'count', phase: 18.1, requirable: false },
-  { key: 'PRODUCING_AGENTS', name: 'Producing agents', unit: 'count', phase: 18.1, requirable: false },
+  // `NEW_ACTIVE_AGENTS_MONTHLY_AVG` (*New AA (avg. monthly)*, 18.1) was here: retired by ADR-0175 §2 (P18.97-T1 AC-6) —
+  // the client's reference slide has no such row. Its frozen figures stay on the meetings that froze them.
+  // P18.97-T1 AC-4 (ADR-0175 §2, UI-004, UI-041): *Producing agents* reads **Annual Active Agents**, its definition the same.
+  { key: 'PRODUCING_AGENTS', name: 'Annual Active Agents', unit: 'count', phase: 18.1, requirable: false },
   { key: 'MAA_MONTHLY_AVG', name: 'Avg. Monthly AA', unit: 'count', phase: 18.1, requirable: false },
   { key: 'CASE_SUBMISSIONS', name: 'Case submission', unit: 'count', phase: 18.1, requirable: false },
   { key: 'AVERAGE_CASE_SIZE_REALISED', name: 'Average Case Size', unit: 'idr_minor', phase: 18.1, requirable: false },
+  /*
+   * Phase 18.97 (P18.97-T1 AC-5; ADR-0175 §2, OD-228): the reference slide's *Cases/producing agents* — `CASE_SUBMISSIONS`
+   * ÷ `PRODUCING_AGENTS` over the same period, computed once (`domain/metrics/cases-per-producing-agent.ts`).
+   * **`requirable: false`**, as the forum's others: computed over an office alone, never for a member.
+   */
+  { key: 'CASES_PER_PRODUCING_AGENT', name: 'Cases/producing agents', unit: 'ratio', phase: 18.97, requirable: false },
   /*
    * Phase 18.6 (P18.6-T1 AC-5, AC-7; OD-159, OD-160): the Owner's compliance tree's two chips that needed a definition,
    * each computed once under `domain/metrics/` (`activation-completion-rate.ts`, `goal-set.ts`). **Both are

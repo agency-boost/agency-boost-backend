@@ -1,11 +1,10 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { MonthlyAgentData } from '@/modules/production/monthly-agent-data.schema';
-import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
 import { clearCollections, startMongo, stopMongo } from '../../../../test/mongo';
 import { configModule, provisionOffice } from '../../../../test/config-module';
-import { LeaderScorecardService } from './scorecard.service';
+import { scorecardServiceOf } from '../../../../test/forum-office';
+import { columnPeriods, LeaderScorecardService } from './scorecard.service';
 import type { ColumnKey, ComputedScorecard, RowKey, ScorecardCell } from './scorecard.types';
 
 /** 10:00 on Saturday 10 October 2026 in Jakarta. */
@@ -16,6 +15,7 @@ const KPM_B = '66f00000000000000000b181';
 const KPM_C = '66f00000000000000000c181';
 const KPM_D = '66f00000000000000000d181';
 const KPM_E = '66f00000000000000000e181';
+const KPM_F = '66f00000000000000000f181';
 const COMPANY = '66f00000000000000000c0c1';
 const M = 1_000_000 * 100;
 
@@ -107,8 +107,8 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     await startMongo();
     wired = configModule(NOW);
     await clearCollections();
-    await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create([KPM_A, KPM_B, KPM_C, KPM_D, KPM_E].map((kpmId, i) => ({
-      _id: kpmId, companyId: COMPANY, code: ['0417', '0555', '0701', '0702', '0703'][i], branchName: 'Branch', timezone: JAKARTA,
+    await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create([KPM_A, KPM_B, KPM_C, KPM_D, KPM_E, KPM_F].map((kpmId, i) => ({
+      _id: kpmId, companyId: COMPANY, code: ['0417', '0555', '0701', '0702', '0703', '0704'][i], branchName: 'Branch', timezone: JAKARTA,
     })));
     await wired.orgLevels.seedDefaultLadder(COMPANY);
     for (const kpmId of [KPM_A, KPM_B]) await provisionOffice(wired, kpmId, COMPANY);
@@ -176,10 +176,7 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
       }
     }
 
-    scorecard = new LeaderScorecardService(
-      wired.officePeople, wired.productionReadings,
-      new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.memberships, wired.clock,
-    );
+    scorecard = scorecardServiceOf(wired);
   }, 120_000);
 
   afterEach(() => clock().set(NOW));
@@ -201,31 +198,41 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     let card: ComputedScorecard;
     beforeAll(async () => { card = await compute('2026-10-13'); });
 
-    it('P18.1-T2 AC-4 names the five periods from the meeting’s date, FY and YTD its years', () => {
-      expect(card.periods).toEqual({ fy: '2025', ytd: '2026', thisMonthLastYear: '2025-10', lastMonth: '2026-09', thisMonth: '2026-10' });
+    it('P18.97-T1 AC-2 names the six periods from the meeting’s month: Full Year, last year’s YTD, YTD and the three months', () => {
+      expect(card.periods).toEqual({
+        fy: { from: '2025-01', to: '2025-12' }, ytdLastYear: { from: '2025-01', to: '2025-10' }, ytd: { from: '2026-01', to: '2026-10' },
+        thisMonthLastYear: { from: '2025-10', to: '2025-10' }, lastMonth: { from: '2026-09', to: '2026-09' }, thisMonth: { from: '2026-10', to: '2026-10' },
+      });
     });
 
-    it('P18.1-T2 AC-4 serves the nine rows in the prototype’s order, each with its unit', () => {
+    it('P18.97-T1 AC-4 serves the nine rows in the reference slide’s order, each with its unit — New AA gone, Cases/producing agents in', () => {
       expect(card.rows.map((r) => [r.key, r.unit])).toEqual([
-        ['ape', 'idr_minor'], ['manpower', 'count'], ['flc', 'count'], ['producing_agents', 'count'], ['new_aa', 'count'],
-        ['new_agent_3m', 'percentage'], ['avg_monthly_aa', 'count'], ['case_submission', 'count'], ['average_case_size', 'idr_minor'],
+        ['ape', 'idr_minor'], ['manpower', 'count'], ['flc', 'count'], ['producing_agents', 'count'], ['new_agent_3m', 'percentage'],
+        ['avg_monthly_aa', 'count'], ['case_submission', 'count'], ['cases_per_producing_agent', 'ratio'], ['average_case_size', 'idr_minor'],
       ]);
     });
 
-    it('P18.1-T2 AC-4 the chips: the headcount today and its members by rung code, a unit per AB', () => {
-      expect(card.chips).toEqual({ manpower: 9, agents: 7, units: 1, ab: 1, aab: 1 });
+    it('P18.97-T1 AC-6 New AA (avg. monthly) is computed nowhere: no row, whatever the file’s NEW_ACTIVE_AGENTS hold', () => {
+      expect(card.rows.some((r) => (r.key as string) === 'new_aa')).toBe(false);
+    });
+
+    it('P18.97-T1 AC-9 the chips: the headcount today and its members by class; # of units every AB and AAB', () => {
+      expect(card.chips).toEqual({ manpower: 9, agents: 7, units: 2, ab: 1, aab: 1 });
+      expect(card.chips.units).toBe(card.chips.ab + card.chips.aab);
       expect(cell(card, 'manpower', 'thisMonth')).toEqual(fig(card.chips.manpower));
     });
 
     it('P18.1-T2 AC-4 Manpower: OFFICE_HEADCOUNT on each period’s last day — the leavers out from the day they left', () => {
       expect(row(card, 'manpower').cells).toEqual({
-        fy: fig(5), ytd: fig(9), thisMonthLastYear: fig(5), lastMonth: fig(9), thisMonth: fig(9),
+        fy: fig(5), ytdLastYear: fig(5), ytd: fig(9), thisMonthLastYear: fig(5), lastMonth: fig(9), thisMonth: fig(9),
       });
     });
 
-    it('P18.1-T2 AC-4 APE: the year to date through the period, a leaver’s kept; a month the office’s file summed', () => {
+    it('P18.97-T1 AC-1 APE: the year to date through the period — last year’s to October as it stood then, a leaver’s kept', () => {
       expect(row(card, 'ape').cells).toEqual({
         fy: fig(186 * M),
+        // January to October of last year: the Owner's 100, the Agent's 50, H25's 3, H25Q's 1 and LEFT's 2.
+        ytdLastYear: fig(156 * M),
         // The carrier's year to date holds August; October, after the latest month held, is the office's current
         // month — its file not due yet — so nothing is named.
         ytd: fig(134 * M),
@@ -236,36 +243,28 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     });
 
     it('P18.1-T2 AC-4 FLC is pending data in every column (OD-26)', () => {
-      expect(Object.values(row(card, 'flc').cells)).toEqual(Array(5).fill(PENDING));
+      expect(Object.values(row(card, 'flc').cells)).toEqual(Array(6).fill(PENDING));
     });
 
-    it('P18.1-T2 AC-4 the three rows the prototype blocks are blocked in the three single months', () => {
-      for (const key of ['producing_agents', 'new_agent_3m', 'average_case_size'] as const) {
+    it('P18.97-T1 AC-5 the four rows the table does not track month by month are Not tracked in the three single months', () => {
+      for (const key of ['producing_agents', 'new_agent_3m', 'cases_per_producing_agent', 'average_case_size'] as const) {
         expect([key, cell(card, key, 'thisMonthLastYear'), cell(card, key, 'lastMonth'), cell(card, key, 'thisMonth')])
           .toEqual([key, BLOCKED, BLOCKED, BLOCKED]);
       }
     });
 
-    it('P18.1-T1 AC-4 Producing agents: active in a held month they belonged in — LEFT in the June they left in', () => {
+    it('P18.1-T1 AC-4 Annual Active Agents: active in a held month they belonged in — LEFT in the June they left in', () => {
       expect(cell(card, 'producing_agents', 'fy')).toEqual(fig(5));
+      expect(cell(card, 'producing_agents', 'ytdLastYear')).toEqual(fig(5));
       expect(cell(card, 'producing_agents', 'ytd')).toEqual(fig(5, ['2026-08']));
-    });
-
-    it('P18.1-T1 AC-3 New AA (avg. monthly): the file’s count over the months that carry it, ÷ those months', () => {
-      expect(row(card, 'new_aa').cells).toEqual({
-        fy: fig(1),
-        // September's file carries no new active agents: it is left out with August, which is not held.
-        ytd: fig(1, ['2026-08', '2026-09']),
-        thisMonthLastYear: fig(1),
-        lastMonth: PENDING,
-        thisMonth: PENDING,
-      });
     });
 
     it('P18.1-T1 AC-4 Avg. Monthly AA: each month’s MAA_COUNT_IN_UNIT over its members on its last day, averaged', () => {
       expect(row(card, 'avg_monthly_aa').cells).toEqual({
         // June counts H25 and not LEFT, removed on the 15th; August H25Q.
         fy: fig(26 / 12),
+        // January to October of last year: two a month, three in June and August.
+        ytdLastYear: fig(22 / 10),
         // May counts LATE and EARLY; September NEW_JUL.
         ytd: fig(19 / 8, ['2026-08']),
         thisMonthLastYear: fig(2),
@@ -276,13 +275,24 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
 
     it('P18.1-T1 AC-4 Case submission: the file’s policies over the months held, a leaver’s kept', () => {
       expect(row(card, 'case_submission').cells).toEqual({
-        fy: fig(39), ytd: fig(27, ['2026-08']), thisMonthLastYear: fig(3), lastMonth: fig(4), thisMonth: PENDING,
+        fy: fig(39), ytdLastYear: fig(33), ytd: fig(27, ['2026-08']), thisMonthLastYear: fig(3), lastMonth: fig(4), thisMonth: PENDING,
       });
+    });
+
+    it('P18.97-T1 AC-5 Cases/producing agents: Case submission ÷ Annual Active Agents over each year, the months either leaves out named', () => {
+      expect(cell(card, 'cases_per_producing_agent', 'fy')).toEqual(fig(39 / 5));
+      expect(cell(card, 'cases_per_producing_agent', 'ytdLastYear')).toEqual(fig(33 / 5));
+      expect(cell(card, 'cases_per_producing_agent', 'ytd')).toEqual(fig(27 / 5, ['2026-08']));
     });
 
     it('P18.1-T1 AC-4 Average Case Size: APE ÷ policies over the same months, in whole minor units', () => {
       expect(cell(card, 'average_case_size', 'fy')).toEqual(fig(Math.round((186 * M) / 39)));
+      expect(cell(card, 'average_case_size', 'ytdLastYear')).toEqual(fig(Math.round((156 * M) / 33)));
       expect(cell(card, 'average_case_size', 'ytd')).toEqual(fig(Math.round((134 * M) / 27), ['2026-08']));
+    });
+
+    it('P18.97-T1 AC-13 AS OF is none while the office has uploaded no file', () => {
+      expect(card.asOf).toBeNull();
     });
 
     /*
@@ -292,6 +302,8 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     it('P18.96-T6 AC-2 3M new agent %: last year 2 of 4 — H25 and LEFT sold by day 90, H25Q on day 117, LEFT_QUIET never', () => {
       // LEFT was removed in June, after selling: a removal is not leaving, and the 90 days decided it.
       expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(50));
+      // P18.97-T1 AC-1: the four joined between March and May, inside January to October of last year too.
+      expect(cell(card, 'new_agent_3m', 'ytdLastYear')).toEqual(fig(50));
     });
 
     it('P18.96-T6 AC-2 3M new agent %: this year 1 of 2 — EARLY’s first sale is day 90, LATE’s the same day is day 91; NEW_JUL in progress', () => {
@@ -302,7 +314,7 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
 
   it('P18.1-T2 AC-4 a meeting already past: its periods end on its date — a member who joined after it is not counted', async () => {
     const card = await compute('2026-09-20');
-    expect(card.periods).toMatchObject({ lastMonth: '2026-08', thisMonth: '2026-09' });
+    expect(card.periods).toMatchObject({ lastMonth: { from: '2026-08', to: '2026-08' }, thisMonth: { from: '2026-09', to: '2026-09' } });
     expect(card.chips.manpower).toBe(8);
     expect(cell(card, 'manpower', 'thisMonth')).toEqual(fig(8));
     // August is not held: pending, never 0.
@@ -313,18 +325,23 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     expect(cell(card, 'case_submission', 'ytd')).toEqual(fig(27, ['2026-08']));
   });
 
-  it('P18.1-T2 AC-4 a meeting in another year: FY and YTD name its years; a period that has not begun is pending', async () => {
+  it('P18.97-T1 AC-2 a meeting in another year — a January one: each YTD its January alone, Last Month the December before', async () => {
     const card = await compute('2027-01-05');
-    expect(card.periods).toEqual({ fy: '2026', ytd: '2027', thisMonthLastYear: '2026-01', lastMonth: '2026-12', thisMonth: '2027-01' });
+    expect(card.periods).toEqual({
+      fy: { from: '2026-01', to: '2026-12' }, ytdLastYear: { from: '2026-01', to: '2026-01' }, ytd: { from: '2027-01', to: '2027-01' },
+      thisMonthLastYear: { from: '2026-01', to: '2026-01' }, lastMonth: { from: '2026-12', to: '2026-12' }, thisMonth: { from: '2027-01', to: '2027-01' },
+    });
+    // Last year's January, read as January's own year to date: the Owner's 10, the Agent's 5.
+    expect(cell(card, 'ape', 'ytdLastYear')).toEqual(fig(15 * M));
     // FY 2026 runs to today: the year to date as it stands.
     expect(cell(card, 'ape', 'fy')).toEqual(fig(134 * M));
     // P18.96-T6: 2026's new hires as they stand today — EARLY activated, LATE not, two in progress.
     expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(50));
     expect(cell(card, 'ape', 'thisMonthLastYear')).toEqual(fig(15 * M));
-    for (const key of ['ape', 'new_aa', 'avg_monthly_aa', 'case_submission'] as const) {
+    for (const key of ['ape', 'avg_monthly_aa', 'case_submission'] as const) {
       expect([key, cell(card, key, 'ytd'), cell(card, key, 'lastMonth'), cell(card, key, 'thisMonth')]).toEqual([key, PENDING, PENDING, PENDING]);
     }
-    for (const key of ['producing_agents', 'new_agent_3m', 'average_case_size'] as const) {
+    for (const key of ['producing_agents', 'new_agent_3m', 'cases_per_producing_agent', 'average_case_size'] as const) {
       expect([key, cell(card, key, 'ytd')]).toEqual([key, PENDING]);
     }
     // A point-in-time figure is taken on the period's end, today: the headcount now.
@@ -332,10 +349,23 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     expect(card.chips.manpower).toBe(9);
   });
 
+  it('P18.97-T1 AC-2 a December meeting: Full Year and last year’s YTD both run to December, and read the same', async () => {
+    clock().set(new Date('2027-01-10T03:00:00Z'));
+    const card = await compute('2026-12-15');
+    expect(card.periods.fy).toEqual({ from: '2025-01', to: '2025-12' });
+    expect(card.periods.ytdLastYear).toEqual({ from: '2025-01', to: '2025-12' });
+    expect(card.periods.ytd).toEqual({ from: '2026-01', to: '2026-12' });
+    for (const key of ['ape', 'manpower', 'producing_agents', 'new_agent_3m', 'avg_monthly_aa', 'case_submission', 'cases_per_producing_agent', 'average_case_size'] as const) {
+      expect([key, cell(card, key, 'ytdLastYear')]).toEqual([key, cell(card, key, 'fy')]);
+    }
+    expect(columnPeriods('2026-12-15')).toEqual(card.periods);
+  });
+
   it('P18.1-T2 AC-4 a meeting at the year’s start, read after it: YTD is its two days, Last Month last December', async () => {
     clock().set(new Date('2026-01-05T03:00:00Z'));
     const card = await compute('2026-01-02');
-    expect(card.periods).toEqual({ fy: '2025', ytd: '2026', thisMonthLastYear: '2025-01', lastMonth: '2025-12', thisMonth: '2026-01' });
+    expect(card.periods).toEqual(columnPeriods('2026-01-02'));
+    expect([card.periods.ytd, card.periods.lastMonth]).toEqual([{ from: '2026-01', to: '2026-01' }, { from: '2025-12', to: '2025-12' }]);
     expect(cell(card, 'ape', 'fy')).toEqual(fig(186 * M));
     expect(cell(card, 'ape', 'ytd')).toEqual(fig(15 * M));
     expect(cell(card, 'ape', 'lastMonth')).toEqual(fig(15 * M));
@@ -354,6 +384,8 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     expect(cell(card, 'average_case_size', 'fy')).toEqual({ kind: 'none' });
     expect(cell(card, 'case_submission', 'fy')).toEqual(fig(0));
     expect(card.chips).toEqual({ manpower: 2, agents: 1, units: 1, ab: 1, aab: 0 });
+    // P18.97-T1 AC-5: policies over nobody producing is *—* too — never a division by zero.
+    expect(cell(card, 'cases_per_producing_agent', 'fy')).toEqual({ kind: 'none' });
   });
 
   it('P18.1-T2 AC-4 an office with no file: every figure from it pending, never 0; the headcount still counted', async () => {
@@ -391,6 +423,55 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     // P18.96-T6: read on 2 November — NEW_JUL's day 90 (17 October) has passed, her September sale inside it: 2 of 3.
     expect(cell(card, 'new_agent_3m', 'ytd')).toEqual(fig(67));
     expect(cell(card, 'case_submission', 'thisMonth')).toEqual(PENDING);
+  });
+
+  it('P18.97-T1 AC-13 AS OF: the office’s day of its latest upload standing, of the months the table reads, by now', async () => {
+    const batch = (kpmId: string, month: string, committedAt: string, status = 'committed') => ({
+      kpmId, month, status, filename: `${month}.csv`, fileSha256: `${kpmId}${month}${committedAt}`, templateVersion: 1,
+      encoding: 'utf-8', delimiter: ',', basedOnRevision: 0, monthRevision: 1, rowCount: 1, writtenRowCount: 1, cellCount: 1,
+      issueCount: 0, startedAt: new Date(committedAt), committedAt: new Date(committedAt), deletedAt: null,
+    });
+    await db().collection('dataUploadBatches').insertMany([
+      batch(KPM_A, '2026-07', '2026-08-05T03:00:00Z'),
+      // 23:30 UTC on 5 October is 6 October in Jakarta: the office's calendar names the day.
+      batch(KPM_A, '2026-09', '2026-10-05T23:30:00Z'),
+      // Reverted, so not standing; another office's; and one the clock has not reached.
+      batch(KPM_A, '2026-09', '2026-10-08T03:00:00Z', 'reverted'),
+      batch(KPM_B, '2026-09', '2026-10-09T03:00:00Z'),
+      batch(KPM_A, '2026-10', '2026-10-11T03:00:00Z'),
+    ]);
+    try {
+      expect((await compute('2026-10-13')).asOf).toBe('2026-10-06');
+      expect((await compute('2026-10-13', KPM_B)).asOf).toBe('2026-10-09');
+      // A meeting in August reads the files to August: July's, uploaded on 5 August.
+      expect((await compute('2026-08-20')).asOf).toBe('2026-08-05');
+      // An office with no file draws no *AS OF*.
+      expect((await compute('2026-10-13', KPM_C)).asOf).toBeNull();
+    } finally {
+      await db().collection('dataUploadBatches').deleteMany({});
+    }
+  });
+
+  it('P18.97-T1 AC-9 # of units on a custom ladder: every member of a leader tier, whatever the company calls the rung', async () => {
+    const member = (code: string, role: 'ab' | 'aab' | 'agent', n: number, removed = false) => ({
+      _id: new mongoose.Types.ObjectId(), kpmId: KPM_F, userId: String(new mongoose.Types.ObjectId()), agentCode: `F${n}`, agentSeq: n,
+      leaderCode: `FL${n}`, orgLevelId: 'x', orgLevelCode: code, role, leaderId: null, ancestorIds: [], depth: 0,
+      directCounts: { total: 0 }, subtreeCount: 0, status: removed ? 'removed' : 'active',
+      joinedAt: new Date('2025-02-01T03:00:00Z'), removedAt: removed ? new Date('2026-09-01T03:00:00Z') : null,
+      joinDate: '2025-02-01', joinedAs: 'existing_agent', deletedAt: null,
+    });
+    // A *Senior Leader* rung called Branch Manager, an *Associate Leader* called Unit Manager, and an agent rung.
+    await db().collection('memberships').insertMany([
+      member('BM', 'ab', 1), member('BM', 'ab', 2), member('UM', 'aab', 3), member('UM', 'aab', 4), member('UM', 'aab', 5),
+      member('FA', 'agent', 6), member('FA', 'agent', 7),
+      // A leader removed before the period's last day is counted nowhere.
+      member('UM', 'aab', 8, true),
+    ]);
+    const card = await compute('2026-10-13', KPM_F);
+    expect(card.chips).toEqual({ manpower: 7, agents: 2, units: 5, ab: 2, aab: 3 });
+    // The target's multiplier, alone: the same count on the same day.
+    expect(await scorecard.units({ kpmId: KPM_F, timezone: JAKARTA, meetingDate: '2026-10-13' })).toBe(5);
+    expect(await scorecard.units({ kpmId: KPM_A, timezone: JAKARTA, meetingDate: '2026-10-13' })).toBe((await compute('2026-10-13')).chips.units);
   });
 
   it('P18.1-T2 AC-4 writes nothing and records no §3.5 entry: a read of the office’s records', async () => {

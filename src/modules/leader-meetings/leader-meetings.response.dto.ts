@@ -1,12 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { LEADER_MEETING_LIMITS } from '@/domain/constants';
-import { ACTION_STATUSES, type ActionStatus, type MonthlyTargetCell } from './leader-meeting.schema';
+import { ACTION_STATUSES, type ActionStatus } from './leader-meeting.schema';
 import type {
   ActionItem, AgendaItem, ForumLimits, ForumPerson, MeetingCan, MeetingCard, MeetingEditors, MeetingListView,
-  MeetingState, MeetingView, Scorecard, ScorecardRow, ShareLink,
+  MeetingState, MeetingView, MonthlyTarget, PartialPeriod, Scorecard, ScorecardRow, ShareLink, YtdChange, YtdChangeUnit,
 } from './leader-meeting.view';
+import type { ScorecardAsOf } from './scorecard/scorecard-record';
 import {
-  COLUMN_KEYS, ROW_KEYS, type ColumnKey, type RowKey, type ScorecardCell, type ScorecardUnit,
+  COLUMN_KEYS, ROW_KEYS, type ColumnKey, type ColumnPeriod, type RowKey, type ScorecardCell, type ScorecardUnit,
 } from './scorecard/scorecard.types';
 
 /** Declared for OpenAPI. The wire shapes live on `leader-meeting.view.ts`, as `frontend/src/lib/leader-meetings.ts` reads them. */
@@ -88,55 +89,138 @@ export class MeetingListViewDto implements MeetingListView {
 
 class ScorecardCellDto {
   @ApiProperty({
-    enum: ['figure', 'pending', 'none', 'blocked'],
+    enum: ['figure', 'pending', 'none', 'blocked', 'unrecorded'],
     description: '`figure` a value; `pending` *pending data* — no source holds it for its period, never 0; `none` *—*, a '
-      + 'ratio over nothing; `blocked`, as the prototype draws it.',
+      + 'ratio over nothing; `blocked` *Not tracked*, a row the table leaves empty in this column; `unrecorded` *—*, a '
+      + 'column or a row a scorecard kept before it existed does not hold — never computed for it.',
   })
   kind!: ScorecardCell['kind'];
 
-  @ApiPropertyOptional({ description: 'On a `figure`: exact — IDR minor units, a count, or a whole percentage.' }) value?: number;
+  @ApiPropertyOptional({ description: 'On a `figure`: exact — IDR minor units, a count, a ratio or a whole percentage.' }) value?: number;
   @ApiPropertyOptional({ type: [String], description: 'On a `figure`: the months of its period, `YYYY-MM`, not uploaded yet.' })
   leavesOut?: string[];
 }
 
-class MonthlyTargetDto implements MonthlyTargetCell {
-  @ApiProperty({ example: '8 (1 @ unit)', description: 'Typed by an editor; *TBD* is a value. Plain text.' }) value!: string;
+class MonthlyTargetDto implements MonthlyTarget {
+  @ApiProperty({
+    type: Number, nullable: true, example: 1,
+    description: 'The rate per unit an editor typed, in the row’s unit — IDR minor units for `ape`, a count for the others; '
+      + '`null` for none (`ape` then reads *TBD*, every other row blank).',
+  })
+  rate!: number | null;
+
+  @ApiProperty({
+    type: Number, nullable: true, example: 9,
+    description: '`rate × # of units`, the meeting’s own units — the ones it was kept with, once it is over. `null` with no rate.',
+  })
+  value!: number | null;
+
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'A target typed as text before rates that could not be read as one: shown as typed, as plain text, until '
+      + 'an editor enters a rate. `null` otherwise.',
+  })
+  typed!: string | null;
+
   @ApiProperty({ example: 1, description: '0 for a cell never typed.' }) version!: number;
+}
+
+class YtdChangeDto {
+  @ApiProperty({
+    enum: ['figure', 'none'],
+    description: '`none` *—*: either year is no figure, or — a change in `percent` — last year’s is 0.',
+  })
+  kind!: YtdChange['kind'];
+
+  @ApiPropertyOptional({
+    example: 18,
+    description: 'On a `figure`: this year’s to date against last year’s, whole and signed, in `unit`. Rounded half up.',
+  })
+  value?: number;
+
+  @ApiPropertyOptional({
+    enum: ['percent', 'points'],
+    description: 'On a `figure`: `percent`, a percentage of last year’s figure (*+18%*); `points`, on a row whose own '
+      + 'figure is a percentage (`unit: percentage`), the difference in percentage points (*-40 points* for 60% against '
+      + '100%), since a percentage of a percentage would read as either.',
+  })
+  unit?: YtdChangeUnit;
 }
 
 class ScorecardRowDto implements ScorecardRow {
   @ApiProperty({ enum: ROW_KEYS }) key!: RowKey;
-  @ApiProperty({ enum: ['idr_minor', 'count', 'percentage'] }) unit!: ScorecardUnit;
+  @ApiProperty({ enum: ['idr_minor', 'count', 'percentage', 'ratio'] }) unit!: ScorecardUnit;
   @ApiProperty({
     type: 'object', additionalProperties: { $ref: '#/components/schemas/ScorecardCellDto' },
     description: `One cell per column: ${COLUMN_KEYS.join(', ')}.`,
   })
   cells!: Record<ColumnKey, ScorecardCell>;
 
-  @ApiProperty({ type: MonthlyTargetDto, nullable: true, description: '`null` where the prototype blocks the cell.' })
-  monthlyTarget!: MonthlyTargetCell | null;
+  @ApiProperty({ type: YtdChangeDto, description: 'What a phone’s card for the row reads: this year to date against last year’s.' })
+  ytdChange!: YtdChange;
+
+  @ApiProperty({
+    type: MonthlyTargetDto, nullable: true,
+    description: '`null` on a row the table does not track month by month, which takes no target.',
+  })
+  monthlyTarget!: MonthlyTarget | null;
+}
+
+class ColumnPeriodDto implements ColumnPeriod {
+  @ApiProperty({ example: '2026-01', description: 'The column’s first month, `YYYY-MM`.' }) from!: string;
+  @ApiProperty({ example: '2026-10', description: 'Its last, `YYYY-MM`: the same for a single month.' }) to!: string;
 }
 
 class ScorecardPeriodsDto {
-  @ApiProperty({ example: '2025', description: '*FY {year}*: the year before the meeting’s.' }) fy!: string;
-  @ApiProperty({ example: '2026', description: '*YTD {year}*: the meeting’s year, January to its month.' }) ytd!: string;
-  @ApiProperty({ example: '2025-10' }) thisMonthLastYear!: string;
-  @ApiProperty({ example: '2026-09' }) lastMonth!: string;
-  @ApiProperty({ example: '2026-10' }) thisMonth!: string;
+  @ApiProperty({ type: ColumnPeriodDto, description: '*Full Year*: January to December of the year before the meeting’s.' })
+  fy!: ColumnPeriod;
+
+  @ApiProperty({ type: ColumnPeriodDto, description: '*YTD* of the year before: January to the meeting’s month, a year earlier.' })
+  ytdLastYear!: ColumnPeriod;
+
+  @ApiProperty({ type: ColumnPeriodDto, description: '*YTD*: the meeting’s year, January to its month.' }) ytd!: ColumnPeriod;
+  @ApiProperty({ type: ColumnPeriodDto }) thisMonthLastYear!: ColumnPeriod;
+  @ApiProperty({ type: ColumnPeriodDto }) lastMonth!: ColumnPeriod;
+  @ApiProperty({ type: ColumnPeriodDto }) thisMonth!: ColumnPeriod;
 }
 
 class ScorecardChipsDto {
   @ApiProperty() manpower!: number;
   @ApiProperty() agents!: number;
-  @ApiProperty() units!: number;
+  @ApiProperty({ description: '*# of units*: *# of AB* + *# of AAB* — or, on a scorecard kept before that, the number it was kept with.' })
+  units!: number;
+
   @ApiProperty() ab!: number;
   @ApiProperty() aab!: number;
 }
 
+class ScorecardAsOfDto {
+  @ApiProperty({
+    enum: ['date', 'none', 'unrecorded'],
+    description: '`date` the agency’s day its latest production file was uploaded; `none` no file yet — nothing is drawn; '
+      + '`unrecorded` *—*, a scorecard kept before the date was recorded.',
+  })
+  kind!: ScorecardAsOf['kind'];
+
+  @ApiPropertyOptional({ example: '2026-10-26', description: 'On a `date`: `YYYY-MM-DD`, the agency’s calendar.' }) date?: string;
+}
+
+class PartialPeriodDto implements PartialPeriod {
+  @ApiProperty({ enum: COLUMN_KEYS }) column!: ColumnKey;
+  @ApiProperty({ type: [String], description: 'Every month, `YYYY-MM`, one of the column’s figures leaves out: its *(*)* note.' })
+  leavesOut!: string[];
+}
+
 class ScorecardDto implements Scorecard {
-  @ApiProperty({ type: ScorecardPeriodsDto }) periods!: Record<ColumnKey, string>;
+  @ApiProperty({ type: ScorecardPeriodsDto, description: 'Each column’s months, from the meeting’s month.' })
+  periods!: Record<ColumnKey, ColumnPeriod>;
+
   @ApiProperty({ type: ScorecardChipsDto }) chips!: Scorecard['chips'];
-  @ApiProperty({ type: [ScorecardRowDto], description: 'Nine, in the prototype’s order.' }) rows!: ScorecardRow[];
+  @ApiProperty({ type: [ScorecardRowDto], description: 'Nine, in the reference slide’s order.' }) rows!: ScorecardRow[];
+  @ApiProperty({ type: ScorecardAsOfDto, description: '*AS OF*, beside the title.' }) asOf!: ScorecardAsOf;
+  @ApiProperty({ type: [PartialPeriodDto], description: 'The periods a figure of which leaves months out, in column order.' })
+  partialPeriods!: PartialPeriod[];
+
   @ApiProperty({
     type: String, nullable: true,
     description: '`null` while the scorecard is computed on every read; the instant it was written onto the meeting otherwise.',

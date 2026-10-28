@@ -2,6 +2,7 @@ import { DateTime } from 'luxon';
 import type { Clock } from '@/common/clock/clock.port';
 import { addDays, type LocalDate } from '@/common/time/local-day';
 import { ACTIVATION, ACTIVATION_ACTIVITY_WEEKS, ACTIVATION_FIRST_CASE_CODE } from '@/domain/constants';
+import { rateOver } from '@/domain/metrics/rate';
 import type { ActivationItemState } from './activation-progress.schema';
 
 /**
@@ -84,7 +85,8 @@ export interface Progress<I extends PinnedItem> {
 
 /**
  * **`ACTIVATION_COMPLETION_PCT` and each aspect's status, computed once** (P13-T2 AC-5). The percentage
- * is `round(done / total × 100)` over the **pinned version's items** (`:6619`); an aspect is *Done* when
+ * is `round(done / total × 100)` over the **pinned version's items** (`:6619`), half up in integers (`rateOver`;
+ * P18.97-T3, parity F-254: 23 of 40 items is 58%, which `Math.round` read 57); an aspect is *Done* when
  * every item in it is, *Not started* when none is, *In progress* between (`:6537-6551`). A version with no
  * items — refused at publish, so never seen — reads as 0%.
  */
@@ -103,7 +105,7 @@ export function progressOf<I extends PinnedItem>(
       : aspectDone > 0 ? 'in_progress' : 'not_started';
     return { code: aspect.code, label: aspect.label, status, done: aspectDone, total: items.length, items };
   });
-  return { done, total, pct: total === 0 ? 0 : Math.round((done / total) * 100), aspects: out };
+  return { done, total, pct: rateOver(done, total).pct ?? 0, aspects: out };
 }
 
 /**

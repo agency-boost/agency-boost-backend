@@ -92,7 +92,7 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
       { name: 'add an action item', call: () => http().post(`/leader-meetings/${id}/action-items`), ok: 201 },
       { name: 'a Monthly Target', call: async () => {
         const cell = (await office.meetings.findById(office.as('OWNER'), id))!.monthlyTargets?.ape;
-        return http().put(`/leader-meetings/${id}/monthly-targets/ape`).send({ value: 'TBD', version: cell?.version ?? 0 });
+        return http().put(`/leader-meetings/${id}/monthly-targets/ape`).send({ rate: 100_000_000 * 100, version: cell?.version ?? 0 });
       }, ok: 200 },
       { name: 'share', call: () => http().post(`/leader-meetings/${id}/share-links`), ok: 201 },
       { name: 'stop sharing', call: () => http().delete(`/leader-meetings/${id}/share-links`), ok: 200 },
@@ -204,7 +204,7 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
           await http().delete(`/leader-meetings/${meetingId}`).query({ version: 1 }),
           await http().post(`/leader-meetings/${meetingId}/agenda-items`).send({ section: 'post' }),
           await http().post(`/leader-meetings/${meetingId}/action-items`),
-          await http().put(`/leader-meetings/${meetingId}/monthly-targets/flc`).send({ value: 'x', version: 0 }),
+          await http().put(`/leader-meetings/${meetingId}/monthly-targets/flc`).send({ rate: 1, version: 0 }),
           await http().put(`/leader-meetings/${meetingId}/action-items/order`).send({ itemIds: [] }),
           await http().post(`/leader-meetings/${meetingId}/share-links`),
           await http().delete(`/leader-meetings/${meetingId}/share-links`),
@@ -221,6 +221,21 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
       const row = (await http().post(`/leader-meetings/${meetingId}/action-items`).expect(201)).body;
       const [entry] = (await audits('leader_meeting.action_item_added')).filter((e) => (e.after as { item: { id: string } }).item.id === row.id);
       expect(entry).toMatchObject({ actorUserId: 'u-support', effectiveUserId: office.as('OWNER').userId, actorMembershipId: office.id.OWNER, kpmId: KPM_A });
+    });
+
+    it('P18.97-T8 L4 an elevated support session’s Monthly Target write is its member’s, both actors on the audit row', async () => {
+      const version = (await office.meetings.findById(office.as('OWNER'), meetingId))!.monthlyTargets?.case_submission?.version ?? 0;
+      session.current = office.supported('OWNER', false);
+      const saved = (await http().put(`/leader-meetings/${meetingId}/monthly-targets/case_submission`).send({ rate: 2, version }).expect(200)).body;
+      expect(saved).toMatchObject({ rate: 2, typed: null, version: version + 1 });
+      const entries = (await audits('leader_meeting.monthly_target_saved')).filter((e) => e.targetId === meetingId
+        && (e.after as { row: string; version: number }).row === 'case_submission'
+        && (e.after as { row: string; version: number }).version === version + 1);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        actorUserId: 'u-support', effectiveUserId: office.as('OWNER').userId, actorMembershipId: office.id.OWNER, kpmId: KPM_A,
+        before: { row: 'case_submission', version }, after: { row: 'case_submission', rate: 2, typed: null, version: version + 1 },
+      });
     });
   });
 
@@ -397,7 +412,7 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
       await http().patch(`/leader-meetings/${written.id}`).send({ title: 'Moved', version: 1 }).expect(200);
       await http().post(`/leader-meetings/${written.id}/share-links`).expect(201);
       expect((await http().get(`/leader-meetings/${written.id}`).expect(200)).body.writtenIn).toBe(false);
-      await http().put(`/leader-meetings/${written.id}/monthly-targets/flc`).send({ value: '8 (1 @ unit)', version: 0 }).expect(200);
+      await http().put(`/leader-meetings/${written.id}/monthly-targets/flc`).send({ rate: 1, version: 0 }).expect(200);
       const after = (await http().get(`/leader-meetings/${written.id}`).expect(200)).body;
       expect([after.writtenIn, after.can.delete]).toEqual([true, false]);
       const refused = await http().delete(`/leader-meetings/${written.id}`).query({ version: 2 }).expect(409);
@@ -430,15 +445,53 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
         can: { edit: true, share: true, reschedule: true, delete: true, manageTags: true, print: true },
       });
       expect(view.scorecard.frozenAt).toBeNull();
+      // P18.97-T1 AC-4: the reference slide's rows, in its order.
       expect(view.scorecard.rows.map((r: { key: string }) => r.key)).toEqual([
-        'ape', 'manpower', 'flc', 'producing_agents', 'new_aa', 'new_agent_3m', 'avg_monthly_aa', 'case_submission', 'average_case_size',
+        'ape', 'manpower', 'flc', 'producing_agents', 'new_agent_3m', 'avg_monthly_aa', 'case_submission', 'cases_per_producing_agent',
+        'average_case_size',
       ]);
       expect(view.scorecard.rows.find((r: { key: string }) => r.key === 'producing_agents').monthlyTarget).toBeNull();
-      expect(view.scorecard.rows.find((r: { key: string }) => r.key === 'ape').monthlyTarget).toEqual({ value: '', version: 0 });
+      expect(view.scorecard.rows.find((r: { key: string }) => r.key === 'ape').monthlyTarget).toEqual({ rate: null, value: null, typed: null, version: 0 });
       as('SARI');
       const sari = (await http().get(`/leader-meetings/${meeting.id}`).expect(200)).body;
       expect(sari.can).toEqual({ edit: true, share: true, reschedule: false, delete: false, manageTags: false, print: true });
       expect(sari.editors.coreLeaders.find((p: { name: string }) => p.name === 'Sari Puspita')).toMatchObject({ isReader: true, rung: { code: 'AAB' } });
+    });
+  });
+
+  describe('P18.97-T8 F1 a phone card’s change, as the meeting is served (parity F-256)', () => {
+    it('P18.97-T8 F1 3M new agent % at 60% against 100% is served −40 points; a sum and a count keep a percentage of last year’s', async () => {
+      const meeting = await make('Points', '2026-09-12');
+      const owner = office.as('OWNER');
+      const editors = await office.people.liveEditors(owner, await office.people.office(owner));
+      const f = (value: number) => ({ kind: 'figure', value, leavesOut: [] });
+      // Kept on the meeting in today's shape, last year's YTD and all: the scorecard a read serves, never recomputed.
+      await db().collection('leaderMeetings').updateOne({ _id: new mongoose.Types.ObjectId(meeting.id) }, {
+        $set: {
+          frozenAt: new Date('2026-09-13T02:00:00Z'),
+          frozenCoeditors: editors,
+          frozenScorecard: {
+            chips: { manpower: 28, agents: 19, units: 9, ab: 5, aab: 4 },
+            rows: [
+              { key: 'ape', unit: 'idr_minor', cells: { ytdLastYear: f(10_000_000_000), ytd: f(11_800_000_000) } },
+              { key: 'producing_agents', unit: 'count', cells: { ytdLastYear: f(0), ytd: f(4) } },
+              { key: 'new_agent_3m', unit: 'percentage', cells: { ytdLastYear: f(100), ytd: f(60) } },
+              { key: 'case_submission', unit: 'count', cells: { ytdLastYear: f(100), ytd: f(60) } },
+            ],
+            asOf: '2026-09-10',
+          },
+        },
+      });
+      as('OWNER');
+      const { rows } = (await http().get(`/leader-meetings/${meeting.id}`).expect(200)).body.scorecard;
+      const change = (key: string) => rows.find((r: { key: string }) => r.key === key).ytdChange;
+      expect(change('new_agent_3m')).toEqual({ kind: 'figure', value: -40, unit: 'points' });
+      // The same 60 against 100 on a count: a fall of 40%.
+      expect(change('case_submission')).toEqual({ kind: 'figure', value: -40, unit: 'percent' });
+      expect(change('ape')).toEqual({ kind: 'figure', value: 18, unit: 'percent' });
+      // A count over last year's 0, and a row kept without last year's YTD: —.
+      expect(change('producing_agents')).toEqual({ kind: 'none' });
+      expect(change('manpower')).toEqual({ kind: 'none' });
     });
   });
 });

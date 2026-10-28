@@ -59,7 +59,11 @@ export class TrainingSkillProgressDto implements TrainingSkillProgressView {
   @ApiProperty({ type: String, example: 'Prospecting' })
   label!: string;
 
-  @ApiProperty({ type: Boolean, description: '`false` only for a skill no longer offered that still holds this member’s history.' })
+  @ApiProperty({
+    type: Boolean,
+    description: '`false` for a skill no longer offered that still holds this member’s history, and for a skill of a '
+      + 'category with no published module.',
+  })
   offered!: boolean;
 
   @ApiProperty({ type: Number, description: DONE })
@@ -91,7 +95,11 @@ export class TrainingCategoryProgressDto implements TrainingCategoryProgressView
   @ApiProperty({ type: String, nullable: true, description: 'The office’s subtitle for the category.' })
   description!: string | null;
 
-  @ApiProperty({ type: Boolean, description: '`false` only for a category no longer offered that still holds this member’s history.' })
+  @ApiProperty({
+    type: Boolean,
+    description: '`false` for a category no longer offered, or with no published module, that still holds this '
+      + 'member’s history.',
+  })
   offered!: boolean;
 
   @ApiProperty({ type: Number, description: DONE })
@@ -125,7 +133,8 @@ export class TrainingProgressDto implements TrainingProgressView {
 
   @ApiProperty({
     type: [TrainingCategoryProgressDto],
-    description: 'Every offered category in display order — an empty one included — then any no longer offered that hold history.',
+    description: 'Every offered category in display order — a category with no published module is not offered, and '
+      + 'is left out — then any no longer offered that hold history.',
   })
   categories!: TrainingCategoryProgressDto[];
 

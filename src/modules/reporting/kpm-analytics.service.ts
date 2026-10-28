@@ -30,6 +30,14 @@ export interface Figures {
   apeAnnual: Money;
   coached7d: Rate;
   activeAgents: number | null;
+  /**
+   * *Producing this month*'s share (P18.97-T3 AC-10; ADR-0176 §12): `activeAgents` over the row's `manpower.total`, the
+   * prototype's `m.active / row.team` (`KPM_Owner.html:3342`), a whole percent through `rateOver` — the server's, so the
+   * screen computes none (invariant §7). `null` while the month is not uploaded, and over nobody. **OD-235 (open)**: for
+   * *Previous month* the count is over that month's members and the base over today's, so a leaver who produced can
+   * push it past 100%; the formula stays the prototype's until the product owner answers.
+   */
+  activePct: number | null;
   leads: { sales: number; salesPotential: number; recruit: number; recruitPotential: number };
   manpower: { aab: number; agents: number; total: number };
 }
@@ -98,8 +106,9 @@ interface MemberFigures {
  *   production is the Overview's year to date (OD-74), which the total can fall short of by it;
  * - **Coached (7d)**: coaching's `coachingCoverage` over the row's members, **its head included** (D-coverage),
  *   so the rows add up to the office's coverage; period-independent;
- * - **Active this month / last month**: `MAA_COUNT_IN_UNIT` for the period's month — `null` while the office
- *   holds no file for it;
+ * - **Active this month / last month** — *Producing this month / last month* on the screen since P18.97-T3 (ADR-0176
+ *   §3): `MAA_COUNT_IN_UNIT` for the period's month — `null` while the office holds no file for it — and its share of
+ *   the row's manpower, `rateOver`'s whole percent (`activePct`, AC-10), so the screen divides nothing;
  * - **Total leads** (D-period): Phase 15's counts (`LeadReadings`) — now, or as they stood at last month's end;
  * - **Manpower**: today's people, by rung.
  *
@@ -224,11 +233,15 @@ export class KpmAnalyticsService {
       const then = ids.filter((id) => periodSet.has(id));
       const sum = rollUpLeadCounts(then.map((id) => member.get(id)!.leads!));
       const [coverage] = coachingCoverage({ scope: now, leaderMembershipId: null, sessions, today, daysBetween });
+      const activeAgents = maaCountInUnit(then.map((id) => member.get(id)!.maa), monthHeld);
       return {
         apeMonth: moneyOf(rollUpGoal(then.map((id) => member.get(id)!.apeMonth!))),
         apeAnnual: moneyOf(rollUpGoal(now.map((id) => member.get(id)!.apeAnnual!))),
         coached7d: rateOver(coverage.coached, coverage.members),
-        activeAgents: maaCountInUnit(then.map((id) => member.get(id)!.maa), monthHeld),
+        activeAgents,
+        // The prototype's `m.active / row.team` (`:3342`), over today's manpower as drawn beside it — no formula changed.
+        // OD-235 (open): a past month's count over today's base can pass 100%; it stays so until the product owner answers.
+        activePct: activeAgents === null ? null : rateOver(activeAgents, now.length).pct,
         leads: { sales: sum.salesOpen, salesPotential: sum.salesClosing, recruit: sum.recruitOpen, recruitPotential: sum.recruitNominated },
         manpower: {
           // By class (ADR-0156): an *Associate Leader* rung's members are the AABs, whatever it is called.

@@ -209,7 +209,11 @@ export class RollCallDto {
   @ApiProperty({ type: String }) startsOn!: string;
   @ApiProperty({ type: RollCallRowDto, isArray: true }) people!: RollCallRowDto[];
   @ApiProperty({ type: RollCallCountsDto }) counts!: RollCallCountsDto;
-  @ApiProperty({ type: Number, nullable: true, description: '`EVENT_ATTENDANCE_RATE`, one decimal; null before the end or for nobody.' })
+  @ApiProperty({
+    type: Number, nullable: true,
+    description: '`EVENT_ATTENDANCE_RATE` as a reader is shown it: a whole percent, rounded once from the counts (ADR-0174 §1) — '
+      + 'never its tenth rounded again; null before the end or for nobody.',
+  })
   attendanceRate!: number | null;
   @ApiProperty({ type: RollCallCanDto }) can!: RollCallCanDto;
 }

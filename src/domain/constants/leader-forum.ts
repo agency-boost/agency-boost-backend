@@ -35,3 +35,12 @@ export const LEADER_MEETING_LIMITS = {
   picMax: 80,
   targetMax: 40,
 } as const;
+
+/**
+ * **The places a *Monthly Target*'s rate is typed and kept to** (P18.97-T1 AC-10, ADR-0175 §4): a rate per unit — *1*,
+ * *2,5*, *0,75* — to two places, refused with more (`400 VALIDATION_FAILED`, `SaveMonthlyTargetDto`), and its value, the
+ * rate times the meeting's *# of units*, rounded to the same two, so the product of two decimals carries no binary
+ * noise (`monthlyTargetOf`). *APE*'s, in IDR minor units, is held to whole sen besides. Not served in `limits`: the
+ * screen's copy (`frontend/src/lib/leader-meeting-tabs.ts`) is read against this one by its spec (invariant §7).
+ */
+export const LEADER_MEETING_TARGET_RATE_DECIMALS = 2;

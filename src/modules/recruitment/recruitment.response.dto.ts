@@ -131,6 +131,14 @@ export class PitchSlotDto {
   @ApiProperty({ type: String })
   line!: string;
 
+  @ApiProperty({
+    type: Boolean,
+    description:
+      'True for the four documents the office’s readiness counts; false for the two optional ones, *Company '
+      + 'Profile* and *Agency Profile*, which count in neither the ring nor the banner.',
+  })
+  required!: boolean;
+
   @ApiProperty({ enum: RECRUITMENT_PITCH_STATES })
   state!: string;
 
@@ -144,22 +152,26 @@ export class PitchSlotDto {
   version!: number;
 }
 
+/** The banner's counts — over the required slots alone; an optional one counts in none of them. */
 export class PitchSummaryDto {
-  @ApiProperty({ type: Number, description: 'Slots complete, or uploaded with nothing to confirm.' })
+  @ApiProperty({ type: Number, description: 'Required slots complete, or uploaded with nothing to confirm.' })
   done!: number;
 
-  @ApiProperty({ type: Number, example: 4 })
+  @ApiProperty({ type: Number, example: 4, description: 'How many slots are required: the four.' })
   total!: number;
 
-  @ApiProperty({ type: Number, description: 'Slots with no file.' })
+  @ApiProperty({ type: Number, description: 'Required slots with no file.' })
   missing!: number;
 
-  @ApiProperty({ type: Number, description: 'Slots with a file and an item still open.' })
+  @ApiProperty({ type: Number, description: 'Required slots with a file and an item still open.' })
   unconfirmed!: number;
 }
 
 export class PitchMaterialsDto {
-  @ApiProperty({ type: [PitchSlotDto], description: 'The four, in order.' })
+  @ApiProperty({
+    type: [PitchSlotDto],
+    description: 'The six, in order: the four required, then *Company Profile* and *Agency Profile*, optional.',
+  })
   slots!: PitchSlotDto[];
 
   @ApiProperty({ type: PitchSummaryDto })

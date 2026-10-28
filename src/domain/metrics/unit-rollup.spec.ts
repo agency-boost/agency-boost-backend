@@ -40,6 +40,12 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
       expect(rollUpGoal([{ targetMinor: 1, actualMinor: 100 * M }]).attainmentPct).toBe(PERFORMANCE.ATTAINMENT_PCT_CAP);
     });
 
+    it('P18.97-T3 F-254 rounds the sums’ attainment half up in integers: Rp 23 jt of Rp 40 jt is 58%, never 57', () => {
+      const total = rollUpGoal([{ targetMinor: 25 * M, actualMinor: 15 * M }, { targetMinor: 15 * M, actualMinor: 8 * M }]);
+      expect(Math.round(((23 * M) / (40 * M)) * 100)).toBe(57);
+      expect(total).toEqual({ targetMinor: 40 * M, actualMinor: 23 * M, attainmentPct: 58, missing: 0 });
+    });
+
     it('P15-T1 AC-4 sums logged counts, and the targets that exist; null only when no row has one', () => {
       expect(rollUpCounts([{ logged: 5, target: 10 }, { logged: 3, target: null }, { logged: 2, target: 4 }]))
         .toEqual({ logged: 10, target: 14 });

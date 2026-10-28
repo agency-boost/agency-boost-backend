@@ -7,6 +7,7 @@ import {
 import { ErrorCode } from '@/common/errors/error-codes';
 import { refuseWith } from '@/common/validation/fields';
 import type { EventAttendanceStatus, EventPhase } from '@/domain/constants';
+import { eventAttendanceRateShown } from '@/domain/metrics/event-attendance';
 import type { NpsBucket } from '@/domain/metrics/event-nps';
 import { AuditService, type AuditEntry } from '@/modules/audit/audit.service';
 import { MemberNames } from '@/modules/org/member-names.service';
@@ -168,7 +169,9 @@ export class EventRollCallService {
         registered: reading.counts.registered,
         notRegistered: reading.counts.not_registered,
       },
-      attendanceRate: reading.rate,
+      // The share as a reader is shown it, whole and rounded once from the counts (ADR-0174 §1, P18.97-T3 AC-2), never
+      // `EVENT_ATTENDANCE_RATE`'s tenth for a screen to round again.
+      attendanceRate: eventAttendanceRateShown(reading.rows.map((r) => r.status), reading.event.ended),
       can: { confirm: can(ctx, 'event_attendance:confirm') && reading.event.ended },
     };
   }

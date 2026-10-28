@@ -17,7 +17,7 @@ export interface AttachedFile {
 }
 
 /**
- * **An office's four pitch slots, behind the chokepoint** (invariant §1): every filter and every write
+ * **An office's six pitch slots, behind the chokepoint** (invariant §1): every filter and every write
  * carries the reader's own `kpmId`, so an office never reads or writes another's slot — a slot of another
  * office is simply not found.
  */

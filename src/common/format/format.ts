@@ -3,12 +3,17 @@ import { MINOR_UNITS_PER_MAJOR } from '@/domain/constants';
 
 /**
  * **How the API writes a date, a sum or a percentage in a sentence** (ADR-0167 §1, OD-196): the Indonesian way,
- * `id-ID`, everywhere — *26 Okt 2026*, *Rp 500 jt*, *15,0%*. The words around them stay English (OD-197); only the
- * formatting changed.
+ * `id-ID`, everywhere — *26 Okt 2026*, *Rp 500 jt*, *96%*. The words around them stay English (OD-197); only the
+ * formatting changed. **Percentages and money since ADR-0174** (OD-226, OD-227; P18.97-T3): a percentage whole,
+ * rounded half up, with no *,0*, and a threshold with the places it was set with; a sum compact in *miliar*, *juta*
+ * and *ribu*. Indonesian until Phase 18.98 adds English through these same functions (ADR-0174 §6).
  *
- * **It mirrors `frontend/src/lib/format.ts`, rule for rule.** A refusal the server composes and a label the screen
- * composes sit side by side, so the two must write the same characters; each function here has its namesake there,
- * and the spec beside each pins the same cases.
+ * **It shares `frontend/src/lib/format.ts`'s forms — not every rule.** A refusal the server composes and a label the
+ * screen composes sit side by side, so where both write a date, a whole percentage, a compact or a full sum, or a
+ * `lossless` threshold, they write the same characters; each function here has its namesake there, and the spec beside
+ * each pins the same cases. What is the screen's alone stays there: a ratio's tenth beside its benchmark (`decimals`,
+ * `maxDecimals`), and `lossless`' cap of `PERCENT_LOSSLESS_MAX_DECIMALS` places — here `lossless` keeps exactly the
+ * places the value has (`metrics-and-definitions.md` §B.25).
  *
  * **Built from static tables, never `toLocale*`.** ICU's `id-ID` data differs between runtimes (*Agu* or *Agt*, a
  * narrow no-break space or none), and a refusal pinned by a test must read the same on the CI runner, the server and
@@ -206,15 +211,16 @@ export function formatNumber(n: number, decimals?: number): string {
 }
 
 /**
- * A percentage, from its percent value (`15` for 15%), to one decimal: *15,0%*, *12,5%*, *90,0%*.
+ * A percentage, from its percent value (`15` for 15%): **whole, rounded half up, with no *,0*** (ADR-0174 §1) —
+ * *15%*, *96%* for 96,4, *13%* for 12,5, *-3%* for -3,45 (half up away from zero). The server rounds a share once,
+ * in integers (`rateOver`), and this writes what it is given: no percentage is rounded twice.
  *
- * **`lossless`**, as `formatRupiahCompact`'s: a value with more decimals than one keeps every one it has —
- * *75,55%*, not *75,6%* — for a threshold stated as a rule, which a rounded figure would misstate.
+ * **`lossless`**, as `formatRupiahCompact`'s: a figure stated as a rule keeps every decimal it has and none it has
+ * not (ADR-0174 §3) — *75,55%*, *75,5%*, *75%* — for a threshold, which a rounded figure would misstate.
  */
 export function formatPercent(pct: number, { lossless = false }: { lossless?: boolean } = {}): string {
   if (!Number.isFinite(pct)) return '';
-  const own = digitsOf(Math.abs(pct))[1].length;
-  return `${formatNumber(pct, lossless && own > 1 ? own : 1)}%`;
+  return `${formatNumber(pct, lossless ? digitsOf(Math.abs(pct))[1].length : 0)}%`;
 }
 
 // ── money ────────────────────────────────────────────────────────────────────────────────────────
@@ -237,11 +243,13 @@ export function formatRupiah(minor: number): string {
 }
 
 /**
- * Rupiah compact, from minor units: *Rp 750 rb*, *Rp 357,5 jt*, *Rp 1,2 M*, and below a thousand in full, *Rp 999*.
+ * Rupiah compact, from minor units: *Rp 750 rb*, *Rp 357,5 jt*, *Rp 1,2 M*, and below a thousand in full, *Rp 999*
+ * (ADR-0174 §4: compact wherever a sum is written but a price and an input's bound; `metrics-and-definitions.md`
+ * §B.25).
  *
  * The largest unit the sum reaches, to one decimal at most, half up on that decimal, a trailing *,0* dropped. A
  * figure that rounds to a thousand of its unit moves up one: 999.950 is *Rp 1 jt*. Above a thousand *miliar* it stays
- * in *M*: *Rp 1.500 M*.
+ * in *M* — there is no *triliun* — *Rp 1.500 M*.
  *
  * **`lossless`**: where the compact form would round — *Rp 1,2 rb* for 1.150 — the full one instead, *Rp 1.150*. For
  * a threshold stated as a rule (a campaign's requirement, an MOC criterion), where a rounded figure misstates it.

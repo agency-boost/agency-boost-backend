@@ -6,6 +6,7 @@ import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
+import { rateOver } from '@/domain/metrics/rate';
 import { SUBJECT_READ_ACTION } from '@/modules/audit/subject-read-audit';
 import { OrgController } from '@/modules/org/org.controller';
 import { DirectoryService } from '@/modules/org/directory.service';
@@ -157,20 +158,43 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       });
     });
 
-    it('P18-T1 AC-5 coaching coverage over the office, and every AB who leads somebody on the leaderboard, lowest first', async () => {
+    it('P18-T1 AC-5, P18.97-T3 AC-5 coaching coverage over the office, and every AB on the leaderboard: leaders lowest first, then No team', async () => {
       as('ADMIN');
       const before = await reads('kpm_overview');
-      const { coaching } = (await http().get('/kpm/overview').expect(200)).body;
+      const { coaching, composition } = (await http().get('/kpm/overview').expect(200)).body;
       // 7 days: Indah (4 days ago), Rina (today), Budi (2 days ago); 30 days adds Sari (12 days ago).
       expect(coaching.coverage7d).toEqual({ count: 3, of: 16, pct: 19 });
       expect(coaching.coverage30d).toEqual({ count: 4, of: 16, pct: 25 });
       expect(coaching.leaderboard).toEqual([
-        { membershipId: office.id.PEER_AB, name: 'Hendra Gunawan', teamSize: 2, coached: 0, pct: 0 },
-        { membershipId: office.id.OWNER, name: 'Wilson Tanoto', teamSize: 15, coached: 0, pct: 0 },
-        { membershipId: office.id.AGUS, name: 'Agus Salim', teamSize: 10, coached: 1, pct: 10 },
+        { membershipId: office.id.PEER_AB, name: 'Hendra Gunawan', teamSize: 2, coached: 0, pct: 0, leads: true },
+        { membershipId: office.id.OWNER, name: 'Wilson Tanoto', teamSize: 15, coached: 0, pct: 0, leads: true },
+        { membershipId: office.id.AGUS, name: 'Agus Salim', teamSize: 10, coached: 1, pct: 10, leads: true },
+        // UI-017: the Admin, on the AB rung, leads nobody — listed last, no rate, never left out and never 0%.
+        { membershipId: office.id.ADMIN, name: 'Maya Kusuma', teamSize: 0, coached: 0, pct: null, leads: false },
       ]);
-      // D-audit: one entry per leader on the board, in one insert; the card's figures write none.
+      // Every member of the `ab` class is on the board: the composition's AB tile counts the same four.
+      expect(coaching.leaderboard).toHaveLength(composition.rungs.find((r: { code: string }) => r.code === 'AB').count);
+      // D-audit: one entry per leader on the board, in one insert; the card's figures — and a row of nobody's coaching —
+      // write none.
       expect(await reads('kpm_overview')).toBe(before + 3);
+    });
+
+    it('P18.97-T3 AC-5 positive: the Owner and the Admin read the same board, every AB on it; negative: a field member is refused it', async () => {
+      const boards: unknown[] = [];
+      for (const who of ['OWNER', 'ADMIN'] as const) {
+        as(who);
+        boards.push((await http().get('/kpm/overview').expect(200)).body.coaching.leaderboard);
+      }
+      expect(boards[1]).toEqual(boards[0]);
+      expect((boards[0] as { membershipId: string; leads: boolean }[]).map((row) => [row.membershipId, row.leads])).toEqual([
+        [office.id.PEER_AB, true], [office.id.OWNER, true], [office.id.AGUS, true], [office.id.ADMIN, false],
+      ]);
+      for (const who of ['AGUS', 'SARI', 'INDAH', 'LUKAS'] as const) {
+        as(who);
+        const res = await http().get('/kpm/overview').expect(403);
+        expect(res.body.error).toMatchObject({ code: 'PERM_DENIED', details: { permission: 'kpm_overview:read' } });
+        expect(JSON.stringify(res.body)).not.toContain('leaderboard');
+      }
     });
 
     it('P18-T1 AC-5 S2 the leaderboard’s entries field by field: each leader, the reader as actor, ROLLING_7D as the range', async () => {
@@ -180,6 +204,16 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       const by = { membershipId: office.id.ADMIN, actorUserId: 'u-ADMIN' };
       expectEntries(await entriesSince(since), (['PEER_AB', 'OWNER', 'AGUS'] as const)
         .map((who) => entry(office.id[who], 'kpm_overview', { from: '2026-09-08', to: TODAY }, by)));
+    });
+
+    it('P18.97-T3 AC-5 a No team row writes no entry: read by the Owner, the Admin who leads nobody is on the board and in no entry', async () => {
+      // Read as the Admin, her row is left out as the reader's own either way; read as the Owner, only `leads` leaves it out.
+      as('OWNER');
+      const since = await mark();
+      const { leaderboard } = (await http().get('/kpm/overview').expect(200)).body.coaching;
+      expect(leaderboard).toContainEqual(expect.objectContaining({ membershipId: office.id.ADMIN, leads: false }));
+      expectEntries(await entriesSince(since), (['PEER_AB', 'AGUS'] as const)
+        .map((who) => entry(office.id[who], 'kpm_overview', { from: '2026-09-08', to: TODAY }, asOwnerIn('OWNER'))));
     });
 
     it('P18-T1 AC-6 recruitment: counts, never leads; no target until one is set', async () => {
@@ -319,6 +353,27 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
           message: 'A recruitment target is set for Sep 2026, the agency\'s current month.',
           details: { field: 'month', month: '2026-09' },
         });
+      });
+
+      it.each(['AGUS', 'SARI', 'INDAH', 'LUKAS'] as const)(
+        'P18.97-T3 AC-7 negative: %s holds no kpm_overview:set_recruit_target, is refused 403, and nothing is written',
+        async (who) => {
+          const targets = await db().collection('kpmRecruitTargets').find({}).toArray();
+          const entries = await db().collection('auditLog').countDocuments({ action: 'kpm_overview.recruit_target_set' });
+          as(who);
+          expect((await put({ month: '2026-09', target: 40 }).expect(403)).body.error)
+            .toMatchObject({ code: 'PERM_DENIED', details: { permission: 'kpm_overview:set_recruit_target' } });
+          expect(await db().collection('kpmRecruitTargets').find({}).toArray()).toEqual(targets);
+          expect(await db().collection('auditLog').countDocuments({ action: 'kpm_overview.recruit_target_set' })).toBe(entries);
+        },
+      );
+
+      it('P18.97-T3 AC-7 positive: the write is unchanged — the Owner and an Admin each save one, answered with what is kept', async () => {
+        for (const [who, target] of [['OWNER', 14], ['ADMIN', 16]] as const) {
+          as(who);
+          expect((await put({ month: '2026-09', target }).expect(200)).body).toEqual({ month: '2026-09', target });
+          expect((await http().get('/kpm/overview').expect(200)).body.recruitment.target).toBe(target);
+        }
       });
 
       it('P18-T1 AC-1 a read-only support session reads the Overview and is refused the target; an elevated one writes as the member', async () => {
@@ -567,6 +622,14 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       expect(now.total.apeMonth.achievedMinor).toBe(300 * M);
       expect(then.total.apeMonth.achievedMinor).toBe(110 * M);
       expect(now.total.activeAgents).toBe(5);
+      // P18.97-T3 AC-10: the share is served — 5 of 16, 31% — on the total and on every row, each over its own manpower.
+      expect(now.total.activePct).toBe(31);
+      type Row = { activeAgents: number | null; activePct: number | null; manpower: { total: number } };
+      const rows = (view: { total: Row; agencies: (Row & { direct: Row; aabUnits: Row[] })[] }) =>
+        [view.total, ...view.agencies.flatMap((a) => [a, a.direct, ...a.aabUnits])];
+      for (const row of [...rows(now), ...rows(then)]) {
+        expect(row.activePct).toBe(row.activeAgents === null ? null : rateOver(row.activeAgents, row.manpower.total).pct);
+      }
       // Rina's lead moved to AAJI licensed on 20 August: it was open then. Indah's, won on 25 August, was not.
       expect(then.total.leads.recruit).toBeGreaterThanOrEqual(1);
     });
@@ -593,8 +656,8 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       as('OWNER');
       const { mocRulesText } = (await http().get('/kpm/analytics').expect(200)).body;
       expect(mocRulesText).toBe(
-        'AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75,0%.\n'
-        + 'AB: (Net APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75,0%) OR Direct AB (AB on AB) ≥ 5.',
+        'AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
+        + 'AB: (Net APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
       );
     });
 

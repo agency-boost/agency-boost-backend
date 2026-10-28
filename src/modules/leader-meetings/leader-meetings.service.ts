@@ -16,8 +16,8 @@ import {
   actionItemsInOrder, agendaOf, FORUM_LIMITS, meetingState, openItemsOf, scorecardOf,
   type MeetingCard, type MeetingEditors, type MeetingListView, type MeetingView,
 } from './leader-meeting.view';
+import { frozenRecord, liveRecord, type ScorecardRecord } from './scorecard/scorecard-record';
 import { LeaderScorecardService } from './scorecard/scorecard.service';
-import type { ComputedScorecard } from './scorecard/scorecard.types';
 
 /** The audit trail's name for the collection (`targetCollection`). */
 export const MEETINGS = 'leaderMeetings';
@@ -230,10 +230,10 @@ export class LeaderMeetingsService {
   private async recordOf(
     ctx: RequestContext, office: ForumOffice, meeting: LeaderMeetingDocument, state: 'upcoming' | 'completed',
     live: FrozenEditor[],
-  ): Promise<{ meeting: LeaderMeetingDocument; scorecard: ComputedScorecard; editors: FrozenEditor[]; frozenAt: Date | null }> {
+  ): Promise<{ meeting: LeaderMeetingDocument; scorecard: ScorecardRecord; editors: FrozenEditor[]; frozenAt: Date | null }> {
     if (meeting.frozenAt) return this.frozen(meeting);
     const scorecard = await this.scorecards.compute({ kpmId: ctx.kpmId!, timezone: office.timezone, meetingDate: meeting.date });
-    if (state === 'upcoming' || ctx.impersonationReadOnly) return { meeting, scorecard, editors: live, frozenAt: null };
+    if (state === 'upcoming' || ctx.impersonationReadOnly) return { meeting, scorecard: liveRecord(scorecard), editors: live, frozenAt: null };
     const frozenAt = this.clock.now();
     const written = await this.meetings.freeze(ctx, String(meeting._id), {
       frozenScorecard: scorecard as unknown as Record<string, unknown>, frozenAt, frozenCoeditors: live,
@@ -252,12 +252,14 @@ export class LeaderMeetingsService {
 
   /**
    * A frozen meeting's record. `frozenScorecard`, `frozenAt` and `frozenCoeditors` are written in one update
-   * (`LeaderMeetingRepository.freeze`), so a meeting with the one has the others.
+   * (`LeaderMeetingRepository.freeze`), so a meeting with the one has the others. **The scorecard is read tolerantly**
+   * (ADR-0175 §8, P18.97-T1 AC-19): one frozen before the reference slide's table reads *—* where it lacks a column, a
+   * row or *AS OF*, keeps the *# of units* it froze with, and is never recomputed (`frozenRecord`).
    */
   private frozen(meeting: LeaderMeetingDocument) {
     return {
       meeting,
-      scorecard: meeting.frozenScorecard as unknown as ComputedScorecard,
+      scorecard: frozenRecord(meeting.frozenScorecard, meeting.date),
       editors: meeting.frozenCoeditors!,
       frozenAt: meeting.frozenAt,
     };

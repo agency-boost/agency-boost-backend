@@ -6,8 +6,8 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import { localDayOf } from '@/common/time/local-day';
 import {
-  RECRUITMENT, RECRUITMENT_PITCH_SLOTS, recruitmentPitchDone, recruitmentPitchState,
-  type RecruitmentPitchSlotCode, type RecruitmentPitchState,
+  RECRUITMENT, RECRUITMENT_PITCH_SLOTS, recruitmentPitchState, recruitmentPitchSummary,
+  type RecruitmentPitchSlotCode, type RecruitmentPitchState, type RecruitmentPitchSummary,
 } from '@/domain/constants';
 import { AssetService } from '@/modules/assets/asset.service';
 import type { SignedUpload } from '@/modules/assets/storage.port';
@@ -16,11 +16,13 @@ import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { RecruitmentPitchRepository } from './recruitment-pitch.repository';
 import type { RecruitmentPitchSlotDocument } from './recruitment-pitch.schema';
 
-/** One of the four slots, as both the agents' tab and the settings page read it (`PitchSlot`). */
+/** One of the six slots, as both the agents' tab and the settings page read it (`PitchSlot`). */
 export interface PitchSlotView {
   slot: RecruitmentPitchSlotCode;
   title: string;
   line: string;
+  /** `true` for the four the readiness counts; `false` for *Company Profile* and *Agency Profile* (ADR-0177). */
+  required: boolean;
   state: RecruitmentPitchState;
   /** `null`, never a placeholder, where the slot holds nothing (T4 AC-5). */
   file: { name: string; bytes: number; uploadedOn: string } | null;
@@ -33,8 +35,11 @@ export interface PitchSlotView {
 /** `GET /recruitment/pitch-materials` (`PitchMaterialsView`). */
 export interface PitchMaterialsView {
   slots: PitchSlotView[];
-  /** `done` complete or uploaded; `missing` no file; `unconfirmed` a file with an item open (`:797-820`). */
-  summary: { done: number; total: number; missing: number; unconfirmed: number };
+  /**
+   * Over the four required slots alone (`recruitmentPitchSummary`, ADR-0177 §3): `done` complete or uploaded;
+   * `missing` no file; `unconfirmed` a file with an item open (`:797-820`).
+   */
+  summary: RecruitmentPitchSummary;
 }
 
 type SlotDefinition = (typeof RECRUITMENT_PITCH_SLOTS)[number];
@@ -42,14 +47,17 @@ type SlotDefinition = (typeof RECRUITMENT_PITCH_SLOTS)[number];
 const PITCH = 'kpmRecruitmentPitchDocuments';
 
 /**
- * **The office's four recruitment pitch documents** (D-model, D-slots, D-replace, D-api; P17-T4).
+ * **The office's recruitment pitch documents** (D-model, D-slots, D-replace, D-api; P17-T4; ADR-0177): the
+ * four the readiness counts, then *Company Profile* and *Agency Profile*, optional.
  *
  * The office's own files (ADR-0032), each in its own slot, through the tenant-scoped repository: an office
- * reads and writes its own four and no other's, and another office's slot or file is **404**, never 403.
+ * reads and writes its own six and no other's, and another office's slot or file is **404**, never 403. An
+ * optional slot is uploaded, replaced and opened exactly as a required one is; only the banner tells them apart.
  *
- * - **The read** (`recruitment:read`, every member of the office) — the four slots in order, each with its
- *   state by the one completion rule, its file's name, size and upload day in the office's calendar, and
- *   whether each item is ticked. The agents' tab and the settings page read the same answer.
+ * - **The read** (`recruitment:read`, every member of the office) — the six slots in order, each with whether
+ *   it is required, its state by the one completion rule, its file's name, size and upload day in the office's
+ *   calendar, and whether each item is ticked; and the banner's counts, over the four required. The agents'
+ *   tab and the settings page read the same answer.
  * - **The link** — signed for 300 seconds, only for a slot the reader's own office has filled.
  * - **The writes** (`tenant_config:write`, the Owner and the Admin) — a signed upload of a PDF into the
  *   office's own `recruitment-pitch` folder; attaching it to a slot, which **clears every confirmation of
@@ -66,21 +74,13 @@ export class RecruitmentPitchService {
     private readonly clock: Clock,
   ) {}
 
-  /** `GET /recruitment/pitch-materials`: the four slots, in order, and the banner's counts. */
+  /** `GET /recruitment/pitch-materials`: the six slots, in order, and the banner's counts over the four required. */
   async read(ctx: RequestContext): Promise<PitchMaterialsView> {
     this.requireOffice(ctx, 'read');
     const [rows, timezone] = await Promise.all([this.slots.find(ctx), this.offices.timezoneOf(ctx)]);
     const views = RECRUITMENT_PITCH_SLOTS.map((definition) =>
       this.view(definition, rows.find((row) => row.slot === definition.code) ?? null, timezone));
-    return {
-      slots: views,
-      summary: {
-        done: views.filter((v) => recruitmentPitchDone(v.state)).length,
-        total: RECRUITMENT_PITCH_SLOTS.length,
-        missing: views.filter((v) => v.state === 'missing').length,
-        unconfirmed: views.filter((v) => v.state === 'partial').length,
-      },
-    };
+    return { slots: views, summary: recruitmentPitchSummary(views) };
   }
 
   /**
@@ -217,7 +217,7 @@ export class RecruitmentPitchService {
     if (!ctx.kpmId) throw new MissingTenantContextError(PITCH, operation);
   }
 
-  /** One of the four, or 404: a slot that does not exist is not found, as an empty one's link is. */
+  /** One of the six, or 404: a slot that does not exist is not found, as an empty one's link is. */
   private requireSlot(code: string): SlotDefinition {
     const definition = RECRUITMENT_PITCH_SLOTS.find((s) => s.code === code);
     if (!definition) throw new NotFoundException('Document');
@@ -231,6 +231,7 @@ export class RecruitmentPitchService {
       slot: definition.code,
       title: definition.title,
       line: definition.line,
+      required: definition.required,
       state: recruitmentPitchState(row !== null, checklist),
       file: row ? { name: row.fileName, bytes: row.bytes, uploadedOn: localDayOf(row.uploadedAt, timezone) } : null,
       checklist,

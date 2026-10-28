@@ -9,6 +9,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { User, UserDocument } from '@/modules/users/user.schema';
+import { initialsOf } from './directory.service';
 import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole } from './membership.schema';
@@ -24,12 +25,6 @@ export interface DelegatedAdmin {
   grantedByName: string | null;
   /** Whether the reader may take it away. False for the Owner's own row. */
   canRevoke: boolean;
-}
-
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '??';
-  return (parts[0][0] + (parts[parts.length - 1][0] ?? '')).toUpperCase();
 }
 
 /**
@@ -251,10 +246,9 @@ export class AdminDelegationService {
     });
   }
 
+  /** Never asked for nobody: `list`, its one caller, answers an office with no admins before it asks. */
   private async namesFor(userIds: string[]): Promise<Map<string, string>> {
-    const unique = [...new Set(userIds)];
-    if (unique.length === 0) return new Map();
-    const found = await this.users.find({ _id: { $in: unique } }).exec();
+    const found = await this.users.find({ _id: { $in: [...new Set(userIds)] } }).exec();
     return new Map(found.map((u) => [String(u._id), u.fullName]));
   }
 }

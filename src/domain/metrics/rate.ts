@@ -14,15 +14,29 @@ export interface Rate {
 }
 
 export function rateOver(count: number, of: number): Rate {
-  return { count, of, pct: of === 0 ? null : halfUpPercent(count, of) };
+  return { count, of, pct: of === 0 ? null : wholePercent(count, of) };
 }
 
 /**
- * `count / of` as a whole percent, rounded half up **in integers** (P18.5 exit review): `Math.round(count / of * 100)`
- * rounds the binary approximation of the quotient, and `23 / 40 * 100` is `57.49999999999999` — so a share that is
- * exactly 57.5% read 57. `floor((200·count + of) / (2·of))` is `count·100/of + ½` floored, exact for the whole-number
- * counts every caller passes.
+ * **`part / of` as a whole percent, rounded half up in integers** — the one rounding every whole percentage of whole
+ * numbers takes (P18.5 exit review; parity F-253, P18.97-T3, the client's UI-018 *"correctly rounded"*): a share of
+ * counts through `rateOver`, and an attainment of two sums — the APE achieved over its target in sen, the activities
+ * logged over theirs — which may pass 100 and whose caller keeps its own cap and its own `null`. `of` is above 0.
+ *
+ * `Math.round(part / of * 100)` rounds the binary approximation of the quotient, and `23 / 40 * 100` is
+ * `57.49999999999999` — so a share that is exactly 57.5% read 57. `floor((200·part + of) / (2·of))` is
+ * `part·100/of + ½` floored, **exact for whole numbers** while the arithmetic stays inside 2⁵³: a correctly rounded
+ * division of two integers below it cannot land on an integer it is not. A sum of sen past it — hundreds of *miliar*
+ * — takes the same arithmetic in `BigInt`, floored, so no figure an office can hold is rounded on a float's guess.
+ * Half up is toward +∞, as `Math.round` is: −57.5 is −57.
  */
-function halfUpPercent(count: number, of: number): number {
-  return Math.floor((200 * count + of) / (2 * of));
+export function wholePercent(part: number, of: number): number {
+  const numerator = 200 * part + of;
+  const denominator = 2 * of;
+  if (Number.isSafeInteger(Math.abs(numerator) + denominator)) return Math.floor(numerator / denominator);
+  const n = 200n * BigInt(Math.round(part)) + BigInt(Math.round(of));
+  const d = 2n * BigInt(Math.round(of));
+  // `BigInt` division truncates toward zero; a negative quotient with a remainder floors one lower.
+  const q = n / d;
+  return Number(n % d !== 0n && n < 0n ? q - 1n : q);
 }

@@ -9,9 +9,9 @@ const JAKARTA = 'Asia/Jakarta';
 const rp = (rupiah: number) => rupiah * MINOR_UNITS_PER_MAJOR;
 
 /**
- * **One way of writing a date, a sum and a percentage** (ADR-0167 §1, OD-196; P18.95-T1 AC-4). Every rule and every
- * threshold is pinned here, and the same cases are pinned in `frontend/src/lib/format.spec.ts`: a sentence the API
- * composes sits beside a label the screen composes, and the two must read the same.
+ * **One way of writing a date, a sum and a percentage** (ADR-0167 §1, OD-196; P18.95-T1 AC-4; ADR-0174, P18.97-T3).
+ * Every rule and every threshold is pinned here, and the same cases are pinned in `frontend/src/lib/format.spec.ts`:
+ * a sentence the API composes sits beside a label the screen composes, and the two must read the same.
  */
 describe('the shared formatters (ADR-0167 §1, P18.95-T1 AC-4)', () => {
   describe('office calendar days and months', () => {
@@ -145,6 +145,16 @@ describe('the shared formatters (ADR-0167 §1, P18.95-T1 AC-4)', () => {
 
   describe('rupiah compact', () => {
     it.each([
+      [999_949_999_999, 'Rp 999,9 M'],
+      [1_000_000_000_000, 'Rp 1.000 M'],
+      [2_345_600_000_000, 'Rp 2.345,6 M'],
+      [5_672_500_000, 'Rp 5,7 M'],
+      [150_000_000, 'Rp 150 jt'],
+    ])('P18.97-T3 AC-3 Rp %d is %s — miliar past a thousand of them, no triliun', (rupiah, compact) => {
+      expect(formatRupiahCompact(rp(rupiah))).toBe(compact);
+    });
+
+    it.each([
       [0, 'Rp 0'],
       [999, 'Rp 999'],
       [1_000, 'Rp 1 rb'],
@@ -234,20 +244,46 @@ describe('the shared formatters (ADR-0167 §1, P18.95-T1 AC-4)', () => {
       expect(formatNumber(1.5e-7, 7)).toBe('0,0000002');
     });
 
-    it('writes a percentage to one decimal, half up', () => {
-      expect(formatPercent(15)).toBe('15,0%');
-      expect(formatPercent(90)).toBe('90,0%');
-      expect(formatPercent(12.5)).toBe('12,5%');
-      expect(formatPercent(12.25)).toBe('12,3%');
-      expect(formatPercent(0)).toBe('0,0%');
-      expect(formatPercent(-3.45)).toBe('-3,5%');
+    it.each([
+      [0, '0%'],
+      [0.04, '0%'],
+      [0.05, '0%'],
+      [0.4, '0%'],
+      [0.5, '1%'],
+      [15, '15%'],
+      [57.4, '57%'],
+      [57.5, '58%'],
+      [96.4, '96%'],
+      [99.4, '99%'],
+      [99.5, '100%'],
+      [100, '100%'],
+      [1_250, '1.250%'],
+    ])('P18.97-T3 AC-1 writes %d%% whole, rounded half up, with no ,0: %s', (pct, text) => {
+      expect(formatPercent(pct)).toBe(text);
     });
 
-    it('lossless: a threshold with more than one decimal keeps them all, and one with fewer still shows one', () => {
+    it('P18.97-T3 AC-1 writes a negative change whole, half up away from zero, and one that rounds to nothing unsigned', () => {
+      expect(formatPercent(-12)).toBe('-12%');
+      expect(formatPercent(-12.5)).toBe('-13%');
+      expect(formatPercent(-3.45)).toBe('-3%');
+      expect(formatPercent(-0.4)).toBe('0%');
+    });
+
+    it('P18.97-T3 AC-1 rounds on the digits as written, so a tie is never lost to binary arithmetic', () => {
+      // 57.5 and 12.5 are ties: half up, in decimal digits — never the 57 a float's 57.4999… would give.
+      expect(formatPercent(57.5)).toBe('58%');
+      expect(formatPercent(12.25)).toBe('12%');
+      expect(formatPercent(50.45)).toBe('50%');
+    });
+
+    it('P18.97-T3 AC-2 lossless: a threshold keeps every decimal it was set with, and none it was not', () => {
       expect(formatPercent(75.55, { lossless: true })).toBe('75,55%');
       expect(formatPercent(75.5, { lossless: true })).toBe('75,5%');
-      expect(formatPercent(75, { lossless: true })).toBe('75,0%');
-      expect(formatPercent(75.55)).toBe('75,6%');
+      expect(formatPercent(75, { lossless: true })).toBe('75%');
+      expect(formatPercent(7.25, { lossless: true })).toBe('7,25%');
+      expect(formatPercent(0, { lossless: true })).toBe('0%');
+      // Without it, the same figure is a share: whole.
+      expect(formatPercent(75.55)).toBe('76%');
     });
 
     it('writes nothing for a number that is not one', () => {

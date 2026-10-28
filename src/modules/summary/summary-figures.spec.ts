@@ -27,6 +27,13 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
       expect(periodFigures(1 * M, 50 * M, 18 * M).attainmentPct).toBe(999);
     });
 
+    it('P18.97-T3 F-254 rounds an exact half up in integers: Rp 23 jt of Rp 40 jt is 58%, which the float read 57', () => {
+      expect(Math.round(((23 * M) / (40 * M)) * 100)).toBe(57);
+      expect(periodFigures(40 * M, 23 * M, 18 * M).attainmentPct).toBe(58);
+      // The cap and the zero target's null are kept: only the rounding changed.
+      expect(periodFigures(40 * M, 23 * M * 100, 18 * M).attainmentPct).toBe(999);
+    });
+
     it('AC-5: has no attainment without a goal — null, not 0%', () => {
       expect(periodFigures(null, 45 * M, 18 * M)).toMatchObject({ targetMinor: null, attainmentPct: null, gapMinor: null });
       expect(periodFigures(0, 45 * M, 18 * M)).toMatchObject({ targetMinor: null, attainmentPct: null });
@@ -182,6 +189,11 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
     it('a target of 0 is a month that needs nothing more: met, with no percentage to show', () => {
       const [, , closings] = activityTargets({ leads: 0, appointments: 0, policies: 0 }, mapping, logged);
       expect(closings).toMatchObject({ target: 0, attainmentPct: null, targetMet: true });
+    });
+
+    it('P18.97-T3 F-254 rounds an exact half up in integers: 23 logged of a target of 40 is 58%, never 57', () => {
+      const [leads] = activityTargets({ leads: 40, appointments: 1, policies: 1 }, mapping, new Map([['LEADS_CONTACTED', 23]]));
+      expect(leads).toMatchObject({ logged: 23, target: 40, attainmentPct: 58, targetMet: false });
     });
 
     it('meets a target on reaching it, and caps the percentage past it', () => {

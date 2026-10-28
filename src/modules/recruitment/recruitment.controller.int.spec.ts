@@ -189,6 +189,49 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
     );
   });
 
+  describe('P18.97-T5 — the two optional documents, per role (ADR-0177 §2; the same permissions as the four)', () => {
+    const OPTIONAL = ['company', 'agency'];
+
+    it.each([
+      ['the Owner', OWNER], ['the Admin', ADMIN], ['an elevated support session as the Owner', ELEVATED_OWNER],
+      ['an elevated support session as the Admin', ELEVATED_ADMIN],
+    ])('P18.97-T5 AC-2 positive: %s signs, attaches and replaces Company Profile and Agency Profile', async (_n, who) => {
+      for (const slot of OPTIONAL) {
+        expect([slot, (await upload(slot, who)).version]).toEqual([slot, 1]);
+        expect([slot, (await upload(slot, who)).version]).toEqual([slot, 2]);
+      }
+    });
+
+    it.each(EVERY_MEMBER)('P18.97-T5 AC-2 positive: %s reads both optional slots and opens one that is filled', async (_n, who) => {
+      await upload('company');
+      session.current = who;
+      const res = await http().get('/recruitment/pitch-materials').expect(200);
+      expect(res.body.slots.filter((s: { required: boolean }) => !s.required).map((s: { slot: string; state: string }) => [s.slot, s.state]))
+        .toEqual([['company', 'uploaded'], ['agency', 'missing']]);
+      const link = await http().get('/recruitment/pitch-materials/company/url').expect(200);
+      expect(link.body.url).toContain('/recruitment-pitch/');
+      // An empty optional slot has nothing to open: 404, as an empty required one.
+      expect((await http().get('/recruitment/pitch-materials/agency/url').expect(404)).body.error.code).toBe('NOT_FOUND');
+    });
+
+    it.each([...NOT_ADMINISTRATORS, ['a read-only support session as the Owner', READ_ONLY_OWNER] as [string, RequestContext]])(
+      'P18.97-T5 AC-2 negative: %s is refused an optional slot’s upload and attach, at the guard, with nothing written', async (_n, who) => {
+        const { storageKey } = await upload('company');
+        session.current = who;
+        await http().post(`${PITCH}/uploads`).send({ filename: 'agency.pdf', mimeType: 'application/pdf', bytes: 1 }).expect(403);
+        for (const slot of OPTIONAL) await http().put(`${PITCH}/${slot}`).send({ storageKey }).expect(403);
+        expect(await mongoose.connection.db!.collection('kpmRecruitmentPitchDocuments').find({}).toArray())
+          .toMatchObject([{ slot: 'company', version: 1 }]);
+      },
+    );
+
+    it('P18.97-T5 AC-2 an optional slot takes no tick: 400 VALIDATION_FAILED over HTTP', async () => {
+      const { version } = await upload('agency');
+      const res = await http().put(`${PITCH}/agency/confirmations/income`).send({ ticked: true, version }).expect(400);
+      expect(res.body.error).toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'item', item: 'income' } });
+    });
+  });
+
   describe('the shapes (the Data contract)', () => {
     it('answers the plan as { hasPlaybook, vocabulary, plan }, the plan’s parts as the contract names them', async () => {
       const res = await http().get(PLAN).expect(200);
@@ -209,14 +252,23 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       expect(res.body).toMatchObject({ hasPlaybook: true, plan: null });
     });
 
-    it('answers the pitch as { slots, summary }, each slot the contract’s fields', async () => {
+    it('P18.97-T5 AC-2 answers the pitch as { slots, summary }, six slots, each the contract’s fields, the summary over the four', async () => {
       await upload('proof');
+      await upload('company');
       session.current = AGENT;
       const res = await http().get('/recruitment/pitch-materials').expect(200);
       expect(Object.keys(res.body)).toEqual(['slots', 'summary']);
-      expect(res.body.slots.map((s: { slot: string }) => s.slot)).toEqual(['opportunity', 'proof', 'faq', 'howtojoin']);
-      expect(Object.keys(res.body.slots[1])).toEqual(['slot', 'title', 'line', 'state', 'file', 'checklist', 'version']);
+      expect(res.body.slots.map((s: { slot: string; required: boolean }) => [s.slot, s.required])).toEqual([
+        ['opportunity', true], ['proof', true], ['faq', true], ['howtojoin', true], ['company', false], ['agency', false],
+      ]);
+      expect(Object.keys(res.body.slots[1])).toEqual(['slot', 'title', 'line', 'required', 'state', 'file', 'checklist', 'version']);
       expect(res.body.slots[1]).toMatchObject({ state: 'uploaded', file: { name: 'proof.pdf', bytes: 1024, uploadedOn: '2026-10-09' }, version: 1 });
+      expect(res.body.slots[4]).toMatchObject({
+        slot: 'company', title: 'Company Profile', required: false, state: 'uploaded', checklist: [], version: 1,
+        file: { name: 'company.pdf', bytes: 1024, uploadedOn: '2026-10-09' },
+      });
+      expect(res.body.slots[5]).toMatchObject({ slot: 'agency', title: 'Agency Profile', required: false, state: 'missing', file: null, version: 0 });
+      // The optional Company Profile counts in nothing: one of four done, three missing (ADR-0177 §3).
       expect(res.body.summary).toEqual({ done: 1, total: 4, missing: 3, unconfirmed: 0 });
     });
 

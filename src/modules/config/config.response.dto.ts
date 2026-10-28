@@ -255,8 +255,8 @@ export class RatioDefinitionDto implements RatioDefinitionView {
   @ApiProperty({
     enum: RATIO_DISPLAY_UNITS,
     description:
-      'How to write `benchmark` for a reader. `percent`: × 100 to one decimal (15.0%). '
-      + '`decimal`: two decimals (0.30). `points`: ± percentage points (±30 points). Always '
+      'How to write `benchmark` for a reader. `percent`: × 100, as typed (15%, 15,5%; ADR-0174 §2). '
+      + '`decimal`: two decimals (0,30). `points`: ± percentage points (±30 points). Always '
       + '`points` on a `band` ratio.',
   })
   displayUnit!: RatioDisplayUnit;

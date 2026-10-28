@@ -29,7 +29,7 @@ describe('the Strategic Leader Forum, isolated (invariant §1)', () => {
   const furnish = async (owner: RequestContext, title: string) => {
     const card = await office.forum.create(owner, { title, date: '2026-09-28' });
     await office.minutes.addActionItem(owner, card.id);
-    await office.minutes.saveMonthlyTarget(owner, card.id, 'ape', { value: 'TBD', version: 0 });
+    await office.minutes.saveMonthlyTarget(owner, card.id, 'flc', { rate: 1, version: 0 });
     const { token } = await office.sharing.create(owner, card.id);
     return { view: await office.forum.read(owner, card.id), token };
   };
@@ -64,7 +64,7 @@ describe('the Strategic Leader Forum, isolated (invariant §1)', () => {
       ['PATCH an action item', () => http().patch(`/leader-meetings/${id}/action-items/${row.id}`).send({ pic: 'Mine', version: row.version })],
       ['DELETE an action item', () => http().delete(`/leader-meetings/${id}/action-items/${row.id}`).query({ version: row.version })],
       ['PUT the order', () => http().put(`/leader-meetings/${id}/action-items/order`).send({ itemIds: [row.id] })],
-      ['PUT a Monthly Target', () => http().put(`/leader-meetings/${id}/monthly-targets/ape`).send({ value: 'Mine', version: 1 })],
+      ['PUT a Monthly Target', () => http().put(`/leader-meetings/${id}/monthly-targets/flc`).send({ rate: 9, version: 1 })],
       ['POST a share link', () => http().post(`/leader-meetings/${id}/share-links`)],
       ['DELETE the share links', () => http().delete(`/leader-meetings/${id}/share-links`)],
       ['GET the shared link', () => http().get(`/leader-meetings/shared/${token}`)],

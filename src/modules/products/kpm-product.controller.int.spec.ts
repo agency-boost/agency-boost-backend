@@ -148,6 +148,28 @@ describe('an office’s products over HTTP (P5-T5, P5-T10)', () => {
         .expect(403);
     });
 
+    /*
+     * P18.97-T4 AC-7 (ADR-0176 §7; the client's UI-028): the shelf's *Waiting for your approval* now carries *Review*,
+     * for whoever holds `sales_script:approve`. A reader who reads the badge without the permission — a read-only
+     * support session as the Owner reads the shelf and the queue — is offered no *Review*, and the decisions it opens
+     * are refused by the server, not only left off the screen.
+     */
+    it('P18.97-T4 AC-7 refuses Review’s decisions to a reader who sees the badge but does not hold sales_script:approve', async () => {
+      await writeScript();
+      session.current = READ_ONLY_OWNER;
+      const shelf = await request(app.getHttpServer()).get(url).expect(200);
+      expect(shelf.body.find((p: { code: string }) => p.code === 'PRUMAPAN').reviewState).toBe('pending');
+      await request(app.getHttpServer()).get(`${url}/script-reviews`).expect(200);
+
+      await request(app.getHttpServer()).post(`${url}/${mapanId}/script/approve`).send({}).expect(403);
+      await request(app.getHttpServer())
+        .post(`${url}/${mapanId}/script/reject`).send({ reason: 'Terlalu menjanjikan.' }).expect(403);
+
+      session.current = OWNER;
+      const after = await request(app.getHttpServer()).get(url).expect(200);
+      expect(after.body.find((p: { code: string }) => p.code === 'PRUMAPAN').reviewState).toBe('pending');
+    });
+
     it('leaves the script unapproved after a refusal, not merely unanswered', async () => {
       // A 403 that had already written would be worse than no gate: the caller is told no and
       // the agents read it anyway.

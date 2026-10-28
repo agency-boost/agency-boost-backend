@@ -2,9 +2,9 @@ import { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from './assets';
 
 /**
  * **Recruitment tools** (Phase 17; `functional/recruitment.md`): the candidate brief's vocabulary, the
- * office's four pitch slots and the rule that says when one is done, and the playbook a company started
- * from the defaults is given — each once, here, and served to the browser rather than re-declared there
- * (invariant §7).
+ * office's six pitch slots — the four the readiness counts, and two optional — with the rule that says when one
+ * is done and what the banner counts, and the playbook a company started from the defaults is given — each
+ * once, here, and served to the browser rather than re-declared there (invariant §7).
  *
  * `:NNN` is a line of `prototype/AgencyBoost_Recruitment_Section.html`. Every string below is the
  * prototype's, verbatim, and `recruitment.spec.ts` reads each one back out of that file — except seven chip
@@ -111,16 +111,24 @@ export const RECRUITMENT = {
 } as const;
 
 /**
- * **The office's four pitch documents** (D-slots; `SLOTS`, `:626-661`), in the order drawn, each with its
- * title and line. *Opportunity Overview* alone carries a checklist — *"Confirm this PDF actually includes"*
- * — of four items, by the prototype's ids (`:634-637`). The prototype's `tooltip` is never drawn and is not
- * carried (contradiction 15).
+ * **The office's six pitch documents** (D-slots; ADR-0177 §2), in the order drawn, each with its title, its
+ * line, and whether the office's readiness counts it (`required`).
+ *
+ * - **The four the prototype draws** (`SLOTS`, `:626-661`), each `required`, verbatim. *Opportunity Overview*
+ *   alone carries a checklist — *"Confirm this PDF actually includes"* — of four items, by the prototype's ids
+ *   (`:634-637`). The prototype's `tooltip` is never drawn and is not carried (contradiction 15).
+ * - **Then two optional ones**, the product owner's (UI-042; OD-233 → ADR-0177): *Company Profile* and
+ *   *Agency Profile*, each the office's own PDF as the four are (ADR-0032), with no checklist, uploaded,
+ *   replaced and opened as the others, and counted in neither the ring nor the banner
+ *   (`recruitmentPitchSummary`). Not in the prototype: their titles are the request's words, and their lines —
+ *   served and drawn on no card, as the four's are — say what each document is for, from the glossary's rows.
  */
 export const RECRUITMENT_PITCH_SLOTS = [
   {
     code: 'opportunity',
     title: 'Opportunity Overview',
     line: 'The core pitch: the role, what it pays, and what it takes.',
+    required: true,
     checklist: [
       { code: 'career-path', label: 'Career Path Ladder (Agent → AAB → AB)' },
       { code: 'income', label: 'Income Potential / compensation illustration' },
@@ -128,9 +136,11 @@ export const RECRUITMENT_PITCH_SLOTS = [
       { code: 'commitment', label: 'Commitment needed — contract maintenance and required activity' },
     ],
   },
-  { code: 'proof', title: 'Proof & Credibility', line: 'Track record, testimonials, and reasons to believe.', checklist: [] },
-  { code: 'faq', title: 'FAQ', line: 'Straight answers to the questions candidates always ask.', checklist: [] },
-  { code: 'howtojoin', title: 'How to Join', line: 'Steps to register, documents needed, and KPM tagging.', checklist: [] },
+  { code: 'proof', title: 'Proof & Credibility', line: 'Track record, testimonials, and reasons to believe.', required: true, checklist: [] },
+  { code: 'faq', title: 'FAQ', line: 'Straight answers to the questions candidates always ask.', required: true, checklist: [] },
+  { code: 'howtojoin', title: 'How to Join', line: 'Steps to register, documents needed, and KPM tagging.', required: true, checklist: [] },
+  { code: 'company', title: 'Company Profile', line: 'A profile of the insurer the agency sells for.', required: false, checklist: [] },
+  { code: 'agency', title: 'Agency Profile', line: 'A profile of the agency itself.', required: false, checklist: [] },
 ] as const;
 export type RecruitmentPitchSlotCode = (typeof RECRUITMENT_PITCH_SLOTS)[number]['code'];
 
@@ -140,8 +150,10 @@ export type RecruitmentPitchState = (typeof RECRUITMENT_PITCH_STATES)[number];
 
 /**
  * **The completion rule, stated once** (D-slots): no file is *missing*; a file with every item of its
- * checklist ticked is *complete*; a file with an item open is *partial* (*"{n}/{m} confirmed"*); a file on a
- * slot with no checklist is *uploaded*.
+ * checklist ticked is *complete*; a file with an item open is *partial* (*Uploaded · needs confirmation*,
+ * ADR-0177 §1 — the prototype's *"{n}/{m} confirmed"*); a file on a slot with no checklist is *uploaded*. The
+ * same for a required slot and an optional one: an optional slot has no checklist, so it is *missing* or
+ * *uploaded*.
  */
 export function recruitmentPitchState(
   hasFile: boolean, checklist: readonly { readonly ticked: boolean }[],
@@ -154,6 +166,36 @@ export function recruitmentPitchState(
 /** Whether a slot counts as done for the banner's ring (`:797-799`): complete, or uploaded with nothing to confirm. */
 export function recruitmentPitchDone(state: RecruitmentPitchState): boolean {
   return state === 'complete' || state === 'uploaded';
+}
+
+/** The banner's counts (`PitchMaterialsView.summary`). */
+export interface RecruitmentPitchSummary {
+  /** Required slots complete, or uploaded with nothing to confirm. */
+  done: number;
+  /** How many slots are required: the ring's *x/4*. */
+  total: number;
+  /** Required slots with no file. */
+  missing: number;
+  /** Required slots with a file and an item still open. */
+  unconfirmed: number;
+}
+
+/**
+ * **What the ring and the banner count, stated once** (`:797-820`; ADR-0177 §3): **the required slots alone**
+ * — `done` by `recruitmentPitchDone`, `missing`, and `unconfirmed` (`partial`) — over `total`, how many are
+ * required. An optional slot counts in none of them, whatever it holds: uploading or leaving *Company Profile*
+ * or *Agency Profile* moves nothing on the banner, so an office with neither still reads *complete*.
+ */
+export function recruitmentPitchSummary(
+  slots: readonly { readonly required: boolean; readonly state: RecruitmentPitchState }[],
+): RecruitmentPitchSummary {
+  const required = slots.filter((slot) => slot.required);
+  return {
+    done: required.filter((slot) => recruitmentPitchDone(slot.state)).length,
+    total: required.length,
+    missing: required.filter((slot) => slot.state === 'missing').length,
+    unconfirmed: required.filter((slot) => slot.state === 'partial').length,
+  };
 }
 
 /**

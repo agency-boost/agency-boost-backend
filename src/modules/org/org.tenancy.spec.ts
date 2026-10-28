@@ -652,6 +652,177 @@ describe('organisation', () => {
       const silent = await hierarchy.create(ctx(KPM_A), { userId: await person('Old Person'), role: 'agent', status: 'active' });
       expect(silent.workStatus).toBeNull();
     });
+
+    /*
+     * P18.97-T4 AC-3 (ADR-0176 §5; the client's UI-024): a member who left and came back has two memberships, one
+     * removed and one live (invariant §2), and the directory says which is which — *Rejoined* on the live one, the
+     * day she came back on the removed one — where it read *Active* beside a *Removed* tab and nothing else.
+     */
+    describe('who came back (P18.97-T4 AC-3)', () => {
+      const DAY_MS = 24 * 60 * 60 * 1000;
+
+      /** Yanti: placed under the office's root, removed, and — a month on — placed again. */
+      async function leftAndCameBack(kpmId = KPM_A) {
+        const root = await join(kpmId, 'ab');
+        const userId = await person('Yanti Kusuma');
+        const first = String((await hierarchy.create(ctx(kpmId), { userId, role: 'agent', leaderId: root, status: 'active' }))._id);
+        await removals.remove(ctx(kpmId), first, { confirmation: 'REMOVE' });
+        clock.advance(30 * DAY_MS);
+        const back = await hierarchy.create(ctx(kpmId), { userId, role: 'agent', leaderId: root, status: 'active' });
+        return { root, userId, first, back: String(back._id), backOn: back.joinDate! };
+      }
+
+      it('P18.97-T4 AC-3 GET /members marks the live membership Rejoined and the removed one with the day she came back', async () => {
+        const { root, first, back, backOn } = await leftAndCameBack();
+
+        const directory_ = await directory.list(ctx(KPM_A));
+        expect(directory_.members.find((m) => m.membershipId === back)!.rejoinedOn).toBe(backOn);
+        // Somebody who never left is not marked.
+        expect(directory_.members.find((m) => m.membershipId === root)!.rejoinedOn).toBeNull();
+
+        const removed = await directory.list(ctx(KPM_A), { status: 'removed' });
+        expect(removed.members.map((m) => [m.membershipId, m.rejoinedOn])).toEqual([[first, backOn]]);
+        // One member's read carries it too, as the roster's rows do.
+        expect((await directory.read(ctx(KPM_A), first)).rejoinedOn).toBe(backOn);
+      });
+
+      it('P18.97-T4 AC-3 is not a return while the second membership waits for somebody to let her in', async () => {
+        const root = await join(KPM_A, 'ab');
+        const userId = await person('Yanti Kusuma');
+        const first = String((await hierarchy.create(ctx(KPM_A), { userId, role: 'agent', leaderId: root, status: 'active' }))._id);
+        await removals.remove(ctx(KPM_A), first, { confirmation: 'REMOVE' });
+        const waiting = String((await hierarchy.create(ctx(KPM_A), { userId, role: 'agent', status: 'pending' }))._id);
+
+        expect((await directory.list(ctx(KPM_A), { status: 'removed' })).members[0].rejoinedOn).toBeNull();
+        expect((await directory.list(ctx(KPM_A), { status: 'pending' })).members
+          .find((m) => m.membershipId === waiting)!.rejoinedOn).toBeNull();
+      });
+
+      it('P18.97-T4 AC-3 never reads another office’s memberships: a person who left office B is new to office A', async () => {
+        const rootB = await join(KPM_B, 'ab');
+        const userId = await person('Yanti Kusuma');
+        const inB = String((await hierarchy.create(ctx(KPM_B), { userId, role: 'agent', leaderId: rootB, status: 'active' }))._id);
+        await removals.remove(ctx(KPM_B), inB, { confirmation: 'REMOVE' });
+        clock.advance(30 * DAY_MS);
+        // The same person, in a second office for the first time.
+        const rootA = await join(KPM_A, 'ab');
+        const inA = String((await hierarchy.create(ctx(KPM_A), { userId, role: 'agent', leaderId: rootA, status: 'active' }))._id);
+
+        expect((await directory.list(ctx(KPM_A))).members.find((m) => m.membershipId === inA)!.rejoinedOn).toBeNull();
+        // Nor is B's removed membership a return to B.
+        expect((await directory.list(ctx(KPM_B), { status: 'removed' })).members[0].rejoinedOn).toBeNull();
+      });
+
+      it('P18.97-T4 AC-3 says nothing to a leader of a membership outside their unit', async () => {
+        const root = await join(KPM_A, 'ab');
+        const peer = await join(KPM_A, 'aab', root);
+        const mine = await join(KPM_A, 'aab', root);
+        const userId = await person('Yanti Kusuma');
+        // Her first membership was in the peer's unit; she came back into this leader's.
+        const first = String((await hierarchy.create(ctx(KPM_A), { userId, role: 'agent', leaderId: peer, status: 'active' }))._id);
+        await removals.remove(ctx(KPM_A), first, { confirmation: 'REMOVE' });
+        clock.advance(30 * DAY_MS);
+        const back = String((await hierarchy.create(ctx(KPM_A), { userId, role: 'agent', leaderId: mine, status: 'active' }))._id);
+        await hierarchy.refreshCounts(ctx(KPM_A), mine);
+
+        const asLeader = new RequestContext('u-aab', 'none', {
+          membershipId: mine, kpmId: KPM_A, orgLevelCode: 'AAB', hierarchyRole: 'aab', status: 'active',
+          isKpmOwner: false, isKpmAdmin: false, directCount: 1,
+        });
+        const seen = (await directory.list(asLeader)).members.find((m) => m.membershipId === back)!;
+        expect(seen.rejoinedOn).toBeNull();
+        // The office reads both, and the mark.
+        expect((await directory.list(ctx(KPM_A))).members.find((m) => m.membershipId === back)!.rejoinedOn).not.toBeNull();
+      });
+
+      /*
+       * P18.97-T8 L1 (the Phase 18.97 exit permission review): the mark read by each reader the directory narrows —
+       * the Owner, an Admin, an AAB and another office's Owner are above and in `directory-admins.int.spec.ts`. Each
+       * reads `rejoinedOn` from the memberships `siblingsWithinReach` lets them see, so a date says nothing of a
+       * membership outside their reach, in either direction.
+       */
+      const marks = (page: { members: { membershipId: string; rejoinedOn: string | null }[] }) =>
+        page.members.map((m): [string, string | null] => [m.membershipId, m.rejoinedOn]);
+
+      it('P18.97-T8 L1 an AB (own-downline) reads a return made within their downline, and null for one whose earlier membership sat under a peer', async () => {
+        const root = await join(KPM_A, 'ab');
+        const ab = await join(KPM_A, 'ab', root);
+        const aab = await join(KPM_A, 'aab', ab);
+        const peer = await join(KPM_A, 'ab', root);
+        // Yanti left from two levels down the AB's line and came back to the AB directly: both within reach.
+        const yanti = await person('Yanti Kusuma');
+        const yantiFirst = String((await hierarchy.create(ctx(KPM_A), { userId: yanti, role: 'agent', leaderId: aab, status: 'active' }))._id);
+        // Dewi left from the peer's unit and came back into the AB's line.
+        const dewi = await person('Dewi Lestari');
+        const dewiFirst = String((await hierarchy.create(ctx(KPM_A), { userId: dewi, role: 'agent', leaderId: peer, status: 'active' }))._id);
+        await removals.remove(ctx(KPM_A), yantiFirst, { confirmation: 'REMOVE' });
+        await removals.remove(ctx(KPM_A), dewiFirst, { confirmation: 'REMOVE' });
+        clock.advance(30 * DAY_MS);
+        const yantiBack = await hierarchy.create(ctx(KPM_A), { userId: yanti, role: 'agent', leaderId: ab, status: 'active' });
+        const dewiBack = await hierarchy.create(ctx(KPM_A), { userId: dewi, role: 'agent', leaderId: aab, status: 'active' });
+
+        const asAb = new RequestContext('u-ab', 'none', {
+          membershipId: ab, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
+          isKpmOwner: false, isKpmAdmin: false, directCount: 2,
+        });
+        const roster = new Map(marks(await directory.list(asAb)));
+        expect(roster.get(String(yantiBack._id))).toBe(yantiBack.joinDate);
+        expect(roster.get(String(dewiBack._id))).toBeNull();
+        // Under Removed: the membership from their line, with the day she came back. The peer's is not theirs to list.
+        expect(marks(await directory.list(asAb, { status: 'removed' }))).toEqual([[yantiFirst, yantiBack.joinDate]]);
+        expect((await directory.read(asAb, yantiFirst)).rejoinedOn).toBe(yantiBack.joinDate);
+        expect((await directory.read(asAb, String(dewiBack._id))).rejoinedOn).toBeNull();
+        // The office reads Dewi's return: the null is the AB's reach, not the data.
+        expect((await directory.read(ctx(KPM_A), String(dewiBack._id))).rejoinedOn).toBe(dewiBack.joinDate);
+      });
+
+      it('P18.97-T8 L1 an Agent (own) reads null on their own return: the membership they left is outside their reach', async () => {
+        const { userId, first, back, backOn } = await leftAndCameBack();
+        const asYanti = new RequestContext(userId, 'none', {
+          membershipId: back, kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent', status: 'active',
+          isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+        });
+
+        // An Agent's reach is the one membership they hold, so no other membership of theirs is ever within it, and
+        // there is no date for them to read: their roster's one row and their own read both carry none.
+        expect(marks(await directory.list(asYanti))).toEqual([[back, null]]);
+        expect((await directory.read(asYanti, back)).rejoinedOn).toBeNull();
+        // Nor is the membership she left one she may read, under Removed or by its id.
+        const removed = await directory.list(asYanti, { status: 'removed' });
+        expect(removed.members).toEqual([]);
+        expect(removed.counts.removed).toBe(0);
+        await expect(directory.read(asYanti, first)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        // The office reads the date: the null is the Agent's reach, not the data.
+        expect((await directory.read(ctx(KPM_A), back)).rejoinedOn).toBe(backOn);
+      });
+
+      it.each([['ab', 'AB'], ['aab', 'AAB']] as const)(
+        'P18.97-T8 L1 the reverse peer case: an %s reads null on a removed membership of their unit whose return sits under a peer',
+        async (role, orgLevelCode) => {
+          const root = await join(KPM_A, 'ab');
+          const mine = await join(KPM_A, role, root);
+          const peer = await join(KPM_A, role, root);
+          const userId = await person('Yanti Kusuma');
+          // Her first membership was in this leader's unit; she came back into the peer's.
+          const first = String((await hierarchy.create(ctx(KPM_A), { userId, role: 'agent', leaderId: mine, status: 'active' }))._id);
+          await removals.remove(ctx(KPM_A), first, { confirmation: 'REMOVE' });
+          clock.advance(30 * DAY_MS);
+          const back = await hierarchy.create(ctx(KPM_A), { userId, role: 'agent', leaderId: peer, status: 'active' });
+
+          const asLeader = new RequestContext(`u-${role}`, 'none', {
+            membershipId: mine, kpmId: KPM_A, orgLevelCode, hierarchyRole: role, status: 'active',
+            isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+          });
+          // The removed row is theirs to see, under Removed and by its id, and it says nothing of where she went.
+          expect(marks(await directory.list(asLeader, { status: 'removed' }))).toEqual([[first, null]]);
+          expect((await directory.read(asLeader, first)).rejoinedOn).toBeNull();
+          // Her live membership is not on their roster at all.
+          expect((await directory.list(asLeader)).members.map((m) => m.membershipId)).not.toContain(String(back._id));
+          // The office reads the date on the removed row: the null is the leader's reach, not the data.
+          expect((await directory.read(ctx(KPM_A), first)).rejoinedOn).toBe(back.joinDate);
+        },
+      );
+    });
   });
 
   describe('the hierarchy (P3-T2)', () => {
@@ -1958,6 +2129,36 @@ describe('organisation', () => {
           code: 'PERM_OWNER_ONLY',
         });
         expect((await members.findById(ctx(KPM_A), root))!.adminAccess.isKpmAdmin).toBe(true);
+      });
+    });
+
+    /*
+     * P18.97-T8 L2 (the Phase 18.97 exit permission review): an admin with no grant on record — the seeded Owner, whom
+     * nobody granted it, or a row written before grants were dated. The list says so rather than inventing a date or a
+     * granter, only the Owner is offered the revoke, and the audit row records that the grant was never dated.
+     */
+    describe('an admin with no grant on record (P18.97-T8 L2)', () => {
+      beforeEach(async () => {
+        await members.updateById(ctx(KPM_A), ab, {
+          $set: { adminAccess: { isKpmAdmin: true, grantedByUserId: null, grantedAt: null, revokedAt: null } },
+        });
+      });
+
+      it('P18.97-T8 L2 lists them with no date and no granter, and offers the revoke to the Owner alone', async () => {
+        expect(await delegation.list(owner)).toEqual([
+          expect.objectContaining({ membershipId: ab, grantedAt: null, grantedByName: null, canRevoke: true }),
+        ]);
+        // The Admin reads their own row as the Owner does, and may not take it away.
+        const [seen] = await delegation.list(await asMember(ab, { isKpmAdmin: true }));
+        expect(seen).toMatchObject({ membershipId: ab, grantedAt: null, grantedByName: null, canRevoke: false });
+      });
+
+      it('P18.97-T8 L2 revokes them, and the audit row says the grant was never dated rather than inventing a date', async () => {
+        await delegation.revoke(owner, ab);
+        expect((await members.findById(ctx(KPM_A), ab))!.adminAccess.isKpmAdmin).toBe(false);
+        const row = await mongoose.model(AuditLog.name).findOne({ action: 'kpm_admin.revoked', targetId: ab });
+        expect(row!.get('before')).toEqual({ isKpmAdmin: true, grantedAt: null });
+        expect(await delegation.list(owner)).toEqual([]);
       });
     });
 

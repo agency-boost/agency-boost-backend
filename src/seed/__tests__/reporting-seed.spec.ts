@@ -66,9 +66,12 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     expect(agency('Yosef Tambunan').manpower).toEqual({ aab: 1, agents: 8, total: 10 });
   });
 
-  it('P18-T1 AC-13 the leaderboard ranks the four ABs who lead somebody; Satria’s people were coached by nobody this week', () => {
-    expect(overview.coaching.leaderboard.map((l) => l.name).sort())
+  it('P18-T1 AC-13, P18.97-T3 AC-5 the leaderboard ranks every AB: the four who lead somebody, then Maya Halim, No team', () => {
+    expect(overview.coaching.leaderboard.slice(0, 4).map((l) => l.name).sort())
       .toEqual(['Agus Prasetyo', 'Satria Nugraha', 'Wilson Tanoto', 'Yosef Tambunan']);
+    // UI-017: Maya Halim, the Admin on the AB rung, leads nobody — listed last, no rate; *Showing 4 of 5 ABs*.
+    expect(overview.coaching.leaderboard).toHaveLength(5);
+    expect(overview.coaching.leaderboard[4]).toMatchObject({ name: 'Maya Halim', leads: false, teamSize: 0, coached: 0, pct: null });
     expect(overview.coaching.leaderboard.find((l) => l.name === 'Satria Nugraha')).toMatchObject({ teamSize: 3, coached: 0, pct: 0 });
     expect(overview.coaching.leaderboard.find((l) => l.name === 'Yosef Tambunan')!.coached).toBe(3);
   });
@@ -124,8 +127,8 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     expect(yosef.aabUnits[0].moc).toMatchObject({ status: 'unknown', missing: 'Not uploaded yet: Rolling Persistency — DU.' });
     expect(yosef.aabUnits[0].moc!.criteria.find((c) => c.code === 'MONTHLY2_AA')).toMatchObject({ current: 2, met: true });
     expect(analytics.mocRulesText).toBe(
-      'AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75,0%.\n'
-      + 'AB: (Net APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75,0%) OR Direct AB (AB on AB) ≥ 5.',
+      'AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
+      + 'AB: (Net APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
     );
     const satria = agency('Satria Nugraha');
     expect(satria.moc!.status).toBe('not_met');

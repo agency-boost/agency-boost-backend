@@ -230,13 +230,14 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
   const pitchRows = () => db().collection('kpmRecruitmentPitchDocuments').find({}).sort({ _id: 1 }).toArray();
 
   describe('the read (P17-T4 AC-5)', () => {
-    it('P17-T4 AC-5 the four slots in order, each with its words, null where nothing is held, version 0', async () => {
+    it('P17-T4 AC-5, P18.97-T5 AC-2 the six slots in order, each with its words, null where nothing is held, version 0', async () => {
       const view = await read(KPM_A);
-      expect(view.slots.map((s) => [s.slot, s.title, s.line, s.state, s.file, s.version])).toEqual(
-        RECRUITMENT_PITCH_SLOTS.map((s) => [s.code, s.title, s.line, 'missing', null, 0]),
+      expect(view.slots.map((s) => [s.slot, s.title, s.line, s.required, s.state, s.file, s.version])).toEqual(
+        RECRUITMENT_PITCH_SLOTS.map((s) => [s.code, s.title, s.line, s.required, 'missing', null, 0]),
       );
       expect(view.slots[0].checklist).toEqual(RECRUITMENT_PITCH_SLOTS[0].checklist.map((i) => ({ ...i, ticked: false })));
-      expect(view.slots.slice(1).map((s) => s.checklist)).toEqual([[], [], []]);
+      expect(view.slots.slice(1).map((s) => s.checklist)).toEqual([[], [], [], [], []]);
+      // The banner counts the four required: the two optional ones are not counted missing (ADR-0177 §3).
       expect(view.summary).toEqual({ done: 0, total: 4, missing: 4, unconfirmed: 0 });
     });
 
@@ -542,27 +543,29 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
 
   describe('isolation (P17-T4 AC-8; P17-T4 AC-6 — exit criterion 2)', () => {
     /**
-     * Every slot state across the two offices: 0417 holds the prototype's pitch — Opportunity Overview with
-     * two ticks (partial), Proof & Credibility (uploaded), FAQ and How to Join missing; 0555 holds all four,
-     * Opportunity Overview's four ticked (complete).
+     * Every slot state across the two offices, as the seed holds them: 0417 the prototype's pitch — Opportunity
+     * Overview with two ticks (partial), Proof & Credibility (uploaded), FAQ and How to Join missing — and its
+     * Company Profile, its Agency Profile empty; 0555 all four, Opportunity Overview's four ticked (complete), and
+     * both optional documents (P18.97-T5 AC-5).
      */
     async function twoOffices() {
       const a = await attachTo(KPM_A, 'opportunity', 'Opportunity_Overview_v3.pdf');
       await tick(KPM_A, 'opportunity', 'career-path', true, a.version);
       await tick(KPM_A, 'opportunity', 'support', true, a.version);
       await attachTo(KPM_A, 'proof', 'Proof_and_Credibility_2026.pdf');
+      await attachTo(KPM_A, 'company', 'Company_Profile_2026.pdf');
       const b = await attachTo(KPM_B, 'opportunity', 'Kelapa Gading Opportunity.pdf');
       for (const item of ['career-path', 'income', 'support', 'commitment']) await tick(KPM_B, 'opportunity', item, true, b.version);
-      for (const slot of ['proof', 'faq', 'howtojoin']) await attachTo(KPM_B, slot, `Kelapa Gading ${slot}.pdf`);
+      for (const slot of ['proof', 'faq', 'howtojoin', 'company', 'agency']) await attachTo(KPM_B, slot, `Kelapa Gading ${slot}.pdf`);
       const keys = Object.fromEntries((await pitchRows()).map((r) => [`${r.kpmId}:${r.slot}`, r.storageKey as string]));
       return keys;
     }
 
-    it('P17-T4 AC-6 exit test 2 — every slot state, every role, two offices: four slots read, a link only for the reader’s own filled slot, 300 seconds, else 404', async () => {
+    it('P17-T4 AC-6, P18.97-T5 AC-2 exit test 2 — every slot state, every role, two offices: six slots read, a link only for the reader’s own filled slot, 300 seconds, else 404', async () => {
       const keys = await twoOffices();
       const expected: Record<string, Record<string, string>> = {
-        [KPM_A]: { opportunity: 'partial', proof: 'uploaded', faq: 'missing', howtojoin: 'missing' },
-        [KPM_B]: { opportunity: 'complete', proof: 'uploaded', faq: 'uploaded', howtojoin: 'uploaded' },
+        [KPM_A]: { opportunity: 'partial', proof: 'uploaded', faq: 'missing', howtojoin: 'missing', company: 'uploaded', agency: 'missing' },
+        [KPM_B]: { opportunity: 'complete', proof: 'uploaded', faq: 'uploaded', howtojoin: 'uploaded', company: 'uploaded', agency: 'uploaded' },
       };
       for (const kpmId of [KPM_A, KPM_B]) {
         for (const role of ROLES) {
@@ -601,7 +604,7 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
       // 0555's Owner ticks with 0417's version on its own slot — it only ever reaches its own.
       await tick(KPM_B, 'opportunity', 'income', false, 1);
       const after = await read(KPM_A);
-      expect(after.slots.map((s) => s.state)).toEqual(['partial', 'uploaded', 'missing', 'missing']);
+      expect(after.slots.map((s) => s.state)).toEqual(['partial', 'uploaded', 'missing', 'missing', 'uploaded', 'missing']);
       expect((await pitchRows()).filter((r) => r.kpmId === KPM_A)).toEqual(
         (before.kpmRecruitmentPitchDocuments as { kpmId: string }[]).filter((r) => r.kpmId === KPM_A),
       );
@@ -628,6 +631,109 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
       // A second office's FAQ is its own row.
       await attachTo(KPM_B, 'faq', 'faq.pdf');
       expect(await db().collection('kpmRecruitmentPitchDocuments').countDocuments({ slot: 'faq' })).toBe(2);
+    });
+  });
+
+  // ---------------------------------------------------------------- the two optional documents (P18.97-T5)
+
+  describe('P18.97-T5 — Company Profile and Agency Profile, optional (ADR-0177 §2, §3; UI-042)', () => {
+    const OPTIONAL = ['company', 'agency'] as const;
+    /** The four required slots, done: Opportunity Overview complete, the other three uploaded. */
+    async function fourDone(kpmId: string) {
+      const slot = await attachTo(kpmId, 'opportunity', 'o.pdf');
+      for (const item of ['career-path', 'income', 'support', 'commitment']) await tick(kpmId, 'opportunity', item, true, slot.version);
+      for (const code of ['proof', 'faq', 'howtojoin']) await attachTo(kpmId, code, `${code}.pdf`);
+    }
+
+    it('P18.97-T5 AC-2 every role reads six slots, the two optional after the four, each saying so, empty ones missing at version 0', async () => {
+      for (const role of ROLES) {
+        const view = await read(KPM_A, role);
+        expect([role, view.slots.map((s) => [s.slot, s.title, s.required, s.state, s.file, s.checklist, s.version])]).toEqual([role, [
+          ['opportunity', 'Opportunity Overview', true, 'missing', null, expect.any(Array), 0],
+          ['proof', 'Proof & Credibility', true, 'missing', null, [], 0],
+          ['faq', 'FAQ', true, 'missing', null, [], 0],
+          ['howtojoin', 'How to Join', true, 'missing', null, [], 0],
+          ['company', 'Company Profile', false, 'missing', null, [], 0],
+          ['agency', 'Agency Profile', false, 'missing', null, [], 0],
+        ]]);
+      }
+    });
+
+    it.each(OPTIONAL)('P18.97-T5 AC-2 %s is signed into the office’s folder, attached, replaced and opened as the four are', async (code) => {
+      const first = await attachTo(KPM_A, code, `${code}-v1.pdf`);
+      expect(first).toMatchObject({ slot: code, required: false, state: 'uploaded', version: 1, checklist: [], file: { name: `${code}-v1.pdf`, bytes: 1024, uploadedOn: TODAY_IN_JAKARTA } });
+      const [row] = await pitchRows();
+      expect(row).toMatchObject({ kpmId: KPM_A, slot: code, version: 1 });
+      expect(row.storageKey).toMatch(new RegExp(`^dev/${KPM_A}/recruitment-pitch/`));
+      // Opened by every member of the office, through a link signed for 300 seconds.
+      for (const role of ROLES) {
+        expect(await wired.recruitmentPitch.url(member(KPM_A, role), code)).toEqual({
+          url: `https://cdn.test/${row.storageKey as string}?sig=abc`,
+          expiresAt: new Date(NOW.getTime() + 300_000).toISOString(),
+        });
+      }
+      // Replaced: the version moves, the old file is released and never deleted, one audit row names the slot.
+      const replaced = await attachTo(KPM_A, code, `${code}-v2.pdf`);
+      expect(replaced).toMatchObject({ state: 'uploaded', version: 2, file: { name: `${code}-v2.pdf` } });
+      expect((await asset(row.storageKey as string))!).toMatchObject({ refCount: 0, deletedAt: null });
+      const entry = await db().collection('auditLog').findOne({ action: 'recruitment_pitch.attached', 'after.fileName': `${code}-v2.pdf` });
+      expect(entry!.after).toMatchObject({ slot: code, version: 2, clearedItems: [] });
+      expect(entry!.before).toMatchObject({ storageKey: row.storageKey, version: 1, confirmed: [] });
+    });
+
+    it.each(OPTIONAL)('P18.97-T5 AC-2 %s has no checklist: a tick on it is 400, nothing written', async (code) => {
+      await attachTo(KPM_A, code, `${code}.pdf`);
+      expect(await refusalOf(tick(KPM_A, code, 'career-path', true, 1))).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+      expect((await pitchRows())[0].confirmations).toEqual([]);
+    });
+
+    it('P18.97-T5 AC-3 uploading and replacing an optional document moves nothing on the banner, at 0 of 4 or at 4 of 4', async () => {
+      const before = (await read(KPM_A)).summary;
+      expect(before).toEqual({ done: 0, total: 4, missing: 4, unconfirmed: 0 });
+      for (const code of OPTIONAL) {
+        await attachTo(KPM_A, code, `${code}.pdf`);
+        expect([code, (await read(KPM_A)).summary]).toEqual([code, before]);
+      }
+      await attachTo(KPM_A, 'company', 'company-v2.pdf');
+      expect((await read(KPM_A)).summary).toEqual(before);
+
+      // An office with its four done is complete with neither optional document, and still with both.
+      await fourDone(KPM_B);
+      expect((await read(KPM_B)).summary).toEqual({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
+      for (const code of OPTIONAL) await attachTo(KPM_B, code, `${code}.pdf`);
+      expect((await read(KPM_B)).summary).toEqual({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
+    });
+
+    it('P18.97-T5 AC-2 another office’s optional document is 404 — its link and an attach naming its file — with nothing written', async () => {
+      // 0555 holds both; 0417 holds neither.
+      for (const code of OPTIONAL) await attachTo(KPM_B, code, `Kelapa Gading ${code}.pdf`);
+      const theirs = Object.fromEntries((await pitchRows()).map((r) => [r.slot, r.storageKey as string]));
+      const before = await everything();
+      for (const code of OPTIONAL) {
+        for (const role of ROLES) {
+          expect([code, role, await refusalOf(wired.recruitmentPitch.url(member(KPM_A, role), code))])
+            .toEqual([code, role, { status: 404, code: 'NOT_FOUND' }]);
+        }
+        expect([code, await refusalOf(wired.recruitmentPitch.attach(owner(KPM_A), code, theirs[code]))])
+          .toEqual([code, { status: 404, code: 'NOT_FOUND' }]);
+        // 0555's own members open their own.
+        expect((await wired.recruitmentPitch.url(member(KPM_B), code)).url).toContain(theirs[code]);
+      }
+      expect(await everything()).toEqual(before);
+      expect((await read(KPM_A)).slots.filter((s) => !s.required).map((s) => [s.slot, s.state]))
+        .toEqual([['company', 'missing'], ['agency', 'missing']]);
+    });
+
+    it('P18.97-T5 AC-2 a Super Admin outside a support session is refused the optional slots as every other', async () => {
+      const root = RequestContext.platform('root');
+      for (const code of OPTIONAL) {
+        for (const work of [
+          wired.recruitmentPitch.url(root, code),
+          wired.recruitmentPitch.attach(root, code, 'dev/x/recruitment-pitch/1'),
+        ]) {
+          expect([code, await refusalOf(work)]).toEqual([code, { status: 403, code: 'TENANT_NO_MEMBERSHIP' }]);
+        }
+      }
     });
   });
 });

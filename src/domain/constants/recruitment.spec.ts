@@ -1,7 +1,7 @@
 import {
   ASSET_LIMITS, DOCUMENT_MIME_TYPES, RECRUITMENT, RECRUITMENT_CANDIDATE_TYPES, RECRUITMENT_HESITATIONS,
   RECRUITMENT_MOTIVATIONS, RECRUITMENT_PITCH_SLOTS, RECRUITMENT_PITCH_STATES, SEED_RECRUITMENT_PLAYBOOK,
-  recruitmentPitchDone, recruitmentPitchState,
+  recruitmentPitchDone, recruitmentPitchState, recruitmentPitchSummary, type RecruitmentPitchState,
 } from '@/domain/constants';
 import { CLIENT_CHIP_WORDS, PROTOTYPE, prototypeChips, shippedChips } from '../../../test/recruitment-prototype';
 
@@ -134,20 +134,43 @@ describe('the recruitment constants (Phase 17)', () => {
     });
   });
 
-  describe('the office’s four pitch slots (D-slots, `:626-661`)', () => {
-    it('P17-T4 AC-1 the four slots, their titles and lines, in the order drawn', () => {
-      expect(RECRUITMENT_PITCH_SLOTS.map(({ code, title, line }) => ({ code, title, line })))
+  describe('the office’s pitch slots (D-slots, `:626-661`; ADR-0177)', () => {
+    /** The four the prototype draws: required, and first. */
+    const FOUR = RECRUITMENT_PITCH_SLOTS.slice(0, 4);
+
+    it('P17-T4 AC-1 the four slots, their titles and lines, in the order drawn — the prototype’s, each required', () => {
+      expect(FOUR.map(({ code, title, line }) => ({ code, title, line })))
         .toEqual(PROTOTYPE.SLOTS.map((s) => ({ code: s.id, title: s.title, line: s.desc })));
-      expect(RECRUITMENT_PITCH_SLOTS.map((s) => s.code)).toEqual(['opportunity', 'proof', 'faq', 'howtojoin']);
+      expect(FOUR.map((s) => s.code)).toEqual(['opportunity', 'proof', 'faq', 'howtojoin']);
+      expect(FOUR.map((s) => s.required)).toEqual([true, true, true, true]);
+      // The prototype draws four and no more: every slot after them is ours, and optional.
+      expect(PROTOTYPE.SLOTS).toHaveLength(4);
     });
 
     it('P17-T4 AC-1 the checklist is Opportunity Overview’s alone: its four items by the prototype’s ids and labels', () => {
-      for (const slot of RECRUITMENT_PITCH_SLOTS) {
+      for (const slot of FOUR) {
         const theirs = PROTOTYPE.SLOTS.find((s) => s.id === slot.code)!.checklist ?? [];
         expect([slot.code, slot.checklist.map((i) => ({ ...i }))])
           .toEqual([slot.code, theirs.map((i) => ({ code: i.id, label: i.label }))]);
       }
       expect(RECRUITMENT_PITCH_SLOTS[0].checklist.map((i) => i.code)).toEqual(['career-path', 'income', 'support', 'commitment']);
+      expect(RECRUITMENT_PITCH_SLOTS.filter((s) => s.checklist.length > 0).map((s) => s.code)).toEqual(['opportunity']);
+    });
+
+    it('P18.97-T5 AC-2 six slots: after the four, Company Profile and Agency Profile — optional, with no checklist (UI-042)', () => {
+      expect(RECRUITMENT_PITCH_SLOTS.map((s) => s.code)).toEqual(['opportunity', 'proof', 'faq', 'howtojoin', 'company', 'agency']);
+      expect(RECRUITMENT_PITCH_SLOTS.slice(4).map(({ code, title, required, checklist }) => ({ code, title, required, checklist: [...checklist] })))
+        .toEqual([
+          { code: 'company', title: 'Company Profile', required: false, checklist: [] },
+          { code: 'agency', title: 'Agency Profile', required: false, checklist: [] },
+        ]);
+      // Each carries a line, served as the four's are and drawn on no card; none names one of OD-39's six words.
+      for (const slot of RECRUITMENT_PITCH_SLOTS.slice(4)) {
+        expect(slot.line.length).toBeGreaterThan(0);
+        expect(slot.line).not.toMatch(/\boffice\b|\bKPM\b|reports to|tagged to|untagged|unassigned/i);
+      }
+      // Four required, so the ring reads x/4.
+      expect(RECRUITMENT_PITCH_SLOTS.filter((s) => s.required)).toHaveLength(4);
     });
 
     it('P17-T4 AC-1 the states, and the completion rule stated once (`slotStatus`, `:681-691`)', () => {
@@ -166,6 +189,38 @@ describe('the recruitment constants (Phase 17)', () => {
 
     it('P17-T4 AC-1 a slot is done for the banner when complete or uploaded (`:797-799`)', () => {
       expect(RECRUITMENT_PITCH_STATES.filter(recruitmentPitchDone)).toEqual(['complete', 'uploaded']);
+    });
+
+    describe('P18.97-T5 AC-3 — the banner counts the four required alone (ADR-0177 §3)', () => {
+      /** The six slots in a state each, by code. */
+      const six = (states: Partial<Record<string, RecruitmentPitchState>>) =>
+        RECRUITMENT_PITCH_SLOTS.map((s) => ({ required: s.required, state: states[s.code] ?? 'missing' }));
+
+      it('P18.97-T5 AC-3 nothing uploaded: 0 of 4, four missing — the two optional ones are not counted missing', () => {
+        expect(recruitmentPitchSummary(six({}))).toEqual({ done: 0, total: 4, missing: 4, unconfirmed: 0 });
+      });
+
+      it('P18.97-T5 AC-3 0417’s pitch: 1 of 4, two missing, one needs checking — whatever the optional ones hold', () => {
+        const required = { opportunity: 'partial', proof: 'uploaded' } as const;
+        const expected = { done: 1, total: 4, missing: 2, unconfirmed: 1 };
+        for (const optional of [{}, { company: 'uploaded' }, { agency: 'uploaded' }, { company: 'uploaded', agency: 'uploaded' }] as const) {
+          expect([optional, recruitmentPitchSummary(six({ ...required, ...optional }))]).toEqual([optional, expected]);
+        }
+      });
+
+      it('P18.97-T5 AC-3 the four done reads complete, with neither optional document or with both', () => {
+        const four = { opportunity: 'complete', proof: 'uploaded', faq: 'uploaded', howtojoin: 'uploaded' } as const;
+        expect(recruitmentPitchSummary(six(four))).toEqual({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
+        expect(recruitmentPitchSummary(six({ ...four, company: 'uploaded', agency: 'uploaded' })))
+          .toEqual({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
+      });
+
+      it('P18.97-T5 AC-3 an optional slot counts in no figure, in any state the rule could give it', () => {
+        for (const state of RECRUITMENT_PITCH_STATES) {
+          expect([state, recruitmentPitchSummary([{ required: false, state }])])
+            .toEqual([state, { done: 0, total: 0, missing: 0, unconfirmed: 0 }]);
+        }
+      });
     });
   });
 
