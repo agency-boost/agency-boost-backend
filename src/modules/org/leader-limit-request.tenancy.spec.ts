@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
-import { readerIn } from '@/common/i18n/reader';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
@@ -33,7 +33,8 @@ import { RoleChangeService } from './role-change.service';
 const KPM_A = new mongoose.Types.ObjectId().toString();
 const KPM_B = new mongoose.Types.ObjectId().toString();
 const NOW = new Date('2026-10-26T03:00:00Z');
-const SA = RequestContext.platform('sa-1');
+/** Contexts read the API's English (`SOURCE_READER`), as asserted below: nobody's choice is Indonesian (P18.98-T4). */
+const SA = RequestContext.platform('sa-1').withReader(SOURCE_READER);
 
 /** The office's own context, for a fixture written on its behalf. */
 const office = (kpmId: string) => RequestContext.superAdminInTenant('sa-1', kpmId);
@@ -154,9 +155,9 @@ describe('P18.8-T2 — a leader past the limit waits for AgencyBoost', () => {
       status: row!.status as 'active', isKpmOwner: over.owner ?? false, isKpmAdmin: over.admin ?? false,
       directCount: row!.directCounts?.total ?? 0,
     };
-    return over.readOnly
+    return (over.readOnly
       ? new RequestContext(row!.userId, 'none', membership, 'sa-1', null, false, true)
-      : new RequestContext(row!.userId, 'none', membership);
+      : new RequestContext(row!.userId, 'none', membership)).withReader(SOURCE_READER);
   }
   const asOwner = () => as(KPM_A, owner, { owner: true });
   const used = (kpmId: string) => countLeadersUsed(members, office(kpmId));

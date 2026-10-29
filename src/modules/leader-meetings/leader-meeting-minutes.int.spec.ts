@@ -9,8 +9,9 @@ import { configModule } from '../../../test/config-module';
 import { session } from '../../../test/http-permissions';
 import { ROSTER_NOW, type Who } from '../../../test/coaching-office';
 import { buildForumOffice, forumApp, KPM_B, type ForumOffice } from '../../../test/forum-office';
-import { IN_INDONESIAN } from '../../../test/i18n';
+import { IN_INDONESIAN, indonesian, indonesianAll } from '../../../test/i18n';
 import { LeaderMeetingSchema } from './leader-meeting.schema';
+import { LEADER_MEETINGS_MESSAGES as SAY } from './leader-meetings.messages';
 
 /**
  * **The minutes, written field by field** (P18.1-T2 AC-5 to AC-8, P18.1-T3 AC-5): the agenda, the tracker and the
@@ -50,17 +51,19 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
 
   describe('P18.1-T2 AC-5, ADR-0130 §3 the agenda a new meeting starts from', () => {
     it('P18.1-T2 AC-5, P18.97-T2 AC-4 an office’s first: the prototype’s ten, PICs empty, the meeting’s own month; no rows, nothing written', async () => {
+      // Made by a context with no reader: nobody's choice, so the stored words are Bahasa Indonesia since the default
+      // went live (P18.98-T4's exit; P18.98-T5 AC-6) — the catalogue's, in the prototype's order.
       const first = await office.forum.create(office.ownerOfB(), { title: 'Strategic Check-in — #1', date: '2026-10-13' });
       expect(first.number).toBe(1);
       const view = await office.forum.read(office.ownerOfB(), first.id);
-      expect(view.agenda.preparation.map((i) => i.text)).toEqual([
-        'Compile follow-ups & commitments from prior session', 'Prepare October performance data', 'Review scorecard, draft talking points',
-      ]);
-      expect(view.agenda.during.map((i) => i.text)).toEqual([
-        'Process update — review prior follow-ups', 'Performance review vs. key thresholds', 'Strategic priorities (Corporate)',
-        'Strategic priorities (Agency)', 'Summarize next steps & assign owners',
-      ]);
-      expect(view.agenda.post.map((i) => i.text)).toEqual(['Document outcomes into template', 'Note feedback for RBDO/BDO']);
+      expect(view.agenda.preparation.map((i) => i.text)).toEqual(indonesianAll([
+        SAY.compileFollowUps, SAY.preparePerformanceData({ month: 10 }), SAY.reviewScorecard,
+      ]));
+      expect(view.agenda.preparation[1].text).toBe('Siapkan data kinerja Oktober');
+      expect(view.agenda.during.map((i) => i.text)).toEqual(indonesianAll([
+        SAY.processUpdate, SAY.performanceReview, SAY.prioritiesCorporate, SAY.prioritiesAgency, SAY.summarizeNextSteps,
+      ]));
+      expect(view.agenda.post.map((i) => i.text)).toEqual(indonesianAll([SAY.documentOutcomes, SAY.noteFeedback]));
       const all = [...view.agenda.preparation, ...view.agenda.during, ...view.agenda.post];
       expect(all).toHaveLength(10);
       expect(all.every((i) => i.pic === '' && i.done === false && i.version === 1)).toBe(true);
@@ -87,14 +90,16 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
       as('OWNER');
       const december = (await http().post('/leader-meetings').send({ title: 'December', date: '2026-12-29' }).expect(201)).body;
       const decemberAgenda = (await read(december.id)).agenda;
-      expect(decemberAgenda.preparation[1].text).toBe('Prepare December performance data');
+      // The agenda it copies was first made with no reader, so it is stored in Bahasa Indonesia (the default is live),
+      // and the month item is re-dated in the language it was written in.
+      expect(decemberAgenda.preparation[1].text).toBe(indonesian(SAY.preparePerformanceData({ month: 12 })));
       // A leader's own wording of another item travels as typed.
       const review = decemberAgenda.preparation[2];
       await http().patch(`/leader-meetings/${december.id}/agenda-items/${review.id}`).send({ text: 'Review the December scorecard', version: review.version }).expect(200);
       const january = (await http().post('/leader-meetings').send({ title: 'January', date: '2027-01-12' }).expect(201)).body;
       const copied = (await read(january.id)).agenda;
       expect(copied.preparation.map((i: { text: string }) => i.text)).toEqual([
-        decemberAgenda.preparation[0].text, 'Prepare January performance data', 'Review the December scorecard',
+        decemberAgenda.preparation[0].text, indonesian(SAY.preparePerformanceData({ month: 1 })), 'Review the December scorecard',
       ]);
       expect(copied.during.map((i: { text: string }) => i.text)).toEqual(decemberAgenda.during.map((i: { text: string }) => i.text));
       await db().collection('leaderMeetings').updateMany(

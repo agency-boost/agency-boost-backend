@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { SOURCE_READER } from '@/common/i18n/reader';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
 import { PasswordService } from '@/modules/auth/password.service';
@@ -144,7 +145,7 @@ describe('the leader limit', () => {
       membershipId, kpmId: row!.kpmId, orgLevelCode: row!.orgLevelCode, hierarchyRole: row!.role,
       status: row!.status as 'active', isKpmOwner: over.owner ?? false, isKpmAdmin: over.admin ?? false,
       directCount: row!.directCounts?.total ?? 0,
-    });
+    }).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
   }
 
   const used = (kpmId: string) => countLeadersUsed(members, office(kpmId));
@@ -299,7 +300,8 @@ describe('the leader limit', () => {
         'Dodi,dodi@kpm.test,9004,aab,9003,1990-01-01,2020-01,full-time,female',
       ].join('\n');
 
-      const asSa = await roster.preview(RequestContext.platform('sa-1'), KPM_A, file);
+      // Read in the API's English, as asserted: nobody's choice is Bahasa Indonesia since P18.98-T4's exit.
+      const asSa = await roster.preview(RequestContext.platform('sa-1').withReader(SOURCE_READER), KPM_A, file);
       expect(asSa.willCreate).toBe(0);
       expect(asSa.issues.map((i) => [i.line, i.column])).toEqual([[4, 'role'], [5, 'role']]);
       expect(asSa.issues[0].message).toMatch(/limit is 2/);

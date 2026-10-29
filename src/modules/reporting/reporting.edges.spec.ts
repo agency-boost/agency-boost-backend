@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { readerIn } from '@/common/i18n/reader';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { officeHeadcount } from '@/domain/metrics/office-headcount';
 import { rateOver } from '@/domain/metrics/rate';
 import { MemberNames } from '@/modules/org/member-names.service';
@@ -50,7 +50,7 @@ describe('the Owner’s reporting at its edges', () => {
     return new RequestContext(String(userId), 'none', {
       membershipId: String(id), kpmId, orgLevelCode: String(over.orgLevelCode ?? 'AB'), hierarchyRole: 'ab', status: 'active',
       isKpmOwner: true, isKpmAdmin: false, directCount: 0,
-    } as never);
+    } as never).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
   };
 
   beforeAll(async () => {

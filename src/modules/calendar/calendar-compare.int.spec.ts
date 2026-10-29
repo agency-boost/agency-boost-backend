@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn } from '@/common/i18n/reader';
 import { SUBJECT_READ_ACTION } from '@/modules/audit/subject-read-audit';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { type Who } from '../../../test/coaching-office';
@@ -288,7 +289,7 @@ describe('compare and Block time (P12-T5)', () => {
       expect(rows[0].delivery).toMatchObject({ in_app: { status: 'sent' }, email: { status: 'sent' } });
       expect(h.email!.sent.filter((s) => s.to.templateId === NotificationTemplate.CALENDAR_BLOCK_PLACED)).toHaveLength(1);
       expect(await inbox('AGUS')).toEqual([]);
-      const indah = new RequestContext(await userOf('INDAH'), 'none', h.office.as('INDAH').membership);
+      const indah = new RequestContext(await userOf('INDAH'), 'none', h.office.as('INDAH').membership).withReader(readerIn('en'));
       expect((await h.notifications!.inbox(indah)).items[0]).toMatchObject({
         title: 'Time was blocked on your calendar', detail: 'A leader above you placed it. Open it to see when.',
         href: `/calendar?entry=${placed.entryId}&date=2026-09-16`,

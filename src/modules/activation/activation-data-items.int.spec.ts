@@ -320,7 +320,8 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
         code: 'VALIDATION_FAILED',
         details: { violations: [
           'record.name is who the case was sold to, and is required for a new closing.',
-          'record.date, the day it was paid and issued, is a day from the join date, 1 Agu 2026, to today, 14 Sep 2026.',
+          // The English reader's figures (`test/setup.ts`), as the default is live.
+          'record.date, the day it was paid and issued, is a day from the join date, 1 Aug 2026, to today, 14 Sep 2026.',
         ] },
       });
       const indonesian = (await h.http().put(`/new-hires/${id('BUDI')}/items/FIRST_CASE_CLOSED`).set('Accept-Language', 'id')

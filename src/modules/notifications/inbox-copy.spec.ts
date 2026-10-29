@@ -1,6 +1,14 @@
-import { readerIn } from '@/common/i18n/reader';
-import { describeNotification, IN_APP_TEMPLATES, inboxAddress, JOIN_REQUEST_INBOX } from './inbox-copy';
+import { readerIn, SOURCE_READER, type Reader } from '@/common/i18n/reader';
+import { describeNotification as composeNotice, IN_APP_TEMPLATES, inboxAddress, JOIN_REQUEST_INBOX } from './inbox-copy';
 import { NotificationTemplate, TEMPLATE_CHANNELS } from './notification.types';
+
+/**
+ * **The notices' English, as the API wrote it** (`SOURCE_READER`: English words, Indonesian figures) unless a test names
+ * another reader. A reader who has chosen nothing reads Bahasa Indonesia since the default went live (P18.98-T4's exit),
+ * so the copy pinned below names its reader rather than leaning on the default; nobody's choice is pinned at the end.
+ */
+const describeNotification = (templateId: string, payload: Record<string, unknown>, reader: Reader = SOURCE_READER) =>
+  composeNotice(templateId, payload, reader);
 
 /**
  * What a notification says.
@@ -457,17 +465,15 @@ describe('P18.98-T5 AC-4 the inbox in the reader’s language', () => {
     });
   });
 
-  it('AC-4 writes an event’s time in the reader’s figures: Indonesian, English for an English reader, as the product wrote it for nobody’s choice', () => {
+  it('AC-4 writes an event’s time in the reader’s figures: Indonesian, English for an English reader, and Indonesian for nobody’s choice', () => {
     const kickoff = { title: 'Kickoff 2026', startsAt: '2026-11-09T02:00:00.000Z', timezone: 'Asia/Jakarta', location: 'Kantor KPM' };
     expect(say(NotificationTemplate.EVENT_REMINDER, kickoff)).toEqual({
       title: 'Kickoff 2026 akan segera berlangsung', detail: '9 Nov 2026, 09.00 · Kantor KPM',
     });
     expect(describeNotification(NotificationTemplate.EVENT_REMINDER, kickoff, readerIn('en')).detail)
       .toBe('9 Nov 2026, 09:00 · Kantor KPM');
-    // A reader who has chosen nothing, until the default is live: English words, the figures as before.
-    expect(describeNotification(NotificationTemplate.EVENT_REMINDER, kickoff)).toEqual({
-      title: 'Kickoff 2026 is coming up', detail: '9 Nov 2026, 09.00 · Kantor KPM',
-    });
+    // A reader who has chosen nothing reads Bahasa Indonesia, words and figures, as the default is live.
+    expect(composeNotice(NotificationTemplate.EVENT_REMINDER, kickoff)).toEqual(say(NotificationTemplate.EVENT_REMINDER, kickoff));
     expect(say(NotificationTemplate.EVENT_REMINDER, { title: 'Leader Forum' }).detail).toBe('Periksa waktu dan tempatnya.');
   });
 

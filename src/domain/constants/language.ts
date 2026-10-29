@@ -46,23 +46,28 @@ export const SOURCE_LANGUAGE: Language = 'en';
 
 /**
  * **Whether the Indonesian default is live** — the backend's half of the frontend's `LANGUAGE_LIVE`
- * (`frontend/src/i18n/language.ts`; ADR-0179's dated note of 2026-10-29). **`false` until P18.98-T4's exit**, and the
- * two flip together: `language.spec.ts` reads the frontend's and fails when they differ.
+ * (`frontend/src/i18n/language.ts`; ADR-0179's dated notes of 2026-10-29). **`true` since P18.98-T4's exit
+ * (2026-10-29)**, flipped with the frontend's: `language.spec.ts` reads the frontend's and fails when they differ.
  *
- * **While `false`** a reader who has chosen nothing — no `Accept-Language`, no saved `users.locale` — reads **English**,
- * the product as it was, and an email to a person with no saved language is English too: nothing anybody reads turns
- * Indonesian before the screens do. **A choice is honoured all the same** — `Accept-Language: id`, a saved `'id'` —
- * which is how P18.98-T4 to T6 read their translations on staging. And **a figure inside a sentence stays Indonesian**
- * for a reader who has not chosen, as the product wrote figures before the phase (`readerOf`, `common/i18n/reader.ts`).
+ * **Live**, a reader who has chosen nothing — no `Accept-Language`, no saved `users.locale` — reads **Bahasa
+ * Indonesia**, words and figures, and so does everything written for nobody's choice: a service called with no reader,
+ * an inbox notice or an email for a person with no saved language, the seed's stored words, a forum's first agenda made
+ * with no writer's language (OD-238: the demo follows Indonesian). **A choice is honoured** — `Accept-Language: en`, a
+ * saved `'en'` — and an English reader's figures are English too (`readerOf`, `common/i18n/reader.ts`).
  *
- * Flipping it is the release: from then a reader who has chosen nothing reads Bahasa Indonesia, figures and all.
+ * **Before it went live** (`false`, P18.98-T4 to T6) a reader who had chosen nothing read English words with
+ * Indonesian figures, the product as it was, so nothing turned Indonesian before the screens did; `unchosenLanguage`
+ * and `readerOf({ live: false })` still answer that state, and their specs pin it.
  */
-export const LANGUAGE_LIVE: boolean = false;
+export const LANGUAGE_LIVE: boolean = true;
 
-/** **What a reader who has chosen nothing reads**: Bahasa Indonesia once the default is live, English until then. */
+/**
+ * **What a reader who has chosen nothing reads**: Bahasa Indonesia when the default is live — as it is since
+ * P18.98-T4's exit — and English when it is not.
+ */
 export function unchosenLanguage(live: boolean): Language {
   return live ? DEFAULT_LANGUAGE : SOURCE_LANGUAGE;
 }
 
-/** What a reader who has chosen no language reads today: `unchosenLanguage(LANGUAGE_LIVE)`. */
+/** What a reader who has chosen no language reads today: `unchosenLanguage(LANGUAGE_LIVE)` — `'id'`, live since 2026-10-29. */
 export const LANGUAGE_UNCHOSEN: Language = unchosenLanguage(LANGUAGE_LIVE);

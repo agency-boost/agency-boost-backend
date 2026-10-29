@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
-import { readerIn } from '@/common/i18n/reader';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { Clock } from '@/common/clock/clock.port';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
@@ -49,6 +49,10 @@ class MovableClock extends Clock {
 const KPM_A = new mongoose.Types.ObjectId().toString();
 const KPM_B = new mongoose.Types.ObjectId().toString();
 
+/**
+ * An actor reading the API's English (`SOURCE_READER`) — the words asserted below — since a reader who has chosen
+ * nothing reads Bahasa Indonesia from P18.98-T4's exit.
+ */
 function ctx(kpmId: string, over: Partial<{ membershipId: string; isKpmOwner: boolean }> = {}) {
   return new RequestContext('u-actor', 'none', {
     membershipId: over.membershipId ?? 'mem-actor',
@@ -58,7 +62,7 @@ function ctx(kpmId: string, over: Partial<{ membershipId: string; isKpmOwner: bo
     isKpmOwner: over.isKpmOwner ?? true,
     isKpmAdmin: false,
     directCount: 0,
-  });
+  }).withReader(SOURCE_READER);
 }
 
 describe('organisation', () => {
@@ -1196,7 +1200,7 @@ describe('organisation', () => {
         await onboarding.requestLeader(joinerCtx, ab);
         const [notice] = sent;
         expect(notice.payload).toMatchObject({ askerName: 'Joining Person' });
-        expect(describeNotification(notice.templateId, notice.payload ?? {}).title).toBe('Joining Person asked to join your unit');
+        expect(describeNotification(notice.templateId, notice.payload ?? {}, SOURCE_READER).title).toBe('Joining Person asked to join your unit');
         expect(inboxAddress(notice.templateId, notice.payload ?? {})).toBe('/new-hires?review=requests');
       });
 
@@ -1388,7 +1392,7 @@ describe('organisation', () => {
         templateId: 'member.tagged_by_leader',
       });
       // P18.96-T1 AC-3: the leader reads who joined, not the member's "A leader added you to their unit".
-      expect(describeNotification(sent[0].templateId, sent[0].payload ?? {}).title)
+      expect(describeNotification(sent[0].templateId, sent[0].payload ?? {}, SOURCE_READER).title)
         .toBe('Rina Wijaya joined your unit with your leader code');
     });
 
@@ -1522,9 +1526,11 @@ describe('organisation', () => {
         expect(await leaderCodes.preview(leaderCode, readerIn('id'))).toMatchObject({
           kpmLabel: 'Tidak diketahui — KPM 0417 · Branch 0417', leaderName: 'seorang leader',
         });
-        expect(await leaderCodes.preview(leaderCode)).toMatchObject({
+        expect(await leaderCodes.preview(leaderCode, readerIn('en'))).toMatchObject({
           kpmLabel: 'Unknown — KPM 0417 · Branch 0417', leaderName: 'a leader',
         });
+        // Nobody's choice — no reader handed in — is Bahasa Indonesia, as the default is live.
+        expect(await leaderCodes.preview(leaderCode)).toEqual(await leaderCodes.preview(leaderCode, readerIn('id')));
       });
     });
   });
@@ -1545,7 +1551,7 @@ describe('organisation', () => {
         isKpmOwner: false,
         isKpmAdmin: false,
         directCount: row!.directCounts?.total ?? 0,
-      });
+      }).withReader(SOURCE_READER);
     }
 
     /** Somebody registered to the office who has asked `leaderId` to take them on. */
@@ -1769,7 +1775,7 @@ describe('organisation', () => {
       hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
           status: 'active', isKpmOwner: true, isKpmAdmin: false,
           directCount: row!.directCounts?.total ?? 0,
-        });
+        }).withReader(SOURCE_READER);
       }
 
       it('shows an Owner every open request, not only their own', async () => {
@@ -1975,7 +1981,7 @@ describe('organisation', () => {
         isKpmOwner: over.isKpmOwner ?? false,
         isKpmAdmin: over.isKpmAdmin ?? false,
         directCount: row!.directCounts?.total ?? 0,
-      });
+      }).withReader(SOURCE_READER);
     }
 
     let root: string;
@@ -2208,7 +2214,7 @@ describe('organisation', () => {
         isKpmOwner: true,
         isKpmAdmin: false,
         directCount: row!.directCounts?.total ?? 0,
-      });
+      }).withReader(SOURCE_READER);
     }
 
     let root: string;
@@ -2730,7 +2736,7 @@ describe('organisation', () => {
         isKpmOwner: over.isKpmOwner ?? false,
         isKpmAdmin: over.isKpmAdmin ?? false,
         directCount: row!.directCounts?.total ?? 0,
-      });
+      }).withReader(SOURCE_READER);
     }
 
     let root: string;
@@ -3083,7 +3089,7 @@ describe('organisation', () => {
         isKpmOwner: over.isKpmOwner ?? false,
         isKpmAdmin: over.isKpmAdmin ?? false,
         directCount: row!.directCounts?.total ?? 0,
-      });
+      }).withReader(SOURCE_READER);
     }
 
     const CONFIRM = { confirmation: 'REMOVE' };
@@ -3500,7 +3506,7 @@ describe('organisation', () => {
         isKpmOwner: over.isKpmOwner ?? false,
         isKpmAdmin: over.isKpmAdmin ?? false,
         directCount: row!.directCounts?.total ?? 0,
-      });
+      }).withReader(SOURCE_READER);
     }
 
     let ab: string;
@@ -3712,7 +3718,7 @@ describe('organisation', () => {
           return new RequestContext(row!.userId, 'none', {
             membershipId: theirAb, kpmId: KPM_B, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
             isKpmOwner: false, isKpmAdmin: false, directCount: 1,
-          });
+          }).withReader(SOURCE_READER);
         })(), theirAgent, 'aab');
 
         expect(await roles.log(abCtx)).toEqual([]);
@@ -4083,7 +4089,7 @@ describe('organisation', () => {
         isKpmOwner: true,
         isKpmAdmin: false,
         directCount: 0,
-      });
+      }).withReader(SOURCE_READER);
 
     async function orphanUser(membershipId: string) {
       const row = await members.findById(ctx(KPM_A), membershipId);

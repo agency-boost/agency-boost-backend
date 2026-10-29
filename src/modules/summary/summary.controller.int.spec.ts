@@ -138,8 +138,9 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
 
   /*
    * **The period's refusals in the reader's language, each month in the reader's figures** (P18.98-T5 AC-1, AC-7):
-   * *Okt 2026* in Indonesian; in English *Okt 2026* still for a reader who has chosen nothing — the API's figures as
-   * they were — and *Oct 2026* for one who saved English. A year is a name, the same in both.
+   * *Okt 2026* in Indonesian — for a reader who has chosen nothing too, since the default went live (P18.98-T4's
+   * exit) — and *Oct 2026* for an English reader, whether the screen says so or the saved choice does. A year is a name,
+   * the same in both.
    */
   describe('P18.98-T5 AC-7 the period in Indonesian', () => {
     const summary = () => request(app.getHttpServer()).get('/summary');
@@ -158,12 +159,17 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
       expect(year.body.error.message).toBe('2027 belum dimulai: tahun terakhir yang ada adalah 2026.');
     });
 
-    it('P18.98-T5 AC-1 writes the months in the reader’s figures: Indonesian until they choose, English once they have', async () => {
-      const unchosen = await summary().query({ month: '2026-10' }).expect(400);
-      expect(unchosen.body.error.message).toBe('Okt 2026 has not begun yet: the latest month is Sep 2026.');
+    it('P18.98-T5 AC-1 writes the months in the reader’s figures: Indonesian for nobody’s choice, English for an English reader', async () => {
+      // No header and nothing saved: nobody's choice, Bahasa Indonesia, words and figures (the default is live).
+      const unchosen = await summary().set('Accept-Language', '').query({ month: '2026-10' }).expect(400);
+      expect(unchosen.body.error.message).toBe('Okt 2026 belum dimulai: bulan terakhir yang ada adalah Sep 2026.');
+
+      // An English screen's header: English words, and English figures with them.
+      const english = await summary().query({ month: '2026-10' }).expect(400);
+      expect(english.body.error.message).toBe('Oct 2026 has not begun yet: the latest month is Sep 2026.');
 
       savedLanguage.current = 'en';
-      const chosen = await summary().query({ month: '2026-10' }).expect(400);
+      const chosen = await summary().set('Accept-Language', '').query({ month: '2026-10' }).expect(400);
       expect(chosen.body.error.message).toBe('Oct 2026 has not begun yet: the latest month is Sep 2026.');
     });
 

@@ -4,8 +4,8 @@ import {
 
 /**
  * **P18.98-T5 AC-1 — the request's language** (ADR-0179 §7): the `Accept-Language` the app sends, else the signed-in
- * person's `users.locale`, else a reader who has chosen nothing — English until the Indonesian default is live
- * (`LANGUAGE_LIVE`), Bahasa Indonesia from then. **A figure's language** is the chosen language, else Indonesian; once
+ * person's `users.locale`, else a reader who has chosen nothing — Bahasa Indonesia, since the default went live
+ * (`LANGUAGE_LIVE`, P18.98-T4's exit); English while it was not, which `live: false` still reads. **A figure's language** is the chosen language, else Indonesian; once
  * live, the request's.
  */
 describe('P18.98-T5 AC-1 the request’s language', () => {
@@ -21,7 +21,7 @@ describe('P18.98-T5 AC-1 the request’s language', () => {
       expect(readerOf({ stored: 'en', live }).language).toBe('en');
     });
 
-    it('AC-1 a reader who has chosen nothing reads English until the default is live', () => {
+    it('AC-1 a reader who has chosen nothing read English while the default was not live (live false)', () => {
       expect(readerOf({ live: false })).toEqual({ language: 'en', figures: 'id' });
       expect(readerOf({ header: null, stored: null, live: false }).language).toBe('en');
     });
@@ -30,19 +30,19 @@ describe('P18.98-T5 AC-1 the request’s language', () => {
       expect(readerOf({ live: true })).toEqual({ language: 'id', figures: 'id' });
     });
 
-    it('AC-1 reads LANGUAGE_LIVE when nobody says: today, not live — English', () => {
-      expect(readerOf()).toEqual({ language: 'en', figures: 'id' });
+    it('AC-1 reads LANGUAGE_LIVE when nobody says: today, live — Bahasa Indonesia, words and figures', () => {
+      expect(readerOf()).toEqual({ language: 'id', figures: 'id' });
     });
   });
 
   describe('the figures’ language', () => {
-    it('AC-1 until live, a reader with nothing saved reads figures in Indonesian — as the product wrote them', () => {
+    it('AC-1 not live, a reader with nothing saved read figures in Indonesian — as the product wrote them', () => {
       // The app's own `en` for a reader with no choice cannot be told from a choice, so it reads as the screens do.
       expect(readerOf({ header: 'en', live: false })).toEqual({ language: 'en', figures: 'id' });
       expect(readerOf({ header: 'id', live: false })).toEqual({ language: 'id', figures: 'id' });
     });
 
-    it('AC-1 until live, a saved choice is the figures’ language too: it is a choice', () => {
+    it('AC-1 not live, a saved choice was the figures’ language too: it is a choice', () => {
       expect(readerOf({ stored: 'en', live: false })).toEqual({ language: 'en', figures: 'en' });
       expect(readerOf({ header: 'en', stored: 'en', live: false })).toEqual({ language: 'en', figures: 'en' });
       expect(readerOf({ header: 'id', stored: 'en', live: false })).toEqual({ language: 'id', figures: 'id' });
@@ -80,10 +80,10 @@ describe('P18.98-T5 AC-1 the request’s language', () => {
       expect(recipientReader(null, readerOf({ header: 'id', live: false }), false)).toEqual({ language: 'id', figures: 'id' });
     });
 
-    it('AC-5 else nobody’s choice: English until live, Indonesian from then', () => {
+    it('AC-5 else nobody’s choice: Indonesian, as it is live; English only while it was not', () => {
       expect(recipientReader(null, undefined, false)).toEqual({ language: 'en', figures: 'id' });
       expect(recipientReader(null, null, true)).toEqual({ language: 'id', figures: 'id' });
-      expect(recipientReader(null)).toEqual({ language: 'en', figures: 'id' });
+      expect(recipientReader(null)).toEqual({ language: 'id', figures: 'id' });
     });
   });
 
@@ -101,9 +101,10 @@ describe('P18.98-T5 AC-1 the request’s language', () => {
 
     it('AC-1 is the header’s for a request no guard saw, and nobody’s without one', () => {
       expect(readerOfRequest({ headers: { 'accept-language': 'id' } })).toEqual({ language: 'id', figures: 'id' });
-      expect(readerOfRequest({ headers: {} })).toEqual({ language: 'en', figures: 'id' });
-      expect(readerOfRequest({})).toEqual({ language: 'en', figures: 'id' });
-      expect(readerOfRequest(undefined)).toEqual({ language: 'en', figures: 'id' });
+      expect(readerOfRequest({ headers: { 'accept-language': 'en' } })).toEqual({ language: 'en', figures: 'en' });
+      expect(readerOfRequest({ headers: {} })).toEqual({ language: 'id', figures: 'id' });
+      expect(readerOfRequest({})).toEqual({ language: 'id', figures: 'id' });
+      expect(readerOfRequest(undefined)).toEqual({ language: 'id', figures: 'id' });
     });
   });
 });

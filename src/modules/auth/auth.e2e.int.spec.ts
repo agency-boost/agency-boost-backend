@@ -1614,11 +1614,11 @@ describe('auth and admin over HTTP', () => {
       expect(browser.body.error.message).toBe('locale harus id atau en');
     });
 
-    it('AC-1 reads nobody’s choice as English until the default is live, with no header and nothing saved', async () => {
+    it('AC-1 reads nobody’s choice as Bahasa Indonesia, the default being live, with no header and nothing saved', async () => {
       const user = await makeUser(`id-none-${Math.random()}@kpm.test`);
       const refused = await api().patch('/api/v1/auth/me').set('Accept-Language', '')
         .set({ Authorization: `Bearer ${user.accessToken}` }).send({ locale: 'fr' }).expect(400);
-      expect(refused.body.error.message).toBe('locale must be id or en');
+      expect(refused.body.error.message).toBe('locale harus id atau en');
     });
 
     it('AC-5 writes the verification email in the language of the page that asked for it', async () => {

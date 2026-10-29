@@ -8,7 +8,8 @@ import { LEADER_MEETINGS_MESSAGES as SAY, MONTH_NAMES } from './leader-meetings.
  * **The words a new meeting is given are its maker's** (P18.98-T5 AC-6; ADR-0179 §7): the first agenda, and the rows
  * *+ Add item* and *+ Add action item* make, are written in the language of the person who makes them — `reader`,
  * the request's — and stored as text. From then they are the office's: copied as stored, edited as typed, and read
- * as stored in both languages (ADR-0179 §5). With no reader they are English, as before the phase.
+ * as stored in both languages (ADR-0179 §5). A call with no reader is English, as before the phase; the service hands
+ * them the request's reader, and one who has chosen nothing reads Indonesian since the default went live (2026-10-29).
  */
 
 /** The month before a meeting's month, in English: *September* for a meeting on 13 October. */

@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import type { DomainException } from '@/common/errors/domain.exception';
-import { readerIn } from '@/common/i18n/reader';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { SEED_ACTIVATION_ITEMS } from '@/domain/constants';
 import type { ActivationService } from './activation.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
@@ -17,7 +17,7 @@ function ctx(kpmId: string, opts: { admin?: boolean } = {}) {
   return new RequestContext('u1', 'none', {
     membershipId: `mem-${kpmId}`, kpmId, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
     isKpmOwner: !opts.admin, isKpmAdmin: Boolean(opts.admin), directCount: 0,
-  });
+  }).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
 }
 
 /**

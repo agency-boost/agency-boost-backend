@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { SOURCE_READER } from '@/common/i18n/reader';
 import { up as mocPersistency } from '@/migrations/0026-moc-persistency';
 import { DirectoryService } from '@/modules/org/directory.service';
 import type { KpmAnalyticsView } from '@/modules/reporting/kpm-analytics.service';
@@ -23,7 +24,7 @@ async function as(code: string, email: string, flags: { owner?: boolean; admin?:
   return new RequestContext(String(member.userId), 'none', {
     membershipId: String(member._id), kpmId: member.kpmId, orgLevelCode: member.orgLevelCode, hierarchyRole: member.role,
     status: 'active', isKpmOwner: flags.owner ?? false, isKpmAdmin: flags.admin ?? false, directCount: 0,
-  } as never);
+  } as never).withReader(SOURCE_READER); // the API's English, as asserted here: nobody's choice reads Indonesian (P18.98-T4)
 }
 
 /**

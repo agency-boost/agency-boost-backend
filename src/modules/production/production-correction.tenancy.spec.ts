@@ -320,6 +320,8 @@ describe('correcting one figure by hand (P9-T5)', () => {
    */
   describe('P18.98-T5 AC-6 — the reason, stored in the words it was written in', () => {
     const IN_ID = ctxFor(KPM_A, A1).withReader(readerIn('id'));
+    /** A leader reading English, named: nobody's choice is Bahasa Indonesia since P18.98-T4's exit. */
+    const IN_EN = A.withReader(readerIn('en'));
     const saveApe = async (
       ctx: RequestContext, row: { apeMonthlyMinor?: number; apeYtdMinor?: number }, reason: Parameters<typeof wired.productionCorrections.correctApe>[1]['reason'],
     ) => wired.productionCorrections.correctApe(ctx, {
@@ -330,7 +332,7 @@ describe('correcting one figure by hand (P9-T5)', () => {
 
     it('writes the API’s own reason in the saving leader’s language, as text, and reads it as stored in either', async () => {
       await saveApe(IN_ID, { apeMonthlyMinor: 200_000_000 }, UNIT_DASHBOARD_MESSAGES.correctionReason);
-      await saveApe(A, { apeYtdMinor: 900_000_000 }, UNIT_DASHBOARD_MESSAGES.correctionReason);
+      await saveApe(IN_EN, { apeYtdMinor: 900_000_000 }, UNIT_DASHBOARD_MESSAGES.correctionReason);
       const row = (await monthRow(A1))!;
       expect([row.apeMonthly.reason, row.apeYtd.reason]).toEqual([
         'Diperbarui di Unit Dashboard dari laporan perusahaan.', 'Updated on the Unit Dashboard from the company report.',
@@ -341,7 +343,7 @@ describe('correcting one figure by hand (P9-T5)', () => {
         'Diperbarui di Unit Dashboard dari laporan perusahaan.', 'Updated on the Unit Dashboard from the company report.',
       ]);
       // Stored as text: an English reader reads the Indonesian a leader saved, and the other way about — never re-written.
-      for (const ctx of [A, IN_ID]) {
+      for (const ctx of [IN_EN, IN_ID]) {
         const cell = await cellOf(ctx);
         expect([cell.monthly.correction!.reason, cell.ytd.correction!.reason]).toEqual([
           'Diperbarui di Unit Dashboard dari laporan perusahaan.', 'Updated on the Unit Dashboard from the company report.',

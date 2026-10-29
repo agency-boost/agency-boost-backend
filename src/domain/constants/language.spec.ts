@@ -51,19 +51,20 @@ describe('P18.98-T2 a stored language, read', () => {
 
 /**
  * **P18.98-T5 AC-1 — the live rule, and the same switch as the frontend's** (ADR-0179's dated note of 2026-10-29). The
- * Indonesian default goes live for the API and the screens together, at P18.98-T4's exit: until then a reader who has
- * chosen nothing reads English, from both halves, and nothing turns Indonesian before the screens do.
+ * Indonesian default went live for the API and the screens together, at P18.98-T4's exit (2026-10-29): a reader who has
+ * chosen nothing reads Bahasa Indonesia, from both halves. Before it a reader who had chosen nothing read English, so
+ * nothing turned Indonesian before the screens did; `unchosenLanguage(false)` still says so.
  */
-describe('P18.98-T5 the Indonesian default, held back with the screens', () => {
-  it('AC-1 is not live yet: one constant, false until P18.98-T4’s exit', () => {
-    expect(LANGUAGE_LIVE).toBe(false);
+describe('P18.98-T5 the Indonesian default, live with the screens', () => {
+  it('AC-1 is live: one constant, true since P18.98-T4’s exit', () => {
+    expect(LANGUAGE_LIVE).toBe(true);
   });
 
-  it('AC-1 a reader who has chosen nothing reads English until it is live, and Bahasa Indonesia once it is', () => {
+  it('AC-1 a reader who has chosen nothing reads Bahasa Indonesia, as it is live; English only while it was not', () => {
     expect(unchosenLanguage(false)).toBe('en');
     expect(unchosenLanguage(true)).toBe(DEFAULT_LANGUAGE);
     expect(LANGUAGE_UNCHOSEN).toBe(unchosenLanguage(LANGUAGE_LIVE));
-    expect(LANGUAGE_UNCHOSEN).toBe('en');
+    expect(LANGUAGE_UNCHOSEN).toBe('id');
   });
 
   it('writes every sentence in English first: the source of each catalogue', () => {

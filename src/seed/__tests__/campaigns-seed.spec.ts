@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { SOURCE_READER } from '@/common/i18n/reader';
 import { isWholeMonths } from '@/domain/metrics/campaign-window';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
@@ -18,7 +19,7 @@ async function as(code: string, email: string): Promise<RequestContext> {
   return new RequestContext(String(member.userId), 'none', {
     membershipId: String(member._id), kpmId: member.kpmId, orgLevelCode: member.orgLevelCode, hierarchyRole: member.role,
     status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
-  } as never);
+  } as never).withReader(SOURCE_READER); // the API's English, as asserted here: nobody's choice reads Indonesian (P18.98-T4)
 }
 
 /**
@@ -112,7 +113,9 @@ describe('Phase 18.5 the campaigns seed — a run at 10:00 on 10 October 2026 in
 
   it('P18.5-T7 AC-7 Agus’s roster: his own ✓, Dimas ✓, Rina ✓ — and one chaser over the MDRT figure', async () => {
     const agus = await as('0417', 'agus@kpm0417.test');
-    const view = await wired.unitDashboard.read(new RequestContext(agus.userId, 'none', { ...agus.membership!, directCount: 3 }));
+    const view = await wired.unitDashboard.read(
+      new RequestContext(agus.userId, 'none', { ...agus.membership!, directCount: 3 }).withReader(agus.reader),
+    );
     const rows = [...view.yourUnit.rows, ...view.units.flatMap(function all(g): typeof view.yourUnit.rows {
       return [g.head, ...g.members, ...g.units.flatMap(all)];
     })];

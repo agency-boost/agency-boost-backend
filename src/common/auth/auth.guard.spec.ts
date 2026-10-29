@@ -155,11 +155,11 @@ describe('AuthGuard', () => {
       expect(request.reader).toEqual({ language: 'id', figures: 'id' });
     });
 
-    it('AC-1 reads nobody’s choice without a header — English until the default is live', async () => {
+    it('AC-1 reads nobody’s choice without a header — Bahasa Indonesia, as the default is live', async () => {
       const signer = { verify: jest.fn() } as unknown as TokenSigner;
       const { context, reflector, request } = execution(undefined, true);
       await new AuthGuard(reflector, signer, resolver, live()).canActivate(context);
-      expect(request.reader).toEqual({ language: 'en', figures: 'id' });
+      expect(request.reader).toEqual({ language: 'id', figures: 'id' });
     });
 
     it('AC-1 writes a refusal before the person is known in the header’s language', async () => {

@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { SOURCE_READER } from '@/common/i18n/reader';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
 import { PasswordService } from '@/modules/auth/password.service';
@@ -212,8 +213,9 @@ describe('OD-50 — placing a member on a custom rung by its code', () => {
     });
 
     it('names a code that is no rung of this company’s ladder, with the ones that are', async () => {
+      // Read by a Super Admin in the API's English: nobody's choice is Bahasa Indonesia since P18.98-T4's exit.
       const preview = await roster.preview(
-        RequestContext.platform('sa-1'), KPM_B, file(`Sinta,sinta@k.test,301,SM,,${PERSONAL}`),
+        RequestContext.platform('sa-1').withReader(SOURCE_READER), KPM_B, file(`Sinta,sinta@k.test,301,SM,,${PERSONAL}`),
       );
       expect(preview.issues).toEqual([{
         line: 2, column: 'role', message: '"SM" is not a rung of this company’s ladder. Use one of: AAB, AB, AGENT.',

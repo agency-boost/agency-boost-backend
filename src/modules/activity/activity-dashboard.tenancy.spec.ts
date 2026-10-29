@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { FixedClock } from '@/common/clock/clock.port';
-import { readerIn } from '@/common/i18n/reader';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
 
@@ -18,7 +18,7 @@ const member = (kpmId: string, over: Record<string, unknown> = {}) => new Reques
     membershipId: `mem-${kpmId}`, kpmId, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
     status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0, ...over,
   } as never,
-);
+).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
 const owner = (kpmId: string) => member(kpmId, { isKpmOwner: true });
 
 /**

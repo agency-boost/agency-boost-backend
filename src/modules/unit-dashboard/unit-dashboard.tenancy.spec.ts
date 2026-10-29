@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
-import { readerIn } from '@/common/i18n/reader';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { UNIT_DASHBOARD_CORRECTION_REASON } from '@/domain/constants';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
@@ -48,7 +48,9 @@ describe('the Unit Dashboard (Phase 15)', () => {
   const reads = () => db().collection('auditLog').countDocuments({ action: 'activity_log.read_raw', 'after.surface': 'unit_dashboard' });
   const state = () => wired.productionMonths.state(office.as('OWNER'), UNIT_MONTH);
   const save = async (who: Who, rows: { membershipId: string; apeMonthlyMinor?: number; apeYtdMinor?: number }[], revision?: number) =>
-    wired.unitDashboard.updateProduction(office.as(who), {
+    // Saved by a leader reading the API's English — the reason is stored in the saver's language, and nobody's choice
+    // is Bahasa Indonesia since P18.98-T4's exit (AC-6 below pins both).
+    wired.unitDashboard.updateProduction(office.as(who).withReader(SOURCE_READER), {
       month: UNIT_MONTH, revision: revision ?? (await state()).revision, rows,
     });
   const cell = async (who: Who, field: 'apeMonthly' | 'apeYtd') =>

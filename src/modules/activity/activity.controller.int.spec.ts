@@ -180,8 +180,9 @@ describe('logging a day over HTTP (P6)', () => {
       const res = await request(app.getHttpServer()).post(`${url}/log/correction`)
         .send({ date: '2025-12-05', counts: {}, reason: 'Because.' }).expect(404);
 
+      // In the English reader's figures (`test/setup.ts`), as the default is live: 5 Dec, where nobody's choice read 5 Des.
       expect(res.body.error).toMatchObject({
-        code: 'NOT_FOUND', message: 'There is no entry for 5 Des 2025 to correct. Log the day instead.',
+        code: 'NOT_FOUND', message: 'There is no entry for 5 Dec 2025 to correct. Log the day instead.',
       });
     });
   });

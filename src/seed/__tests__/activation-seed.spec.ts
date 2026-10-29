@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { SOURCE_READER } from '@/common/i18n/reader';
 import { addDays } from '@/common/time/local-day';
 import type { ActivationView } from '@/modules/activation/activation-progress.view';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
@@ -35,7 +36,7 @@ async function as(email: string): Promise<RequestContext> {
   return new RequestContext(String(member.userId), 'none', {
     membershipId: String(member._id), kpmId: member.kpmId, orgLevelCode: member.orgLevelCode, hierarchyRole: member.role,
     status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: directs,
-  } as never);
+  } as never).withReader(SOURCE_READER); // the API's English, as asserted here: nobody's choice reads Indonesian (P18.98-T4)
 }
 
 const item = (view: ActivationView, code: string) => view.aspects.flatMap((a) => a.items).find((i) => i.code === code)!;

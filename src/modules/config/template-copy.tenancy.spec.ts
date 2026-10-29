@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
-import { readerIn } from '@/common/i18n/reader';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { SEED_EVENT_TYPES } from '@/domain/constants';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import { AssetRepository } from '@/modules/assets/asset.repository';
@@ -17,7 +17,8 @@ const ALLIANZ = '66f0000000000000000000c2';
 const KPM = '66f0000000000000000000a1';
 const OTHER_KPM = '66f0000000000000000000a2';
 const NEW_KPM = '66f0000000000000000000a9';
-const sa = RequestContext.platform('root');
+/** The Super Admin, reading the API's English — the reasons asserted below — as nobody's choice is Indonesian (P18.98-T4). */
+const sa = RequestContext.platform('root').withReader(SOURCE_READER);
 const col = (name: string) => mongoose.connection.db!.collection(name);
 
 const member = (kpmId: string, over: Record<string, unknown> = {}) => new RequestContext('u-owner', 'none', {

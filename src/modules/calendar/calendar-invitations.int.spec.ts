@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn } from '@/common/i18n/reader';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { type Who } from '../../../test/coaching-office';
 import { startCalendar, stopCalendar, timed, type CalendarHarness } from '../../../test/calendar-office';
@@ -287,7 +288,7 @@ describe('invitations, the picker and the notices (P12-T4)', () => {
       // The payload is ids and a date: nothing anybody typed.
       expect(JSON.stringify(await h.col('notifications').find({}).toArray())).not.toContain('Kusuma');
 
-      const rina = new RequestContext(await userOf('RINA'), 'none', h.office.as('RINA').membership);
+      const rina = new RequestContext(await userOf('RINA'), 'none', h.office.as('RINA').membership).withReader(readerIn('en'));
       const [row] = (await h.notifications!.inbox(rina)).items;
       expect(row).toMatchObject({
         title: 'You have a new invitation', detail: 'Open it on your calendar to accept or decline.',
@@ -362,7 +363,7 @@ describe('invitations, the picker and the notices (P12-T4)', () => {
       expect(await emailsTo('INDAH', NotificationTemplate.CALENDAR_ENTRY_CHANGED)).toHaveLength(2);
       expect(await inbox('DIMAS', NotificationTemplate.CALENDAR_ENTRY_CHANGED)).toEqual([]);
 
-      const indah = new RequestContext(await userOf('INDAH'), 'none', h.office.as('INDAH').membership);
+      const indah = new RequestContext(await userOf('INDAH'), 'none', h.office.as('INDAH').membership).withReader(readerIn('en'));
       const cancelled = (await h.notifications!.inbox(indah)).items.find((i) => i.title.includes('cancelled'));
       expect(cancelled).toMatchObject({ detail: 'It is no longer on your calendar.', href: '/calendar?date=2026-09-16' });
     });

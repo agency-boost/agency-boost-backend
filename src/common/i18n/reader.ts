@@ -5,8 +5,8 @@ import {
 /**
  * **Who a sentence is written for** (ADR-0179 §6, §7; P18.98-T5 AC-1): the language its words are in, and the language
  * its figures are in — a date, a number, a sum (`common/format`). The two are one language for anybody who has chosen,
- * and for everybody once the Indonesian default is live (`LANGUAGE_LIVE`). Until then a reader who has chosen nothing
- * reads the product as it was: English words, Indonesian figures (ADR-0167 §1).
+ * and, since the Indonesian default went live on 2026-10-29 (`LANGUAGE_LIVE`), for everybody. Before, a reader who had
+ * chosen nothing read the product as it was: English words, Indonesian figures (ADR-0167 §1).
  */
 export interface Reader {
   readonly language: Language;
@@ -29,7 +29,7 @@ export interface ReaderInput {
 /**
  * **The request's language** (ADR-0179 §7; P18.98-T5 AC-1): the `Accept-Language` the app sends from the screen's
  * language; failing that, the signed-in person's `users.locale`; failing that, the language of a reader who has chosen
- * nothing — Bahasa Indonesia once the default is live, English until then (`unchosenLanguage`).
+ * nothing — Bahasa Indonesia since the default went live on 2026-10-29, English before (`unchosenLanguage`).
  *
  * **A figure's language is the chosen language, else Indonesian; once live, the request's** — the frontend's rule
  * (P18.98-T3). The API cannot see the browser's cookie, so a choice it can see is a saved one: before the release an

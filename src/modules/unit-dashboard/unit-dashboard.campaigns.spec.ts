@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { SOURCE_READER } from '@/common/i18n/reader';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { buildCoachingOffice, KPM_A, ROSTER_NOW, type CoachingOffice, type Who } from '../../../test/coaching-office';
@@ -18,7 +19,8 @@ describe('the Unit Dashboard’s campaign parts (P18.5-T7)', () => {
   let wired: ReturnType<typeof configModule>;
   let office: CoachingOffice;
   const db = () => mongoose.connection.db!;
-  const read = (who: Who, query: { for?: string } = {}) => wired.unitDashboard.read(office.as(who), query);
+  /** Read in the API's English, as asserted below: nobody's choice is Bahasa Indonesia since P18.98-T4's exit. */
+  const read = (who: Who, query: { for?: string } = {}) => wired.unitDashboard.read(office.as(who).withReader(SOURCE_READER), query);
   const row = (v: UnitDashboardView, who: Who) => everyRow(v).find((r) => r.membershipId === office.id[who])!;
   const chase = (who: Who, code: string) => db().collection('campaignChases').insertOne({
     kpmId: KPM_A, membershipId: office.id[who], campaignCode: code, chasing: true, deletedAt: null,

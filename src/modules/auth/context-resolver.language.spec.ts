@@ -42,8 +42,8 @@ describe('P18.98-T5 AC-1 the reader ContextResolver resolves', () => {
     expect((await resolver.resolve(saved, null, false, false, [], null)).reader).toEqual({ language: 'id', figures: 'id' });
   });
 
-  it('AC-1 reads nobody’s choice for a person who has made none: English words, Indonesian figures, until live', async () => {
-    expect((await resolver.resolve(await person(null))).reader).toEqual({ language: 'en', figures: 'id' });
+  it('AC-1 reads nobody’s choice for a person who has made none: Bahasa Indonesia, words and figures, as it is live', async () => {
+    expect((await resolver.resolve(await person(null))).reader).toEqual({ language: 'id', figures: 'id' });
     expect((await resolver.resolve(await person(null), null, false, false, [], 'id')).reader)
       .toEqual({ language: 'id', figures: 'id' });
   });
@@ -53,9 +53,10 @@ describe('P18.98-T5 AC-1 the reader ContextResolver resolves', () => {
   });
 
   it('AC-1 never reads the person’s own choice in a support session (ADR-0179 §2)', async () => {
-    const saved = await person('id');
-    expect((await resolver.resolve(saved, 'root', true)).reader).toEqual({ language: 'en', figures: 'id' });
-    expect((await resolver.resolve(saved, 'root', true, false, [], 'id')).reader).toEqual({ language: 'id', figures: 'id' });
+    // Saved English, so nobody's choice — Bahasa Indonesia, now it is live — tells the two apart.
+    const saved = await person('en');
+    expect((await resolver.resolve(saved, 'root', true)).reader).toEqual({ language: 'id', figures: 'id' });
+    expect((await resolver.resolve(saved, 'root', true, false, [], 'en')).reader).toEqual({ language: 'en', figures: 'en' });
   });
 
   it('AC-1 writes a refusal of the person read in their saved language', async () => {

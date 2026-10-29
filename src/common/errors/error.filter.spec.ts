@@ -27,12 +27,14 @@ function makeHost(requestId = 'req-1', request: { headers?: Record<string, strin
 
 /** A request the app sent from an Indonesian screen, no guard having resolved it. */
 const INDONESIAN = { headers: { 'accept-language': 'id' } };
+/** The same from an English screen — what a test that reads the API's English sends, since nobody's choice is Indonesian. */
+const ENGLISH = { headers: { 'accept-language': 'en' } };
 
 describe('DomainExceptionFilter', () => {
   const filter = new DomainExceptionFilter();
 
   it('renders a domain exception with its code, message and details', () => {
-    const { host, status, json } = makeHost();
+    const { host, status, json } = makeHost('req-1', ENGLISH);
     filter.catch(new VersionConflictException(3, 5), host as never);
 
     expect(status).toHaveBeenCalledWith(HttpStatus.CONFLICT);
@@ -63,7 +65,7 @@ describe('DomainExceptionFilter', () => {
   });
 
   it('maps a validation BadRequest to VALIDATION_FAILED with the violations', () => {
-    const { host, status, json } = makeHost();
+    const { host, status, json } = makeHost('req-1', ENGLISH);
     filter.catch(new BadRequestException(['name must be a string']), host as never);
 
     expect(status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
@@ -74,7 +76,7 @@ describe('DomainExceptionFilter', () => {
   });
 
   it('handles a string-bodied HttpException', () => {
-    const { host, json } = makeHost();
+    const { host, json } = makeHost('req-1', ENGLISH);
     filter.catch(new BadRequestException('plain message'), host as never);
     expect(json.mock.calls[0][0].error.message).toContain('plain message');
   });
@@ -134,7 +136,7 @@ describe('DomainExceptionFilter', () => {
     // Super Admin token: the guard passed a grant the route could not honour, the
     // repository stopped the query correctly, and the caller was told the server broke.
     // A backstop working is not a fault.
-    const { host, status, json } = makeHost();
+    const { host, status, json } = makeHost('req-1', ENGLISH);
     filter.catch(new MissingTenantContextError('memberships', 'find'), host as never);
 
     expect(status).toHaveBeenCalledWith(HttpStatus.FORBIDDEN);
@@ -182,9 +184,13 @@ describe('P18.98-T5 the refusal in the reader’s language', () => {
     const indonesian = makeHost('req-1', INDONESIAN);
     filter.catch(new NotFoundException('Membership'), indonesian.host as never);
     expect(indonesian.json.mock.calls[0][0].error).toMatchObject({ code: 'NOT_FOUND', message: 'Anggota tidak ditemukan.' });
-    const english = makeHost();
+    const english = makeHost('req-1', ENGLISH);
     filter.catch(new NotFoundException('Membership'), english.host as never);
     expect(english.json.mock.calls[0][0].error.message).toBe('Membership not found.');
+    // A request that names no language is nobody's choice: Bahasa Indonesia, as the default is live.
+    const unchosen = makeHost();
+    filter.catch(new NotFoundException('Membership'), unchosen.host as never);
+    expect(unchosen.json.mock.calls[0][0].error.message).toBe('Anggota tidak ditemukan.');
   });
 
   it('AC-1 prefers the reader the guard resolved to the header', () => {
@@ -242,7 +248,7 @@ describe('P18.98-T5 the refusal in the reader’s language', () => {
       const id = makeHost('req-1', INDONESIAN);
       filter.catch(exception, id.host as never);
       expect(id.json.mock.calls[0][0].error).toMatchObject({ code, message: indonesian });
-      const en = makeHost();
+      const en = makeHost('req-1', ENGLISH);
       filter.catch(exception, en.host as never);
       expect(en.json.mock.calls[0][0].error.message).toBe(exception.message);
     }

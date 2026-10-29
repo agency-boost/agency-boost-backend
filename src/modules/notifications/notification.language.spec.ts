@@ -48,8 +48,8 @@ class SavedLanguages extends RecipientLanguages {
 /**
  * **P18.98-T5 AC-5 — an email in its recipient's language** (ADR-0179 §7): their saved `users.locale`; for one with
  * none, the language of the request that caused it where that was theirs (the verification and reset emails); else a
- * reader who has chosen nothing — English until the Indonesian default is live. Read when the email is rendered, off
- * the request.
+ * reader who has chosen nothing — Bahasa Indonesia, since the default went live at P18.98-T4's exit. Read when the email
+ * is rendered, off the request.
  */
 describe('P18.98-T5 AC-5 the email in its recipient’s language', () => {
   const renderer = new EmailTemplateRenderer({ getOrThrow: () => 'https://app.agencyboost.test' } as unknown as ConfigService);
@@ -117,10 +117,11 @@ describe('P18.98-T5 AC-5 the email in its recipient’s language', () => {
     expect(rendered.subject).toBe('[AgencyBoost] Verifikasi alamat email Anda');
   });
 
-  it('AC-5 any other email to a person with no saved language reads as nobody’s choice: English until live', async () => {
+  it('AC-5 any other email to a person with no saved language reads as nobody’s choice: Bahasa Indonesia, as it is live', async () => {
     await service.send({ userId: 'u-none', templateId: NotificationTemplate.ROLE_CHANGED, payload: {} });
     const [{ rendered }] = await emails(1);
-    expect(rendered.subject).toBe('[AgencyBoost] Your role changed');
+    expect(rendered.subject).toBe('[AgencyBoost] Peran Anda berubah');
+    expect(rendered).toEqual(renderer.render(NotificationTemplate.ROLE_CHANGED, {}, readerIn('id')));
   });
 
   it('AC-5 asks nobody’s language for a notice with no email: the inbox writes its row when it is read', async () => {
@@ -147,9 +148,10 @@ describe('P18.98-T5 AC-5 the email in its recipient’s language', () => {
       mongoose.model(Notification.name) as never,
       new NotificationRepository(mongoose.model(Notification.name) as never),
       mongoose.model(NotificationPreferences.name) as never,
-      // The email, rendered for its Indonesian recipient, fails; the in-app row's render, for nobody's language, does not.
+      // The email, rendered for its English recipient, fails; the in-app row's render, for nobody's language — Bahasa
+      // Indonesia, as the default is live — does not.
       { render: (_id: string, _payload: Record<string, unknown>, reader?: Reader) => {
-        if (reader?.language === 'id') throw new Error('no words');
+        if (reader?.language === 'en') throw new Error('no words');
         return { subject: '', body: '' };
       } } as never,
       new FixedClock(NOW),
@@ -157,7 +159,7 @@ describe('P18.98-T5 AC-5 the email in its recipient’s language', () => {
       [new InApp(), email],
       languages,
     );
-    await expect(broken.send({ userId: 'u-id', templateId: NotificationTemplate.ROLE_CHANGED, payload: {} })).resolves.toBeUndefined();
+    await expect(broken.send({ userId: 'u-en', templateId: NotificationTemplate.ROLE_CHANGED, payload: {} })).resolves.toBeUndefined();
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const [row] = await mongoose.model(Notification.name).find({}).lean().exec() as unknown as { delivery: { email?: { status: string } } }[];
       if (row?.delivery.email?.status === 'failed') return;

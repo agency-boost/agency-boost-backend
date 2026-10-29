@@ -183,7 +183,8 @@ describe('PATCH /admin/tenants/:kpmId/subscription, and the reads (P13.2-T3)', (
   it('exit review: a price over the bound is refused in rupiah, the words the dialog shows', async () => {
     const kpm = await office();
     const res = await patch(String(kpm._id), { ...BODY, pricePerLeaderMinor: 100_000_001_00 }).expect(400);
-    expect(res.body.error.message).toBe('The price per leader must be from Rp 0 to Rp 100.000.000 a month.');
+    // In the English reader's figures (`test/setup.ts`; P18.98-T5 AC-1, live): the Indonesian dialog's are pinned below.
+    expect(res.body.error.message).toBe('The price per leader must be from IDR 0 to IDR 100,000,000 a month.');
   });
 
   it('P18.98-T5 AC-7 refuses a price, and a date the DTO cannot read, in Indonesian for an Indonesian reader', async () => {

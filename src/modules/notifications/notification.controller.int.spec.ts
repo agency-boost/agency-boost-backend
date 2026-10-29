@@ -172,8 +172,10 @@ describe('the inbox over HTTP (P12.1-T4)', () => {
       },
     ]);
     const { items } = (await http().get('/notifications').expect(200)).body;
+    // The suite reads in English (`test/setup.ts`), and since the default went live an English reader's figures are
+    // English too: 09:00, where nobody's choice read 09.00 before (P18.98-T5 AC-1).
     expect(items.map((i: { title: string; detail: string }) => [i.title, i.detail])).toEqual([
-      ['Kickoff 2026 is coming up', '9 Nov 2026, 09.00 · Kantor KPM'],
+      ['Kickoff 2026 is coming up', '9 Nov 2026, 09:00 · Kantor KPM'],
       ['Town Hall is coming up', 'Check the time and where it is.'],
     ]);
   });

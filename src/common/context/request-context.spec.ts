@@ -174,9 +174,9 @@ describe('P18.98-T5 the context’s reader', () => {
     isKpmOwner: false, isKpmAdmin: false, directCount: 0,
   };
 
-  it('AC-1 reads as nobody’s choice when nothing resolved one: English words, Indonesian figures, until live', () => {
-    expect(new RequestContext('u1', 'none', member).reader).toEqual({ language: 'en', figures: 'id' });
-    expect(RequestContext.forJob('k1', 'nightly').reader).toEqual({ language: 'en', figures: 'id' });
+  it('AC-1 reads as nobody’s choice when nothing resolved one: Bahasa Indonesia, words and figures, as it is live', () => {
+    expect(new RequestContext('u1', 'none', member).reader).toEqual({ language: 'id', figures: 'id' });
+    expect(RequestContext.forJob('k1', 'nightly').reader).toEqual({ language: 'id', figures: 'id' });
   });
 
   it('AC-1 carries the reader it was given', () => {

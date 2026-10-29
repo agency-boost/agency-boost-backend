@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { SOURCE_READER } from '@/common/i18n/reader';
 import { addDays } from '@/common/time/local-day';
 import { AGENT_CODE_PATTERN, CASCADE_ACTIVITY_CODES, GENDERS, PERFORMANCE, WORK_STATUSES } from '@/domain/constants';
 import { birthDateProblem, joinMonthProblem } from '@/modules/users/personal-data';
@@ -785,7 +786,7 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
       const as = new RequestContext(String(member.userId), 'none', {
         membershipId: String(member._id), kpmId, orgLevelCode: member.orgLevelCode, hierarchyRole: member.role,
         status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: member.directCounts?.total ?? 0,
-      } as never);
+      } as never).withReader(SOURCE_READER); // the inbox's English, as nobody's choice now reads Bahasa Indonesia
       const sessionId = latest(ids[key])._id;
       const row = (await inboxes.inbox(as)).items.find((i) => i.templateId === NotificationTemplate.COACHING_SESSION_FINALIZED);
       expect({ key, row }).toEqual({
@@ -865,7 +866,7 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
       const as = new RequestContext(String(member.userId), 'none', {
         membershipId: String(member._id), kpmId, orgLevelCode: member.orgLevelCode, hierarchyRole: member.role,
         status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
-      } as never);
+      } as never).withReader(SOURCE_READER); // English words, Indonesian figures: the API's own English (P18.98-T5)
       const { items } = await inboxes.inbox(as);
       // Among the newest, after anything this morning's run sent (Rina's finalized session): three in a row, unread.
       const first = items.findIndex((i) => i.title === 'Kickoff 2026 is coming up');

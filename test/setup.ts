@@ -28,10 +28,14 @@ jest.setTimeout(30_000);
 /**
  * **Every integration suite reads the API in English unless a test asks for Indonesian** (ADR-0179 §9; P18.98-T5
  * AC-7). The app sends `Accept-Language` on every request (P18.98-T2 AC-6), so a suite sends the one an English screen
- * sends: `en`. Every assertion written before the phase stands — English words, and the figures in them as the API
- * wrote them for a reader who has chosen nothing — and keeps standing when `LANGUAGE_LIVE` turns a request with no
- * header Indonesian. A test that sets the header itself is left alone: `.set('Accept-Language', 'id')` for Indonesian,
- * or `''` for none at all (`common/i18n/reader.ts` reads an empty header as none).
+ * sends: `en`. A request with no header is nobody's choice, and reads Bahasa Indonesia since `LANGUAGE_LIVE` went live
+ * at P18.98-T4's exit (2026-10-29); this keeps every English word written before the phase standing. **The figures in
+ * them are an English reader's** since then — *Aug*, *IDR 200M*, *09:00* — where nobody's choice read *Agu*, *Rp 200
+ * jt*, *09.00* before (`readerOf`). A test that sets the header itself is left alone: `.set('Accept-Language', 'id')`
+ * for Indonesian, or `''` for none at all — nobody's choice (`common/i18n/reader.ts` reads an empty header as none).
+ *
+ * This reaches HTTP only. A service a test calls with a `RequestContext` it builds itself reads the context's reader —
+ * nobody's choice, Indonesian, unless the test names one (`withReader(SOURCE_READER)` for the API's own English).
  */
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- the class supertest builds every request from
 const SupertestTest = require('supertest/lib/test') as {

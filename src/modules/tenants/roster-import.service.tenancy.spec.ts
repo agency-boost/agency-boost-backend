@@ -6,6 +6,7 @@ import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { RequestContext } from '@/common/context/request-context';
+import { SOURCE_READER } from '@/common/i18n/reader';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
 import { PasswordService } from '@/modules/auth/password.service';
@@ -40,7 +41,8 @@ describe('RosterImportService (P3.6-T4)', () => {
   let companyId: string;
   const clock = new FixedClock(NOW);
 
-  const sa = () => RequestContext.platform('root');
+  /** The Super Admin, reading the API's English as asserted below: nobody's choice reads Indonesian (P18.98-T4). */
+  const sa = () => RequestContext.platform('root').withReader(SOURCE_READER);
 
   beforeAll(async () => {
     await startMongo();

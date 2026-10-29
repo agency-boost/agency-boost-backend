@@ -1,10 +1,15 @@
 import { ConfigService } from '@nestjs/config';
-import { readerIn } from '@/common/i18n/reader';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { EmailTemplateRenderer } from './email-renderer';
 import { NotificationTemplate, TEMPLATE_CHANNELS } from './notification.types';
 
 const config = { getOrThrow: () => 'https://app.agencyboost.test' } as unknown as ConfigService;
 const renderer = new EmailTemplateRenderer(config);
+
+/*
+ * The P4-T14 copy below is the English the API writes (`SOURCE_READER`), named as its reader: a recipient who has chosen
+ * nothing reads Bahasa Indonesia since the default went live (P18.98-T4's exit), and P18.98-T5 AC-5 below pins that.
+ */
 
 describe('what the transactional mail says (P4-T14)', () => {
   describe('the two templates that have no inbox row', () => {
@@ -13,7 +18,7 @@ describe('what the transactional mail says (P4-T14)', () => {
       // sign in — the link is the entire product of the email.
       const { subject, body } = renderer.render(NotificationTemplate.EMAIL_VERIFICATION, {
         token: 'tok-123', fullName: 'Rina Wijaya',
-      });
+      }, SOURCE_READER);
       expect(subject).toBe('[AgencyBoost] Verify your email address');
       expect(body).toContain('Hello Rina Wijaya,');
       expect(body).toContain('https://app.agencyboost.test/verify-email/tok-123');
@@ -23,7 +28,7 @@ describe('what the transactional mail says (P4-T14)', () => {
     it('gives reset a link, and tells somebody who did not ask that nothing has changed', () => {
       const { subject, body } = renderer.render(NotificationTemplate.PASSWORD_RESET, {
         token: 'tok-456', fullName: 'Rina',
-      });
+      }, SOURCE_READER);
       expect(subject).toBe('[AgencyBoost] Reset your password');
       expect(body).toContain('https://app.agencyboost.test/reset-password/tok-456');
       expect(body).toContain('Your password has not changed');
@@ -31,20 +36,20 @@ describe('what the transactional mail says (P4-T14)', () => {
 
     it('points at the app, not at this API', () => {
       // A person opens a page, not an endpoint, and the two differ in every environment.
-      const { body } = renderer.render(NotificationTemplate.EMAIL_VERIFICATION, { token: 't' });
+      const { body } = renderer.render(NotificationTemplate.EMAIL_VERIFICATION, { token: 't' }, SOURCE_READER);
       expect(body).toContain('https://app.agencyboost.test/verify-email/t');
     });
 
     it('does not put a double slash in the link when the origin carries a trailing one', () => {
       const trailing = { getOrThrow: () => 'https://app.test/' } as unknown as ConfigService;
       const { body } = new EmailTemplateRenderer(trailing)
-        .render(NotificationTemplate.PASSWORD_RESET, { token: 't' });
+        .render(NotificationTemplate.PASSWORD_RESET, { token: 't' }, SOURCE_READER);
       expect(body).toContain('https://app.test/reset-password/t');
       expect(body).not.toContain('app.test//');
     });
 
     it('greets somebody whose name it does not have, without a hole in the sentence', () => {
-      const { body } = renderer.render(NotificationTemplate.EMAIL_VERIFICATION, { token: 't' });
+      const { body } = renderer.render(NotificationTemplate.EMAIL_VERIFICATION, { token: 't' }, SOURCE_READER);
       expect(body).toContain('Hello,');
       expect(body).not.toContain('undefined');
     });
@@ -59,7 +64,7 @@ describe('what the transactional mail says (P4-T14)', () => {
        */
       const { subject, body } = renderer.render(NotificationTemplate.JOIN_REQUEST_APPROVED, {
         fullName: 'Rina',
-      });
+      }, SOURCE_READER);
       expect(subject).toBe('[AgencyBoost] You are in');
       expect(body).toContain('Your request was approved. You now have a leader.');
       expect(body).toContain('https://app.agencyboost.test/notifications');
@@ -67,12 +72,12 @@ describe('what the transactional mail says (P4-T14)', () => {
 
     it('P12-T4 AC-7 a calendar notice’s email links to the address its row opens, built from APP_ORIGIN', () => {
       const entryId = '66f0000000000000000000e1';
-      const invited = renderer.render(NotificationTemplate.CALENDAR_INVITATION, { entryId, date: '2026-10-05' });
+      const invited = renderer.render(NotificationTemplate.CALENDAR_INVITATION, { entryId, date: '2026-10-05' }, SOURCE_READER);
       expect(invited.subject).toBe('[AgencyBoost] You have a new invitation');
       expect(invited.body).toContain(`https://app.agencyboost.test/calendar?entry=${entryId}&date=2026-10-05`);
       const cancelled = renderer.render(NotificationTemplate.CALENDAR_ENTRY_CHANGED, {
         entryId, date: '2026-10-05', change: 'cancelled',
-      });
+      }, SOURCE_READER);
       expect(cancelled.subject).toBe('[AgencyBoost] An entry on your calendar was cancelled');
       expect(cancelled.body).toContain('https://app.agencyboost.test/calendar?date=2026-10-05');
       expect(cancelled.body).not.toContain('/notifications');
@@ -81,7 +86,7 @@ describe('what the transactional mail says (P4-T14)', () => {
     it('P18.95-T7 AC-4 an event reminder’s email names its time and place, as its inbox row does', () => {
       const { subject, body } = renderer.render(NotificationTemplate.EVENT_REMINDER, {
         title: 'Kickoff 2026', startsAt: '2026-11-09T02:00:00.000Z', timezone: 'Asia/Jakarta', location: 'Kantor KPM',
-      });
+      }, SOURCE_READER);
       expect(subject).toBe('[AgencyBoost] Kickoff 2026 is coming up');
       expect(body).toContain('9 Nov 2026, 09.00 · Kantor KPM');
       expect(body).not.toContain('Check the time');
@@ -95,7 +100,7 @@ describe('what the transactional mail says (P4-T14)', () => {
       expect(emailTemplates.length).toBeGreaterThan(5);
 
       for (const id of emailTemplates) {
-        const { subject, body } = renderer.render(id, { token: 't', fullName: 'X' });
+        const { subject, body } = renderer.render(id, { token: 't', fullName: 'X' }, SOURCE_READER);
         expect(subject.startsWith('[AgencyBoost] ')).toBe(true);
         expect(subject.length).toBeGreaterThan('[AgencyBoost] '.length);
         expect(body.trim().length).toBeGreaterThan(20);
@@ -107,7 +112,7 @@ describe('what the transactional mail says (P4-T14)', () => {
 /**
  * **P18.98-T5 AC-5 — the email in its recipient's language** (ADR-0179 §7): the subject, the greeting, the body and the
  * sign-off, for the reader `NotificationService` hands the renderer; with none, a reader who has chosen nothing —
- * English until the Indonesian default is live.
+ * Bahasa Indonesia, since the default went live at P18.98-T4's exit.
  */
 describe('P18.98-T5 AC-5 the email in the recipient’s language', () => {
   const ID = readerIn('id');
@@ -156,10 +161,11 @@ describe('P18.98-T5 AC-5 the email in the recipient’s language', () => {
     expect(renderer.render(NotificationTemplate.EVENT_REMINDER, kickoff, readerIn('en')).body).toContain('9 Nov 2026, 09:00 · Kantor KPM');
   });
 
-  it('AC-5 writes for a reader who has chosen nothing when it is given none: English, as before the phase', () => {
+  it('AC-5 writes for a reader who has chosen nothing when it is given none: Bahasa Indonesia, as the default is live', () => {
     const { subject, body } = renderer.render(NotificationTemplate.EMAIL_VERIFICATION, { token: 't', fullName: 'Rina' });
-    expect(subject).toBe('[AgencyBoost] Verify your email address');
-    expect(body.startsWith('Hello Rina,')).toBe(true);
+    expect(subject).toBe('[AgencyBoost] Verifikasi alamat email Anda');
+    expect(body.startsWith('Halo Rina,')).toBe(true);
+    expect({ subject, body }).toEqual(renderer.render(NotificationTemplate.EMAIL_VERIFICATION, { token: 't', fullName: 'Rina' }, ID));
   });
 
   it('AC-5 renders every email template in Indonesian, none of it the English', () => {

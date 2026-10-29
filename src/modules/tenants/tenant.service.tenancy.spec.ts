@@ -10,7 +10,7 @@ import {
 import { FixedClock } from '@/common/clock/clock.port';
 import { SEED_RECRUITMENT_PLAYBOOK } from '@/domain/constants';
 import { RequestContext } from '@/common/context/request-context';
-import { readerIn } from '@/common/i18n/reader';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
@@ -73,7 +73,7 @@ function ctx(opts: { superAdmin?: boolean; owner?: boolean; admin?: boolean; kpm
           isKpmAdmin: opts.admin ?? false, directCount: 0,
         }
       : null,
-  );
+  ).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
 }
 
 /** Inferring the model type keeps mongoose's generics out of the test's way. */

@@ -7,7 +7,7 @@ import {
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { english, indonesian } from '../../../test/i18n';
-import { readerIn } from '@/common/i18n/reader';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { configModule } from '../../../test/config-module';
 import { OFFICE_0417, prototypeRender, shelf0417 } from '../../../test/sales-tools';
 import { ProductCatalogService } from './product-catalog.service';
@@ -26,7 +26,7 @@ const agent = (kpmId: string, over: Record<string, unknown> = {}) =>
   new RequestContext(`u-${kpmId}`, 'none', {
     membershipId: `mem-${kpmId}`, kpmId, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
     status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0, ...over,
-  } as never);
+  } as never).withReader(SOURCE_READER); // the API's English, as `english(...)` reads it: nobody's choice is Indonesian
 /** The office's Owner, who writes its decisions on the settings screen. */
 const owner = (kpmId: string) => agent(kpmId, { orgLevelCode: 'AB', hierarchyRole: 'ab', isKpmOwner: true });
 const superAdmin = () => RequestContext.platform('root');

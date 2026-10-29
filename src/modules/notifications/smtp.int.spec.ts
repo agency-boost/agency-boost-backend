@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { SMTPServer } from 'smtp-server';
 import { RecipientAddressBook, SmtpChannelAdapter } from './smtp.adapter';
 import { FixedClock } from '@/common/clock/clock.port';
+import { readerIn } from '@/common/i18n/reader';
 import { EmailTemplateRenderer } from './email-renderer';
 import { NotificationRepository } from './notification.repository';
 import { NotificationService } from './notification.service';
@@ -92,9 +93,10 @@ describe('SMTP, end to end (P4-T14 AC-7)', () => {
   it('delivers a verification mail a person could act on', async () => {
     const { adapter: smtp, config } = adapter();
     const rendered = new EmailTemplateRenderer(config)
+      // Written for an English reader: a recipient who has chosen nothing reads Bahasa Indonesia since P18.98-T4's exit.
       .render(NotificationTemplate.EMAIL_VERIFICATION, {
         token: 'real-token-abc', fullName: 'Rina Wijaya',
-      });
+      }, readerIn('en'));
 
     await smtp.send(
       { userId: 'u1', templateId: NotificationTemplate.EMAIL_VERIFICATION, payload: {} },
