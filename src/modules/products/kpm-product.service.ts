@@ -1,8 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
 import {
   APPROVED_PRODUCT_FIELDS, DOCUMENT_MIME_TYPES, OVERRIDABLE_PRODUCT_FIELDS, PRODUCT_DOCUMENT_FOLDER,
   PRODUCT_DOCUMENT_LABEL_MAX_LENGTH, PRODUCT_DOCUMENT_SLOTS,
@@ -16,6 +17,7 @@ import { Kpm } from '@/modules/tenants/kpm.schema';
 import { KpmProductConfigDocument } from './kpm-product-config.schema';
 import { KpmProductConfigRepository } from './kpm-product.repository';
 import { Product, ProductDocument } from './product.schema';
+import { PRODUCTS_REFUSALS } from './products.messages';
 
 /** One value an office reads, and whether the office is the one who chose it. */
 export interface EffectiveField<T> {
@@ -125,6 +127,9 @@ export function effectiveWordsOf(
 
 const SLOT_KEYS = PRODUCT_DOCUMENT_SLOTS.map((s) => s.key) as readonly string[];
 
+/** The office's settings, refused in both languages (P18.98-T5 AC-3). */
+const SAY = PRODUCTS_REFUSALS.VALIDATION_FAILED;
+
 /**
  * What an office sells, and the words it sells it with (P5-T5, ADR-0033, ADR-0037).
  *
@@ -196,10 +201,7 @@ export class KpmProductService {
     // A withdrawn product is one the company has taken off the market. An office turning it back
     // on would be selling something its insurer no longer issues.
     if (active === true && product.lifecycle === 'withdrawn') {
-      throw new BadRequestException(
-        `${product.name} has been withdrawn by your company, so it cannot be activated. `
-        + 'Your company decides what is on the shelf; your office decides which of it you sell.',
-      );
+      throw new InvalidRequestException(SAY.withdrawn({ name: product.name }));
     }
 
     const row = await this.configs.upsert(ctx, productId, { $set: { active } });
@@ -240,12 +242,9 @@ export class KpmProductService {
     if (unknown.length > 0) {
       // Named, rather than quietly dropped: somebody whose edit half-saved has no way to find out
       // which half, and the fields an office may not change are a rule worth stating out loud.
-      throw new BadRequestException(
-        `Your office cannot change ${unknown.join(', ')} on a product — those belong to your `
-        + `company. You may change: ${OVERRIDABLE_PRODUCT_FIELDS.join(', ')}.`,
-      );
+      throw new InvalidRequestException(SAY.companysFields({ fields: unknown, allowed: OVERRIDABLE_PRODUCT_FIELDS }));
     }
-    if (Object.keys(input).length === 0) throw new BadRequestException('Nothing to change.');
+    if (Object.keys(input).length === 0) throw new InvalidRequestException(SAY.nothingToChange);
 
     const set: Record<string, unknown> = {};
     const unset: Record<string, ''> = {};
@@ -303,7 +302,7 @@ export class KpmProductService {
   ): Promise<KpmProductView> {
     const product = await this.requireProduct(ctx, productId);
     if (!(OVERRIDABLE_PRODUCT_FIELDS as readonly string[]).includes(field)) {
-      throw new BadRequestException(`${field} is not a field your office can change.`);
+      throw new InvalidRequestException(SAY.notOverridable({ field }));
     }
 
     /*
@@ -491,10 +490,7 @@ export class KpmProductService {
 
     const trimmed = reason.trim();
     if (!trimmed) {
-      throw new BadRequestException(
-        'Say why you are sending it back. Somebody has to act on it, and "no" on its own is not '
-        + 'something anybody can act on.',
-      );
+      throw new InvalidRequestException(SAY.rejectionReason);
     }
 
     const rejected = await this.configs.upsert(ctx, productId, {
@@ -548,10 +544,7 @@ export class KpmProductService {
   ): Promise<KpmProductConfigDocument> {
     const row = await this.configs.findOne(ctx, { productId });
     if (!row || row.reviewState !== 'pending') {
-      throw new BadRequestException(
-        'There is nothing waiting on you for this product. A decision is made on a script that has '
-        + 'been written and not yet approved.',
-      );
+      throw new InvalidRequestException(SAY.nothingPending);
     }
     return row;
   }
@@ -613,9 +606,7 @@ export class KpmProductService {
 
   private requireSlot(slot: string): void {
     if (!SLOT_KEYS.includes(slot)) {
-      throw new BadRequestException(
-        `${slot} is not a document slot. A product has: ${SLOT_KEYS.join(', ')}.`,
-      );
+      throw new InvalidRequestException(SAY.notASlot({ slot, slots: SLOT_KEYS }));
     }
   }
 

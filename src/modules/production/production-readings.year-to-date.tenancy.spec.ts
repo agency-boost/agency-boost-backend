@@ -164,5 +164,70 @@ describe('the month cells and the year to date, from one read (ProductionReading
     expect(queries).toEqual([]);
     expect(result.cells).toEqual(new Map());
     expect(result.apeYearToDateThrough([], '2026-09')).toEqual(new Map());
+    expect(result.standingsFor([], '2025-06')).toEqual(new Map());
+  });
+
+  /*
+   * **`standingsFor`: `ledgersFor`'s standing from the same read** (the analytics at 500 members, 2026-10-29) — the
+   * read it replaces there, `ledgersFor` once or twice beside `monthCellsFor`, held to the hydrated readings over every
+   * month of two whole years: the year's latest year to date, the year to date through last month, the month's own APE.
+   */
+  describe('standingsFor', () => {
+    /** Two whole years, as the analytics reads them: last year's January to this year's December. */
+    const YEARS = { from: '2025-01', to: '2026-12' };
+    const EVERY_MONTH = Array.from({ length: 24 }, (_, i) => new Date(Date.UTC(2025, i, 1)).toISOString().slice(0, 7));
+
+    it('answers for every month of the years read what standingsFor answers from ledgersFor, for every member', async () => {
+      const { result: read, queries } = await counted(() => readings().monthCellsAndYearToDateFor(office(), IDS, YEARS));
+      expect(queries).toEqual(['monthlyAgentData.find']);
+      for (const month of EVERY_MONTH) {
+        const mine = read.standingsFor(IDS, month);
+        const hydrated = await readings().standingsFor(office(), IDS, month);
+        for (const id of IDS) expect({ id, month, standing: mine.get(id) }).toEqual({ id, month, standing: hydrated.get(id) });
+      }
+    });
+
+    it('the year’s latest is the whole year’s, a month after the one asked included; January has nothing through last month', async () => {
+      const read = await readings().monthCellsAndYearToDateFor(office(), IDS, YEARS);
+      // September, asked in September: October's year to date is the year's latest, as `ledgersFor` reads the year.
+      expect(read.standingsFor([RINA], '2026-09').get(RINA)).toEqual({
+        yearToDate: held(150 * M, '2026-10'), throughLastMonth: held(105 * M, '2026-07'), thisMonth: held(30 * M, '2026-09'),
+      });
+      // January: its own month and the year's latest; nothing before it, whatever last December held.
+      expect(read.standingsFor([RINA, DEWI], '2026-01')).toEqual(new Map([
+        [RINA, { yearToDate: held(150 * M, '2026-10'), throughLastMonth: null, thisMonth: held(15 * M, '2026-01') }],
+        [DEWI, { yearToDate: held(30 * M, '2026-03'), throughLastMonth: null, thisMonth: null }],
+      ]));
+      // May's own APE beside its corrected year to date; June's emptied by hand holds no month of its own.
+      expect(read.standingsFor([RINA], '2026-06').get(RINA)).toEqual({
+        yearToDate: held(150 * M, '2026-10'), throughLastMonth: held(75 * M, '2026-05', true), thisMonth: null,
+      });
+      // A leaver's year stops with his file; a deleted row is never read; nobody is nothing at all.
+      expect(read.standingsFor([BUDI, TARI, NOBODY], '2026-05')).toEqual(new Map([
+        [BUDI, { yearToDate: held(80 * M, '2026-04'), throughLastMonth: held(80 * M, '2026-04'), thisMonth: null }],
+        [TARI, { yearToDate: held(25 * M, '2026-02'), throughLastMonth: held(25 * M, '2026-02'), thisMonth: null }],
+        [NOBODY, { yearToDate: null, throughLastMonth: null, thisMonth: null }],
+      ]));
+    });
+
+    it('reads one office: another office’s row under the same membership is that office’s standing alone', async () => {
+      const mine = await readings().monthCellsAndYearToDateFor(office(), [RINA], YEARS);
+      expect(mine.standingsFor([RINA], '2026-08').get(RINA)!.thisMonth).toBeNull();
+      const theirs = await readings().monthCellsAndYearToDateFor(office(KPM_B), [RINA], YEARS);
+      expect(theirs.standingsFor([RINA], '2026-08').get(RINA)).toEqual({
+        yearToDate: held(999 * M, '2026-08'), throughLastMonth: null, thisMonth: held(999 * M, '2026-08'),
+      });
+    });
+
+    it('refuses a month whose year was not read whole, a month that is none, and a member not read', async () => {
+      const read = await readings().monthCellsAndYearToDateFor(office(), [RINA], RANGE);
+      // RANGE ends in September: this year's December was not read, so the year's latest would miss October.
+      expect(() => read.standingsFor([RINA], '2026-09')).toThrow(/A standing at 2026-09 reads 2026-01 to 2026-12; 2025-01 to 2026-09 was read/);
+      expect(read.standingsFor([RINA], '2025-12').get(RINA)!.yearToDate).toEqual(held(120 * M, '2025-12'));
+      const late = await readings().monthCellsAndYearToDateFor(office(), [RINA], { from: '2025-06', to: '2026-12' });
+      expect(() => late.standingsFor([RINA], '2025-12')).toThrow(/2025-01 to 2025-12; 2025-06 to 2026-12 was read/);
+      expect(() => late.standingsFor([RINA], 'soon')).toThrow(/A standing at soon/);
+      expect(() => late.standingsFor([RINA, BUDI], '2026-09')).toThrow(`The year to date of ${BUDI}, whose months were not read.`);
+    });
   });
 });

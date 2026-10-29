@@ -59,27 +59,17 @@ export const MDRT_CAMPAIGN_CODE = 'MDRT_QUALIFICATION';
 
 /**
  * **What a window reads as on the card and in the dialog**, verbatim where the prototype writes one
- * (`Overall.html:7972`, `:8012`) but for its dates, which are written the Indonesian way (ADR-0167 §1) — *1 Jan –
+ * (`Overall.html:7972`, `:8012`) but for its dates, which are written in the reader's figures (ADR-0167 §1) — *1 Jan –
  * 31 Des* where it wrote *Jan 1 – Dec 31*; a campaign's own dates are composed in the office's calendar instead.
+ * **Sentences in both languages since P18.98-T5** (`campaigns.messages.ts`), written for the reader who reads them.
+ *
+ * *Chasing MDRT*'s header tooltip, `MDRT_TOOLTIP`, is there too: the prototype's opening, and the words for an
+ * office running no MDRT campaign (OD-152 → option 3, D-18; ADR-0142 §3).
  */
-export const CAMPAIGN_DURATION_WORDS: Readonly<Record<Exclude<CampaignWindow, 'campaign_dates'>, string>> = {
-  calendar_year: 'Standing — evaluated per calendar year (1 Jan – 31 Des)',
-  rolling_12m: 'Rolling 12-month window',
-};
+export { CAMPAIGN_DURATION_WORDS, MDRT_TOOLTIP } from './campaigns.messages';
 
 /** The rolling window's length, in months held (`Overall.html:7972`, *"Rolling 12-month window"*). */
 export const CAMPAIGN_ROLLING_MONTHS = 12;
-
-/**
- * *Chasing MDRT*'s header tooltip (OD-152 → option 3, D-18): the prototype's opening, then the office's MDRT
- * requirement in words — or, with no MDRT campaign running, saying so. *"…based on annual FYC pace"* is not
- * shipped: the ✓ is a chase, not a pace, and FYC is not in the file.
- */
-export const MDRT_TOOLTIP = {
-  OPENING: 'Chasing MDRT (Million Dollar Round Table) this year',
-  /** ADR-0142 §3, verbatim: *"Chasing MDRT (Million Dollar Round Table) this year. No MDRT campaign is running."* */
-  NONE: 'No MDRT campaign is running.',
-} as const;
 
 /**
  * `CAMPAIGN_QUALIFICATION_STATUS`'s values (§A.6; ADR-0143): a chaser is `qualified`, `in_progress`, `not_met` or

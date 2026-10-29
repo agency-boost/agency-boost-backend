@@ -1,9 +1,12 @@
-import { BadRequestException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
+import {
+  DomainException, InvalidRequestException, NotFoundException, PermissionDeniedException,
+} from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AssetService } from '@/modules/assets/asset.service';
 import { can } from '@/modules/rbac/permissions';
@@ -15,17 +18,18 @@ import type { NamedTemplateDocument, TemplateOrigin } from './named-template.sch
 import { OfficeSettingsSource } from './office-settings.source';
 import {
   filesOfTraining, templateKindsFromOffice, withCopiedFiles,
-  type DroppedSetting, type TemplateFile, type TemplateKinds,
+  type DroppedSettingView, type TemplateFile, type TemplateKinds,
 } from './office-template';
 import { ProvisioningService } from './provisioning.service';
 import { refuseUnknownRungs } from './template-rungs';
+import { TEMPLATE_REFUSALS } from './template.messages';
 
 /**
  * *Save as template*'s answer: the template as made, and **what the office held that it left out or
  * changed**, and why (exit review of P13.2, finding 2) — empty when nothing was.
  */
 export interface SavedOfficeTemplateView extends NamedTemplateView {
-  dropped: DroppedSetting[];
+  dropped: DroppedSettingView[];
 }
 
 /** A file about to be duplicated, with what its source asset row says it was called. */
@@ -105,8 +109,11 @@ export class TemplateCopyService {
     const destination = input.companyId;
     const name = await this.templates.checkNewName(destination, input.name);
 
-    const { kinds, files, dropped } = templateKindsFromOffice(await this.office.publishedSettingsOf(ctx, kpmId));
-    this.provisioning.checkSource(`KPM ${kpm.code}’s published settings`, kinds);
+    const settings = templateKindsFromOffice(await this.office.publishedSettingsOf(ctx, kpmId));
+    const { kinds, files } = settings;
+    // Why each setting was left out, written for the person saving (P18.98-T5 AC-4): the answer and the audit row.
+    const dropped = settings.dropped.map((d) => ({ ...d, reason: render(d.reason, ctx.reader) }));
+    this.provisioning.checkSource({ kind: 'office', code: kpm.code }, kinds);
 
     const crossing = destination !== kpm.companyId;
     if (crossing) await this.refuseUnknownRungs(destination, kinds);
@@ -145,9 +152,7 @@ export class TemplateCopyService {
   ): Promise<NamedTemplateView> {
     this.require(ctx);
     if (input.fromCompanyId === companyId) {
-      throw new BadRequestException(
-        'That template is already this company’s. Use New template and copy it instead.',
-      );
+      throw new InvalidRequestException(TEMPLATE_REFUSALS.VALIDATION_FAILED.alreadyThisCompanys);
     }
     const name = await this.templates.checkNewName(companyId, input.name);
     // The source company's template, by its company and its id: another company's is a 404.
@@ -229,14 +234,7 @@ export class TemplateCopyService {
 
   /** `company_template:write`, or `403 PERM_DENIED` — before anything is read. */
   private require(ctx: RequestContext): void {
-    if (!can(ctx, 'company_template:write')) {
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        'You do not have permission to perform this action.',
-        HttpStatus.FORBIDDEN,
-        { permission: 'company_template:write' },
-      );
-    }
+    if (!can(ctx, 'company_template:write')) throw new PermissionDeniedException('company_template:write');
   }
 
   /**
@@ -271,9 +269,7 @@ export class TemplateCopyService {
       if (!row || row.uploadState !== 'confirmed') {
         throw new DomainException(
           ErrorCode.ASSET_NOT_CONFIRMED,
-          `The file “${file.label}” in training module ${file.moduleCode} never finished `
-            + 'uploading, so it cannot be copied and nothing was. Have it uploaded again, or removed, '
-            + 'and try again.',
+          TEMPLATE_REFUSALS.ASSET_NOT_CONFIRMED.neverUploaded({ label: file.label, moduleCode: file.moduleCode }),
           HttpStatus.CONFLICT,
           { moduleCode: file.moduleCode, label: file.label },
         );

@@ -5,6 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
 import { localDayOf } from '@/common/time/local-day';
 import { can } from '@/modules/rbac/permissions';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -23,10 +24,21 @@ import {
   type RosterIssue,
   type RosterRow,
 } from './roster-csv';
+import { TENANTS_REFUSALS } from './tenants.messages';
+
+/** The import's refusals and each row's issue, in both languages (P18.98-T5 AC-3). */
+const SAY = TENANTS_REFUSALS.VALIDATION_FAILED;
+
+/** One row's issue as the preview answers it: its words written for the reader (P18.98-T5 AC-3). */
+export interface RosterIssueView {
+  line: number;
+  column: string;
+  message: string;
+}
 
 export interface RosterPreview {
   /** Everything wrong, per row, in one pass. Empty means the file will commit. */
-  issues: RosterIssue[];
+  issues: RosterIssueView[];
   /** How many people the commit would create. Zero when anything is wrong. */
   willCreate: number;
   rows: Array<{ line: number; fullName: string; email: string; agentCode: string; role: string }>;
@@ -71,7 +83,7 @@ export class RosterImportService {
     if (!can(ctx, 'kpm:import_roster')) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'You do not have permission to import a roster.',
+        TENANTS_REFUSALS.PERM_DENIED.importRoster,
         HttpStatus.FORBIDDEN,
         { permission: 'kpm:import_roster' },
       );
@@ -142,8 +154,7 @@ export class RosterImportService {
         issues.push({
           line: row.line,
           column: 'role',
-          message: `"${row.role.toUpperCase()}" is not a rung of this company’s ladder. Use one of: `
-            + `${[...rungs.keys()].sort().join(', ')}.`,
+          message: SAY.notALadderRung({ role: row.role.toUpperCase(), rungs: [...rungs.keys()].sort() }),
         });
       }
       if (row.email) {
@@ -152,7 +163,7 @@ export class RosterImportService {
           issues.push({
             line: row.line,
             column: 'email',
-            message: 'Already has an account. Import creates people; this one exists already.',
+            message: SAY.emailHasAccount,
           });
         }
       }
@@ -167,7 +178,7 @@ export class RosterImportService {
           issues.push({
             line: row.line,
             column: 'agentCode',
-            message: `Already registered at this insurer by ${held.email}.`,
+            message: SAY.agentCodeHeld({ email: held.email }),
           });
         }
       }
@@ -183,8 +194,7 @@ export class RosterImportService {
           issues.push({
             line: row.line,
             column: 'leaderAgentCode',
-            message: `No active member of this office has the code ${row.leaderAgentCode}, and `
-              + 'it is not in this file either.',
+            message: SAY.leaderNotFound({ code: row.leaderAgentCode }),
           });
         }
       }
@@ -194,7 +204,7 @@ export class RosterImportService {
       issues.push({
         line: 1,
         column: 'leaderAgentCode',
-        message: 'The leader columns form a loop, so nobody in it could be created first.',
+        message: SAY.leaderLoop,
       });
     }
 
@@ -238,7 +248,6 @@ export class RosterImportService {
       if (!leads(row.role)) continue;
       leaders += 1;
       if (leaders <= max) continue;
-      const already = `${used} ${used === 1 ? 'is' : 'are'} in use already`;
       issues.push({
         line: row.line,
         column: 'role',
@@ -248,12 +257,8 @@ export class RosterImportService {
          * through that asks: import them as an Agent, then promote them, which asks AgencyBoost.
          */
         message: ctx.isSuperAdmin
-          ? `This office’s leader limit is ${max} — ABs and AABs together — and ${already}, so this `
-            + `row would be one too many. Raise the limit with Edit subscription on the offices list `
-            + 'first, or import them as an Agent.'
-          : `Your office’s leader limit is ${max} — ABs and AABs together — and ${already}, so this `
-            + 'row would be one too many. Import them as an Agent, then promote them on their page: past the '
-            + 'limit, that asks AgencyBoost to approve it.',
+          ? SAY.pastLimitForSuperAdmin({ max, used })
+          : SAY.pastLimitForOffice({ max, used }),
       });
     }
     return issues;
@@ -272,7 +277,8 @@ export class RosterImportService {
       .sort((a, b) => a.line - b.line || a.column.localeCompare(b.column));
 
     return {
-      issues: all,
+      // Each issue written for the reader (P18.98-T5 AC-3): the same words the commit's refusal carries.
+      issues: all.map((issue) => ({ ...issue, message: render(issue.message, ctx.reader) })),
       willCreate: all.length === 0 ? rows.length : 0,
       rows: rows.map(({ line, fullName, email, agentCode, role }) => ({
         line, fullName, email, agentCode, role,
@@ -289,16 +295,16 @@ export class RosterImportService {
     if (all.length > 0) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        `${all.length} row${all.length === 1 ? '' : 's'} would not import. Nothing was created — `
-          + 'fix the file and upload it again.',
+        SAY.rowsWouldNotImport({ count: all.length }),
         HttpStatus.BAD_REQUEST,
+        // Each issue's words are written for the reader by the error filter; `details` holds the English.
         { issues: all },
       );
     }
     if (rows.length === 0) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'That file has a header and no people in it.',
+        SAY.headerOnly,
         HttpStatus.BAD_REQUEST,
       );
     }

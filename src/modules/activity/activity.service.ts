@@ -1,4 +1,4 @@
-import { BadRequestException, HttpStatus, Injectable, Optional, Inject } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -15,10 +15,10 @@ import { RequestContext } from '@/common/context/request-context';
  * project's exception: only it carries a specific code, a message and `details`.
  */
 import {
-  DomainException, NoMembershipException, NotFoundException,
+  DomainException, InvalidRequestException, NoMembershipException, NotFoundException,
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { formatDate } from '@/common/format/format';
+import { render } from '@/common/i18n/sentence';
 import {
   calendarMonth, isFutureDay, isLocalDate, isWithinCorrectionWindow, localDayOf, rollingWindow,
   type LocalDate,
@@ -52,6 +52,7 @@ import {
   bucketIndex, bucketsFor, dashboardRange, type DashboardBucket, type DashboardRange,
 } from './activity-dashboard';
 import { appliesTo, computeRatio, type RatioStatus } from './activity-ratios';
+import { ACTIVITY_MESSAGES, ACTIVITY_REFUSALS } from './activity.messages';
 
 /** One activity type's count on one day, as the wire carries it. */
 export interface ActivityCountView {
@@ -506,7 +507,9 @@ export class ActivityService {
     if (stray.length > 0) {
       const counts = stray.map((code) => byCode.get(code)!);
       sections.push({
-        code: '', label: 'Other', standing: 'archived', total: total(sum(counts)), counts: sum(counts),
+        // The section's name is the API's own, written for the reader; each row's is its code (P18.98-T5 AC-4).
+        code: '', label: render(ACTIVITY_MESSAGES.otherSection, ctx.reader), standing: 'archived',
+        total: total(sum(counts)), counts: sum(counts),
         types: stray.map((code, i) => ({
           code, label: code, description: null, displayOrder: 0, standing: 'archived',
           total: total(counts[i]), counts: counts[i],
@@ -595,7 +598,8 @@ export class ActivityService {
       return sections.length === 1 && sections[0] ? sectionOf.get(sections[0]) : undefined;
     };
     const tagFor = (comparison: string, denominator: readonly string[]) => {
-      if (comparison === 'band') return { code: null, label: 'Balance' };
+      // A balance ratio has no section of its own: its tag is the API's word, in the reader's language (AC-4).
+      if (comparison === 'band') return { code: null, label: render(ACTIVITY_MESSAGES.balanceTag, ctx.reader) };
       const section = sectionFor(denominator);
       return section ? { code: section.code, label: section.label } : null;
     };
@@ -707,7 +711,7 @@ export class ActivityService {
     if (isFutureDay(date, today)) {
       throw new DomainException(
         ErrorCode.ACTIVITY_FUTURE_DATE,
-        `${formatDate(date)} has not happened yet in this office. A day is logged after it, not before.`,
+        ACTIVITY_REFUSALS.ACTIVITY_FUTURE_DATE.notYet({ date }),
         HttpStatus.UNPROCESSABLE_ENTITY,
         { date, today },
       );
@@ -719,8 +723,7 @@ export class ActivityService {
       // step, and the screen switches to the correction form rather than showing a message.
       throw new DomainException(
         ErrorCode.ACTIVITY_DATE_OUT_OF_WINDOW,
-        `${formatDate(date)} is closed for editing. Correct it instead, with a reason — the correction stays `
-        + 'beside the numbers anybody has already read.',
+        ACTIVITY_REFUSALS.ACTIVITY_DATE_OUT_OF_WINDOW.closed({ date }),
         HttpStatus.UNPROCESSABLE_ENTITY,
         { date, graceDays: grace },
       );
@@ -781,25 +784,21 @@ export class ActivityService {
     const reason = (input.reason ?? '').trim();
 
     if (!reason) {
-      throw new BadRequestException(
-        'Say why the day is being corrected. A correction nobody can explain is a number that '
-        + 'changed for no reason anybody can find.',
-      );
+      throw new InvalidRequestException(ACTIVITY_REFUSALS.VALIDATION_FAILED.correctionReason);
     }
 
     const existing = await this.logs.findOne(ctx, { membershipId: me, localDate: date });
     if (!existing) {
-      throw new NotFoundException(
-        `There is no entry for ${formatDate(date)} to correct. Log the day instead.`,
+      throw new DomainException(
+        ErrorCode.NOT_FOUND,
+        ACTIVITY_REFUSALS.NOT_FOUND.noEntryToCorrect({ date }),
+        HttpStatus.NOT_FOUND,
       );
     }
 
     const grace = office.settings.activityBackdateGraceDays;
     if (isWithinCorrectionWindow(date, today, grace)) {
-      throw new BadRequestException(
-        `${formatDate(date)} is still open — save it normally. A correction is for a day somebody has `
-        + 'already read.',
-      );
+      throw new InvalidRequestException(ACTIVITY_REFUSALS.VALIDATION_FAILED.stillOpen({ date }));
     }
 
     const mine = ctx.membership?.orgLevelCode ?? '';
@@ -898,7 +897,7 @@ export class ActivityService {
 
   private requireDay(value: string): LocalDate {
     if (!isLocalDate(value)) {
-      throw new BadRequestException(`${value} is not a date. Days are written YYYY-MM-DD.`);
+      throw new InvalidRequestException(ACTIVITY_REFUSALS.VALIDATION_FAILED.notADay({ value }));
     }
     return value;
   }
@@ -999,9 +998,7 @@ export class ActivityService {
     const sent = Object.keys(counts ?? {}).map((code) => code.trim().toUpperCase());
     const unknown = sent.filter((code) => !codes.has(code));
     if (unknown.length > 0) {
-      throw new BadRequestException(
-        `This office has no activity type with the code ${unknown.join(', ')} in the list it has published.`,
-      );
+      throw new InvalidRequestException(ACTIVITY_REFUSALS.VALIDATION_FAILED.unknownCodes({ codes: unknown }));
     }
 
     // A code that exists but belongs to a section this rung is not shown. Its own code, because
@@ -1011,7 +1008,7 @@ export class ActivityService {
     if (hidden.length > 0) {
       throw new DomainException(
         ErrorCode.ACTIVITY_TYPE_NOT_APPLICABLE,
-        `${hidden.join(', ')} counts activity in a section your office does not show your rung.`,
+        ACTIVITY_REFUSALS.ACTIVITY_TYPE_NOT_APPLICABLE.hiddenSection({ codes: hidden }),
         HttpStatus.UNPROCESSABLE_ENTITY,
         { codes: hidden },
       );
@@ -1038,7 +1035,7 @@ export class ActivityService {
       const from = this.requireDay(input.from ?? today);
       const to = this.requireDay(input.to ?? today);
       if (from > to) {
-        throw new BadRequestException('The range starts after it ends.');
+        throw new InvalidRequestException(ACTIVITY_REFUSALS.VALIDATION_FAILED.rangeBackwards);
       }
       return { from, to };
     }
@@ -1047,8 +1044,8 @@ export class ActivityService {
       case 'ROLLING_30D': return rollingWindow(today, PERIOD.ROLLING_30D_DAYS);
       case 'ROLLING_7D': return rollingWindow(today, PERIOD.ROLLING_7D_DAYS);
       default:
-        throw new BadRequestException(
-          `${input.period} is not a period. One of: ROLLING_7D, ROLLING_30D, CALENDAR_MONTH.`,
+        throw new InvalidRequestException(
+          ACTIVITY_REFUSALS.VALIDATION_FAILED.notAPeriod({ period: String(input.period) }),
         );
     }
   }

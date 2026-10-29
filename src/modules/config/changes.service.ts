@@ -1,8 +1,8 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
-import type { ErrorCodeValue } from '@/common/errors/error-codes';
+import { DomainException, InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { filedUnder, refiled, type Sentence } from '@/common/i18n/sentence';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import {
   ActivityConfigService, boundSectionRefusal, boundTypeRefusal,
@@ -21,6 +21,16 @@ import {
   checkTrainingCategoryCreate, checkTrainingCategoryUpdate, checkTrainingModuleCreate,
   checkTrainingModuleUpdate, checkTrainingSkillCreate, checkTrainingSkillUpdate,
 } from '@/modules/training/training-input';
+import { CONFIG_REFUSALS } from './config.messages';
+
+/** The batch's own refusals, in both languages (P18.98-T5 AC-3). */
+const SAY = CONFIG_REFUSALS.VALIDATION_FAILED;
+
+/**
+ * What the validate pass refuses an op with, each under its own code: a rule of the batch's, a unit its rule cannot
+ * have (`resolveDisplayUnit`'s words), a rung the company's ladder does not hold.
+ */
+type OpRefusal = Sentence<'VALIDATION_FAILED' | 'CONFIG_RATIO_UNIT_MISMATCH' | 'CONFIG_RUNG_UNKNOWN'>;
 
 /**
  * Each op's own field rules — the checker its service runs (ADR-0030).
@@ -197,13 +207,13 @@ export class ConfigChangeService {
 
     for (const [index, op] of ops.entries()) {
       const rows = rowsByKind[op.op.split('.')[0]];
-      const fail = (message: string, code: ErrorCodeValue = ErrorCode.VALIDATION_FAILED) => {
-        throw this.atOp(index, op.op, new DomainException(code, message, HttpStatus.BAD_REQUEST));
+      const fail = (message: OpRefusal): never => {
+        throw this.atOp(index, op.op, new DomainException(filedUnder(message), message, HttpStatus.BAD_REQUEST));
       };
 
       // An op nothing handles is refused before anything is written, not skipped quietly.
       const checker = CHECKERS[op.op] as ((body: unknown) => object | void) | undefined;
-      if (!checker) fail(`Unknown change ${String(op.op)}.`);
+      if (!checker) fail(SAY.unknownChange({ op: String(op.op) }));
 
       // The body by its own rules before anything about it is believed — its code included.
       let checked: Checked = {};
@@ -218,14 +228,14 @@ export class ConfigChangeService {
         // Counting archived rows, and counting earlier ops: a code is never reused once
         // published (ADR-0006), and two creates in one batch must not collide either.
         if ([...rows.values()].some((r) => r.code === code)) {
-          fail(`${code} is already in use in this office. A code is never reused.`);
+          fail(SAY.codeInUse({ code }));
         }
         rows.set(`pending:${index}`, { id: `pending:${index}`, code, version: 1, status: 'active' });
 
         if (op.op === 'type.create') {
           const parent = checked.categoryCode!;
           if (![...categories.values()].some((c) => c.code === parent && c.status === 'active')) {
-            fail(`No active section called ${parent}. Add the section first, or check the code.`);
+            fail(SAY.noActiveSection({ code: parent }));
           }
         }
       } else {
@@ -244,14 +254,14 @@ export class ConfigChangeService {
           throw this.atOp(index, op.op, new NotFoundException('That row'));
         }
         if (op.expectedVersion === undefined) {
-          fail('Every change to an existing row must say which version it was read at.');
+          fail(SAY.sayTheVersion);
         }
         if (row!.version !== op.expectedVersion) {
           throw this.atOp(index, op.op, new DomainException(
             ErrorCode.VERSION_CONFLICT,
-            `${row!.code} changed while you were editing — it is now version `
-              + `${row!.version} and you read version ${op.expectedVersion}. Reload to see `
-              + 'what somebody else did, then make your change again.',
+            CONFIG_REFUSALS.VERSION_CONFLICT.rowChanged({
+              code: row!.code, version: row!.version, read: op.expectedVersion as number,
+            }),
             HttpStatus.CONFLICT,
           ));
         }
@@ -321,7 +331,7 @@ export class ConfigChangeService {
             shape?.displayUnit,
           );
           if (resolved.refusal !== undefined) {
-            fail(resolved.refusal, ErrorCode.CONFIG_RATIO_UNIT_MISMATCH);
+            fail(resolved.refusal);
           } else if (shape) {
             ratioShapes.set(op.id!, { comparison, displayUnit: resolved.unit });
           }
@@ -334,10 +344,7 @@ export class ConfigChangeService {
           .map((r) => String(r).trim().toUpperCase())
           .filter((r) => !activeRungs.has(r));
         if (unknown.length) {
-          fail(
-            `${unknown.join(', ')} is not an active rung on your company’s ladder.`,
-            ErrorCode.CONFIG_RUNG_UNKNOWN,
-          );
+          fail(CONFIG_REFUSALS.CONFIG_RUNG_UNKNOWN.notActiveRungs({ codes: unknown }));
         }
       }
     }
@@ -372,7 +379,7 @@ export class ConfigChangeService {
     index: number,
     checked: Checked,
     tree: { categories: Map<string, Known>; skills: Map<string, Known>; modules: Map<string, Known> },
-    fail: (message: string) => never,
+    fail: (message: Sentence<'VALIDATION_FAILED'>) => never,
   ): void {
     const active = (rows: Map<string, Known>, code: string) =>
       [...rows.values()].some((r) => r.code === code && r.status === 'active');
@@ -383,20 +390,20 @@ export class ConfigChangeService {
     switch (op.op) {
       case 'trainingSkill.create':
         if (!active(tree.categories, checked.categoryCode!)) {
-          fail(`No active training category called ${checked.categoryCode}. Add it first, or check the code.`);
+          fail(SAY.noTrainingCategory({ code: checked.categoryCode! }));
         }
         pending(tree.skills).parent = checked.categoryCode;
         return;
       case 'trainingModule.create':
         if (!active(tree.skills, checked.skillCode!)) {
-          fail(`No active training skill called ${checked.skillCode}. Add it first, or check the code.`);
+          fail(SAY.noTrainingSkill({ code: checked.skillCode! }));
         }
         pending(tree.modules).parent = checked.skillCode;
         return;
       case 'trainingSkill.update':
         if (checked.categoryCode !== undefined && checked.categoryCode !== row!.parent) {
           if (!active(tree.categories, checked.categoryCode)) {
-            fail(`No active training category called ${checked.categoryCode} to move ${row!.code} into.`);
+            fail(SAY.noCategoryToMoveInto({ category: checked.categoryCode, row: row!.code }));
           }
           row!.parent = checked.categoryCode;
         }
@@ -404,19 +411,19 @@ export class ConfigChangeService {
       case 'trainingModule.update':
         if (checked.skillCode !== undefined && checked.skillCode !== row!.parent) {
           if (!active(tree.skills, checked.skillCode)) {
-            fail(`No active training skill called ${checked.skillCode} to move ${row!.code} under.`);
+            fail(SAY.noSkillToMoveUnder({ skill: checked.skillCode, row: row!.code }));
           }
           row!.parent = checked.skillCode;
         }
         return;
       case 'trainingSkill.restore':
         if (!active(tree.categories, row!.parent!)) {
-          fail(`${row!.code} is in ${row!.parent}, which is archived. Restore the category first.`);
+          fail(SAY.categoryArchived({ row: row!.code, parent: row!.parent! }));
         }
         return;
       case 'trainingModule.restore':
         if (!active(tree.skills, row!.parent!)) {
-          fail(`${row!.code} teaches ${row!.parent}, which is archived. Restore the skill first.`);
+          fail(SAY.skillArchived({ row: row!.code, parent: row!.parent! }));
         }
         return;
       case 'trainingCategory.archive': {
@@ -499,14 +506,20 @@ export class ConfigChangeService {
    *
    * A batch of twenty edits reporting only *"Nothing to change"* sends an Owner to read
    * their own form looking for which row meant it.
+   *
+   * **The original's words in both languages** (P18.98-T5 AC-3): its sentence, after the op's number, under its own
+   * code and status. The details travel with the refusal as given, sentences and all — a mismatched tile names its code
+   * and its labels (ADR-0064), a form's violations are written for the reader — and a screen pointing at the field
+   * needs them as much as a single route's does. Anything that is no refusal of ours keeps its own English.
    */
   private atOp(index: number, op: ChangeOp, err: unknown): unknown {
+    const n = index + 1;
+    if (err instanceof DomainException) {
+      return new DomainException(
+        err.code, refiled(SAY.atChange({ n, op, inner: err.sentence }), err.code), err.getStatus(), err.givenDetails,
+      );
+    }
     const detail = err instanceof Error ? err.message : String(err);
-    const code = err instanceof DomainException ? err.code : ErrorCode.VALIDATION_FAILED;
-    const status = err instanceof DomainException ? err.getStatus() : HttpStatus.BAD_REQUEST;
-    // The details travel with the refusal: a mismatched tile names its code and its labels
-    // (ADR-0064), and a screen pointing at the field needs them as much as a single route's does.
-    const details = err instanceof DomainException ? err.details : undefined;
-    return new DomainException(code, `Change ${index + 1} (${op}): ${detail}`, status, details);
+    return new InvalidRequestException(SAY.atChangeUnexpected({ n, op, detail }));
   }
 }

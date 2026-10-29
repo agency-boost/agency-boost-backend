@@ -1,13 +1,15 @@
-import { BadRequestException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
+import { DomainException, InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
+import { joinSentences } from '@/common/i18n/sentence';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { ActivityBindingRepository, ActivityTypeRepository } from './activity.repository';
 import type { ActivityBindingDocument } from './activity-binding.schema';
+import { CONFIG_REFUSALS } from './config.messages';
 import {
   BINDING_ROLES, bindingProblems, defaultBinding, normalisedBinding, type CascadeBinding,
 } from './activity-binding';
@@ -132,7 +134,7 @@ export class ActivityBindingService {
       if (Array.isArray(codes)) input[role] = codes.map((c) => (typeof c === 'string' ? c.trim().toUpperCase() : c));
     }
     const problems = bindingProblems(input, known);
-    if (problems.length) throw new BadRequestException(problems.join(' '));
+    if (problems.length) throw new InvalidRequestException(joinSentences(problems, ' '));
     const next = normalisedBinding(input);
 
     const [current] = await this.bindings.findInOfficeAcrossTenants(ctx, kpmId, { status: 'active' }, { limit: 1 });
@@ -141,8 +143,7 @@ export class ActivityBindingService {
     if (typeof expected === 'number' && expected !== before.version) {
       throw new DomainException(
         ErrorCode.VERSION_CONFLICT,
-        `The activity binding changed while you were editing — it is now version ${before.version} and you read `
-          + `version ${expected}. Reload to see what changed, then make your change again.`,
+        CONFIG_REFUSALS.VERSION_CONFLICT.bindingChanged({ version: before.version, read: expected }),
         HttpStatus.CONFLICT,
         { version: before.version },
       );

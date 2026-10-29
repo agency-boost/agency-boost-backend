@@ -1,8 +1,9 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { formatMonth } from '@/common/format/format';
+import type { Sentence } from '@/common/i18n/sentence';
 import { endOfMonth, type LocalDate } from '@/common/time/local-day';
+import { SUMMARY_REFUSALS } from './summary.messages';
 
 /** What a reader asked for: a month, a year, or neither — the office's current month (P18.8-T11). */
 export interface SummaryPeriodQuery {
@@ -66,8 +67,10 @@ export function summaryPeriod(office: OfficeCalendar, asked: SummaryPeriodQuery 
   const firstMonth = office.firstMonth < thisMonth ? office.firstMonth : thisMonth;
   const firstYear = firstMonth.slice(0, 4);
 
-  // The words name no office (ADR-0084): a coachee's *Personal Summary* tab shows a refusal as its banner.
-  const refuse = (field: 'month' | 'year', message: string): never => {
+  // The words name no office (ADR-0084): a coachee's *Personal Summary* tab shows a refusal as its banner. In both
+  // languages, a month in the reader's figures (P18.98-T5 AC-2).
+  const SAY = SUMMARY_REFUSALS.VALIDATION_FAILED;
+  const refuse = (field: 'month' | 'year', message: Sentence<'VALIDATION_FAILED'>): never => {
     throw new DomainException(ErrorCode.VALIDATION_FAILED, message, HttpStatus.BAD_REQUEST, {
       field,
       earliest: field === 'year' ? firstYear : firstMonth,
@@ -77,14 +80,14 @@ export function summaryPeriod(office: OfficeCalendar, asked: SummaryPeriodQuery 
 
   let month = thisMonth;
   if (asked.month !== undefined && asked.year !== undefined) {
-    refuse('year', 'Ask for a month or a year, not both.');
+    refuse('year', SAY.monthOrYear);
   } else if (asked.year !== undefined) {
-    if (asked.year > thisYear) refuse('year', `${asked.year} has not begun yet: the latest year is ${thisYear}.`);
-    if (asked.year < firstYear) refuse('year', `${asked.year} is before the first year there is, ${firstYear}.`);
+    if (asked.year > thisYear) refuse('year', SAY.yearNotBegun({ year: asked.year, latest: thisYear }));
+    if (asked.year < firstYear) refuse('year', SAY.yearBeforeFirst({ year: asked.year, first: firstYear }));
     month = asked.year === thisYear ? thisMonth : `${asked.year}-12`;
   } else if (asked.month !== undefined) {
-    if (asked.month > thisMonth) refuse('month', `${formatMonth(asked.month)} has not begun yet: the latest month is ${formatMonth(thisMonth)}.`);
-    if (asked.month < firstMonth) refuse('month', `${formatMonth(asked.month)} is before the first month there is, ${formatMonth(firstMonth)}.`);
+    if (asked.month > thisMonth) refuse('month', SAY.monthNotBegun({ month: asked.month, latest: thisMonth }));
+    if (asked.month < firstMonth) refuse('month', SAY.monthBeforeFirst({ month: asked.month, first: firstMonth }));
     month = asked.month;
   }
 

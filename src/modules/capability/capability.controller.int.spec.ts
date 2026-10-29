@@ -13,6 +13,7 @@ import {
 import { CapabilityController } from './capability.controller';
 import { CapabilityService } from './capability.service';
 import { listenOnLoopback } from '../../../test/listen';
+import { IN_INDONESIAN } from '../../../test/i18n';
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
@@ -139,6 +140,29 @@ describe('skills and stages over HTTP (P5-T8)', () => {
     // `@IsIn` on the DTO, so the four named parts are the whole vocabulary over the wire.
     await request(app.getHttpServer()).post(`${url}/items`)
       .send({ part: 'rung', code: 'X', label: 'X' }).expect(400);
+  });
+
+  it('P18.98-T5 AC-7 refuses a reused code, and a reorder naming too few, in Indonesian for an Indonesian reader', async () => {
+    const before = (await request(app.getHttpServer()).get(url).expect(200)).body;
+    const taken = before.milestones[0].code as string;
+
+    const reused = await request(app.getHttpServer()).post(`${url}/items`).set(...IN_INDONESIAN)
+      .send({ part: 'milestone', code: taken, label: 'Again' }).expect(400);
+    expect(reused.body.error.code).toBe('VALIDATION_FAILED');
+    expect(reused.body.error.message).toBe(
+      `${taken} sudah dipakai di katalog ini. Kode tidak pernah dipakai ulang — centang merujuk ke satu kode, `
+        + 'jadi kode yang sama dua kali akan menjadi centang yang sama.',
+    );
+
+    const short = await request(app.getHttpServer()).patch(`${url}/order`).set(...IN_INDONESIAN)
+      .send({ part: 'milestone', codes: [taken] }).expect(400);
+    expect(short.body.error.message)
+      .toBe(`Kirim setiap milestone masing-masing sekali — semuanya ${before.milestones.length}.`);
+
+    // The same refusal, in English for an English reader: the words the API has always written.
+    const english = await request(app.getHttpServer()).patch(`${url}/order`)
+      .send({ part: 'milestone', codes: [taken] }).expect(400);
+    expect(english.body.error.message).toBe(`Send every milestone once each — ${before.milestones.length} of them.`);
   });
 
   it('refuses a body carrying a field the DTO never declared', async () => {

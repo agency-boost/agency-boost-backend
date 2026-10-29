@@ -9,7 +9,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { clearCollections, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
 import {
-  AGENT, declaredPermissions, EVERY_MEMBER, OWNER, productionPipe, session, StubAuth, SUPER_ADMIN,
+  AGENT, declaredPermissions, EVERY_MEMBER, OWNER, productionPipe, savedLanguage, session, StubAuth, SUPER_ADMIN,
 } from '../../../test/http-permissions';
 import { listenOnLoopback } from '../../../test/listen';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
@@ -293,5 +293,44 @@ describe('the inbox over HTTP (P12.1-T4)', () => {
     await http().post('/notifications/read-all').expect(200);
     expect(await readAtOf(shown)).toEqual(NOW);
     expect(await readAtOf(String(auth))).toBeNull();
+  });
+
+  /*
+   * **P18.98-T5 AC-4 — the inbox in the reader's language, when it is read** (ADR-0179 §7). Each row is composed for the
+   * request's reader, so the same stored notice — one written before the phase — reads in either language.
+   */
+  describe('P18.98-T5 AC-4 the inbox in the reader’s language', () => {
+    afterEach(() => { savedLanguage.current = null; });
+
+    it('AC-4 reads the same stored row in Indonesian for an Indonesian screen, and in English for an English one', async () => {
+      await seed(AGENT.userId, 1);
+      const inIndonesian = (await http().get('/notifications').set('Accept-Language', 'id').expect(200)).body;
+      expect(inIndonesian.items[0]).toMatchObject({
+        templateId: 'join_request.approved',
+        title: 'Anda sudah bergabung',
+        detail: 'Permintaan Anda disetujui. Sekarang Anda memiliki leader.',
+      });
+      const inEnglish = (await http().get('/notifications').expect(200)).body;
+      expect(inEnglish.items[0]).toMatchObject({ title: 'You are in', detail: 'Your request was approved. You now have a leader.' });
+    });
+
+    it('AC-1 reads a saved language where the request names none', async () => {
+      await seed(AGENT.userId, 2);
+      savedLanguage.current = 'id';
+      const saved = (await http().get('/notifications').set('Accept-Language', '').expect(200)).body;
+      expect(saved.items.map((item: { title: string }) => item.title)).toEqual(['Anda mendapat undangan baru', 'Anda sudah bergabung']);
+    });
+
+    it('AC-2 refuses a mark on another person’s notice in Indonesian, the code unchanged', async () => {
+      const [theirs] = await seed('u-somebody-else', 1);
+      const refused = (await http().post(`/notifications/${theirs}/read`).set('Accept-Language', 'id').expect(404)).body;
+      expect(refused.error).toMatchObject({ code: 'NOT_FOUND', message: 'Notifikasi tidak ditemukan.' });
+    });
+
+    it('AC-3 refuses a page size out of range in Indonesian, the violation named as the API names it', async () => {
+      const refused = (await http().get('/notifications?pageSize=0').set('Accept-Language', 'id').expect(400)).body;
+      expect(refused.error.code).toBe('VALIDATION_FAILED');
+      expect(refused.error.details.violations).toEqual(['pageSize tidak boleh kurang dari 1']);
+    });
   });
 });

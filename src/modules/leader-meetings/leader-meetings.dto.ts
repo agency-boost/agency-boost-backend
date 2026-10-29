@@ -4,8 +4,13 @@ import {
   ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsString, Max, MaxLength, Min, MinLength, ValidateBy, ValidateIf,
 } from 'class-validator';
 import { isLocalDate } from '@/common/time/local-day';
+import { field } from '@/common/validation/violations';
 import { LEADER_MEETING_LIMITS, LEADER_MEETING_TARGET_RATE_DECIMALS } from '@/domain/constants';
 import { ACTION_STATUSES, AGENDA_SECTIONS, type ActionStatus, type AgendaSection } from './leader-meeting.schema';
+import { LEADER_MEETINGS_REFUSALS } from './leader-meetings.messages';
+
+/** The DTOs' own sentences, in both languages (P18.98-T5 AC-3): `field` carries them through class-validator. */
+const SAY = LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED;
 
 const { titleMax, textMax, picMax } = LEADER_MEETING_LIMITS;
 
@@ -24,7 +29,7 @@ function IsOfficeDate() {
     name: 'isOfficeDate',
     validator: {
       validate: (value: unknown) => isLocalDate(value),
-      defaultMessage: () => 'date must be a real day, YYYY-MM-DD',
+      defaultMessage: () => field(SAY.dateShape),
     },
   });
 }
@@ -37,7 +42,7 @@ export class CreateLeaderMeetingDto {
   @ApiProperty({ example: 'Strategic Check-in — #15', minLength: 1, maxLength: titleMax, description: 'Plain text, trimmed.' })
   @Trimmed()
   @IsString()
-  @MinLength(1, { message: 'title must not be empty' })
+  @MinLength(1, { message: field(SAY.titleNotEmpty) })
   @MaxLength(titleMax)
   title!: string;
 
@@ -52,7 +57,7 @@ export class RescheduleLeaderMeetingDto {
   @Sent()
   @Trimmed()
   @IsString()
-  @MinLength(1, { message: 'title must not be empty' })
+  @MinLength(1, { message: field(SAY.titleNotEmpty) })
   @MaxLength(titleMax)
   title?: string;
 
@@ -179,7 +184,7 @@ export class SaveMonthlyTargetDto {
   @ValidateIf((_: unknown, value: unknown) => value !== null)
   @IsNumber(
     { allowNaN: false, allowInfinity: false, maxDecimalPlaces: LEADER_MEETING_TARGET_RATE_DECIMALS },
-    { message: 'rate must be a number, or null to clear it' },
+    { message: field(SAY.rateNumber) },
   )
   @Min(0)
   @Max(Number.MAX_SAFE_INTEGER)

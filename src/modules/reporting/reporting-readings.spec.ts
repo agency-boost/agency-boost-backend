@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { MemberNames } from '@/modules/org/member-names.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { KPM_A, ROSTER_NOW } from '../../../test/coaching-office';
@@ -35,6 +36,29 @@ describe('the readings the Owner’s reporting reads through', () => {
       mongoose.set('debug', false);
     }
     expect(queries).toEqual([]);
+  });
+
+  it('the office’s people and the active ones’ names: the memberships read once, then the users — byMembershipId’s names', async () => {
+    const ctx = office.as('OWNER');
+    // Nothing in flight while the queries are counted: a model's automatic index build lands in whichever capture it
+    // overlaps (`scorecard.performance.spec.ts`'s note).
+    await Promise.all(mongoose.modelNames().map((name) => mongoose.model(name).init()));
+    const queries: string[] = [];
+    mongoose.set('debug', (collection: string, method: string) => { queries.push(`${collection}.${method}`); });
+    let roster: Awaited<ReturnType<typeof wired.officePeople.read>>;
+    try {
+      roster = await wired.officePeople.read(ctx, null, 'Asia/Jakarta');
+    } finally {
+      mongoose.set('debug', false);
+    }
+    // 2026-10-29: the names come from the rows the people read holds — no second read of every membership, whole.
+    expect(queries).toEqual(['memberships.find', 'users.find']);
+    const byId = await new MemberNames(wired.memberships, wired.users as never)
+      .byMembershipId(ctx, roster.active.map((p) => p.membershipId));
+    expect(roster.names).toEqual(byId);
+    expect(roster.names.get(office.id.SARI)).toBe('Sari Puspita');
+    // Every active member here has a name on file: one each, and nobody else's.
+    expect([...roster.names.keys()].sort()).toEqual(roster.active.map((p) => p.membershipId).sort());
   });
 
   it('P18-T2 AC-3 a lead with no registration date stood from its creation; a month’s cells read as the table reads them', async () => {

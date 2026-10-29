@@ -56,6 +56,7 @@ import { NotificationRepository } from '@/modules/notifications/notification.rep
 import { EmailTemplateRenderer } from '@/modules/notifications/email-renderer';
 import { RecipientAddressBook, SmtpChannelAdapter } from '@/modules/notifications/smtp.adapter';
 import { UserAddressBook } from '@/modules/notifications/user-address-book';
+import { RecipientLanguages, UserLanguages } from '@/modules/notifications/recipient-languages';
 import { InAppChannelAdapter, LogEmailAdapter } from '@/modules/notifications/local-adapters';
 import {
   ActivityCategory, ActivityCategorySchema,
@@ -513,6 +514,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     },
     { provide: TemplateRenderer, useClass: EmailTemplateRenderer },
     { provide: RecipientAddressBook, useClass: UserAddressBook },
+    // P18.98-T5 AC-5: whose language an email is written in — the recipient's `users.locale`.
+    { provide: RecipientLanguages, useClass: UserLanguages },
     InAppChannelAdapter,
     LogEmailAdapter,
     SmtpChannelAdapter,

@@ -51,10 +51,11 @@ describe('P18.6-T1 AC-12 the compliance tree reaches exactly the readers it call
       'modules/goals/goal.service.ts',
       'modules/org/member-names.service.ts',
       'modules/rbac/permissions.ts',
-      // Phase 18's own: the agencies, the names' order, and the office's people.
+      // Phase 18's own: the agencies, the names' order, and the office's people — and the module's sentences (P18.98-T5).
       'modules/reporting/agency-partition.ts',
       'modules/reporting/office-figures.ts',
       'modules/reporting/office-people.ts',
+      'modules/reporting/reporting.messages.ts',
       'modules/tenants/tenant-day.service.ts',
       'modules/training/offered-training.ts',
       'modules/training/training-progress-readings.ts',

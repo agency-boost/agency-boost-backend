@@ -1,11 +1,15 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import type { Sentence } from '@/common/i18n/sentence';
 import {
   RECRUITMENT_CANDIDATE_TYPES, RECRUITMENT_HESITATIONS, RECRUITMENT_MOTIVATIONS,
   type RecruitmentHesitationCode, type RecruitmentMotivationCode, type RecruitmentPlaybookBody,
   type RecruitmentTypeCode,
 } from '@/domain/constants';
+import { RECRUITMENT_REFUSALS } from './recruitment.messages';
+
+const SAY = RECRUITMENT_REFUSALS.VALIDATION_FAILED;
 
 /** A chip: its code, and its label verbatim (`:302-331`). */
 export interface Choice {
@@ -47,7 +51,7 @@ export function recruitmentVocabulary(): RecruitmentVocabulary {
   };
 }
 
-function refuse(message: string, parameters: string[]): never {
+function refuse(message: Sentence<'VALIDATION_FAILED'>, parameters: string[]): never {
   throw new DomainException(ErrorCode.VALIDATION_FAILED, message, HttpStatus.BAD_REQUEST, { parameters });
 }
 
@@ -66,19 +70,19 @@ export function readBrief(query: { type?: string; motivation?: string; hesitatio
   if (given.length === 0) return null;
   const missing = (['type', 'motivation', 'hesitation'] as const).filter((p) => query[p] === undefined);
   if (missing.length > 0) {
-    refuse(`A brief needs a candidate type, a motivation and a hesitation; ${missing.join(' and ')} missing.`, missing);
+    refuse(SAY.briefIncomplete({ missing }), missing);
   }
 
   const type = RECRUITMENT_CANDIDATE_TYPES.find((c) => c.code === query.type);
-  if (!type) refuse(`"${query.type}" is not a candidate type.`, ['type']);
+  if (!type) refuse(SAY.notACandidateType({ type: String(query.type) }), ['type']);
 
   const many = <C extends string>(parameter: 'motivation' | 'hesitation', vocabulary: readonly { code: C }[]): C[] => {
     const codes = String(query[parameter]).split(',');
     const known = vocabulary.map((c) => c.code) as readonly string[];
     if (codes.some((code) => !known.includes(code))) {
-      refuse(`${parameter} holds a code that is not one of its answers, or none at all.`, [parameter]);
+      refuse(SAY.notOneOfAnswers({ parameter }), [parameter]);
     }
-    if (new Set(codes).size !== codes.length) refuse(`${parameter} names one answer twice.`, [parameter]);
+    if (new Set(codes).size !== codes.length) refuse(SAY.answerTwice({ parameter }), [parameter]);
     return vocabulary.map((c) => c.code).filter((code) => codes.includes(code));
   };
 

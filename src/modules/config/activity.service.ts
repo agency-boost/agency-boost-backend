@@ -1,5 +1,5 @@
-import { BadRequestException, HttpStatus, Injectable, NotFoundException, Optional, Inject } from '@nestjs/common';
-import { DomainException } from '@/common/errors/domain.exception';
+import { HttpStatus, Injectable, Optional, Inject } from '@nestjs/common';
+import { DomainException, InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
@@ -16,6 +16,10 @@ import {
 import { refuseSummaryGroupConflict } from './summary-group';
 import { BINDING_ROLE_LABEL, defaultBinding, roleOfCode, type CascadeBinding } from './activity-binding';
 import { ActivityBindingService } from './activity-binding.service';
+import { CONFIG_REFUSALS } from './config.messages';
+
+/** The taxonomy's own refusals, in both languages (P18.98-T5 AC-3). */
+const SAY = CONFIG_REFUSALS.VALIDATION_FAILED;
 
 /**
  * **The bound types, by the role each counts in** (ADR-0163 §5): every code the office's activity binding names.
@@ -34,9 +38,7 @@ export function boundRoles(binding: CascadeBinding): Map<string, string> {
 export function boundTypeRefusal(type: { code: string; label: string }, role: string): DomainException {
   return new DomainException(
     ErrorCode.ACTIVITY_TYPE_BOUND,
-    `\u201c${type.label}\u201d cannot be archived: the summary and the goal plan count it as ${role}. A Super Admin `
-      + 'can bind another activity in its place first. You can rename it, describe it, reorder it or move it to '
-      + 'another section.',
+    CONFIG_REFUSALS.ACTIVITY_TYPE_BOUND.typeBound({ label: type.label, role }),
     HttpStatus.CONFLICT,
     { codes: [type.code], roles: [role] },
   );
@@ -48,8 +50,7 @@ export function boundSectionRefusal(
 ): DomainException {
   return new DomainException(
     ErrorCode.ACTIVITY_TYPE_BOUND,
-    `${section.label} cannot be archived while it holds ${held.map((t) => `\u201c${t.label}\u201d`).join(', ')}, `
-      + 'which the summary and the goal plan count. Move them to another section first.',
+    CONFIG_REFUSALS.ACTIVITY_TYPE_BOUND.sectionBound({ section: section.label, labels: held.map((t) => t.label) }),
     HttpStatus.CONFLICT,
     { codes: held.map((t) => t.code), roles: held.map((t) => t.role) },
   );
@@ -261,7 +262,7 @@ export class ActivityConfigService {
       if (!options.summaryGroupsChecked) await this.refuseSummaryGroupConflict(ctx, id, group);
       Object.assign(set, group);
     }
-    if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
+    if (Object.keys(set).length === 0) throw new InvalidRequestException(SAY.nothingToChange);
 
     const updated = await this.categories.updateById(ctx, id, {
       $set: set, $inc: { version: 1 },
@@ -337,7 +338,7 @@ export class ActivityConfigService {
     const live = await this.categories.find(ctx, {});
     const known = new Set(live.map((c) => String(c._id)));
     if (ids.length !== known.size || ids.some((id) => !known.has(id))) {
-      throw new BadRequestException('Send every section, once each, in the order you want them.');
+      throw new InvalidRequestException(SAY.sendEverySection);
     }
 
     await Promise.all(
@@ -396,7 +397,7 @@ export class ActivityConfigService {
       await this.requireLiveCategory(ctx, input.categoryCode);
       set.categoryCode = input.categoryCode;
     }
-    if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
+    if (Object.keys(set).length === 0) throw new InvalidRequestException(SAY.nothingToChange);
 
     const updated = await this.types.updateById(ctx, id, { $set: set, $inc: { version: 1 } });
     if (!updated) throw new NotFoundException('Activity type');
@@ -416,9 +417,7 @@ export class ActivityConfigService {
     const live = await this.types.find(ctx, {});
     const known = new Set(live.map((t) => String(t._id)));
     if (ids.length !== known.size || ids.some((id) => !known.has(id))) {
-      throw new BadRequestException(
-        'Send every activity type, once each, in the order you want them.',
-      );
+      throw new InvalidRequestException(SAY.sendEveryType);
     }
 
     // Position is presentation. Nothing references it, so no version is bumped: an office
@@ -469,19 +468,19 @@ export class ActivityConfigService {
     // Archived rows count. A retired code that came back as something else would change
     // the meaning of every archived type still pointing at it.
     if (await this.categories.exists(ctx, { code })) {
-      throw new BadRequestException(`This office already has a category called ${code}.`);
+      throw new InvalidRequestException(SAY.categoryTaken({ code }));
     }
   }
 
   private async refuseDuplicateType(ctx: RequestContext, code: string): Promise<void> {
     if (await this.types.exists(ctx, { code })) {
-      throw new BadRequestException(`This office already has an activity type called ${code}.`);
+      throw new InvalidRequestException(SAY.typeTaken({ code }));
     }
   }
 
   private async requireLiveCategory(ctx: RequestContext, code: string): Promise<void> {
     if (!(await this.categories.exists(ctx, { code, status: 'active' }))) {
-      throw new BadRequestException(`No active category called ${code} in this office.`);
+      throw new InvalidRequestException(SAY.noActiveCategory({ code }));
     }
   }
 
@@ -565,9 +564,7 @@ export class ActivityConfigService {
     if (broken.length) {
       throw new DomainException(
         ErrorCode.CONFIG_RATIO_UNREACHABLE_INPUT,
-        `${broken.join(', ')} counts activity in this section, and applies to rungs the `
-          + 'section would no longer be shown to. Those agents would be measured on '
-          + 'something they cannot log. Narrow the ratio first, or widen the section.',
+        CONFIG_REFUSALS.CONFIG_RATIO_UNREACHABLE_INPUT.narrowFirst({ ratios: broken }),
         HttpStatus.BAD_REQUEST,
         { ratios: broken },
       );

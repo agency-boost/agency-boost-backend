@@ -10,7 +10,7 @@ import type {
 } from './tenant-config.service';
 import type { TemplateView } from './template.service';
 import type { NamedTemplateView } from './named-template.service';
-import type { DroppedSetting } from './office-template';
+import type { DroppedSettingView } from './office-template';
 import type {
   ActivityBindingView, BindableType, OfficeActivityBindingView,
 } from './activity-binding.service';
@@ -602,7 +602,7 @@ export class NamedTemplateDto implements NamedTemplateView {
  * Something an office held that *Save as template* left out or changed, and why (exit review of P13.2,
  * finding 2): what archiving left behind, which no office made from the template could be given.
  */
-export class DroppedSettingDto implements DroppedSetting {
+export class DroppedSettingDto implements DroppedSettingView {
   @ApiProperty({
     enum: OFFICE_TEMPLATE_KINDS,
     description: 'The template kind it was in: `ratio_set`, `capability_ladder` or `activation_checklist`.',

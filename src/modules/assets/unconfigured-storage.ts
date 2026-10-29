@@ -1,6 +1,7 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { ASSETS_REFUSALS } from './assets.messages';
 import { SignedUpload, StoragePort, StoredObject } from './storage.port';
 
 /**
@@ -20,7 +21,7 @@ export class UnconfiguredStorage extends StoragePort {
   private refuse(): never {
     throw new DomainException(
       ErrorCode.STORAGE_NOT_CONFIGURED,
-      'File storage is not configured on this server, so files cannot be uploaded or opened here.',
+      ASSETS_REFUSALS.STORAGE_NOT_CONFIGURED.noStorage,
       HttpStatus.SERVICE_UNAVAILABLE,
     );
   }

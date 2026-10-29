@@ -1,5 +1,5 @@
 import {
-  BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Put,
+  Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Put,
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -7,7 +7,7 @@ import {
   AllowWhileOfficeUnavailable, AllowWhileReadOnly, Ctx, RequirePermission,
 } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException } from '@/common/errors/domain.exception';
+import { DomainException, InvalidRequestException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditReadService } from '@/modules/audit/audit-read.service';
 import { ElevateImpersonationDto, ImpersonateDto } from '@/modules/auth/auth.dto';
@@ -41,6 +41,7 @@ import { TemplateService } from '@/modules/config/template.service';
 import { SaveTemplateDraftDto } from '@/modules/config/template.dto';
 import { TemplateQueryDto } from '@/modules/config/named-template.dto';
 import { TEMPLATE_KINDS, type TemplateKind } from '@/modules/config/company-template.schema';
+import { TENANTS_REFUSALS } from './tenants.messages';
 
 /**
  * The Super Admin console.
@@ -285,7 +286,7 @@ export class AdminController {
     if (dto.startFrom?.kind !== 'defaults') return;
     throw new DomainException(
       ErrorCode.VALIDATION_FAILED,
-      'Start from a template — the Template’s Default template holds the AgencyBoost defaults — or Empty.',
+      TENANTS_REFUSALS.VALIDATION_FAILED.startFromDefaults,
       HttpStatus.BAD_REQUEST,
       { field: 'startFrom.kind' },
     );
@@ -405,8 +406,8 @@ export class AdminController {
   /** An unknown kind is a 400 naming the ones that exist, not an empty answer. */
   private kindOf(raw: string): TemplateKind {
     if (!(TEMPLATE_KINDS as readonly string[]).includes(raw)) {
-      throw new BadRequestException(
-        `Unknown template kind "${raw}". One of: ${TEMPLATE_KINDS.join(', ')}.`,
+      throw new InvalidRequestException(
+        TENANTS_REFUSALS.VALIDATION_FAILED.unknownTemplateKind({ kind: raw, kinds: TEMPLATE_KINDS }),
       );
     }
     return raw as TemplateKind;

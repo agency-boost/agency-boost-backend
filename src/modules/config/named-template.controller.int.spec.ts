@@ -12,6 +12,7 @@ import {
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
 import { listenOnLoopback } from '../../../test/listen';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { NamedTemplateController } from './named-template.controller';
 import { NamedTemplateService } from './named-template.service';
 import { TemplateCopyService } from './template-copy.service';
@@ -136,6 +137,29 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
     it('refuses a name an active template has, ignoring case — 409 TEMPLATE_NAME_TAKEN', async () => {
       const res = await http().post(base).send({ name: 'prudential TEMPLATE', from: 'empty' }).expect(409);
       expect(res.body.error).toMatchObject({ code: 'TEMPLATE_NAME_TAKEN', details: { name: 'prudential TEMPLATE' } });
+    });
+
+    it('P18.98-T5 AC-7 refuses a taken name, archiving the default and a start it cannot read, in Indonesian', async () => {
+      const taken = await http().post(base).set(...IN_INDONESIAN).send({ name: 'prudential TEMPLATE', from: 'empty' }).expect(409);
+      expect(taken.body.error).toMatchObject({
+        code: 'TEMPLATE_NAME_TAKEN',
+        message: 'Perusahaan ini sudah memiliki templat bernama prudential TEMPLATE. Pilih nama lain.',
+        details: { name: 'prudential TEMPLATE' },
+      });
+
+      const defaultId = String((await wired.namedTemplates.resolve(COMPANY))._id);
+      const archive = await http().post(`${base}/${defaultId}/archive`).set(...IN_INDONESIAN).expect(409);
+      expect(archive.body.error).toMatchObject({
+        code: 'TEMPLATE_IS_DEFAULT',
+        message: 'Prudential template adalah templat default perusahaan ini, jadi tidak dapat diarsipkan. Jadikan '
+          + 'templat lain sebagai default terlebih dahulu, lalu arsipkan templat ini.',
+      });
+
+      // The DTO's own decorator sentence (`field`), in `details.violations` and the message alike.
+      const start = await http().post(base).set(...IN_INDONESIAN).send({ name: 'x', from: 'somewhere' }).expect(400);
+      expect(start.body.error.details.violations).toEqual([
+        'from harus "empty", "defaults", atau { templateId } yang menyebut salah satu templat perusahaan',
+      ]);
     });
 
     it('validates the body: a name, and one of the two starts', async () => {

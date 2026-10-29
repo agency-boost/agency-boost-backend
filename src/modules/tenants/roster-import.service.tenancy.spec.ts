@@ -1,4 +1,10 @@
+import { INestApplication } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { Test } from '@nestjs/testing';
 import mongoose from 'mongoose';
+import request from 'supertest';
+import { PermissionsGuard } from '@/common/auth/permissions.guard';
+import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -19,6 +25,10 @@ import { OrgLevelService } from './org-level.service';
 import { RosterImportService } from './roster-import.service';
 import { ROSTER_TEMPLATE_HEADER } from './roster-csv';
 import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
+import { productionPipe, session, StubAuth, SUPER_ADMIN } from '../../../test/http-permissions';
+import { IN_INDONESIAN } from '../../../test/i18n';
+import { listenOnLoopback } from '../../../test/listen';
+import { AdminController } from './admin.controller';
 
 const H = ROSTER_TEMPLATE_HEADER;
 const NOW = new Date('2026-09-09T02:00:00.000Z');
@@ -389,6 +399,72 @@ describe('RosterImportService (P3.6-T4)', () => {
 
       const here = await members.find(RequestContext.tenantRead(kpmId, 'test'), {});
       expect(here).toEqual([]);
+    });
+  });
+
+  /*
+   * **The preview's issues, and the commit's refusal, written for their reader** (P18.98-T5 AC-3, AC-7): each issue
+   * is a sentence in both languages, which the preview writes for the request's reader and the error filter writes in
+   * the commit's `details.issues`. Over HTTP, so the header is what decides.
+   */
+  describe('P18.98-T5 AC-7 over HTTP, in the reader’s language', () => {
+    let app: INestApplication;
+
+    beforeAll(async () => {
+      const moduleRef = await Test.createTestingModule({
+        controllers: [AdminController],
+        providers: [{ provide: RosterImportService, useValue: service }],
+      })
+        .useMocker(() => ({}))
+        .compile();
+      app = moduleRef.createNestApplication();
+      app.useGlobalPipes(productionPipe());
+      app.useGlobalFilters(new DomainExceptionFilter());
+      app.useGlobalGuards(new StubAuth(), new PermissionsGuard(app.get(Reflector)));
+      await app.init();
+      await listenOnLoopback(app);
+    });
+    afterAll(() => app.close());
+    beforeEach(() => { session.current = SUPER_ADMIN; });
+
+    const rows = () => file('Rina,rina@k.test,101,senior manager,', 'Budi,rina@k.test,102,agent,');
+    const NOT_A_RUNG_ID = '"senior manager" bukan jenjang. Gunakan kode jenjang dari susunan jenjang perusahaan Anda — '
+      + 'AB, AAB, atau Agent, atau jenjang yang ditambahkannya.';
+
+    it('previews every row’s issue in Indonesian for an Indonesian reader, and in English for an English one', async () => {
+      const res = await request(app.getHttpServer()).post(`/admin/tenants/${kpmId}/roster/preview`)
+        .set(...IN_INDONESIAN).send({ rows: rows() }).expect(200);
+      expect(res.body.issues).toEqual([
+        { line: 2, column: 'role', message: NOT_A_RUNG_ID },
+        { line: 3, column: 'email', message: 'Sudah ada di baris 2.' },
+      ]);
+      expect(res.body.willCreate).toBe(0);
+
+      const english = await request(app.getHttpServer()).post(`/admin/tenants/${kpmId}/roster/preview`)
+        .send({ rows: rows() }).expect(200);
+      expect(english.body.issues.map((i: { message: string }) => i.message)).toEqual([
+        '"senior manager" is not a rung. Use a rung of your company’s ladder by its code — AB, AAB or Agent, '
+          + 'or one it added.',
+        'Already on line 2.',
+      ]);
+    });
+
+    it('refuses the commit with the same issues, the refusal and each issue in Indonesian', async () => {
+      const res = await request(app.getHttpServer()).post(`/admin/tenants/${kpmId}/roster`)
+        .set(...IN_INDONESIAN).send({ rows: rows() }).expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      expect(res.body.error.message)
+        .toBe('2 baris tidak dapat diimpor. Tidak ada yang dibuat — perbaiki file, lalu unggah lagi.');
+      expect(res.body.error.details.issues).toEqual([
+        { line: 2, column: 'role', message: NOT_A_RUNG_ID },
+        { line: 3, column: 'email', message: 'Sudah ada di baris 2.' },
+      ]);
+
+      const english = await request(app.getHttpServer()).post(`/admin/tenants/${kpmId}/roster`)
+        .send({ rows: rows() }).expect(400);
+      expect(english.body.error.message)
+        .toBe('2 rows would not import. Nothing was created — fix the file and upload it again.');
+      expect(english.body.error.details.issues[1]).toEqual({ line: 3, column: 'email', message: 'Already on line 2.' });
     });
   });
 });

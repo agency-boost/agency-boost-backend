@@ -24,3 +24,25 @@ process.on('unhandledRejection', (reason) => {
 });
 
 jest.setTimeout(30_000);
+
+/**
+ * **Every integration suite reads the API in English unless a test asks for Indonesian** (ADR-0179 §9; P18.98-T5
+ * AC-7). The app sends `Accept-Language` on every request (P18.98-T2 AC-6), so a suite sends the one an English screen
+ * sends: `en`. Every assertion written before the phase stands — English words, and the figures in them as the API
+ * wrote them for a reader who has chosen nothing — and keeps standing when `LANGUAGE_LIVE` turns a request with no
+ * header Indonesian. A test that sets the header itself is left alone: `.set('Accept-Language', 'id')` for Indonesian,
+ * or `''` for none at all (`common/i18n/reader.ts` reads an empty header as none).
+ */
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- the class supertest builds every request from
+const SupertestTest = require('supertest/lib/test') as {
+  prototype: { end(this: SupertestRequest, fn?: unknown): unknown };
+};
+interface SupertestRequest {
+  get(field: string): string | undefined;
+  set(field: string, value: string): unknown;
+}
+const sendRequest = SupertestTest.prototype.end;
+SupertestTest.prototype.end = function end(this: SupertestRequest, fn?: unknown) {
+  if (this.get('Accept-Language') === undefined) this.set('Accept-Language', 'en');
+  return sendRequest.call(this, fn);
+};

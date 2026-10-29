@@ -1,4 +1,5 @@
 import { isLeaderClass } from '@/domain/constants/leader-tier';
+import { readerOf, type Reader } from '@/common/i18n/reader';
 
 /**
  * Everything authorization needs, resolved once per request and immutable thereafter.
@@ -107,8 +108,25 @@ export class RequestContext {
      * elevates it — enforcement no longer needs it then, and it still says which kind of session this is.
      */
     readonly impersonationWriteScope: readonly string[] = [],
+    /**
+     * **Who this request's sentences are written for** (ADR-0179 §7; P18.98-T5 AC-1): the `Accept-Language` the app
+     * sent, else the person's saved `users.locale`, else a reader who has chosen nothing (`readerOf`). Resolved once,
+     * by `AuthGuard`, from the user `ContextResolver` already reads — no extra read. What a service writes a sentence
+     * for — a notice in the inbox, a figure's words — and the language of a sentence it stores (AC-6).
+     *
+     * A context built for a job, or by hand in a test, reads as a reader who has chosen nothing.
+     */
+    readonly reader: Reader = readerOf(),
   ) {
     Object.freeze(this);
+  }
+
+  /** **The same context, written for another reader** — what a test's stand-in for `AuthGuard` hands a request. */
+  withReader(reader: Reader): RequestContext {
+    return new RequestContext(
+      this.userId, this.platformRole, this.membership, this.impersonatorUserId, this.actingInKpmId,
+      this.mustChangePassword, this.impersonationReadOnly, this.impersonationWriteScope, reader,
+    );
   }
 
   /**
@@ -228,7 +246,7 @@ export class RequestContext {
    * `auditActors` still answers *who really did this*.
    */
   static joiningTenant(ctx: RequestContext, kpmId: string): RequestContext {
-    return new RequestContext(ctx.userId, 'none', null, ctx.impersonatorUserId, kpmId);
+    return new RequestContext(ctx.userId, 'none', null, ctx.impersonatorUserId, kpmId, false, false, [], ctx.reader);
   }
 
   /**

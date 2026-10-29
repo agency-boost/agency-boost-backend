@@ -1,9 +1,15 @@
 import { isValidObjectId } from 'mongoose';
-import { Fields, refuseWith } from '@/common/validation/fields';
+import { Fields, refuseWith, type FieldSentence } from '@/common/validation/fields';
+import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
 import {
   EVENT_AUDIENCE_SCOPES, EVENT_ISSUERS, SELECT_AUDIENCE_SCOPES,
   type EventAudienceScope, type EventIssuer,
 } from '@/domain/constants';
+import { EVENTS_REFUSALS } from './events.messages';
+
+/** What an event's fields are refused with (P18.98-T5 AC-3): this module's sentences, and the shared envelope's. */
+const SAY = EVENTS_REFUSALS.VALIDATION_FAILED;
+const FIELD = VALIDATION_REFUSALS.VALIDATION_FAILED;
 
 export interface CheckedEventType {
   code?: string;
@@ -59,7 +65,7 @@ export function checkEventType(
 
   const emoji = optionalText(source.emoji, 'emoji', 8, violations);
   const color = optionalText(source.color, 'color', 7, violations);
-  if (color && !HEX.test(color)) violations.push('color must be a hex value such as #2D9CDB.');
+  if (color && !HEX.test(color)) violations.push(SAY.colorHex);
 
   if (violations.length > 0) refuseWith(violations);
   return {
@@ -99,13 +105,13 @@ export function checkEvent(body: unknown, opts: { partial?: boolean } = {}): Che
   const violations = [...f.violations];
   const locationUrl = optionalText(source.locationUrl, 'locationUrl', 500, violations);
   if (locationUrl && !WEB_LINK.test(locationUrl)) {
-    violations.push('locationUrl must be a web address starting with http:// or https://.');
+    violations.push(SAY.locationUrlWeb);
   }
 
   const startsAt = instant(source.startsAt, 'startsAt', required, violations);
   const endsAt = instant(source.endsAt, 'endsAt', required, violations);
   if (startsAt && endsAt && endsAt.getTime() <= startsAt.getTime()) {
-    violations.push('endsAt must be after startsAt.');
+    violations.push(SAY.endsAfterStarts);
   }
 
   const audience = readAudience(source.audience, required, violations);
@@ -126,72 +132,70 @@ export function checkEvent(body: unknown, opts: { partial?: boolean } = {}): Che
 }
 
 function optionalText(
-  raw: unknown, field: string, max: number, violations: string[],
+  raw: unknown, field: string, max: number, violations: FieldSentence[],
 ): string | null | undefined {
   if (raw === undefined) return undefined;
   if (raw === null) return null;
   if (typeof raw !== 'string') {
-    violations.push(`${field} must be text.`);
+    violations.push(FIELD.notText({ field }));
     return undefined;
   }
   const value = raw.trim();
-  if (value.length > max) violations.push(`${field} is at most ${max} characters.`);
+  if (value.length > max) violations.push(SAY.textAtMost({ field, max }));
   return value || null;
 }
 
 /** An ISO instant. A date with no time is refused rather than assumed to mean midnight somewhere. */
 function instant(
-  raw: unknown, field: string, required: boolean, violations: string[],
+  raw: unknown, field: string, required: boolean, violations: FieldSentence[],
 ): Date | undefined {
   if (raw === undefined) {
-    if (required) violations.push(`${field} is required.`);
+    if (required) violations.push(FIELD.required({ field }));
     return undefined;
   }
   const value = new Date(String(raw));
   if (Number.isNaN(value.getTime())) {
-    violations.push(`${field} is not a date and time.`);
+    violations.push(SAY.notADateTime({ field }));
     return undefined;
   }
   return value;
 }
 
 function readAudience(
-  raw: unknown, required: boolean, violations: string[],
+  raw: unknown, required: boolean, violations: FieldSentence[],
 ): CheckedEvent['audience'] | undefined {
   if (raw === undefined) {
-    if (required) violations.push('audience is required.');
+    if (required) violations.push(FIELD.required({ field: 'audience' }));
     return undefined;
   }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    violations.push('audience must be an object of fields.');
+    violations.push(SAY.audienceNotObject);
     return undefined;
   }
   const row = raw as Record<string, unknown>;
   const issuer = String(row.issuer ?? '');
   const scope = String(row.scope ?? '');
   if (!(EVENT_ISSUERS as readonly string[]).includes(issuer)) {
-    violations.push(`audience.issuer is one of: ${EVENT_ISSUERS.join(', ')}.`);
+    violations.push(SAY.issuerOneOf({ values: EVENT_ISSUERS }));
   }
   if (!(EVENT_AUDIENCE_SCOPES as readonly string[]).includes(scope)) {
-    violations.push(`audience.scope is one of: ${EVENT_AUDIENCE_SCOPES.join(', ')}.`);
+    violations.push(SAY.scopeOneOf({ values: EVENT_AUDIENCE_SCOPES }));
   }
 
   const ids = Array.isArray(row.inviteeMembershipIds)
     ? row.inviteeMembershipIds.map((v) => String(v))
     : [];
   if (row.inviteeMembershipIds !== undefined && !Array.isArray(row.inviteeMembershipIds)) {
-    violations.push('audience.inviteeMembershipIds must be a list.');
+    violations.push(SAY.inviteesNotList);
   }
   // A membership id is an id: anything else is a malformed body, never a lookup (the exit review).
   const malformed = ids.filter((id) => !isValidObjectId(id));
   if (malformed.length > 0) {
-    violations.push(`audience.inviteeMembershipIds holds ${malformed.length} value(s) that are not membership ids.`);
+    violations.push(SAY.inviteesMalformed({ count: malformed.length }));
   }
   // A list on a scope that does not take one is a body meaning two things at once.
   if (ids.length > 0 && !SELECT_AUDIENCE_SCOPES.includes(scope as EventAudienceScope)) {
-    violations.push(
-      `audience.scope "${scope}" invites everybody it describes, so it takes no invitee list.`,
-    );
+    violations.push(SAY.scopeTakesNoList({ scope }));
   }
 
   return {

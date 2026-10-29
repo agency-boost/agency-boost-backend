@@ -3,6 +3,8 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Matches, MaxLength, Min, ValidateNested,
 } from 'class-validator';
+import { field } from '@/common/validation/violations';
+import { COACHING_REFUSALS } from './coaching.messages';
 
 /**
  * **The limits a session's editable state is held to** (`functional/coaching.md`, the Data contract):
@@ -11,9 +13,9 @@ import {
  */
 export const SESSION_LIMITS = { ITEMS_MAX: 50, TIPS_MAX: 50, TEXT_MAX: 500, REASON_MAX: 500, ID_MAX: 64 } as const;
 
-/** `YYYY-MM-DD`. Whether it is a day at all — `2026-02-31` — the service checks. */
+/** `YYYY-MM-DD`. Whether it is a day at all — `2026-02-31` — the service checks. Said in both languages (P18.98-T5). */
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
-const DATE_MESSAGE = 'A date is written YYYY-MM-DD.';
+const DATE_MESSAGE = field(COACHING_REFUSALS.VALIDATION_FAILED.dateShape);
 
 /** What every pinned session write carries: the version it was read at (`conventions.md`, *Concurrency*). */
 export class PinnedSessionDto {
@@ -93,6 +95,7 @@ export class ReopenCoachingSessionDto extends PinnedSessionDto {
       'Why it is reopened. Required, and kept with the session: everybody who reads the session, the '
       + 'coachee included, reads it.',
   })
-  @IsString() @MaxLength(SESSION_LIMITS.REASON_MAX) @Matches(/\S/, { message: 'reason must not be blank' })
+  @IsString() @MaxLength(SESSION_LIMITS.REASON_MAX)
+  @Matches(/\S/, { message: field(COACHING_REFUSALS.VALIDATION_FAILED.reasonBlank) })
   reason!: string;
 }

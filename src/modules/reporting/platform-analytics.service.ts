@@ -1,10 +1,9 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException } from '@/common/errors/domain.exception';
-import { ErrorCode } from '@/common/errors/error-codes';
+import { PermissionDeniedException } from '@/common/errors/domain.exception';
 import { rollingWindow } from '@/common/time/local-day';
 import { DEFAULT_TENANT_TIMEZONE, PERIOD } from '@/domain/constants';
 import { MembershipRepository } from '@/modules/org/membership.repository';
@@ -71,14 +70,8 @@ export class PlatformAnalyticsService {
   ) {}
 
   async read(ctx: RequestContext): Promise<PlatformAnalyticsView> {
-    if (!ctx.isSuperAdmin || ctx.isImpersonating) {
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        'You do not have permission to perform this action.',
-        HttpStatus.FORBIDDEN,
-        { permission: 'platform_analytics:read' },
-      );
-    }
+    // The shared refusal: `403 PERM_DENIED`, its words in both languages, `details.permission` naming the grant.
+    if (!ctx.isSuperAdmin || ctx.isImpersonating) throw new PermissionDeniedException('platform_analytics:read');
     const timezone = DEFAULT_TENANT_TIMEZONE;
     const today = this.clock.localDateFor(timezone);
     const month = today.slice(0, 7);

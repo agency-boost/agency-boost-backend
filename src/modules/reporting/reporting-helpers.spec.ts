@@ -1,13 +1,14 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { CarrierRules } from '@/modules/campaigns/carrier-rules';
 import { QualificationRule, QualificationRuleSchema } from '@/modules/campaigns/campaign.schema';
 import type { OrgLevelRow } from '@/modules/tenants/org-level.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { DirectoryColumns } from './directory-columns';
 import { clubTiers, juniorFirst } from './kpm-analytics.service';
-import { byName, dayLabel, monthLabel, shiftMonth, twoMonthsLabel, yearToDateLabel } from './office-figures';
+import { asOfLabel, byName, monthLabel, shiftMonth, twoMonthsLabel, yearToDateLabel } from './office-figures';
 import { OfficePeople, rungsFor } from './office-people';
 import { stateOf, sumOf } from './platform-analytics.service';
 
@@ -32,15 +33,29 @@ describe('the reporting module’s helpers', () => {
   });
 
   it('P18-T2 AC-4, P18.95-T1 AC-4 the labels a period is read over, the Indonesian way', () => {
+    // A reader who has chosen nothing before the release: English words, Indonesian figures — as the API wrote them.
+    const reader = SOURCE_READER;
     expect(shiftMonth('2026-01', -1)).toBe('2025-12');
-    expect(monthLabel('2026-09')).toBe('Sep 2026');
-    expect(twoMonthsLabel('2026-08', '2026-09')).toBe('Agu and Sep 2026');
-    expect(twoMonthsLabel('2025-12', '2026-01')).toBe('Des 2025 and Jan 2026');
-    expect(yearToDateLabel('2026-01')).toBe('Jan 2026');
-    expect(yearToDateLabel('2026-09')).toBe('Jan – Sep 2026');
-    expect(dayLabel('2026-10-09')).toBe('9 Okt 2026');
+    expect(monthLabel('2026-09', reader)).toBe('Sep 2026');
+    expect(twoMonthsLabel('2026-08', '2026-09', reader)).toBe('Agu and Sep 2026');
+    expect(twoMonthsLabel('2025-12', '2026-01', reader)).toBe('Des 2025 and Jan 2026');
+    expect(yearToDateLabel('2026-01', reader)).toBe('Jan 2026');
+    expect(yearToDateLabel('2026-09', reader)).toBe('Jan – Sep 2026');
+    expect(asOfLabel('2026-10-09', reader)).toBe('As of 9 Okt 2026');
     const names = new Map([['a', 'Bea'], ['b', 'Ann']]);
     expect(['a', 'b', 'c', 'd'].sort(byName(names))).toEqual(['c', 'd', 'b', 'a']);
+  });
+
+  it('P18.98-T5 AC-4 the same labels for a reader of Indonesian, and of English figures', () => {
+    const id = readerIn('id');
+    expect(twoMonthsLabel('2026-08', '2026-09', id)).toBe('Agu dan Sep 2026');
+    expect(twoMonthsLabel('2025-12', '2026-01', id)).toBe('Des 2025 dan Jan 2026');
+    expect(asOfLabel('2026-10-09', id)).toBe('Per 9 Okt 2026');
+    expect(yearToDateLabel('2026-08', id)).toBe('Jan – Agu 2026');
+    const en = readerIn('en');
+    expect([monthLabel('2026-10', en), twoMonthsLabel('2026-07', '2026-08', en), asOfLabel('2026-10-09', en)])
+      .toEqual(['Oct 2026', 'Jul and Aug 2026', 'As of 9 Oct 2026']);
+    expect(yearToDateLabel('2026-08', en)).toBe('Jan – Aug 2026');
   });
 
   it('P18-T2 AC-5 the club tiers from the company’s production_club rules, a rule with no APE threshold none', () => {

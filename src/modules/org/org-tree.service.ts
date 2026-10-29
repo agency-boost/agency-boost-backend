@@ -4,11 +4,13 @@ import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
 import { preferredNameOf } from '@/modules/users/display-name';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { initialsOf } from './directory.service';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole } from './membership.schema';
+import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
 import { visibleTo } from './reader-visibility';
 
 export interface OrgTreeNode {
@@ -115,7 +117,7 @@ export class OrgTreeService {
     if (rows.length > ORG_TREE_MAX_NODES) {
       throw new DomainException(
         ErrorCode.ORG_TREE_TOO_LARGE,
-        `This office has ${rows.length} members, more than the tree can draw.`,
+        ORG_REFUSALS.ORG_TREE_TOO_LARGE.tooLarge({ count: rows.length }),
         HttpStatus.PAYLOAD_TOO_LARGE,
         { count: rows.length, max: ORG_TREE_MAX_NODES },
       );
@@ -125,6 +127,8 @@ export class OrgTreeService {
     const named = await this.namesFor(rows.map((r) => r.userId));
 
     const present = new Set(rows.map((r) => String(r._id)));
+    // A person whose account is gone is still a node, named in the reader's language (P18.98-T5 AC-4).
+    const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
 
     // Every root sits at layer 1, whatever its office depth. Orphaning already rewrites
     // the orphan's depth to 0 and shifts its subtree (P3-T7 via `reparent`), so an
@@ -141,7 +145,7 @@ export class OrgTreeService {
 
     for (const row of rows) {
       const id = String(row._id);
-      const fullName = named.get(row.userId)?.fullName ?? 'Unknown';
+      const fullName = named.get(row.userId)?.fullName ?? unknown;
       const directCount = row.directCounts?.total ?? 0;
 
       // A node whose leader is outside what this requester may see is a root of *their*
@@ -208,7 +212,8 @@ export class OrgTreeService {
     const leader = await this.members.findById(ctx, me.leaderId);
     if (!leader || leader.status === 'removed') return null;
 
-    const fullName = (await this.namesFor([leader.userId])).get(leader.userId)?.fullName ?? 'Unknown';
+    const fullName = (await this.namesFor([leader.userId])).get(leader.userId)?.fullName
+      ?? render(ORG_MESSAGES.unknownName, ctx.reader);
     return {
       membershipId: String(leader._id),
       fullName,

@@ -1,11 +1,12 @@
 import { DateTime } from 'luxon';
-import {
-  formatDateRange, formatDayMonth, formatMonth, formatMonthName, formatMonthRange,
-} from '@/common/format/format';
+import { formatDateRange, formatMonthRange } from '@/common/format/format';
+import { SOURCE_READER, type Reader } from '@/common/i18n/reader';
+import { render } from '@/common/i18n/sentence';
 import { addDays, endOfMonth, localDayOf, type LocalDate } from '@/common/time/local-day';
 import {
-  CAMPAIGN_DURATION_WORDS, CAMPAIGN_ROLLING_MONTHS, type CampaignWindow,
+  CAMPAIGN_DURATION_WORDS, CAMPAIGN_ROLLING_MONTHS, DEFAULT_LANGUAGE, type CampaignWindow, type Language,
 } from '@/domain/constants';
+import { CAMPAIGN_WINDOW_MESSAGES } from './campaign-window.messages';
 
 /**
  * **What a campaign is read over** (P18.5-T8 AC-2; D-windows), in the office's calendar — pure: a campaign's
@@ -19,6 +20,10 @@ import {
  *
  * Every edge is a local day: a campaign that ends on 30 September is running at 23:59 that night in Jakarta and
  * ended at 00:01 on 1 October, whatever the server's clock says (invariant §9).
+ *
+ * **Its words are the reader's** (P18.98-T5 AC-4): a function that writes them takes the reader last — the figures'
+ * language alone where it writes only figures (a month range, a day range, the window's label) — and a caller that
+ * passes none reads what the API wrote before the phase: English words, Indonesian figures.
  */
 
 export interface CampaignDates {
@@ -36,7 +41,7 @@ export interface ResolvedWindow {
   days: { from: LocalDate; to: LocalDate } | null;
   /** The window's last day, today or not. */
   lastDay: LocalDate;
-  /** The dialog's words for what is read: *Jul – Sep 2026*, *Jan – Des 2026*, *Okt 2025 – Sep 2026*. */
+  /** The dialog's words for what is read, in the reader's figures: *Jul – Sep 2026*, *Jan – Des 2026*. */
   label: string;
   /** `rolling_12m` never is: it moves with every month held. */
   finalisable: boolean;
@@ -56,17 +61,17 @@ export function monthsFrom(from: string, to: string): string[] {
   return out;
 }
 
-/** *Jul – Sep 2026*, *Nov 2026 – Jan 2027*, *Sep 2026* — the shared formatter's (ADR-0167 §1). */
-export function monthRangeWords(from: string, to: string): string {
-  return formatMonthRange(from, to);
+/** *Jul – Sep 2026*, *Nov 2026 – Jan 2027*, *Sep 2026* — the shared formatter's (ADR-0167 §1), in `figures`. */
+export function monthRangeWords(from: string, to: string, figures: Language = DEFAULT_LANGUAGE): string {
+  return formatMonthRange(from, to, figures);
 }
 
 /**
  * *1 Jul – 30 Sep 2026*, *1 Nov 2026 – 31 Jan 2027* — the card's duration (`Overall.html:7930`), written the
  * Indonesian way through the shared formatter (ADR-0167 §1) where the prototype wrote *Jul 1 – Sep 30, 2026*.
  */
-export function dayRangeWords(from: LocalDate, to: LocalDate): string {
-  return formatDateRange(from, to);
+export function dayRangeWords(from: LocalDate, to: LocalDate, figures: Language = DEFAULT_LANGUAGE): string {
+  return formatDateRange(from, to, figures);
 }
 
 /**
@@ -120,12 +125,12 @@ export function campaignPhase(startsAt: Date, endsAt: Date | null, now: Date): '
   return 'ended';
 }
 
-/** The card's duration, composed in the office's calendar, or the window's verbatim words. */
-export function durationWords(campaign: CampaignDates, timezone: string): string {
-  if (campaign.window !== 'campaign_dates') return CAMPAIGN_DURATION_WORDS[campaign.window];
+/** The card's duration, composed in the office's calendar, or the window's verbatim words — for `reader`. */
+export function durationWords(campaign: CampaignDates, timezone: string, reader: Reader = SOURCE_READER): string {
+  if (campaign.window !== 'campaign_dates') return render(CAMPAIGN_DURATION_WORDS[campaign.window], reader);
   const from = localDayOf(campaign.startsAt, timezone);
-  if (campaign.endsAt === null) return `From ${formatDayMonth(from)}`;
-  return dayRangeWords(from, lastLocalDay(campaign.endsAt, timezone));
+  if (campaign.endsAt === null) return render(CAMPAIGN_WINDOW_MESSAGES.from({ day: from }), reader);
+  return dayRangeWords(from, lastLocalDay(campaign.endsAt, timezone), reader.figures);
 }
 
 /**
@@ -142,27 +147,29 @@ export function durationWords(campaign: CampaignDates, timezone: string): string
  * Month names and the range's en dash are the shared formatter's (ADR-0167 §1). The card and the dialog keep
  * `durationWords`, the prototype's words, at every size.
  */
-export function runsWords(campaign: CampaignDates, timezone: string): string {
-  if (campaign.window === 'calendar_year') {
-    // The formatter's range, its year dropped: `formatMonthRange` would write *Jan – Des 2026*.
-    const [first, last] = [formatMonthName('2000-01'), formatMonthName('2000-12')];
-    return `Runs ${first} – ${last}`;
+export function runsWords(campaign: CampaignDates, timezone: string, reader: Reader = SOURCE_READER): string {
+  // The formatter's range, its year dropped: `formatMonthRange` would write *Jan – Des 2026*.
+  if (campaign.window === 'calendar_year') return render(CAMPAIGN_WINDOW_MESSAGES.runsEveryYear, reader);
+  if (campaign.window === 'rolling_12m') {
+    return render(CAMPAIGN_WINDOW_MESSAGES.runsRolling({ months: CAMPAIGN_ROLLING_MONTHS }), reader);
   }
-  if (campaign.window === 'rolling_12m') return `Runs over the last ${CAMPAIGN_ROLLING_MONTHS} months`;
   const from = localDayOf(campaign.startsAt, timezone).slice(0, 7);
-  if (campaign.endsAt === null) return `Runs from ${formatMonth(from)}`;
-  return `Runs ${formatMonthRange(from, lastLocalDay(campaign.endsAt, timezone).slice(0, 7))}`;
+  if (campaign.endsAt === null) return render(CAMPAIGN_WINDOW_MESSAGES.runsFrom({ month: from }), reader);
+  const to = lastLocalDay(campaign.endsAt, timezone).slice(0, 7);
+  return render(CAMPAIGN_WINDOW_MESSAGES.runsMonths({ from, to }), reader);
 }
 
 /**
  * **The window, as of the office's day.** `latestHeldMonth` is the latest month the office holds a file for — what
- * `rolling_12m` ends on; `null` when it holds none, and the window then ends with last month.
+ * `rolling_12m` ends on; `null` when it holds none, and the window then ends with last month. Its `label` is written
+ * in `figures`, the reader's.
  */
 export function resolveWindow(
   campaign: CampaignDates,
   office: { today: LocalDate; timezone: string; latestHeldMonth: string | null },
   /** A calendar year other than today's: the year before, when its standings are frozen. */
   year?: string,
+  figures: Language = DEFAULT_LANGUAGE,
 ): ResolvedWindow {
   const thisMonth = office.today.slice(0, 7);
   if (campaign.window === 'calendar_year') {
@@ -173,7 +180,7 @@ export function resolveWindow(
       months: monthsFrom(`${y}-01`, `${y}-12`),
       days: daysUpTo(`${y}-01-01`, lastDay, office.today),
       lastDay,
-      label: monthRangeWords(`${y}-01`, `${y}-12`),
+      label: monthRangeWords(`${y}-01`, `${y}-12`, figures),
       finalisable: true,
     };
   }
@@ -189,7 +196,7 @@ export function resolveWindow(
       months: monthsFrom(first, anchor),
       days: daysUpTo(`${first}-01`, lastDay, office.today),
       lastDay,
-      label: monthRangeWords(first, anchor),
+      label: monthRangeWords(first, anchor, figures),
       finalisable: false,
     };
   }
@@ -203,7 +210,7 @@ export function resolveWindow(
     months,
     days: daysUpTo(from, lastDay, office.today),
     lastDay,
-    label: whole ? monthRangeWords(months[0], months[months.length - 1]) : dayRangeWords(from, lastDay),
+    label: whole ? monthRangeWords(months[0], months[months.length - 1], figures) : dayRangeWords(from, lastDay, figures),
     finalisable: true,
   };
 }

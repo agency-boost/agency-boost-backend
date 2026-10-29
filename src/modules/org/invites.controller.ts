@@ -7,9 +7,11 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
+import { readerOfRequest } from '@/common/i18n/reader';
 import { RateLimiter } from '@/modules/auth/rate-limiter';
 import { AddAgentDto, DeclineTransferDto } from './invites.dto';
 import { InvitesService } from './invites.service';
+import { ONBOARDING_REFUSALS } from './onboarding.messages';
 import { TransfersService } from './transfers.service';
 
 /**
@@ -162,7 +164,7 @@ export class InviteLinkController {
     if (retryAfter !== null) {
       throw new DomainException(
         ErrorCode.AUTH_RATE_LIMITED,
-        `Too many attempts. Try again in ${Math.ceil(retryAfter / 60)} minute(s).`,
+        ONBOARDING_REFUSALS.AUTH_RATE_LIMITED.tooMany({ minutes: Math.ceil(retryAfter / 60) }),
         HttpStatus.TOO_MANY_REQUESTS,
         { retryAfterSeconds: retryAfter },
       );
@@ -185,7 +187,8 @@ export class InviteLinkController {
   @ApiResponse(refusal(429, '`AUTH_RATE_LIMITED` — too many link openings from this address.'))
   async banner(@Param('token') token: string, @Req() req: Request) {
     this.limit(`invite-link:ip:${req.ip ?? 'unknown'}`, 60);
-    return this.invites.banner(token);
+    // A public route has no context, and still a reader: the one `AuthGuard` read off the request's header.
+    return this.invites.banner(token, readerOfRequest(req));
   }
 
   @ApiBearerAuth()

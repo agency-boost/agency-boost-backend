@@ -1,5 +1,6 @@
 import type { SessionView } from './auth.service';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { LANGUAGES, type Language } from '@/domain/constants';
 
 /**
  * The shapes `AuthController` builds itself rather than handing back from a service, and
@@ -108,6 +109,24 @@ export class MeUserDto {
     description: 'Their membership\'s, in the office this session is in; until they have one, what they registered with.',
   })
   workStatus!: string | null;
+
+  /*
+   * The language they read AgencyBoost in (ADR-0179 §2, P18.98-T2): set with `PATCH /auth/me`. Never `null` here —
+   * `users.locale` is, for somebody who has chosen nothing, and that reads Bahasa Indonesia.
+   */
+  @ApiProperty({
+    type: String, enum: LANGUAGES, example: 'id',
+    description: 'The language in force: the one this account chose, or `id`, Bahasa Indonesia, for one that has '
+      + 'chosen none (`localeChosen` false). `id` or `en`; set with `PATCH /auth/me`.',
+  })
+  locale!: Language;
+
+  @ApiProperty({
+    type: Boolean,
+    description: 'Whether this account has chosen a language. A browser follows `locale` only when it has: an account '
+      + 'with none keeps the language the browser already reads in (the `ab_lang` cookie) and saves nothing.',
+  })
+  localeChosen!: boolean;
 }
 
 /** The participation half. Null for somebody who has signed in but joined no office yet. */

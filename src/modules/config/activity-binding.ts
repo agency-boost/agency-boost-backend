@@ -1,4 +1,8 @@
+import type { FieldSentence } from '@/common/validation/fields';
 import { BINDING_CODES_MAX, CASCADE_ACTIVITY_CODES } from '@/domain/constants';
+import { CONFIG_REFUSALS } from './config.messages';
+
+const SAY = CONFIG_REFUSALS.VALIDATION_FAILED;
 
 /**
  * **The three cascade roles** (ADR-0163 §1), in the prototype's order: *Set appointment*, *Sales meeting*,
@@ -14,7 +18,7 @@ export interface CascadeBinding {
   closings: string[];
 }
 
-/** The client's words for each role (ADR-0160), as a refusal names them. */
+/** The client's words for each role (ADR-0160), as a refusal names them — in both languages (§A.6). */
 export const BINDING_ROLE_LABEL: Record<BindingRole, string> = {
   leads: 'Set appointment',
   appointments: 'Sales meeting',
@@ -54,48 +58,45 @@ export function roleOfCode(binding: CascadeBinding): Map<string, BindingRole> {
 }
 
 /**
- * **What is wrong with a binding, one sentence each** — the one checker the office's write, a template's publish
- * and provisioning share, so the three cannot disagree about what is valid.
+ * **What is wrong with a binding, one sentence each**, in both languages (P18.98-T5 AC-3) — the one checker the
+ * office's write, a template's publish and provisioning share, so the three cannot disagree about what is valid.
  *
  * - each role a list of codes, at least one and at most `BINDING_CODES_MAX`;
  * - a code in one role only — counted twice it would be a lead and a meeting at once;
  * - every code `known`: one of the office's activity types (archived allowed, for its history), or of the
  *   template's taxonomy.
  */
-export function bindingProblems(input: unknown, known: ReadonlySet<string>): string[] {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    return ['The activity binding must name the codes for Set appointment, Sales meeting and Submission polis.'];
-  }
-  const problems: string[] = [];
+export function bindingProblems(input: unknown, known: ReadonlySet<string>): FieldSentence[] {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return [SAY.bindingNotAnObject];
+  const problems: FieldSentence[] = [];
   const seen = new Map<string, BindingRole>();
   for (const role of BINDING_ROLES) {
     const codes = (input as Record<string, unknown>)[role];
     const label = BINDING_ROLE_LABEL[role];
     if (!Array.isArray(codes) || codes.some((code) => typeof code !== 'string' || code.trim() === '')) {
-      problems.push(`${label} must be a list of activity type codes.`);
+      problems.push(SAY.bindingNotAList({ label }));
       continue;
     }
     if (codes.length === 0) {
-      problems.push(`${label} counts no activity type. Bind at least one, or the summary counts nothing for it.`);
+      problems.push(SAY.bindingCountsNone({ label }));
       continue;
     }
     if (codes.length > BINDING_CODES_MAX) {
-      problems.push(`${label} names ${codes.length} activity types; at most ${BINDING_CODES_MAX}.`);
+      problems.push(SAY.bindingTooMany({ label, count: codes.length, max: BINDING_CODES_MAX }));
     }
     for (const code of codes as string[]) {
       const other = seen.get(code);
       if (other) {
         problems.push(other === role
-          ? `${label} names ${code} twice.`
-          : `${code} is bound to both ${BINDING_ROLE_LABEL[other]} and ${label}. One activity counts in one place.`);
+          ? SAY.bindingTwice({ label, code })
+          : SAY.bindingInTwoRoles({ code, other: BINDING_ROLE_LABEL[other], label }));
         continue;
       }
       seen.set(code, role);
     }
     const unknown = [...new Set((codes as string[]).filter((code) => !known.has(code)))];
     if (unknown.length) {
-      problems.push(`${label} names ${unknown.join(', ')}, which ${unknown.length === 1 ? 'is' : 'are'} not `
-        + `${unknown.length === 1 ? 'an activity type' : 'activity types'} here.`);
+      problems.push(SAY.bindingUnknownCodes({ label, codes: unknown }));
     }
   }
   return problems;

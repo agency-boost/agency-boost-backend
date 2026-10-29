@@ -1,3 +1,5 @@
+import { readerIn } from '@/common/i18n/reader';
+import type { DomainException } from '@/common/errors/domain.exception';
 import { checkEvent, checkEventType } from './event-input';
 
 /**
@@ -150,5 +152,56 @@ describe('reading the bodies nobody sends on purpose (P18.5 exit review)', () =>
   it('P18.5-T5 AC-9 a location link over 500 characters is refused', () => {
     expect(() => checkEvent({ locationUrl: `https://x.test/${'a'.repeat(500)}` }, { partial: true }))
       .toThrow(/locationUrl is at most 500 characters/);
+  });
+});
+
+/** **The same refusals, in Bahasa Indonesia** (P18.98-T5 AC-3): each violation a sentence, the message them all. */
+describe('P18.98-T5 AC-3 an event body’s violations, in both languages', () => {
+  const refused = (read: () => unknown): DomainException => {
+    try {
+      read();
+    } catch (err) {
+      return err as DomainException;
+    }
+    throw new Error('expected a refusal');
+  };
+
+  it('P18.98-T5 AC-3 every field sentence reads in Indonesian; the English, the message and the code are unchanged', () => {
+    const err = refused(() => checkEvent({
+      code: 'KICKOFF', typeCode: 'TRAINING', title: 'Kickoff', startsAt: 'next tuesday', endsAt: '2026-10-01T06:00:00Z',
+      locationUrl: 42, audience: { issuer: 'kpm', scope: 'leaders', inviteeMembershipIds: ['a', 'b'] },
+    }));
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.details).toEqual({ violations: [
+      'locationUrl must be text.',
+      'startsAt is not a date and time.',
+      'audience.inviteeMembershipIds holds 2 value(s) that are not membership ids.',
+      'audience.scope "leaders" invites everybody it describes, so it takes no invitee list.',
+    ] });
+    const id = err.detailsFor(readerIn('id')) as { violations: string[] };
+    expect(id.violations).toEqual([
+      'locationUrl harus berupa teks.',
+      'startsAt bukan tanggal dan waktu yang valid.',
+      'audience.inviteeMembershipIds berisi 2 nilai yang bukan ID anggota.',
+      'audience.scope "leaders" mengundang semua orang yang dicakupnya, jadi tidak menerima daftar undangan.',
+    ]);
+    expect(err.messageFor(readerIn('id'))).toBe(id.violations.join('; '));
+  });
+
+  it('P18.98-T5 AC-3 a type’s colour, a missing audience, a text too long and an audience that is not an object', () => {
+    const say = (read: () => unknown) => refused(read).detailsFor(readerIn('id'));
+    expect(say(() => checkEventType({ code: 'CLINIC', label: 'Clinic', color: 'blue' })))
+      .toEqual({ violations: ['color harus berupa nilai hex, misalnya #2D9CDB.'] });
+    expect(say(() => checkEventType({ code: 'CLINIC', label: 'Clinic', emoji: '🩺🩺🩺🩺🩺' })))
+      .toEqual({ violations: ['emoji paling banyak 8 karakter.'] });
+    expect(say(() => checkEvent({ audience: 'KPM | All agents' }, { partial: true })))
+      .toEqual({ violations: ['audience harus berupa objek berisi kolom.'] });
+    expect(say(() => checkEvent({ audience: { issuer: 'kpm', scope: 'x', inviteeMembershipIds: 'a' } }, { partial: true })))
+      .toEqual({ violations: [
+        'audience.scope harus salah satu dari: all_agents, select_agents, leaders, select_leaders.',
+        'audience.inviteeMembershipIds harus berupa daftar.',
+      ] });
+    const { violations } = say(() => checkEvent({})) as { violations: string[] };
+    expect(violations).toEqual(expect.arrayContaining(['code wajib diisi.', 'audience wajib diisi.', 'endsAt wajib diisi.']));
   });
 });

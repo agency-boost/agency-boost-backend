@@ -7,6 +7,7 @@ import { Observable } from 'rxjs';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { PRODUCTION_UPLOAD } from '@/domain/constants';
+import { PRODUCTION_REFUSALS } from './production.messages';
 
 /** The one file a preview reads, held in memory: `buffer` is the bytes as they arrived. */
 export interface UploadedCsv {
@@ -51,7 +52,7 @@ export class ProductionUploadInterceptor implements NestInterceptor {
       if (err instanceof PayloadTooLargeException || code === 'LIMIT_FILE_SIZE') {
         throw new DomainException(
           ErrorCode.ASSET_TOO_LARGE,
-          `The file is larger than ${PRODUCTION_UPLOAD.MAX_BYTES / 1024 / 1024} MB. The template for a whole office is a few kilobytes — check this is the right file.`,
+          PRODUCTION_REFUSALS.ASSET_TOO_LARGE.fileTooLarge({ mb: PRODUCTION_UPLOAD.MAX_BYTES / 1024 / 1024 }),
           HttpStatus.PAYLOAD_TOO_LARGE,
           { maxBytes: PRODUCTION_UPLOAD.MAX_BYTES },
         );
@@ -60,7 +61,7 @@ export class ProductionUploadInterceptor implements NestInterceptor {
       if (err instanceof HttpException) throw err;
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'The upload could not be read as a form. Send the filled template as the `file` field, and the month as `month`.',
+        PRODUCTION_REFUSALS.VALIDATION_FAILED.notAForm,
         HttpStatus.BAD_REQUEST,
         { reason: err instanceof Error ? err.message : String(err) },
       );

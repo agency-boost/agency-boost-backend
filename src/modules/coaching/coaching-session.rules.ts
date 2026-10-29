@@ -1,6 +1,9 @@
+import type { Reader } from '@/common/i18n/reader';
+import { render, type Sentence } from '@/common/i18n/sentence';
 import { addDays, type LocalDate } from '@/common/time/local-day';
 import { COACHING } from '@/domain/constants';
 import { byNextAction } from '@/modules/leads/lead-readings';
+import { COACHING_MESSAGES, COACHING_REFUSALS } from './coaching.messages';
 import type {
   CoachingActionItem, CoachingLastWeekItem, CoachingLeadAction, CoachingSessionCorrection, CoachingTip,
 } from './coaching-session.schema';
@@ -75,11 +78,13 @@ export function latestFinalized(session: {
 
 /**
  * ***Follow up with {name}*** when a lead's next action carries no note (`Overall.html:11057`): the
- * prototype's words for a dated lead with nothing written beside the date.
+ * prototype's words for a dated lead with nothing written beside the date — **for `reader`** (P18.98-T5
+ * AC-4, AC-6): the request's, live; the finalizing leader's, when the session stores them. A note is the
+ * lead's own, as typed.
  */
-export function leadActionText(lead: { name: string; nextActionNote: string | null }): string {
+export function leadActionText(lead: { name: string; nextActionNote: string | null }, reader: Reader): string {
   const note = lead.nextActionNote?.trim();
-  return note ? note : `Follow up with ${lead.name}`;
+  return note ? note : render(COACHING_MESSAGES.followUpWith({ name: lead.name }), reader);
 }
 
 /**
@@ -87,12 +92,12 @@ export function leadActionText(lead: { name: string; nextActionNote: string | nu
  * date, **closed ones included**, nearest first — and in the order they were registered on a tie, then by
  * id, so two reads never shuffle (`byNextAction`, the leads module's own order).
  */
-export function leadActionsOf(leads: readonly SessionLead[]): CoachingLeadAction[] {
+export function leadActionsOf(leads: readonly SessionLead[], reader: Reader): CoachingLeadAction[] {
   return leads
     .filter((lead) => lead.nextActionDate !== null)
     .sort(byNextAction)
     .map((lead) => ({
-      leadId: lead.id, leadName: lead.name, dueDate: lead.nextActionDate as string, text: leadActionText(lead),
+      leadId: lead.id, leadName: lead.name, dueDate: lead.nextActionDate as string, text: leadActionText(lead, reader),
     }));
 }
 
@@ -148,19 +153,23 @@ export interface FinalizeRefusal {
   leadName?: string;
 }
 
-/** The prototype's sentence for each (`Overall.html:11111-11117`), which the refusal's message carries. */
-export function finalizeSentence(refusal: FinalizeRefusal): string {
+/**
+ * The prototype's sentence for each (`Overall.html:11111-11117`), which the refusal's message carries — in both
+ * languages (P18.98-T5 AC-2).
+ */
+export function finalizeSentence(refusal: FinalizeRefusal): Sentence<'COACHING_SESSION_INCOMPLETE'> {
+  const SAY = COACHING_REFUSALS.COACHING_SESSION_INCOMPLETE;
   switch (refusal.rule) {
     case 'NO_ACTION_ITEM':
-      return 'Add at least one action item before finalizing.';
+      return SAY.noActionItem;
     case 'EMPTY_TIP':
-      return 'Fill in or remove the empty coaching tip before finalizing.';
+      return SAY.emptyTip;
     case 'EMPTY_ACTION_ITEM':
-      return 'Fill in or remove the empty action item before finalizing.';
+      return SAY.emptyActionItem;
     case 'UNDATED_ACTION_ITEM':
-      return 'Every action item needs a date before finalizing.';
+      return SAY.undatedActionItem;
     case 'LEAD_THIS_MONTH_UNDATED':
-      return `${refusal.leadName} is tagged "this month" but has no next action date set — add one before finalizing.`;
+      return SAY.leadThisMonthUndated({ leadName: refusal.leadName as string });
   }
 }
 

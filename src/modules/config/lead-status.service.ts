@@ -1,10 +1,15 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
 import { AuditService } from '@/modules/audit/audit.service';
 import { LeadStatusRepository } from './activity.repository';
 import { LeadPipeline, LeadStatusDocument } from './lead-status.schema';
 import { checkLeadStatusCreate, checkLeadStatusLabel } from './config-input';
+import { CONFIG_REFUSALS } from './config.messages';
+
+/** The pipelines' own refusals, in both languages (P18.98-T5 AC-3). */
+const SAY = CONFIG_REFUSALS.VALIDATION_FAILED;
 
 export interface LeadStatusView {
   id: string;
@@ -57,7 +62,7 @@ export class LeadStatusService {
     const { code } = input;
     // Across both pipelines: one code must not mean two things in one office.
     if (await this.statuses.exists(ctx, { code })) {
-      throw new BadRequestException(`This office already has a lead status called ${code}.`);
+      throw new InvalidRequestException(SAY.leadStatusTaken({ code }));
     }
 
     const inPipeline = await this.statuses.count(ctx, { pipeline: input.pipeline });
@@ -104,7 +109,7 @@ export class LeadStatusService {
     const target = await this.statuses.findById(ctx, id);
     if (!target) throw new NotFoundException('Lead status');
     if (target.status === 'archived') {
-      throw new BadRequestException('An archived status cannot be the one that closes a pipeline.');
+      throw new InvalidRequestException(SAY.archivedCannotClose);
     }
 
     const current = await this.statuses.find(ctx, {
@@ -142,13 +147,10 @@ export class LeadStatusService {
     const target = await this.statuses.findById(ctx, id);
     if (!target) throw new NotFoundException('Lead status');
     if (isLateStage && target.isTerminal) {
-      throw new BadRequestException(
-        'This is the stage that closes the pipeline, so a lead sitting on it has already '
-        + 'closed. Flag a stage before it instead.',
-      );
+      throw new InvalidRequestException(SAY.terminalIsClosed);
     }
     if (isLateStage && target.status === 'archived') {
-      throw new BadRequestException('An archived stage holds no leads, so it counts nothing.');
+      throw new InvalidRequestException(SAY.archivedHoldsNoLeads);
     }
     if (target.isLateStage === isLateStage) return this.view(target);
 
@@ -166,9 +168,7 @@ export class LeadStatusService {
     const live = await this.statuses.find(ctx, { pipeline });
     const known = new Set(live.map((r) => String(r._id)));
     if (ids.length !== known.size || ids.some((id) => !known.has(id))) {
-      throw new BadRequestException(
-        `Send every ${pipeline} status, once each, in the order you want them.`,
-      );
+      throw new InvalidRequestException(SAY.sendEveryStatus({ pipeline }));
     }
     await Promise.all(ids.map((id, i) => this.statuses.updateById(ctx, id, { $set: { rank: i + 1 } })));
     await this.record(ctx, 'lead_status.reordered', ctx.kpmId ?? '', { pipeline, count: ids.length });
@@ -181,9 +181,7 @@ export class LeadStatusService {
     if (target.isTerminal) {
       // Archiving it would leave the pipeline with no way to be marked successful, and
       // nothing on the leads screen would say why the tick stopped working.
-      throw new BadRequestException(
-        'This is the stage that closes the pipeline. Make another one terminal first.',
-      );
+      throw new InvalidRequestException(SAY.terminalCannotArchive);
     }
 
     const updated = await this.statuses.updateById(ctx, id, {

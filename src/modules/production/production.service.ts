@@ -27,6 +27,7 @@ import type { ReadUpload } from './production-preview';
 import { requireMonth, requireOffice } from './production-guards';
 import { orgTreeOrder } from './production-roster-order';
 import { readCell } from './production-readings';
+import { PRODUCTION_REFUSALS } from './production.messages';
 
 export { requireMonth, requireOffice };
 
@@ -240,7 +241,7 @@ export class ProductionService {
     if (!upload) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Attach the filled template as the `file` field.',
+        PRODUCTION_REFUSALS.VALIDATION_FAILED.attachFile,
         HttpStatus.BAD_REQUEST,
         { field: 'file' },
       );
@@ -259,7 +260,8 @@ export class ProductionService {
       ])) as StoredFigures;
     };
 
-    const preview = buildPreview({ records: read.records, delimiter: read.delimiter, roster, stored: figures });
+    // Each issue in the reader's words: a preview answers them, and a commit keeps its issues in them (P18.98-T5).
+    const preview = buildPreview({ records: read.records, delimiter: read.delimiter, roster, stored: figures }, ctx.reader);
 
     // Which of the figures the file would change were corrected by hand (ADR-0053). `buildPreview`
     // sees numbers only; the stored cells say who corrected what, and why.

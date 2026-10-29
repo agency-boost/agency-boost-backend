@@ -198,6 +198,46 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
       expect(await audit()).toEqual([]);
     });
 
+    it('P18.98-T5 AC-7 refuses a hand tick of a linked item in Indonesian, saying in the reader’s words what completes it', async () => {
+      await h.start('BUDI', '2026-07-15');
+      h.as('BUDI');
+      const english = await h.http().put('/activation/me/items/GOAL_SETTING').send({ done: true }).expect(409);
+      expect(english.body.error).toMatchObject({
+        code: 'ACTIVATION_ITEM_AUTOMATIC', details: { code: 'GOAL_SETTING' },
+        message: 'This item completes on its own, when the hire has saved any goal since joining. Nobody ticks it by hand.',
+      });
+      const indonesian = await h.http().put('/activation/me/items/ACTIVITY_TRACKER_WEEKLY').set('Accept-Language', 'id')
+        .send({ done: true }).expect(409);
+      expect(indonesian.body.error).toMatchObject({
+        code: 'ACTIVATION_ITEM_AUTOMATIC', details: { code: 'ACTIVITY_TRACKER_WEEKLY' },
+        message: 'Item ini selesai dengan sendirinya, saat rekrut telah mencatat aktivitas selama empat minggu berturut-turut. '
+          + 'Tidak ada yang mencentangnya secara manual.',
+      });
+      // The pipe's own sentence for a date that is no day, the field named as the API names it.
+      const day = await h.http().put('/activation/me/items/CRM_SETUP').set('Accept-Language', 'id')
+        .send({ done: true, date: '1 Aug' }).expect(400);
+      expect(day.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'date harus berupa tanggal dengan format YYYY-MM-DD.',
+        details: { violations: ['date harus berupa tanggal dengan format YYYY-MM-DD.'] },
+      });
+      expect((await h.http().put('/activation/me/items/CRM_SETUP').send({ done: true, date: '1 Aug' }).expect(400)).body.error)
+        .toMatchObject({ details: { violations: ['date must be a day, written YYYY-MM-DD.'] } });
+    });
+
+    it('P18.98-T5 AC-4 reads the hire’s activation in Indonesian: each link’s words, a data item’s source label', async () => {
+      await h.start('BUDI', '2026-07-15');
+      h.as('BUDI');
+      const view = (await h.http().get('/activation/me').set('Accept-Language', 'id').expect(200)).body;
+      const link = (code: string) => (item(view, code) as unknown as { link: Record<string, unknown> }).link;
+      expect(link('GOAL_SETTING')).toMatchObject({ label: 'Goal Settings', completesWhen: 'rekrut telah menyimpan goal apa pun sejak bergabung' });
+      expect(link('FIRST_CASE_CLOSED')).toMatchObject({ label: 'Data penjualan', form: 'closing' });
+      expect(link('WEEKLY_CHECK_IN')).toMatchObject({ label: 'Sesi coaching', form: 'one_on_one' });
+      // What the hire's office typed stays as typed, in both languages.
+      expect(item(view, 'GOAL_SETTING')).toMatchObject({ code: 'GOAL_SETTING' });
+      expect(view.aspects[0].label).toBe('1. Introduction');
+    });
+
     /*
      * P18.5-T3 AC-3: this asserted the opposite until 2026-10-10 — *"stays tickable by hand until its evaluator
      * exists"*. The evaluator exists: a module the office offers is done when the hire marks it *Done*, and nobody

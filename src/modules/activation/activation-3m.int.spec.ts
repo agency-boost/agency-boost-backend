@@ -278,6 +278,49 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
       expect(await marks()).toEqual([]);
     });
 
+    it('P18.98-T5 AC-7 refuses Mark left in Indonesian: the same code and details, in the reader’s words', async () => {
+      await h.start('LUKAS', '2026-08-01'); // an Agent with a direct report, Tari
+      expect((await left('AGUS', 'LUKAS').set('Accept-Language', 'id').expect(409)).body.error).toMatchObject({
+        code: 'NEW_HIRE_HAS_REPORTS', details: { directCount: 1 },
+        message: '1 orang melapor kepadanya. Pindahkan orang itu ke leader lain sebelum menandainya keluar.',
+      });
+      await existingAgent('RINA', '2026-08-01');
+      expect((await left('SARI', 'RINA').set('Accept-Language', 'id').expect(409)).body.error).toMatchObject({
+        code: 'NOT_A_NEW_HIRE',
+        message: 'Dia bergabung sebagai agent yang sudah ada, jadi tidak ada 3M activation yang perlu diakhiri. Hanya new hire '
+          + 'yang dapat ditandai keluar.',
+      });
+      await h.start('DODI', '2024-03-01');
+      expect((await left('AGUS', 'DODI').set('Accept-Language', 'id').expect(409)).body.error).toMatchObject({
+        code: 'NEW_HIRE_NOT_MARKABLE', details: { reason: 'past_the_year', joinDate: '2024-03-01' },
+        message: 'Dia bergabung lebih dari setahun yang lalu, jadi dia tidak lagi ada di New Hires dan tidak ada hasil 3M yang '
+          + 'perlu ditentukan. Untuk mengeluarkannya dari tim, keluarkan dia.',
+      });
+      await h.start('BUDI', '2026-07-15');
+      await left('SARI', 'BUDI').expect(200);
+      expect((await left('SARI', 'BUDI').set('Accept-Language', 'id').expect(409)).body.error).toMatchObject({
+        code: 'NEW_HIRE_ALREADY_LEFT', message: 'Dia sudah ditandai keluar.', details: { leftOn: TODAY },
+      });
+    });
+
+    it('P18.98-T5 AC-6 stores the reason Mark left writes in the language of whoever marks it — kept as written', async () => {
+      await h.start('BUDI', '2026-07-15');
+      await h.start('INDAH', '2026-07-20');
+      await left('SARI', 'BUDI').expect(200);
+      await left(h.officeOnly('OWNER'), 'INDAH').set('Accept-Language', 'id').expect(200);
+      const reasonOf = async (who: Who) =>
+        (await h.col('membershipHistory').findOne({ membershipId: id(who), eventType: 'removed' }))!.reason;
+      expect(await reasonOf('BUDI')).toBe('Left the office as a new hire.');
+      expect(await reasonOf('INDAH')).toBe('Keluar dari KPM sebagai new hire.');
+      // Stored as text: a later read in the other language, or a later writer, changes neither.
+      h.as('SARI');
+      await h.http().get('/new-hires').set('Accept-Language', 'id').expect(200);
+      expect(await reasonOf('BUDI')).toBe('Left the office as a new hire.');
+      const removed = await h.col('auditLog').find({ action: 'member.removed' }).toArray();
+      expect(removed.map((entry) => entry.after.reason).sort())
+        .toEqual(['Keluar dari KPM sebagai new hire.', 'Left the office as a new hire.']);
+    });
+
     it('P18.96-T6 AC-4 permitted: the hire’s AAB, the AB above, the Owner and an Admin as such — new_hire:mark_left', async () => {
       for (const [as, who] of [
         ['SARI', 'BUDI'], ['AGUS', 'RINA'], [h.officeOnly('OWNER'), 'DODI'], [h.officeOnly('ADMIN'), 'INDAH'],

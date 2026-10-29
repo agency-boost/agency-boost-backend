@@ -1,4 +1,7 @@
+import type { DomainException } from '@/common/errors/domain.exception';
+import type { Sentence } from '@/common/i18n/sentence';
 import { GOAL_DEFAULTS, RATIO_BENCHMARKS, SEED_RATIO_DEFINITIONS, TIME } from '@/domain/constants';
+import { english, indonesian, indonesianAll } from '../../../test/i18n';
 import {
   annualTargetOf, cascadeCounts, clampMonths, computeCascade, defaultMonthsLeft, defaultRates, policiesPerWeekOf,
   weeklyOf, type CascadeInputs,
@@ -294,6 +297,32 @@ describe('the goal cascade', () => {
         throw new Error('should have refused');
       } catch (err) {
         expect((err as { details: { violations: string[] } }).details.violations).toHaveLength(3);
+      }
+    });
+
+    it('P18.98-T5 AC-2 says each in both languages, one after another, Goal Settings’ labels kept English', () => {
+      try {
+        computeCascade({ ...defaults, caseSizeMinor: 0, closingRatePct: 0 });
+        throw new Error('should have refused');
+      } catch (err) {
+        const refusal = err as DomainException;
+        expect(english(refusal.sentence)).toBe(
+          'Average case size must be above zero: it is what a policy is worth. Closing rate must be above 0 and at most 100 per cent.',
+        );
+        expect(indonesian(refusal.sentence)).toBe(
+          'Average case size harus di atas nol: itulah nilai satu polis. Closing rate harus di atas 0 dan paling tinggi 100 persen.',
+        );
+        expect(indonesianAll(refusal.givenDetails!.violations as Sentence[])).toEqual([
+          'Average case size harus di atas nol: itulah nilai satu polis.',
+          'Closing rate harus di atas 0 dan paling tinggi 100 persen.',
+        ]);
+      }
+      try {
+        annualTargetOf({ ...defaults, mode: 'from_savings', commissionRatePct: 0 });
+        throw new Error('should have refused');
+      } catch (err) {
+        expect(indonesian((err as DomainException).sentence))
+          .toBe('Target tabungan memerlukan commission rate di atas nol untuk menjadi target APE.');
       }
     });
   });

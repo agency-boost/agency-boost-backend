@@ -1,3 +1,4 @@
+import { VALIDATION_PIPE_OPTIONS } from '@/bootstrap';
 import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import {
   TrainingCategory, TrainingCategorySchema,
@@ -200,6 +201,16 @@ class Mailbox extends NotificationChannelAdapter {
 
 const mailbox = new Mailbox();
 
+/** The emails sent to one person for one template, once at least `count` of them have left (they leave off the request). */
+async function waitForMail(userId: string, templateId: string, count = 1) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const found = mailbox.sent.filter((m) => m.to.userId === userId && m.to.templateId === templateId);
+    if (found.length >= count) return found;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`fewer than ${count} ${templateId} were sent to ${userId}`);
+}
+
 describe('auth and admin over HTTP', () => {
   let app: INestApplication;
   let mongoUri: string;
@@ -323,12 +334,8 @@ describe('auth and admin over HTTP', () => {
     app.use(cookieParser());
     app.setGlobalPrefix('api');
     app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true, forbidNonWhitelisted: true, transform: true,
-        transformOptions: { enableImplicitConversion: false },
-      }),
-    );
+    // The server's own pipe (`VALIDATION_PIPE_OPTIONS`), its refusals in the reader's language (P18.98-T5 AC-3).
+    app.useGlobalPipes(new ValidationPipe(VALIDATION_PIPE_OPTIONS));
     app.useGlobalGuards(app.get(AuthGuard), app.get(PermissionsGuard));
     await app.init();
     // Listen once, for the whole suite.
@@ -1555,6 +1562,104 @@ describe('auth and admin over HTTP', () => {
         cookie = next.find((c) => c.startsWith('agencyboost_refresh=')) ?? cookie;
       }
       expect(limited).toBe(true);
+    });
+  });
+
+  /*
+   * **P18.98-T5 — the auth family in the reader's language** (ADR-0179 §7): a refusal, a validation message and the two
+   * auth emails, over HTTP. The request's language is the `Accept-Language` the app sends, else the signed-in person's
+   * saved `users.locale`, else a reader who has chosen nothing — English until the Indonesian default is live.
+   */
+  describe('P18.98-T5 the auth family in the reader’s language', () => {
+    it('AC-7 refuses a wrong password in Indonesian, the code unchanged', async () => {
+      const user = await makeUser(`id-login-${Math.random()}@kpm.test`);
+      const refused = await api().post('/api/v1/auth/login').set('Accept-Language', 'id')
+        .send({ email: user.email, password: 'not the password at all' }).expect(401);
+      expect(refused.body.error).toMatchObject({
+        code: 'AUTH_INVALID_CREDENTIALS', message: 'Email atau kata sandi itu salah.',
+      });
+      const english = await api().post('/api/v1/auth/login')
+        .send({ email: user.email, password: 'not the password at all' }).expect(401);
+      expect(english.body.error.message).toBe('That email or password is not correct.');
+    });
+
+    it('AC-7 refuses a request with no token in Indonesian, before anybody is known', async () => {
+      const refused = await api().get('/api/v1/auth/me').set('Accept-Language', 'id').expect(401);
+      expect(refused.body.error).toMatchObject({ code: 'AUTH_TOKEN_INVALID', message: 'Masuk untuk melanjutkan.' });
+    });
+
+    it('AC-3 writes a validation message in Indonesian, the field named as the API names it', async () => {
+      const user = await makeUser(`id-locale-${Math.random()}@kpm.test`);
+      const refused = await api().patch('/api/v1/auth/me').set('Accept-Language', 'id')
+        .set({ Authorization: `Bearer ${user.accessToken}` }).send({ locale: 'fr' }).expect(400);
+      expect(refused.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'locale harus id atau en',
+        details: { violations: ['locale harus id atau en'] },
+      });
+    });
+
+    it('AC-1 reads the saved language where no header names one, and the header over it', async () => {
+      const user = await makeUser(`id-saved-${Math.random()}@kpm.test`);
+      const auth = { Authorization: `Bearer ${user.accessToken}` };
+      await api().patch('/api/v1/auth/me').set(auth).send({ locale: 'id' }).expect(200);
+
+      const saved = await api().patch('/api/v1/auth/me').set('Accept-Language', '').set(auth).send({ locale: 'fr' }).expect(400);
+      expect(saved.body.error.message).toBe('locale harus id atau en');
+      const sent = await api().patch('/api/v1/auth/me').set('Accept-Language', 'en').set(auth).send({ locale: 'fr' }).expect(400);
+      expect(sent.body.error.message).toBe('locale must be id or en');
+      // A browser's own header is no choice: the saved language stands.
+      const browser = await api().patch('/api/v1/auth/me').set('Accept-Language', 'en-US,en;q=0.9').set(auth)
+        .send({ locale: 'fr' }).expect(400);
+      expect(browser.body.error.message).toBe('locale harus id atau en');
+    });
+
+    it('AC-1 reads nobody’s choice as English until the default is live, with no header and nothing saved', async () => {
+      const user = await makeUser(`id-none-${Math.random()}@kpm.test`);
+      const refused = await api().patch('/api/v1/auth/me').set('Accept-Language', '')
+        .set({ Authorization: `Bearer ${user.accessToken}` }).send({ locale: 'fr' }).expect(400);
+      expect(refused.body.error.message).toBe('locale must be id or en');
+    });
+
+    it('AC-5 writes the verification email in the language of the page that asked for it', async () => {
+      const companyId = await anInsurer();
+      e2eCodeSeq += 1;
+      const email = `id-verify-${Math.random()}@kpm.test`;
+      await api().post('/api/v1/auth/register').set('Accept-Language', 'id').send({
+        email, password: PASSWORD, fullName: 'Rina Wijaya', companyId, agentCode: String(9000 + e2eCodeSeq), ...PERSONAL,
+      }).expect(201);
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      const user = await users.findOne({ email }).exec();
+      const [sent] = await waitForMail(String(user!._id), 'auth.email_verification');
+      expect(sent.rendered.subject).toBe('[AgencyBoost] Verifikasi alamat email Anda');
+      expect(sent.rendered.body.startsWith('Halo Rina Wijaya,')).toBe(true);
+    });
+
+    it('AC-5 writes the reset email in the language of the page that asked, and English for one with no choice', async () => {
+      const user = await makeUser(`id-reset-${Math.random()}@kpm.test`);
+      await api().post('/api/v1/auth/forgot-password').set('Accept-Language', 'id').send({ email: user.email }).expect(202);
+      const [inIndonesian] = (await waitForMail(user.id, 'auth.password_reset')).slice(-1);
+      expect(inIndonesian.rendered.subject).toBe('[AgencyBoost] Atur ulang kata sandi Anda');
+
+      await api().post('/api/v1/auth/forgot-password').send({ email: user.email }).expect(202);
+      const [inEnglish] = (await waitForMail(user.id, 'auth.password_reset', 2)).slice(-1);
+      expect(inEnglish.rendered.subject).toBe('[AgencyBoost] Reset your password');
+    });
+
+    it('sends one verification email per resend, not two', async () => {
+      const companyId = await anInsurer();
+      e2eCodeSeq += 1;
+      const email = `resend-once-${Math.random()}@kpm.test`;
+      await api().post('/api/v1/auth/register').send({
+        email, password: PASSWORD, fullName: 'Once', companyId, agentCode: String(9000 + e2eCodeSeq), ...PERSONAL,
+      }).expect(201);
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      const id = String((await users.findOne({ email }).exec())!._id);
+      await waitForMail(id, 'auth.email_verification');
+      await api().post('/api/v1/auth/resend-verification').send({ email }).expect(202);
+      await waitForMail(id, 'auth.email_verification', 2);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(mailbox.sent.filter((m) => m.to.userId === id)).toHaveLength(2);
     });
   });
 

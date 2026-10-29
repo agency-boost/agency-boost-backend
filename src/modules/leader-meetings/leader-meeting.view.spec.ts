@@ -1,4 +1,7 @@
-import { firstAgendaTexts, meetingMonth, monthBefore, redated, startingAgenda } from './leader-meeting-agenda';
+import { readerIn } from '@/common/i18n/reader';
+import {
+  firstAgendaTexts, meetingMonth, monthBefore, newActionItem, newAgendaItemText, preparePerformanceData, redated, startingAgenda,
+} from './leader-meeting-agenda';
 import type { LeaderMeetingActionItem } from './leader-meeting.schema';
 import {
   actionItemsInOrder, agendaOf, meetingState, monthlyTargetOf, openItemsOf, partialPeriodsOf, scorecardOf, ytdChangeOf,
@@ -207,6 +210,86 @@ describe('the forum’s rules, unit by unit (P18.1-T2)', () => {
       expect(copy.preparation.filter((_, i) => i !== 1).map((i) => i.text)).toEqual(first.preparation.filter((_, i) => i !== 1).map((i) => i.text));
       // A previous meeting stored before a section existed copies it empty.
       expect(startingAgenda('2026-10-27', { preparation: [] } as never, ids)).toEqual({ preparation: [], during: [], post: [] });
+    });
+  });
+
+  /**
+   * **A new meeting's words are its maker's** (P18.98-T5 AC-6; the glossary's §C9): the first agenda in Bahasa
+   * Indonesia for an Indonesian reader, *RBDO/BDO* kept; the English byte for byte for an English one, and with no
+   * reader. A copied agenda is the office's text: copied as stored, its month item re-dated in its own language.
+   */
+  describe('P18.98-T5 AC-6 the agenda a new meeting starts from, in its maker’s language', () => {
+    const ID = readerIn('id');
+    const EN = readerIn('en');
+
+    it('P18.98-T5 AC-6 the prototype’s ten in Indonesian, and the English unchanged', () => {
+      expect(firstAgendaTexts('2026-10-27', ID)).toEqual({
+        preparation: [
+          'Kumpulkan follow-up & komitmen dari sesi sebelumnya',
+          'Siapkan data kinerja Oktober',
+          'Tinjau scorecard, susun poin pembahasan',
+        ],
+        during: [
+          'Pembaruan proses — tinjau follow-up sebelumnya',
+          'Tinjauan kinerja terhadap ambang batas utama',
+          'Prioritas strategis (Korporat)',
+          'Prioritas strategis (Agency)',
+          'Rangkum langkah berikutnya & tetapkan penanggung jawab',
+        ],
+        post: ['Catat hasil ke dalam templat', 'Catat masukan untuk RBDO/BDO'],
+      });
+      const english = {
+        preparation: [
+          'Compile follow-ups & commitments from prior session',
+          'Prepare October performance data',
+          'Review scorecard, draft talking points',
+        ],
+        during: [
+          'Process update — review prior follow-ups',
+          'Performance review vs. key thresholds',
+          'Strategic priorities (Corporate)',
+          'Strategic priorities (Agency)',
+          'Summarize next steps & assign owners',
+        ],
+        post: ['Document outcomes into template', 'Note feedback for RBDO/BDO'],
+      };
+      expect(firstAgendaTexts('2026-10-27', EN)).toEqual(english);
+      expect(firstAgendaTexts('2026-10-27')).toEqual(english);
+      expect(meetingMonth('2026-08-03', 'id')).toBe('Agustus');
+      expect(preparePerformanceData('2027-01-04', ID)).toBe('Siapkan data kinerja Januari');
+    });
+
+    it('P18.98-T5 AC-6 a copied month item is re-dated in the language it was written in; a reworded one stays as typed', () => {
+      expect(redated('Siapkan data kinerja September', '2026-10-27')).toBe('Siapkan data kinerja Oktober');
+      expect(redated('Siapkan data kinerja Desember', '2027-01-08')).toBe('Siapkan data kinerja Januari');
+      expect(redated('Siapkan data kinerja Sept', '2026-10-27')).toBe('Siapkan data kinerja Sept');
+      expect(redated('Prepare September performance data', '2026-10-27')).toBe('Prepare October performance data');
+    });
+
+    it('P18.98-T5 AC-6 an Indonesian reader’s first meeting; a copy of it made by an English reader keeps its words', () => {
+      let n = 0;
+      const ids = () => `id-${(n += 1)}`;
+      const first = startingAgenda('2026-10-13', null, ids, ID);
+      expect(first.post[1]).toEqual({ itemId: 'id-10', text: 'Catat masukan untuk RBDO/BDO', pic: '', done: false, version: 1 });
+      expect(first.preparation[1].text).toBe('Siapkan data kinerja Oktober');
+      const copy = startingAgenda('2026-11-10', first, ids, EN);
+      expect(copy.preparation.map((i) => i.text)).toEqual([
+        'Kumpulkan follow-up & komitmen dari sesi sebelumnya', 'Siapkan data kinerja November', 'Tinjau scorecard, susun poin pembahasan',
+      ]);
+      expect(startingAgenda('2026-10-13', null, ids, EN).post[1].text).toBe('Note feedback for RBDO/BDO');
+    });
+
+    it('P18.98-T5 AC-6 + Add item and + Add action item write their rows in the adder’s language; TBD is kept', () => {
+      expect(newAgendaItemText(ID)).toBe('Item agenda baru');
+      expect(newAgendaItemText()).toBe('New agenda item');
+      expect(newActionItem(ID)).toEqual({
+        initiative: 'Inisiatif baru', metric: 'Ukuran keberhasilan', action: 'Tindakan baru', pic: 'TBD', status: 'not_planned',
+        remarks: 'TBD',
+      });
+      expect(newActionItem(EN)).toEqual({
+        initiative: 'New initiative', metric: 'Success metric', action: 'New action item', pic: 'TBD', status: 'not_planned',
+        remarks: 'TBD',
+      });
     });
   });
 });

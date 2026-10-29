@@ -175,10 +175,12 @@ export class CampaignEvaluation {
       // The window's last instant (exclusive): what a chase must have stood at to count once final (ADR-0143 §2).
       end: this.clock.endOfLocalDay(office.timezone, window.lastDay),
     });
+    // The window's label is in the reader's figures (P18.98-T5 AC-4): the dialog and the tree print it as it is.
+    const labelIn = ctx.reader.figures;
     for (const campaign of campaigns) {
-      jobs.push(job(campaign, resolveWindow(campaign, where), true));
+      jobs.push(job(campaign, resolveWindow(campaign, where, undefined, labelIn), true));
       if (campaign.window === 'calendar_year' && monthOf(campaign.startsAt, office.timezone) <= `${lastYear}-12`) {
-        jobs.push(job(campaign, resolveWindow(campaign, where, lastYear), false));
+        jobs.push(job(campaign, resolveWindow(campaign, where, lastYear, labelIn), false));
       }
     }
     const locks = new Map<string, Promise<boolean>>();

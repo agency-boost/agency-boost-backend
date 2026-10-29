@@ -1,3 +1,5 @@
+import type { DomainException } from '@/common/errors/domain.exception';
+import { readerIn } from '@/common/i18n/reader';
 import { checkTrainingContent, CONTENT_BOUNDS, emptyContent, storageKeysOf } from './training-content';
 
 /** The refusal's violations, or `[]` when the body passes. */
@@ -73,5 +75,50 @@ describe('checkTrainingContent', () => {
 
   it('collects every violation before refusing', () => {
     expect(violations({ files: [null], links: [link({ url: 'http://x.test' })] })).toHaveLength(2);
+  });
+});
+
+/**
+ * **A module's content refused in Bahasa Indonesia** (P18.98-T5 AC-3): each item named by its place in the reader's
+ * words — *File 1*, *Video 1*, *Tautan 1* — its own field's sentence after it, the English unchanged.
+ */
+describe('P18.98-T5 AC-3 checkTrainingContent, in both languages', () => {
+  const refused = (body: unknown): DomainException => {
+    try {
+      checkTrainingContent(body);
+    } catch (err) {
+      return err as DomainException;
+    }
+    throw new Error('expected a refusal');
+  };
+  const indonesian = (body: unknown) => (refused(body).detailsFor(readerIn('id')) as { violations: string[] }).violations;
+
+  it('P18.98-T5 AC-3 every rule, its item named in Indonesian', () => {
+    expect(indonesian({ files: 'deck.pdf', videos: [[]], links: [link({ url: '' }), link({ url: 'not a url' }), link({ url: 'http://x.test' })] }))
+      .toEqual([
+        'files harus berupa daftar.',
+        'Video 1 harus berupa objek berisi kolom.',
+        'Tautan 1: url wajib diisi.',
+        'Tautan 2: "not a url" bukan alamat web.',
+        'Tautan 3: tautan harus diawali https://. "http://x.test" akan diblokir atau diberi peringatan di ponsel agent.',
+      ]);
+    expect(indonesian({ files: [file({ label: '' })], links: [link({ label: '', id: 'SAME' })], videos: [file({ id: 'SAME', storageKey: 'k2' })] }))
+      .toEqual([
+        'File 1: label harus 1–200 karakter.',
+        'Tautan 1: label harus 1–200 karakter.',
+        'Dua item di modul ini memakai ID yang sama.',
+      ]);
+    const many = Array.from({ length: CONTENT_BOUNDS.perSection + 1 }, () => link());
+    expect(indonesian({ links: many })).toEqual([`Satu modul paling banyak berisi ${CONTENT_BOUNDS.perSection} links; modul ini berisi ${many.length}.`]);
+    expect(indonesian({ files: [null] })).toEqual(['File 1 harus berupa objek berisi kolom.']);
+    expect(indonesian({ links: [{ label: 'Talk' }] })).toEqual(['Tautan 1: url wajib diisi.']);
+  });
+
+  it('P18.98-T5 AC-3 the English and the message are as they were: the sentences joined by "; "', () => {
+    const err = refused({ links: [link({ url: 'http://x.test' })], files: [null] });
+    expect(err.message).toBe('File 1 must be an object of fields.; Link 1: a link must start with https://. "http://x.test" would be '
+      + 'blocked or warned about on an agent’s phone.');
+    expect(err.messageFor(readerIn('id'))).toBe('File 1 harus berupa objek berisi kolom.; Tautan 1: tautan harus diawali https://. '
+      + '"http://x.test" akan diblokir atau diberi peringatan di ponsel agent.');
   });
 });

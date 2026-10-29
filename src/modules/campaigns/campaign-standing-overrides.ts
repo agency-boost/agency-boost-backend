@@ -12,6 +12,7 @@ import { CampaignEvaluation, evaluationInput, fromFrozen } from './campaign-eval
 import { CampaignStandingRepository } from './campaign-standing.repository';
 import type { CampaignStanding, StandingOverride } from './campaign-standing.schema';
 import { CampaignRepository } from './campaign.repository';
+import { CAMPAIGNS_REFUSALS } from './campaigns.messages';
 
 /** What a stored final standing can read: the two an override sets, and the one nothing could decide. */
 type FrozenStatus = StandingOverride['previousStatus'];
@@ -129,7 +130,7 @@ export class CampaignStandingOverrides {
     if (membershipId === me) {
       throw new DomainException(
         ErrorCode.CAMPAIGN_OVERRIDE_SELF,
-        'You can’t override your own result.',
+        CAMPAIGNS_REFUSALS.CAMPAIGN_OVERRIDE_SELF.ownResult,
         HttpStatus.BAD_REQUEST,
         { membershipId: me },
       );
@@ -141,7 +142,7 @@ export class CampaignStandingOverrides {
     if (!evaluated.final) {
       throw new DomainException(
         ErrorCode.CAMPAIGN_STANDING_NOT_FINAL,
-        'This campaign’s result is not final yet. It can be overridden once the last month it reads has locked.',
+        CAMPAIGNS_REFUSALS.CAMPAIGN_STANDING_NOT_FINAL.notFinal,
         HttpStatus.CONFLICT,
         { code: campaign.code },
       );
@@ -164,9 +165,9 @@ export class CampaignStandingOverrides {
       if (status !== null && before === status) {
         throw new DomainException(
           ErrorCode.VALIDATION_FAILED,
-          `The result already reads ${status}.`,
+          CAMPAIGNS_REFUSALS.VALIDATION_FAILED.alreadyReads({ status }),
           HttpStatus.BAD_REQUEST,
-          { violations: [`status already reads ${status}.`], status },
+          { violations: [CAMPAIGNS_REFUSALS.VALIDATION_FAILED.statusAlreadyReads({ status })], status },
         );
       }
       if (status === null && current === null) throw new NotFoundException('Override');
@@ -203,7 +204,7 @@ export class CampaignStandingOverrides {
       if (attempt >= 1) {
         throw new DomainException(
           ErrorCode.VERSION_CONFLICT,
-          'This result changed while it was being corrected. Reload and try again.',
+          CAMPAIGNS_REFUSALS.VERSION_CONFLICT.changedWhileCorrected,
           HttpStatus.CONFLICT,
         );
       }

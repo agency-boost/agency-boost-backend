@@ -13,8 +13,9 @@ import { MembershipRepository } from '@/modules/org/membership.repository';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import {
-  AAB, AB, ADMIN, AGENT, FIXTURE_KPM, OWNER, productionPipe, session, StubAuth, SUPER_ADMIN,
+  AAB, AB, ADMIN, AGENT, FIXTURE_KPM, OWNER, productionPipe, savedLanguage, session, StubAuth, SUPER_ADMIN,
 } from '../../../test/http-permissions';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { listenOnLoopback } from '../../../test/listen';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { AdminController } from './admin.controller';
@@ -183,6 +184,34 @@ describe('PATCH /admin/tenants/:kpmId/subscription, and the reads (P13.2-T3)', (
     const kpm = await office();
     const res = await patch(String(kpm._id), { ...BODY, pricePerLeaderMinor: 100_000_001_00 }).expect(400);
     expect(res.body.error.message).toBe('The price per leader must be from Rp 0 to Rp 100.000.000 a month.');
+  });
+
+  it('P18.98-T5 AC-7 refuses a price, and a date the DTO cannot read, in Indonesian for an Indonesian reader', async () => {
+    const kpm = await office();
+    const price = await patch(String(kpm._id), { ...BODY, pricePerLeaderMinor: 100_000_001_00 })
+      .set(...IN_INDONESIAN).expect(400);
+    expect(price.body.error).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      message: 'Harga per leader harus dari Rp 0 sampai Rp 100.000.000 per bulan.',
+      details: { field: 'pricePerLeaderMinor' },
+    });
+
+    // The DTO's own sentence (`field`): the message and the violation alike, the field named as the API names it.
+    const date = await patch(String(kpm._id), { ...BODY, startDate: '01/10/2026' }).set(...IN_INDONESIAN).expect(400);
+    expect(date.body.error.code).toBe('VALIDATION_FAILED');
+    expect(date.body.error.details.violations).toEqual(['startDate harus berupa tanggal dengan format YYYY-MM-DD']);
+    expect(date.body.error.message).toBe('startDate harus berupa tanggal dengan format YYYY-MM-DD');
+  });
+
+  it('P18.98-T5 AC-1 writes a bound’s figures in English for a reader who chose English', async () => {
+    const kpm = await office();
+    savedLanguage.current = 'en';
+    try {
+      const res = await patch(String(kpm._id), { ...BODY, pricePerLeaderMinor: 100_000_001_00 }).expect(400);
+      expect(res.body.error.message).toBe('The price per leader must be from IDR 0 to IDR 100,000,000 a month.');
+    } finally {
+      savedLanguage.current = null;
+    }
   });
 
   it.each<[string, Record<string, unknown>, string]>([

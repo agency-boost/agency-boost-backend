@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { NotFoundException } from '@/common/errors/domain.exception';
-import { formatDate } from '@/common/format/format';
 import { addDays, isLocalDate } from '@/common/time/local-day';
 import { refuseWith } from '@/common/validation/fields';
 import { ACTIVATION, ACTIVATION_3M } from '@/domain/constants';
@@ -24,6 +23,9 @@ import type {
 import { Activation3MService } from './activation-3m.service';
 import { ActivationItemRecords, type ItemRecordInput } from './activation-records.service';
 import { activationEndsOn, activationState } from './activation-rules';
+import { ACTIVATION_REFUSALS } from './activation.messages';
+
+const SAY = ACTIVATION_REFUSALS.VALIDATION_FAILED;
 
 /**
  * **The leader's side of an activation** (P13-T5, P13-T6): *Your New Hires*, one hire's detail — which the
@@ -231,10 +233,7 @@ export class NewHiresService {
     const office = await this.days.office(ctx);
     const earliest = addDays(office.today, -ACTIVATION.START_DATE_MAX_DAYS_BACK);
     if (!isLocalDate(startDate) || startDate > office.today || startDate < earliest) {
-      refuseWith([
-        `The join date must be a day from ${formatDate(earliest)} to ${formatDate(office.today)}: no later than today, and no more `
-          + `than ${ACTIVATION.START_DATE_MAX_DAYS_BACK} days before it.`,
-      ]);
+      refuseWith([SAY.joinDateRange({ from: earliest, to: office.today, days: ACTIVATION.START_DATE_MAX_DAYS_BACK })]);
     }
     const state = activationState(doc.graduatedAt, office.today, activationEndsOn(office.timezone, doc.startDate));
     if (state !== 'open') throw activationClosed(state);
@@ -270,7 +269,7 @@ export class NewHiresService {
     const doc = await this.reach(ctx, membershipId);
     const trimmed = text.trim();
     if (trimmed.length === 0 || trimmed.length > ACTIVATION.COACHING_NOTE_MAX) {
-      refuseWith([`text must be 1 to ${ACTIVATION.COACHING_NOTE_MAX} characters once trimmed.`]);
+      refuseWith([SAY.coachingNote({ max: ACTIVATION.COACHING_NOTE_MAX })]);
     }
     // Like every other write: nothing on a graduated or expired activation changes (amended 2026-10-03).
     const office = await this.days.office(ctx);

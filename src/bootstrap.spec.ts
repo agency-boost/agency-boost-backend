@@ -1,12 +1,13 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { BadRequestException, INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
+import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IsString } from 'class-validator';
 import { SwaggerModule } from '@nestjs/swagger';
 
 import { configureApp } from './bootstrap';
+import { DomainException } from './common/errors/domain.exception';
 
 jest.mock('@nestjs/swagger', () => ({
   SwaggerModule: { setup: jest.fn() },
@@ -101,18 +102,25 @@ describe('configureApp', () => {
       return pipe;
     }
 
+    /*
+     * The refusal is `400 VALIDATION_FAILED` with `details.violations`, as Nest's own was — now a `DomainException`
+     * whose sentences the error filter writes in the reader's language (P18.98-T5 AC-3; `validationRefusal`).
+     */
     it('rejects an unknown field rather than dropping it silently', async () => {
       const pipe = pipeFrom({ NODE_ENV: 'production' });
-      await expect(
-        pipe.transform({ name: 'ok', typo: 'x' }, { type: 'body', metatype: Dto }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      const refused = pipe.transform({ name: 'ok', typo: 'x' }, { type: 'body', metatype: Dto });
+      await expect(refused).rejects.toBeInstanceOf(DomainException);
+      await expect(refused).rejects.toMatchObject({
+        code: 'VALIDATION_FAILED', details: { violations: ['property typo should not exist'] },
+      });
+      await expect(refused.catch((err: DomainException) => err.getStatus())).resolves.toBe(400);
     });
 
     it('does not coerce a number into a string — implicit conversion stays off', async () => {
       const pipe = pipeFrom({ NODE_ENV: 'production' });
       await expect(
         pipe.transform({ name: 42 }, { type: 'body', metatype: Dto }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { violations: ['name must be a string'] } });
     });
 
     it('accepts a valid body', async () => {

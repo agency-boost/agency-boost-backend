@@ -757,6 +757,58 @@ describe('the coaching session over HTTP (P11-T5)', () => {
 
   // ------------------------------------------------------------------ who reads a session
 
+  /*
+   * **The session in Indonesian** (P18.98-T5 AC-4, AC-6, AC-7): a refusal's words follow the request's
+   * `Accept-Language`, its code and details the same in both; *From leads (automatic)*'s *Follow up with {name}* is
+   * written for the reader while the session is open, and stored at finalize in the language of the leader finalizing.
+   */
+  describe('P18.98-T5 AC-7 in Indonesian', () => {
+    it('P18.98-T5 AC-7 refuses finalize in Indonesian, with the same rule', async () => {
+      const started = (await start('AGUS', 'LUKAS').expect(201)).body;
+      const res = await finalize(started.sessionId, started.version).set('Accept-Language', 'id').expect(422);
+      expect(res.body.error).toMatchObject({
+        code: 'COACHING_SESSION_INCOMPLETE',
+        message: 'Tambahkan paling tidak satu action item sebelum memfinalkan.',
+        details: { rule: 'NO_ACTION_ITEM' },
+      });
+    });
+
+    it('P18.98-T5 AC-4, AC-6 writes *Follow up with* for the reader while open, and stores it as the leader finalized it', async () => {
+      const promised = await lead('LUKAS', { name: 'Pak Fauzan Akbar', nextActionDate: '2026-09-16' });
+      const started = (await start('AGUS', 'LUKAS').expect(201)).body;
+      const line = (text: string) => [{ leadId: promised, leadName: 'Pak Fauzan Akbar', dueDate: '2026-09-16', text }];
+
+      // Open: written live, for whoever reads it.
+      expect((await read(started.sessionId).set('Accept-Language', 'id').expect(200)).body.leadActions)
+        .toEqual(line('Follow up dengan Pak Fauzan Akbar'));
+      expect((await read(started.sessionId).expect(200)).body.leadActions).toEqual(line('Follow up with Pak Fauzan Akbar'));
+
+      // Finalized by a leader reading Indonesian: stored in their words, and shown as stored to every reader.
+      const saved = (await save(started.sessionId, { version: started.version, lastWeekItems: [], actionItems: [dated()], tips: [] })
+        .expect(200)).body;
+      const done = (await finalize(started.sessionId, saved.version).set('Accept-Language', 'id').expect(200)).body;
+      expect(done.leadActions).toEqual(line('Follow up dengan Pak Fauzan Akbar'));
+      expect((await read(started.sessionId).expect(200)).body.leadActions).toEqual(line('Follow up dengan Pak Fauzan Akbar'));
+    });
+
+    it('P18.98-T5 AC-7 refuses a reopen past its window in Indonesian, the day in it; and a blank reason by the DTO’s sentence', async () => {
+      const closed = await finalized('AGUS', 'DIMAS');
+      as('AGUS');
+      clock.set(new Date('2026-09-21T17:00:00Z')); // 00:00 on the 22nd in Jakarta.
+      const res = await reopen(closed.sessionId, closed.version).set('Accept-Language', 'id').expect(409);
+      expect(res.body.error).toMatchObject({
+        code: 'COACHING_REOPEN_WINDOW_CLOSED',
+        message: 'Sesi ini hanya dapat dibuka kembali sampai 21 Sep 2026, 7 hari setelah diadakan.',
+        details: { date: ROSTER_TODAY, reopenableUntil: '2026-09-21', windowDays: 7 },
+      });
+
+      const blank = await reopen(closed.sessionId, closed.version, '   ').set('Accept-Language', 'id').expect(400);
+      expect(blank.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED', message: 'reason tidak boleh kosong', details: { violations: ['reason tidak boleh kosong'] },
+      });
+    });
+  });
+
   describe('who reads a session', () => {
     it.each([
       ['AGUS', 'its coach'],

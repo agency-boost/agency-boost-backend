@@ -2,8 +2,12 @@ import {
   ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { readerOfRequest, type Reader, type ReaderCarrier } from '@/common/i18n/reader';
+import { render, type Sentence } from '@/common/i18n/sentence';
+import { legacyViolation } from '@/common/validation/violations';
 import { DomainException } from './domain.exception';
-import { ErrorCode } from './error-codes';
+import { ErrorCode, type ErrorCodeValue } from './error-codes';
+import { ERROR_REFUSALS } from './error.messages';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import { redactUrl } from '@/common/logging/redact-url';
 
@@ -14,12 +18,26 @@ import { redactUrl } from '@/common/logging/redact-url';
  * called itself an internal error sent whoever opened the API's root looking for a fault (staging's first day,
  * 2026-10-24). A status with no catalog code of its own is still `INTERNAL_ERROR`.
  */
-const FRAMEWORK_CODES: Readonly<Partial<Record<number, string>>> = {
+const FRAMEWORK_CODES: Readonly<Partial<Record<number, ErrorCodeValue>>> = {
   [HttpStatus.BAD_REQUEST]: ErrorCode.VALIDATION_FAILED,
   [HttpStatus.UNAUTHORIZED]: ErrorCode.AUTH_TOKEN_INVALID,
   [HttpStatus.FORBIDDEN]: ErrorCode.PERM_DENIED,
   [HttpStatus.NOT_FOUND]: ErrorCode.NOT_FOUND,
 };
+
+/**
+ * **A framework exception's words, in the reader's language** (P18.98-T5 AC-2): Nest's English as Nest wrote it — every
+ * assertion on *"Cannot GET /x"* stands — and, in Indonesian, what its status means.
+ */
+function frameworkSentence(code: ErrorCodeValue, english: string): Sentence {
+  switch (code) {
+    case ErrorCode.VALIDATION_FAILED: return ERROR_REFUSALS.VALIDATION_FAILED.framework({ english });
+    case ErrorCode.AUTH_TOKEN_INVALID: return ERROR_REFUSALS.AUTH_TOKEN_INVALID.framework({ english });
+    case ErrorCode.PERM_DENIED: return ERROR_REFUSALS.PERM_DENIED.framework({ english });
+    case ErrorCode.NOT_FOUND: return ERROR_REFUSALS.NOT_FOUND.framework({ english });
+    default: return ERROR_REFUSALS.INTERNAL_ERROR.framework({ english });
+  }
+}
 
 interface ErrorEnvelope {
   error: {
@@ -43,10 +61,11 @@ export class DomainExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();
     const res = http.getResponse<Response>();
-    const req = http.getRequest<Request & { id?: string }>();
+    const req = http.getRequest<Request & { id?: string } & ReaderCarrier>();
     const requestId = String(req.id ?? req.headers['x-request-id'] ?? 'unknown');
 
-    const { status, body } = this.render(exception, requestId);
+    // The request's reader (P18.98-T5 AC-1): resolved by `AuthGuard`, or read off the header for a request no guard saw.
+    const { status, body } = this.render(exception, requestId, readerOfRequest(req));
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(
@@ -59,16 +78,24 @@ export class DomainExceptionFilter implements ExceptionFilter {
     res.status(status).json(body);
   }
 
-  private render(exception: unknown, requestId: string): { status: number; body: ErrorEnvelope } {
+  private render(exception: unknown, requestId: string, request: Reader): { status: number; body: ErrorEnvelope } {
     if (exception instanceof DomainException) {
-      const payload = exception.getResponse() as {
-        code: string;
-        message: string;
-        details?: Record<string, unknown>;
-      };
+      /*
+       * **Written for its reader** (P18.98-T5 AC-2, AC-3): the sentence in their language, and every sentence in
+       * `details` — `violations` — with it. `code` and every other detail are the same in both languages.
+       */
+      const reader = exception.readerOr(request);
+      const details = exception.detailsFor(reader);
       return {
         status: exception.getStatus(),
-        body: { error: { ...payload, requestId } },
+        body: {
+          error: {
+            code: exception.code,
+            message: exception.messageFor(reader),
+            ...(details === undefined ? {} : { details }),
+            requestId,
+          },
+        },
       };
     }
 
@@ -91,7 +118,7 @@ export class DomainExceptionFilter implements ExceptionFilter {
         body: {
           error: {
             code: ErrorCode.TENANT_NO_MEMBERSHIP,
-            message: 'This request needs an office, and yours resolves to none.',
+            message: render(ERROR_REFUSALS.TENANT_NO_MEMBERSHIP.noOffice, request),
             // No details: the error's own message names the collection and the
             // operation, which is for the log and not for the caller.
             requestId,
@@ -106,13 +133,20 @@ export class DomainExceptionFilter implements ExceptionFilter {
         typeof response === 'string'
           ? response
           : ((response as { message?: string | string[] }).message ?? exception.message);
+      const code = FRAMEWORK_CODES[exception.getStatus()] ?? ErrorCode.INTERNAL_ERROR;
+      /*
+       * **A list is violations Nest wrote** — a pipe built without `VALIDATION_PIPE_OPTIONS`' factory: each is read as
+       * class-validator's and written for the reader, as the factory writes them. A single message is Nest's, and
+       * Indonesian says what its status means (P18.98-T5 AC-2).
+       */
+      const violations = Array.isArray(message) ? message.map((text) => render(legacyViolation(String(text)), request)) : null;
       return {
         status: exception.getStatus(),
         body: {
           error: {
-            code: FRAMEWORK_CODES[exception.getStatus()] ?? ErrorCode.INTERNAL_ERROR,
-            message: Array.isArray(message) ? message.join('; ') : String(message),
-            ...(Array.isArray(message) ? { details: { violations: message } } : {}),
+            code,
+            message: violations ? violations.join('; ') : render(frameworkSentence(code, String(message)), request),
+            ...(violations ? { details: { violations } } : {}),
             requestId,
           },
         },
@@ -124,7 +158,7 @@ export class DomainExceptionFilter implements ExceptionFilter {
       body: {
         error: {
           code: ErrorCode.INTERNAL_ERROR,
-          message: 'Something went wrong. Quote the request id if you contact support.',
+          message: render(ERROR_REFUSALS.INTERNAL_ERROR.unexpected, request),
           requestId,
         },
       },

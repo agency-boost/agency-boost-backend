@@ -1,12 +1,17 @@
 import { isLocalDate, type LocalDate } from '@/common/time/local-day';
 import { PERSONAL_DATA } from '@/domain/constants';
+import type { Sentence } from '@/common/i18n/sentence';
+import { USERS_REFUSALS } from './users.messages';
+
+const SAY = USERS_REFUSALS.VALIDATION_FAILED;
 
 /**
  * The rules on what a person records (ADR-0158 §2), as plain functions of the value and **today in the
  * office's calendar** — so the roster file, registration and `/profile` refuse the same things in the
  * same words, and a test can put today anywhere without a clock.
  *
- * Each answers `null` for a value that is fine, or the sentence the caller shows, naming what is wrong.
+ * Each answers `null` for a value that is fine, or the sentence the caller shows, naming what is wrong — in both
+ * languages (P18.98-T5 AC-3), written for its reader by whoever answers with it.
  * The caller supplies `today`, from the injected clock and the office's timezone (invariant §9): nothing
  * here reads one.
  */
@@ -35,18 +40,16 @@ export function latestAdultBirthDate(today: LocalDate): LocalDate {
 }
 
 /** A birth date: a real day, in the past, and at least `MIN_AGE_YEARS` ago (ADR-0158 §2). */
-export function birthDateProblem(value: string, today: LocalDate): string | null {
-  if (!isLocalDate(value)) return `"${value}" is not a date of birth. Write it YYYY-MM-DD, like 1990-03-15.`;
-  if (value >= today) return 'A date of birth must be in the past.';
-  if (value > latestAdultBirthDate(today)) {
-    return `A date of birth must be at least ${PERSONAL_DATA.MIN_AGE_YEARS} years ago.`;
-  }
+export function birthDateProblem(value: string, today: LocalDate): Sentence<'VALIDATION_FAILED'> | null {
+  if (!isLocalDate(value)) return SAY.birthDateNotADate({ value });
+  if (value >= today) return SAY.birthDateNotPast;
+  if (value > latestAdultBirthDate(today)) return SAY.birthDateTooRecent({ years: PERSONAL_DATA.MIN_AGE_YEARS });
   return null;
 }
 
 /** The month somebody joined their insurer: a real month, and not one still to come (ADR-0158 §2). */
-export function joinMonthProblem(value: string, today: LocalDate): string | null {
-  if (!isYearMonth(value)) return `"${value}" is not a month. Write the company join month YYYY-MM, like 2021-07.`;
-  if (value > today.slice(0, 7)) return 'The company join month cannot be in the future.';
+export function joinMonthProblem(value: string, today: LocalDate): Sentence<'VALIDATION_FAILED'> | null {
+  if (!isYearMonth(value)) return SAY.joinMonthNotAMonth({ value });
+  if (value > today.slice(0, 7)) return SAY.joinMonthFuture;
   return null;
 }

@@ -1,4 +1,6 @@
 import { addDays, isLocalDate, type LocalDate } from '@/common/time/local-day';
+import type { Sentence } from '@/common/i18n/sentence';
+import { JOINING_REFUSALS } from './joining.messages';
 
 /**
  * **A person's join date in an office, and who it makes them** (ADR-0169, P18.96-T2).
@@ -85,11 +87,13 @@ export function joinedAsFor(joinDate: LocalDate, today: LocalDate): JoinedAs {
 /**
  * **What is wrong with a join date a leader gave**, or `null` when nothing is: a real calendar day, not after the
  * office's today, and not before `JOINING.EARLIEST_JOIN_DATE`. The sentence names the field, as the shared envelope's
- * other refusals do.
+ * other refusals do, in both languages (P18.98-T5 AC-3).
  */
-export function joinDateViolation(value: unknown, today: LocalDate): string | null {
-  if (!isLocalDate(value)) return 'joinDate must be a real date, written YYYY-MM-DD.';
-  if (value > today) return 'joinDate cannot be after today.';
-  if (value < JOINING.EARLIEST_JOIN_DATE) return `joinDate cannot be before ${JOINING.EARLIEST_JOIN_DATE.slice(0, 4)}.`;
+export function joinDateViolation(value: unknown, today: LocalDate): Sentence<'VALIDATION_FAILED'> | null {
+  if (!isLocalDate(value)) return JOINING_REFUSALS.VALIDATION_FAILED.notADate;
+  if (value > today) return JOINING_REFUSALS.VALIDATION_FAILED.afterToday;
+  if (value < JOINING.EARLIEST_JOIN_DATE) {
+    return JOINING_REFUSALS.VALIDATION_FAILED.beforeEarliest({ year: JOINING.EARLIEST_JOIN_DATE.slice(0, 4) });
+  }
   return null;
 }

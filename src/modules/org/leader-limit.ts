@@ -10,6 +10,7 @@ import { can } from '@/modules/rbac/permissions';
 import type { KpmDocument } from '@/modules/tenants/kpm.schema';
 import type { MembershipRepository } from './membership.repository';
 import type { MembershipDocument } from './membership.schema';
+import { LEADER_LIMIT_REFUSALS, type StaleReason } from './leader-limit.messages';
 
 /**
  * **The leader limit** (ADR-0113, P13.2-T4): what *Leaders used* counts, and the check every path
@@ -61,10 +62,9 @@ export function countLeadersUsedPerOffice(
 export function leaderLimitReached(maxLeaders: number, leadersUsed: number, canRequest = false): DomainException {
   return new DomainException(
     ErrorCode.LEADER_LIMIT_REACHED,
-    `This office has reached its limit of ${maxLeaders} leaders — ABs and AABs together, the Owner `
-      + (canRequest
-        ? 'included. Ask AgencyBoost to approve this one past the limit, or to raise it.'
-        : 'included. Nobody else can be made a leader until AgencyBoost raises it.'),
+    canRequest
+      ? LEADER_LIMIT_REFUSALS.LEADER_LIMIT_REACHED.askAgencyBoost({ maxLeaders })
+      : LEADER_LIMIT_REFUSALS.LEADER_LIMIT_REACHED.untilRaised({ maxLeaders }),
     HttpStatus.CONFLICT,
     { maxLeaders, leadersUsed, canRequest },
   );
@@ -85,11 +85,14 @@ export interface ApprovedPastLimit {
 /**
  * **An approved request that no longer applies** (ADR-0157 §3): `409 LEADER_LIMIT_REQUEST_STALE`, with what
  * changed. Nothing is written for the member; the request is closed as declined with `why`.
+ *
+ * `why` is a sentence (`STALE_REASONS`), said inside the refusal and kept in `details.why` — English on the exception,
+ * as `details` always is, and written for the reader in the response (P18.98-T5 AC-3).
  */
-export function leaderLimitRequestStale(requestId: string, why: string): DomainException {
+export function leaderLimitRequestStale(requestId: string, why: StaleReason): DomainException {
   return new DomainException(
     ErrorCode.LEADER_LIMIT_REQUEST_STALE,
-    `This request no longer applies: ${why} It has been closed, and nothing was changed.`,
+    LEADER_LIMIT_REFUSALS.LEADER_LIMIT_REQUEST_STALE.noLongerApplies({ why }),
     HttpStatus.CONFLICT,
     { requestId, why },
   );
@@ -159,7 +162,7 @@ export async function withLeaderSeat<T>(
   if (!kpmId) {
     throw new DomainException(
       ErrorCode.INTERNAL_ERROR,
-      'The leader limit was asked about a write with no office in its context.',
+      LEADER_LIMIT_REFUSALS.INTERNAL_ERROR.noOffice,
       HttpStatus.INTERNAL_SERVER_ERROR,
     );
   }
@@ -230,7 +233,7 @@ async function takeLease(
   }
   throw new DomainException(
     ErrorCode.VERSION_CONFLICT,
-    'Somebody else is changing this office’s leaders at this moment. Try again.',
+    LEADER_LIMIT_REFUSALS.VERSION_CONFLICT.leadersBusy,
     HttpStatus.CONFLICT,
   );
 }

@@ -1,9 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import { NotFoundException } from '@/common/errors/domain.exception';
-import { formatDate } from '@/common/format/format';
 import { isLocalDate, type LocalDate } from '@/common/time/local-day';
-import { refuseWith } from '@/common/validation/fields';
+import { refuseWith, type FieldSentence } from '@/common/validation/fields';
 import { CoachingSessionService } from '@/modules/coaching/coaching-session.service';
 import { LeadService } from '@/modules/leads/lead.service';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
@@ -12,6 +11,9 @@ import {
   ActivationProgressService, recordRequired, type ItemChange, type ItemRecord, type ItemWritePlan,
 } from './activation-progress.service';
 import type { ActivationClosingsView, ActivationView } from './activation-progress.view';
+import { ACTIVATION_REFUSALS } from './activation.messages';
+
+const SAY = ACTIVATION_REFUSALS.VALIDATION_FAILED;
 
 /** The record a hand tick of a data-backed item names, as the request sends it (P18.96-T4 AC-3). */
 export interface ItemRecordInput {
@@ -85,11 +87,11 @@ export class ActivationItemRecords {
     const { record: input, ...rest } = change;
     const plan = await this.activations.planItemWrite(ctx, doc, code, rest);
     if (!plan.needsRecord) {
-      if (input) refuseWith([`record is for the items that complete from sales and coaching data, not for ${plan.label}.`]);
+      if (input) refuseWith([SAY.recordNotTaken({ label: plan.label })]);
       return this.activations.commitItemWrite(ctx, plan, rest, source, null);
     }
     if (!input) throw recordRequired(code, plan.needsRecord);
-    if (input.kind !== plan.needsRecord) refuseWith([`record.kind must be ${plan.needsRecord} for ${plan.label}.`]);
+    if (input.kind !== plan.needsRecord) refuseWith([SAY.recordKind({ kind: plan.needsRecord, label: plan.label })]);
 
     const today = (await this.days.for(ctx)).today;
     if (plan.needsRecord === 'closing') {
@@ -113,16 +115,16 @@ export class ActivationItemRecords {
     const owner = source === 'hire' ? undefined : plan.doc.membershipId;
     if (input.leadId !== undefined) {
       if (input.name !== undefined || input.date !== undefined) {
-        refuseWith(['record names an existing closing by leadId, or a new one by name and date — not both.']);
+        refuseWith([SAY.closingEitherOr]);
       }
       const found = (await this.leads.closingsOf(ctx, owner)).find((c) => c.leadId === input.leadId);
       if (!found) throw new NotFoundException('Lead');
       return { collection: 'leads', id: found.leadId };
     }
     const name = input.name?.trim() ?? '';
-    const violations: string[] = [];
-    if (name.length === 0) violations.push('record.name is who the case was sold to, and is required for a new closing.');
-    const dateProblem = dayProblem(input.date, plan.startDate, today, 'record.date, the day it was paid and issued,');
+    const violations: FieldSentence[] = [];
+    if (name.length === 0) violations.push(SAY.closingName);
+    const dateProblem = dayProblem(input.date, plan.startDate, today, 'closing');
     if (dateProblem) violations.push(dateProblem);
     if (violations.length > 0) refuseWith(violations);
     const logged = await this.leads.logClosing(ctx, { name, date: input.date! }, owner);
@@ -132,21 +134,24 @@ export class ActivationItemRecords {
 
 /** *Log 1:1*'s fields, checked: a day from the join date to today, and a note of 1 to 500 characters once trimmed. */
 function oneOnOneOf(input: ItemRecordInput, startDate: LocalDate, today: LocalDate): { date: LocalDate; note: string } {
-  const violations: string[] = [];
-  if (input.leadId !== undefined || input.name !== undefined) violations.push('record for a 1:1 takes a date and a note only.');
-  const dateProblem = dayProblem(input.date, startDate, today, 'record.date, the day the 1:1 was held,');
+  const violations: FieldSentence[] = [];
+  if (input.leadId !== undefined || input.name !== undefined) violations.push(SAY.oneOnOneFields);
+  const dateProblem = dayProblem(input.date, startDate, today, 'oneOnOne');
   if (dateProblem) violations.push(dateProblem);
   const note = input.note?.trim() ?? '';
-  if (note.length === 0 || note.length > NOTE_MAX) violations.push(`record.note is 1 to ${NOTE_MAX} characters once trimmed.`);
+  if (note.length === 0 || note.length > NOTE_MAX) violations.push(SAY.oneOnOneNote({ max: NOTE_MAX }));
   if (violations.length > 0) refuseWith(violations);
   return { date: input.date!, note };
 }
 
-/** What is wrong with a record's day, or `null`: a real day, no earlier than the join date and no later than today. */
-function dayProblem(value: string | undefined, startDate: LocalDate, today: LocalDate, what: string): string | null {
-  if (value === undefined || !isLocalDate(value)) return `${what} is a date, written YYYY-MM-DD.`;
-  if (value < startDate || value > today) {
-    return `${what} is a day from the join date, ${formatDate(startDate)}, to today, ${formatDate(today)}.`;
-  }
+/**
+ * What is wrong with a record's day, or `null`: a real day, no earlier than the join date and no later than today —
+ * named as the closing's day or the 1:1's (`what`).
+ */
+function dayProblem(
+  value: string | undefined, startDate: LocalDate, today: LocalDate, what: 'closing' | 'oneOnOne',
+): FieldSentence | null {
+  if (value === undefined || !isLocalDate(value)) return SAY.recordDayShape({ what });
+  if (value < startDate || value > today) return SAY.recordDayRange({ what, from: startDate, to: today });
   return null;
 }

@@ -1,9 +1,13 @@
-import { BadRequestException, HttpStatus, Injectable, Optional } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
+import {
+  DomainException, InvalidRequestException, NotFoundException, PermissionDeniedException,
+} from '@/common/errors/domain.exception';
+import type { Reader } from '@/common/i18n/reader';
+import { render } from '@/common/i18n/sentence';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
@@ -26,6 +30,7 @@ import { INSURERS_ONLY, isTemplateLibrary } from './template-library';
 import {
   subscriptionStateOf, validateSubscription, type SubscriptionInput, type SubscriptionState,
 } from './subscription';
+import { TENANTS_MESSAGES, TENANTS_REFUSALS } from './tenants.messages';
 
 export interface CreateKpmInput {
   companyId: string;
@@ -186,14 +191,8 @@ export class TenantService {
   ) {}
 
   private require(ctx: RequestContext, permission: Parameters<typeof can>[1]): void {
-    if (!can(ctx, permission)) {
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        'You do not have permission to perform this action.',
-        HttpStatus.FORBIDDEN,
-        { permission },
-      );
-    }
+    // The shared refusal, in both languages: *You do not have permission to perform this action.*
+    if (!can(ctx, permission)) throw new PermissionDeniedException(permission);
   }
 
   /**
@@ -563,7 +562,7 @@ export class TenantService {
   private slugTaken(slug: string, existingName: string): DomainException {
     return new DomainException(
       ErrorCode.COMPANY_SLUG_TAKEN,
-      `The slug "${slug}" already belongs to ${existingName}. Edit the slug to something unique.`,
+      TENANTS_REFUSALS.COMPANY_SLUG_TAKEN.taken({ slug, existingName }),
       HttpStatus.CONFLICT,
       { slug, existingName },
     );
@@ -579,8 +578,7 @@ export class TenantService {
     if (isTemplateLibrary(company)) {
       throw new DomainException(
         ErrorCode.COMPANY_IS_TEMPLATE_LIBRARY,
-        `${company.name} is the Template library: it holds the templates new companies and offices copy, and no `
-          + 'office. Choose the insurer the office belongs to.',
+        TENANTS_REFUSALS.COMPANY_IS_TEMPLATE_LIBRARY.holdsNoOffice({ name: company.name }),
         HttpStatus.CONFLICT,
         { companyId: input.companyId },
       );
@@ -592,7 +590,7 @@ export class TenantService {
     if (clash) {
       throw new DomainException(
         ErrorCode.TENANT_CODE_TAKEN,
-        `KPM code ${input.code} is already used by ${company.name}.`,
+        TENANTS_REFUSALS.TENANT_CODE_TAKEN.taken({ code: input.code, company: company.name }),
         HttpStatus.CONFLICT,
         { companyId: input.companyId, code: input.code },
       );
@@ -795,7 +793,7 @@ export class TenantService {
     if (!who.userId && !email) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Name the new owner by email or by user id.',
+        TENANTS_REFUSALS.VALIDATION_FAILED.nameTheOwner,
         HttpStatus.BAD_REQUEST,
         { fields: ['email', 'userId'] },
       );
@@ -814,7 +812,7 @@ export class TenantService {
     if (user.status === 'deactivated') {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'That account is deactivated and cannot own an office.',
+        TENANTS_REFUSALS.VALIDATION_FAILED.ownerDeactivated,
         HttpStatus.BAD_REQUEST,
         { userId: String(user._id) },
       );
@@ -830,7 +828,7 @@ export class TenantService {
     this.require(ctx, 'kpm:assign_owner');
     throw new DomainException(
       ErrorCode.PERM_LAST_OWNER,
-      'A KPM must always have an Owner. Transfer ownership instead of removing it.',
+      TENANTS_REFUSALS.PERM_LAST_OWNER.alwaysAnOwner,
       HttpStatus.CONFLICT,
       { kpmId },
     );
@@ -974,7 +972,7 @@ export class TenantService {
         totalMembers: members.length,
         agencyBuilders,
       },
-      attention: this.attentionQueue(kpms, pendingRequests),
+      attention: this.attentionQueue(kpms, pendingRequests, ctx.reader),
       companies: companies.map((c) => {
         const theirs = kpmsByCompany.get(String(c._id)) ?? [];
         return {
@@ -1001,22 +999,20 @@ export class TenantService {
    * one kind of row is produced. A queue with one real row is honest; four invented ones
    * would make the screen look finished and tell the reader nothing true.
    */
-  private attentionQueue(kpms: KpmDocument[], pendingRequests: number): AttentionItem[] {
+  private attentionQueue(kpms: KpmDocument[], pendingRequests: number, reader: Reader): AttentionItem[] {
     const items: AttentionItem[] = [];
+    // Written for the Super Admin reading the queue (P18.98-T5 AC-4): every word of a row in their language.
+    const say = TENANTS_MESSAGES;
 
     const unowned = kpms.filter((k) => !k.ownerUserId && k.status !== 'archived');
     if (unowned.length > 0) {
       items.push({
-        tag: 'KPM owner',
+        tag: render(say.unownedTag, reader),
         severity: 'structural',
-        title:
-          unowned.length === 1
-            ? '1 office has no Owner'
-            : `${unowned.length} offices have no Owner`,
-        detail:
-          'Nobody can administer an office until an Owner is assigned, and only the platform can assign one.',
+        title: render(say.unownedTitle({ count: unowned.length }), reader),
+        detail: render(say.unownedDetail, reader),
         href: '/admin/tenants',
-        actionLabel: 'Review',
+        actionLabel: render(say.reviewAction, reader),
       });
     }
 
@@ -1027,16 +1023,12 @@ export class TenantService {
     // surface nobody could reach.
     if (pendingRequests > 0) {
       items.push({
-        tag: 'KPM request',
+        tag: render(say.requestTag, reader),
         severity: 'approval',
-        title:
-          pendingRequests === 1
-            ? '1 office is waiting for a decision'
-            : `${pendingRequests} offices are waiting for a decision`,
-        detail:
-          'Somebody has asked for an office and nobody has approved or declined it yet. Until one of those happens they have no way in.',
+        title: render(say.requestTitle({ count: pendingRequests }), reader),
+        detail: render(say.requestDetail, reader),
         href: '/admin/kpm-requests',
-        actionLabel: 'Decide',
+        actionLabel: render(say.decideAction, reader),
       });
     }
 
@@ -1200,7 +1192,7 @@ export class TenantService {
     if (input.fiscalYearStartMonth !== undefined) {
       set.fiscalYearStartMonth = input.fiscalYearStartMonth;
     }
-    if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
+    if (Object.keys(set).length === 0) throw new InvalidRequestException(TENANTS_REFUSALS.VALIDATION_FAILED.nothingToChange);
 
     const before = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec()
       .catch(() => null);

@@ -1,5 +1,7 @@
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import type { DomainException } from '@/common/errors/domain.exception';
+import { readerIn } from '@/common/i18n/reader';
 import { AssetService } from './asset.service';
 import { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from '@/domain/constants';
 import {
@@ -224,6 +226,34 @@ describe('AssetService', () => {
         .rejects.toMatchObject({ code: 'NOT_FOUND' });
       expect(asked).not.toHaveBeenCalled();
     });
+  });
+
+  it('P18.98-T5 AC-2 says each refusal in both languages: the English as it always was, and Indonesian', async () => {
+    const said = async (call: Promise<unknown>) => {
+      const refusal = (await call.catch((err: unknown) => err)) as DomainException;
+      return [refusal.code, refusal.message, refusal.messageFor(readerIn('id'))];
+    };
+    const { service, storage } = makeService();
+    expect(await said(service.requestUpload(ctx, {
+      folder: 'training', filename: 'big.pdf', mimeType: 'application/pdf', bytes: ASSET_LIMITS.MAX_BYTES + 1,
+    }))).toEqual(['ASSET_TOO_LARGE', 'Files must be 25 MB or smaller.', 'Ukuran file paling besar 25 MB.']);
+    expect(await said(service.requestUpload(ctx, { folder: 'x', filename: 'x.exe', mimeType: 'application/x-msdownload', bytes: 10 })))
+      .toEqual(['ASSET_TYPE_NOT_ALLOWED', 'That file type is not accepted.', 'Jenis file itu tidak diterima.']);
+    expect(await said(service.requestUpload(new RequestContext('u2', 'none', null), {
+      folder: 'x', filename: 'a.pdf', mimeType: 'application/pdf', bytes: 10,
+    }))).toEqual(['TENANT_NO_MEMBERSHIP', 'You have not joined a KPM yet.', 'Anda belum bergabung dengan KPM.']);
+    expect(await said(service.urlFor(ctx, 'dev/kpm-b/x/1')))
+      .toEqual(['NOT_FOUND', 'Asset not found.', 'File tidak ditemukan.']);
+    expect(await said(makeService({ uploadState: 'pending' }).service.urlFor(ctx, 'dev/kpm-a/x/1'))).toEqual([
+      'ASSET_NOT_CONFIRMED', 'This file has not finished uploading yet. Try again shortly.',
+      'File ini belum selesai diunggah. Coba lagi sebentar lagi.',
+    ]);
+    const pending = makeService({ _id: 'a1', uploadState: 'pending' });
+    pending.storage.stored = null;
+    expect(await said(pending.service.confirmUpload(ctx, 'dev/kpm-a/x/1'))).toEqual([
+      'ASSET_NOT_UPLOADED', 'That file never finished uploading. Try again.', 'File itu tidak selesai diunggah. Coba lagi.',
+    ]);
+    expect(storage.removed).toEqual([]);
   });
 
   describe('orphan reporting', () => {

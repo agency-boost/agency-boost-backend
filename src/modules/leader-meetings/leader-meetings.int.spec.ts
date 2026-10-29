@@ -8,6 +8,7 @@ import { configModule } from '../../../test/config-module';
 import { declaredPermissions, session, SUPER_ADMIN } from '../../../test/http-permissions';
 import { ROSTER_NOW, type Who } from '../../../test/coaching-office';
 import { buildForumOffice, forumApp, KPM_A, type ForumOffice } from '../../../test/forum-office';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { LeaderMeetingsController } from './leader-meetings.controller';
 
 /**
@@ -492,6 +493,109 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
       // A count over last year's 0, and a row kept without last year's YTD: —.
       expect(change('producing_agents')).toEqual({ kind: 'none' });
       expect(change('manpower')).toEqual({ kind: 'none' });
+    });
+  });
+
+  /**
+   * **A new meeting's words are its maker's, and stored** (P18.98-T5 AC-6; ADR-0179 §7; the glossary's §C9): the first
+   * agenda an Indonesian reader makes is Bahasa Indonesia, *RBDO/BDO* kept; an English reader's is the English byte for
+   * byte; either reads as stored in both languages, and a copy keeps the stored words, re-dating its month in them.
+   * The office's meetings are put out of sight for the test — a new one is its first — and back after it.
+   */
+  describe('P18.98-T5 AC-6 a new meeting’s agenda, in its maker’s language', () => {
+    const oid = (id: string) => new mongoose.Types.ObjectId(id);
+    const stored = async (id: string) => (await db().collection('leaderMeetings').findOne({ _id: oid(id) }))!.agenda as
+      Record<'preparation' | 'during' | 'post', { text: string }[]>;
+    const texts = (agenda: Record<string, { text: string }[]>) =>
+      ['preparation', 'during', 'post'].map((section) => agenda[section].map((i) => i.text));
+
+    it('P18.98-T5 AC-6 an Indonesian reader’s first meeting stores Bahasa Indonesia, an English reader’s the English', async () => {
+      const shown = (await db().collection('leaderMeetings').find({ kpmId: KPM_A, deletedAt: null }).toArray()).map((m) => m._id);
+      await db().collection('leaderMeetings').updateMany({ _id: { $in: shown } }, { $set: { deletedAt: new Date() } });
+      const made: string[] = [];
+      const create = async (title: string, date: string, indonesian: boolean) => {
+        const req = http().post('/leader-meetings');
+        const card = (await (indonesian ? req.set(...IN_INDONESIAN) : req).send({ title, date }).expect(201)).body;
+        made.push(card.id);
+        return card.id as string;
+      };
+      try {
+        as('OWNER');
+        const id = await create('Rapat pertama', '2026-10-13', true);
+        const indonesianAgenda = [
+          ['Kumpulkan follow-up & komitmen dari sesi sebelumnya', 'Siapkan data kinerja Oktober', 'Tinjau scorecard, susun poin pembahasan'],
+          [
+            'Pembaruan proses — tinjau follow-up sebelumnya', 'Tinjauan kinerja terhadap ambang batas utama',
+            'Prioritas strategis (Korporat)', 'Prioritas strategis (Agency)', 'Rangkum langkah berikutnya & tetapkan penanggung jawab',
+          ],
+          ['Catat hasil ke dalam templat', 'Catat masukan untuk RBDO/BDO'],
+        ];
+        expect(texts(await stored(id))).toEqual(indonesianAgenda);
+        // Read as stored, in both languages: the office's text now, never translated.
+        expect(texts((await http().get(`/leader-meetings/${id}`).expect(200)).body.agenda)).toEqual(indonesianAgenda);
+        expect(texts((await http().get(`/leader-meetings/${id}`).set(...IN_INDONESIAN).expect(200)).body.agenda)).toEqual(indonesianAgenda);
+
+        // The next meeting, made by an English reader, copies the stored words — its month item re-dated in them.
+        const next = await create('Next', '2026-11-10', false);
+        expect(texts(await stored(next))[0])
+          .toEqual(['Kumpulkan follow-up & komitmen dari sesi sebelumnya', 'Siapkan data kinerja November', 'Tinjau scorecard, susun poin pembahasan']);
+
+        // An office's first made by an English reader: the English, byte for byte.
+        await db().collection('leaderMeetings').updateMany({ _id: { $in: made.map(oid) } }, { $set: { deletedAt: new Date() } });
+        const english = await create('First in English', '2026-10-13', false);
+        expect(texts(await stored(english))).toEqual([
+          ['Compile follow-ups & commitments from prior session', 'Prepare October performance data', 'Review scorecard, draft talking points'],
+          [
+            'Process update — review prior follow-ups', 'Performance review vs. key thresholds', 'Strategic priorities (Corporate)',
+            'Strategic priorities (Agency)', 'Summarize next steps & assign owners',
+          ],
+          ['Document outcomes into template', 'Note feedback for RBDO/BDO'],
+        ]);
+        // + Add item and + Add action item store their words in the adder's language.
+        expect((await http().post(`/leader-meetings/${english}/agenda-items`).set(...IN_INDONESIAN).send({ section: 'post' }).expect(201))
+          .body).toMatchObject({ text: 'Item agenda baru', pic: '' });
+        expect((await http().post(`/leader-meetings/${english}/action-items`).set(...IN_INDONESIAN).expect(201)).body).toMatchObject({
+          initiative: 'Inisiatif baru', metric: 'Ukuran keberhasilan', action: 'Tindakan baru', pic: 'TBD', status: 'not_planned', remarks: 'TBD',
+        });
+        expect(texts(await stored(english))[2]).toEqual(['Document outcomes into template', 'Note feedback for RBDO/BDO', 'Item agenda baru']);
+      } finally {
+        await db().collection('leaderMeetings').updateMany({ _id: { $in: made.map(oid) } }, { $set: { deletedAt: new Date() } });
+        await db().collection('leaderMeetings').updateMany({ _id: { $in: shown } }, { $set: { deletedAt: null } });
+      }
+    });
+  });
+
+  /** **Making, moving and removing a meeting, refused in Bahasa Indonesia** (P18.98-T5 AC-7): the codes as in English. */
+  describe('P18.98-T5 AC-7 the forum’s refusals in Indonesian', () => {
+    it('P18.98-T5 AC-7 the DTO’s own sentences, a move with nothing in it, a completed meeting and one with minutes', async () => {
+      as('OWNER');
+      const blank = await http().post('/leader-meetings').set(...IN_INDONESIAN).send({ title: '   ', date: '2026-02-31' }).expect(400);
+      expect(blank.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        details: { violations: ['title tidak boleh kosong', 'date harus berupa tanggal yang benar, dengan format YYYY-MM-DD'] },
+      });
+      // The English, as the DTO wrote it before.
+      expect((await http().post('/leader-meetings').send({ title: '   ', date: '2026-10-05' }).expect(400)).body.error.details.violations)
+        .toEqual(['title must not be empty']);
+
+      const upcoming = await make('Upcoming in Indonesian', '2026-10-20');
+      const nothing = await http().patch(`/leader-meetings/${upcoming.id}`).set(...IN_INDONESIAN).send({ version: 1 }).expect(400);
+      expect(nothing.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED', message: 'Kirim judul, tanggal, atau keduanya.', details: { violations: ['Kirim judul, tanggal, atau keduanya.'] },
+      });
+      const past = await make('Past in Indonesian', '2026-09-08');
+      const completed = await http().patch(`/leader-meetings/${past.id}`).set(...IN_INDONESIAN).send({ date: '2026-09-30', version: 1 })
+        .expect(409);
+      expect(completed.body.error).toMatchObject({
+        code: 'LEADER_MEETING_COMPLETED', message: 'Rapat ini sudah berlangsung, jadi tanggalnya tetap.', details: { date: '2026-09-08' },
+      });
+      await http().put(`/leader-meetings/${upcoming.id}/monthly-targets/flc`).send({ rate: 1, version: 0 }).expect(200);
+      const written = await http().delete(`/leader-meetings/${upcoming.id}`).query({ version: 1 }).set(...IN_INDONESIAN).expect(409);
+      expect(written.body.error).toMatchObject({
+        code: 'LEADER_MEETING_HAS_MINUTES', message: 'Sudah ada yang ditulis di rapat ini, jadi rapat ini tidak dapat dihapus.',
+      });
+      expect((await http().get('/leader-meetings/66f00000000000000000ffff').set(...IN_INDONESIAN).expect(404)).body.error.message)
+        .toBe('Rapat tidak ditemukan.');
     });
   });
 });

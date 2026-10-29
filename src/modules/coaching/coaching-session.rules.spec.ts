@@ -1,4 +1,6 @@
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { COACHING } from '@/domain/constants';
+import { englishAll, indonesianAll } from '../../../test/i18n';
 import {
   carryForward, coalesceKeyOf, FINALIZE_RULES, finalizeRefusal, finalizeSentence, latestFinalized, leadActionsOf,
   leadActionText, reopenableUntil, reopenWindowOpen, reviewedItems, type SessionLead,
@@ -51,7 +53,7 @@ describe('the coaching session’s rules (P11-T5)', () => {
         lead({ id: 'undated' }),
         lead({ id: 'a', nextActionDate: '2026-09-20', registeredAt: 1, nextActionNote: '  Bring the SPAJ.  ' }),
         lead({ id: 'c', nextActionDate: '2026-09-15', registeredAt: 9 }),
-      ]);
+      ], SOURCE_READER);
       expect(actions).toEqual([
         { leadId: 'c', leadName: 'Lead c', dueDate: '2026-09-15', text: 'Follow up with Lead c' },
         { leadId: 'a', leadName: 'Lead a', dueDate: '2026-09-20', text: 'Bring the SPAJ.' },
@@ -60,8 +62,15 @@ describe('the coaching session’s rules (P11-T5)', () => {
     });
 
     it('P11-T8 AC-9 a blank note reads the prototype’s *Follow up with {name}*', () => {
-      expect(leadActionText({ name: 'Pak Hendro', nextActionNote: '   ' })).toBe('Follow up with Pak Hendro');
-      expect(leadActionText({ name: 'Pak Hendro', nextActionNote: null })).toBe('Follow up with Pak Hendro');
+      expect(leadActionText({ name: 'Pak Hendro', nextActionNote: '   ' }, SOURCE_READER)).toBe('Follow up with Pak Hendro');
+      expect(leadActionText({ name: 'Pak Hendro', nextActionNote: null }, SOURCE_READER)).toBe('Follow up with Pak Hendro');
+    });
+
+    it('P18.98-T5 AC-4 writes the line for its reader, the lead’s name and a note as typed', () => {
+      expect(leadActionText({ name: 'Pak Hendro', nextActionNote: null }, readerIn('id'))).toBe('Follow up dengan Pak Hendro');
+      expect(leadActionText({ name: 'Pak Hendro', nextActionNote: ' Bawa SPAJ. ' }, readerIn('id'))).toBe('Bawa SPAJ.');
+      expect(leadActionsOf([lead({ id: 'c', name: 'Ibu Rina', nextActionDate: '2026-09-15' })], readerIn('id')))
+        .toEqual([{ leadId: 'c', leadName: 'Ibu Rina', dueDate: '2026-09-15', text: 'Follow up dengan Ibu Rina' }]);
     });
   });
 
@@ -160,12 +169,22 @@ describe('the coaching session’s rules (P11-T5)', () => {
     });
 
     it('P11-T5 AC-4 carries the prototype’s sentence for each rule', () => {
-      expect(FINALIZE_RULES.map((rule) => finalizeSentence({ rule, leadName: 'Pak Fauzan Akbar' }))).toEqual([
+      expect(englishAll(FINALIZE_RULES.map((rule) => finalizeSentence({ rule, leadName: 'Pak Fauzan Akbar' })))).toEqual([
         'Add at least one action item before finalizing.',
         'Fill in or remove the empty coaching tip before finalizing.',
         'Fill in or remove the empty action item before finalizing.',
         'Every action item needs a date before finalizing.',
         'Pak Fauzan Akbar is tagged "this month" but has no next action date set — add one before finalizing.',
+      ]);
+    });
+
+    it('P18.98-T5 AC-2 says each rule in Indonesian too, the lead’s name as typed', () => {
+      expect(indonesianAll(FINALIZE_RULES.map((rule) => finalizeSentence({ rule, leadName: 'Pak Fauzan Akbar' })))).toEqual([
+        'Tambahkan paling tidak satu action item sebelum memfinalkan.',
+        'Isi atau hapus coaching tip yang kosong sebelum memfinalkan.',
+        'Isi atau hapus action item yang kosong sebelum memfinalkan.',
+        'Setiap action item harus diberi tanggal sebelum memfinalkan.',
+        'Pak Fauzan Akbar di-tag "bulan ini" tetapi belum memiliki tanggal tindakan berikutnya — tambahkan sebelum memfinalkan.',
       ]);
     });
   });

@@ -163,6 +163,18 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(await auditCount()).toBe(before);
     });
 
+    it('P18.98-T5 AC-7 refuses an item on a one-item category in Indonesian, and a module not offered', async () => {
+      const said = 'item tidak diterima oleh kategori goals: kategori ini hanya memiliki satu item.';
+      const refused = await http().get('/kpm/analytics/compliance').set('Accept-Language', 'id')
+        .query({ category: 'goals', item: '2026' }).expect(400);
+      expect(refused.body.error).toMatchObject({ code: 'VALIDATION_FAILED', message: said, details: { violations: [said] } });
+      expect((await http().get('/kpm/analytics/compliance').query({ category: 'goals', item: '2026' }).expect(400)).body.error.message)
+        .toBe('item is not taken by category goals: it has one item only.');
+      const missing = await http().get('/kpm/analytics/compliance').set('Accept-Language', 'id')
+        .query({ category: 'training', item: 'NOT_A_MODULE' }).expect(404);
+      expect(missing.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Modul training tidak ditemukan.' });
+    });
+
     it('P18.6-T1 AC-1 a module the office does not offer is 404, and writes nothing', async () => {
       const before = await auditCount();
       for (const item of ['NOT_A_MODULE', 'prospect_list']) {

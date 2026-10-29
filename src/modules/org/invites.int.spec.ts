@@ -26,6 +26,7 @@ import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { declaredPermissions, NO_CLASS, productionPipe, session, StubAuth } from '../../../test/http-permissions';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { listenOnLoopback } from '../../../test/listen';
 import { clearCollections, seedLadder, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
 import { ApprovalsService } from './approvals.service';
@@ -820,6 +821,126 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       await signIn('RINA');
       expect((await http().post('/join/leader-request').send({ leaderMembershipId: id.PEER }).expect(409)).body.error.code)
         .toBe('ORG_AGENT_ALREADY_TAGGED');
+    });
+  });
+
+  // ------------------------------------------------------------------ the reader's language
+
+  /*
+   * **P18.98-T5 — joining an office, in the reader's language** (ADR-0179 §7; AC-3, AC-4, AC-6, AC-7). One refusal of
+   * each family asked as an Indonesian screen asks (`Accept-Language: id`): the same `code` and `details`, the sentence
+   * in Indonesian, a field's sentence in `details.violations` with it. Every other test here reads English.
+   */
+  describe('P18.98-T5 in Indonesian', () => {
+    it('P18.98-T5 AC-7 + Add agent refuses the form’s own fields, a join date after today and a code already invited, in Indonesian', async () => {
+      const fields = await add({ agentCode: 'PRU-1', phone: 'call me' }).set(...IN_INDONESIAN).expect(400);
+      expect(fields.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        details: {
+          violations: [
+            'agentCode hanya boleh berisi angka, 3 sampai 32 digit',
+            'phone harus berupa nomor telepon: angka, spasi, atau tanda hubung, dengan paling banyak satu + di depan',
+          ],
+        },
+      });
+      const english = await add({ agentCode: 'PRU-1' }).expect(400);
+      expect(english.body.error.message).toBe('agentCode must be digits only, 3 to 32 of them');
+
+      const future = await add({ agentCode: '80777', joinDate: '2026-10-28' }).set(...IN_INDONESIAN).expect(400);
+      expect(future.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'joinDate tidak boleh setelah hari ini.',
+        details: { violations: ['joinDate tidak boleh setelah hari ini.'] },
+      });
+
+      await add({ agentCode: '80777' }).expect(200);
+      const waiting = await add({ agentCode: '80777' }).set(...IN_INDONESIAN).expect(409);
+      expect(waiting.body.error).toMatchObject({
+        code: 'ORG_INVITE_PENDING',
+        message: 'Kode agen 80777 sudah memiliki undangan yang menunggu diterima. Kirim ulang undangan itu, atau batalkan dulu.',
+        details: { agentCode: '80777' },
+      });
+    });
+
+    it('P18.98-T5 AC-7 an invite: a link that opens nothing, and one cancelled twice, in Indonesian', async () => {
+      const nothing = await http().get('/invites/nonsense').set(...IN_INDONESIAN).expect(404);
+      expect(nothing.body.error).toMatchObject({
+        code: 'NOT_FOUND',
+        message: 'Tautan undangan ini tidak valid. Pastikan Anda membuka seluruh tautannya, atau minta tautan baru kepada '
+          + 'pengirimnya.',
+      });
+      await add({ agentCode: '80777' }).expect(200);
+      const inviteId = String((await col('memberInvites').findOne({}))!._id);
+      await http().delete(`/new-hires/invites/${inviteId}`).expect(200);
+      const twice = await http().delete(`/new-hires/invites/${inviteId}`).set(...IN_INDONESIAN).expect(409);
+      expect(twice.body.error).toMatchObject({
+        code: 'ORG_REQUEST_ALREADY_DECIDED', message: 'Undangan itu sudah dibatalkan.', details: { status: 'cancelled' },
+      });
+      expect((await http().delete(`/new-hires/invites/${inviteId}`).expect(409)).body.error.message)
+        .toBe('That invite was already cancelled.');
+    });
+
+    it('P18.98-T5 AC-4 the banner names a leader whose account is gone in the reader’s language', async () => {
+      const token = tokenOf((await add({ agentCode: '80777' }).expect(200)).body.link);
+      await col('users').deleteOne({ _id: new mongoose.Types.ObjectId(user.AGUS) });
+      session.current = RequestContext.platform('nobody');
+      const path = `/invites/${encodeURIComponent(token)}`;
+      expect((await http().get(path).set(...IN_INDONESIAN).expect(200)).body.leaderName).toBe('leader Anda');
+      expect((await http().get(path).expect(200)).body.leaderName).toBe('your leader');
+    });
+
+    it('P18.98-T5 AC-6, AC-7 a transfer: asked twice, decided twice, in Indonesian — and its edge’s reason stored in the decider’s', async () => {
+      const first = (await add({ agentCode: '10007' }).expect(200)).body.transfer.transferId;
+      const again = await add({ agentCode: '10007' }).set(...IN_INDONESIAN).expect(409);
+      expect(again.body.error).toMatchObject({
+        code: 'ORG_TRANSFER_PENDING', message: 'Permintaan pemindahan untuknya sudah menunggu keputusan KPM.',
+      });
+      await signIn('OWNER');
+      await http().post(`/transfer-requests/${first}/approve`).set(...IN_INDONESIAN).expect(200);
+      const edge = await col('membershipHistory').findOne({ membershipId: id.PEER_AGENT, eventType: 're_parented', validTo: null });
+      expect(edge?.reason).toBe('Permintaan pemindahan disetujui');
+      const decided = await http().post(`/transfer-requests/${first}/decline`).set(...IN_INDONESIAN).send({}).expect(409);
+      expect(decided.body.error).toMatchObject({
+        code: 'ORG_REQUEST_ALREADY_DECIDED', message: 'Permintaan pemindahan itu sudah disetujui.', details: { status: 'approved' },
+      });
+    });
+
+    it('P18.98-T5 AC-7 a join request decided twice, and a tag for somebody already in a unit, in Indonesian', async () => {
+      const requestId = String((await col('joinRequests').findOne({ membershipId: id.PUTRI }))!._id);
+      await signIn('SARI');
+      const badDate = await http().post(`/join/requests/${requestId}/approve`).set(...IN_INDONESIAN)
+        .send({ joinDate: '27/10/2026' }).expect(400);
+      expect(badDate.body.error.details.violations)
+        .toEqual(['joinDate harus berupa tanggal yang benar, dengan format YYYY-MM-DD.']);
+      await http().post(`/join/requests/${requestId}/approve`).send({}).expect(200);
+      const twice = await http().post(`/join/requests/${requestId}/approve`).set(...IN_INDONESIAN).send({}).expect(409);
+      expect(twice.body.error).toMatchObject({
+        code: 'ORG_REQUEST_ALREADY_DECIDED', message: 'Permintaan itu sudah disetujui.', details: { status: 'approved' },
+      });
+
+      await signIn('AGUS');
+      const tagged = await http().post(`/join/untagged/${id.RINA}`).set(...IN_INDONESIAN).send({}).expect(409);
+      expect(tagged.body.error).toMatchObject({
+        code: 'ORG_AGENT_ALREADY_TAGGED',
+        message: 'Dia sudah melapor ke seseorang. Memindahkannya adalah proses yang berbeda.',
+      });
+    });
+
+    it('P18.98-T5 AC-7 Find Your Leader refuses a loop and somebody who has a leader, in Indonesian', async () => {
+      await signIn('ORPHAN');
+      const loop = await http().post('/join/leader-request').set(...IN_INDONESIAN)
+        .send({ leaderMembershipId: id.ORPHAN_AAB }).expect(409);
+      expect(loop.body.error).toMatchObject({
+        code: 'ORG_CYCLE_DETECTED',
+        message: 'Dia melapor ke Anda, jadi dia tidak dapat menjadi leader Anda. Minta seseorang di luar unit Anda.',
+      });
+      await signIn('RINA');
+      const led = await http().post('/join/leader-request').set(...IN_INDONESIAN)
+        .send({ leaderMembershipId: id.PEER }).expect(409);
+      expect(led.body.error).toMatchObject({
+        code: 'ORG_AGENT_ALREADY_TAGGED',
+        message: 'Anda sudah melapor ke seseorang. Pindah ke leader lain tidak dapat Anda minta di sini.',
+      });
     });
   });
 

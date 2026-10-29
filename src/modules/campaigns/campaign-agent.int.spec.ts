@@ -8,7 +8,10 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
-import { declaredPermissions, productionPipe, session, StubAuth, SUPER_ADMIN } from '../../../test/http-permissions';
+import {
+  declaredPermissions, productionPipe, savedLanguage, session, StubAuth, SUPER_ADMIN,
+} from '../../../test/http-permissions';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { listenOnLoopback } from '../../../test/listen';
 import { buildCoachingOffice, KPM_B, ROSTER_NOW, type CoachingOffice, type Who } from '../../../test/coaching-office';
 import { CampaignAgentController } from './campaign-agent.controller';
@@ -313,6 +316,56 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       as('BUDI');
       expect((await chasing().expect(200)).body).toEqual({ membershipId: office.id.BUDI, campaigns: [] });
       expect(KPM_B).toBeTruthy();
+    });
+  });
+
+  /**
+   * **The agent's campaigns for an Indonesian reader, and an English one's figures** (P18.98-T5 AC-4, AC-7): the
+   * window's words and a refusal in Bahasa Indonesia, every date the reader's; the codes and the data as in English.
+   */
+  describe('P18.98-T5 AC-7 the agent’s campaigns, in both languages', () => {
+    afterEach(() => { savedLanguage.current = null; });
+
+    it('P18.98-T5 AC-4 the cards, the dialog and the chases in Indonesian', async () => {
+      as('RINA');
+      const cards = (await http().get('/campaigns').set(...IN_INDONESIAN).expect(200)).body.campaigns as Record<string, unknown>[];
+      const byCode = (code: string) => cards.find((c) => c.code === code)!;
+      expect(byCode('APE_SPRINT')).toMatchObject({ duration: '1 Agu – 30 Sep 2026', phase: 'running' });
+      expect(byCode('MDRT_QUALIFICATION')).toMatchObject({ duration: 'Selalu aktif — dinilai per tahun kalender (1 Jan – 31 Des)' });
+      expect(byCode('PROMOTION_AAB_AB')).toMatchObject({ duration: 'Periode 12 bulan bergulir', chaseBlocked: 'not_eligible' });
+      expect((await http().get('/campaigns/APE_SPRINT').set(...IN_INDONESIAN).expect(200)).body.progress)
+        .toMatchObject({ windowLabel: 'Agu – Sep 2026', final: false });
+
+      for (const code of ['APE_SPRINT', 'MDRT_QUALIFICATION']) await http().put(`/campaigns/${code}/chase`).expect(200);
+      const chased = (await http().get('/campaigns/chasing').set(...IN_INDONESIAN).expect(200)).body.campaigns;
+      expect(chased.map((c: { code: string; runs: string }) => [c.code, c.runs])).toEqual([
+        ['APE_SPRINT', 'Berlangsung Agu – Sep 2026'], ['MDRT_QUALIFICATION', 'Berlangsung Jan – Des'],
+      ]);
+    });
+
+    it('P18.98-T5 AC-4 an English reader who chose English reads English figures: Aug, Dec', async () => {
+      as('RINA');
+      savedLanguage.current = 'en';
+      const cards = (await http().get('/campaigns').expect(200)).body.campaigns as Record<string, unknown>[];
+      expect(cards.find((c) => c.code === 'APE_SPRINT')).toMatchObject({ duration: '1 Aug – 30 Sep 2026' });
+      expect(cards.find((c) => c.code === 'MDRT_QUALIFICATION'))
+        .toMatchObject({ duration: 'Standing — evaluated per calendar year (1 Jan – 31 Dec)' });
+      expect((await http().get('/campaigns/APE_SPRINT').expect(200)).body.progress).toMatchObject({ windowLabel: 'Aug – Sep 2026' });
+    });
+
+    it('P18.98-T5 AC-7 an ended campaign and a rung it is not for are refused in Indonesian, the codes unchanged', async () => {
+      as('RINA');
+      const ended = await http().put('/campaigns/OLD_PUSH/chase').set(...IN_INDONESIAN).expect(409);
+      expect(ended.body.error).toMatchObject({
+        code: 'CAMPAIGN_NOT_OPEN',
+        message: 'Campaign ini sudah berakhir, jadi Anda tidak dapat lagi mulai atau berhenti mengejarnya.',
+        details: { code: 'OLD_PUSH' },
+      });
+      const notYours = await http().put('/campaigns/PROMOTION_AAB_AB/chase').set(...IN_INDONESIAN).expect(403);
+      expect(notYours.body.error).toMatchObject({
+        code: 'CAMPAIGN_NOT_ELIGIBLE', message: 'Campaign ini tidak terbuka untuk peran Anda.', details: { code: 'PROMOTION_AAB_AB' },
+      });
+      expect((await http().get('/campaigns/NOPE').set(...IN_INDONESIAN).expect(404)).body.error.message).toBe('Campaign tidak ditemukan.');
     });
   });
 });

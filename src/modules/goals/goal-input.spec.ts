@@ -1,3 +1,6 @@
+import type { DomainException } from '@/common/errors/domain.exception';
+import type { Sentence } from '@/common/i18n/sentence';
+import { indonesianAll } from '../../../test/i18n';
 import { checkGoal, GOAL_BOUNDS } from './goal-input';
 
 /**
@@ -127,6 +130,27 @@ describe('a goal’s fields', () => {
       throw new Error('should have refused');
     } catch (err) {
       expect((err as { details: { violations: string[] } }).details.violations).toHaveLength(3);
+    }
+  });
+
+  it('P18.98-T5 AC-3 says every violation in Indonesian too, a decimal written the Indonesian way', () => {
+    try {
+      const { period: _period, ...rest } = ok;
+      checkGoal({ ...rest, caseSizeMinor: 1_000.5, closingRatePct: 'thirty' });
+      throw new Error('should have refused');
+    } catch (err) {
+      expect(indonesianAll((err as DomainException).givenDetails!.violations as Sentence[])).toEqual([
+        'period wajib diisi.',
+        'caseSizeMinor dalam satuan sen IDR dan harus berupa bilangan bulat.',
+        'closingRatePct harus berupa persentase, ditulis sebagai angka seperti 30 atau 12,5.',
+      ]);
+    }
+    try {
+      checkGoal({ ...ok, period: '26' });
+      throw new Error('should have refused');
+    } catch (err) {
+      expect(indonesianAll((err as DomainException).givenDetails!.violations as Sentence[]))
+        .toEqual(['period harus berupa tahun kalender, dengan format YYYY.']);
     }
   });
 });

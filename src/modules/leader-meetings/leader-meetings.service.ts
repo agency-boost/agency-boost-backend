@@ -9,6 +9,7 @@ import { refuseWith } from '@/common/validation/fields';
 import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
 import { startingAgenda } from './leader-meeting-agenda';
+import { LEADER_MEETINGS_REFUSALS } from './leader-meetings.messages';
 import { LeaderMeetingPeople, meetingNotFound, type ForumOffice } from './leader-meeting-people';
 import { LeaderMeetingRepository } from './leader-meeting.repository';
 import type { FrozenEditor, LeaderMeetingDocument } from './leader-meeting.schema';
@@ -91,7 +92,8 @@ export class LeaderMeetingsService {
       try {
         created = await this.meetings.create(ctx, {
           number, title: input.title, date: input.date,
-          agenda: startingAgenda(input.date, previous?.agenda ?? null, newItemId),
+          // The first agenda in the maker's language, stored as text (P18.98-T5 AC-6); a copied one as stored.
+          agenda: startingAgenda(input.date, previous?.agenda ?? null, newItemId, ctx.reader),
           actionItems: [], monthlyTargets: {}, writtenAt: null,
           frozenScorecard: null, frozenAt: null, frozenCoeditors: null, version: 1,
         } as never);
@@ -102,7 +104,7 @@ export class LeaderMeetingsService {
         if (attempt >= NUMBER_ATTEMPTS) {
           throw new DomainException(
             ErrorCode.VERSION_CONFLICT,
-            'Another meeting was made at the same moment. Try again.',
+            LEADER_MEETINGS_REFUSALS.VERSION_CONFLICT.madeAtSameMoment,
             HttpStatus.CONFLICT,
             { number },
           );
@@ -128,11 +130,13 @@ export class LeaderMeetingsService {
     const office = await this.people.office(ctx);
     const meeting = await this.meetings.findById(ctx, meetingId);
     if (!meeting) throw meetingNotFound();
-    if (input.title === undefined && input.date === undefined) refuseWith(['Send a title, a date, or both.']);
+    if (input.title === undefined && input.date === undefined) {
+      refuseWith([LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED.titleOrDate]);
+    }
     if (meetingState(meeting.date, this.today(office)) === 'completed') {
       throw new DomainException(
         ErrorCode.LEADER_MEETING_COMPLETED,
-        'This meeting has already taken place, so its date stays.',
+        LEADER_MEETINGS_REFUSALS.LEADER_MEETING_COMPLETED.dateStays,
         HttpStatus.CONFLICT,
         { date: meeting.date },
       );
@@ -167,7 +171,7 @@ export class LeaderMeetingsService {
       if (now.writtenAt) {
         throw new DomainException(
           ErrorCode.LEADER_MEETING_HAS_MINUTES,
-          'Something has been written in this meeting, so it can’t be deleted.',
+          LEADER_MEETINGS_REFUSALS.LEADER_MEETING_HAS_MINUTES.writtenIn,
           HttpStatus.CONFLICT,
         );
       }

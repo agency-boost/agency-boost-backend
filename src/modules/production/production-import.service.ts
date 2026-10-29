@@ -18,6 +18,9 @@ import type { Cadence, PreviewCell, PreviewRow } from './production-preview';
 import { type MonthState, ProductionMonths } from './production-months.service';
 import type { UploadedCsv } from './production-upload.interceptor';
 import { ProductionService, requireMonth, requireOffice } from './production.service';
+import { PRODUCTION_REFUSALS } from './production.messages';
+
+const SAY = PRODUCTION_REFUSALS;
 
 /** An import as the history panel shows it. */
 export interface BatchView {
@@ -124,7 +127,7 @@ export class ProductionImportService {
     if (revision === undefined || !/^\d+$/.test(revision) || !Number.isSafeInteger(basedOn)) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Send the `revision` the preview was taken against.',
+        SAY.VALIDATION_FAILED.revisionRequired,
         HttpStatus.BAD_REQUEST,
         { field: 'revision' },
       );
@@ -137,7 +140,7 @@ export class ProductionImportService {
     if (await this.batches.exists(ctx, { month, fileSha256: sha, basedOnRevision: basedOn, status: { $in: WENT_THROUGH } })) {
       throw new DomainException(
         ErrorCode.UPLOAD_BATCH_ALREADY_COMMITTED,
-        'This file was imported already, from this same preview. Its figures are in the table.',
+        SAY.UPLOAD_BATCH_ALREADY_COMMITTED.importedAlready,
         HttpStatus.CONFLICT,
         { month },
       );
@@ -154,7 +157,7 @@ export class ProductionImportService {
       if (!conflicts.has(key)) {
         throw new DomainException(
           ErrorCode.VALIDATION_FAILED,
-          'A correction named to be replaced is not one this file would change. Upload the file again.',
+          SAY.VALIDATION_FAILED.correctionNotInFile,
           HttpStatus.BAD_REQUEST,
           { field: 'replace', key },
         );
@@ -167,7 +170,7 @@ export class ProductionImportService {
     if (writable.length === 0) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'This file would change nothing: every figure in it is blank, already stored, or not taken.',
+        SAY.VALIDATION_FAILED.changesNothing,
         HttpStatus.BAD_REQUEST,
         { month },
       );
@@ -263,8 +266,8 @@ export class ProductionImportService {
       throw new DomainException(
         ErrorCode.UPLOAD_NOTHING_TO_REVERT,
         batch.status === 'reverted'
-          ? 'This import has been reverted already.'
-          : 'This import never completed, so there is nothing of it to revert.',
+          ? SAY.UPLOAD_NOTHING_TO_REVERT.reverted
+          : SAY.UPLOAD_NOTHING_TO_REVERT.neverCompleted,
         HttpStatus.CONFLICT,
         { batchId, status: batch.status },
       );
@@ -274,7 +277,7 @@ export class ProductionImportService {
     if (String(latest._id) !== batchId) {
       throw new DomainException(
         ErrorCode.UPLOAD_BATCH_NOT_LATEST,
-        `“${latest.filename}” was imported into this month after it. Revert that one first.`,
+        SAY.UPLOAD_BATCH_NOT_LATEST.revertThatFirst({ filename: latest.filename }),
         HttpStatus.CONFLICT,
         { batchId, latestBatchId: String(latest._id) },
       );

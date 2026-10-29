@@ -5,6 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
@@ -13,6 +14,9 @@ import { initialsOf } from './directory.service';
 import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole } from './membership.schema';
+import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
+
+const SAY = ORG_REFUSALS;
 
 export interface DelegatedAdmin {
   membershipId: string;
@@ -58,7 +62,7 @@ export class AdminDelegationService {
     if (!ctx.kpmId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
-        'You are not in an office.',
+        SAY.TENANT_NO_MEMBERSHIP.notInOffice,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -80,9 +84,11 @@ export class AdminDelegationService {
       ...rows.map((r) => r.adminAccess?.grantedByUserId).filter((u): u is string => !!u),
     ]);
     const isOwner = Boolean(ctx.membership?.isKpmOwner);
+    // A person whose account is gone is still named — in the reader's language (P18.98-T5 AC-4).
+    const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
 
     return rows.map((row) => {
-      const fullName = named.get(row.userId) ?? 'Unknown';
+      const fullName = named.get(row.userId) ?? unknown;
       const grantedBy = row.adminAccess?.grantedByUserId;
       return {
         membershipId: String(row._id),
@@ -92,7 +98,7 @@ export class AdminDelegationService {
         role: row.role,
         grantedAt: row.adminAccess?.grantedAt?.toISOString() ?? null,
         // Null for the seeded Owner, who was never granted it by anybody.
-        grantedByName: grantedBy ? (named.get(grantedBy) ?? 'Unknown') : null,
+        grantedByName: grantedBy ? (named.get(grantedBy) ?? unknown) : null,
         canRevoke: isOwner && String(row._id) !== ctx.membershipId,
       };
     });
@@ -106,7 +112,7 @@ export class AdminDelegationService {
     if (target.adminAccess?.isKpmAdmin) {
       throw new DomainException(
         ErrorCode.ORG_ALREADY_ADMIN,
-        'They already administer this office.',
+        SAY.ORG_ALREADY_ADMIN.alreadyAdmin,
         HttpStatus.CONFLICT,
         { membershipId },
       );
@@ -117,7 +123,7 @@ export class AdminDelegationService {
     if (target.status !== 'active') {
       throw new DomainException(
         ErrorCode.ORG_ADMIN_TARGET_NOT_ACTIVE,
-        'They have not joined the office yet.',
+        SAY.ORG_ADMIN_TARGET_NOT_ACTIVE.notJoinedYet,
         HttpStatus.UNPROCESSABLE_ENTITY,
         { membershipId, status: target.status },
       );
@@ -167,7 +173,7 @@ export class AdminDelegationService {
     if (!target.adminAccess?.isKpmAdmin) {
       throw new DomainException(
         ErrorCode.ORG_NOT_AN_ADMIN,
-        'They do not administer this office.',
+        SAY.ORG_NOT_AN_ADMIN.notAdmin,
         HttpStatus.CONFLICT,
         { membershipId },
       );
@@ -179,7 +185,7 @@ export class AdminDelegationService {
     if (membershipId === ctx.membershipId) {
       throw new DomainException(
         ErrorCode.PERM_OWNER_ONLY,
-        'The Owner’s own access cannot be revoked. Transfer the office instead.',
+        SAY.PERM_OWNER_ONLY.ownersOwnAccess,
         HttpStatus.FORBIDDEN,
         { membershipId },
       );

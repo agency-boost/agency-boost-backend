@@ -5,11 +5,13 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext, TenantMembership, isEffectiveCoreLeader } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { formatDate } from '@/common/format/format';
+import { readerOf } from '@/common/i18n/reader';
+import { isLanguage, type Language } from '@/domain/constants/language';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { isEnded } from '@/modules/tenants/subscription';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { Membership, MembershipDocument } from '@/modules/org/membership.schema';
+import { AUTH_REFUSALS } from './auth.messages';
 
 /**
  * Builds the RequestContext once per request.
@@ -50,21 +52,31 @@ export class ContextResolver {
      * A setup session's write scope, off the same session row (ADR-0162 §2). Ignored outside a session.
      */
     impersonationWriteScope: readonly string[] = [],
+    /**
+     * **The language the request's `Accept-Language` names** (P18.98-T5 AC-1), read by the guard, or `null`. The
+     * request's reader is it, else the person's saved `users.locale` — off the row read here, no extra read — else a
+     * reader who has chosen nothing. **Never the person's own choice in a support session**: it is neither read nor
+     * written there (ADR-0179 §2), so the support person's screen's language, or nobody's.
+     */
+    headerLanguage: Language | null = null,
   ): Promise<RequestContext> {
     const user = await this.users.findOne({ _id: userId, deletedAt: null }).exec();
     if (!user) {
       throw new DomainException(
         ErrorCode.AUTH_TOKEN_INVALID,
-        'Your session is no longer valid. Sign in again.',
+        AUTH_REFUSALS.AUTH_TOKEN_INVALID.noLongerValid,
         HttpStatus.UNAUTHORIZED,
       );
     }
+    const stored = impersonatorUserId === null && isLanguage(user.locale) ? user.locale : null;
+    const reader = readerOf({ header: headerLanguage, stored });
+    // Every refusal below is the person's own, so it is written in their language, saved or sent (`writtenFor`).
     if (user.status === 'deactivated') {
       throw new DomainException(
         ErrorCode.AUTH_ACCOUNT_DEACTIVATED,
-        'This account has been deactivated.',
+        AUTH_REFUSALS.AUTH_ACCOUNT_DEACTIVATED.deactivated,
         HttpStatus.FORBIDDEN,
-      );
+      ).writtenFor(reader);
     }
 
     const membership = await this.resolveMembership(userId);
@@ -87,19 +99,18 @@ export class ContextResolver {
       if (kpm?.status === 'suspended' && !exempt) {
         throw new DomainException(
           ErrorCode.TENANT_SUSPENDED,
-          'This office is suspended, so nobody in it can use AgencyBoost until it is reactivated. '
-            + 'The office’s Owner can ask AgencyBoost about it.',
+          AUTH_REFUSALS.TENANT_SUSPENDED.suspended,
           HttpStatus.FORBIDDEN,
           office,
-        );
+        ).writtenFor(reader);
       }
       if (kpm?.status === 'archived' && !exempt) {
         throw new DomainException(
           ErrorCode.TENANT_ARCHIVED,
-          'This office is archived. Its records are kept, and nobody in it can use AgencyBoost.',
+          AUTH_REFUSALS.TENANT_ARCHIVED.archived,
           HttpStatus.FORBIDDEN,
           office,
-        );
+        ).writtenFor(reader);
       }
       /*
        * **The end of a subscription, beside the suspension and after it** (ADR-0112 §3): a
@@ -115,11 +126,10 @@ export class ContextResolver {
       if (kpm && impersonatorUserId === null && isEnded(kpm, this.clock)) {
         throw new DomainException(
           ErrorCode.TENANT_SUBSCRIPTION_ENDED,
-          `This office’s subscription ended on ${formatDate(kpm.subscription?.endDate ?? '')}. Nobody in it can use `
-            + 'AgencyBoost until it is renewed. Contact AgencyBoost.',
+          AUTH_REFUSALS.TENANT_SUBSCRIPTION_ENDED.ended({ endDate: kpm.subscription?.endDate ?? '' }),
           HttpStatus.FORBIDDEN,
           { endDate: kpm.subscription?.endDate ?? null, ...office },
-        );
+        ).writtenFor(reader);
       }
     }
 
@@ -129,6 +139,7 @@ export class ContextResolver {
       // Never outside a session: somebody acting as themselves is not being restrained.
       impersonatorUserId !== null && impersonationReadOnly,
       impersonatorUserId !== null ? Object.freeze([...impersonationWriteScope]) : [],
+      reader,
     );
   }
 

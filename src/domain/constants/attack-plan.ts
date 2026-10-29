@@ -1,3 +1,4 @@
+import { ATTACK_PLAN_MESSAGES } from './attack-plan.messages';
 import type { ProductCategory, ProductChannel, ProductNeed } from './product-catalog';
 
 /**
@@ -60,6 +61,8 @@ export const PRODUCT_CHANNEL_LABELS: Readonly<Record<ProductChannel, string>> = 
  * The drawer's *Details* note for a product in run-off, verbatim (`Overall.html:10240`). The plan's own
  * run-off note and the *Attack Plan* tab's are the screens' (`:9676`, `:10290`): each says something
  * different, where it is.
+ *
+ * **A sentence in both languages since P18.98-T5** (AC-4), held in `attack-plan.messages.ts` and written for the
+ * request's reader where the drawer's answer is built (`ProductCatalogService`).
  */
-export const PRODUCT_RUN_OFF_NOTE =
-  'In run-off — not actively issued to new applicants. Shown for reference only; not part of the current sales shelf.';
+export const PRODUCT_RUN_OFF_NOTE = ATTACK_PLAN_MESSAGES.runOffNote;

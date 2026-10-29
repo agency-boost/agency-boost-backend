@@ -9,6 +9,7 @@ import { configModule } from '../../../test/config-module';
 import { session } from '../../../test/http-permissions';
 import { ROSTER_NOW, type Who } from '../../../test/coaching-office';
 import { buildForumOffice, forumApp, KPM_B, type ForumOffice } from '../../../test/forum-office';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { LeaderMeetingSchema } from './leader-meeting.schema';
 
 /**
@@ -408,6 +409,49 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
       const stored = await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(past.id) });
       expect(Object.keys(stored!)).not.toEqual(expect.arrayContaining(['lockedAt']));
       for (const struck of ['attendees', 'notes', 'coeditorIds', 'lockedAt']) expect(LeaderMeetingSchema.path(struck)).toBeUndefined();
+    });
+  });
+
+  /** **The minutes' refusals in Bahasa Indonesia** (P18.98-T5 AC-7): the codes and details as in English. */
+  describe('P18.98-T5 AC-7 the minutes’ refusals in Indonesian', () => {
+    it('P18.98-T5 AC-7 one field per write, a box off During, a row with no target, ape in sen, a rate that is no number', async () => {
+      const { id } = await make('Refused in Indonesian', '2026-10-06');
+      as('OWNER');
+      const view = await read(id);
+      const [prep] = view.agenda.preparation;
+      const say = async (call: request.Test, status: number) => (await call.set(...IN_INDONESIAN).expect(status)).body.error;
+
+      expect(await say(http().patch(`/leader-meetings/${id}/agenda-items/${prep.id}`).send({ text: 'a', pic: 'b', version: 1 }), 400))
+        .toMatchObject({ code: 'VALIDATION_FAILED', message: 'Kirim tepat satu dari text, pic, done, beserta versi yang Anda baca.' });
+      expect(await say(http().patch(`/leader-meetings/${id}/agenda-items/${prep.id}`).send({ done: true, version: 1 }), 400))
+        .toMatchObject({ details: { violations: ['done hanya dapat dicentang pada item di bagian Saat rapat.'] } });
+      expect(await say(http().put(`/leader-meetings/${id}/monthly-targets/new_aa`).send({ rate: 1, version: 0 }), 400))
+        .toMatchObject({ message: expect.stringMatching(/^row harus salah satu dari ape, .+: baris lain tidak memiliki Monthly Target\.$/) });
+      expect(await say(http().put(`/leader-meetings/${id}/monthly-targets/ape`).send({ rate: 1.5, version: 0 }), 400))
+        .toMatchObject({ message: 'rate untuk ape harus berupa sen IDR yang bulat.' });
+      expect(await say(http().put(`/leader-meetings/${id}/monthly-targets/flc`).send({ rate: 'TBD', version: 0 }), 400))
+        .toMatchObject({ details: { violations: expect.arrayContaining(['rate harus berupa angka, atau null untuk mengosongkannya']) } });
+      // The English, as before.
+      expect((await http().put(`/leader-meetings/${id}/monthly-targets/flc`).send({ rate: 'TBD', version: 0 }).expect(400)).body.error.details.violations)
+        .toEqual(expect.arrayContaining(['rate must be a number, or null to clear it']));
+    });
+
+    it('P18.98-T5 AC-7 the tracker’s rows changed since, and an item no longer in the meeting: 409, in Indonesian', async () => {
+      const { id } = await make('Conflicts in Indonesian', '2026-10-07');
+      as('OWNER');
+      const row = (await http().post(`/leader-meetings/${id}/action-items`).expect(201)).body;
+      const moved = await http().put(`/leader-meetings/${id}/action-items/order`).set(...IN_INDONESIAN).send({ itemIds: [] }).expect(409);
+      expect(moved.body.error).toMatchObject({
+        code: 'VERSION_CONFLICT', message: 'Baris di Pelacak tindakan berubah sejak Anda membukanya. Muat ulang, lalu coba lagi.',
+        details: { itemIds: [row.id] },
+      });
+      await http().delete(`/leader-meetings/${id}/action-items/${row.id}`).query({ version: row.version }).expect(204);
+      const gone = await http().patch(`/leader-meetings/${id}/action-items/${row.id}`).set(...IN_INDONESIAN)
+        .send({ pic: 'Sari', version: row.version }).expect(409);
+      expect(gone.body.error).toMatchObject({
+        code: 'VERSION_CONFLICT', message: 'Item ini sudah tidak ada di rapat. Muat ulang untuk melihat isinya sekarang.',
+        details: { expectedVersion: row.version, actualVersion: null },
+      });
     });
   });
 

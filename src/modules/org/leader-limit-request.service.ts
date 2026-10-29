@@ -5,6 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
 import { isLeaderClass } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
@@ -17,10 +18,14 @@ import { ApprovalsService } from './approvals.service';
 import { HierarchyService } from './hierarchy.service';
 import { countLeadersUsed, countLeadersUsedPerOffice, leaderLimitRequestStale } from './leader-limit';
 import {
+  LEADER_LIMIT_MESSAGES, LEADER_LIMIT_REFUSALS, STALE_REASONS, type StaleReason,
+} from './leader-limit.messages';
+import {
   LeaderLimitAction, LeaderLimitRequestDocument, LeaderLimitRequestStatus,
 } from './leader-limit-request.schema';
 import { MembershipRepository } from './membership.repository';
 import { MembershipDocument } from './membership.schema';
+import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
 import { LeaderLimitRequestRepository } from './org.repositories';
 import { RoleChangeService } from './role-change.service';
 
@@ -85,7 +90,7 @@ export class LeaderLimitRequestService {
 
   private requireMember(ctx: RequestContext): string {
     if (!ctx.kpmId || !ctx.membershipId) {
-      throw new DomainException(ErrorCode.TENANT_NO_MEMBERSHIP, 'You are not in an office.', HttpStatus.FORBIDDEN);
+      throw new DomainException(ErrorCode.TENANT_NO_MEMBERSHIP, ORG_REFUSALS.TENANT_NO_MEMBERSHIP.notInOffice, HttpStatus.FORBIDDEN);
     }
     return ctx.membershipId;
   }
@@ -111,7 +116,7 @@ export class LeaderLimitRequestService {
       if (!input.orgLevelCode?.trim()) {
         throw new DomainException(
           ErrorCode.VALIDATION_FAILED,
-          'Name the rung they are to be given.',
+          LEADER_LIMIT_REFUSALS.VALIDATION_FAILED.nameTheRung,
           HttpStatus.BAD_REQUEST,
           { field: 'orgLevelCode' },
         );
@@ -262,8 +267,11 @@ export class LeaderLimitRequestService {
       }
     } catch (err) {
       if (err instanceof DomainException && err.code === ErrorCode.LEADER_LIMIT_REQUEST_STALE) {
-        const why = String((err.details as { why?: string } | undefined)?.why ?? 'It no longer applies.');
-        await this.close(ctx, office, request, 'declined', `No longer applies: ${why}`, 'stale', 'approved');
+        // The sentence the refusal was given, both languages (`givenDetails`); the stored reason is written in the
+        // deciding Super Admin's language, and shown as stored (P18.98-T5 AC-6).
+        const why = (err.givenDetails as { why?: StaleReason } | undefined)?.why ?? STALE_REASONS.noLongerApplies;
+        const reason = render(LEADER_LIMIT_MESSAGES.closedAsStale({ why }), ctx.reader);
+        await this.close(ctx, office, request, 'declined', reason, 'stale', 'approved');
       } else {
         // Anything else left the act undone: the request goes back to waiting, to be decided again.
         await this.requests.transition(office, String(request._id), 'approved', {
@@ -284,7 +292,7 @@ export class LeaderLimitRequestService {
     if (!reason) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Say why. The office reads it, and a refusal with nothing to act on is not an answer.',
+        LEADER_LIMIT_REFUSALS.VALIDATION_FAILED.sayWhy,
         HttpStatus.BAD_REQUEST,
         { field: 'reason' },
       );
@@ -298,7 +306,9 @@ export class LeaderLimitRequestService {
   /** The queue and the decisions are the platform's: an office's Owner holds `:read` for their own list only. */
   private requireDecider(ctx: RequestContext, permission: 'leader_limit_request:read' | 'leader_limit_request:decide'): void {
     if (!ctx.isSuperAdmin || !can(ctx, permission)) {
-      throw new DomainException(ErrorCode.PERM_DENIED, 'Only AgencyBoost decides these.', HttpStatus.FORBIDDEN, { permission });
+      throw new DomainException(
+        ErrorCode.PERM_DENIED, LEADER_LIMIT_REFUSALS.PERM_DENIED.agencyBoostDecides, HttpStatus.FORBIDDEN, { permission },
+      );
     }
   }
 
@@ -321,7 +331,7 @@ export class LeaderLimitRequestService {
     const now = await this.requests.findById(office, String(request._id));
     assertPending(now ?? request);
     // Still pending although the move matched nothing: only a claim released between the two reads can do this.
-    throw leaderLimitRequestStale(String(request._id), 'It changed while it was being decided.');
+    throw leaderLimitRequestStale(String(request._id), STALE_REASONS.changedWhileDeciding);
   }
 
   /**
@@ -335,18 +345,18 @@ export class LeaderLimitRequestService {
     office: RequestContext,
     request: LeaderLimitRequestDocument,
     target: MembershipDocument | null,
-  ): Promise<string | null> {
+  ): Promise<StaleReason | null> {
     const asker = await this.members.findById(office, request.requestedByMembershipId);
-    if (!asker || asker.status !== 'active') return 'Whoever asked is no longer an active member of the office.';
+    if (!asker || asker.status !== 'active') return STALE_REASONS.askerGone;
     const kpm = await this.kpms.findOne({ _id: request.kpmId, deletedAt: null }).exec();
     const tenantAdmin = asker.adminAccess?.isKpmAdmin === true || kpm?.ownerUserId === asker.userId;
     if (tenantAdmin) return null;
     if (request.action === 'activate') {
-      return request.leaderMembershipId === String(asker._id) ? null : 'It was not routed to whoever asked.';
+      return request.leaderMembershipId === String(asker._id) ? null : STALE_REASONS.notRoutedToAsker;
     }
-    if (!target || target.leaderId !== String(asker._id)) return 'They no longer report to whoever asked.';
+    if (!target || target.leaderId !== String(asker._id)) return STALE_REASONS.noLongerReportsToAsker;
     const rung = await this.hierarchy.rungFor(office, request.toOrgLevelCode as string);
-    return rung.role === 'ab' ? 'Only the Owner or an Admin may make somebody an AB.' : null;
+    return rung.role === 'ab' ? STALE_REASONS.abNeedsTheOffice : null;
   }
 
   /** A promotion's rung must still be on the ladder, and still lead: archived or re-tiered since, it is stale. */
@@ -356,9 +366,9 @@ export class LeaderLimitRequestService {
       if (err instanceof DomainException && err.code === ErrorCode.ORG_LEVEL_NOT_ON_LADDER) return null;
       throw err;
     });
-    if (!rung) throw leaderLimitRequestStale(String(request._id), `The rung ${code} is no longer on the ladder.`);
+    if (!rung) throw leaderLimitRequestStale(String(request._id), STALE_REASONS.rungOffTheLadder({ code }));
     if (!isLeaderClass(rung.role)) {
-      throw leaderLimitRequestStale(String(request._id), `The rung ${code} no longer leads.`);
+      throw leaderLimitRequestStale(String(request._id), STALE_REASONS.rungNoLongerLeads({ code }));
     }
   }
 
@@ -431,9 +441,10 @@ export class LeaderLimitRequestService {
     }
     const users = await this.users.find({ _id: { $in: [...new Set([...memberships.values()].map((m) => m.userId))] } }).exec();
     const userOf = new Map(users.map((u) => [String(u._id), u]));
+    const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
     const nameOf = (membershipId: string): string => {
       const user = userOf.get(memberships.get(membershipId)?.userId ?? '');
-      return displayNameOf(user) ?? 'Unknown';
+      return displayNameOf(user) ?? unknown;
     };
 
     // The count: the office's own for its members, every office's named for the Super Admin.
@@ -476,7 +487,7 @@ function ranked(found: LeaderLimitRequestDocument[]): LeaderLimitRequestDocument
 function requestOpen(requestId: string | null): DomainException {
   return new DomainException(
     ErrorCode.LEADER_LIMIT_REQUEST_OPEN,
-    'AgencyBoost is already deciding a request about them. Wait for it, or cancel it first.',
+    LEADER_LIMIT_REFUSALS.LEADER_LIMIT_REQUEST_OPEN.alreadyDeciding,
     HttpStatus.CONFLICT,
     { requestId },
   );
@@ -486,7 +497,7 @@ function assertPending(request: LeaderLimitRequestDocument): void {
   if (request.status === 'pending') return;
   throw new DomainException(
     ErrorCode.LEADER_LIMIT_REQUEST_DECIDED,
-    `That request was already ${request.status}.`,
+    LEADER_LIMIT_REFUSALS.LEADER_LIMIT_REQUEST_DECIDED.already({ status: request.status }),
     HttpStatus.CONFLICT,
     { requestId: String(request._id), status: request.status, decidedAt: request.decidedAt?.toISOString() ?? null },
   );
@@ -494,14 +505,14 @@ function assertPending(request: LeaderLimitRequestDocument): void {
 
 /**
  * **Does the act still apply?** (ADR-0157 §3) — asked with the office's leader lease held. `null` when it does;
- * otherwise what changed, in words the asker reads.
+ * otherwise what changed, in words the asker reads: a sentence, in both languages (`STALE_REASONS`).
  */
 export function staleReason(
   request: Pick<LeaderLimitRequestDocument, 'action' | 'fromOrgLevelCode'>,
   target: Pick<MembershipDocument, 'status' | 'orgLevelCode'> | null,
-): string | null {
-  if (!target || target.status === 'removed') return 'They are no longer a member of the office.';
-  if (target.orgLevelCode !== request.fromOrgLevelCode) return 'They have moved rung since it was asked.';
-  if (request.action === 'activate' && target.status !== 'pending') return 'They were let in since it was asked.';
+): StaleReason | null {
+  if (!target || target.status === 'removed') return STALE_REASONS.memberGone;
+  if (target.orgLevelCode !== request.fromOrgLevelCode) return STALE_REASONS.movedRung;
+  if (request.action === 'activate' && target.status !== 'pending') return STALE_REASONS.letInSince;
   return null;
 }

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { SeedRecord } from './company-template.schema';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
@@ -8,7 +8,11 @@ import {
   type SeedActivityCategory, type SeedActivityType, type SeedLeadStatus, type SeedRatioDefinition,
   defaultDisplayUnitFor, resolveDisplayUnit,
 } from '@/domain/constants';
-import { NotFoundException } from '@/common/errors/domain.exception';
+import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
+import { ErrorCode } from '@/common/errors/error-codes';
+import { inSource, joinSentences, prefixed, refiled } from '@/common/i18n/sentence';
+import type { FieldSentence } from '@/common/validation/fields';
+import { TEMPLATE_REFUSALS, type BrokenSource, type TemplateSection } from './template.messages';
 import type { KpmStartedFrom } from '@/modules/tenants/kpm.schema';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
@@ -165,25 +169,22 @@ type TemplateCategory = SeedActivityCategory & {
   appliesToOrgLevelCodes?: string[];
 };
 
-/** What would make a lead pipeline payload produce a broken office — one sentence each. */
-export function leadPipelineProblems(statuses: readonly SeedLeadStatus[]): string[] {
-  const problems: string[] = [];
+/** The whole-source check's refusals, in both languages (P18.98-T5 AC-3). */
+const SAY = TEMPLATE_REFUSALS.VALIDATION_FAILED;
+
+/** What would make a lead pipeline payload produce a broken office — one sentence each, in both languages. */
+export function leadPipelineProblems(statuses: readonly SeedLeadStatus[]): FieldSentence[] {
+  const problems: FieldSentence[] = [];
   // A closed lead is not expected to close. A template saying both would make the Overview's
   // *Expected to close* double-count against *Last month* (ADR-0043).
   const contradictory = statuses.filter((s) => s.isTerminal && s.isLateStage);
   if (contradictory.length) {
-    problems.push(
-      `${contradictory.map((s) => s.code).join(', ')} is flagged as both the stage that closes its `
-        + 'pipeline and a stage still expected to close. A lead can only be one.',
-    );
+    problems.push(SAY.flaggedBoth({ codes: contradictory.map((s) => s.code) }));
   }
   for (const pipeline of ['sales', 'recruitment'] as const) {
     const terminals = statuses.filter((s) => s.pipeline === pipeline && s.isTerminal);
     if (terminals.length !== 1) {
-      problems.push(
-        `The ${pipeline} pipeline has ${terminals.length} terminal stages. It needs exactly one: it is `
-          + 'what gates marking a lead successful.',
-      );
+      problems.push(SAY.terminalCount({ pipeline, count: terminals.length }));
     }
   }
   return problems;
@@ -281,7 +282,7 @@ export class ProvisioningService {
     } else {
       const library = startFrom?.kind === 'template' && startFrom.templateLibrary === true;
       if (startFrom?.kind === 'template' && !startFrom.templateId && !library) {
-        throw new BadRequestException('Choose the template the office starts from.');
+        throw new InvalidRequestException(SAY.chooseTemplate);
       }
       // The company whose template it is: the office's own, or the Template library's (ADR-0164 §5).
       const sourceCompanyId = library ? await this.libraryCompanyId() : companyId;
@@ -336,17 +337,17 @@ export class ProvisioningService {
    * **The whole-source check, over payloads no template publish has seen** (P13.2-T7 AC-5): a
    * template saved from an office's published settings is checked as `planFor` checks a template,
    * before anything is written, so it can never hold what an office made from it would be refused.
-   * `sourceName` begins the refusal — *"KPM 0417's published settings would produce a broken
+   * `source` begins the refusal, in the reader's language — *"KPM 0417's published settings would produce a broken
    * office, so nothing was created."* — and a kind absent from `payloads` is a kind held empty.
    */
   checkSource(
-    sourceName: string,
+    source: BrokenSource,
     payloads: Partial<Record<OfficeTemplateKind, Record<string, unknown>>>,
   ): void {
     this.refuseBrokenPlan({
-      startedFrom: { source: 'template', templateId: null, templateName: sourceName },
+      startedFrom: { source: 'template', templateId: null, templateName: null },
       kinds: this.each((kind) => ({ payload: payloads[kind] ?? null, seededFrom: { ...NO_RECORD } })),
-    });
+    }, source);
   }
 
   /**
@@ -397,9 +398,7 @@ export class ProvisioningService {
       .catch(() => null);
     if (!template) throw new NotFoundException('Template');
     if (template.status === 'archived') {
-      throw new BadRequestException(
-        `${template.name} is archived and is not offered. Start the office from an active template.`,
-      );
+      throw new InvalidRequestException(SAY.startFromArchived({ name: template.name }));
     }
     return template;
   }
@@ -411,31 +410,32 @@ export class ProvisioningService {
    * A capability ladder is checked only where the source has one: where it has none, the office is given
    * the platform's (ADR-0116), which needs no check.
    */
-  private refuseBrokenPlan(plan: ProvisioningPlan): void {
+  private refuseBrokenPlan(plan: ProvisioningPlan, named?: BrokenSource): void {
     const { kinds } = plan;
-    const problems: string[] = [];
-    const say = (what: string, found: string[]) => problems.push(...found.map((p) => `${what}: ${p}`));
+    // Each problem after its section's name, in both languages (P18.98-T5 AC-3): *Activity binding: …*.
+    const problems: FieldSentence[] = [];
+    const say = (section: TemplateSection, found: readonly FieldSentence[]) => problems.push(
+      ...found.map((inner) => SAY.inSection({ section, inner })),
+    );
 
     const taxonomy = (kinds.activity_taxonomy.payload ?? {}) as ActivityTaxonomyPayload;
     const binding = bindingOfSource(kinds.activity_taxonomy.payload);
     const { categories, types } = withCascadeTypes(taxonomy.categories ?? [], taxonomy.types ?? [], binding);
     const conflict = summaryGroupConflict(categories);
     if (conflict) {
-      say('Activity types', [`the summary tile ${conflict.summaryGroupCode} is labelled `
-        + `${conflict.labels.join(' and ')}. One tile has one label.`]);
+      say('activityTypes', [SAY.tileLabelled({ code: conflict.summaryGroupCode, labels: conflict.labels })]);
     }
     const taken = summaryGroupCodeTaken(categories);
     if (taken) {
-      say('Activity types', [`the summary tile ${taken.summaryGroupCode} has the code of a section `
-        + 'outside it. One code is one tile.']);
+      say('activityTypes', [SAY.tileCodeTaken({ code: taken.summaryGroupCode })]);
     }
     const known = new Set(categories.map((c) => c.code));
     const typeCodes = new Set(types.filter((t) => known.has(t.categoryCode)).map((t) => t.code));
     // Every code the binding names is one the office will hold (ADR-0163 §1): the same checker as the office's own.
-    say('Activity binding', bindingProblems(binding, typeCodes));
+    say('activityBinding', bindingProblems(binding, typeCodes));
 
     const statuses = (kinds.lead_pipeline.payload as { statuses?: SeedLeadStatus[] } | null)?.statuses;
-    if (statuses) say('Lead statuses', leadPipelineProblems(statuses));
+    if (statuses) say('leadStatuses', leadPipelineProblems(statuses));
 
     const ratios = (kinds.ratio_set.payload as { ratios?: SeedRatioDefinition[] } | null)?.ratios ?? [];
     for (const ratio of ratios) {
@@ -443,18 +443,19 @@ export class ProvisioningService {
         ratio.comparison,
         (ratio as { displayUnit?: string }).displayUnit ?? defaultDisplayUnitFor(ratio.code, ratio.comparison),
       );
-      if (resolved.refusal !== undefined) say('Ratio benchmarks', [`${ratio.code}: ${resolved.refusal}`]);
+      if (resolved.refusal !== undefined) {
+        say('ratioBenchmarks', [prefixed(`${ratio.code}: `, refiled(resolved.refusal, ErrorCode.VALIDATION_FAILED))]);
+      }
       const missing = [...ratio.numerator, ...ratio.denominator].filter((c) => !typeCodes.has(c));
       if (missing.length) {
-        say('Ratio benchmarks', [`${ratio.code} names ${missing.join(', ')}, which the activity types `
-          + 'it would be given do not contain.']);
+        say('ratioBenchmarks', [SAY.ratioNamesMissing({ code: ratio.code, missing })]);
       }
     }
 
     let moduleCodes: string[] = [];
     if (kinds.training_taxonomy.payload) {
       const found = trainingTaxonomyProblems(kinds.training_taxonomy.payload);
-      say('Training', found);
+      say('training', found);
       if (!found.length) {
         moduleCodes = trainingSeedDocuments('', kinds.training_taxonomy.payload as unknown as TrainingTaxonomyPayload)
           .modules.filter((m) => m.publishState === 'published').map((m) => m.code);
@@ -462,27 +463,25 @@ export class ProvisioningService {
     }
     if (kinds.activation_checklist.payload) {
       const found = activationChecklistProblems(kinds.activation_checklist.payload);
-      say('Activation checklist', found);
+      say('activationChecklist', found);
       if (!found.length) {
         const offered = new Set(moduleCodes);
         const missing = activationTrainingLinks(activationSeedAspects(kinds.activation_checklist.payload))
           .filter((code) => !offered.has(code));
         if (missing.length) {
-          say('Activation checklist', [`it links to training modules the office would not be given: `
-            + `${missing.join(', ')}.`]);
+          say('activationChecklist', [SAY.checklistLinks({ codes: missing })]);
         }
       }
     }
-    if (kinds.event_types.payload) say('Events', eventTypesProblems(kinds.event_types.payload));
+    if (kinds.event_types.payload) say('events', eventTypesProblems(kinds.event_types.payload));
     const ladder = withPlatformLadder(kinds.capability_ladder.payload);
-    if (!ladder.supplied) say('Capability mapping', capabilityLadderProblems(ladder.payload));
+    if (!ladder.supplied) say('capabilityMapping', capabilityLadderProblems(ladder.payload));
 
     if (problems.length) {
-      const from = plan.startedFrom.templateName ?? (plan.startedFrom.source === 'defaults'
-        ? 'The AgencyBoost defaults' : 'The source');
-      throw new BadRequestException(
-        `${from} would produce a broken office, so nothing was created. ${problems.join(' ')}`,
-      );
+      const { templateName, source: kind } = plan.startedFrom;
+      const source: BrokenSource = named
+        ?? (templateName !== null ? { kind: 'template', name: templateName } : { kind: kind === 'defaults' ? 'defaults' : 'source' });
+      throw new InvalidRequestException(SAY.brokenOffice({ source, problems: joinSentences(problems, ' ') }));
     }
   }
 
@@ -529,7 +528,7 @@ export class ProvisioningService {
 
     const problems = leadPipelineProblems(statuses);
     if (problems.length) {
-      throw new Error(`The lead pipeline for office ${kpmId} would be broken: ${problems.join(' ')}`);
+      throw new Error(`The lead pipeline for office ${kpmId} would be broken: ${problems.map(inSource).join(' ')}`);
     }
 
     await this.leadStatuses.insertMany(statuses.map((s) => ({
@@ -692,7 +691,7 @@ export class ProvisioningService {
     const problems = capabilityLadderProblems(ladder.payload);
     if (problems.length) {
       throw new Error(
-        `The capability catalog for office ${kpmId} would be broken: ${problems.join(' ')}`,
+        `The capability catalog for office ${kpmId} would be broken: ${problems.map(inSource).join(' ')}`,
       );
     }
     if (ladder.supplied) {
@@ -721,7 +720,7 @@ export class ProvisioningService {
     if (!source.payload) return { rows: 0, seededFrom: source.seededFrom };
     const problems = eventTypesProblems(source.payload);
     if (problems.length) {
-      throw new Error(`The event types for office ${kpmId} would be broken: ${problems.join(' ')}`);
+      throw new Error(`The event types for office ${kpmId} would be broken: ${problems.map(inSource).join(' ')}`);
     }
     const rows = eventTypeSeedDocuments(kpmId, source.payload as unknown as EventTypesPayload);
     if (rows.length) await this.eventTypes.insertMany(rows);
@@ -779,7 +778,7 @@ export class ProvisioningService {
     if (!source.payload) return { rows: 0, seededFrom: source.seededFrom, publishedModuleCodes: [] };
     const problems = trainingTaxonomyProblems(source.payload);
     if (problems.length) {
-      throw new Error(`The training taxonomy for office ${kpmId} would be broken: ${problems.join(' ')}`);
+      throw new Error(`The training taxonomy for office ${kpmId} would be broken: ${problems.map(inSource).join(' ')}`);
     }
     const rows = trainingSeedDocuments(kpmId, source.payload as unknown as TrainingTaxonomyPayload);
     if (rows.categories.length) await this.trainingCategories.insertMany(rows.categories);
@@ -815,7 +814,9 @@ export class ProvisioningService {
 
     const problems = activationChecklistProblems(source.payload);
     if (problems.length) {
-      throw new Error(`The activation checklist for office ${kpmId} would be broken: ${problems.join(' ')}`);
+      throw new Error(
+        `The activation checklist for office ${kpmId} would be broken: ${problems.map(inSource).join(' ')}`,
+      );
     }
 
     const aspects = activationSeedAspects(payload);
@@ -877,7 +878,7 @@ export class ProvisioningService {
         (r as { displayUnit?: string }).displayUnit ?? defaultDisplayUnitFor(r.code, r.comparison),
       );
       if (resolved.refusal !== undefined) {
-        throw new Error(`The ratio ${r.code} for office ${kpmId}: ${resolved.refusal}`);
+        throw new Error(`The ratio ${r.code} for office ${kpmId}: ${inSource(resolved.refusal)}`);
       }
       return resolved.unit;
     };

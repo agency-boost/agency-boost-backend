@@ -1,8 +1,12 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
+import { ErrorCode } from '@/common/errors/error-codes';
+import { joinSentences, prefixed, refiled } from '@/common/i18n/sentence';
+import type { FieldSentence } from '@/common/validation/fields';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import {
@@ -29,6 +33,15 @@ import { eventTypesProblems } from '@/modules/events/event-types-payload';
 import {
   campaignKindsProblems, type CampaignKindsPayload,
 } from '@/modules/campaigns/campaign-kinds-payload';
+import { TEMPLATE_REFUSALS } from './template.messages';
+
+/** A publish's refusals, in both languages (P18.98-T5 AC-3). */
+const SAY = TEMPLATE_REFUSALS.VALIDATION_FAILED;
+
+/** A payload's problems, refused whole: every sentence, one after another, as `join(' ')` said them. */
+const refuseProblems = (problems: readonly FieldSentence[]): void => {
+  if (problems.length) throw new InvalidRequestException(joinSentences(problems, ' '));
+};
 
 /** No version to stand against — nothing published, or a history row that is not current. */
 const NO_STANDING: OfficeStanding = { behind: 0, unrecorded: 0 };
@@ -240,10 +253,7 @@ export class TemplateService {
     const draft = await this.templates
       .findOne({ ...this.rowsOf(at), status: 'draft', deletedAt: null }).exec();
     if (!draft) {
-      throw new BadRequestException(
-        'There is nothing to publish. Change something first — the published version is '
-          + 'immutable, because offices record which one they were built from.',
-      );
+      throw new InvalidRequestException(SAY.nothingToPublish);
     }
     await this.refuseBroken(at, draft.payload);
 
@@ -312,9 +322,7 @@ export class TemplateService {
   ): Promise<KindAddress> {
     const at = await this.address(companyId, kind, templateId);
     if (at.template?.status === 'archived') {
-      throw new BadRequestException(
-        `${at.template.name} is archived, so it is kept as it is. Edit an active template instead.`,
-      );
+      throw new InvalidRequestException(SAY.editArchived({ name: at.template.name }));
     }
     return at;
   }
@@ -390,14 +398,12 @@ export class TemplateService {
       * name, so provisioning checks it against the modules it has just copied.
       */
     if (kind === 'activation_checklist') {
-      const problems = activationChecklistProblems(payload);
-      if (problems.length) throw new BadRequestException(problems.join(' '));
+      refuseProblems(activationChecklistProblems(payload));
       return;
     }
 
     if (kind === 'training_taxonomy') {
-      const problems = trainingTaxonomyProblems(payload);
-      if (problems.length) throw new BadRequestException(problems.join(' '));
+      refuseProblems(trainingTaxonomyProblems(payload));
       return;
     }
 
@@ -407,15 +413,14 @@ export class TemplateService {
      * One checker, two callers, on purpose: publishing and provisioning disagreeing about what is
      * valid is how a template passes here and throws at a Super Admin creating a real branch.
      */
-    const checker: Partial<Record<TemplateKind, (p: unknown) => string[]>> = {
+    const checker: Partial<Record<TemplateKind, (p: unknown) => FieldSentence[]>> = {
       capability_ladder: capabilityLadderProblems,
       event_types: eventTypesProblems,
       campaign_kinds: campaignKindsProblems,
     };
     const check = checker[kind];
     if (check) {
-      const problems = check(payload);
-      if (problems.length) throw new BadRequestException(problems.join(' '));
+      refuseProblems(check(payload));
       return;
     }
 
@@ -428,7 +433,7 @@ export class TemplateService {
       }[];
     };
     if (!ratios?.length) {
-      throw new BadRequestException('A ratio set with no ratios gives every new office nothing to measure.');
+      throw new InvalidRequestException(SAY.noRatios);
     }
 
     /*
@@ -450,10 +455,8 @@ export class TemplateService {
     )].filter((code) => !known.has(code));
 
     if (missing.length) {
-      throw new BadRequestException(
-        `${missing.join(', ')} is named by a ratio and declared by no activity type in this `
-          + `template\u2019s published taxonomy${taxonomy ? ` (version ${taxonomy.version})` : ''}. `
-          + 'Publish the taxonomy first, or point the ratio at a code it has.',
+      throw new InvalidRequestException(
+        SAY.ratioCodesUndeclared({ codes: missing, version: taxonomy ? taxonomy.version : null }),
       );
     }
 
@@ -468,14 +471,14 @@ export class TemplateService {
           ratio.comparison === 'band' ? 'band' : 'gte', ratio.displayUnit,
         );
         if (resolved.refusal !== undefined) {
-          throw new BadRequestException(`${ratio.code}: ${resolved.refusal}`);
+          // The rule's own words (`resolveDisplayUnit`), after the ratio's code, refused as the publish refuses.
+          throw new InvalidRequestException(
+            prefixed(`${ratio.code}: `, refiled(resolved.refusal, ErrorCode.VALIDATION_FAILED)),
+          );
         }
       }
       if (!ratio.denominator?.length) {
-        throw new BadRequestException(
-          `${ratio.code} has nothing in its denominator. That is a division by zero dressed `
-            + 'up as configuration, and it renders as ∞ on every agent\u2019s screen.',
-        );
+        throw new InvalidRequestException(SAY.noDenominator({ code: ratio.code }));
       }
     }
   }
@@ -492,7 +495,9 @@ export class TemplateService {
     const own = ((payload.types ?? []) as { code: string }[]).map((t) => t.code);
     const known = new Set([...own, ...SEED_ACTIVITY_TYPES.map((t) => t.code)]);
     const problems = bindingProblems(payload.bindings, known);
-    if (problems.length) throw new BadRequestException(`Activity binding: ${problems.join(' ')}`);
+    if (problems.length) {
+      throw new InvalidRequestException(SAY.inSection({ section: 'activityBinding', inner: joinSentences(problems, ' ') }));
+    }
   }
 
   /**
@@ -511,10 +516,7 @@ export class TemplateService {
     if (kind === 'activity_taxonomy') {
       const { categories, types } = payload as { categories?: unknown[]; types?: unknown[] };
       if (!categories?.length || !types?.length) {
-        throw new BadRequestException(
-          'A taxonomy with no categories or no types would give every new office an empty '
-            + 'Log Activity screen.',
-        );
+        throw new InvalidRequestException(SAY.taxonomyEmpty);
       }
       // Again at publish: a draft saved before the rule existed is what would reach offices.
       this.checkedTaxonomy(payload);
@@ -524,13 +526,10 @@ export class TemplateService {
       for (const pipeline of ['sales', 'recruitment']) {
         const mine = (statuses ?? []).filter((s) => s.pipeline === pipeline);
         if (mine.length === 0) {
-          throw new BadRequestException(`The ${pipeline} pipeline has no stages.`);
+          throw new InvalidRequestException(SAY.pipelineNoStages({ pipeline }));
         }
         if (mine.filter((s) => s.isTerminal).length !== 1) {
-          throw new BadRequestException(
-            `The ${pipeline} pipeline needs exactly one stage that closes it. It is what `
-              + 'gates marking a lead successful.',
-          );
+          throw new InvalidRequestException(SAY.pipelineOneTerminal({ pipeline }));
         }
       }
     }

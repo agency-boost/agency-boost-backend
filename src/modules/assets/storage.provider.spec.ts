@@ -6,6 +6,7 @@ import { HttpStatus } from '@nestjs/common';
 import { FixedClock } from '@/common/clock/clock.port';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { readerIn } from '@/common/i18n/reader';
 import { GcsAdapter } from './gcs.adapter';
 import { STORAGE_PROVIDER, storageFor } from './storage.provider';
 import { StoragePort } from './storage.port';
@@ -64,6 +65,10 @@ describe('P18.7-T2 storage that is not configured (D12)', () => {
     expect((failure as DomainException).getStatus()).toBe(HttpStatus.SERVICE_UNAVAILABLE);
     expect((failure as DomainException).message).toBe(
       'File storage is not configured on this server, so files cannot be uploaded or opened here.',
+    );
+    // P18.98-T5 AC-2: and in Indonesian, for a reader of Indonesian.
+    expect((failure as DomainException).messageFor(readerIn('id'))).toBe(
+      'Penyimpanan file belum dikonfigurasi di server ini, jadi file tidak dapat diunggah atau dibuka di sini.',
     );
   });
 

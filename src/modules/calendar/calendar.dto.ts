@@ -4,7 +4,9 @@ import {
   ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength,
   Min,
 } from 'class-validator';
+import { field } from '@/common/validation/violations';
 import { CALENDAR, CALENDAR_ENTRY_TYPES, type CalendarEntryType } from '@/domain/constants';
+import { CALENDAR_REFUSALS } from './calendar.messages';
 
 /**
  * **The calendar's requests** (`functional/calendar.md`, the Data contract). The shapes and the limits
@@ -16,12 +18,15 @@ import { CALENDAR, CALENDAR_ENTRY_TYPES, type CalendarEntryType } from '@/domain
  * parameter 400, by name, rather than ignoring it.
  */
 
-/** `YYYY-MM-DD`. Whether it is a day at all — `2026-02-31` — the service checks. */
+/**
+ * `YYYY-MM-DD`. Whether it is a day at all — `2026-02-31` — the service checks. The messages are in both languages
+ * (P18.98-T5 AC-3), and class-validator writes the field's name for `$property` in each.
+ */
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
-const DATE_MESSAGE = '$property must be a day, written YYYY-MM-DD.';
+const DATE_MESSAGE = field(CALENDAR_REFUSALS.VALIDATION_FAILED.dayShape({ field: '$property' }));
 /** `HH:mm`, 24-hour. `00:00` as an end is midnight at the end of the date. */
 const TIME_SHAPE = /^([01]\d|2[0-3]):[0-5]\d$/;
-const TIME_MESSAGE = '$property must be a time, written HH:mm, 00:00 to 23:59.';
+const TIME_MESSAGE = field(CALENDAR_REFUSALS.VALIDATION_FAILED.clockShape({ field: '$property' }));
 
 export class CalendarEntriesQueryDto {
   @ApiPropertyOptional({ enum: ['week', 'month'], default: 'week', description: 'The period to answer.' })

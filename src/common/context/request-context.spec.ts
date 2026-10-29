@@ -163,3 +163,43 @@ describe('the Core Leader', () => {
     expect(isEffectiveCoreLeader({ isCoreLeader: true, role: null })).toBe(false);
   });
 });
+
+/**
+ * **P18.98-T5 AC-1 — the reader is on the context** (ADR-0179 §7): resolved once by `AuthGuard`, what every service
+ * writes a sentence for. A context built for a job, or by hand, reads as a reader who has chosen nothing.
+ */
+describe('P18.98-T5 the context’s reader', () => {
+  const member = {
+    membershipId: 'm1', kpmId: 'k1', orgLevelCode: 'AB', hierarchyRole: 'ab' as const, status: 'active' as const,
+    isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+  };
+
+  it('AC-1 reads as nobody’s choice when nothing resolved one: English words, Indonesian figures, until live', () => {
+    expect(new RequestContext('u1', 'none', member).reader).toEqual({ language: 'en', figures: 'id' });
+    expect(RequestContext.forJob('k1', 'nightly').reader).toEqual({ language: 'en', figures: 'id' });
+  });
+
+  it('AC-1 carries the reader it was given', () => {
+    const ctx = new RequestContext('u1', 'none', member, null, null, false, false, [], { language: 'id', figures: 'id' });
+    expect(ctx.reader).toEqual({ language: 'id', figures: 'id' });
+  });
+
+  it('AC-1 answers the same context for another reader, every other fact kept', () => {
+    const session = new RequestContext('u1', 'none', member, 'root', null, true, true, ['tenant_config:write']);
+    const indonesian = session.withReader({ language: 'id', figures: 'id' });
+    expect(indonesian).not.toBe(session);
+    expect(indonesian.reader).toEqual({ language: 'id', figures: 'id' });
+    expect(indonesian).toMatchObject({
+      userId: 'u1', impersonatorUserId: 'root', mustChangePassword: true, impersonationReadOnly: true,
+      impersonationWriteScope: ['tenant_config:write'], membership: member,
+    });
+    expect(Object.isFrozen(indonesian)).toBe(true);
+    // The office a Super Admin acts inside travels too.
+    expect(RequestContext.superAdminInTenant('root', 'k9').withReader({ language: 'id', figures: 'id' }).kpmId).toBe('k9');
+  });
+
+  it('AC-1 keeps the reader of the request somebody joins an office from', () => {
+    const asked = new RequestContext('u1', 'none', null, null, null, false, false, [], { language: 'id', figures: 'id' });
+    expect(RequestContext.joiningTenant(asked, 'k1').reader).toEqual({ language: 'id', figures: 'id' });
+  });
+});

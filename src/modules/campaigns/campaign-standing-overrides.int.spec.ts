@@ -10,6 +10,7 @@ import { clearCollections, startMongo, stopMongo, syncIndexes } from '../../../t
 import { configModule } from '../../../test/config-module';
 import { declaredPermissions, productionPipe, session, StubAuth } from '../../../test/http-permissions';
 import { listenOnLoopback } from '../../../test/listen';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { buildCoachingOffice, KPM_A, ROSTER_NOW, type CoachingOffice, type Who } from '../../../test/coaching-office';
 import { CampaignController } from './campaign.controller';
 import { CampaignService } from './campaign.service';
@@ -214,6 +215,32 @@ describe('the override of a final standing over HTTP (P18.6-T2 AC-5)', () => {
 
     it('P18.6-T2 AC-5 takes the campaign’s code in any case', async () => {
       await put('august_push', 'BUDI', { status: 'qualified', reason: REASON }).expect(200);
+    });
+  });
+
+  /** **The override's refusals in Bahasa Indonesia** (P18.98-T5 AC-7): the codes and details as in English. */
+  describe('P18.98-T5 AC-7 the override’s refusals in Indonesian', () => {
+    it('P18.98-T5 AC-7 one’s own result, a result not final, the status it already reads and a missing reason', async () => {
+      as('OWNER');
+      const own = await put('AUGUST_PUSH', 'OWNER', { status: 'qualified', reason: REASON }).set(...IN_INDONESIAN).expect(400);
+      expect(own.body.error).toMatchObject({
+        code: 'CAMPAIGN_OVERRIDE_SELF', message: 'Anda tidak dapat mengoreksi hasil Anda sendiri.', details: { membershipId: office.id.OWNER },
+      });
+      const early = await put('SEPT_PUSH', 'RINA', { status: 'not_met', reason: 'x' }).set(...IN_INDONESIAN).expect(409);
+      expect(early.body.error).toMatchObject({
+        code: 'CAMPAIGN_STANDING_NOT_FINAL',
+        message: 'Hasil campaign ini belum final. Hasil ini dapat dikoreksi manual setelah bulan terakhir yang dibacanya dikunci.',
+        details: { code: 'SEPT_PUSH' },
+      });
+      const already = await put('AUGUST_PUSH', 'BUDI', { status: 'not_met', reason: 'x' }).set(...IN_INDONESIAN).expect(400);
+      expect(already.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED', message: 'Hasil ini sudah bernilai not_met.',
+        details: { status: 'not_met', violations: ['status sudah bernilai not_met.'] },
+      });
+      const noReason = await put('AUGUST_PUSH', 'BUDI', { status: 'qualified' }).set(...IN_INDONESIAN).expect(400);
+      expect(noReason.body.error.details.violations).toEqual(['reason wajib diisi.']);
+      const none = await del('AUGUST_PUSH', 'BUDI', { reason: 'x' }).set(...IN_INDONESIAN).expect(404);
+      expect(none.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Koreksi manual tidak ditemukan.' });
     });
   });
 });

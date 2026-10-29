@@ -5,6 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException, PermissionDeniedException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
 import { isLeaderClass } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
@@ -13,6 +14,9 @@ import { GroupDocument } from './group.schema';
 import type { MembershipDocument } from './membership.schema';
 import { GroupRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
+import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
+
+const SAY = ORG_REFUSALS;
 
 export interface GroupSummary {
   groupId: string;
@@ -74,7 +78,7 @@ export class GroupService {
     if (!ctx.kpmId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
-        'You are not in an office.',
+        SAY.TENANT_NO_MEMBERSHIP.notInOffice,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -103,10 +107,12 @@ export class GroupService {
       _id: { $in: [...new Set(rows.map((g) => g.ownerMembershipId))] },
     });
     const named = await this.namesFor(owners.map((o) => o.userId));
+    // An owner whose account is gone is still named, in the reader's language (P18.98-T5 AC-4).
+    const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
     const byMembership = new Map(
       owners.map((o) => [
         String(o._id),
-        { name: named.get(o.userId) ?? 'Unknown', hasLeft: o.status === 'removed' },
+        { name: named.get(o.userId) ?? unknown, hasLeft: o.status === 'removed' },
       ]),
     );
 
@@ -114,7 +120,7 @@ export class GroupService {
       groupId: String(g._id),
       name: g.name,
       ownerMembershipId: g.ownerMembershipId,
-      ownerName: byMembership.get(g.ownerMembershipId)?.name ?? 'Unknown',
+      ownerName: byMembership.get(g.ownerMembershipId)?.name ?? unknown,
       ownerHasLeft: byMembership.get(g.ownerMembershipId)?.hasLeft ?? true,
       memberCount: counts.get(String(g._id)) ?? 0,
     }));
@@ -210,7 +216,7 @@ export class GroupService {
     const named = await this.namesFor([member.userId]);
     return {
       membershipId,
-      fullName: named.get(member.userId) ?? 'Unknown',
+      fullName: named.get(member.userId) ?? render(ORG_MESSAGES.unknownName, ctx.reader),
       // Only groups that still exist: an archived one stays on the row but is not offered
       // back, so re-saving the panel does not silently re-add it.
       groupIds: member.groupIds ?? [],
@@ -237,7 +243,7 @@ export class GroupService {
       if (found.length !== wanted.length) {
         throw new DomainException(
           ErrorCode.ORG_GROUP_NOT_FOUND,
-          'One of those groups is not in this office, or has been retired.',
+          SAY.ORG_GROUP_NOT_FOUND.notHere,
           HttpStatus.NOT_FOUND,
           { membershipId },
         );
@@ -310,7 +316,7 @@ export class GroupService {
     if (wanted && !isLeaderClass(member.role)) {
       throw new DomainException(
         ErrorCode.CORE_LEADER_NOT_A_LEADER,
-        'Only a leader can be a Core Leader. Move them to a leader rung first.',
+        SAY.CORE_LEADER_NOT_A_LEADER.leadersOnly,
         HttpStatus.BAD_REQUEST,
         { membershipId: String(member._id), role: member.role },
       );
@@ -334,7 +340,7 @@ export class GroupService {
     if (!owner || owner.status === 'removed') {
       throw new DomainException(
         ErrorCode.ORG_GROUP_OWNER_NOT_IN_KPM,
-        'Give the group an owner who is in this office.',
+        SAY.ORG_GROUP_OWNER_NOT_IN_KPM.ownerInOffice,
         HttpStatus.UNPROCESSABLE_ENTITY,
         { ownerMembershipId: membershipId },
       );
@@ -350,7 +356,7 @@ export class GroupService {
     if (clash && String(clash._id) !== exceptId) {
       throw new DomainException(
         ErrorCode.ORG_GROUP_NAME_TAKEN,
-        `This office already has a group called “${name}”.`,
+        SAY.ORG_GROUP_NAME_TAKEN.taken({ name }),
         HttpStatus.CONFLICT,
         { name },
       );

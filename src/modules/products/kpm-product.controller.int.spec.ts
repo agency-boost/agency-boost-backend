@@ -15,6 +15,7 @@ import {
 import { KpmProductController } from './kpm-product.controller';
 import { KpmProductService } from './kpm-product.service';
 import { listenOnLoopback } from '../../../test/listen';
+import { IN_INDONESIAN } from '../../../test/i18n';
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 const PRUDENTIAL = '66f0000000000000000000c1';
@@ -570,6 +571,26 @@ describe('an office’s products over HTTP (P5-T5, P5-T10)', () => {
     it('refuses a slot a product does not have', async () => {
       await request(app.getHttpServer())
         .delete(`${url}/${mapanId}/documents/poster`).expect(400);
+    });
+
+    it('P18.98-T5 AC-7 refuses a slot, an empty change and another company’s product in Indonesian for an Indonesian reader', async () => {
+      const slot = await request(app.getHttpServer())
+        .delete(`${url}/${mapanId}/documents/poster`).set(...IN_INDONESIAN).expect(400);
+      expect(slot.body.error.code).toBe('VALIDATION_FAILED');
+      expect(slot.body.error.message).toMatch(/^poster bukan slot dokumen\. Produk memiliki: /);
+
+      const empty = await request(app.getHttpServer())
+        .patch(`${url}/${mapanId}/overrides`).set(...IN_INDONESIAN).send({}).expect(400);
+      expect(empty.body.error).toMatchObject({ code: 'VALIDATION_FAILED', message: 'Tidak ada yang diubah.' });
+
+      // Ours now, not Nest's: *Product not found.* where Nest answered *Product* — and, in Indonesian, *Produk*.
+      const unknown = '66f0000000000000000000ff';
+      const missing = await request(app.getHttpServer())
+        .patch(`${url}/${unknown}/overrides`).set(...IN_INDONESIAN).send({ displayName: 'Ours' }).expect(404);
+      expect(missing.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Produk tidak ditemukan.' });
+      const inEnglish = await request(app.getHttpServer())
+        .patch(`${url}/${unknown}/overrides`).send({ displayName: 'Ours' }).expect(404);
+      expect(inEnglish.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Product not found.' });
     });
 
     it('writes only the field sent, so renaming a product leaves its script the company’s', async () => {

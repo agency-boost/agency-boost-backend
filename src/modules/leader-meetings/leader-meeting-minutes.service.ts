@@ -5,7 +5,8 @@ import { DomainException, VersionConflictException } from '@/common/errors/domai
 import { ErrorCode } from '@/common/errors/error-codes';
 import { refuseWith } from '@/common/validation/fields';
 import { AuditService } from '@/modules/audit/audit.service';
-import { NEW_ACTION_ITEM, NEW_AGENDA_ITEM_TEXT } from './leader-meeting-agenda';
+import { newActionItem, newAgendaItemText } from './leader-meeting-agenda';
+import { LEADER_MEETINGS_REFUSALS } from './leader-meetings.messages';
 import { LeaderMeetingPeople, meetingNotFound } from './leader-meeting-people';
 import { LeaderMeetingRepository } from './leader-meeting.repository';
 import {
@@ -27,7 +28,7 @@ const AGENDA_FIELDS = ['text', 'pic', 'done'] as const;
 /** One field per write (D-forum-model): the name of the one sent, or the refusal. */
 function oneField<K extends string>(input: Partial<Record<K, unknown>>, fields: readonly K[]): K {
   const sent = fields.filter((field) => input[field] !== undefined);
-  if (sent.length !== 1) refuseWith([`Send exactly one of ${fields.join(', ')}, with the version you read.`]);
+  if (sent.length !== 1) refuseWith([LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED.exactlyOne({ fields })]);
   return sent[0];
 }
 
@@ -66,10 +67,15 @@ export class LeaderMeetingMinutes {
     private readonly scorecards: LeaderScorecardService,
   ) {}
 
-  /** *+ Add item* (`:2863`): *"New agenda item"*, no PIC, unticked, last in its section. */
+  /**
+   * *+ Add item* (`:2863`): *"New agenda item"*, no PIC, unticked, last in its section — in the adder's language,
+   * stored as text (P18.98-T5 AC-6).
+   */
   async addAgendaItem(ctx: RequestContext, meetingId: string, section: AgendaSection): Promise<AgendaItem> {
     const meeting = await this.writable(ctx, meetingId);
-    const item: LeaderMeetingAgendaItem = { itemId: newItemId(), text: NEW_AGENDA_ITEM_TEXT, pic: '', done: false, version: 1 };
+    const item: LeaderMeetingAgendaItem = {
+      itemId: newItemId(), text: newAgendaItemText(ctx.reader), pic: '', done: false, version: 1,
+    };
     await this.writing(ctx, meeting);
     if (!(await this.meetings.pushAgendaItem(ctx, meetingId, section, item))) throw meetingNotFound();
     await this.audited(ctx, meeting, 'leader_meeting.agenda_item_added', null, { section, item: agendaItemOf(item) });
@@ -87,7 +93,9 @@ export class LeaderMeetingMinutes {
     const meeting = await this.writable(ctx, meetingId);
     const field = oneField(input, AGENDA_FIELDS);
     const found = findAgendaItem(meeting, itemId);
-    if (field === 'done' && found && found.section !== 'during') refuseWith(['done is ticked on During items only.']);
+    if (field === 'done' && found && found.section !== 'during') {
+      refuseWith([LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED.doneDuringOnly]);
+    }
     if (!found) throw await this.itemConflict(ctx, meetingId, itemId, input.version);
     const { section, item: before } = found;
 
@@ -107,11 +115,11 @@ export class LeaderMeetingMinutes {
     return after;
   }
 
-  /** *+ Add action item* (`:2869`): the prototype's new row, *Not yet planned*, last. */
+  /** *+ Add action item* (`:2869`): the prototype's new row, *Not yet planned*, last — its words the adder's (AC-6). */
   async addActionItem(ctx: RequestContext, meetingId: string): Promise<ActionItem> {
     const meeting = await this.writable(ctx, meetingId);
     const last = Math.max(-1, ...meeting.actionItems.map((row) => row.order));
-    const row: LeaderMeetingActionItem = { itemId: newItemId(), ...NEW_ACTION_ITEM, order: last + 1, version: 1 };
+    const row: LeaderMeetingActionItem = { itemId: newItemId(), ...newActionItem(ctx.reader), order: last + 1, version: 1 };
     await this.writing(ctx, meeting);
     if (!(await this.meetings.pushActionItem(ctx, meetingId, row))) throw meetingNotFound();
     await this.audited(ctx, meeting, 'leader_meeting.action_item_added', null, { item: actionItemOf(row) });
@@ -161,7 +169,7 @@ export class LeaderMeetingMinutes {
       if (!(await this.meetings.findById(ctx, meetingId))) throw meetingNotFound();
       throw new DomainException(
         ErrorCode.VERSION_CONFLICT,
-        'The tracker’s rows changed since you loaded them. Reload and try again.',
+        LEADER_MEETINGS_REFUSALS.VERSION_CONFLICT.trackerRowsChanged,
         HttpStatus.CONFLICT,
         { itemIds: before },
       );
@@ -185,10 +193,10 @@ export class LeaderMeetingMinutes {
   ): Promise<MonthlyTarget> {
     const meeting = await this.writable(ctx, meetingId);
     if (!(TARGET_ROW_KEYS as readonly string[]).includes(row)) {
-      refuseWith([`row must be one of ${TARGET_ROW_KEYS.join(', ')}: the others take no Monthly Target.`]);
+      refuseWith([LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED.targetRow({ rows: TARGET_ROW_KEYS })]);
     }
     if (row === 'ape' && input.rate !== null && !Number.isInteger(input.rate)) {
-      refuseWith(['rate must be whole IDR minor units for ape.']);
+      refuseWith([LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED.apeWholeSen]);
     }
     const stored = meeting.monthlyTargets?.[row];
     const before = stored ?? { rate: null, typed: null, version: 0 };
@@ -254,7 +262,7 @@ export class LeaderMeetingMinutes {
     if (item) return new VersionConflictException(version, item.version);
     return new DomainException(
       ErrorCode.VERSION_CONFLICT,
-      'This item is no longer in the meeting. Reload to see what is there now.',
+      LEADER_MEETINGS_REFUSALS.VERSION_CONFLICT.itemGone,
       HttpStatus.CONFLICT,
       { expectedVersion: version, actualVersion: null },
     );

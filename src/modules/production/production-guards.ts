@@ -2,6 +2,7 @@ import { HttpStatus } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NoMembershipException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { PRODUCTION_REFUSALS } from './production.messages';
 import { MONTH_PATTERN } from './production-units';
 
 /**
@@ -23,7 +24,7 @@ export function requireMonth(month: string): void {
   if (!MONTH_PATTERN.test(month)) {
     throw new DomainException(
       ErrorCode.VALIDATION_FAILED,
-      month ? `${month} is not a month. Use YYYY-MM.` : 'A month is required. Use YYYY-MM.',
+      month ? PRODUCTION_REFUSALS.VALIDATION_FAILED.notAMonth({ month }) : PRODUCTION_REFUSALS.VALIDATION_FAILED.monthRequired,
       HttpStatus.BAD_REQUEST,
       { month },
     );

@@ -1,9 +1,13 @@
 import { formatNumber, formatPercent, formatRupiahCompact } from '@/common/format/format';
-import { MDRT_TOOLTIP, metricByKey } from '@/domain/constants';
+import { SOURCE_READER, type Reader } from '@/common/i18n/reader';
+import { render, type Sentence } from '@/common/i18n/sentence';
+import { DEFAULT_LANGUAGE, metricByKey, type Language } from '@/domain/constants';
+import { CAMPAIGNS_MESSAGES } from './campaigns.messages';
 
 /**
  * What the campaigns screens print that the server composes — pure, so each rule is a unit test
- * (P18.5-T7; D-lists, OD-152).
+ * (P18.5-T7; D-lists, OD-152). **Written for a reader** (P18.98-T5 AC-4): each function that writes words takes the
+ * reader last, and the figures in them are the reader's; with none it writes what it wrote before the phase.
  */
 
 /** The fields the order reads. */
@@ -39,40 +43,49 @@ export function campaignOrder(a: Orderable, b: Orderable): number {
  * *3*. **Lossless**: a target is a rule, so one the compact form would round — *Rp 1.250.000.000* — is written in full,
  * and a percentage keeps every decimal it was set with and no *,0* (ADR-0174 §3).
  */
-export function targetWords(metricKey: string, value: number): string {
+export function targetWords(metricKey: string, value: number, figures: Language = DEFAULT_LANGUAGE): string {
   switch (metricByKey(metricKey)?.unit) {
-    case 'idr_minor': return formatRupiahCompact(value, { lossless: true });
-    case 'percentage': return formatPercent(value, { lossless: true });
-    default: return formatNumber(value);
+    case 'idr_minor': return formatRupiahCompact(value, { lossless: true }, figures);
+    case 'percentage': return formatPercent(value, { lossless: true }, figures);
+    default: return formatNumber(value, undefined, figures);
   }
 }
 
 /** What a requirement is of, in the tooltip's words: *APE* for the file's APE (ADR-0142 §3), else the registry's name. */
 const NOUN: Readonly<Record<string, string>> = { APE_ACHIEVED: 'APE' };
 
+type Requirement = { metricKey: string; comparator: string; value: number };
+
+/** A requirement in words, in both languages: its comparator's sentence, the target a figure for each reader. */
+function requirementSentence(r: Requirement): Sentence {
+  const parts = {
+    noun: NOUN[r.metricKey] ?? metricByKey(r.metricKey)?.name ?? r.metricKey,
+    target: (figures: Language) => targetWords(r.metricKey, r.value, figures),
+  };
+  switch (r.comparator) {
+    case 'gte': return CAMPAIGNS_MESSAGES.atLeast(parts);
+    case 'gt': return CAMPAIGNS_MESSAGES.above(parts);
+    case 'lte': return CAMPAIGNS_MESSAGES.atMost(parts);
+    case 'lt': return CAMPAIGNS_MESSAGES.below(parts);
+    default: return CAMPAIGNS_MESSAGES.exactly(parts);
+  }
+}
+
 /**
  * A requirement in words, as ADR-0142 §3 writes one: *"APE of Rp 1,2 M or more"* — the target in rupiah from sen,
- * written as ADR-0167 §1 writes a sum, the comparator in words.
+ * written as ADR-0167 §1 writes a sum, the comparator in words; *"APE minimal Rp 1,2 M"* in Bahasa Indonesia.
  */
-export function requirementWords(r: { metricKey: string; comparator: string; value: number }): string {
-  const noun = NOUN[r.metricKey] ?? metricByKey(r.metricKey)?.name ?? r.metricKey;
-  const target = targetWords(r.metricKey, r.value);
-  switch (r.comparator) {
-    case 'gte': return `${noun} of ${target} or more`;
-    case 'gt': return `${noun} above ${target}`;
-    case 'lte': return `${noun} of ${target} or less`;
-    case 'lt': return `${noun} below ${target}`;
-    default: return `${noun} of exactly ${target}`;
-  }
+export function requirementWords(r: Requirement, reader: Reader = SOURCE_READER): string {
+  return render(requirementSentence(r), reader);
 }
 
 /**
  * ***Chasing MDRT*'s header tooltip** (OD-152 → option 3, D-18): the prototype's opening, then the office's MDRT
  * campaign's requirements in words; or, with none running, saying so. Never *"…based on annual FYC pace"*: the ✓ is
- * a chase, and FYC is not in the file.
+ * a chase, and FYC is not in the file. Written for `reader`, its figures with it.
  */
-export function mdrtTooltip(mdrt: { requirements: readonly { metricKey: string; comparator: string; value: number }[] } | null): string {
-  if (mdrt === null) return `${MDRT_TOOLTIP.OPENING}. ${MDRT_TOOLTIP.NONE}`;
-  if (mdrt.requirements.length === 0) return `${MDRT_TOOLTIP.OPENING}.`;
-  return `${MDRT_TOOLTIP.OPENING} — ${mdrt.requirements.map(requirementWords).join(' and ')}.`;
+export function mdrtTooltip(mdrt: { requirements: readonly Requirement[] } | null, reader: Reader = SOURCE_READER): string {
+  if (mdrt === null) return render(CAMPAIGNS_MESSAGES.mdrtNoneRunning, reader);
+  if (mdrt.requirements.length === 0) return render(CAMPAIGNS_MESSAGES.mdrtAsksNothing, reader);
+  return render(CAMPAIGNS_MESSAGES.mdrtAsks({ requirements: mdrt.requirements.map(requirementSentence) }), reader);
 }

@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn } from '@/common/i18n/reader';
 import { Clock } from '@/common/clock/clock.port';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
@@ -1503,6 +1504,28 @@ describe('organisation', () => {
           leaderCodes.preview(`  ${leaderCode.toLowerCase()}  `),
         ).resolves.toBeDefined();
       });
+
+      it('P18.98-T5 AC-4, AC-7 says a code that opens nothing, and a leader or company with no name, in the reader’s language', async () => {
+        const refused = await leaderCodes.redeem(newcomer(await person()), 'ZZZZZZ').catch((e) => e);
+        expect([refused.code, refused.message]).toEqual([
+          'ORG_INVITE_EXPIRED',
+          'That code is not valid. It may be mistyped, or the person who gave it to you may have left — ask them to check it.',
+        ]);
+        expect(refused.messageFor(readerIn('id'))).toBe(
+          'Kode itu tidak valid. Mungkin salah ketik, atau orang yang memberikannya kepada Anda sudah keluar — minta dia '
+          + 'memeriksanya.',
+        );
+
+        // The leader's account and the company's row gone: the preview still says whose unit, in the reader's words.
+        await users.deleteOne({ _id: (await members.findById(ctx(KPM_A), leader))!.userId });
+        await mongoose.model(Company.name).deleteMany({});
+        expect(await leaderCodes.preview(leaderCode, readerIn('id'))).toMatchObject({
+          kpmLabel: 'Tidak diketahui — KPM 0417 · Branch 0417', leaderName: 'seorang leader',
+        });
+        expect(await leaderCodes.preview(leaderCode)).toMatchObject({
+          kpmLabel: 'Unknown — KPM 0417 · Branch 0417', leaderName: 'a leader',
+        });
+      });
     });
   });
 
@@ -2985,6 +3008,11 @@ describe('organisation', () => {
           code: 'ORG_TREE_TOO_LARGE',
           details: { count: ORG_TREE_MAX_NODES + 1, max: ORG_TREE_MAX_NODES },
         });
+        // P18.98-T5: the number as each language writes it — the English as it always was.
+        const refused = await oversized.read(ctx(KPM_A)).catch((e) => e);
+        expect(refused.message).toBe('This office has 2001 members, more than the tree can draw.');
+        expect(refused.messageFor(readerIn('id')))
+          .toBe('KPM ini memiliki 2.001 anggota, lebih banyak dari yang dapat digambar dalam bagan.');
       });
 
       it('names somebody whose user row has gone rather than dropping their card', async () => {

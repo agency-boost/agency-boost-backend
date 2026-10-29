@@ -1,3 +1,5 @@
+import type { Sentence } from '@/common/i18n/sentence';
+import { english, indonesian } from '../../../test/i18n';
 import { bucketIndex, bucketsFor, dashboardRange } from './activity-dashboard';
 
 const TODAY = '2026-09-28';
@@ -37,7 +39,7 @@ describe('the Activity Dashboard’s range and columns (P10-T1)', () => {
       try {
         dashboardRange({ range: 'CUSTOM', ...input }, TODAY);
       } catch (err) {
-        return err as { code: string; status: number; details: Record<string, unknown>; message: string };
+        return err as { code: string; status: number; details: Record<string, unknown>; message: string; sentence: Sentence };
       }
       throw new Error('expected a refusal');
     };
@@ -68,6 +70,19 @@ describe('the Activity Dashboard’s range and columns (P10-T1)', () => {
       expect(refused({ to: TODAY })).toMatchObject({ details: { field: 'from' } });
       expect(refused({ from: TODAY })).toMatchObject({ details: { field: 'to' } });
       expect(refused({ from: '2026-02-31', to: TODAY })).toMatchObject({ details: { field: 'from' } });
+    });
+
+    it('P18.98-T5 AC-2 says each refusal in both languages, a day and a count in the reader’s figures', () => {
+      const late = refused({ from: '2026-09-20', to: '2026-09-29' });
+      expect(english(late.sentence)).toBe('The range ends after today, 28 Sep 2026. Nothing has been logged yet.');
+      expect(indonesian(late.sentence)).toBe('Rentang ini berakhir setelah hari ini, 28 Sep 2026. Belum ada yang tercatat.');
+      expect(indonesian(refused({ from: '0100-01-01', to: TODAY }).sentence))
+        .toBe('Rentang ini mencakup 703.728 hari. Dashboard menampilkan paling banyak 366 hari sekaligus.');
+      expect(english(refused({ from: '0100-01-01', to: TODAY }).sentence))
+        .toBe('The range covers 703728 days. The dashboard shows up to 366 at a time.');
+      expect(indonesian(refused({ from: '2026-02-31', to: TODAY }).sentence))
+        .toBe('2026-02-31 bukan tanggal. Tanggal ditulis dengan format YYYY-MM-DD.');
+      expect(indonesian(refused({ to: TODAY }).sentence)).toBe('Rentang kustom memerlukan kedua tanggal; from belum diisi.');
     });
 
     it('refuses a range it does not know', () => {

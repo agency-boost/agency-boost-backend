@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import type { DomainException } from '@/common/errors/domain.exception';
+import { readerIn } from '@/common/i18n/reader';
 import { SEED_ACTIVATION_ITEMS } from '@/domain/constants';
 import type { ActivationService } from './activation.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
@@ -367,6 +369,78 @@ describe('the office activation checklist (P5-T3)', () => {
       await wired.training.archiveModule(ctx(KPM_A), module.id);
 
       await expect(activation.publish(ctx(KPM_A))).rejects.toThrow(/archived/);
+    });
+  });
+
+  describe('P18.98-T5 in the reader’s language', () => {
+    const inIndonesian = (kpmId: string) => ctx(kpmId).withReader(readerIn('id'));
+    const refusalOf = async (call: Promise<unknown>): Promise<DomainException> =>
+      (await call.catch((err: unknown) => err)) as DomainException;
+
+    it('P18.98-T5 AC-4 says what completes each link in the reader’s words: page names and module titles as they are', async () => {
+      const items = (await activation.read(inIndonesian(KPM_A))).published!.aspects.flatMap((a) => a.items);
+      const link = (code: string) => items.find((i) => i.code === code)!.link;
+      expect(link('GOAL_SETTING')).toEqual({
+        kind: 'feature:goals', label: 'Goal Settings', route: '/goals',
+        completesWhen: 'rekrut telah menyimpan goal apa pun sejak bergabung', live: true, form: null,
+      });
+      expect(link('ADD_PROSPECTS')).toMatchObject({ label: 'Leads Management', completesWhen: 'rekrut telah menambahkan setidaknya satu prospek' });
+      expect(link('ACTIVITY_TRACKER_WEEKLY')).toMatchObject({
+        label: 'Activity Management', completesWhen: 'rekrut telah mencatat aktivitas selama empat minggu berturut-turut',
+      });
+      // The three data-backed items: their source line's label and what completes them.
+      expect(link('FIRST_CASE_CLOSED')).toMatchObject({
+        kind: 'sales:first', label: 'Data penjualan', form: 'closing',
+        completesWhen: 'rekrut telah melakukan penjualan pertama sejak bergabung: sebuah sales lead yang dibayar dan '
+          + 'diterbitkan, atau sebuah polis di file produksi',
+      });
+      expect(link('INDEPENDENT_AGENT_MILESTONE')).toMatchObject({
+        label: 'Data penjualan', completesWhen: 'rekrut telah memiliki 3 sales leads yang dibayar dan diterbitkan sejak bergabung',
+      });
+      expect(link('WEEKLY_CHECK_IN')).toMatchObject({
+        label: 'Sesi coaching', form: 'one_on_one',
+        completesWhen: '4 kali 1:1 dengan rekrut telah dicatat sebagai sesi coaching sejak bergabung',
+      });
+      // An English reader reads the registry's own words, as before.
+      const english = (await activation.read(ctx(KPM_A))).published!.aspects.flatMap((a) => a.items);
+      expect(english.find((i) => i.code === 'WEEKLY_CHECK_IN')!.link).toMatchObject({
+        label: 'Coaching sessions', completesWhen: '4 1:1s with the hire are recorded in coaching sessions since joining',
+      });
+    });
+
+    it('P18.98-T5 AC-4 a training link reads its module’s title in both, and what completes it in the reader’s words', async () => {
+      const next = asDraft(await activation.read(ctx(KPM_A)));
+      next.aspects[2].items[0].autoLink = 'training:PROSPECT_LIST';
+      const saved = await activation.saveDraft(inIndonesian(KPM_A), next);
+      expect(saved.draft!.aspects[2].items[0].link).toMatchObject({
+        label: 'Building Your Prospect List', completesWhen: 'rekrut telah menyelesaikan modul training tersebut',
+      });
+    });
+
+    it('P18.98-T5 AC-3 refuses to publish in Indonesian: 400 VALIDATION_FAILED, the same answer, the reader’s words', async () => {
+      const nothing = await refusalOf(activation.publish(inIndonesian(KPM_A)));
+      expect([nothing.code, nothing.getStatus(), nothing.details]).toEqual(['VALIDATION_FAILED', 400, undefined]);
+      expect(nothing.message).toBe('There is nothing to publish. Change something first — a published version is immutable, '
+        + 'because every hire records which one they started on.');
+      expect(nothing.messageFor(readerIn('id'))).toBe('Tidak ada yang dapat diterbitkan. Ubah sesuatu dulu — versi yang sudah '
+        + 'diterbitkan tidak dapat diubah, karena setiap rekrut mencatat versi yang dia mulai.');
+
+      await activation.saveDraft(ctx(KPM_A), asDraft(await activation.read(ctx(KPM_A))));
+      expect((await refusalOf(activation.publish(ctx(KPM_A)))).messageFor(readerIn('id'))).toBe(
+        'Draf ini sama dengan versi 1, jadi tidak ada yang dapat diterbitkan. Ubah sesuatu dulu — setiap rekrut mencatat '
+          + 'versi yang dia mulai.',
+      );
+    });
+
+    it('P18.98-T5 AC-3 names a module nobody is offered in Indonesian, each module’s own sentence after the first', async () => {
+      const next = asDraft(await activation.read(ctx(KPM_A)));
+      next.aspects[2].items[0].autoLink = 'training:NO_SUCH_MODULE';
+      next.aspects[2].items[1].autoLink = 'training:OTHER_MODULE';
+      const refused = await refusalOf(activation.saveDraft(ctx(KPM_A), next));
+      expect(refused.message).toBe('A checklist item is linked to a training module it cannot wait for. '
+        + 'NO_SUCH_MODULE is not a training module in this office. OTHER_MODULE is not a training module in this office.');
+      expect(refused.messageFor(readerIn('id'))).toBe('Sebuah item checklist ditautkan ke modul training yang tidak dapat '
+        + 'ditunggunya. NO_SUCH_MODULE bukan modul training di KPM ini. OTHER_MODULE bukan modul training di KPM ini.');
     });
   });
 

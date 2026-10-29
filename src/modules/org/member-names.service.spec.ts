@@ -26,10 +26,11 @@ const ctx = (kpmId = KPM) => new RequestContext('u1', 'none', {
  */
 describe('a person’s name, from their membership', () => {
   let names: MemberNames;
+  let memberships: MembershipRepository;
 
   beforeAll(async () => {
     await startMongo();
-    const memberships = new MembershipRepository(
+    memberships = new MembershipRepository(
       mongoose.model(Membership.name, MembershipSchema) as never,
     );
     names = new MemberNames(memberships, mongoose.model(User.name, UserSchema) as never);
@@ -125,5 +126,50 @@ describe('a person’s name, from their membership', () => {
 
     expect(found.has(SARI)).toBe(false);
     expect(found.get(RINA)).toBe('Rina Wijaya');
+  });
+
+  /*
+   * **The second hop alone, for memberships the caller has just read** (the Owner's reporting, 2026-10-29):
+   * `OfficePeople` reads every member's row for its figures, `userId` with them, and names the active from those rows
+   * rather than asking `byMembershipId` to read them all again, whole.
+   */
+  describe('byReadMemberships', () => {
+    /** A read, with every query it sends counted. */
+    const counted = async <T>(read: () => Promise<T>): Promise<{ result: T; queries: string[] }> => {
+      const queries: string[] = [];
+      mongoose.set('debug', (collection: string, method: string) => { queries.push(`${collection}.${method}`); });
+      try {
+        return { result: await read(), queries };
+      } finally {
+        mongoose.set('debug', false);
+      }
+    };
+
+    it('names the rows of a scoped read as byMembershipId names their ids — from the users alone', async () => {
+      const rows = await memberships.find(ctx(), {}, { projection: { userId: 1 } });
+      expect(rows.map((row) => String(row._id)).sort()).toEqual([SARI, RINA].sort());
+      const { result, queries } = await counted(() => names.byReadMemberships(rows));
+      expect(queries).toEqual(['users.find']);
+      expect(result).toEqual(await names.byMembershipId(ctx(), [SARI, RINA]));
+      expect(result).toEqual(new Map([[SARI, 'Ibu Sari'], [RINA, 'Rina Wijaya']]));
+    });
+
+    it('names only the rows it is given: another office’s person is reached only through that office’s own read', async () => {
+      const mine = await memberships.find(ctx(), { _id: SARI }, { projection: { userId: 1 } });
+      expect(await names.byReadMemberships(mine)).toEqual(new Map([[SARI, 'Ibu Sari']]));
+      // The other office's scoped read holds its own member alone; this office's holds none of theirs.
+      expect(await memberships.find(ctx(), { _id: ELSEWHERE }, { projection: { userId: 1 } })).toEqual([]);
+      const theirs = await memberships.find(ctx(OTHER), {}, { projection: { userId: 1 } });
+      expect(await names.byReadMemberships(theirs)).toEqual(new Map([[ELSEWHERE, 'Lina Marlina']]));
+    });
+
+    it('reads nothing for no rows, and leaves out a membership whose person has no name on file', async () => {
+      const { result, queries } = await counted(() => names.byReadMemberships([]));
+      expect([result.size, queries]).toEqual([0, []]);
+      await mongoose.connection.db!.collection('users')
+        .updateOne({ _id: new mongoose.Types.ObjectId('66f0000000000000000002' + '02') }, { $unset: { fullName: '' } });
+      const rows = await memberships.find(ctx(), {}, { projection: { userId: 1 } });
+      expect(await names.byReadMemberships(rows)).toEqual(new Map([[SARI, 'Ibu Sari']]));
+    });
   });
 });

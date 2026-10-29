@@ -1,9 +1,13 @@
 /**
- * Stable, machine-readable error codes. Clients switch on these; `message` is English,
- * may change, and is never parsed.
+ * Stable, machine-readable error codes. Clients switch on these; `message` is written in the
+ * reader's language — the request's `Accept-Language`, else the person's saved language
+ * (P18.98-T5, ADR-0179 §7) — may change, and is never parsed. `code` and `details` are the
+ * same in both languages.
  *
- * Every code here has a row in docs/02-specs/api/error-catalog.md. A new failure mode
- * without a catalog entry fails review.
+ * Every code here has a row in docs/02-specs/api/error-catalog.md, and its sentence, in
+ * English and Indonesian, in its module's catalogue (`<module>.messages.ts`, filed under
+ * the code: `refusals`, `common/i18n/sentence.ts`). A new failure mode without either fails
+ * review, and one with no sentence in both languages fails `error-codes.spec.ts`.
  */
 export const ErrorCode = {
   // Authentication

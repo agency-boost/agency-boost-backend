@@ -2747,7 +2747,7 @@
         ]
       },
       "patch": {
-        "description": "Your name, preferred name and pronoun; and your date of birth, gender, company join month and work status (ADR-0158) — each optional, none clearable. A birth date must be in the past and at least 18 years ago and a join month not in the future, else `400 VALIDATION_FAILED` naming the field. Work status is written on your membership in your office, and on your account until you have one. **Refused `403 PERM_DENIED` in any support session**, read-only, setup or elevated: a person's own account is theirs to change.\n\n**Any signed-in user.** No further permission.",
+        "description": "Your name, preferred name and pronoun; your date of birth, gender, company join month and work status (ADR-0158); and the language you read AgencyBoost in, `locale` (`id` or `en`, ADR-0179) — each optional, none clearable. A birth date must be in the past and at least 18 years ago and a join month not in the future, else `400 VALIDATION_FAILED` naming the field; a `locale` that is not `id` or `en`, `null` included, is `400 VALIDATION_FAILED` with `details.violations`. Work status is written on your membership in your office, and on your account until you have one. **Refused `403 PERM_DENIED` in any support session**, read-only, setup or elevated: a person's own account, their language included, is theirs to change.\n\n**Any signed-in user.** No further permission.",
         "operationId": "AuthController_updateMe_v1",
         "parameters": [],
         "requestBody": {
@@ -26310,7 +26310,7 @@
   },
   "info": {
     "title": "AgencyBoost API",
-    "description": "Multi-tenant SaaS for insurance agency offices (KPM).\n\nEvery failure uses one envelope — `{ error: { code, message, details?, requestId } }` — and every `code` has a row in `docs/02-specs/api/error-catalog.md`. **Branch on the code, never on the message.**\n\nA resource in another tenant answers `404`, not `403`: a `403` would confirm the id exists.",
+    "description": "Multi-tenant SaaS for insurance agency offices (KPM).\n\nEvery failure uses one envelope — `{ error: { code, message, details?, requestId } }` — and every `code` has a row in `docs/02-specs/api/error-catalog.md`. **Branch on the code, never on the message.**\n\nA resource in another tenant answers `404`, not `403`: a `403` would confirm the id exists.\n\n**Every sentence is in the request's language** — a refusal's `message`, its `details.violations`, a notice: `Accept-Language` (`id` or `en`, exactly), else the signed-in person's saved language, else English until the Indonesian default is live (`docs/02-specs/api/conventions.md`). `code` and every other detail are the same in both.",
     "version": "1.0",
     "contact": {}
   },
@@ -26982,7 +26982,7 @@
           "message": {
             "type": "string",
             "example": "You do not have permission to do that.",
-            "description": "Written for a person. Wording may change; the code will not."
+            "description": "Written for a person, in the request's language: `Accept-Language` (`id` or `en`), else the signed-in person's saved language, else English until the Indonesian default is live. Wording may change; the code will not."
           },
           "details": {
             "type": "object",
@@ -28845,6 +28845,14 @@
               "male",
               "female"
             ]
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "id",
+              "en"
+            ],
+            "description": "The language you read AgencyBoost in: `id`, Bahasa Indonesia, or `en`, English. Saved on your account, so it follows you to every device. Not clearable: anything else, `null` included, is `400 VALIDATION_FAILED`."
           }
         }
       },
@@ -40613,7 +40621,12 @@
             "type": "number",
             "nullable": true,
             "example": 68,
-            "description": "*Producing this month*’s share: `activeAgents` over `manpower.total`, a whole percent rounded half up in integers (`rateOver`); `null` while the month is not uploaded, or over nobody."
+            "description": "*Producing this month*’s share: `activeAgents` over the members it counts from — `manpower.total` for `this_month`, the month’s members on its last day for `previous_month` (OD-235), so never above 100 — a whole percent rounded half up in integers (`rateOver`); `null` while the month is not uploaded, or over nobody."
+          },
+          "activeOf": {
+            "type": "number",
+            "example": 31,
+            "description": "The members `activePct` is over (OD-235): `manpower.total` for `this_month`, the month’s members on its last day for `previous_month`, a leaver since included — so the cell writes its count over the same members as its percent. Served whether or not the month is uploaded."
           },
           "leads": {
             "description": "As they stood at the period’s end, over the members it had then.",
@@ -40641,6 +40654,7 @@
           "coached7d",
           "activeAgents",
           "activePct",
+          "activeOf",
           "leads",
           "manpower",
           "head"
@@ -40682,7 +40696,12 @@
             "type": "number",
             "nullable": true,
             "example": 68,
-            "description": "*Producing this month*’s share: `activeAgents` over `manpower.total`, a whole percent rounded half up in integers (`rateOver`); `null` while the month is not uploaded, or over nobody."
+            "description": "*Producing this month*’s share: `activeAgents` over the members it counts from — `manpower.total` for `this_month`, the month’s members on its last day for `previous_month` (OD-235), so never above 100 — a whole percent rounded half up in integers (`rateOver`); `null` while the month is not uploaded, or over nobody."
+          },
+          "activeOf": {
+            "type": "number",
+            "example": 31,
+            "description": "The members `activePct` is over (OD-235): `manpower.total` for `this_month`, the month’s members on its last day for `previous_month`, a leaver since included — so the cell writes its count over the same members as its percent. Served whether or not the month is uploaded."
           },
           "leads": {
             "description": "As they stood at the period’s end, over the members it had then.",
@@ -40719,6 +40738,7 @@
           "coached7d",
           "activeAgents",
           "activePct",
+          "activeOf",
           "leads",
           "manpower",
           "head",
@@ -40782,7 +40802,12 @@
             "type": "number",
             "nullable": true,
             "example": 68,
-            "description": "*Producing this month*’s share: `activeAgents` over `manpower.total`, a whole percent rounded half up in integers (`rateOver`); `null` while the month is not uploaded, or over nobody."
+            "description": "*Producing this month*’s share: `activeAgents` over the members it counts from — `manpower.total` for `this_month`, the month’s members on its last day for `previous_month` (OD-235), so never above 100 — a whole percent rounded half up in integers (`rateOver`); `null` while the month is not uploaded, or over nobody."
+          },
+          "activeOf": {
+            "type": "number",
+            "example": 31,
+            "description": "The members `activePct` is over (OD-235): `manpower.total` for `this_month`, the month’s members on its last day for `previous_month`, a leaver since included — so the cell writes its count over the same members as its percent. Served whether or not the month is uploaded."
           },
           "leads": {
             "description": "As they stood at the period’s end, over the members it had then.",
@@ -40849,6 +40874,7 @@
           "coached7d",
           "activeAgents",
           "activePct",
+          "activeOf",
           "leads",
           "manpower",
           "head",
@@ -40895,7 +40921,12 @@
             "type": "number",
             "nullable": true,
             "example": 68,
-            "description": "*Producing this month*’s share: `activeAgents` over `manpower.total`, a whole percent rounded half up in integers (`rateOver`); `null` while the month is not uploaded, or over nobody."
+            "description": "*Producing this month*’s share: `activeAgents` over the members it counts from — `manpower.total` for `this_month`, the month’s members on its last day for `previous_month` (OD-235), so never above 100 — a whole percent rounded half up in integers (`rateOver`); `null` while the month is not uploaded, or over nobody."
+          },
+          "activeOf": {
+            "type": "number",
+            "example": 31,
+            "description": "The members `activePct` is over (OD-235): `manpower.total` for `this_month`, the month’s members on its last day for `previous_month`, a leaver since included — so the cell writes its count over the same members as its percent. Served whether or not the month is uploaded."
           },
           "leads": {
             "description": "As they stood at the period’s end, over the members it had then.",
@@ -40937,6 +40968,7 @@
           "coached7d",
           "activeAgents",
           "activePct",
+          "activeOf",
           "leads",
           "manpower",
           "abCount",
@@ -43049,6 +43081,19 @@
               "part_time"
             ],
             "description": "Their membership's, in the office this session is in; until they have one, what they registered with."
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "id",
+              "en"
+            ],
+            "example": "id",
+            "description": "The language in force: the one this account chose, or `id`, Bahasa Indonesia, for one that has chosen none (`localeChosen` false). `id` or `en`; set with `PATCH /auth/me`."
+          },
+          "localeChosen": {
+            "type": "boolean",
+            "description": "Whether this account has chosen a language. A browser follows `locale` only when it has: an account with none keeps the language the browser already reads in (the `ab_lang` cookie) and saves nothing."
           }
         },
         "required": [
@@ -43062,7 +43107,9 @@
           "dateOfBirth",
           "gender",
           "companyJoinMonth",
-          "workStatus"
+          "workStatus",
+          "locale",
+          "localeChosen"
         ]
       },
       "MeOfficeDto": {

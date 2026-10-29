@@ -1,3 +1,4 @@
+import { inSource } from '@/common/i18n/sentence';
 import 'reflect-metadata';
 import type { Readable, Writable } from 'node:stream';
 import { isEmail } from 'class-validator';
@@ -112,7 +113,8 @@ export async function createSuperAdmin(
   const email = normalizeEmail(input.email);
 
   const problems = passwords.validate(input.password);
-  if (problems.length > 0) throw new CliError(`The password was refused. ${problems.join(' ')}`);
+  // An operator's console, in English: the policy's sentences as the API writes them in English (`inSource`).
+  if (problems.length > 0) throw new CliError(`The password was refused. ${problems.map(inSource).join(' ')}`);
 
   /*
    * Checked again just before the insert, as well as before the prompt. **Two runs at the same moment with

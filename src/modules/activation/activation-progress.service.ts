@@ -20,6 +20,7 @@ import { TenantDay, type Office } from '@/modules/tenants/tenant-day.service';
 import { OfferedTraining } from '@/modules/training/offered-training';
 import type { ActivationSignal } from './activation-events.port';
 import { trainingLinkModuleCode } from './activation-input';
+import { ACTIVATION_REFUSALS, completesWhenOf } from './activation.messages';
 import {
   ActivationService, type ActivationItemView, type ActivationVersionView,
 } from './activation.service';
@@ -92,10 +93,8 @@ const DUPLICATE_KEY = 11000;
 export function activationClosed(state: ActivationState): DomainException {
   return new DomainException(
     ErrorCode.ACTIVATION_CLOSED,
-    state === 'graduated'
-      // P18.96-T6 AC-5 (ADR-0173 §4): the checklist is complete — never *activation*, which is the 3M result.
-      ? 'This checklist is complete. Nothing on it changes now.'
-      : 'This activation has ended: its six months are over. It is kept as it was, and nothing on it changes now.',
+    // P18.96-T6 AC-5 (ADR-0173 §4): the checklist is complete — never *activation*, which is the 3M result.
+    state === 'graduated' ? ACTIVATION_REFUSALS.ACTIVATION_CLOSED.complete : ACTIVATION_REFUSALS.ACTIVATION_CLOSED.ended,
     HttpStatus.CONFLICT,
     { state },
   );
@@ -428,7 +427,7 @@ export class ActivationProgressService {
     ctx: RequestContext, doc: ActivationProgressDocument, code: string, change: ItemChange,
   ): Promise<ItemWritePlan> {
     if (typeof change.date === 'string' && !isLocalDate(change.date)) {
-      refuseWith(['date must be a day, written YYYY-MM-DD.']);
+      refuseWith([ACTIVATION_REFUSALS.VALIDATION_FAILED.dayShape({ field: 'date' })]);
     }
     const office = await this.days.office(ctx);
     const [resolved] = await this.resolve(ctx, [doc], office);
@@ -443,9 +442,9 @@ export class ActivationProgressService {
       // item hand-ticked while its module was withdrawn may be unticked while it still is.
       const moduleCode = trainingLinkModuleCode(item.autoLink);
       const offeredNow = moduleCode === null || (await this.training.moduleCodes(ctx)).has(moduleCode);
-      if (!mayTickByHand(item.autoLink, offeredNow, byLink)) throw automatic(code, item.link!.completesWhen);
+      if (!mayTickByHand(item.autoLink, offeredNow, byLink)) throw automatic(code, item.autoLink!);
     } else if (dataRule === 'refused') {
-      throw automatic(code, item.link!.completesWhen);
+      throw automatic(code, item.autoLink!);
     }
     if (resolved.state !== 'open') throw activationClosed(resolved.state);
     return {
@@ -542,8 +541,9 @@ export class ActivationProgressService {
     if (resolved.progress.done < resolved.progress.total) {
       throw new DomainException(
         ErrorCode.ACTIVATION_INCOMPLETE,
-        `${resolved.progress.total - resolved.progress.done} of ${resolved.progress.total} items are not done yet. `
-          + 'The checklist is complete when every item is.',
+        ACTIVATION_REFUSALS.ACTIVATION_INCOMPLETE.notDone({
+          left: resolved.progress.total - resolved.progress.done, total: resolved.progress.total,
+        }),
         HttpStatus.CONFLICT,
         { done: resolved.progress.done, total: resolved.progress.total },
       );
@@ -610,11 +610,11 @@ export class ActivationProgressService {
   }
 }
 
-/** Refused: an item that completes on its own (ADR-0031), naming what completes it. */
-function automatic(code: string, completesWhen: string): DomainException {
+/** Refused: an item that completes on its own (ADR-0031), naming what completes it — its link's own words. */
+function automatic(code: string, link: string): DomainException {
   return new DomainException(
     ErrorCode.ACTIVATION_ITEM_AUTOMATIC,
-    `This item completes on its own, when ${completesWhen}. Nobody ticks it by hand.`,
+    ACTIVATION_REFUSALS.ACTIVATION_ITEM_AUTOMATIC.onItsOwn({ completesWhen: completesWhenOf(link) }),
     HttpStatus.CONFLICT,
     { code },
   );
@@ -625,8 +625,8 @@ export function recordRequired(code: string, form: ActivationRecordForm): Domain
   return new DomainException(
     ErrorCode.ACTIVATION_RECORD_REQUIRED,
     form === 'closing'
-      ? 'This item is ticked with the case it names: choose one of the closings, or log a new one.'
-      : 'This item is ticked with the 1:1 it names: log it, with the day it was held and a note.',
+      ? ACTIVATION_REFUSALS.ACTIVATION_RECORD_REQUIRED.closing
+      : ACTIVATION_REFUSALS.ACTIVATION_RECORD_REQUIRED.oneOnOne,
     HttpStatus.UNPROCESSABLE_ENTITY,
     { code, form },
   );

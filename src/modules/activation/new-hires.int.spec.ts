@@ -434,6 +434,20 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       );
     });
 
+    it('P18.98-T5 AC-7 refuses a join date out of bounds in Indonesian, the bounds in Indonesian figures', async () => {
+      await h.start('RINA', '2026-07-18');
+      h.as('SARI');
+      const said = 'Tanggal bergabung harus berupa hari dari 14 Sep 2025 sampai 14 Sep 2026: tidak setelah hari ini, dan tidak '
+        + 'lebih dari 365 hari sebelumnya.';
+      const res = await h.http().put(`/new-hires/${id('RINA')}/start-date`).set('Accept-Language', 'id')
+        .send({ startDate: '2026-09-15' }).expect(400);
+      expect(res.body.error).toMatchObject({ code: 'VALIDATION_FAILED', message: said, details: { violations: [said] } });
+      // The pipe's own sentence for a day not written as one, the field as the API names it.
+      expect((await h.http().put(`/new-hires/${id('RINA')}/start-date`).set('Accept-Language', 'id')
+        .send({ startDate: '14/09/2026' }).expect(400)).body.error.details.violations)
+        .toEqual(['startDate harus berupa tanggal dengan format YYYY-MM-DD.']);
+    });
+
     it('P13-T5 AC-5 the hire’s own is read-only: a hire has no route to it', async () => {
       await h.start('RINA', '2026-07-18');
       h.as('RINA');
@@ -484,6 +498,16 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       for (const bad of ['', '   ', 'x'.repeat(1001), 42, null]) {
         expect((await put(bad).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
       }
+    });
+
+    it('P18.98-T5 AC-7 refuses a note out of bounds in Indonesian: its bound written the Indonesian way', async () => {
+      await h.start('RINA', '2026-07-18');
+      h.as('SARI');
+      const said = 'text harus 1 sampai 1.000 karakter, tanpa spasi di awal dan akhir.';
+      expect((await h.http().put(`/new-hires/${id('RINA')}/note`).set('Accept-Language', 'id').send({ text: '   ' }).expect(400))
+        .body.error).toMatchObject({ code: 'VALIDATION_FAILED', message: said, details: { violations: [said] } });
+      expect((await h.http().put(`/new-hires/${id('RINA')}/note`).send({ text: '   ' }).expect(400)).body.error.message)
+        .toBe('text must be 1 to 1000 characters once trimmed.');
     });
 
     it('P13-T6 AC-4 it is not a Leader Note: no Leader Note reaches the hire’s payload, and the note is not in leaderNotes', async () => {

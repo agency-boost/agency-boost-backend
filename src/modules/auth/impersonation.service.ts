@@ -5,6 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { AUTH_REFUSALS } from './auth.messages';
 import { AuditService } from '@/modules/audit/audit.service';
 import { can, SETUP_SESSION_WRITE_SCOPE } from '@/modules/rbac/permissions';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
@@ -65,14 +66,14 @@ export class ImpersonationService {
     if (ctx.isImpersonating) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'You are already impersonating. End that session first.',
+        AUTH_REFUSALS.PERM_DENIED.alreadyImpersonating,
         HttpStatus.FORBIDDEN,
       );
     }
     if (!can(ctx, 'impersonation:start')) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'Only a Super Admin can impersonate a user.',
+        AUTH_REFUSALS.PERM_DENIED.superAdminOnly,
         HttpStatus.FORBIDDEN,
         { permission: 'impersonation:start' },
       );
@@ -80,7 +81,7 @@ export class ImpersonationService {
     if (!reason?.trim()) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'A reason is required to impersonate a user.',
+        AUTH_REFUSALS.VALIDATION_FAILED.impersonationReason,
         HttpStatus.BAD_REQUEST,
         { field: 'reason' },
       );
@@ -98,7 +99,7 @@ export class ImpersonationService {
       // Granted to nobody, deliberately — see the denial row in the permission matrix.
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'A Super Admin cannot be impersonated.',
+        AUTH_REFUSALS.PERM_DENIED.targetSuperAdmin,
         HttpStatus.FORBIDDEN,
         { permission: 'impersonation:target_super_admin' },
       );
@@ -106,7 +107,7 @@ export class ImpersonationService {
     if (String(target._id) === ctx.userId) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'You cannot impersonate yourself.',
+        AUTH_REFUSALS.PERM_DENIED.yourself,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -127,7 +128,7 @@ export class ImpersonationService {
     if (targetIsAdmin && !can(ctx, 'impersonation:target_kpm_admin_or_owner')) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'Impersonating an office\'s Owner or Admin needs its own grant.',
+        AUTH_REFUSALS.PERM_DENIED.ownerOrAdminGrant,
         HttpStatus.FORBIDDEN,
         { permission: 'impersonation:target_kpm_admin_or_owner' },
       );
@@ -173,8 +174,9 @@ export class ImpersonationService {
         const reason = unavailable.status === 'archived' ? 'archived' : 'suspended';
         throw new DomainException(
           ErrorCode.IMPERSONATION_OFFICE_UNAVAILABLE,
-          `KPM ${unavailable.code} · ${unavailable.branchName} is ${reason}, so nobody can act as `
-            + 'its members until it is reactivated.',
+          AUTH_REFUSALS.IMPERSONATION_OFFICE_UNAVAILABLE.unavailable({
+            code: unavailable.code, branch: unavailable.branchName, reason,
+          }),
           HttpStatus.CONFLICT,
           { kpmCode: unavailable.code, branch: unavailable.branchName, reason },
         );
@@ -191,8 +193,7 @@ export class ImpersonationService {
     if (purpose === 'setup' && !setsUpTheOffice) {
       throw new DomainException(
         ErrorCode.IMPERSONATION_SETUP_TARGET,
-        'A setup session acts as an office\'s Owner or one of its Admins, and this person is neither. '
-          + 'Start a support session to look at their screens.',
+        AUTH_REFUSALS.IMPERSONATION_SETUP_TARGET.notOwnerOrAdmin,
         HttpStatus.CONFLICT,
         { purpose },
       );
@@ -253,7 +254,7 @@ export class ImpersonationService {
       if (isDuplicateTokenHash(err)) {
         throw new DomainException(
           ErrorCode.IMPERSONATION_JUST_STARTED,
-          'A session as this person started a moment ago. Use that one, or wait a second and start again.',
+          AUTH_REFUSALS.IMPERSONATION_JUST_STARTED.aMomentAgo,
           HttpStatus.CONFLICT,
         );
       }
@@ -332,7 +333,7 @@ export class ImpersonationService {
     if (!can(ctx, 'impersonation:elevate_to_write')) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'Only a Super Admin can approve writing in a support session.',
+        AUTH_REFUSALS.PERM_DENIED.approveSuperAdminOnly,
         HttpStatus.FORBIDDEN,
         { permission: 'impersonation:elevate_to_write' },
       );
@@ -343,14 +344,14 @@ export class ImpersonationService {
       // costs one line here and the alternative is a hole nobody can see from one file.
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'End your own support session before approving one.',
+        AUTH_REFUSALS.PERM_DENIED.endYourOwn,
         HttpStatus.FORBIDDEN,
       );
     }
     if (!reason?.trim()) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Say why this session needs to write. The office\'s Owner reads it.',
+        AUTH_REFUSALS.VALIDATION_FAILED.elevationReason,
         HttpStatus.BAD_REQUEST,
         { field: 'reason' },
       );
@@ -367,7 +368,7 @@ export class ImpersonationService {
     if (session.realActorUserId === ctx.userId) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'A second Super Admin has to approve this — not the one running the session.',
+        AUTH_REFUSALS.PERM_DENIED.secondSuperAdmin,
         HttpStatus.FORBIDDEN,
       );
     }

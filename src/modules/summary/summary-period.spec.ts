@@ -1,4 +1,7 @@
 import { DomainException } from '@/common/errors/domain.exception';
+import { readerIn } from '@/common/i18n/reader';
+import { render } from '@/common/i18n/sentence';
+import { indonesian } from '../../../test/i18n';
 import { summaryPeriod, type OfficeCalendar } from './summary-period';
 
 /** 14 October 2026 in the office; it opened in March 2025. */
@@ -11,7 +14,11 @@ function refusal(run: () => unknown) {
   } catch (err) {
     expect(err).toBeInstanceOf(DomainException);
     const e = err as DomainException;
-    return { status: e.getStatus(), code: e.code, message: e.message, details: e.details };
+    return {
+      status: e.getStatus(), code: e.code, message: e.message, details: e.details,
+      // The sentence itself, both languages (P18.98-T5): `message` is its English as the API wrote it before.
+      inIndonesian: indonesian(e.sentence), forEnglishReader: render(e.sentence, readerIn('en')),
+    };
   }
   throw new Error('not refused');
 }
@@ -72,6 +79,7 @@ describe('the Summary’s period (P18.8-T11)', () => {
     expect(refusal(() => summaryPeriod(OFFICE, asked))).toEqual({
       status: 400, code: 'VALIDATION_FAILED', message,
       details: field === 'year' ? { field, earliest: '2025', latest: '2026' } : { field, earliest: '2025-03', latest: '2026-10' },
+      inIndonesian: expect.any(String), forEnglishReader: expect.any(String),
     });
   });
 
@@ -82,6 +90,16 @@ describe('the Summary’s period (P18.8-T11)', () => {
   ])('P18.8-T11 AC-1 refuses anything before the office’s first month, %j', (asked, field, message) => {
     const answer = refusal(() => summaryPeriod(OFFICE, asked));
     expect(answer).toMatchObject({ status: 400, code: 'VALIDATION_FAILED', message, details: { field } });
+  });
+
+  it.each([
+    [{ month: '2026-11' }, 'Nov 2026 belum dimulai: bulan terakhir yang ada adalah Okt 2026.', 'Nov 2026 has not begun yet: the latest month is Oct 2026.'],
+    [{ month: '2024-12' }, 'Des 2024 sebelum bulan pertama yang ada, Mar 2025.', 'Dec 2024 is before the first month there is, Mar 2025.'],
+    [{ year: '2027' }, '2027 belum dimulai: tahun terakhir yang ada adalah 2026.', '2027 has not begun yet: the latest year is 2026.'],
+    [{ year: '2024' }, '2024 sebelum tahun pertama yang ada, 2025.', '2024 is before the first year there is, 2025.'],
+    [{ month: '2026-02', year: '2026' }, 'Pilih bulan atau tahun, bukan keduanya.', 'Ask for a month or a year, not both.'],
+  ])('P18.98-T5 AC-2 says %j in Indonesian, and each month in the reader’s figures', (asked, inIndonesian, forEnglishReader) => {
+    expect(refusal(() => summaryPeriod(OFFICE, asked))).toMatchObject({ inIndonesian, forEnglishReader });
   });
 
   it('P18.8-T11 AC-1 the office’s first year may be asked for whole, its months before it opened included', () => {

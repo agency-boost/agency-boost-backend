@@ -12,6 +12,7 @@ import { Company, CompanyDocument } from './company.schema';
 import { KpmRequest, KpmRequestDocument, KpmRequestStatus } from './kpm-request.schema';
 import { TenantService } from './tenant.service';
 import { INSURERS_ONLY } from './template-library';
+import { TENANTS_REFUSALS } from './tenants.messages';
 
 export interface KpmRequestRow {
   requestId: string;
@@ -56,7 +57,7 @@ export class KpmRequestService {
     if (!can(ctx, permission)) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'You cannot do that.',
+        TENANTS_REFUSALS.PERM_DENIED.cannotDoThat,
         HttpStatus.FORBIDDEN,
         { permission },
       );
@@ -80,7 +81,7 @@ export class KpmRequestService {
     if (ctx.membership) {
       throw new DomainException(
         ErrorCode.ORG_AGENT_ALREADY_TAGGED,
-        'You are already registered to an office.',
+        TENANTS_REFUSALS.ORG_AGENT_ALREADY_TAGGED.alreadyInOffice,
         HttpStatus.CONFLICT,
         { kpmId: ctx.kpmId },
       );
@@ -102,7 +103,7 @@ export class KpmRequestService {
     if (open) {
       throw new DomainException(
         ErrorCode.TENANT_REQUEST_ALREADY_OPEN,
-        'You have already asked for an office. Wait for that one to be decided.',
+        TENANTS_REFUSALS.TENANT_REQUEST_ALREADY_OPEN.alreadyAsked,
         HttpStatus.CONFLICT,
         { requestId: String(open._id) },
       );
@@ -245,7 +246,7 @@ export class KpmRequestService {
     if (request.status !== 'pending') {
       throw new DomainException(
         ErrorCode.TENANT_REQUEST_DECIDED,
-        `That request was already ${request.status}.`,
+        TENANTS_REFUSALS.TENANT_REQUEST_DECIDED.alreadyDecided({ status: request.status }),
         HttpStatus.CONFLICT,
         { requestId, status: request.status, decidedAt: request.decidedAt?.toISOString() ?? null },
       );

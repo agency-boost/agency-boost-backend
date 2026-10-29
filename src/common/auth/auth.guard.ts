@@ -2,16 +2,22 @@ import { CanActivate, ExecutionContext, HttpStatus, Injectable } from '@nestjs/c
 import { Reflector } from '@nestjs/core';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { headerLanguage, readerOf, type Reader } from '@/common/i18n/reader';
 import { ContextResolver } from '@/modules/auth/context-resolver';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
 import { TokenSigner } from '@/modules/auth/token-signer';
 import { ALLOWED_WHILE_OFFICE_UNAVAILABLE, ALLOWS_TEMPORARY_PASSWORD, IS_PUBLIC } from './auth.decorators';
+import { AUTH_GUARD_REFUSALS } from './auth.messages';
 
 /**
  * Verifies the access token and attaches the resolved RequestContext.
  *
  * Roles are resolved from the database on every request rather than read from the
  * token, which is what makes revoking a grant take effect immediately.
+ *
+ * **It resolves the request's reader too** (ADR-0179 §7; P18.98-T5 AC-1), first of all and on every route, public
+ * ones included: the `Accept-Language` the app sent, and — once the person is read — their saved `users.locale`. The
+ * error filter writes every refusal for it, and every service reads it off the context.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -27,19 +33,24 @@ export class AuthGuard implements CanActivate {
       execution.getHandler(),
       execution.getClass(),
     ]);
-    if (isPublic) return true;
 
     const request = execution.switchToHttp().getRequest<{
       headers: Record<string, string | undefined>;
       context?: unknown;
+      reader?: Reader;
     }>();
+
+    // Before anything is refused, and on a public route as on any other: nobody is known yet, so the header alone.
+    const language = headerLanguage(request.headers['accept-language']);
+    request.reader = readerOf({ header: language });
+    if (isPublic) return true;
 
     const header = request.headers.authorization ?? '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     if (!token) {
       throw new DomainException(
         ErrorCode.AUTH_TOKEN_INVALID,
-        'Sign in to continue.',
+        AUTH_GUARD_REFUSALS.AUTH_TOKEN_INVALID.signIn,
         HttpStatus.UNAUTHORIZED,
       );
     }
@@ -50,7 +61,7 @@ export class AuthGuard implements CanActivate {
     } catch {
       throw new DomainException(
         ErrorCode.AUTH_TOKEN_EXPIRED,
-        'Your session has expired. Sign in again.',
+        AUTH_GUARD_REFUSALS.AUTH_TOKEN_EXPIRED.expired,
         HttpStatus.UNAUTHORIZED,
       );
     }
@@ -76,7 +87,7 @@ export class AuthGuard implements CanActivate {
       if (!session) {
         throw new DomainException(
           ErrorCode.AUTH_TOKEN_EXPIRED,
-          'That support session has ended.',
+          AUTH_GUARD_REFUSALS.AUTH_TOKEN_EXPIRED.supportEnded,
           HttpStatus.UNAUTHORIZED,
         );
       }
@@ -102,8 +113,10 @@ export class AuthGuard implements CanActivate {
     ) === true;
 
     const context = await this.resolver.resolve(
-      claims.sub, impersonator, readOnlySession, leavingSupport, writeScope,
+      claims.sub, impersonator, readOnlySession, leavingSupport, writeScope, language,
     );
+    // The person read: their saved language, behind the header (AC-1).
+    request.reader = context.reader;
 
     /*
      * **A temporary password buys three routes and nothing else.**
@@ -125,8 +138,7 @@ export class AuthGuard implements CanActivate {
       if (!allowed) {
         throw new DomainException(
           ErrorCode.AUTH_PASSWORD_CHANGE_REQUIRED,
-          'Choose your own password before you go any further. The one you signed in with '
-            + 'was generated for you, and somebody else has seen it.',
+          AUTH_GUARD_REFUSALS.AUTH_PASSWORD_CHANGE_REQUIRED.chooseYourOwn,
           HttpStatus.FORBIDDEN,
         );
       }

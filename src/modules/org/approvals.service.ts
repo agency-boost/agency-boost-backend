@@ -5,6 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
@@ -15,10 +16,15 @@ import { ActivationStarter, startActivation } from './activation-starter.port';
 import { HierarchyService, type JoiningFields } from './hierarchy.service';
 import { JoinRequestDocument } from './join-request.schema';
 import { leaderLimitRequestStale, type ApprovedPastLimit, type LeaderSeatOptions } from './leader-limit';
+import { STALE_REASONS } from './leader-limit.messages';
 import { JoinRequestRepository } from './org.repositories';
 import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole, MembershipDocument } from './membership.schema';
+import { ONBOARDING_REFUSALS } from './onboarding.messages';
+import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
+
+const SAY = ONBOARDING_REFUSALS;
 
 export interface PendingRequest {
   requestId: string;
@@ -108,7 +114,7 @@ export class ApprovalsService {
     if (!ctx.kpmId || !ctx.membershipId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
-        'You are not in an office.',
+        ORG_REFUSALS.TENANT_NO_MEMBERSHIP.notInOffice,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -168,12 +174,13 @@ export class ApprovalsService {
     const leaderName = new Map(
       leaderRows.map((m) => [String(m._id), names.get(m.userId)?.fullName ?? null]),
     );
+    const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
 
     return rows
       .map((r) => {
         const membership = byId.get(r.membershipId);
         if (!membership) return null;
-        const fullName = names.get(membership.userId)?.fullName ?? 'Unknown';
+        const fullName = names.get(membership.userId)?.fullName ?? unknown;
         return {
           requestId: String(r._id),
           membershipId: r.membershipId,
@@ -188,7 +195,7 @@ export class ApprovalsService {
               ? (leaderName.get(r.leaderMembershipId) ?? null)
               : null,
           leaderMembershipId: r.leaderMembershipId,
-          leaderName: leaderName.get(r.leaderMembershipId) ?? 'Unknown',
+          leaderName: leaderName.get(r.leaderMembershipId) ?? unknown,
         };
       })
       .filter((r): r is PendingRequest => r !== null);
@@ -243,9 +250,10 @@ export class ApprovalsService {
       { sort: { agentSeq: 1 } },
     );
     const names = await this.named(units.map((u) => u.userId));
+    const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
     return units.map((u) => ({
       membershipId: String(u._id),
-      fullName: names.get(u.userId)?.fullName ?? 'Unknown',
+      fullName: names.get(u.userId)?.fullName ?? unknown,
       unitSize: u.subtreeCount ?? 0,
       forLeaderMembershipId: String(u.leaderId),
     }));
@@ -272,7 +280,7 @@ export class ApprovalsService {
       // more use than saying "no".
       throw new DomainException(
         ErrorCode.ORG_REQUEST_ALREADY_DECIDED,
-        `That request was already ${request.status}.`,
+        SAY.ORG_REQUEST_ALREADY_DECIDED.request({ status: request.status }),
         HttpStatus.CONFLICT,
         { status: request.status, decidedAt: request.decidedAt },
       );
@@ -311,7 +319,7 @@ export class ApprovalsService {
       if (!can(ctx, 'leader_request:route_to_sub_unit')) {
         throw new DomainException(
           ErrorCode.PERM_DENIED,
-          'You cannot send this request into somebody else’s unit.',
+          SAY.PERM_DENIED.routeElsewhere,
           HttpStatus.FORBIDDEN,
           { permission: 'leader_request:route_to_sub_unit' },
         );
@@ -329,7 +337,7 @@ export class ApprovalsService {
       ) {
         throw new DomainException(
           ErrorCode.ORG_LEADER_NOT_IN_KPM,
-          'That is not one of your own units.',
+          SAY.ORG_LEADER_NOT_IN_KPM.notYourUnit,
           HttpStatus.UNPROCESSABLE_ENTITY,
           { routeToMembershipId },
         );
@@ -427,10 +435,11 @@ export class ApprovalsService {
 
     const names = await this.named(candidates.map((r) => r.userId));
     const term = q?.trim().toLowerCase();
+    const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
 
     return candidates
       .map((r) => {
-        const fullName = names.get(r.userId)?.fullName ?? 'Unknown';
+        const fullName = names.get(r.userId)?.fullName ?? unknown;
         return {
           membershipId: String(r._id),
           fullName,
@@ -513,7 +522,7 @@ export class ApprovalsService {
     if (target.status !== 'pending' || !isLeaderClass(target.role)) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Letting them in does not make a new leader, so it needs nobody’s approval. Do it directly.',
+        SAY.VALIDATION_FAILED.letInDirectly,
         HttpStatus.BAD_REQUEST,
         { membershipId },
       );
@@ -562,13 +571,13 @@ export class ApprovalsService {
 
     const leader = await this.members.findById(ctx, request.leaderMembershipId);
     if (!leader || leader.status !== 'active') {
-      throw leaderLimitRequestStale(request.requestId, 'The leader they were to join is no longer an active member.');
+      throw leaderLimitRequestStale(request.requestId, STALE_REASONS.leaderGone);
     }
 
     if (request.joinRequestId) {
       const joinRequest = await this.requests.findOne(ctx, { _id: request.joinRequestId, status: 'pending' });
       if (!joinRequest) {
-        throw leaderLimitRequestStale(request.requestId, 'Their request to join was decided or withdrawn since.');
+        throw leaderLimitRequestStale(request.requestId, STALE_REASONS.joinRequestDecided);
       }
       await this.attach(ctx, member, request.leaderMembershipId, {
         action: 'leader_request.approved',
@@ -593,7 +602,7 @@ export class ApprovalsService {
     }
 
     if (member.leaderId) {
-      throw leaderLimitRequestStale(request.requestId, 'They were placed in a unit since.');
+      throw leaderLimitRequestStale(request.requestId, STALE_REASONS.placedSince);
     }
     await this.attach(ctx, member, request.leaderMembershipId, { action: 'member.tagged_by_leader' }, { pastLimit }, await this.joiningFor(ctx, member));
     await this.requests.updateMany(
@@ -622,7 +631,7 @@ export class ApprovalsService {
       // is not a thing you do from a search result.
       throw new DomainException(
         ErrorCode.ORG_AGENT_ALREADY_TAGGED,
-        'They already report to somebody. Moving them is a different operation.',
+        SAY.ORG_AGENT_ALREADY_TAGGED.reportsToSomebody,
         HttpStatus.CONFLICT,
         { membershipId, leaderId: target.leaderId },
       );
@@ -630,7 +639,7 @@ export class ApprovalsService {
     if (membershipId === me) {
       throw new DomainException(
         ErrorCode.ORG_CYCLE_DETECTED,
-        'You cannot add yourself to your own unit.',
+        SAY.ORG_CYCLE_DETECTED.addYourself,
         HttpStatus.CONFLICT,
       );
     }
@@ -652,7 +661,7 @@ export class ApprovalsService {
     if (isRoot || (await this.hierarchy.ownsTheOffice(ctx, target))) {
       throw new DomainException(
         ErrorCode.ORG_NOT_PERMITTED_TO_TAG,
-        'They lead the office. Nobody tags them into a unit.',
+        SAY.ORG_NOT_PERMITTED_TO_TAG.leadsTheOffice,
         HttpStatus.FORBIDDEN,
         { membershipId },
       );
@@ -671,7 +680,7 @@ export class ApprovalsService {
     if (!tenantAdmin && (target.directCounts?.total ?? 0) > 0) {
       throw new DomainException(
         ErrorCode.ORG_NOT_PERMITTED_TO_TAG,
-        'They lead a unit of their own. Only the office can place them.',
+        SAY.ORG_NOT_PERMITTED_TO_TAG.leadsOwnUnit,
         HttpStatus.FORBIDDEN,
         { membershipId, directCount: target.directCounts?.total ?? 0 },
       );

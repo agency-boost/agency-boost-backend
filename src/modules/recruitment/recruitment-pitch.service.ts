@@ -3,6 +3,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException, VersionConflictException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import type { Sentence } from '@/common/i18n/sentence';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import { localDayOf } from '@/common/time/local-day';
 import {
@@ -15,6 +16,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { RecruitmentPitchRepository } from './recruitment-pitch.repository';
 import type { RecruitmentPitchSlotDocument } from './recruitment-pitch.schema';
+import { RECRUITMENT_REFUSALS } from './recruitment.messages';
 
 /** One of the six slots, as both the agents' tab and the settings page read it (`PitchSlot`). */
 export interface PitchSlotView {
@@ -178,11 +180,13 @@ export class RecruitmentPitchService {
     const definition = this.requireSlot(slotCode);
     const item = (definition.checklist as readonly { code: string }[]).find((i) => i.code === itemCode);
     if (!item) {
-      throw invalid(`${definition.title} has no item "${itemCode}" to confirm.`, { field: 'item', item: itemCode });
+      throw invalid(RECRUITMENT_REFUSALS.VALIDATION_FAILED.noSuchItem({ title: definition.title, item: itemCode }), {
+        field: 'item', item: itemCode,
+      });
     }
     const current = await this.slots.findOne(ctx, { slot: definition.code });
     if (!current) {
-      throw invalid(`${definition.title} has no file yet: upload one before confirming what it includes.`, {
+      throw invalid(RECRUITMENT_REFUSALS.VALIDATION_FAILED.noFileYet({ title: definition.title }), {
         field: 'slot', slot: definition.code,
       });
     }
@@ -240,6 +244,6 @@ export class RecruitmentPitchService {
   }
 }
 
-function invalid(message: string, details: Record<string, unknown>): DomainException {
+function invalid(message: Sentence<'VALIDATION_FAILED'>, details: Record<string, unknown>): DomainException {
   return new DomainException(ErrorCode.VALIDATION_FAILED, message, HttpStatus.BAD_REQUEST, details);
 }

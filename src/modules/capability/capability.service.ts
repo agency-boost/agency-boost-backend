@@ -1,11 +1,15 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
-import { NotFoundException } from '@/common/errors/domain.exception';
+import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
 import { capabilityStageFor, type CapabilityStage } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { CapabilityCatalogDocument } from './capability.schema';
 import { CapabilityCatalogRepository } from './capability.repository';
 import { capabilitySeedDocument, defaultCapabilityLadder } from './capability-payload';
+import { CAPABILITY_REFUSALS } from './capability.messages';
+
+/** The office's own edits, refused in both languages (P18.98-T5 AC-3). */
+const SAY = CAPABILITY_REFUSALS.VALIDATION_FAILED;
 
 export interface CapabilityEntryView {
   code: string;
@@ -83,7 +87,7 @@ export class CapabilityService {
     ctx: RequestContext, part: CapabilityPart, code: string, label: string, gridCode?: string,
   ): Promise<CapabilityCatalogView> {
     const trimmed = label.trim();
-    if (!trimmed) throw new BadRequestException('A label cannot be empty.');
+    if (!trimmed) throw new InvalidRequestException(SAY.labelEmpty);
 
     const row = await this.require(ctx);
     const target = this.find(row, part, code, gridCode);
@@ -112,10 +116,7 @@ export class CapabilityService {
       // A stage requiring an archived milestone is a stage nobody could reach again.
       const needed = row.stages.filter((s) => s.requiredMilestoneCodes.includes(code));
       if (needed.length > 0) {
-        throw new BadRequestException(
-          `${needed.map((s) => s.label).join(', ')} require this milestone, so archiving it would `
-          + 'make those stages unreachable. Take it out of them first.',
-        );
+        throw new InvalidRequestException(SAY.milestoneRequired({ stages: needed.map((s) => s.label) }));
       }
     }
 
@@ -139,15 +140,12 @@ export class CapabilityService {
     gridCode?: string,
   ): Promise<CapabilityCatalogView> {
     const normalised = code.trim().toUpperCase();
-    if (!normalised) throw new BadRequestException('An item needs a code.');
-    if (!label.trim()) throw new BadRequestException('An item needs a label.');
+    if (!normalised) throw new InvalidRequestException(SAY.itemNeedsCode);
+    if (!label.trim()) throw new InvalidRequestException(SAY.itemNeedsLabel);
 
     const row = await this.require(ctx);
     if (this.codes(row).has(normalised)) {
-      throw new BadRequestException(
-        `${normalised} is already used in this catalog. A code is never reused — a tick names one, `
-        + 'so the same code twice would be the same tick.',
-      );
+      throw new InvalidRequestException(SAY.codeUsed({ code: normalised }));
     }
 
     if (part === 'milestone') {
@@ -182,9 +180,7 @@ export class CapabilityService {
     const known = new Set(list.map((entry) => entry.code));
     if (codes.length !== list.length || new Set(codes).size !== codes.length
       || codes.some((code) => !known.has(code))) {
-      throw new BadRequestException(
-        `Send every ${part} once each — ${list.length} of them.`,
-      );
+      throw new InvalidRequestException(SAY.sendEvery({ part, count: list.length }));
     }
     codes.forEach((code, index) => {
       const entry = list.find((e) => e.code === code)!;

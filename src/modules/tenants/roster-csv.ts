@@ -1,7 +1,12 @@
 import { randomInt } from 'node:crypto';
 import type { LocalDate } from '@/common/time/local-day';
+import type { FieldSentence } from '@/common/validation/fields';
 import { AGENT_CODE_PATTERN, type Gender, type WorkStatus } from '@/domain/constants';
 import { birthDateProblem, joinMonthProblem } from '@/modules/users/personal-data';
+import { TENANTS_REFUSALS } from './tenants.messages';
+
+/** Each row's issue, in both languages (P18.98-T5 AC-3): written for the reader where the preview answers. */
+const SAY = TENANTS_REFUSALS.VALIDATION_FAILED;
 
 /**
  * The roster file, and the password an imported account starts on.
@@ -133,7 +138,11 @@ export interface RosterRow {
 export interface RosterIssue {
   line: number;
   column: string;
-  message: string;
+  /**
+   * What is wrong, in both languages (P18.98-T5 AC-3): the preview writes it for its reader, and the commit's refusal
+   * carries it in `details.issues`, which the error filter writes for its reader.
+   */
+  message: FieldSentence;
 }
 
 /**
@@ -253,7 +262,7 @@ export function parseRoster(text: string, today: LocalDate): { rows: RosterRow[]
     .filter(({ text }) => text.trim() !== '' && !text.trimStart().startsWith(COMMENT_PREFIX));
 
   if (lines.length === 0) {
-    issues.push({ line: 1, column: 'file', message: 'The file is empty.' });
+    issues.push({ line: 1, column: 'file', message: SAY.fileEmpty });
     return { rows: [], issues };
   }
 
@@ -277,7 +286,7 @@ export function parseRoster(text: string, today: LocalDate): { rows: RosterRow[]
     issues.push({
       line: lines[0].line,
       column: 'file',
-      message: `The header must read exactly: ${ROSTER_TEMPLATE_HEADER}. Download the template.`,
+      message: SAY.headerExactly({ header: ROSTER_TEMPLATE_HEADER }),
     });
     return { rows: [], issues };
   }
@@ -293,7 +302,7 @@ export function parseRoster(text: string, today: LocalDate): { rows: RosterRow[]
       issues.push({
         line,
         column: 'file',
-        message: `Expected ${ROSTER_COLUMNS.length} columns, found ${cells.length}.`,
+        message: SAY.columnCount({ expected: ROSTER_COLUMNS.length, found: cells.length }),
       });
       continue;
     }
@@ -307,41 +316,34 @@ export function parseRoster(text: string, today: LocalDate): { rows: RosterRow[]
     const role = roleRaw.toLowerCase();
     const leaderAgentCode = leaderAgentCodeRaw.toUpperCase();
 
-    if (!fullName) issues.push({ line, column: 'fullName', message: 'A name is required.' });
+    if (!fullName) issues.push({ line, column: 'fullName', message: SAY.nameRequired });
     // Deliberately loose, and the same shape `@IsEmail` will apply on the way in. The
     // point here is to catch the blank and the obviously-not-an-address, not to relitigate
     // what an address may contain.
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      issues.push({ line, column: 'email', message: `"${emailRaw}" is not an email address.` });
+      issues.push({ line, column: 'email', message: SAY.notAnEmail({ value: emailRaw }) });
     }
     if (!agentCode) {
-      issues.push({ line, column: 'agentCode', message: 'An agent code is required.' });
+      issues.push({ line, column: 'agentCode', message: SAY.agentCodeRequired });
     } else if (!AGENT_CODE_PATTERN.test(agentCode)) {
       // ADR-0158 §4: digits only on every new code. One already held elsewhere keeps its letters.
-      issues.push({
-        line, column: 'agentCode',
-        message: `"${agentCodeRaw}" is not an agent code. Use digits only, 3 to 32 of them.`,
-      });
+      issues.push({ line, column: 'agentCode', message: SAY.notAnAgentCode({ value: agentCodeRaw }) });
     }
     // The shape of a rung's code. Whether it is a rung **of this company's ladder** the parser cannot know:
     // the import checks it against the ladder (OD-50), so a rung the company added — `SM` — is placed too.
     if (!isRungCode(role)) {
-      issues.push({
-        line, column: 'role',
-        message: `"${roleRaw}" is not a rung. Use a rung of your company’s ladder by its code — AB, AAB or Agent, `
-          + 'or one it added.',
-      });
+      issues.push({ line, column: 'role', message: SAY.notARung({ value: roleRaw }) });
     }
 
     // The four a person records (ADR-0158 §2), each required, each named when it is wrong.
     if (!dateOfBirth) {
-      issues.push({ line, column: 'dateOfBirth', message: 'A date of birth is required.' });
+      issues.push({ line, column: 'dateOfBirth', message: SAY.birthDateRequired });
     } else {
       const problem = birthDateProblem(dateOfBirth, today);
       if (problem) issues.push({ line, column: 'dateOfBirth', message: problem });
     }
     if (!companyJoinMonth) {
-      issues.push({ line, column: 'companyJoinMonth', message: 'The month they joined the company is required.' });
+      issues.push({ line, column: 'companyJoinMonth', message: SAY.joinMonthRequired });
     } else {
       const problem = joinMonthProblem(companyJoinMonth, today);
       if (problem) issues.push({ line, column: 'companyJoinMonth', message: problem });
@@ -350,30 +352,26 @@ export function parseRoster(text: string, today: LocalDate): { rows: RosterRow[]
     if (!workStatus) {
       issues.push({
         line, column: 'workStatus',
-        message: workStatusRaw
-          ? `"${workStatusRaw}" is not a work status. Use full-time or part-time.`
-          : 'A work status is required: full-time or part-time.',
+        message: workStatusRaw ? SAY.notAWorkStatus({ value: workStatusRaw }) : SAY.workStatusRequired,
       });
     }
     const gender = GENDER_WORDS[genderRaw.toLowerCase()] ?? null;
     if (!gender) {
       issues.push({
         line, column: 'gender',
-        message: genderRaw
-          ? `"${genderRaw}" is not a gender. Use male or female.`
-          : 'A gender is required: male or female.',
+        message: genderRaw ? SAY.notAGender({ value: genderRaw }) : SAY.genderRequired,
       });
     }
 
     // Within the file. Against the office is the service's to check.
     const emailFirst = seenEmail.get(email);
     if (email && emailFirst) {
-      issues.push({ line, column: 'email', message: `Already on line ${emailFirst}.` });
+      issues.push({ line, column: 'email', message: SAY.alreadyOnLine({ line: emailFirst }) });
     } else if (email) seenEmail.set(email, line);
 
     const codeFirst = seenCode.get(agentCode);
     if (agentCode && codeFirst) {
-      issues.push({ line, column: 'agentCode', message: `Already on line ${codeFirst}.` });
+      issues.push({ line, column: 'agentCode', message: SAY.alreadyOnLine({ line: codeFirst }) });
     } else if (agentCode) seenCode.set(agentCode, line);
 
     rows.push({

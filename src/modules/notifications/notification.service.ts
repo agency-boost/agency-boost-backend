@@ -1,5 +1,6 @@
-import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
+import { recipientReader, type Reader } from '@/common/i18n/reader';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { can } from '@/modules/rbac/permissions';
@@ -10,6 +11,8 @@ import { Clock } from '@/common/clock/clock.port';
 import { INBOX_PAGE } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationRepository } from './notification.repository';
+import { NOTIFICATION_REFUSALS } from './notification.messages';
+import { RecipientLanguages } from './recipient-languages';
 import {
   Notification, NotificationDocument,
   NotificationPreferences, NotificationPreferencesDocument,
@@ -95,9 +98,12 @@ function officeOf(kpmId: string): RequestContext {
   return RequestContext.forJob(kpmId, 'coalesced-notice');
 }
 
-/** Renders a template id + payload into a subject and body. */
+/**
+ * Renders a template id + payload into a subject and body, **for a reader** (P18.98-T5 AC-5): the recipient's language,
+ * words and figures. A renderer that writes one language may ignore it.
+ */
 export abstract class TemplateRenderer {
-  abstract render(templateId: string, payload: Record<string, unknown>): RenderedMessage;
+  abstract render(templateId: string, payload: Record<string, unknown>, reader?: Reader): RenderedMessage;
 }
 
 /**
@@ -182,6 +188,12 @@ export class NotificationService {
     private readonly clock: Clock,
     private readonly audit: AuditService,
     @Inject(NOTIFICATION_ADAPTERS) adapters: NotificationChannelAdapter[] = [],
+    /**
+     * **Whose language an email is written in** (P18.98-T5 AC-5): the recipient's `users.locale`, read when the email
+     * is rendered, off the request. Absent where a spec builds the service by hand: every recipient then reads as one
+     * who has chosen nothing, or as the request that caused the email.
+     */
+    @Optional() private readonly languages?: RecipientLanguages,
   ) {
     for (const adapter of adapters) this.adapters.set(adapter.channel, adapter);
   }
@@ -367,7 +379,7 @@ export class NotificationService {
     };
     const outcome = prefs?.mutedTemplates?.includes(templateId)
       ? { status: 'suppressed' as const, at: this.clock.now() }
-      : await this.deliverOne(HELD_CHANNEL, request, prefs, this.renderer.render(templateId, claimed.payload));
+      : await this.deliverOne(HELD_CHANNEL, request, prefs, () => this.renderFor(request));
     await this.coalesced.recordDelivery(office, String(claimed._id), HELD_CHANNEL, outcome);
   }
 
@@ -380,6 +392,16 @@ export class NotificationService {
   }
 
   /**
+   * **The message, for its recipient** (P18.98-T5 AC-5): their saved language, else the request that caused it where
+   * that was theirs (`SendRequest.reader`), else a reader who has chosen nothing (`recipientReader`). Read when an
+   * external channel delivers — off the request, which is not kept waiting for it.
+   */
+  private async renderFor(request: SendRequest): Promise<RenderedMessage> {
+    const stored = request.userId && this.languages ? await this.languages.languageOf(request.userId) : null;
+    return this.renderer.render(request.templateId, request.payload, recipientReader(stored, request.reader));
+  }
+
+  /**
    * Every channel the template declares, delivered or recorded as not: opted out is `suppressed`, the
    * `held` channel is kept back for `releaseHeld`, a channel with no adapter is `failed`, the in-app
    * channel is delivered now, and every other channel is **started now and not awaited** — `pending` on
@@ -388,7 +410,8 @@ export class NotificationService {
   private async deliver(
     request: SendRequest, prefs: Preferences, held: NotificationChannel | null,
   ): Promise<Delivered> {
-    const rendered = this.renderer.render(request.templateId, request.payload);
+    // The in-app channel's delivery is the row, whose words the inbox composes when it is read: nobody's language here.
+    const inline = this.renderer.render(request.templateId, request.payload, recipientReader(null, request.reader));
     const delivery: Record<string, Delivery> = {};
     const dispatched: Dispatch[] = [];
     for (const channel of TEMPLATE_CHANNELS[request.templateId] ?? []) {
@@ -399,10 +422,10 @@ export class NotificationService {
       if (settled) {
         delivery[channel] = settled;
       } else if (INLINE_CHANNELS.includes(channel)) {
-        delivery[channel] = await this.deliverOne(channel, request, prefs, rendered);
+        delivery[channel] = await this.deliverOne(channel, request, prefs, inline);
       } else {
         delivery[channel] = { status: 'pending', at: this.clock.now() };
-        dispatched.push({ channel, outcome: this.deliverOne(channel, request, prefs, rendered) });
+        dispatched.push({ channel, outcome: this.deliverOne(channel, request, prefs, () => this.renderFor(request)) });
       }
     }
     return { delivery, dispatched };
@@ -452,16 +475,20 @@ export class NotificationService {
 
   /**
    * One channel, through its adapter. A failing adapter — a rejection or a synchronous throw — is recorded
-   * and logged at error level, and never thrown.
+   * and logged at error level, and never thrown. An external channel's message is rendered here, for its recipient
+   * (`renderFor`), so a failure to render it is recorded as its delivery's, too.
    */
   private async deliverOne(
-    channel: NotificationChannel, request: SendRequest, prefs: Preferences, rendered: RenderedMessage,
+    channel: NotificationChannel,
+    request: SendRequest,
+    prefs: Preferences,
+    rendered: RenderedMessage | (() => Promise<RenderedMessage>),
   ): Promise<Delivery> {
     const settled = this.undeliverable(channel, prefs);
     if (settled) return settled;
     const adapter = this.adapters.get(channel) as NotificationChannelAdapter;
     try {
-      await adapter.send(request, rendered);
+      await adapter.send(request, typeof rendered === 'function' ? await rendered() : rendered);
       return { status: 'sent', at: this.clock.now() };
     } catch (err) {
       this.logger.error({ err, channel, templateId: request.templateId }, 'delivery failed');
@@ -510,7 +537,8 @@ export class NotificationService {
       items: items.map((n) => ({
         notificationId: String(n._id),
         templateId: n.templateId,
-        ...describeNotification(n.templateId, n.payload),
+        // In the reader's language, when it is read (P18.98-T5 AC-4): a notice stored before reads in it too.
+        ...describeNotification(n.templateId, n.payload, ctx.reader),
         href: inboxAddress(n.templateId, n.payload),
         kpmId: n.kpmId,
         createdAt: n.get('createdAt')?.toISOString() ?? '',
@@ -631,12 +659,9 @@ export class NotificationService {
 
   private require(ctx: RequestContext, permission: Parameters<typeof can>[1]): void {
     if (!can(ctx, permission)) {
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        'You cannot do that.',
-        HttpStatus.FORBIDDEN,
-        { permission },
-      );
+      throw new DomainException(ErrorCode.PERM_DENIED, NOTIFICATION_REFUSALS.PERM_DENIED.cannot, HttpStatus.FORBIDDEN, {
+        permission,
+      });
     }
   }
 

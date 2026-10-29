@@ -573,3 +573,9 @@ export {
   type WorkStatus,
   AGENT_CODE_PATTERN,
 } from './personal-data';
+
+// Phase 18.98: the two languages, and Bahasa Indonesia for a person who has chosen neither (ADR-0179 §1).
+export {
+  LANGUAGES, type Language, DEFAULT_LANGUAGE, isLanguage, languageOf,
+  SOURCE_LANGUAGE, LANGUAGE_LIVE, unchosenLanguage, LANGUAGE_UNCHOSEN,
+} from './language';

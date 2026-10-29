@@ -1,6 +1,13 @@
 import { DateTime } from 'luxon';
 import { addDays, daysBetween, endOfMonth, isLocalDate, type LocalDate } from '@/common/time/local-day';
+import type { FieldSentence } from '@/common/validation/fields';
+import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
 import { CALENDAR, CALENDAR_ALL_DAY_TYPE, type CalendarEntryType } from '@/domain/constants';
+import { CALENDAR_REFUSALS } from './calendar.messages';
+
+/** An entry's timing refused field by field, each sentence in both languages (P18.98-T5 AC-3). */
+const SAY = CALENDAR_REFUSALS.VALIDATION_FAILED;
+const REQUIRED = VALIDATION_REFUSALS.VALIDATION_FAILED.required;
 
 /**
  * **The calendar's clock, in the office's zone and nowhere else** (invariant §9; P12-T2 AC-3, P12-T3
@@ -142,30 +149,30 @@ const TRAVEL_FIELDS = ['startsOn', 'endsOn'] as const;
  */
 export function timingOf(
   type: CalendarEntryType, input: TimingInput, timezone: string,
-): { timing: StoredTiming } | { violations: string[] } {
-  const violations: string[] = [];
+): { timing: StoredTiming } | { violations: FieldSentence[] } {
+  const violations: FieldSentence[] = [];
   const travel = type === CALENDAR_ALL_DAY_TYPE;
   const own = travel ? TRAVEL_FIELDS : TIMED_FIELDS;
   const other = travel ? TIMED_FIELDS : TRAVEL_FIELDS;
   for (const field of other) {
     if (input[field] !== undefined && input[field] !== null) {
-      violations.push(`${field} is not part of ${travel ? 'a travel entry' : 'a timed entry'}.`);
+      violations.push(SAY.notPartOf({ field, travel }));
     }
   }
   for (const field of own) {
-    if (input[field] === undefined || input[field] === null) violations.push(`${field} is required.`);
+    if (input[field] === undefined || input[field] === null) violations.push(REQUIRED({ field }));
   }
   if (violations.length) return { violations };
 
   if (travel) {
     const startsOn = input.startsOn as string;
     const endsOn = input.endsOn as string;
-    if (!isLocalDate(startsOn)) violations.push('startsOn must be a day, written YYYY-MM-DD.');
-    if (!isLocalDate(endsOn)) violations.push('endsOn must be a day, written YYYY-MM-DD.');
+    if (!isLocalDate(startsOn)) violations.push(SAY.dayShape({ field: 'startsOn' }));
+    if (!isLocalDate(endsOn)) violations.push(SAY.dayShape({ field: 'endsOn' }));
     if (violations.length) return { violations };
-    if (endsOn < startsOn) return { violations: ['endsOn must be on or after startsOn.'] };
+    if (endsOn < startsOn) return { violations: [SAY.endsBeforeStarts] };
     if (daysBetween(startsOn, endsOn).length > CALENDAR.TRAVEL_DAYS_MAX) {
-      return { violations: [`endsOn must be at most ${CALENDAR.TRAVEL_DAYS_MAX} days from startsOn, inclusive.`] };
+      return { violations: [SAY.tripTooLong({ max: CALENDAR.TRAVEL_DAYS_MAX })] };
     }
     return {
       timing: {
@@ -180,13 +187,13 @@ export function timingOf(
   const date = input.date as string;
   const start = input.start as string;
   const end = input.end as string;
-  if (!isLocalDate(date)) violations.push('date must be a day, written YYYY-MM-DD.');
-  if (!WALL_CLOCK.test(start)) violations.push('start must be a time, written HH:mm.');
-  if (!WALL_CLOCK.test(end)) violations.push('end must be a time, written HH:mm.');
+  if (!isLocalDate(date)) violations.push(SAY.dayShape({ field: 'date' }));
+  if (!WALL_CLOCK.test(start)) violations.push(SAY.timeShape({ field: 'start' }));
+  if (!WALL_CLOCK.test(end)) violations.push(SAY.timeShape({ field: 'end' }));
   if (violations.length) return { violations };
   const from = minutesOf(start);
   const to = end === MIDNIGHT ? MINUTES_PER_DAY : minutesOf(end);
-  if (to <= from) return { violations: ['end must be after start on the same date.'] };
+  if (to <= from) return { violations: [SAY.endBeforeStart] };
   return {
     timing: {
       startsAt: instantOf(timezone, date, from),

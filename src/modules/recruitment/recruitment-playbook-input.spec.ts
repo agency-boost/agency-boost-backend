@@ -1,18 +1,28 @@
 import { DomainException } from '@/common/errors/domain.exception';
+import { readerIn } from '@/common/i18n/reader';
 import { SEED_RECRUITMENT_PLAYBOOK } from '@/domain/constants';
-import { checkPlaybookBody, type PlaybookViolation } from './recruitment-playbook-input';
+import { checkPlaybookBody } from './recruitment-playbook-input';
 import { defaultPlaybookBody } from './recruitment-playbook-defaults';
 
-/** The violations a body is refused with, or `null` when it saves. */
-function violationsOf(body: unknown): PlaybookViolation[] | null {
+/** A violation as a reader reads it: the field's path, and its sentence written for them. */
+type Said = { field: string; message: string };
+
+/** The refusal of a body, or `null` when it saves. */
+function refusalOf(body: unknown): DomainException | null {
   try {
     checkPlaybookBody(body);
     return null;
   } catch (err) {
     const e = err as DomainException;
     expect([e.getStatus(), e.code]).toEqual([400, 'VALIDATION_FAILED']);
-    return (e.details as { violations: PlaybookViolation[] }).violations;
+    return e;
   }
+}
+
+/** The violations a body is refused with, in the API's English, or `null` when it saves. */
+function violationsOf(body: unknown): Said[] | null {
+  const e = refusalOf(body);
+  return e === null ? null : (e.details as { violations: Said[] }).violations;
 }
 const fields = (body: unknown) => violationsOf(body)?.map((v) => v.field) ?? [];
 
@@ -104,6 +114,33 @@ describe('a playbook’s save, checked whole (P17-T8 AC-2)', () => {
     expect(empty).toEqual(expect.arrayContaining([
       'body.profiles', 'body.profiles.fresh-grad', 'body.objections', 'body.objections.time', 'body.nextAction',
     ]));
+  });
+
+  it('P18.98-T5 AC-3 every violation in Bahasa Indonesia, the field’s path as the API names it; the message them all', () => {
+    const e = refusalOf(edited((b) => {
+      b.profiles['career-switch'].tagline = '';
+      b.profiles.retiree.benefits = 'many';
+      b.profiles.retiree.colour = 'red';
+      delete b.objections.reputation;
+      b.nextAction = 'x'.repeat(601);
+    }))!;
+    const violations: Said[] = [
+      { field: 'body.profiles.career-switch.tagline', message: 'Tidak boleh kosong.' },
+      { field: 'body.profiles.retiree.colour', message: 'Bukan bagian dari playbook recruitment.' },
+      { field: 'body.profiles.retiree.benefits', message: 'Harus berupa daftar.' },
+      { field: 'body.objections.reputation', message: 'Belum diisi: semuanya wajib dijawab.' },
+      { field: 'body.nextAction', message: 'Paling banyak 600 karakter.' },
+    ];
+    expect(e.detailsFor(readerIn('id'))).toEqual({ violations });
+    expect(e.messageFor(readerIn('id')))
+      .toBe(`Playbook ini tidak dapat disimpan: ${violations.map((v) => `${v.field} — ${v.message}`).join('; ')}`);
+    expect(e.message).toMatch(/^This playbook cannot be saved: body\.profiles\.career-switch\.tagline — Must not be empty\.; /);
+    expect(refusalOf('words')!.detailsFor(readerIn('id'))).toMatchObject({
+      violations: expect.arrayContaining([{ field: 'body', message: 'Harus berupa objek berisi kolom.' }]),
+    });
+    expect(refusalOf(edited((b) => { b.profiles.retiree.benefits = []; }))!.detailsFor(readerIn('id'))).toEqual({
+      violations: [{ field: 'body.profiles.retiree.benefits', message: 'Harus berisi 1 sampai 6 manfaat.' }],
+    });
   });
 
   it('P17-T8 AC-2 takes 600 characters exactly, and one benefit or six', () => {

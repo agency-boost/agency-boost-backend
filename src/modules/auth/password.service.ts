@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import type { Sentence } from '@/common/i18n/sentence';
+import { AUTH_REFUSALS } from './auth.messages';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
@@ -40,16 +42,16 @@ export class PasswordService {
    * Validation returns every failure at once. Telling someone their password is too
    * short, then that it is breached, is two round trips for one decision.
    */
-  validate(plain: string): string[] {
-    const problems: string[] = [];
+  validate(plain: string): Sentence<'VALIDATION_FAILED'>[] {
+    const problems: Sentence<'VALIDATION_FAILED'>[] = [];
     if (plain.length < PasswordService.MIN_LENGTH) {
-      problems.push(`Password must be at least ${PasswordService.MIN_LENGTH} characters.`);
+      problems.push(AUTH_REFUSALS.VALIDATION_FAILED.passwordTooShort({ min: PasswordService.MIN_LENGTH }));
     }
     if (plain.length > 200) {
-      problems.push('Password must be 200 characters or fewer.');
+      problems.push(AUTH_REFUSALS.VALIDATION_FAILED.passwordTooLong);
     }
     if (/^\s|\s$/.test(plain)) {
-      problems.push('Password must not begin or end with a space.');
+      problems.push(AUTH_REFUSALS.VALIDATION_FAILED.passwordSpaces);
     }
     return problems;
   }

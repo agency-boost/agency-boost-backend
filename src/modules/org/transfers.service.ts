@@ -5,6 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
@@ -13,6 +14,7 @@ import { HierarchyService } from './hierarchy.service';
 import { MemberNames } from './member-names.service';
 import { MembershipRepository } from './membership.repository';
 import { MembershipDocument } from './membership.schema';
+import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
 import { TransferRequestRepository } from './org.repositories';
 import { TransferRequestDocument, type TransferRequestStatus } from './transfer-request.schema';
 
@@ -169,7 +171,7 @@ export class TransfersService {
       await this.close(ctx, transferId);
       throw new DomainException(
         ErrorCode.ORG_ALREADY_REMOVED,
-        'They are no longer an active member of the office, so there is nobody to move. The request is closed.',
+        ORG_REFUSALS.ORG_ALREADY_REMOVED.nobodyToMove,
         HttpStatus.CONFLICT,
         { transferId },
       );
@@ -178,8 +180,7 @@ export class TransfersService {
       await this.close(ctx, transferId);
       throw new DomainException(
         ErrorCode.ORG_TRANSFER_STALE,
-        'They have moved to another leader since this was asked, so it no longer says where they come from. The '
-          + 'request is closed; ask again if they should still move.',
+        ORG_REFUSALS.ORG_TRANSFER_STALE.movedSince,
         HttpStatus.CONFLICT,
         { transferId },
       );
@@ -195,7 +196,10 @@ export class TransfersService {
 
     const previousLeaderId = member.leaderId;
     try {
-      await this.hierarchy.reparent(ctx, row.membershipId, row.toLeaderId, 'Transfer request approved');
+      // The edge's reason is stored, so it is written in the decider's language (P18.98-T5 AC-6).
+      await this.hierarchy.reparent(
+        ctx, row.membershipId, row.toLeaderId, render(ORG_MESSAGES.transferApproved, ctx.reader),
+      );
     } catch (err) {
       // Nobody moved, so nothing is approved: the request waits again, for this decider or another.
       await this.transfers.updateMany(
@@ -290,7 +294,7 @@ export class TransfersService {
     if (await this.hierarchy.ownsTheOffice(ctx, member)) {
       throw new DomainException(
         ErrorCode.ORG_NOT_PERMITTED_TO_TAG,
-        'They own this office. Nobody adds them to a unit.',
+        ORG_REFUSALS.ORG_NOT_PERMITTED_TO_TAG.ownerNotAdded,
         HttpStatus.FORBIDDEN,
         { membershipId: String(member._id) },
       );
@@ -352,7 +356,7 @@ function askedFor(view: TransferView): string {
 function transferPending(transferId: string | null): DomainException {
   return new DomainException(
     ErrorCode.ORG_TRANSFER_PENDING,
-    'A transfer request for them is already waiting for the office to decide.',
+    ORG_REFUSALS.ORG_TRANSFER_PENDING.waiting,
     HttpStatus.CONFLICT,
     { transferId },
   );
@@ -361,7 +365,7 @@ function transferPending(transferId: string | null): DomainException {
 function alreadyDecided(row: TransferRequestDocument): DomainException {
   return new DomainException(
     ErrorCode.ORG_REQUEST_ALREADY_DECIDED,
-    `That transfer request was already ${row.status}.`,
+    ORG_REFUSALS.ORG_REQUEST_ALREADY_DECIDED.transfer({ status: row.status }),
     HttpStatus.CONFLICT,
     { status: row.status, decidedAt: row.decidedAt },
   );

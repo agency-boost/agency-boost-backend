@@ -1,3 +1,4 @@
+import { english, englishAll, indonesianAll } from '../../../test/i18n';
 import { PasswordService } from './password.service';
 
 /**
@@ -67,8 +68,16 @@ describe('PasswordService', () => {
     it('names every problem at once, rather than one round trip each', () => {
       const problems = passwords.validate(' short ');
       expect(problems).toHaveLength(2);
-      expect(problems[0]).toMatch(/at least 10 characters/);
-      expect(problems[1]).toMatch(/begin or end with a space/);
+      expect(english(problems[0])).toMatch(/at least 10 characters/);
+      expect(english(problems[1])).toMatch(/begin or end with a space/);
+    });
+
+    it('P18.98-T5 AC-3 names each problem in Indonesian too', () => {
+      expect(indonesianAll(passwords.validate(' short '))).toEqual([
+        'Kata sandi minimal 10 karakter.',
+        'Kata sandi tidak boleh diawali atau diakhiri spasi.',
+      ]);
+      expect(indonesianAll(passwords.validate('x'.repeat(201)))).toEqual(['Kata sandi paling banyak 200 karakter.']);
     });
 
     it('refuses one under the floor, and accepts one exactly on it', () => {
@@ -80,7 +89,7 @@ describe('PasswordService', () => {
       // The ceiling is about the hash function's cost, not about the password: an
       // unbounded input is a way to make every login expensive.
       expect(passwords.validate('x'.repeat(200))).toEqual([]);
-      expect(passwords.validate('x'.repeat(201)))
+      expect(englishAll(passwords.validate('x'.repeat(201))))
         .toEqual(['Password must be 200 characters or fewer.']);
     });
 

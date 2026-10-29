@@ -15,6 +15,8 @@ import { EventController } from './event.controller';
 import { EventService } from './event.service';
 import { EventRollCallService } from './event-roll-call.service';
 import { listenOnLoopback } from '../../../test/listen';
+import { IN_INDONESIAN } from '../../../test/i18n';
+import { EVENT_ISSUERS } from '@/domain/constants';
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 
@@ -265,6 +267,55 @@ describe('an office’s events over HTTP (P5-T6)', () => {
       session.current = AGENT;
 
       await request(app.getHttpServer()).post(url).send({ nonsense: true }).expect(403);
+    });
+  });
+
+  /**
+   * **The Owner's refusals, in Bahasa Indonesia** (P18.98-T5 AC-7): a code taken and an archived type — Nest's
+   * `BadRequestException` once, the same `400 VALIDATION_FAILED` now — and a malformed event's field sentences.
+   */
+  describe('P18.98-T5 AC-7 the Owner’s refusals in Indonesian', () => {
+    const post = (body: Record<string, unknown>) => request(app.getHttpServer()).post(url).set(...IN_INDONESIAN).send(body);
+
+    it('P18.98-T5 AC-7 a code taken and an archived type answer 400 VALIDATION_FAILED, the words Indonesian', async () => {
+      await request(app.getHttpServer()).post(url).send(anEvent()).expect(201);
+      const taken = await post(anEvent()).expect(400);
+      expect(taken.body.error).toEqual({
+        code: 'VALIDATION_FAILED', message: 'KPM ini sudah memiliki event dengan kode KICKOFF.', requestId: expect.any(String),
+      });
+      // The same refusal, in English, word for word as before.
+      expect((await request(app.getHttpServer()).post(url).send(anEvent()).expect(400)).body.error.message)
+        .toBe('This office already has an event with the code KICKOFF.');
+
+      const types = (await request(app.getHttpServer()).get(`${url}/types`).expect(200)).body as { id: string; code: string }[];
+      await request(app.getHttpServer()).post(`${url}/types/${types.find((t) => t.code === 'TRAINING')!.id}/archive`).send({})
+        .expect(201);
+      expect((await post(anEvent({ code: 'SECOND' })).expect(400)).body.error.message)
+        .toBe('TRAINING diarsipkan, jadi tidak ada event baru yang dapat dicatat dengan jenis ini. Pulihkan dulu.');
+      expect((await post(anEvent({ code: 'THIRD', typeCode: 'NO_SUCH_TYPE' })).expect(400)).body.error.message)
+        .toBe('NO_SUCH_TYPE bukan jenis event di KPM ini.');
+      const typeTaken = await request(app.getHttpServer()).post(`${url}/types`).set(...IN_INDONESIAN)
+        .send({ code: 'TRAINING', label: 'Training again' }).expect(400);
+      expect(typeTaken.body.error.message).toBe('KPM ini sudah memiliki jenis event dengan kode TRAINING.');
+    });
+
+    it('P18.98-T5 AC-7 a malformed event: every field sentence in Indonesian, joined as in English', async () => {
+      const res = await post(anEvent({
+        endsAt: '2026-10-01T01:00:00Z', locationUrl: 'javascript:alert(1)', audience: { issuer: 'x', scope: 'all_agents' },
+      })).expect(400);
+      const violations = [
+        'locationUrl harus berupa alamat web yang diawali http:// atau https://.',
+        'endsAt harus setelah startsAt.',
+        `audience.issuer harus salah satu dari: ${EVENT_ISSUERS.join(', ')}.`,
+      ];
+      expect(res.body.error).toMatchObject({ code: 'VALIDATION_FAILED', message: violations.join('; '), details: { violations } });
+      const select = await post(anEvent({ audience: { issuer: 'kpm', scope: 'select_agents', inviteeMembershipIds: [] } }))
+        .expect(400);
+      expect(select.body.error.message)
+        .toBe('Audiens "select" memerlukan paling sedikit satu orang. Pilih semua orang jika itu yang Anda maksud.');
+      const color = await request(app.getHttpServer()).post(`${url}/types`).set(...IN_INDONESIAN)
+        .send({ code: 'CLINIC', label: 'Clinic', color: 'blue' }).expect(400);
+      expect(color.body.error.details.violations).toEqual(['color harus berupa nilai hex, misalnya #2D9CDB.']);
     });
   });
 });

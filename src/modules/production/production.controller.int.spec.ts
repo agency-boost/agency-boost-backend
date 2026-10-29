@@ -275,6 +275,44 @@ describe('production over HTTP (P9-T1)', () => {
       expect(noMonth.status).toBe(400);
       expect(noMonth.body.error.code).toBe('VALIDATION_FAILED');
     });
+
+    it('P18.98-T5 AC-4 answers each row’s and each cell’s issue in the reader’s language, the cells named as the file names them', async () => {
+      const file = `${TEMPLATE_HEADER_V1.join(',')}\nPRU-001,"Rina Wijaya",1.5,140,,,,,,,,,,\nPRU-999,"Nobody",1,,,,,,,,,,,\n`;
+      const issues = (body: { rows: { issues: { code: string; message: string }[] }[] }) =>
+        body.rows.map((row) => row.issues.map((issue) => [issue.code, issue.message]));
+      expect(issues((await send(file).expect(200)).body)).toEqual([
+        [['UPLOAD_VALUE_OUT_OF_RANGE', 'Rolling Persistency (%) — This Month: “140” is above 100 — persistency is a percentage.']],
+        [['UPLOAD_UNKNOWN_AGENT_CODE', 'No active member of this office has this code.']],
+      ]);
+      const indonesian = await send(file).set('Accept-Language', 'id').expect(200);
+      expect(issues(indonesian.body)).toEqual([
+        [['UPLOAD_VALUE_OUT_OF_RANGE', 'Rolling Persistency (%) — This Month: “140” lebih dari 100 — persistency adalah persentase.']],
+        [['UPLOAD_UNKNOWN_AGENT_CODE', 'Tidak ada anggota aktif KPM ini yang memiliki kode ini.']],
+      ]);
+      // Everything else in the preview is the same in both: codes, statuses, figures.
+      expect(indonesian.body.summary).toMatchObject({ rows: 2, ready: 1, refused: 1, newCells: 1, refusedCells: 1 });
+    });
+
+    it('P18.98-T5 AC-2 refuses the file in Indonesian: its header, its size, a missing file', async () => {
+      const header = await send(FILLED.replace('Recruitment — This Month', 'Recruits')).set('Accept-Language', 'id').expect(422);
+      expect(header.body.error).toMatchObject({
+        code: 'UPLOAD_TEMPLATE_MISMATCH', details: { column: 5 },
+        message: 'Kolom 5 di header berisi “Recruits”; di templat berisi “Recruitment — This Month”. Unduh templat untuk bulan '
+          + 'ini dan isi templat itu — belum ada yang dibaca.',
+      });
+      const big = await send(Buffer.alloc(PRODUCTION_UPLOAD.MAX_BYTES + 1, 0x41)).set('Accept-Language', 'id').expect(413);
+      expect(big.body.error).toMatchObject({
+        code: 'ASSET_TOO_LARGE', details: { maxBytes: 1_048_576 },
+        message: 'File ini lebih besar dari 1 MB. Templat untuk satu KPM hanya beberapa kilobyte — periksa apakah ini file yang benar.',
+      });
+      const noFile = await request(app.getHttpServer()).post('/kpm/data-upload/preview').set('Accept-Language', 'id')
+        .field('month', '2026-09').expect(400);
+      expect(noFile.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED', details: { field: 'file' }, message: 'Lampirkan templat yang sudah diisi sebagai kolom `file`.',
+      });
+      const notAMonth = await send(FILLED, 'Sep-2026').set('Accept-Language', 'id').expect(400);
+      expect(notAMonth.body.error).toMatchObject({ code: 'VALIDATION_FAILED', message: 'Sep-2026 bukan bulan. Gunakan format YYYY-MM.' });
+    });
   });
 
   describe('confirm, revert, history and the month lock (P9-T4)', () => {
@@ -392,6 +430,46 @@ describe('production over HTTP (P9-T1)', () => {
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('VERSION_CONFLICT');
     });
+
+    it('P18.98-T5 AC-2 refuses in Indonesian: a month locked on its schedule, its month and day in the reader’s figures', async () => {
+      const august = request(app.getHttpServer()).post('/kpm/data-upload/commit').set('Accept-Language', 'id')
+        .field('month', '2026-08').field('revision', '0').attach('file', Buffer.from(FILLED), 'filled.csv');
+      expect((await august.expect(409)).body.error).toMatchObject({
+        code: 'UPLOAD_MONTH_LOCKED', details: { month: '2026-08', reason: 'schedule', editableUntil: '2026-09-07' },
+        message: 'Agu 2026 dikunci setelah 7 Sep 2026, saat masa pengisiannya berakhir. Buka kembali bulan ini untuk mengubah '
+          + 'angkanya.',
+      });
+      await commit();
+      const stale = await commit('0', FILLED.replace('1.5', '2')).set('Accept-Language', 'id').expect(409);
+      expect(stale.body.error).toMatchObject({
+        code: 'VERSION_CONFLICT',
+        message: 'Sep 2026 telah berubah sejak Anda membukanya. Muat ulang, lalu unggah file lagi jika Anda sedang mengimpor.',
+      });
+      const again = await commit('0').set('Accept-Language', 'id').expect(409);
+      expect(again.body.error).toMatchObject({
+        code: 'UPLOAD_BATCH_ALREADY_COMMITTED',
+        message: 'File ini sudah diimpor, dari pratinjau yang sama. Angka-angkanya sudah ada di tabel.',
+      });
+      const nothing = await commit('1').set('Accept-Language', 'id').expect(400);
+      expect(nothing.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'File ini tidak akan mengubah apa pun: setiap angka di dalamnya kosong, sudah tersimpan, atau tidak diambil.',
+      });
+      const noRevision = await commit('latest').set('Accept-Language', 'id').expect(400);
+      expect(noRevision.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED', details: { field: 'revision' }, message: 'Kirim `revision` yang menjadi dasar pratinjau.',
+      });
+    });
+
+    it('P18.98-T5 AC-6 keeps a commit’s issues with the batch in the words of whoever imported it', async () => {
+      const file = `${TEMPLATE_HEADER_V1.join(',')}\nPRU-001,"Rina Wijaya",1.5,140,,,,,,,,,,\n`;
+      await commit('0', file).set('Accept-Language', 'id').expect(201);
+      const [row] = await mongoose.connection.db!.collection('dataUploadRows').find({}).toArray();
+      expect(row.issues).toEqual([{
+        code: 'UPLOAD_VALUE_OUT_OF_RANGE', metric: 'persistency', cadence: 'monthly',
+        message: 'Rolling Persistency (%) — This Month: “140” lebih dari 100 — persistency adalah persentase.',
+      }]);
+    });
   });
 
   describe('correcting one figure (P9-T5)', () => {
@@ -431,6 +509,29 @@ describe('production over HTTP (P9-T1)', () => {
       expect(res.body.error).toMatchObject({
         code: 'UPLOAD_VALUE_OUT_OF_RANGE', message: 'Rolling persistency this month is above 100 — persistency is a percentage.',
       });
+    });
+
+    it('P18.98-T5 AC-2 refuses a correction in Indonesian: the figure named by its metric, the cadence in the reader’s words', async () => {
+      const range = await patch({ metric: 'persistency', cadence: 'ytd', value: 140 }).set('Accept-Language', 'id').expect(422);
+      expect(range.body.error).toMatchObject({
+        code: 'UPLOAD_VALUE_OUT_OF_RANGE', details: { metric: 'persistency', cadence: 'ytd', value: 140 },
+        message: 'Rolling persistency YTD lebih dari 100 — persistency adalah persentase.',
+      });
+      const noReason = await patch({ reason: '  ' }).set('Accept-Language', 'id').expect(400);
+      expect(noReason.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED', details: { field: 'reason' }, message: 'Jelaskan mengapa angka ini dikoreksi.',
+      });
+      // Too long is the form's to refuse, in the pipe's own Indonesian, before the service reads it.
+      const tooLong = await patch({ reason: 'x'.repeat(501) }).set('Accept-Language', 'id').expect(400);
+      expect(tooLong.body.error.message).toBe('reason paling banyak 500 karakter');
+    });
+
+    it('P18.98-T5 AC-6 stores the reason a person types as typed, and reads it as stored, whatever the language', async () => {
+      await patch({ reason: 'Carrier mengoreksi lewat email' }).set('Accept-Language', 'id').expect(200);
+      const month = await request(app.getHttpServer()).get('/kpm/data-upload/2026-09').expect(200);
+      expect(month.body.rows[0].metrics.ape.monthly.correction.reason).toBe('Carrier mengoreksi lewat email');
+      const indonesian = await request(app.getHttpServer()).get('/kpm/data-upload/2026-09').set('Accept-Language', 'id').expect(200);
+      expect(indonesian.body.rows[0].metrics.ape.monthly.correction.reason).toBe('Carrier mengoreksi lewat email');
     });
 
     it.each(NOT_ADMINISTRATORS.filter(([who]) => who !== 'a Super Admin'))('refuses %s', async (_who, ctx) => {

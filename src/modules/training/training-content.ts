@@ -1,5 +1,9 @@
 import { ulid } from 'ulid';
-import { Fields, refuseWith } from '@/common/validation/fields';
+import { Fields, refuseWith, type FieldSentence } from '@/common/validation/fields';
+import { TRAINING_REFUSALS, type ContentItem } from './training.messages';
+
+/** What a module's content is refused with (P18.98-T5 AC-3): each sentence in both languages, its item named. */
+const SAY = TRAINING_REFUSALS.VALIDATION_FAILED;
 
 /** One uploaded file or short video, as a write sends it. */
 export interface CheckedContentFile {
@@ -46,7 +50,7 @@ export const CONTENT_BOUNDS = { perSection: 20 } as const;
  * nothing, and the orphan sweep reports it — which is what that sweep is for.
  */
 export function checkTrainingContent(body: unknown): CheckedContent {
-  const violations: string[] = [];
+  const violations: FieldSentence[] = [];
   const source = (body ?? {}) as Record<string, unknown>;
 
   const outer = new Fields(source, ['files', 'videos', 'links']);
@@ -56,20 +60,18 @@ export function checkTrainingContent(body: unknown): CheckedContent {
     const raw = source[key];
     if (raw === undefined) return [];
     if (!Array.isArray(raw)) {
-      violations.push(`${key} must be a list.`);
+      violations.push(SAY.notAList({ key }));
       return [];
     }
     if (raw.length > CONTENT_BOUNDS.perSection) {
-      violations.push(
-        `A module holds at most ${CONTENT_BOUNDS.perSection} ${key}; this one has ${raw.length}.`,
-      );
+      violations.push(SAY.sectionTooMany({ max: CONTENT_BOUNDS.perSection, key, count: raw.length }));
     }
     return raw;
   };
 
-  const readFile = (raw: unknown, where: string): CheckedContentFile | null => {
+  const readFile = (raw: unknown, item: ContentItem): CheckedContentFile | null => {
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-      violations.push(`${where} must be an object of fields.`);
+      violations.push(SAY.itemNotObject({ item }));
       return null;
     }
     const row = raw as Record<string, unknown>;
@@ -77,7 +79,7 @@ export function checkTrainingContent(body: unknown): CheckedContent {
     const label = f.text('label', LABEL, true);
     const storageKey = f.text('storageKey', KEY, true);
     const mimeType = f.text('mimeType', { min: 1, max: 200 }, true);
-    violations.push(...f.violations.map((v) => `${where}: ${v}`));
+    violations.push(...f.violations.map((inner) => SAY.atItem({ item, inner })));
     if (label === undefined || storageKey === undefined || mimeType === undefined) return null;
     return {
       // Minted here when the screen sends a new item, so an id is never the client's to choose
@@ -90,31 +92,31 @@ export function checkTrainingContent(body: unknown): CheckedContent {
     };
   };
 
-  const readLink = (raw: unknown, where: string): CheckedContentLink | null => {
+  const readLink = (raw: unknown, item: ContentItem): CheckedContentLink | null => {
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-      violations.push(`${where} must be an object of fields.`);
+      violations.push(SAY.itemNotObject({ item }));
       return null;
     }
     const row = raw as Record<string, unknown>;
     const f = new Fields(row, ['id', 'label', 'url']);
     const label = f.text('label', LABEL, true);
-    violations.push(...f.violations.map((v) => `${where}: ${v}`));
+    violations.push(...f.violations.map((inner) => SAY.atItem({ item, inner })));
 
-    const url = checkUrl(row.url, where, violations);
+    const url = checkUrl(row.url, item, violations);
     if (label === undefined || url === null) return null;
     return { id: String(row.id ?? '').trim() || ulid(), label, url };
   };
 
   const content: CheckedContent = {
-    files: list('files').map((r, i) => readFile(r, `File ${i + 1}`)).filter(isPresent),
-    videos: list('videos').map((r, i) => readFile(r, `Video ${i + 1}`)).filter(isPresent),
-    links: list('links').map((r, i) => readLink(r, `Link ${i + 1}`)).filter(isPresent),
+    files: list('files').map((r, i) => readFile(r, { kind: 'file', n: i + 1 })).filter(isPresent),
+    videos: list('videos').map((r, i) => readFile(r, { kind: 'video', n: i + 1 })).filter(isPresent),
+    links: list('links').map((r, i) => readLink(r, { kind: 'link', n: i + 1 })).filter(isPresent),
   };
 
   // An id is what an office's override names, so two items sharing one would make "remove that
   // file" ambiguous — and the ambiguity would only surface when somebody removed the wrong thing.
   const ids = [...content.files, ...content.videos, ...content.links].map((i) => i.id);
-  if (new Set(ids).size !== ids.length) violations.push('Two items in this module share an id.');
+  if (new Set(ids).size !== ids.length) violations.push(SAY.sharedId);
 
   if (violations.length > 0) refuseWith(violations);
   return content;
@@ -131,24 +133,21 @@ function isPresent<T>(value: T | null): value is T {
  * Android over a mobile network, and a browser blocks or warns about an insecure page — so a link
  * that looks saved and never opens is worse than one refused while somebody can still fix it.
  */
-function checkUrl(raw: unknown, where: string, violations: string[]): string | null {
+function checkUrl(raw: unknown, item: ContentItem, violations: FieldSentence[]): string | null {
   const value = String(raw ?? '').trim();
   if (value === '') {
-    violations.push(`${where}: url is required.`);
+    violations.push(SAY.urlRequired({ item }));
     return null;
   }
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
-    violations.push(`${where}: "${value}" is not a web address.`);
+    violations.push(SAY.notAWebAddress({ item, value }));
     return null;
   }
   if (parsed.protocol !== 'https:') {
-    violations.push(
-      `${where}: a link must start with https://. "${value}" would be blocked or warned about on `
-      + 'an agent’s phone.',
-    );
+    violations.push(SAY.httpsOnly({ item, value }));
     return null;
   }
   return parsed.toString();

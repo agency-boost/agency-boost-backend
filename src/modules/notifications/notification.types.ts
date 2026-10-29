@@ -6,6 +6,8 @@
  * the five phases that call this service.
  */
 
+import type { Reader } from '@/common/i18n/reader';
+
 export type NotificationChannel = 'in_app' | 'email';
 
 export const NOTIFICATION_CHANNELS: readonly NotificationChannel[] = ['in_app', 'email'] as const;
@@ -129,6 +131,12 @@ export interface SendRequest {
   readonly userId?: string;
   readonly templateId: NotificationTemplateId;
   readonly payload: Record<string, unknown>;
+  /**
+   * **The reader of the request that caused it**, for a recipient with no saved language (P18.98-T5 AC-5): set only
+   * where that request was the recipient's own — the verification and reset emails, whose page asked for them in its
+   * language. Every other email reads the recipient's `users.locale`, or a reader who has chosen nothing.
+   */
+  readonly reader?: Reader;
 }
 
 /** A channel implementation. Adding WhatsApp means implementing this once. */

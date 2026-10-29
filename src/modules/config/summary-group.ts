@@ -1,10 +1,11 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { refuseWith } from '@/common/validation/fields';
-import {
-  CODE_MESSAGE, CODE_PATTERN, CONFIG_BOUNDS, SUMMARY_GROUP_PAIR_MESSAGE,
-} from './config-input';
+import { prefixed } from '@/common/i18n/sentence';
+import { refuseWith, type FieldSentence } from '@/common/validation/fields';
+import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
+import { CODE_PATTERN, CONFIG_BOUNDS, SUMMARY_GROUP_PAIR_SENTENCE } from './config-input';
+import { CONFIG_REFUSALS } from './config.messages';
 
 /**
  * One summary tile, one label (ADR-0064) — the rule across rows, where `config-input.ts` holds
@@ -89,9 +90,9 @@ export function refuseSummaryGroupConflict(rows: readonly SummaryGrouped[]): voi
   if (conflict) {
     throw new DomainException(
       ErrorCode.CONFIG_SUMMARY_GROUP_LABEL_MISMATCH,
-      `The sections in the summary tile ${conflict.summaryGroupCode} would be labelled `
-        + `${conflict.labels.map((l) => `“${l}”`).join(' and ')}. One tile has one label: give `
-        + 'every section in it the same one.',
+      CONFIG_REFUSALS.CONFIG_SUMMARY_GROUP_LABEL_MISMATCH.twoLabels({
+        code: conflict.summaryGroupCode, labels: conflict.labels,
+      }),
       HttpStatus.UNPROCESSABLE_ENTITY,
       { summaryGroupCode: conflict.summaryGroupCode, labels: conflict.labels },
     );
@@ -100,8 +101,7 @@ export function refuseSummaryGroupConflict(rows: readonly SummaryGrouped[]): voi
   if (taken) {
     throw new DomainException(
       ErrorCode.CONFIG_SUMMARY_GROUP_CODE_TAKEN,
-      `${taken.summaryGroupCode} is the code of the summary tile “${taken.label}”, so a section `
-        + 'outside that tile cannot carry it as well. Give the section another code.',
+      CONFIG_REFUSALS.CONFIG_SUMMARY_GROUP_CODE_TAKEN.codeOfATile({ code: taken.summaryGroupCode, label: taken.label }),
       HttpStatus.UNPROCESSABLE_ENTITY,
       { summaryGroupCode: taken.summaryGroupCode, label: taken.label },
     );
@@ -119,7 +119,8 @@ export function refuseSummaryGroupConflict(rows: readonly SummaryGrouped[]): voi
  */
 export function checkTemplateSummaryGroups(categories: unknown): Record<string, unknown>[] {
   if (!Array.isArray(categories)) return [];
-  const violations: string[] = [];
+  // Each named for its row (`categories[2] (CORE): …`), in both languages (P18.98-T5 AC-3).
+  const violations: FieldSentence[] = [];
   const checked = categories.map((entry: unknown, index) => {
     // Not a section this rule can read, and not this rule's to refuse: saved exactly as sent.
     if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return entry as Record<string, unknown>;
@@ -128,7 +129,7 @@ export function checkTemplateSummaryGroups(categories: unknown): Record<string, 
     const rawCode = row.summaryGroupCode ?? null;
     const rawLabel = row.summaryGroupLabel ?? null;
     if ((rawCode === null) !== (rawLabel === null)) {
-      violations.push(`${at}: ${SUMMARY_GROUP_PAIR_MESSAGE}`);
+      violations.push(prefixed(`${at}: `, SUMMARY_GROUP_PAIR_SENTENCE));
       return row;
     }
     if (rawCode === null) return { ...row, summaryGroupCode: null, summaryGroupLabel: null };
@@ -137,10 +138,10 @@ export function checkTemplateSummaryGroups(categories: unknown): Record<string, 
     const label = typeof rawLabel === 'string' ? rawLabel.trim() : '';
     const { min, max } = CONFIG_BOUNDS.summaryGroupLabel;
     if (!CODE_PATTERN.test(code)) {
-      violations.push(`${at}: summaryGroupCode: ${CODE_MESSAGE}`);
+      violations.push(prefixed(`${at}: `, VALIDATION_REFUSALS.VALIDATION_FAILED.fieldCodeShape({ field: 'summaryGroupCode' })));
     }
     if (typeof rawLabel !== 'string' || label.length < min || label.length > max) {
-      violations.push(`${at}: summaryGroupLabel must be ${min}–${max} characters.`);
+      violations.push(prefixed(`${at}: `, VALIDATION_REFUSALS.VALIDATION_FAILED.textBetween({ field: 'summaryGroupLabel', min, max })));
     }
     return { ...row, summaryGroupCode: code.toUpperCase(), summaryGroupLabel: label };
   });

@@ -40,8 +40,10 @@ describe('P15-T1 AC-11, P18.5-T7 AC-8 the Unit Dashboard reads no training or ev
   const rel = (f: string) => f.slice(SRC.length + 1);
 
   it('P15-T1 AC-11 the module has code to check', () => {
+    // Its sentences in both languages since P18.98-T5: `unit-dashboard.messages.ts`, the catalogue.
     expect(code.map((f) => f.slice(MODULE.length + 1)).sort()).toEqual([
-      'unit-dashboard.controller.ts', 'unit-dashboard.dto.ts', 'unit-dashboard.response.dto.ts', 'unit-dashboard.service.ts',
+      'unit-dashboard.controller.ts', 'unit-dashboard.dto.ts', 'unit-dashboard.messages.ts',
+      'unit-dashboard.response.dto.ts', 'unit-dashboard.service.ts',
     ]);
   });
 
@@ -56,7 +58,8 @@ describe('P15-T1 AC-11, P18.5-T7 AC-8 the Unit Dashboard reads no training or ev
     const direct = [...new Set(code.flatMap(importsOf))].map(rel).filter((f) => f.startsWith('modules/campaigns/'));
     expect(direct).toEqual(['modules/campaigns/campaign-chase-readings.ts']);
     const campaigns = [...reached(code)].map(rel).filter((f) => f.startsWith('modules/campaigns/')).sort();
-    // The reader, the two repositories and schemas it reads, and the words it composes the MDRT tooltip with.
+    // The reader, the two repositories and schemas it reads, and the words it composes the MDRT tooltip with — held
+    // in both languages in the module's catalogue since P18.98-T5, which is sentences and nothing else.
     expect(campaigns).toEqual([
       'modules/campaigns/campaign-chase-readings.ts',
       'modules/campaigns/campaign-chase.repository.ts',
@@ -64,6 +67,7 @@ describe('P15-T1 AC-11, P18.5-T7 AC-8 the Unit Dashboard reads no training or ev
       'modules/campaigns/campaign-words.ts',
       'modules/campaigns/campaign.repository.ts',
       'modules/campaigns/campaign.schema.ts',
+      'modules/campaigns/campaigns.messages.ts',
     ]);
   });
 });

@@ -1,3 +1,4 @@
+import { readerIn } from '@/common/i18n/reader';
 import { campaignOrder, mdrtTooltip, requirementWords, targetWords, type Orderable } from './campaign-words';
 
 const at = (iso: string) => new Date(iso);
@@ -65,5 +66,49 @@ describe('campaign words (P18.5-T7)', () => {
       ],
     })).toBe('Chasing MDRT (Million Dollar Round Table) this year — APE of Rp 1 or more and Rolling persistency of 85% or more.');
     expect(mdrtTooltip(null)).not.toMatch(/FYC|pace|office|KPM/i);
+  });
+});
+
+/**
+ * **The same words for an Indonesian reader, and an English one's figures** (P18.98-T5 AC-4): the comparator in words
+ * — *minimal*, *lebih dari*, *maksimal*, *kurang dari*, *tepat* — the metric's name kept (§A.4), and every target a
+ * figure in the reader's own (the glossary's §E). *MDRT* stays; the tooltip's sentence around it is Indonesian (§C6).
+ */
+describe('P18.98-T5 AC-4 the campaigns’ words, in both languages', () => {
+  const ID = readerIn('id');
+  const EN = readerIn('en');
+
+  it('P18.98-T5 AC-4 a requirement in Indonesian: the comparator in words, the target in Indonesian figures', () => {
+    expect(requirementWords({ metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 120_000_000_000 }, ID)).toBe('APE minimal Rp 1,2 M');
+    expect(requirementWords({ metricKey: 'NEW_HIRES', comparator: 'gt', value: 2 }, ID)).toBe('New Hire lebih dari 2');
+    expect(requirementWords({ metricKey: 'ROLLING_PERSISTENCY', comparator: 'lte', value: 75.55 }, ID))
+      .toBe('Rolling persistency maksimal 75,55%');
+    expect(requirementWords({ metricKey: 'NEW_HIRES', comparator: 'lt', value: 1_250 }, ID)).toBe('New Hire kurang dari 1.250');
+    expect(requirementWords({ metricKey: 'UNKNOWN_KEY', comparator: 'eq', value: 1 }, ID)).toBe('UNKNOWN_KEY tepat 1');
+    // Lossless in both: a target the compact form would round is written in full.
+    expect(requirementWords({ metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 115_000 }, ID)).toBe('APE minimal Rp 1.150');
+  });
+
+  it('P18.98-T5 AC-4 an English reader whose figures are English: the words as before, IDR and a decimal point', () => {
+    expect(targetWords('APE_ACHIEVED', 240_000_000_000, 'en')).toBe('IDR 2.4B');
+    expect(requirementWords({ metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 120_000_000_000 }, EN)).toBe('APE of IDR 1.2B or more');
+    expect(requirementWords({ metricKey: 'ROLLING_PERSISTENCY', comparator: 'lte', value: 75.55 }, EN))
+      .toBe('Rolling persistency of 75.55% or less');
+    expect(requirementWords({ metricKey: 'NEW_HIRES', comparator: 'lt', value: 1_250 }, EN)).toBe('New Hire below 1,250');
+  });
+
+  it('P18.98-T5 AC-4 Chasing MDRT’s tooltip in Indonesian: none running, one asking nothing, and two requirements', () => {
+    expect(mdrtTooltip(null, ID))
+      .toBe('Mengejar MDRT (Million Dollar Round Table) tahun ini. Tidak ada campaign MDRT yang sedang berjalan.');
+    expect(mdrtTooltip({ requirements: [] }, ID)).toBe('Mengejar MDRT (Million Dollar Round Table) tahun ini.');
+    expect(mdrtTooltip({
+      requirements: [
+        { metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 240_000_000_000 },
+        { metricKey: 'ROLLING_PERSISTENCY', comparator: 'gte', value: 85 },
+      ],
+    }, ID)).toBe('Mengejar MDRT (Million Dollar Round Table) tahun ini — APE minimal Rp 2,4 M dan Rolling persistency minimal 85%.');
+    expect(mdrtTooltip({ requirements: [{ metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 240_000_000_000 }] }, EN))
+      .toBe('Chasing MDRT (Million Dollar Round Table) this year — APE of IDR 2.4B or more.');
+    expect(mdrtTooltip(null, ID)).not.toMatch(/FYC|pace|office|KPM/i);
   });
 });

@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn } from '@/common/i18n/reader';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
 
@@ -117,6 +118,13 @@ describe('the office’s ratios, over a member’s last 30 days (P10-T2, P10-T3)
         sides: { numerator: 'Selling', denominator: 'Recruitment' },
       });
       expect((await byCode(leader())).SELLING_SUCCESS_RATE.sides).toBeNull();
+    });
+
+    it('P18.98-T5 AC-4 tags the balance in the reader’s language; its sides are the office’s own labels, as typed', async () => {
+      await day(TODAY, { SELL_PRESENTATION: 9, RECRUIT_PRESENTATION: 1 }, { membershipId: 'mem-leader' });
+      expect((await byCode(leader().withReader(readerIn('id')))).SELLING_VS_RECRUITMENT).toMatchObject({
+        tag: { code: null, label: 'Keseimbangan' }, sides: { numerator: 'Selling', denominator: 'Recruitment' },
+      });
     });
 
     it('names each side’s terms as the office numbers them, tags the section, and says what it measures', async () => {

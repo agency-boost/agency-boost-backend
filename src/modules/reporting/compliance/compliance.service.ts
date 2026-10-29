@@ -10,6 +10,7 @@ import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { partitionAgencies } from '../agency-partition';
 import { byName } from '../office-figures';
 import { OfficePeople } from '../office-people';
+import { REPORTING_REFUSALS } from '../reporting.messages';
 import { ActivationComplianceCategory } from './activation.category';
 import { ActivityComplianceCategory } from './activity.category';
 import { CampaignsComplianceCategory, type CampaignsComplianceCatalog } from './campaigns.category';
@@ -123,7 +124,7 @@ export class ComplianceService {
     const category = query.category ?? 'training';
     const asked = query.item ?? null;
     if (asked !== null && SINGLE_ITEM_CATEGORIES.includes(category)) {
-      refuseWith([`item is not taken by category ${category}: it has one item only.`]);
+      refuseWith([REPORTING_REFUSALS.VALIDATION_FAILED.itemNotTaken({ category })]);
     }
 
     const office = await this.days.office(ctx);

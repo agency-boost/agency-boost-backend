@@ -30,6 +30,7 @@
  *   answer a day after that — never later than the run.
  */
 import type { Clock } from '@/common/clock/clock.port';
+import { inSource } from '@/common/i18n/sentence';
 import { addDays, type LocalDate } from '@/common/time/local-day';
 import type { CalendarEntryType } from '@/domain/constants';
 import type { CalendarAnswer } from '@/modules/calendar/calendar-event.schema';
@@ -182,7 +183,9 @@ export function buildCalendarFixture(input: CalendarFixtureInput): CalendarFixtu
     const timing = 'date' in s
       ? timingOf(s.type, { date: s.date, start: s.start, end: s.end }, timezone)
       : timingOf(s.type, { startsOn: s.startsOn, endsOn: s.endsOn }, timezone);
-    if ('violations' in timing) throw new Error(`The calendar fixture's ${s.slot} is not an entry: ${timing.violations.join(' ')}`);
+    if ('violations' in timing) {
+      throw new Error(`The calendar fixture's ${s.slot} is not an entry: ${timing.violations.map(inSource).join(' ')}`);
+    }
     const date = 'date' in s ? s.date : s.startsOn;
     const organiser = members[s.by];
     const _id = seedObjectId('calendarEvent', kpmId, organiser, s.slot);

@@ -1,3 +1,6 @@
+import type { DomainException } from '@/common/errors/domain.exception';
+import type { Sentence } from '@/common/i18n/sentence';
+import { indonesian, indonesianAll } from '../../../test/i18n';
 import { checkLead } from './lead-input';
 
 /**
@@ -74,6 +77,40 @@ describe('reading a lead’s fields (P7-T1)', () => {
     it('refuses one longer than the field holds', () => {
       expect(() => checkLead({ ...ok, contact: { phone: '0'.repeat(40) } }))
         .toThrow(/contact.phone must be at most 32/);
+    });
+
+    it('P18.98-T5 AC-3 says every one of them in Indonesian, joined as the message, each field named as the API names it', () => {
+      try {
+        checkLead({
+          ...ok, nextActionDate: '24/09/2026', thisMonth: 'yes', version: 0,
+          contact: { phone: 81234567890, email: 'budi', whatsapp: '0812' },
+        });
+        throw new Error('should have refused');
+      } catch (err) {
+        const refusal = err as DomainException;
+        const violations = [
+          'nextActionDate harus berupa tanggal, dengan format YYYY-MM-DD.',
+          'thisMonth harus true atau false.',
+          'version harus berupa bilangan bulat, yaitu versi data saat dibaca.',
+          'properti contact.whatsapp tidak dikenal',
+          'contact.phone harus berupa teks.',
+          'contact.email harus berupa alamat email.',
+        ];
+        expect(indonesianAll(refusal.givenDetails!.violations as Sentence[])).toEqual(violations);
+        expect(indonesian(refusal.sentence)).toBe(violations.join('; '));
+      }
+      try {
+        checkLead({ ...ok, contact: '0812' });
+        throw new Error('should have refused');
+      } catch (err) {
+        expect(indonesian((err as DomainException).sentence)).toBe('contact harus berupa objek berisi phone dan email.');
+      }
+      try {
+        checkLead({ ...ok, contact: { phone: '0'.repeat(40) } });
+        throw new Error('should have refused');
+      } catch (err) {
+        expect(indonesian((err as DomainException).sentence)).toBe('contact.phone paling banyak 32 karakter.');
+      }
     });
   });
 

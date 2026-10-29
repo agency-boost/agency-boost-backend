@@ -1,9 +1,12 @@
 import {
-  CODE_MESSAGE, CODE_PATTERN, Fields, refuseWith, type Bounds,
+  CODE_PATTERN, Fields, refuseWith, type Bounds, type FieldSentence,
 } from '@/common/validation/fields';
 import {
-  ACTIVATION_FEATURE_LINKS, ACTIVATION_TRAINING_LINK_PREFIX, activationLinkKind, isActivationDataLink,
+  ACTIVATION_TRAINING_LINK_PREFIX, activationLinkKind, isActivationDataLink,
 } from '@/domain/constants';
+import { ACTIVATION_REFUSALS, type ChecklistPlace } from './activation.messages';
+
+const SAY = ACTIVATION_REFUSALS.VALIDATION_FAILED;
 
 /**
  * What a write to an office's activation checklist may contain (P5-T3, ADR-0030).
@@ -51,10 +54,10 @@ export function trainingLinkModuleCode(link: string | null): string | null {
     : null;
 }
 
-function checkLink(raw: unknown, where: string, violations: string[]): string | null {
+function checkLink(raw: unknown, where: ChecklistPlace, violations: FieldSentence[]): string | null {
   if (raw === undefined || raw === null || raw === '') return null;
   if (typeof raw !== 'string') {
-    violations.push(`${where}: autoLink must be text, or null for a manual item.`);
+    violations.push(SAY.autoLinkNotText({ where }));
     return null;
   }
 
@@ -64,7 +67,7 @@ function checkLink(raw: unknown, where: string, violations: string[]): string | 
     // Structural only. Whether the office has that module, published and active, is the
     // service's — it needs the database, and a template has no office to ask.
     if (!CODE_PATTERN.test(moduleCode)) {
-      violations.push(`${where}: a training link names a module code. ${CODE_MESSAGE}`);
+      violations.push(SAY.trainingLinkCode({ where }));
       return null;
     }
     return `${ACTIVATION_TRAINING_LINK_PREFIX}${moduleCode.toUpperCase()}`;
@@ -72,19 +75,12 @@ function checkLink(raw: unknown, where: string, violations: string[]): string | 
 
   // P18.96-T4: a data kind is bound by an item's code (`ACTIVATION_CODE_BOUND_LINKS`), never stored on one.
   if (isActivationDataLink(link)) {
-    violations.push(
-      `${where}: ${link} is not chosen for an item. It belongs to the item whose code it is bound to, `
-        + 'which reads it on its own.',
-    );
+    violations.push(SAY.dataLinkNotChosen({ where, link }));
     return null;
   }
 
   if (activationLinkKind(link) === undefined) {
-    violations.push(
-      `${where}: ${link} is not a link this product has. Use one of `
-        + `${ACTIVATION_FEATURE_LINKS.join(', ')}, ${ACTIVATION_TRAINING_LINK_PREFIX}<module code>, `
-        + 'or nothing at all for a manual item.',
-    );
+    violations.push(SAY.unknownLink({ where, link }));
     return null;
   }
   return link;
@@ -97,7 +93,7 @@ function checkLink(raw: unknown, where: string, violations: string[]): string | 
  * `displayOrder` is the position in the list the caller sent.
  */
 export function checkActivationChecklist(body: unknown): CheckedActivationChecklist {
-  const violations: string[] = [];
+  const violations: FieldSentence[] = [];
   const source = (body ?? {}) as Record<string, unknown>;
 
   const outer = new Fields(source, ['aspects']);
@@ -105,14 +101,13 @@ export function checkActivationChecklist(body: unknown): CheckedActivationCheckl
 
   const rawAspects = source.aspects;
   if (!Array.isArray(rawAspects)) {
-    refuseWith([...violations, 'aspects must be a list.']);
+    refuseWith([...violations, SAY.aspectsNotAList]);
   }
   if (rawAspects.length < ACTIVATION_BOUNDS.aspects.min
     || rawAspects.length > ACTIVATION_BOUNDS.aspects.max) {
-    violations.push(
-      `A checklist has ${ACTIVATION_BOUNDS.aspects.min}–${ACTIVATION_BOUNDS.aspects.max} aspects; `
-        + `this one has ${rawAspects.length}.`,
-    );
+    violations.push(SAY.aspectCount({
+      min: ACTIVATION_BOUNDS.aspects.min, max: ACTIVATION_BOUNDS.aspects.max, count: rawAspects.length,
+    }));
   }
 
   const aspectCodes = new Set<string>();
@@ -120,9 +115,9 @@ export function checkActivationChecklist(body: unknown): CheckedActivationCheckl
   const aspects: CheckedActivationAspect[] = [];
 
   rawAspects.forEach((raw, index) => {
-    const where = `Aspect ${index + 1}`;
+    const where: ChecklistPlace = { aspect: index + 1 };
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-      violations.push(`${where} must be an object of fields.`);
+      violations.push(SAY.notAnObject({ where }));
       return;
     }
 
@@ -130,31 +125,30 @@ export function checkActivationChecklist(body: unknown): CheckedActivationCheckl
     const f = new Fields(row, ['code', 'label', 'items']);
     const code = f.code('code', true);
     const label = f.text('label', ACTIVATION_BOUNDS.aspectLabel, true);
-    violations.push(...f.violations.map((v) => `${where}: ${v}`));
+    violations.push(...f.violations.map((inner) => SAY.at({ where, inner })));
 
     if (code !== undefined) {
-      if (aspectCodes.has(code)) violations.push(`The aspect code ${code} is used twice.`);
+      if (aspectCodes.has(code)) violations.push(SAY.aspectCodeTwice({ code }));
       aspectCodes.add(code);
     }
 
     const rawItems = row.items;
     if (!Array.isArray(rawItems)) {
-      violations.push(`${where}: items must be a list.`);
+      violations.push(SAY.itemsNotAList({ where }));
       return;
     }
     if (rawItems.length < ACTIVATION_BOUNDS.items.min
       || rawItems.length > ACTIVATION_BOUNDS.items.max) {
-      violations.push(
-        `${where} has ${rawItems.length} items; an aspect holds `
-          + `${ACTIVATION_BOUNDS.items.min}–${ACTIVATION_BOUNDS.items.max}.`,
-      );
+      violations.push(SAY.itemCount({
+        where, count: rawItems.length, min: ACTIVATION_BOUNDS.items.min, max: ACTIVATION_BOUNDS.items.max,
+      }));
     }
 
     const items: CheckedActivationItem[] = [];
     rawItems.forEach((rawItem, at) => {
-      const itemWhere = `${where}, item ${at + 1}`;
+      const itemWhere: ChecklistPlace = { aspect: index + 1, item: at + 1 };
       if (rawItem === null || typeof rawItem !== 'object' || Array.isArray(rawItem)) {
-        violations.push(`${itemWhere} must be an object of fields.`);
+        violations.push(SAY.notAnObject({ where: itemWhere }));
         return;
       }
 
@@ -162,12 +156,12 @@ export function checkActivationChecklist(body: unknown): CheckedActivationCheckl
       const g = new Fields(item, ['code', 'label', 'autoLink']);
       const itemCode = g.code('code', true);
       const itemLabel = g.text('label', ACTIVATION_BOUNDS.itemLabel, true);
-      violations.push(...g.violations.map((v) => `${itemWhere}: ${v}`));
+      violations.push(...g.violations.map((inner) => SAY.at({ where: itemWhere, inner })));
 
       const autoLink = checkLink(item.autoLink, itemWhere, violations);
 
       if (itemCode !== undefined) {
-        if (itemCodes.has(itemCode)) violations.push(`The item code ${itemCode} is used twice.`);
+        if (itemCodes.has(itemCode)) violations.push(SAY.itemCodeTwice({ code: itemCode }));
         itemCodes.add(itemCode);
       }
       if (itemCode === undefined || itemLabel === undefined) return;

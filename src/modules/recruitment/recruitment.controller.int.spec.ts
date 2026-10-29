@@ -15,6 +15,7 @@ import {
   productionPipe, session, StubAuth, SUPER_ADMIN,
 } from '../../../test/http-permissions';
 import { listenOnLoopback } from '../../../test/listen';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { defaultPlaybookBody } from './recruitment-playbook-defaults';
 import {
   RecruitmentController, RecruitmentPitchController, RecruitmentPlaybookController,
@@ -433,5 +434,58 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       answers.push(JSON.stringify([(await http().get(PLAN)).body, (await http().get('/recruitment/pitch-materials')).body]));
     }
     expect(new Set(answers).size).toBe(1);
+  });
+
+  /**
+   * **Recruitment's refusals in Bahasa Indonesia** (P18.98-T5 AC-7): a brief, the pitch's checklist and the playbook's
+   * save — the codes and the details as in English, a parameter and a field named as the API names them.
+   */
+  describe('P18.98-T5 AC-7 recruitment’s refusals in Indonesian', () => {
+    const plan = (query: string) => http().get(`/recruitment/attack-plan?${query}`).set(...IN_INDONESIAN).expect(400);
+
+    it('P18.98-T5 AC-7 a brief missing a parameter, naming a code twice, an unknown code and an unknown type', async () => {
+      expect((await plan('type=retiree')).body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'Brief memerlukan jenis kandidat, motivasi, dan keraguan; motivation dan hesitation belum diisi.',
+        details: { parameters: ['motivation', 'hesitation'] },
+      });
+      expect((await plan('type=retiree&motivation=leadership,leadership&hesitation=time')).body.error.message)
+        .toBe('motivation menyebut satu jawaban dua kali.');
+      expect((await plan('type=retiree&motivation=fame&hesitation=time')).body.error.message)
+        .toBe('motivation berisi kode yang bukan salah satu jawabannya, atau tidak berisi kode sama sekali.');
+      expect((await plan('type=astronaut&motivation=leadership&hesitation=time')).body.error).toMatchObject({
+        message: '"astronaut" bukan jenis kandidat.', details: { parameters: ['type'] },
+      });
+    });
+
+    it('P18.98-T5 AC-7 the pitch: a tick on a slot with no file, and an item a slot does not have', async () => {
+      session.current = OWNER;
+      const empty = await http().put(`${PITCH}/opportunity/confirmations/income`).set(...IN_INDONESIAN)
+        .send({ ticked: true, version: 1 }).expect(400);
+      expect(empty.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'Opportunity Overview belum memiliki file: unggah file dulu sebelum mengonfirmasi isinya.',
+        details: { field: 'slot', slot: 'opportunity' },
+      });
+      const { version } = await upload('agency');
+      const noItem = await http().put(`${PITCH}/agency/confirmations/income`).set(...IN_INDONESIAN)
+        .send({ ticked: true, version }).expect(400);
+      expect(noItem.body.error).toMatchObject({
+        message: 'Agency Profile tidak memiliki item "income" untuk dikonfirmasi.', details: { field: 'item', item: 'income' },
+      });
+    });
+
+    it('P18.98-T5 AC-7 a playbook that is not whole: each field’s sentence in Indonesian, the message naming them all', async () => {
+      session.current = SUPER_ADMIN;
+      const body = defaultPlaybookBody() as unknown as { nextAction: string };
+      body.nextAction = '';
+      const res = await http().put(`/admin/companies/${PRUDENTIAL}/recruitment-playbook`).set(...IN_INDONESIAN)
+        .send({ version: 1, body }).expect(400);
+      expect(res.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'Playbook ini tidak dapat disimpan: body.nextAction — Tidak boleh kosong.',
+        details: { violations: [{ field: 'body.nextAction', message: 'Tidak boleh kosong.' }] },
+      });
+    });
   });
 });

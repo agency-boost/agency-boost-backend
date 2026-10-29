@@ -1,4 +1,6 @@
+import type { Sentence } from '@/common/i18n/sentence';
 import { SEED_RATIO_DEFINITIONS } from './activity-taxonomy';
+import { RATIO_DISPLAY_REFUSALS } from './ratio-display.messages';
 
 /**
  * How a ratio's benchmark is written for a reader (P4-T25).
@@ -24,7 +26,7 @@ export type RatioDisplayUnit = (typeof RATIO_DISPLAY_UNITS)[number];
 
 export type DisplayUnitResolution =
   | { unit: RatioDisplayUnit; refusal?: undefined }
-  | { unit?: undefined; refusal: string };
+  | { unit?: undefined; refusal: Sentence<'CONFIG_RATIO_UNIT_MISMATCH'> };
 
 /**
  * The unit a ratio ends up with, or why it cannot have the one asked for.
@@ -41,7 +43,8 @@ export type DisplayUnitResolution =
  * that writes the stored value unchanged, so nothing is multiplied without being asked.
  *
  * Returns a refusal rather than throwing, because the callers refuse in different
- * vocabularies — a domain exception, a batch failure naming its op, a publish error.
+ * vocabularies — a domain exception, a batch failure naming its op, a publish error — in both languages
+ * (P18.98-T5 AC-2): a caller raising another code re-files it (`refiled`).
  */
 export function resolveDisplayUnit(
   comparison: 'gte' | 'band',
@@ -49,24 +52,18 @@ export function resolveDisplayUnit(
   current?: RatioDisplayUnit | null,
 ): DisplayUnitResolution {
   if (requested != null && !(RATIO_DISPLAY_UNITS as readonly string[]).includes(requested)) {
-    return { refusal: `${requested} is not a way to show a benchmark. Use percent, decimal or points.` };
+    return { refusal: RATIO_DISPLAY_REFUSALS.CONFIG_RATIO_UNIT_MISMATCH.unknownUnit({ requested }) };
   }
 
   if (comparison === 'band') {
     if (requested != null && requested !== 'points') {
-      return {
-        refusal: 'A balance ratio is judged in percentage points either side of an even split, '
-          + 'so its benchmark is shown in points.',
-      };
+      return { refusal: RATIO_DISPLAY_REFUSALS.CONFIG_RATIO_UNIT_MISMATCH.balanceIsPoints };
     }
     return { unit: 'points' };
   }
 
   if (requested === 'points') {
-    return {
-      refusal: 'Points are for the balance rule, which is judged either side of an even split. '
-        + 'A ratio judged at or above its benchmark is shown as a percentage or as a number.',
-    };
+    return { refusal: RATIO_DISPLAY_REFUSALS.CONFIG_RATIO_UNIT_MISMATCH.pointsAreForBalance };
   }
   return {
     unit: (requested as RatioDisplayUnit | undefined)

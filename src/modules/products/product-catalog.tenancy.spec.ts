@@ -6,6 +6,8 @@ import {
 } from '@/domain/constants';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
+import { english, indonesian } from '../../../test/i18n';
+import { readerIn } from '@/common/i18n/reader';
 import { configModule } from '../../../test/config-module';
 import { OFFICE_0417, prototypeRender, shelf0417 } from '../../../test/sales-tools';
 import { ProductCatalogService } from './product-catalog.service';
@@ -322,7 +324,11 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
         superAdmin(), PRUDENTIAL, ids.PRULINK_GENERASI_BARU_PGB, 'closed_to_new_business', ids.PRULINK_NEXTGEN,
       );
       const pgb = await service.product(agent(KPM_A), 'PRULINK_GENERASI_BARU_PGB');
-      expect(pgb.runOffNote).toBe(PRODUCT_RUN_OFF_NOTE);
+      expect(pgb.runOffNote).toBe(english(PRODUCT_RUN_OFF_NOTE));
+      // P18.98-T5 AC-4: written for the reader — an Indonesian one reads it in Indonesian.
+      const inIndonesian = await service.product(agent(KPM_A).withReader(readerIn('id')), 'PRULINK_GENERASI_BARU_PGB');
+      expect(inIndonesian.runOffNote).toBe(indonesian(PRODUCT_RUN_OFF_NOTE));
+      expect(inIndonesian.runOffNote).toMatch(/^Dalam masa run-off/);
       expect(pgb.script.fullScript).toBe('');
       expect(pgb.successorCode).toBe('PRULINK_NEXTGEN');
     });

@@ -4,9 +4,13 @@ import {
   IsEmail, IsEnum, IsIn, IsInt, IsMongoId, IsOptional, IsString, Matches, Max, MaxLength, Min,
   MinLength, ValidateIf,
 } from 'class-validator';
-import { AGENT_CODE_PATTERN, GENDERS, WORK_STATUSES, type Gender, type WorkStatus } from '@/domain/constants';
+import {
+  AGENT_CODE_PATTERN, GENDERS, LANGUAGES, WORK_STATUSES, type Gender, type Language, type WorkStatus,
+} from '@/domain/constants';
 import { preferredNameOf } from '@/modules/users/display-name';
+import { field } from '@/common/validation/violations';
 import { PasswordService } from './password.service';
+import { AUTH_REFUSALS } from './auth.messages';
 import { IMPERSONATION_PURPOSES, type ImpersonationPurpose } from './impersonation-session.schema';
 
 /**
@@ -15,6 +19,9 @@ import { IMPERSONATION_PURPOSES, type ImpersonationPurpose } from './impersonati
  * (`personal-data.ts`), so both refusals are named in one sentence each.
  */
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The DTOs' own sentences, in both languages (P18.98-T5 AC-3): `field` carries them to the pipe. */
+const SAY = AUTH_REFUSALS.VALIDATION_FAILED;
 const MONTH_SHAPE = /^\d{4}-\d{2}$/;
 
 export class RegisterDto {
@@ -55,7 +62,7 @@ export class RegisterDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @ValidateIf((o: RegisterDto) => !o.inviteToken)
   @IsString()
-  @Matches(AGENT_CODE_PATTERN, { message: 'agentCode must be digits only, 3 to 32 of them' })
+  @Matches(AGENT_CODE_PATTERN, { message: field(SAY.agentCodeShape) })
   agentCode!: string;
 
   /**
@@ -75,7 +82,7 @@ export class RegisterDto {
 
   @ApiProperty({ example: '1990-03-15', description: '`YYYY-MM-DD`. In the past, and at least 18 years ago.' })
   @IsString()
-  @Matches(DATE_SHAPE, { message: 'dateOfBirth must be a date, YYYY-MM-DD' })
+  @Matches(DATE_SHAPE, { message: field(SAY.dateOfBirthShape) })
   dateOfBirth!: string;
 
   @ApiProperty({
@@ -83,18 +90,18 @@ export class RegisterDto {
     description: '`YYYY-MM`: the month they joined the insurer chosen in `companyId` (*Joined Prudential*). Not in the future.',
   })
   @IsString()
-  @Matches(MONTH_SHAPE, { message: 'companyJoinMonth must be a month, YYYY-MM' })
+  @Matches(MONTH_SHAPE, { message: field(SAY.companyJoinMonthShape) })
   companyJoinMonth!: string;
 
   @ApiProperty({
     enum: WORK_STATUSES,
     description: 'Copied onto the membership they are given when an office takes them on (ADR-0158 §1).',
   })
-  @IsIn(WORK_STATUSES, { message: 'workStatus must be full_time or part_time' })
+  @IsIn(WORK_STATUSES, { message: field(SAY.workStatusShape) })
   workStatus!: WorkStatus;
 
   @ApiProperty({ enum: GENDERS })
-  @IsIn(GENDERS, { message: 'gender must be male or female' })
+  @IsIn(GENDERS, { message: field(SAY.genderShape) })
   gender!: Gender;
 }
 
@@ -188,13 +195,13 @@ export class UpdateProfileDto {
   @ApiPropertyOptional({ example: '1990-03-15', description: '`YYYY-MM-DD`. In the past, and at least 18 years ago.' })
   @ValidateIf((_, value) => value !== undefined)
   @IsString()
-  @Matches(DATE_SHAPE, { message: 'dateOfBirth must be a date, YYYY-MM-DD' })
+  @Matches(DATE_SHAPE, { message: field(SAY.dateOfBirthShape) })
   dateOfBirth?: string;
 
   @ApiPropertyOptional({ example: '2021-07', description: '`YYYY-MM`: the month you joined your insurer. Not in the future.' })
   @ValidateIf((_, value) => value !== undefined)
   @IsString()
-  @Matches(MONTH_SHAPE, { message: 'companyJoinMonth must be a month, YYYY-MM' })
+  @Matches(MONTH_SHAPE, { message: field(SAY.companyJoinMonthShape) })
   companyJoinMonth?: string;
 
   @ApiPropertyOptional({
@@ -202,13 +209,27 @@ export class UpdateProfileDto {
     description: 'Written on your membership in your office; on your account until you have one.',
   })
   @ValidateIf((_, value) => value !== undefined)
-  @IsIn(WORK_STATUSES, { message: 'workStatus must be full_time or part_time' })
+  @IsIn(WORK_STATUSES, { message: field(SAY.workStatusShape) })
   workStatus?: WorkStatus;
 
   @ApiPropertyOptional({ enum: GENDERS })
   @ValidateIf((_, value) => value !== undefined)
-  @IsIn(GENDERS, { message: 'gender must be male or female' })
+  @IsIn(GENDERS, { message: field(SAY.genderShape) })
   gender?: Gender;
+
+  /*
+   * **The language you read AgencyBoost in** (ADR-0179 §2; P18.98-T2 AC-1): the *ID | EN* switch and *Language* on
+   * *Your account* both send it, on its own. One of the two; **not clearable** — `null` is refused like any other value,
+   * because a person who has chosen once has chosen, and the default only stands for somebody who never has.
+   */
+  @ApiPropertyOptional({
+    enum: LANGUAGES,
+    description: 'The language you read AgencyBoost in: `id`, Bahasa Indonesia, or `en`, English. Saved on your account, '
+      + 'so it follows you to every device. Not clearable: anything else, `null` included, is `400 VALIDATION_FAILED`.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsIn(LANGUAGES, { message: field(SAY.localeShape) })
+  locale?: Language;
 }
 
 export class ImpersonateDto {

@@ -6,7 +6,7 @@ import {
   DomainException, NoMembershipException, NotFoundException, VersionConflictException,
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { formatDate } from '@/common/format/format';
+import type { Sentence } from '@/common/i18n/sentence';
 import { isLocalDate, type LocalDate } from '@/common/time/local-day';
 import { COACHING } from '@/domain/constants';
 import { ActivationEvents, signalActivation } from '@/modules/activation/activation-events.port';
@@ -32,6 +32,7 @@ import type {
   CoachingSessionDocument, CoachingSessionStatus, CoachingSnapshot, CoachingTip,
 } from './coaching-session.schema';
 import { CoachingSnapshotBuilder } from './coaching-snapshot';
+import { COACHING_REFUSALS } from './coaching.messages';
 import { knowsTheLeads, leadsReached, shownActionItems, shownLastWeekItems } from './lead-visibility';
 
 // Where every coaching reader found them before Phase 15 moved them to a module of their own.
@@ -477,7 +478,8 @@ export class CoachingSessionService {
 
     const day = await this.days.for(ctx);
     const leads = await this.leadsOf(ctx, session.coacheeMembershipId, day);
-    const leadActions = leadActionsOf(leads);
+    // Stored with the session: the lines a lead with no note reads are written for the leader finalizing (AC-6).
+    const leadActions = leadActionsOf(leads, ctx.reader);
     const refusal = finalizeRefusal({ leadActions, actionItems: session.actionItems, tips: session.tips, leads });
     if (refusal) {
       throw new DomainException(
@@ -546,7 +548,7 @@ export class CoachingSessionService {
     if (!can(ctx, 'coaching_session:create') || !can(ctx, 'coaching_session:finalize')) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'A 1:1 is logged by a leader who runs coaching sessions: an AB or an AAB.',
+        COACHING_REFUSALS.PERM_DENIED.logOneOnOne,
         HttpStatus.FORBIDDEN,
         { permission: 'coaching_session:create' },
       );
@@ -554,10 +556,10 @@ export class CoachingSessionService {
     const day = await this.days.for(ctx);
     const note = input.note.trim();
     if (!isLocalDate(input.date) || input.date > day.today) {
-      throw invalid('The day the 1:1 was held is a date, written YYYY-MM-DD, and no later than today.', { field: 'date' });
+      throw invalid(COACHING_REFUSALS.VALIDATION_FAILED.logDate, { field: 'date' });
     }
     if (note.length === 0 || note.length > SESSION_LIMITS.TEXT_MAX) {
-      throw invalid(`The note is 1 to ${SESSION_LIMITS.TEXT_MAX} characters once trimmed.`, { field: 'note' });
+      throw invalid(COACHING_REFUSALS.VALIDATION_FAILED.logNote({ max: SESSION_LIMITS.TEXT_MAX }), { field: 'note' });
     }
 
     const now = this.clock.now();
@@ -613,7 +615,7 @@ export class CoachingSessionService {
     if (session.status !== 'finalized') {
       throw new DomainException(
         ErrorCode.COACHING_SESSION_NOT_FINALIZED,
-        'Only a finalized session can be reopened.',
+        COACHING_REFUSALS.COACHING_SESSION_NOT_FINALIZED.reopenFinalizedOnly,
         HttpStatus.CONFLICT,
         { status: session.status },
       );
@@ -623,7 +625,9 @@ export class CoachingSessionService {
     if (!reopenWindowOpen(date, day.today)) {
       throw new DomainException(
         ErrorCode.COACHING_REOPEN_WINDOW_CLOSED,
-        `This session could be reopened until ${formatDate(reopenableUntil(date))}, ${COACHING.REOPEN_WINDOW_DAYS} days after it was held.`,
+        COACHING_REFUSALS.COACHING_REOPEN_WINDOW_CLOSED.windowEnded({
+          until: reopenableUntil(date), days: COACHING.REOPEN_WINDOW_DAYS,
+        }),
         HttpStatus.CONFLICT,
         { date, reopenableUntil: reopenableUntil(date), windowDays: COACHING.REOPEN_WINDOW_DAYS },
       );
@@ -631,7 +635,7 @@ export class CoachingSessionService {
     if (!standing.live && !(await this.coach.coaches(ctx, session.coachMembershipId, session.coacheeMembershipId))) {
       throw new DomainException(
         ErrorCode.COACHING_REOPEN_COACH_NOT_CURRENT,
-        'Only the session’s coach can finalize a correction, and they no longer coach this person.',
+        COACHING_REFUSALS.COACHING_REOPEN_COACH_NOT_CURRENT.coachMovedOn,
         HttpStatus.CONFLICT,
       );
     }
@@ -754,7 +758,7 @@ export class CoachingSessionService {
     let leadActions: CoachingLeadAction[] = [];
     if (leadsShown) {
       leadActions = open
-        ? leadActionsOf(leads ?? await this.leadsOf(ctx, session.coacheeMembershipId, day))
+        ? leadActionsOf(leads ?? await this.leadsOf(ctx, session.coacheeMembershipId, day), ctx.reader)
         : (shown ?? session).leadActions;
     }
     const finalizedAt = shown ? shown.finalizedAt : session.finalizedAt;
@@ -887,14 +891,14 @@ function newId(): string {
   return new Types.ObjectId().toHexString();
 }
 
-function invalid(message: string, details: Record<string, unknown>): DomainException {
+function invalid(message: Sentence<'VALIDATION_FAILED'>, details: Record<string, unknown>): DomainException {
   return new DomainException(ErrorCode.VALIDATION_FAILED, message, HttpStatus.BAD_REQUEST, details);
 }
 
 /** A date the body sent: `YYYY-MM-DD` that is a day, or `null`. `2026-02-31` is refused. */
 function checkDate(value: string | null, field: string): string | null {
   if (value === null) return null;
-  if (!isLocalDate(value)) throw invalid(`${value} is not a date. Dates are written YYYY-MM-DD.`, { field, value });
+  if (!isLocalDate(value)) throw invalid(COACHING_REFUSALS.VALIDATION_FAILED.notADate({ value }), { field, value });
   return value;
 }
 
@@ -905,7 +909,9 @@ function applyTicks(
   const byId = new Map(items.map((item) => [item.itemId, item]));
   for (const change of changes) {
     const item = byId.get(change.itemId);
-    if (!item) throw invalid('One of last week’s items is not on this session.', { field: 'lastWeekItems', itemId: change.itemId });
+    if (!item) {
+      throw invalid(COACHING_REFUSALS.VALIDATION_FAILED.lastWeekItemUnknown, { field: 'lastWeekItems', itemId: change.itemId });
+    }
     item.done = change.done;
     if (change.dueDate !== undefined) item.dueDate = checkDate(change.dueDate, 'lastWeekItems');
   }
@@ -928,7 +934,7 @@ function replaceRows<Row, Kept>(
     const id = sentId(row);
     if (id === undefined) return build(row, undefined);
     const prior = byId.get(id);
-    if (!prior || seen.has(id)) throw invalid(`An id in ${field} is not on this session, or is sent twice.`, { field, id });
+    if (!prior || seen.has(id)) throw invalid(COACHING_REFUSALS.VALIDATION_FAILED.rowIdUnknown({ field }), { field, id });
     seen.add(id);
     return build(row, prior);
   });

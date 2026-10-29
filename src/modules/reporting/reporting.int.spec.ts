@@ -355,6 +355,19 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
         });
       });
 
+      it('P18.98-T5 AC-7 refuses another month, and a month not written as one, in Indonesian', async () => {
+        as('OWNER');
+        expect((await put({ month: '2026-08', target: 3 }).set('Accept-Language', 'id').expect(400)).body.error).toMatchObject({
+          code: 'VALIDATION_FAILED', message: 'Target recruitment ditetapkan untuk Sep 2026, bulan berjalan KPM.',
+          details: { field: 'month', month: '2026-09' },
+        });
+        expect((await put({ month: 'September', target: 3 }).set('Accept-Language', 'id').expect(400)).body.error).toMatchObject({
+          code: 'VALIDATION_FAILED', details: { violations: ['month harus dengan format YYYY-MM'] },
+        });
+        expect((await put({ month: 'September', target: 3 }).expect(400)).body.error.details.violations)
+          .toEqual(['month must be YYYY-MM']);
+      });
+
       it.each(['AGUS', 'SARI', 'INDAH', 'LUKAS'] as const)(
         'P18.97-T3 AC-7 negative: %s holds no kpm_overview:set_recruit_target, is refused 403, and nothing is written',
         async (who) => {
@@ -652,6 +665,34 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       expect(agencies.find((a: { head: { isReader: boolean } }) => a.head.isReader).moc).not.toBeNull();
     });
 
+    it('P18.98-T5 AC-4 MOC in Indonesian: each criterion’s period, the path, the OR — the criteria by their names', async () => {
+      as('OWNER');
+      const english = (await http().get('/kpm/analytics').expect(200)).body;
+      const { agencies, mocRulesText } = (await http().get('/kpm/analytics').set('Accept-Language', 'id').expect(200)).body;
+      const agus = agencies.find((a: { head: { name: string } }) => a.head.name === 'Agus Salim');
+      expect(agus.moc.criteria.map((c: { label: string; period: string }) => [c.label, c.period])).toEqual([
+        ['Net APE', 'Jan – Sep 2026'],
+        ['Monthly2 AA — DU', 'Agu dan Sep 2026'],
+        ['Monthly2 AA — DG', 'Agu dan Sep 2026'],
+        ['Rolling Persistency — DU/DG', 'Sep 2026'],
+        ['— ATAU — Direct AB (AB on AB)', 'Per 14 Sep 2026'],
+      ]);
+      expect(agus.moc).toMatchObject({
+        status: 'not_met', missing: null, path: 'Perlu memenuhi ketiga kriteria standar sekaligus, atau mencapai 5 Direct ABs.',
+      });
+      const sari = agus.aabUnits.find((u: { head: { name: string } }) => u.head.name === 'Sari Puspita');
+      expect(sari.moc.path).toBe('Syarat AAB tidak memiliki jalur alternatif — ketiganya harus terpenuhi.');
+      expect(mocRulesText).toBe(
+        'AAB: Net APE ≥ Rp 200 jt DAN Monthly2 AA ≥ 2 DAN Rolling Persistency DU ≥ 75%.\n'
+        + 'AB: (Net APE ≥ Rp 600 jt DAN Monthly2 AA DU ≥ 4 / DG ≥ 6 DAN Rolling Persistency DU/DG ≥ 75%) ATAU Direct AB (AB on AB) ≥ 5.',
+      );
+      // English, as it always read; every figure the same in both.
+      const englishAgus = english.agencies.find((a: { head: { name: string } }) => a.head.name === 'Agus Salim');
+      expect(englishAgus.moc.path).toBe('Needs to clear either the three standard criteria together, or reach 5 Direct ABs.');
+      expect(englishAgus.moc.criteria.map((c: { current: number | null }) => c.current))
+        .toEqual(agus.moc.criteria.map((c: { current: number | null }) => c.current));
+    });
+
     it('P18-T2 AC-4 item 8 the MOC column’s tooltip is the company’s rules in the prototype’s words, the AAB’s first', async () => {
       as('OWNER');
       const { mocRulesText } = (await http().get('/kpm/analytics').expect(200)).body;
@@ -699,6 +740,11 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
         as(who);
         expect((await http().get('/admin/analytics').expect(403)).body.error.details).toEqual({ permission: 'platform_analytics:read' });
       }
+      // P18.98-T5 AC-7: the same refusal in Indonesian.
+      expect((await http().get('/admin/analytics').set('Accept-Language', 'id').expect(403)).body.error).toMatchObject({
+        code: 'PERM_DENIED', message: 'Anda tidak memiliki izin untuk melakukan tindakan ini.',
+        details: { permission: 'platform_analytics:read' },
+      });
       const owner = office.as('OWNER');
       for (const readOnly of [true, false]) {
         session.current = new RequestContext(owner.userId, 'none', owner.membership, 'u-support', null, false, readOnly);

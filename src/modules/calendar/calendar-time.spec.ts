@@ -1,4 +1,5 @@
 import { CALENDAR } from '@/domain/constants';
+import { englishAll, indonesianAll } from '../../../test/i18n';
 import {
   mondayOf, officeClockOf, officeDateOf, officeTimingOf, periodOf, startOfOfficeDay, timingOf, weekdayOf,
 } from './calendar-time';
@@ -129,7 +130,10 @@ describe('the calendar’s clock, in the office’s zone', () => {
 });
 
 describe('the rules an entry’s timing keeps (P12-T2 AC-5)', () => {
-  const refused = (result: ReturnType<typeof timingOf>) => ('violations' in result ? result.violations : []);
+  /** Each rule broken, as the API's English writes it (P18.98-T5: each is a sentence in both languages). */
+  const refused = (result: ReturnType<typeof timingOf>) => englishAll('violations' in result ? result.violations : []);
+  /** The same, in Indonesian. */
+  const refusedInIndonesian = (result: ReturnType<typeof timingOf>) => indonesianAll('violations' in result ? result.violations : []);
 
   it('P12-T2 AC-5 an end at or before its start is refused, naming the field', () => {
     expect(refused(timingOf('meeting', { date: '2026-09-28', start: '10:00', end: '10:00' }, JAKARTA)))
@@ -172,6 +176,26 @@ describe('the rules an entry’s timing keeps (P12-T2 AC-5)', () => {
     expect('timing' in timingOf('travel', { startsOn: '2026-10-01', endsOn: '2026-10-31' }, JAKARTA)).toBe(true);
     expect(refused(timingOf('travel', { startsOn: '2026-10-01', endsOn: '2026-11-01' }, JAKARTA)))
       .toEqual(['endsOn must be at most 31 days from startsOn, inclusive.']);
+  });
+
+  it('P18.98-T5 AC-3 says every rule in Indonesian, each field named as the API names it', () => {
+    expect(refusedInIndonesian(timingOf('client', {}, JAKARTA)))
+      .toEqual(['date wajib diisi.', 'start wajib diisi.', 'end wajib diisi.']);
+    expect(refusedInIndonesian(timingOf('meeting', {
+      date: '2026-09-28', start: '09:00', end: '10:00', startsOn: '2026-09-28',
+    }, JAKARTA))).toEqual(['startsOn bukan bagian dari entri dengan jam mulai dan selesai.']);
+    expect(refusedInIndonesian(timingOf('travel', { startsOn: '2026-10-01', endsOn: '2026-10-02', start: '09:00' }, JAKARTA)))
+      .toEqual(['start bukan bagian dari entri perjalanan.']);
+    expect(refusedInIndonesian(timingOf('task', { date: '2026-02-30', start: '24:00', end: '9:00' }, JAKARTA))).toEqual([
+      'date harus berupa tanggal, dengan format YYYY-MM-DD.', 'start harus berupa jam, dengan format HH:mm.',
+      'end harus berupa jam, dengan format HH:mm.',
+    ]);
+    expect(refusedInIndonesian(timingOf('meeting', { date: '2026-09-28', start: '10:00', end: '09:30' }, JAKARTA)))
+      .toEqual(['end harus setelah start pada tanggal yang sama.']);
+    expect(refusedInIndonesian(timingOf('travel', { startsOn: '2026-10-02', endsOn: '2026-10-01' }, JAKARTA)))
+      .toEqual(['endsOn harus sama dengan atau setelah startsOn.']);
+    expect(refusedInIndonesian(timingOf('travel', { startsOn: '2026-10-01', endsOn: '2026-11-01' }, JAKARTA)))
+      .toEqual(['endsOn paling lambat 31 hari dari startsOn, termasuk kedua tanggalnya.']);
   });
 
   it('sets a wall clock in a zone with a daylight-saving day as that wall clock, not as minutes after midnight', () => {

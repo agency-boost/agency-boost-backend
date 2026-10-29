@@ -18,7 +18,9 @@ import { ActivationEvents, signalActivation } from '@/modules/activation/activat
 import { SalesEvents, signalSales } from '@/modules/activation/sales-events.port';
 import { FIRST_SALE_STAGE_CODE } from '@/domain/constants';
 import { isLocalDate, type LocalDate } from '@/common/time/local-day';
+import type { FieldSentence } from '@/common/validation/fields';
 import { leadFlags, type LeadFlag } from './lead-attention';
+import { LEAD_REFUSALS } from './leads.messages';
 import { checkLead, type CheckedLead } from './lead-input';
 import { isInMemorySort, ladderRanks, leadOrder, SAVED_ORDER, type LeadSortKey } from './lead-order';
 import {
@@ -232,10 +234,9 @@ export class LeadService {
     if (writing && pinned === undefined && lead.ownerMembershipId !== ctx.membershipId) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Send the version you read this lead at. A change to somebody else’s lead has to say which '
-        + 'version it was written against.',
+        LEAD_REFUSALS.VALIDATION_FAILED.pinVersion,
         HttpStatus.BAD_REQUEST,
-        { violations: ['version is required when the lead is not yours'] },
+        { violations: [LEAD_REFUSALS.VALIDATION_FAILED.versionRequired] },
       );
     }
     /*
@@ -380,9 +381,9 @@ export class LeadService {
     if (!isLocalDate(input.date) || input.date > day.today) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'The day it was paid and issued is a date, written YYYY-MM-DD, and no later than today.',
+        LEAD_REFUSALS.VALIDATION_FAILED.paidAndIssuedDate,
         HttpStatus.BAD_REQUEST,
-        { violations: ['date must be a day no later than today'] },
+        { violations: [LEAD_REFUSALS.VALIDATION_FAILED.dateNotAfterToday] },
       );
     }
     const status = await this.publishedStage(ctx, FIRST_SALE_STAGE_CODE);
@@ -535,7 +536,7 @@ export class LeadService {
     if (lead.outcome) {
       throw new DomainException(
         ErrorCode.LEAD_ALREADY_CLOSED,
-        'This lead is closed. Reopen it before moving it again.',
+        LEAD_REFUSALS.LEAD_ALREADY_CLOSED.reopenToMove,
         HttpStatus.CONFLICT,
         { outcome: lead.outcome },
       );
@@ -545,9 +546,9 @@ export class LeadService {
       // a stage means nothing until we know which of the two vocabularies it belongs to.
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Choose whether this is a sales or a recruitment lead before setting a stage.',
+        LEAD_REFUSALS.VALIDATION_FAILED.typeFirst,
         HttpStatus.BAD_REQUEST,
-        { violations: ['type is required before a stage'] },
+        { violations: [LEAD_REFUSALS.VALIDATION_FAILED.typeRequired] },
       );
     }
 
@@ -567,7 +568,9 @@ export class LeadService {
     if (status.pipeline !== lead.type) {
       throw new DomainException(
         ErrorCode.LEAD_STATUS_WRONG_PIPELINE,
-        `${wanted} belongs to the ${status.pipeline} ladder; this is a ${lead.type} lead.`,
+        LEAD_REFUSALS.LEAD_STATUS_WRONG_PIPELINE.otherLadder({
+          code: wanted, pipeline: status.pipeline, type: lead.type,
+        }),
         HttpStatus.UNPROCESSABLE_ENTITY,
         { code: wanted, pipeline: status.pipeline, leadType: lead.type },
       );
@@ -615,7 +618,7 @@ export class LeadService {
     if (outcome && lead.outcome) {
       throw new DomainException(
         ErrorCode.LEAD_ALREADY_CLOSED,
-        `This lead is already ${lead.outcome}. Reopen it before closing it again.`,
+        LEAD_REFUSALS.LEAD_ALREADY_CLOSED.reopenToClose({ outcome: lead.outcome }),
         HttpStatus.CONFLICT,
         { outcome: lead.outcome },
       );
@@ -627,7 +630,7 @@ export class LeadService {
       if (!status?.isTerminal) {
         throw new DomainException(
           ErrorCode.LEAD_STATUS_NOT_FINAL,
-          'A lead is won at the stage that closes its pipeline. Move it there first.',
+          LEAD_REFUSALS.LEAD_STATUS_NOT_FINAL.moveFirst,
           HttpStatus.UNPROCESSABLE_ENTITY,
           { statusCode: lead.statusCode ?? null },
         );
@@ -675,7 +678,7 @@ export class LeadService {
   private retired(code: string): DomainException {
     return new DomainException(
       ErrorCode.CONFIG_ARCHIVED,
-      `${code} has been retired. Leads already on it keep it; new ones cannot be moved to it.`,
+      LEAD_REFUSALS.CONFIG_ARCHIVED.retiredStage({ code }),
       HttpStatus.UNPROCESSABLE_ENTITY,
       { code },
     );
@@ -724,20 +727,16 @@ export class LeadService {
     const mine = new Set(open.map((lead) => String(lead._id)));
     const sent = new Set(ids);
 
-    const violations: string[] = [];
+    // Field sentences, each in both languages, written for the reader in `details.violations` (P18.98-T5 AC-3).
+    const SAY = LEAD_REFUSALS.VALIDATION_FAILED;
+    const violations: FieldSentence[] = [];
     const strangers = ids.filter((id) => !mine.has(id)).length;
-    if (strangers > 0) violations.push(`${strangers} of the ids sent ${strangers === 1 ? 'is' : 'are'} not one of your open leads`);
-    if (sent.size !== ids.length) violations.push('ids names a lead more than once');
+    if (strangers > 0) violations.push(SAY.reorderStrangers({ count: strangers }));
+    if (sent.size !== ids.length) violations.push(SAY.reorderRepeat);
     const missing = [...mine].filter((id) => !sent.has(id)).length;
-    if (missing > 0) violations.push(`${missing} of your open leads ${missing === 1 ? 'is' : 'are'} missing from ids`);
+    if (missing > 0) violations.push(SAY.reorderMissing({ count: missing }));
     if (violations.length > 0) {
-      throw new DomainException(
-        ErrorCode.VALIDATION_FAILED,
-        'Send every one of your open leads, once each, in the order you want them. Your list may have '
-        + 'changed since you opened it: reload it and try again.',
-        HttpStatus.BAD_REQUEST,
-        { violations },
-      );
+      throw new DomainException(ErrorCode.VALIDATION_FAILED, SAY.reorderEveryLead, HttpStatus.BAD_REQUEST, { violations });
     }
 
     await this.leads.reposition(ctx, membershipId, ids);

@@ -10,6 +10,7 @@ import {
 import { FixedClock } from '@/common/clock/clock.port';
 import { SEED_RECRUITMENT_PLAYBOOK } from '@/domain/constants';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn } from '@/common/i18n/reader';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
@@ -839,6 +840,21 @@ describe('TenantService', () => {
         severity: 'structural',
         title: '1 office has no Owner',
       });
+    });
+
+    it('P18.98-T5 AC-4 writes the queue’s rows for the Super Admin reading them, in Indonesian for an Indonesian one', async () => {
+      const sa = ctx({ superAdmin: true });
+      await service.createKpm(sa, input());
+
+      const { attention } = await service.platformOverview(sa.withReader(readerIn('id')));
+      expect(attention).toEqual([{
+        tag: 'KPM Owner',
+        severity: 'structural',
+        title: '1 KPM belum memiliki Owner',
+        detail: 'Tidak ada yang dapat mengelola KPM sampai Owner ditetapkan, dan hanya platform yang dapat menetapkannya.',
+        href: '/admin/tenants',
+        actionLabel: 'Tinjau',
+      }]);
     });
 
     it('I-48: raises a pending KPM request, which is the only way to reach that screen', async () => {

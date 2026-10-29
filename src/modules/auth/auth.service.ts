@@ -8,6 +8,8 @@ import { DEFAULT_TENANT_TIMEZONE, type Gender, type WorkStatus } from '@/domain/
 import { birthDateProblem, joinMonthProblem } from '@/modules/users/personal-data';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import type { Reader } from '@/common/i18n/reader';
+import { joinSentences } from '@/common/i18n/sentence';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { INSURERS_ONLY } from '@/modules/tenants/template-library';
 import { NotificationService } from '@/modules/notifications/notification.service';
@@ -16,6 +18,7 @@ import { User, UserDocument } from '@/modules/users/user.schema';
 import { AuthToken, AuthTokenDocument } from './auth-token.schema';
 import { PasswordService } from './password.service';
 import { TokenSigner } from './token-signer';
+import { AUTH_REFUSALS } from './auth.messages';
 
 export interface TokenPair {
   accessToken: string;
@@ -74,8 +77,12 @@ export class AuthService {
 
   // ---------------------------------------------------------------- registration
 
-  async register(input: RegistrationInput): Promise<UserDocument> {
-    return (await this.registerAccount(input)).user;
+  /**
+   * `reader` is the request's (P18.98-T5 AC-5): the verification email is written in it for a person who has saved no
+   * language — a new account never has.
+   */
+  async register(input: RegistrationInput, reader?: Reader): Promise<UserDocument> {
+    return (await this.registerAccount(input, reader)).user;
   }
 
   /**
@@ -83,12 +90,12 @@ export class AuthService {
    * office only for an account made here and now: an address that already exists answers the same shape as ever —
    * confirming it would be the enumeration oracle `register` refuses to be — and must not join anybody to anything.
    */
-  async registerAccount(input: RegistrationInput): Promise<{ user: UserDocument; created: boolean }> {
+  async registerAccount(input: RegistrationInput, reader?: Reader): Promise<{ user: UserDocument; created: boolean }> {
     const problems = this.passwords.validate(input.password);
     if (problems.length) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        problems.join(' '),
+        joinSentences(problems),
         HttpStatus.BAD_REQUEST,
         { field: 'password', problems },
       );
@@ -134,8 +141,7 @@ export class AuthService {
     if (clash) {
       throw new DomainException(
         ErrorCode.AGENT_CODE_TAKEN,
-        `Agent code ${agentCode} is already registered at ${company.name}. ` +
-          'Check the code on your contract, or ask your office to sort it out.',
+        AUTH_REFUSALS.AGENT_CODE_TAKEN.registered({ agentCode, company: company.name }),
         HttpStatus.CONFLICT,
         { field: 'agentCode', agentCode },
       );
@@ -156,7 +162,7 @@ export class AuthService {
       platformRole: 'none',
     });
 
-    await this.issueVerification(user);
+    await this.issueVerification(user, reader);
     return { user, created: true };
   }
 
@@ -198,21 +204,21 @@ export class AuthService {
     if (!user || !ok) {
       throw new DomainException(
         ErrorCode.AUTH_INVALID_CREDENTIALS,
-        'That email or password is not correct.',
+        AUTH_REFUSALS.AUTH_INVALID_CREDENTIALS.wrongCredentials,
         HttpStatus.UNAUTHORIZED,
       );
     }
     if (user.status === 'deactivated') {
       throw new DomainException(
         ErrorCode.AUTH_ACCOUNT_DEACTIVATED,
-        'This account has been deactivated. Contact your KPM Owner.',
+        AUTH_REFUSALS.AUTH_ACCOUNT_DEACTIVATED.contactOwner,
         HttpStatus.FORBIDDEN,
       );
     }
     if (!user.emailVerifiedAt) {
       throw new DomainException(
         ErrorCode.AUTH_EMAIL_NOT_VERIFIED,
-        'Verify your email address before signing in. Check your inbox.',
+        AUTH_REFUSALS.AUTH_EMAIL_NOT_VERIFIED.verifyFirst,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -362,21 +368,21 @@ export class AuthService {
    * is an account-enumeration oracle, the same reason `forgot-password` answers `202`
    * either way.
    */
-  async resendVerification(email: string): Promise<void> {
+  async resendVerification(email: string, reader?: Reader): Promise<void> {
     const user = await this.users
       .findOne({ email: email.toLowerCase().trim(), deletedAt: null })
       .exec();
     if (!user || user.emailVerifiedAt) return;
 
-    const raw = await this.issueVerification(user);
-    await this.notifications.send({
-      userId: String(user._id),
-      templateId: NotificationTemplate.EMAIL_VERIFICATION,
-      payload: { token: raw, fullName: user.fullName },
-    });
+    // `issueVerification` sends it. It was sent a second time here, so every resend delivered two (P18.98-T5).
+    await this.issueVerification(user, reader);
   }
 
-  async issueVerification(user: UserDocument): Promise<string> {
+  /**
+   * A fresh verification link, emailed. **In the language of the request that asked for it** where the person has
+   * saved none (P18.98-T5 AC-5): `reader` is that request's, and their saved `users.locale` wins over it.
+   */
+  async issueVerification(user: UserDocument, reader?: Reader): Promise<string> {
     const raw = this.passwords.generateToken();
     await this.tokens.create({
       userId: String(user._id),
@@ -389,6 +395,7 @@ export class AuthService {
       userId: String(user._id),
       templateId: NotificationTemplate.EMAIL_VERIFICATION,
       payload: { token: raw, fullName: user.fullName },
+      reader,
     });
     return raw;
   }
@@ -409,7 +416,7 @@ export class AuthService {
    * Always resolves, whether or not the address exists. Anything else tells an
    * attacker which addresses have accounts.
    */
-  async forgotPassword(email: string): Promise<void> {
+  async forgotPassword(email: string, reader?: Reader): Promise<void> {
     const user = await this.users
       .findOne({ email: email.toLowerCase().trim(), deletedAt: null })
       .exec();
@@ -423,10 +430,12 @@ export class AuthService {
       expiresAt: new Date(this.clock.now().getTime() + RESET_TTL_MINUTES * 60_000),
     });
 
+    // In the language of the page that asked, for a person who has saved none (P18.98-T5 AC-5).
     await this.notifications.send({
       userId: String(user._id),
       templateId: NotificationTemplate.PASSWORD_RESET,
       payload: { token: raw, fullName: user.fullName },
+      reader,
     });
   }
 
@@ -435,7 +444,7 @@ export class AuthService {
     if (problems.length) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        problems.join(' '),
+        joinSentences(problems),
         HttpStatus.BAD_REQUEST,
         { field: 'password', problems },
       );
@@ -468,7 +477,7 @@ export class AuthService {
     if (!user || !(await this.passwords.verify(user.passwordHash, current))) {
       throw new DomainException(
         ErrorCode.AUTH_INVALID_CREDENTIALS,
-        'Your current password is not correct.',
+        AUTH_REFUSALS.AUTH_INVALID_CREDENTIALS.wrongCurrentPassword,
         HttpStatus.UNAUTHORIZED,
       );
     }
@@ -477,7 +486,7 @@ export class AuthService {
     if (problems.length) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        problems.join(' '),
+        joinSentences(problems),
         HttpStatus.BAD_REQUEST,
         { field: 'password', problems },
       );
@@ -488,7 +497,7 @@ export class AuthService {
       // let them through on the credential the admin still has a copy of.
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Choose a different password from the one you are using now.',
+        AUTH_REFUSALS.VALIDATION_FAILED.samePassword,
         HttpStatus.BAD_REQUEST,
         { field: 'password' },
       );
@@ -543,7 +552,9 @@ export class AuthService {
 
     const invalid = new DomainException(
       kind === 'password_reset' ? ErrorCode.AUTH_RESET_TOKEN_INVALID : ErrorCode.AUTH_TOKEN_INVALID,
-      'That link is no longer valid. Request a new one.',
+      kind === 'password_reset'
+        ? AUTH_REFUSALS.AUTH_RESET_TOKEN_INVALID.linkInvalid
+        : AUTH_REFUSALS.AUTH_TOKEN_INVALID.linkInvalid,
       HttpStatus.BAD_REQUEST,
     );
 
@@ -563,7 +574,7 @@ export class AuthService {
 function sessionEnded(): DomainException {
   return new DomainException(
     ErrorCode.AUTH_SESSION_ENDED,
-    'Your session ended. Sign in again.',
+    AUTH_REFUSALS.AUTH_SESSION_ENDED.ended,
     HttpStatus.UNAUTHORIZED,
   );
 }

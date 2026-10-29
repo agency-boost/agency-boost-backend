@@ -4,8 +4,10 @@ import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
+import { field } from '@/common/validation/violations';
 import { SummaryDto } from './summary.response.dto';
 import { SummaryService } from './summary.service';
+import { SUMMARY_REFUSALS } from './summary.messages';
 
 /**
  * **`for`** (P11-T4): whose Summary; **`month` or `year`** (P18.8-T11, ADR-0161 §4): which period. The validation
@@ -31,7 +33,8 @@ export class SummaryQueryDto {
       + 'office’s first month to this one; the future, or a month before the office, is `400`. Omitted, it is '
       + 'this month. Not with `year`.',
   })
-  @IsOptional() @IsString() @Matches(/^\d{4}-(0[1-9]|1[0-2])$/, { message: 'month must be a month, YYYY-MM' })
+  @IsOptional() @IsString()
+  @Matches(/^\d{4}-(0[1-9]|1[0-2])$/, { message: field(SUMMARY_REFUSALS.VALIDATION_FAILED.monthShape) })
   month?: string;
 
   @ApiPropertyOptional({
@@ -42,7 +45,7 @@ export class SummaryQueryDto {
       + 'this year, this month. From the office’s first year to this one; the future, or a year before the '
       + 'office, is `400`. Not with `month`.',
   })
-  @IsOptional() @IsString() @Matches(/^\d{4}$/, { message: 'year must be a year, YYYY' })
+  @IsOptional() @IsString() @Matches(/^\d{4}$/, { message: field(SUMMARY_REFUSALS.VALIDATION_FAILED.yearShape) })
   year?: string;
 }
 

@@ -6,6 +6,11 @@ import {
   MaxLength, Min, MinLength, ValidateIf, ValidateNested,
 } from 'class-validator';
 import { DEFAULT_TENANT_TIMEZONE, LEADER_TIERS, SUBSCRIPTION, type LeaderTier } from '@/domain/constants';
+import { field } from '@/common/validation/violations';
+import { TENANTS_REFUSALS } from './tenants.messages';
+
+/** The DTOs' own sentences, in both languages (P18.98-T5 AC-3): `field` carries them to the pipe. */
+const SAY = TENANTS_REFUSALS.VALIDATION_FAILED;
 
 /**
  * A rung's leader tier on the wire (ADR-0156): `senior`, `associate`, or `null` for *Not a leader*.
@@ -44,9 +49,7 @@ export class CreateCompanyDto {
   })
   @IsString()
   @MaxLength(64)
-  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
-    message: 'slug must be lower-case letters and digits, separated by single hyphens',
-  })
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, { message: field(SAY.slugShape) })
   slug!: string;
 
   /**
@@ -91,9 +94,7 @@ export class UpdateCompanyDto {
   @IsOptional()
   @IsString()
   @MaxLength(64)
-  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
-    message: 'slug must be lower-case letters and digits, separated by single hyphens',
-  })
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, { message: field(SAY.slugShape) })
   slug?: string;
 }
 
@@ -122,9 +123,7 @@ export class CreateOrgLevelDto {
     pattern: '^[A-Z][A-Z0-9_]{1,31}$',
   })
   @IsString()
-  @Matches(/^[A-Za-z][A-Za-z0-9_]{1,31}$/, {
-    message: 'code must be letters, digits and underscores, starting with a letter',
-  })
+  @Matches(/^[A-Za-z][A-Za-z0-9_]{1,31}$/, { message: field(SAY.rungCodeShape) })
   code!: string;
 
   @ApiProperty({ example: 'Associate Agency Business', minLength: 1, maxLength: 60 })
@@ -224,9 +223,7 @@ export class CreateKpmDto {
       'and the office inherits the same value from its company (ADR-0016).',
   })
   @IsOptional()
-  @IsIn([DEFAULT_TENANT_TIMEZONE], {
-    message: `timezone must be ${DEFAULT_TENANT_TIMEZONE} — v1 runs on a single time zone`,
-  })
+  @IsIn([DEFAULT_TENANT_TIMEZONE], { message: field(SAY.timezoneOnly({ zone: DEFAULT_TENANT_TIMEZONE })) })
   timezone?: string;
 
   /**
@@ -297,7 +294,7 @@ export class UpdateSubscriptionDto {
   })
   @ValidateIf((o: UpdateSubscriptionDto) => o.startDate !== null)
   @IsString()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'startDate must be a date written YYYY-MM-DD' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: field(SAY.startDateShape) })
   startDate!: string | null;
 
   @ApiProperty({
@@ -308,7 +305,7 @@ export class UpdateSubscriptionDto {
   })
   @ValidateIf((o: UpdateSubscriptionDto) => o.endDate !== null)
   @IsString()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'endDate must be a date written YYYY-MM-DD' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: field(SAY.endDateShape) })
   endDate!: string | null;
 
   @ApiProperty({
@@ -367,7 +364,7 @@ export class AuditQueryDto {
 export class ApproveKpmRequestDto {
   @ApiProperty({ example: '0629', description: 'Unique within the company.' })
   @IsString()
-  @Matches(/^\d{4}$/, { message: 'code must be four digits' })
+  @Matches(/^\d{4}$/, { message: field(SAY.kpmCodeShape) })
   code!: string;
 }
 

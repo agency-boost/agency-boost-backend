@@ -1,6 +1,10 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import type { Sentence } from '@/common/i18n/sentence';
+import { PRODUCTION_REFUSALS } from './production.messages';
+
+const SAY = PRODUCTION_REFUSALS.UPLOAD_MALFORMED_CSV;
 
 /**
  * Bytes to records, for a file that may have been through a spreadsheet (P9-T3, ADR-0052).
@@ -19,7 +23,7 @@ export interface CsvRecord {
   cells: string[];
 }
 
-const malformed = (message: string, details?: Record<string, unknown>) =>
+const malformed = (message: Sentence<'UPLOAD_MALFORMED_CSV'>, details?: Record<string, unknown>) =>
   new DomainException(ErrorCode.UPLOAD_MALFORMED_CSV, message, HttpStatus.UNPROCESSABLE_ENTITY, details);
 
 /** `PK\x03\x04` — every `.xlsx` is a zip. */
@@ -41,13 +45,9 @@ const startsWith = (bytes: Uint8Array, prefix: number[]) => prefix.every((b, i) 
  * in it, which no text file has.
  */
 export function decodeUpload(bytes: Uint8Array): { text: string; encoding: UploadEncoding } {
-  if (bytes.length === 0) throw malformed('The file is empty.');
-  if (startsWith(bytes, ZIP_MAGIC)) {
-    throw malformed(
-      'This is a spreadsheet workbook, not a CSV file. In the spreadsheet, save it as CSV and upload that.',
-    );
-  }
-  if (bytes.includes(0)) throw malformed('This is not a text file. Upload the filled template as a CSV file.');
+  if (bytes.length === 0) throw malformed(SAY.empty);
+  if (startsWith(bytes, ZIP_MAGIC)) throw malformed(SAY.workbook);
+  if (bytes.includes(0)) throw malformed(SAY.notText);
 
   const body = startsWith(bytes, UTF8_BOM) ? bytes.subarray(UTF8_BOM.length) : bytes;
   try {
@@ -145,12 +145,7 @@ export function parseCsv(text: string, delimiter: UploadDelimiter): CsvRecord[] 
     } else field += c;
   }
 
-  if (quoted) {
-    throw malformed(
-      `A quote opened on line ${quoteOpenedOn} is never closed, so the rest of the file cannot be read.`,
-      { line: quoteOpenedOn },
-    );
-  }
+  if (quoted) throw malformed(SAY.unclosedQuote({ line: quoteOpenedOn }), { line: quoteOpenedOn });
   // The last record, unless the file ended on a line break.
   if (field !== '' || cells.length > 0) endRecord();
   return records;

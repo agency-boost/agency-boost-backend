@@ -201,6 +201,32 @@ describe('the calendar over HTTP (P12-T2, P12-T3)', () => {
       // At the limit is fine.
       await h.http().post('/calendar/entries').send(timed(1, '09:00', '10:00', { title: 'x'.repeat(120), notes: 'y'.repeat(1000) })).expect(201);
     });
+
+    it('P18.98-T5 AC-7 refuses an entry’s timing field by field in Indonesian, each field named as the API names it', async () => {
+      h.as('AGUS');
+      const res = await h.http().post('/calendar/entries').set('Accept-Language', 'id')
+        .send({ type: 'task', start: '09:00', end: '10:00', endsOn: '2026-09-16' }).expect(400);
+      const violations = ['endsOn bukan bagian dari entri dengan jam mulai dan selesai.', 'date wajib diisi.'];
+      expect(res.body.error).toEqual({
+        code: 'VALIDATION_FAILED', message: violations.join('; '), details: { violations }, requestId: expect.any(String),
+      });
+      expect(await h.col('calendarEvents').countDocuments()).toBe(0);
+    });
+
+    it('P18.98-T5 AC-7 the DTO’s own sentences name their field in Indonesian too, and in English as before', async () => {
+      h.as('AGUS');
+      const body = timed(1, '24:00', '10:00', { date: '2026/09/16' });
+      const res = await h.http().post('/calendar/entries').set('Accept-Language', 'id').send(body).expect(400);
+      expect(res.body.error.details.violations).toEqual([
+        'date harus berupa tanggal, dengan format YYYY-MM-DD.',
+        'start harus berupa jam, dengan format HH:mm, dari 00:00 sampai 23:59.',
+      ]);
+      const english = await h.http().post('/calendar/entries').send(body).expect(400);
+      expect(english.body.error.details.violations).toEqual([
+        'date must be a day, written YYYY-MM-DD.',
+        'start must be a time, written HH:mm, 00:00 to 23:59.',
+      ]);
+    });
   });
 
   // ------------------------------------------------------------------ reading one, editing, deleting
@@ -395,6 +421,21 @@ describe('the calendar over HTTP (P12-T2, P12-T3)', () => {
       expect((await h.col('calendarEvents').findOne({}))!.attendees).toEqual([
         expect.objectContaining({ membershipId: h.id('AGUS'), placed: false, answer: 'declined' }),
       ]);
+    });
+
+    it('P18.98-T5 AC-7 tells the member a block was placed on, in Indonesian, that there is nothing to answer', async () => {
+      h.as('OWNER');
+      const placed = (await h.http().post('/calendar/blocks')
+        .send({ ...timed(2, '11:00', '11:30', { type: 'coaching', title: '1:1 with Agus Salim' }), membershipId: h.id('AGUS') })
+        .expect(201)).body;
+      h.as('AGUS');
+      const res = await h.http().post(`/calendar/entries/${placed.entryId}/answer`).set('Accept-Language', 'id')
+        .send({ answer: 'accepted' }).expect(409);
+      expect(res.body.error).toMatchObject({
+        code: 'CALENDAR_BLOCK_NOT_ANSWERABLE',
+        message: 'Waktu ini diblok di kalender Anda oleh leader di atas Anda. Tidak ada yang perlu diterima atau ditolak.',
+        details: { entryId: placed.entryId },
+      });
     });
 
     it('calendar_block_is_not_answered P12-T2 AC-15 an AB a block is placed on is answered 409: the Owner, the AB above Agus, blocks his time', async () => {

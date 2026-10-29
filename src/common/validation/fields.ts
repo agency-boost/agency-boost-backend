@@ -1,6 +1,9 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { joinSentences, type Sentence } from '@/common/i18n/sentence';
+import { VALIDATION_REFUSALS } from './validation.messages';
+import { field } from './violations';
 
 /**
  * Reading one request body by field — shared by every module's input checkers (ADR-0030).
@@ -12,8 +15,15 @@ import { ErrorCode } from '@/common/errors/error-codes';
 
 /** How a code may be typed. Case is forgiven; the code saved is upper case. */
 export const CODE_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,39}$/;
-export const CODE_MESSAGE =
-  'A code is 3–40 characters of A–Z, 0–9 and underscore, starting with a letter.';
+/** What a code's refusal says (P18.98-T5 AC-3): a service's sentence, in both languages. */
+export const CODE_SENTENCE = VALIDATION_REFUSALS.VALIDATION_FAILED.codeShape;
+/** The same, as a DTO's `@Matches` takes it (`field`). */
+export const CODE_MESSAGE = field(CODE_SENTENCE);
+
+/** A field's sentence, as a service's checker writes it: one of its module's, under `VALIDATION_FAILED`. */
+export type FieldSentence = Sentence<'VALIDATION_FAILED'>;
+
+const SAY = VALIDATION_REFUSALS.VALIDATION_FAILED;
 
 export type Bounds = { readonly min: number; readonly max: number };
 
@@ -22,18 +32,18 @@ export type Bounds = { readonly min: number; readonly max: number };
  * with three mistakes hears about three, the way the pipe reports them.
  */
 export class Fields {
-  readonly violations: string[] = [];
+  readonly violations: FieldSentence[] = [];
   private readonly body: Record<string, unknown>;
 
   constructor(raw: unknown, allowed: readonly string[]) {
     const isObject = raw !== null && typeof raw === 'object' && !Array.isArray(raw);
     this.body = isObject ? (raw as Record<string, unknown>) : {};
-    if (!isObject) this.violations.push('The change must be an object of fields.');
+    if (!isObject) this.violations.push(SAY.notAnObject);
     // The pipe's `forbidNonWhitelisted`, for the path the pipe never sees: a misspelt field
     // quietly ignored is the hardest kind of bug to find.
     for (const key of Object.keys(this.body)) {
       if (!allowed.includes(key) && this.body[key] !== undefined) {
-        this.violations.push(`property ${key} should not exist`);
+        this.violations.push(SAY.unknownField({ key }));
       }
     }
   }
@@ -42,16 +52,16 @@ export class Fields {
   text(field: string, bounds: Bounds, required: boolean): string | undefined {
     const value = this.body[field];
     if (value === undefined) {
-      if (required) this.violations.push(`${field} is required.`);
+      if (required) this.violations.push(SAY.required({ field }));
       return undefined;
     }
     if (typeof value !== 'string') {
-      this.violations.push(`${field} must be text.`);
+      this.violations.push(SAY.notText({ field }));
       return undefined;
     }
     const trimmed = value.trim();
     if (trimmed.length < bounds.min || trimmed.length > bounds.max) {
-      this.violations.push(`${field} must be ${bounds.min}–${bounds.max} characters.`);
+      this.violations.push(SAY.textBetween({ field, min: bounds.min, max: bounds.max }));
     }
     return trimmed;
   }
@@ -65,12 +75,12 @@ export class Fields {
     if (value === undefined) return undefined;
     if (value === null) return null;
     if (typeof value !== 'string') {
-      this.violations.push(`${field} must be text.`);
+      this.violations.push(SAY.notText({ field }));
       return undefined;
     }
     const trimmed = value.trim();
     if (trimmed.length > bounds.max) {
-      this.violations.push(`${field} must be at most ${bounds.max} characters.`);
+      this.violations.push(SAY.textAtMost({ field, max: bounds.max }));
     }
     return trimmed || null;
   }
@@ -79,11 +89,11 @@ export class Fields {
   code(field: string, required: boolean): string | undefined {
     const value = this.body[field];
     if (value === undefined) {
-      if (required) this.violations.push(`${field} is required.`);
+      if (required) this.violations.push(SAY.required({ field }));
       return undefined;
     }
     if (typeof value !== 'string' || !CODE_PATTERN.test(value.trim())) {
-      this.violations.push(`${field}: ${CODE_MESSAGE}`);
+      this.violations.push(SAY.fieldCodeShape({ field }));
       return undefined;
     }
     return value.trim().toUpperCase();
@@ -97,16 +107,15 @@ export class Fields {
     field: string,
     bounds: Bounds,
     required: boolean,
-    outOfBounds: (count: number) => string = () =>
-      `${field} must name ${bounds.min}–${bounds.max} codes.`,
+    outOfBounds: (count: number) => FieldSentence = () => SAY.codesBetween({ field, min: bounds.min, max: bounds.max }),
   ): string[] | undefined {
     const value = this.body[field];
     if (value === undefined) {
-      if (required) this.violations.push(`${field} is required.`);
+      if (required) this.violations.push(SAY.required({ field }));
       return undefined;
     }
     if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
-      this.violations.push(`${field} must be a list of codes.`);
+      this.violations.push(SAY.notCodes({ field }));
       return undefined;
     }
     if (value.length < bounds.min || value.length > bounds.max) {
@@ -118,14 +127,14 @@ export class Fields {
   number(field: string, bounds: Bounds, required: boolean): number | undefined {
     const value = this.body[field];
     if (value === undefined) {
-      if (required) this.violations.push(`${field} is required.`);
+      if (required) this.violations.push(SAY.required({ field }));
       return undefined;
     }
     if (
       typeof value !== 'number' || !Number.isFinite(value)
       || value < bounds.min || value > bounds.max
     ) {
-      this.violations.push(`${field} must be a number from ${bounds.min} to ${bounds.max}.`);
+      this.violations.push(SAY.numberBetween({ field, min: bounds.min, max: bounds.max }));
       return undefined;
     }
     return value;
@@ -134,11 +143,11 @@ export class Fields {
   oneOf<T extends string>(field: string, values: readonly T[], required: boolean): T | undefined {
     const value = this.body[field];
     if (value === undefined) {
-      if (required) this.violations.push(`${field} is required.`);
+      if (required) this.violations.push(SAY.required({ field }));
       return undefined;
     }
     if (typeof value !== 'string' || !values.includes(value as T)) {
-      this.violations.push(`${field} must be one of ${values.join(', ')}.`);
+      this.violations.push(SAY.oneOf({ field, values }));
       return undefined;
     }
     return value as T;
@@ -155,7 +164,7 @@ export class Fields {
     if (this.violations.length > 0) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        this.violations.join('; '),
+        joinSentences(this.violations, '; '),
         HttpStatus.BAD_REQUEST,
         { violations: [...this.violations] },
       );
@@ -173,10 +182,10 @@ export class Fields {
  * The same shape `Fields.done` throws, so a client still cannot tell which layer refused, and a form
  * with three mistakes still hears about three.
  */
-export function refuseWith(violations: readonly string[]): never {
+export function refuseWith(violations: readonly FieldSentence[]): never {
   throw new DomainException(
     ErrorCode.VALIDATION_FAILED,
-    violations.join('; '),
+    joinSentences(violations, '; '),
     HttpStatus.BAD_REQUEST,
     { violations: [...violations] },
   );

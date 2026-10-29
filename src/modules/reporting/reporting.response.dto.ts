@@ -258,10 +258,19 @@ class AnalyticsFiguresDto implements Figures {
 
   @ApiProperty({
     type: Number, nullable: true, example: 68,
-    description: '*Producing this month*’s share: `activeAgents` over `manpower.total`, a whole percent rounded half up in '
-      + 'integers (`rateOver`); `null` while the month is not uploaded, or over nobody.',
+    description: '*Producing this month*’s share: `activeAgents` over the members it counts from — `manpower.total` for '
+      + '`this_month`, the month’s members on its last day for `previous_month` (OD-235), so never above 100 — a whole '
+      + 'percent rounded half up in integers (`rateOver`); `null` while the month is not uploaded, or over nobody.',
   })
   activePct!: number | null;
+
+  @ApiProperty({
+    example: 31,
+    description: 'The members `activePct` is over (OD-235): `manpower.total` for `this_month`, the month’s members on its '
+      + 'last day for `previous_month`, a leaver since included — so the cell writes its count over the same members as '
+      + 'its percent. Served whether or not the month is uploaded.',
+  })
+  activeOf!: number;
 
   @ApiProperty({ type: AnalyticsLeadsDto, description: 'As they stood at the period’s end, over the members it had then.' })
   leads!: Figures['leads'];

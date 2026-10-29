@@ -1,7 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { baseSchemaOptions } from '@/common/schema/base.schema';
-import { GENDERS, WORK_STATUSES, type Gender, type WorkStatus } from '@/domain/constants';
+import {
+  GENDERS, LANGUAGES, WORK_STATUSES, type Gender, type Language, type WorkStatus,
+} from '@/domain/constants';
 
 export type UserDocument = HydratedDocument<User>;
 
@@ -102,8 +104,16 @@ export class User {
   @Prop({ type: String, default: null })
   avatarUrl!: string | null;
 
-  @Prop({ type: String, default: null })
-  locale!: string | null;
+  /**
+   * **The language this person chose to read AgencyBoost in** (ADR-0179 §2; P18.98-T2): `'id'` or `'en'`, set by the
+   * *ID | EN* switch and by *Language* on *Your account*, through `PATCH /auth/me`. It follows them to every device.
+   *
+   * **`null` is a person who has chosen nothing, and reads Bahasa Indonesia** (`languageOf`, `DEFAULT_LANGUAGE`).
+   * Every account made before the switch holds `null` — nothing wrote the field until then (ADR-0016) — so there is no
+   * migration. The reader's language, never the office's: `kpms.locale` stays `id-ID`.
+   */
+  @Prop({ type: String, enum: [...LANGUAGES, null], default: null })
+  locale!: Language | null;
 
   @Prop({ type: String, default: null })
   timezone!: string | null;

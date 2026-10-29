@@ -2,11 +2,12 @@ import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { formatMonth } from '@/common/format/format';
+import type { Sentence } from '@/common/i18n/sentence';
 import { rollingWindow, type LocalDate } from '@/common/time/local-day';
 import {
-  MDRT_CAMPAIGN_CODE, PERIOD, UNIT_DASHBOARD, UNIT_DASHBOARD_CORRECTION_REASON, type UnitDashboardPeriod,
+  MDRT_CAMPAIGN_CODE, PERIOD, UNIT_DASHBOARD, type UnitDashboardPeriod,
 } from '@/domain/constants';
+import { UNIT_DASHBOARD_MESSAGES } from '@/domain/constants/unit-dashboard.messages';
 import { oneOnOneOverdue } from '@/domain/metrics/coaching-recency';
 import { newHireBeforeFirstSale, type ProductionStanding } from '@/domain/metrics/counts-for-production';
 import type { GoalPaceStatus } from '@/domain/metrics/goal-pace-status';
@@ -37,6 +38,7 @@ import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { defaultBinding } from '@/modules/config/activity-binding';
 import { ActivityBindingService } from '@/modules/config/activity-binding.service';
 import { TenantDay, type Office } from '@/modules/tenants/tenant-day.service';
+import { UNIT_DASHBOARD_REFUSALS } from './unit-dashboard.messages';
 
 /** A member, by the membership that identifies them (invariant §2). */
 export interface UnitPerson {
@@ -467,17 +469,19 @@ export class UnitDashboardService {
     const me = requireMembership(ctx);
     const office = await this.days.office(ctx);
     if (body.month !== office.month) {
-      throw invalid(`Production can only be updated here for ${formatMonth(office.month)}, the agency's current month.`, {
+      throw invalid(UNIT_DASHBOARD_REFUSALS.VALIDATION_FAILED.currentMonthOnly({ month: office.month }), {
         field: 'month', month: office.month,
       });
     }
     const seen = new Set<string>();
     body.rows.forEach((row, index) => {
       if (row.apeMonthlyMinor === undefined && row.apeYtdMinor === undefined) {
-        throw invalid('Each row needs this month’s figure, the year’s, or both.', { field: `rows[${index}]` });
+        throw invalid(UNIT_DASHBOARD_REFUSALS.VALIDATION_FAILED.rowNeedsFigure, { field: `rows[${index}]` });
       }
       if (seen.has(row.membershipId)) {
-        throw invalid('Each person appears once in a save.', { field: `rows[${index}].membershipId`, membershipId: row.membershipId });
+        throw invalid(UNIT_DASHBOARD_REFUSALS.VALIDATION_FAILED.personOnce, {
+          field: `rows[${index}].membershipId`, membershipId: row.membershipId,
+        });
       }
       seen.add(row.membershipId);
     });
@@ -495,7 +499,8 @@ export class UnitDashboardService {
       month: body.month,
       revision: body.revision,
       rows: body.rows,
-      reason: UNIT_DASHBOARD_CORRECTION_REASON,
+      // AC-6 (P18.98-T5): the API's own reason, stored in the saving leader's language and shown as stored.
+      reason: UNIT_DASHBOARD_MESSAGES.correctionReason,
       surface: 'unit_dashboard',
     });
   }
@@ -644,6 +649,7 @@ function requireMembership(ctx: RequestContext): string {
   return me;
 }
 
-function invalid(message: string, details: Record<string, unknown>): DomainException {
+/** `400 VALIDATION_FAILED` with the field it names, its sentence in both languages (P18.98-T5 AC-2). */
+function invalid(message: Sentence<'VALIDATION_FAILED'>, details: Record<string, unknown>): DomainException {
   return new DomainException(ErrorCode.VALIDATION_FAILED, message, HttpStatus.BAD_REQUEST, details);
 }

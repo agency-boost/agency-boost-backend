@@ -6,6 +6,8 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { readerOf, type Reader } from '@/common/i18n/reader';
+import { render, type Sentence } from '@/common/i18n/sentence';
 import type { LocalDate } from '@/common/time/local-day';
 import { DEFAULT_TENANT_TIMEZONE, INVITES } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -24,10 +26,12 @@ import { MemberInviteDocument } from './member-invite.schema';
 import { MemberNames } from './member-names.service';
 import { MembershipRepository } from './membership.repository';
 import { MembershipDocument } from './membership.schema';
+import { ONBOARDING_MESSAGES, ONBOARDING_REFUSALS } from './onboarding.messages';
 import { JoinRequestRepository, MemberInviteRepository } from './org.repositories';
 import { TransfersService, type RequestedTransferView } from './transfers.service';
 
 const DAY_MS = 86_400_000;
+const SAY = ONBOARDING_REFUSALS;
 /** 24 random bytes: 192 bits, written in base64url after the office's id. Guessing one is not a plan. */
 const TOKEN_BYTES = 24;
 
@@ -143,7 +147,7 @@ export class InvitesService {
       if (String(holder._id) === ctx.userId) {
         throw new DomainException(
           ErrorCode.ORG_CYCLE_DETECTED,
-          'That is your own agent code. Nobody joins their own unit.',
+          SAY.ORG_CYCLE_DETECTED.ownCode,
           HttpStatus.CONFLICT,
           { agentCode },
         );
@@ -180,7 +184,7 @@ export class InvitesService {
       const who = displayNameOf(holder);
       throw new DomainException(
         ErrorCode.ORG_AGENT_ALREADY_TAGGED,
-        who ? `${who} already reports to this leader.` : 'They already report to this leader.',
+        who ? SAY.ORG_AGENT_ALREADY_TAGGED.reportsHere({ who }) : SAY.ORG_AGENT_ALREADY_TAGGED.theyReportHere,
         HttpStatus.CONFLICT,
         { membershipId },
       );
@@ -311,15 +315,18 @@ export class InvitesService {
 
   // ---------------------------------------------------------------- the invitee's side
 
-  /** **`GET /invites/:token`**: the banner, for anybody holding the link. 404 for every link that opens nothing. */
-  async banner(token: string): Promise<InviteBanner> {
+  /**
+   * **`GET /invites/:token`**: the banner, for anybody holding the link. 404 for every link that opens nothing.
+   * `reader`: the request's, for the one word the banner may write — *your leader*, when the leader's account is gone.
+   */
+  async banner(token: string, reader: Reader = readerOf()): Promise<InviteBanner> {
     const { row, kpm } = await this.open(token);
     const ctx = RequestContext.tenantRead(String(kpm._id), 'invite-link');
     const leader = await this.members.findById(ctx, row.leaderMembershipId);
     const leaderUser = leader ? await this.users.findOne({ _id: leader.userId }).exec() : null;
     const company = await this.companies.findOne({ _id: kpm.companyId }).exec();
     return {
-      leaderName: displayNameOf(leaderUser) ?? 'your leader',
+      leaderName: displayNameOf(leaderUser) ?? render(ONBOARDING_MESSAGES.yourLeader, reader),
       kpm: { code: kpm.code, branchName: kpm.branchName },
       companyId: kpm.companyId,
       companyName: company?.name ?? '',
@@ -366,7 +373,7 @@ export class InvitesService {
     if (ctx.membership) {
       throw new DomainException(
         ErrorCode.ORG_AGENT_ALREADY_TAGGED,
-        'You already belong to an office, so this invite cannot add you. Ask whoever runs your office to move you.',
+        SAY.ORG_AGENT_ALREADY_TAGGED.inAnotherOffice,
         HttpStatus.CONFLICT,
         { kpmId: ctx.kpmId },
       );
@@ -386,7 +393,7 @@ export class InvitesService {
     if (!leader || leader.status !== 'active') {
       throw new DomainException(
         ErrorCode.ORG_LEADER_NOT_IN_KPM,
-        'The leader who invited you is no longer in the office. Ask the office for a new invite.',
+        SAY.ORG_LEADER_NOT_IN_KPM.inviterLeft,
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
@@ -397,7 +404,7 @@ export class InvitesService {
     if (clash) {
       throw new DomainException(
         ErrorCode.AGENT_CODE_TAKEN,
-        `Agent code ${row.agentCode} is already registered to somebody else. Ask your office to sort it out.`,
+        SAY.AGENT_CODE_TAKEN.heldElsewhere({ agentCode: row.agentCode }),
         HttpStatus.CONFLICT,
         { field: 'agentCode', agentCode: row.agentCode },
       );
@@ -438,7 +445,7 @@ export class InvitesService {
       if ((err as { code?: number }).code === 11000) {
         throw new DomainException(
           ErrorCode.ORG_AGENT_ALREADY_TAGGED,
-          'You already belong to this office, so this invite cannot add you again.',
+          SAY.ORG_AGENT_ALREADY_TAGGED.inThisOffice,
           HttpStatus.CONFLICT,
           { kpmId: row.kpmId },
         );
@@ -471,7 +478,8 @@ export class InvitesService {
     await startActivation(this.activations, scoped, membershipId);
 
     const leaderUser = await this.users.findOne({ _id: leader.userId }).exec();
-    return displayNameOf(leaderUser) ?? 'your leader';
+    // The joining context carries the request's reader (`RequestContext.joiningTenant`).
+    return displayNameOf(leaderUser) ?? render(ONBOARDING_MESSAGES.yourLeader, scoped.reader);
   }
 
   /**
@@ -480,8 +488,8 @@ export class InvitesService {
    * used or ran out tells a prober nothing they could use.
    */
   private async open(token: string): Promise<{ row: MemberInviteDocument; kpm: KpmDocument }> {
-    const notValid = (message: string) => new DomainException(ErrorCode.NOT_FOUND, message, HttpStatus.NOT_FOUND);
-    const unknown = notValid('This invite link is not valid. Check you opened the whole link, or ask whoever sent it for a new one.');
+    const notValid = (message: Sentence<'NOT_FOUND'>) => new DomainException(ErrorCode.NOT_FOUND, message, HttpStatus.NOT_FOUND);
+    const unknown = notValid(SAY.NOT_FOUND.linkNotValid);
     const [kpmId, secret] = (token ?? '').split('.');
     if (!secret || !isValidObjectId(kpmId)) throw unknown;
     const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec();
@@ -491,9 +499,9 @@ export class InvitesService {
     const ctx = RequestContext.tenantRead(kpmId, 'invite-link');
     const row = await this.invites.findOne(ctx, { tokenHash: inviteTokenHash(token) });
     if (!row || row.status === 'cancelled') throw unknown;
-    if (row.status === 'accepted') throw notValid('This invite was already used. Sign in instead.');
+    if (row.status === 'accepted') throw notValid(SAY.NOT_FOUND.alreadyUsed);
     if (row.status === 'expired' || row.expiresAt.getTime() <= this.clock.now().getTime()) {
-      throw notValid('This invite has expired. Ask whoever sent it to send it again.');
+      throw notValid(SAY.NOT_FOUND.expired);
     }
     return { row, kpm };
   }
@@ -516,7 +524,7 @@ export class InvitesService {
     if (leader.status !== 'active') {
       throw new DomainException(
         ErrorCode.ORG_LEADER_NOT_IN_KPM,
-        'That leader is not an active member of this office.',
+        SAY.ORG_LEADER_NOT_IN_KPM.notActive,
         HttpStatus.UNPROCESSABLE_ENTITY,
         { leaderMembershipId: id },
       );
@@ -585,7 +593,7 @@ export function inviteLink(appOrigin: string, token: string, existingAccount: bo
 function invitePending(agentCode: string): DomainException {
   return new DomainException(
     ErrorCode.ORG_INVITE_PENDING,
-    `Agent code ${agentCode} already has an invite waiting to be accepted. Resend that one, or cancel it first.`,
+    SAY.ORG_INVITE_PENDING.waiting({ agentCode }),
     HttpStatus.CONFLICT,
     { agentCode },
   );
@@ -594,7 +602,7 @@ function invitePending(agentCode: string): DomainException {
 function inviteDecided(row: Pick<MemberInviteDocument, 'status'>): DomainException {
   return new DomainException(
     ErrorCode.ORG_REQUEST_ALREADY_DECIDED,
-    `That invite was already ${row.status}.`,
+    SAY.ORG_REQUEST_ALREADY_DECIDED.invite({ status: row.status }),
     HttpStatus.CONFLICT,
     { status: row.status },
   );

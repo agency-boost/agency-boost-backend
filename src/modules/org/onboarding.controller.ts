@@ -6,6 +6,7 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
+import { ONBOARDING_REFUSALS } from './onboarding.messages';
 import { OnboardingService } from './onboarding.service';
 import {
   ApproveRequestDto,
@@ -60,7 +61,7 @@ export class OnboardingController {
     if (retryAfter !== null) {
       throw new DomainException(
         ErrorCode.AUTH_RATE_LIMITED,
-        `Too many code attempts. Try again in ${Math.ceil(retryAfter / 60)} minute(s).`,
+        ONBOARDING_REFUSALS.AUTH_RATE_LIMITED.tooManyCodes({ minutes: Math.ceil(retryAfter / 60) }),
         HttpStatus.TOO_MANY_REQUESTS,
         { retryAfterSeconds: retryAfter },
       );
@@ -98,8 +99,8 @@ export class OnboardingController {
       'that otherwise nobody could join. Projection-limited to code, branch name, ' +
       'company and city: no member counts, no production, no owner name.',
   })
-  async kpms(@Query() query: KpmSearchDto) {
-    return this.onboarding.searchKpms(query.q);
+  async kpms(@Ctx() ctx: RequestContext, @Query() query: KpmSearchDto) {
+    return this.onboarding.searchKpms(query.q, ctx.reader);
   }
 
   @Post('kpm')
@@ -200,7 +201,7 @@ export class OnboardingController {
   })
   async previewInvite(@Ctx() ctx: RequestContext, @Query() query: InviteCodeQueryDto) {
     this.limitCodeAttempts(ctx);
-    return this.leaderCodes.preview(query.code);
+    return this.leaderCodes.preview(query.code, ctx.reader);
   }
 
   // ---- The leader's side: deciding, and pulling somebody in. ----

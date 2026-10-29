@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { readerIn } from '@/common/i18n/reader';
 import { EmailTemplateRenderer } from './email-renderer';
 import { NotificationTemplate, TEMPLATE_CHANNELS } from './notification.types';
 
@@ -100,5 +101,74 @@ describe('what the transactional mail says (P4-T14)', () => {
         expect(body.trim().length).toBeGreaterThan(20);
       }
     });
+  });
+});
+
+/**
+ * **P18.98-T5 AC-5 — the email in its recipient's language** (ADR-0179 §7): the subject, the greeting, the body and the
+ * sign-off, for the reader `NotificationService` hands the renderer; with none, a reader who has chosen nothing —
+ * English until the Indonesian default is live.
+ */
+describe('P18.98-T5 AC-5 the email in the recipient’s language', () => {
+  const ID = readerIn('id');
+
+  it('AC-5 writes the verification email in Indonesian, the link and the name as they are', () => {
+    const { subject, body } = renderer.render(NotificationTemplate.EMAIL_VERIFICATION, {
+      token: 'tok-123', fullName: 'Rina Wijaya',
+    }, ID);
+    expect(subject).toBe('[AgencyBoost] Verifikasi alamat email Anda');
+    expect(body).toBe([
+      'Halo Rina Wijaya,',
+      '',
+      'Buka tautan ini untuk memverifikasi alamat Anda. Anda tidak dapat masuk sebelum melakukannya.',
+      '',
+      'https://app.agencyboost.test/verify-email/tok-123',
+      '',
+      'Jika Anda tidak membuat akun AgencyBoost, abaikan email ini — tidak ada yang terjadi sampai tautan dibuka.',
+      '',
+      '— AgencyBoost',
+    ].join('\n'));
+  });
+
+  it('AC-5 writes the reset email in Indonesian, and greets somebody whose name it lacks', () => {
+    const { subject, body } = renderer.render(NotificationTemplate.PASSWORD_RESET, { token: 'tok-456' }, ID);
+    expect(subject).toBe('[AgencyBoost] Atur ulang kata sandi Anda');
+    expect(body.split('\n')[0]).toBe('Halo,');
+    expect(body).toContain('Buka tautan ini untuk membuat kata sandi baru.');
+    expect(body).toContain('https://app.agencyboost.test/reset-password/tok-456');
+    expect(body).toContain('Kata sandi Anda tidak berubah, dan tautan ini akan kedaluwarsa dengan sendirinya.');
+  });
+
+  it('AC-5 writes every other email in the inbox’s words, in Indonesian', () => {
+    const approved = renderer.render(NotificationTemplate.JOIN_REQUEST_APPROVED, { fullName: 'Rina' }, ID);
+    expect(approved.subject).toBe('[AgencyBoost] Anda sudah bergabung');
+    expect(approved.body).toContain('Halo Rina,');
+    expect(approved.body).toContain('Permintaan Anda disetujui. Sekarang Anda memiliki leader.');
+    expect(approved.body).toContain('https://app.agencyboost.test/notifications');
+    // A template with no detail of its own still says where to look, in the reader's language.
+    const unknown = renderer.render('something.new', {}, ID);
+    expect(unknown.body).toContain('Buka AgencyBoost untuk melihat perubahannya.');
+  });
+
+  it('AC-5 writes an event’s time in the recipient’s figures', () => {
+    const kickoff = { title: 'Kickoff 2026', startsAt: '2026-11-09T02:00:00.000Z', timezone: 'Asia/Jakarta', location: 'Kantor KPM' };
+    expect(renderer.render(NotificationTemplate.EVENT_REMINDER, kickoff, ID).body).toContain('9 Nov 2026, 09.00 · Kantor KPM');
+    expect(renderer.render(NotificationTemplate.EVENT_REMINDER, kickoff, readerIn('en')).body).toContain('9 Nov 2026, 09:00 · Kantor KPM');
+  });
+
+  it('AC-5 writes for a reader who has chosen nothing when it is given none: English, as before the phase', () => {
+    const { subject, body } = renderer.render(NotificationTemplate.EMAIL_VERIFICATION, { token: 't', fullName: 'Rina' });
+    expect(subject).toBe('[AgencyBoost] Verify your email address');
+    expect(body.startsWith('Hello Rina,')).toBe(true);
+  });
+
+  it('AC-5 renders every email template in Indonesian, none of it the English', () => {
+    const emailTemplates = Object.entries(TEMPLATE_CHANNELS).filter(([, channels]) => channels.includes('email')).map(([id]) => id);
+    for (const id of emailTemplates) {
+      const en = renderer.render(id, { token: 't', fullName: 'X' }, readerIn('en'));
+      const inIndonesian = renderer.render(id, { token: 't', fullName: 'X' }, ID);
+      expect({ id, same: en.subject === inIndonesian.subject }).toEqual({ id, same: false });
+      expect(inIndonesian.body.startsWith('Halo X,')).toBe(true);
+    }
   });
 });

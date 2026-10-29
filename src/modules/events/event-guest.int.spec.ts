@@ -7,6 +7,7 @@ import { configModule } from '../../../test/config-module';
 import { declaredPermissions, session } from '../../../test/http-permissions';
 import { buildEventsOffice, eventsApp, type EventKey, type EventsOffice, type EventsWho } from '../../../test/events-office';
 import { ROSTER_NOW } from '../../../test/coaching-office';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { EventGuestController } from './event-guest.controller';
 
 /**
@@ -726,6 +727,77 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(await codesOf('LUKAS')).toContain('PAST_LEADERS');
       const call = await rollCall('PAST_LEADERS');
       expect(rowOf(call, 'LUKAS')).toBeDefined();
+    });
+  });
+
+  /**
+   * **The member's and the roll call's refusals, in Bahasa Indonesia** (P18.98-T5 AC-7): the same code and details as
+   * in English, the words the reader's — a refusal's message and every field sentence in `details.violations`.
+   */
+  describe('P18.98-T5 AC-7 the events’ refusals in Indonesian', () => {
+    it('P18.98-T5 AC-7 one’s own row, before the end and a malformed roll call: the codes as in English, the words Indonesian', async () => {
+      as('OWNER');
+      const own = await http().put(`/kpm/settings/events/${idOf('PAST_ALL')}/attendance`).set(...IN_INDONESIAN)
+        .send({ entries: [{ membershipId: office.id.OWNER, attended: true }] }).expect(400);
+      expect(own.body.error).toMatchObject({
+        code: 'EVENT_ATTENDANCE_SELF',
+        message: 'Tidak ada yang mengonfirmasi kehadirannya sendiri. Administrator lain yang mengonfirmasi kehadiran Anda.',
+        details: { membershipId: office.id.OWNER },
+      });
+      const early = await http().put(`/kpm/settings/events/${idOf('UPCOMING')}/attendance`).set(...IN_INDONESIAN)
+        .send({ entries: [{ membershipId: office.id.RINA, attended: true }] }).expect(409);
+      expect(early.body.error).toMatchObject({ code: 'EVENT_NOT_ENDED', message: 'Kehadiran dikonfirmasi setelah event berakhir.' });
+      const malformed = await http().put(`/kpm/settings/events/${idOf('PAST_ALL')}/attendance`).set(...IN_INDONESIAN)
+        .send({ entries: [
+          { membershipId: office.id.RINA, attended: 'yes' }, { membershipId: office.id.BUDI, attended: true, note: 'x' },
+        ] }).expect(400);
+      const violations = ['entries[0].attended harus true, false, atau null.', 'properti entries[1].note tidak dikenal'];
+      expect(malformed.body.error).toMatchObject({ code: 'VALIDATION_FAILED', message: violations.join('; '), details: { violations } });
+      // A field the pipe refuses before the service reads the body is Indonesian too (`common/validation`).
+      const extra = await http().put(`/kpm/settings/events/${idOf('PAST_ALL')}/attendance`).set(...IN_INDONESIAN)
+        .send({ entries: [{ membershipId: office.id.RINA, attended: true }], extra: 1 }).expect(400);
+      expect(extra.body.error.details.violations).toEqual(['properti extra tidak dikenal']);
+    });
+
+    it('P18.98-T5 AC-7 the answer: not ended, not attended, a score out of range and a second submit, in Indonesian', async () => {
+      as('RINA');
+      const say = async (key: EventKey, body: Record<string, unknown>, status: number) =>
+        (await http().post(`/events/${idOf(key)}/feedback`).set(...IN_INDONESIAN).send(body).expect(status)).body.error;
+      expect(await say('UPCOMING', { score: 9 }, 409)).toMatchObject({ code: 'EVENT_NOT_ENDED', message: 'Event ini belum berakhir.' });
+      expect(await say('PAST_ALL', { score: 9 }, 409)).toMatchObject({
+        code: 'EVENT_NOT_ATTENDED',
+        message: 'Masukan hanya dikumpulkan dari orang yang ikut atau menyatakan hadir di event ini.',
+      });
+      await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
+      expect(await say('PAST_ALL', { score: 11 }, 400)).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'score harus berupa bilangan bulat dari 0 sampai 10.',
+        details: { violations: ['score harus berupa bilangan bulat dari 0 sampai 10.'] },
+      });
+      expect(await say('PAST_ALL', {}, 400)).toMatchObject({ details: { violations: ['score wajib diisi.'] } });
+      await http().post(`/events/${idOf('PAST_ALL')}/feedback`).send({ score: 9 }).expect(201);
+      expect(await say('PAST_ALL', { score: 9 }, 409)).toMatchObject({
+        code: 'EVENT_FEEDBACK_ALREADY_SUBMITTED', message: 'Anda sudah memberikan masukan untuk event ini.',
+      });
+      // The RSVP once the event has ended, and the same refusal in English, unchanged.
+      const closed = await http().post(`/events/${idOf('PAST_ALL')}/rsvp`).set(...IN_INDONESIAN).expect(409);
+      expect(closed.body.error).toMatchObject({ code: 'EVENT_RSVP_CLOSED', message: 'Event ini sudah berakhir, jadi RSVP-nya ditutup.' });
+      expect((await http().post(`/events/${idOf('PAST_ALL')}/rsvp`).expect(409)).body.error.message)
+        .toBe('This event has ended, so its RSVP is closed.');
+    });
+
+    it('P18.98-T5 AC-7 an answered event moved into the future is refused in Indonesian, its details as in English', async () => {
+      as('RINA');
+      await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
+      as('OWNER');
+      const res = await http().patch(`/kpm/settings/events/${idOf('PAST_ALL')}`).set(...IN_INDONESIAN)
+        .send({ endsAt: '2027-01-01T02:00:00Z' }).expect(409);
+      expect(res.body.error).toMatchObject({
+        code: 'EVENT_HAS_RESPONSES',
+        message: 'Sudah ada yang menanggapi event ini, jadi waktu mulai, audiens, dan waktu selesai di masa depan tidak '
+          + 'dapat diubah. Tambahkan event baru sebagai gantinya.',
+        details: { field: 'dates', changed: ['endsAt'] },
+      });
     });
   });
 });

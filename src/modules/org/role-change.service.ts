@@ -5,6 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
 import { isLeaderClass, shortOfRung } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
@@ -16,6 +17,9 @@ import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole, MembershipDocument } from './membership.schema';
 import type { ApprovedPastLimit } from './leader-limit';
+import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
+
+const SAY = ORG_REFUSALS;
 
 export interface TeamMember {
   membershipId: string;
@@ -73,7 +77,7 @@ export class RoleChangeService {
     if (!ctx.kpmId || !ctx.membershipId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
-        'You are not in an office.',
+        SAY.TENANT_NO_MEMBERSHIP.notInOffice,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -112,9 +116,10 @@ export class RoleChangeService {
 
     const users = await this.users.find({ _id: { $in: rows.map((r) => r.userId) } }).exec();
     const byUser = new Map(users.map((u) => [String(u._id), u]));
+    const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
 
     return rows.map((r) => {
-      const fullName = byUser.get(r.userId)?.fullName ?? 'Unknown';
+      const fullName = byUser.get(r.userId)?.fullName ?? unknown;
       const rules = this.permitted(ctx, r);
       return {
         membershipId: String(r._id),
@@ -159,7 +164,7 @@ export class RoleChangeService {
     if (!checked || isLeaderClass(checked.target.role) || !isLeaderClass(checked.toClass)) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'That change does not make a new leader, so it needs nobody’s approval. Make it directly.',
+        SAY.VALIDATION_FAILED.changeDirectly,
         HttpStatus.BAD_REQUEST,
         { membershipId, toRole },
       );
@@ -211,7 +216,7 @@ export class RoleChangeService {
     if (await this.hierarchy.ownsTheOffice(ctx, target)) {
       throw new DomainException(
         ErrorCode.ORG_ROLE_CHANGE_NOT_PERMITTED,
-        'They own this office. Transfer it first — only the platform can do that.',
+        SAY.ORG_ROLE_CHANGE_NOT_PERMITTED.owner,
         HttpStatus.FORBIDDEN,
         { membershipId, fromRole: target.role, toRole },
       );
@@ -223,8 +228,8 @@ export class RoleChangeService {
       throw new DomainException(
         ErrorCode.ORG_ROLE_CHANGE_NOT_PERMITTED,
         involvesAb
-          ? `Only the office’s Owner or an Admin can change somebody’s role to or from ${await this.seniorRungName(ctx, target, toClass, level)}.`
-          : 'Only somebody’s direct leader can change their role.',
+          ? SAY.ORG_ROLE_CHANGE_NOT_PERMITTED.officeOnly({ rung: await this.seniorRungName(ctx, target, toClass, level) })
+          : SAY.ORG_ROLE_CHANGE_NOT_PERMITTED.directLeaderOnly,
         HttpStatus.FORBIDDEN,
         { membershipId, fromRole: target.role, toRole },
       );
@@ -238,7 +243,7 @@ export class RoleChangeService {
     if (demoting && directCount > 0) {
       throw new DomainException(
         ErrorCode.ORG_HAS_DIRECT_REPORTS,
-        `${directCount} ${directCount === 1 ? 'person reports' : 'people report'} to them. Move them to another leader first.`,
+        SAY.ORG_HAS_DIRECT_REPORTS.moveFirst({ count: directCount }),
         HttpStatus.CONFLICT,
         { membershipId, directCount },
       );
@@ -368,7 +373,7 @@ export class RoleChangeService {
       const membership = byMembership.get(r.membershipId);
       return {
         membershipId: r.membershipId,
-        fullName: named(r.membershipId) ?? 'Unknown',
+        fullName: named(r.membershipId) ?? render(ORG_MESSAGES.unknownName, ctx.reader),
         agentCode: membership?.agentCode ?? '',
         fromRole: r.fromRole,
         toRole: r.toRole,

@@ -304,6 +304,57 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(await stored('BUDI', 'FIRST_CASE_CLOSED')).toMatchObject({ done: false, source: null });
     });
 
+    it('P18.98-T5 AC-7 refuses a record in Indonesian: every field’s sentence, the join date and today in the reader’s figures', async () => {
+      const doc = await h.start('BUDI', '2026-08-01');
+      /** An item's label as the office stored it — typed by the office, so interpolated as typed in either language. */
+      const labelOf = async (code: string) => {
+        const template = await h.col('activationTemplates').findOne({ kpmId: kpmOf('BUDI'), version: doc.templateVersion });
+        return (template!.aspects as { items: { code: string; label: string }[] }[])
+          .flatMap((a) => a.items).find((i) => i.code === code)!.label;
+      };
+      h.as('SARI');
+      const record = { kind: 'closing', name: '  ', date: '2026-07-20' };
+      const english = (await h.http().put(`/new-hires/${id('BUDI')}/items/FIRST_CASE_CLOSED`)
+        .send({ done: true, record }).expect(400)).body.error;
+      expect(english).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        details: { violations: [
+          'record.name is who the case was sold to, and is required for a new closing.',
+          'record.date, the day it was paid and issued, is a day from the join date, 1 Agu 2026, to today, 14 Sep 2026.',
+        ] },
+      });
+      const indonesian = (await h.http().put(`/new-hires/${id('BUDI')}/items/FIRST_CASE_CLOSED`).set('Accept-Language', 'id')
+        .send({ done: true, record }).expect(400)).body.error;
+      const said = [
+        'record.name adalah nama orang yang membeli case ini, dan wajib diisi untuk closing baru.',
+        'record.date, hari case ini dibayar dan diterbitkan, harus berupa hari dari tanggal bergabung, 1 Agu 2026, sampai '
+          + 'hari ini, 14 Sep 2026.',
+      ];
+      expect(indonesian).toMatchObject({ code: 'VALIDATION_FAILED', message: said.join('; '), details: { violations: said } });
+      // A day not written as one: the pipe's own sentence, under the record's path, in either language.
+      const shape = (language: string) => h.http().put(`/new-hires/${id('BUDI')}/items/WEEKLY_CHECK_IN`)
+        .set('Accept-Language', language).send({ done: true, record: { kind: 'one_on_one', date: '20 Agu', note: 'x' } });
+      expect((await shape('en').expect(400)).body.error.details.violations).toEqual(['record.date must be a day, written YYYY-MM-DD.']);
+      expect((await shape('id').expect(400)).body.error.details.violations)
+        .toEqual(['record.date harus berupa tanggal dengan format YYYY-MM-DD.']);
+      // A 1:1 on a day that is none, and with no note: the service's own two sentences.
+      const oneOnOne = (await h.http().put(`/new-hires/${id('BUDI')}/items/WEEKLY_CHECK_IN`).set('Accept-Language', 'id')
+        .send({ done: true, record: { kind: 'one_on_one', date: '2026-02-30', note: ' ' } }).expect(400)).body.error;
+      expect(oneOnOne.details.violations).toEqual([
+        'record.date, hari 1:1 diadakan, harus berupa tanggal dengan format YYYY-MM-DD.',
+        'record.note harus 1 sampai 500 karakter, tanpa spasi di awal dan akhir.',
+      ]);
+      // A record on an item that takes none, and one of the wrong kind, naming the office's own label as typed.
+      const wrong = (await h.http().put(`/new-hires/${id('BUDI')}/items/CRM_SETUP`).set('Accept-Language', 'id')
+        .send({ done: true, record }).expect(400)).body.error;
+      expect(wrong.message).toBe('record hanya untuk item yang selesai dari data penjualan dan coaching, bukan untuk '
+        + `${await labelOf('CRM_SETUP')}.`);
+      const kind = (await h.http().put(`/new-hires/${id('BUDI')}/items/FIRST_CASE_CLOSED`).set('Accept-Language', 'id')
+        .send({ done: true, record: { kind: 'one_on_one', date: '2026-09-01', note: 'x' } }).expect(400)).body.error;
+      expect(kind.message).toBe(`record.kind harus closing untuk ${await labelOf('FIRST_CASE_CLOSED')}.`);
+      expect(await h.col('leads').countDocuments({ ownerMembershipId: id('BUDI') })).toBe(0);
+    });
+
     it('P18.96-T4 AC-3 the tick does not stick when the leads module refuses the closing: an office with no Paid and issued stage', async () => {
       await h.start('BUDI', '2026-07-15');
       jest.spyOn(h.wired.leadRecords, 'logClosing').mockRejectedValueOnce(new Error('the closing could not be written'));

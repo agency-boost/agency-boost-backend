@@ -1,7 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsBoolean, IsIn, IsOptional, IsString, Matches, MaxLength, ValidateNested } from 'class-validator';
+import { field } from '@/common/validation/violations';
 import { ACTIVATION } from '@/domain/constants';
+import { ACTIVATION_REFUSALS } from './activation.messages';
 
 /**
  * **The activation's requests** (`functional/activation.md`, the Data contract). Each limit is read from
@@ -14,7 +16,11 @@ import { ACTIVATION } from '@/domain/constants';
 
 /** `YYYY-MM-DD`. */
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
-const DATE_MESSAGE = '$property must be a day, written YYYY-MM-DD.';
+/**
+ * The day's shape, in both languages (P18.98-T5 AC-3): the service's own sentence, the field named by class-validator's
+ * `$property`, which it fills in for each field in either language.
+ */
+const DATE_MESSAGE = field(ACTIVATION_REFUSALS.VALIDATION_FAILED.dayShape({ field: '$property' }));
 
 /** A lead's name and a note, at most (the leads module's and the coaching module's own bounds hold them again). */
 const RECORD_TEXT_MAX = 500;

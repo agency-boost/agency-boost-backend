@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { FilterQuery, Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-// The domain's, not Nest's: it answers `NOT_FOUND`, the code every tenant-scoped refusal uses.
-import { NotFoundException } from '@/common/errors/domain.exception';
+// The domain's, not Nest's: it answers `NOT_FOUND`, the code every tenant-scoped refusal uses; and a malformed request
+// is `400 VALIDATION_FAILED` in the reader's language (P18.98-T5 AC-3).
+import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
 import type { TrainingPublishState } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AssetService } from '@/modules/assets/asset.service';
@@ -22,6 +23,9 @@ import {
 import {
   checkTrainingContent, emptyContent, storageKeysOf, type CheckedContent,
 } from './training-content';
+import { TRAINING_REFUSALS } from './training.messages';
+
+const SAY = TRAINING_REFUSALS.VALIDATION_FAILED;
 
 type Status = 'active' | 'archived';
 
@@ -157,7 +161,7 @@ export class TrainingService {
   /** Label and description. **Never the code.** */
   async updateCategory(ctx: RequestContext, id: string, body: unknown): Promise<TrainingCategoryRow> {
     const input = checkTrainingCategoryUpdate(body);
-    if (Object.keys(input).length === 0) throw new BadRequestException('Nothing to change.');
+    if (Object.keys(input).length === 0) throw new InvalidRequestException(SAY.nothingToChange);
 
     const updated = await this.categories.updateById(ctx, id, { $set: input, $inc: { version: 1 } });
     if (!updated) throw new NotFoundException('Training category');
@@ -232,7 +236,7 @@ export class TrainingService {
       set.categoryCode = input.categoryCode;
       set.displayOrder = (await this.skills.count(ctx, { categoryCode: input.categoryCode })) + 1;
     }
-    if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
+    if (Object.keys(set).length === 0) throw new InvalidRequestException(SAY.nothingToChange);
 
     const updated = await this.skills.updateById(ctx, id, { $set: set, $inc: { version: 1 } });
     if (!updated) throw new NotFoundException('Training skill');
@@ -260,10 +264,7 @@ export class TrainingService {
     const existing = await this.skills.findById(ctx, id);
     if (!existing) throw new NotFoundException('Training skill');
     if (!(await this.categories.exists(ctx, { code: existing.categoryCode, status: 'active' }))) {
-      throw new BadRequestException(
-        `${existing.code} is in ${existing.categoryCode}, which is archived. Restore the category `
-          + 'first — a skill in an archived category shows on no screen.',
-      );
+      throw new InvalidRequestException(SAY.skillInArchivedCategory({ code: existing.code, categoryCode: existing.categoryCode }));
     }
 
     const updated = await this.skills.updateById(ctx, id, restored);
@@ -310,7 +311,7 @@ export class TrainingService {
       set.skillCode = input.skillCode;
       set.displayOrder = (await this.modules.count(ctx, { skillCode: input.skillCode })) + 1;
     }
-    if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
+    if (Object.keys(set).length === 0) throw new InvalidRequestException(SAY.nothingToChange);
 
     const updated = await this.modules.updateById(ctx, id, { $set: set, $inc: { version: 1 } });
     if (!updated) throw new NotFoundException('Training module');
@@ -330,10 +331,7 @@ export class TrainingService {
     const existing = await this.modules.findById(ctx, id);
     if (!existing) throw new NotFoundException('Training module');
     if (!(await this.skills.exists(ctx, { code: existing.skillCode, status: 'active' }))) {
-      throw new BadRequestException(
-        `${existing.code} teaches ${existing.skillCode}, which is archived. Restore the skill `
-          + 'first — a module under an archived skill shows on no screen.',
-      );
+      throw new InvalidRequestException(SAY.moduleUnderArchivedSkill({ code: existing.code, skillCode: existing.skillCode }));
     }
 
     const updated = await this.modules.updateById(ctx, id, restored);
@@ -541,21 +539,19 @@ export class TrainingService {
   ): Promise<void> {
     const repository = { category: this.categories, skill: this.skills, module: this.modules }[level];
     if (await (repository as TrainingCategoryRepository).exists(ctx, { code })) {
-      throw new BadRequestException(
-        `This office already has a training ${level} called ${code}. A code is never reused.`,
-      );
+      throw new InvalidRequestException(SAY.codeTaken({ level, code }));
     }
   }
 
   private async requireActiveCategory(ctx: RequestContext, code: string): Promise<void> {
     if (!(await this.categories.exists(ctx, { code, status: 'active' }))) {
-      throw new BadRequestException(`No active training category called ${code} in this office.`);
+      throw new InvalidRequestException(SAY.noActiveCategory({ code }));
     }
   }
 
   private async requireActiveSkill(ctx: RequestContext, code: string): Promise<void> {
     if (!(await this.skills.exists(ctx, { code, status: 'active' }))) {
-      throw new BadRequestException(`No active training skill called ${code} in this office.`);
+      throw new InvalidRequestException(SAY.noActiveSkill({ code }));
     }
   }
 

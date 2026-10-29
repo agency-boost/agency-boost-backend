@@ -6,6 +6,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { Fields, refuseWith } from '@/common/validation/fields';
+import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
 import {
   EVENT_FEEDBACK_TEXT_MAX, NPS, type EventAudienceScope, type EventIssuer, type EventPhase,
 } from '@/domain/constants';
@@ -23,6 +24,7 @@ import {
 } from './event.repository';
 import { hasEnded, localTimeOf } from './event-phase';
 import { EventReadings } from './event-readings';
+import { EVENTS_REFUSALS } from './events.messages';
 
 /** The NPS scale as the screens read it (invariant §7: served, never re-declared). */
 export interface NpsConstants {
@@ -206,7 +208,7 @@ export class EventGuestService {
     if (!eligible) {
       throw new DomainException(
         ErrorCode.EVENT_NOT_ATTENDED,
-        'Feedback is only collected from people who joined or say they attended this event.',
+        EVENTS_REFUSALS.EVENT_NOT_ATTENDED.feedbackFromAttendees,
         HttpStatus.CONFLICT,
       );
     }
@@ -250,7 +252,7 @@ export class EventGuestService {
   private refuseOnceEnded(event: EventDocument): void {
     if (hasEnded(event, this.clock.now())) {
       throw new DomainException(
-        ErrorCode.EVENT_RSVP_CLOSED, 'This event has ended, so its RSVP is closed.', HttpStatus.CONFLICT,
+        ErrorCode.EVENT_RSVP_CLOSED, EVENTS_REFUSALS.EVENT_RSVP_CLOSED.ended, HttpStatus.CONFLICT,
       );
     }
   }
@@ -258,7 +260,7 @@ export class EventGuestService {
   private refuseUntilEnded(event: EventDocument): void {
     if (!hasEnded(event, this.clock.now())) {
       throw new DomainException(
-        ErrorCode.EVENT_NOT_ENDED, 'This event has not ended yet.', HttpStatus.CONFLICT,
+        ErrorCode.EVENT_NOT_ENDED, EVENTS_REFUSALS.EVENT_NOT_ENDED.notYet, HttpStatus.CONFLICT,
       );
     }
   }
@@ -342,7 +344,8 @@ export class EventGuestService {
 
 function alreadySubmitted(): DomainException {
   return new DomainException(
-    ErrorCode.EVENT_FEEDBACK_ALREADY_SUBMITTED, 'You have already given feedback for this event.', HttpStatus.CONFLICT,
+    ErrorCode.EVENT_FEEDBACK_ALREADY_SUBMITTED, EVENTS_REFUSALS.EVENT_FEEDBACK_ALREADY_SUBMITTED.already,
+    HttpStatus.CONFLICT,
   );
 }
 
@@ -353,8 +356,10 @@ export function checkFeedback(body: unknown): { score: number; why: string; impr
   const improve = f.text('improve', { min: 0, max: EVENT_FEEDBACK_TEXT_MAX }, false);
   const violations = [...f.violations];
   const score = (body as Record<string, unknown> | null)?.score;
-  if (score === undefined) violations.push('score is required.');
-  else if (!isNpsScore(score)) violations.push(`score must be a whole number from ${NPS.SCALE_MIN} to ${NPS.SCALE_MAX}.`);
+  if (score === undefined) violations.push(VALIDATION_REFUSALS.VALIDATION_FAILED.required({ field: 'score' }));
+  else if (!isNpsScore(score)) {
+    violations.push(EVENTS_REFUSALS.VALIDATION_FAILED.scoreWhole({ min: NPS.SCALE_MIN, max: NPS.SCALE_MAX }));
+  }
   if (violations.length > 0) refuseWith(violations);
   return { score: score as number, why: why ?? '', improve: improve ?? '' };
 }

@@ -4,11 +4,13 @@ import { FilterQuery, Model } from 'mongoose';
 import { RequestContext, isEffectiveCoreLeader } from '@/common/context/request-context';
 import { can } from '@/modules/rbac/permissions';
 import { NotFoundException } from '@/common/errors/domain.exception';
+import { render } from '@/common/i18n/sentence';
 import { preferredNameOf } from '@/modules/users/display-name';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole, MembershipDocument, MembershipStatus } from './membership.schema';
+import { ORG_MESSAGES } from './org.messages';
 import { rejoinedOn, type RejoinFacts } from './rejoined';
 import { DIRECTORY_READ, siblingsWithinReach, visibleTo, withinReach } from './reader-visibility';
 import { isLeaderClass, type Gender, type WorkStatus } from '@/domain/constants';
@@ -280,10 +282,11 @@ export class DirectoryService {
     m: MembershipDocument,
     user: UserDocument | undefined,
     leaderNameValue: string | null,
-    ctx?: RequestContext,
-    ownerUserId?: string | null,
+    ctx: RequestContext,
+    ownerUserId: string | null,
   ): Omit<DirectoryMember, 'rejoinedOn'> {
-    const fullName = user?.fullName ?? 'Unknown';
+    // A person whose account is gone is still named, in the reader's language (P18.98-T5 AC-4).
+    const fullName = user?.fullName ?? render(ORG_MESSAGES.unknownName, ctx.reader);
     const tenantAdmin = Boolean(ctx?.membership?.isKpmOwner || ctx?.membership?.isKpmAdmin);
     const isDirectLeader = Boolean(ctx?.membershipId) && m.leaderId === ctx?.membershipId;
     const removed = m.status === 'removed';

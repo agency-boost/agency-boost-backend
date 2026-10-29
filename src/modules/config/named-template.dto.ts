@@ -4,6 +4,8 @@ import {
   IsBoolean, IsIn, IsMongoId, IsOptional, IsString, MaxLength, MinLength, ValidateBy, ValidateIf,
   isMongoId,
 } from 'class-validator';
+import { field } from '@/common/validation/violations';
+import { TEMPLATE_REFUSALS } from './template.messages';
 
 /**
  * A template's name: trimmed by the service, unique among the company's active templates. Its bounds are
@@ -28,7 +30,8 @@ function IsTemplateFrom() {
           && typeof (value as { templateId: unknown }).templateId === 'string'
           && isMongoId((value as { templateId: string }).templateId);
       },
-      defaultMessage: () => 'from must be "empty", "defaults", or { templateId } naming one of the company\u2019s templates',
+      // The DTO's own sentence, in both languages (P18.98-T5 AC-3).
+      defaultMessage: () => field(TEMPLATE_REFUSALS.VALIDATION_FAILED.fromShape),
     },
   });
 }

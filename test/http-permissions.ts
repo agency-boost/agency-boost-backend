@@ -2,6 +2,8 @@ import { CanActivate, ExecutionContext, ValidationPipe } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { REQUIRED_PERMISSION } from '@/common/auth/auth.decorators';
 import { RequestContext, type HierarchyRole } from '@/common/context/request-context';
+import { headerLanguage, readerOf } from '@/common/i18n/reader';
+import { isLanguage } from '@/domain/constants/language';
 import { VALIDATION_PIPE_OPTIONS } from '@/bootstrap';
 
 /**
@@ -58,14 +60,35 @@ export const EVERY_MEMBER: [string, RequestContext][] = [
 export const session: { current: RequestContext } = { current: SUPER_ADMIN };
 
 /**
+ * **A saved language for whoever `session.current` is** (P18.98-T5 AC-1): what `users.locale` would hold. A spec that
+ * signs somebody in with a saved choice sets it; `StubAuth` reads it, as `ContextResolver` reads the row.
+ */
+export const savedLanguage: { current: string | null } = { current: null };
+
+/**
  * Stands in for `AuthGuard` only.
  *
  * Which session is signed in — a real token, a real membership, impersonation — is
  * `auth.e2e.int.spec.ts`'s question. Whether `PermissionsGuard` then refuses is these specs'.
+ *
+ * **It resolves the request's reader as the guard does** (P18.98-T5 AC-1): the `Accept-Language` sent — `en` unless a
+ * test sets another (`test/setup.ts`) — else `savedLanguage`, onto the request and the context alike.
  */
 export class StubAuth implements CanActivate {
   canActivate(execution: ExecutionContext): boolean {
-    execution.switchToHttp().getRequest<{ context: RequestContext }>().context = session.current;
+    const request = execution.switchToHttp().getRequest<{
+      context: RequestContext;
+      reader?: unknown;
+      headers: Record<string, string | string[] | undefined>;
+    }>();
+    const stored = isLanguage(savedLanguage.current) && !session.current.isImpersonating ? savedLanguage.current : null;
+    const reader = readerOf({ header: headerLanguage(request.headers['accept-language']), stored });
+    request.reader = reader;
+    // The same context when it already reads so, so a spec that asserts the context it set is handed it, as before.
+    const { language, figures } = session.current.reader;
+    request.context = language === reader.language && figures === reader.figures
+      ? session.current
+      : session.current.withReader(reader);
     return true;
   }
 }

@@ -1,7 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsMongoId, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { field } from '@/common/validation/violations';
 import { AGENT_CODE_PATTERN, INVITES } from '@/domain/constants';
+import { ONBOARDING_REFUSALS } from './onboarding.messages';
+
+/** The form's own sentences, in both languages (`field`, P18.98-T5 AC-3). */
+const SAY = ONBOARDING_REFUSALS.VALIDATION_FAILED;
 
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 /** What a person types for a WhatsApp number: digits, spaces and dashes, a `+` in front at most. */
@@ -16,20 +21,20 @@ export class AddAgentDto {
   @ApiProperty({ example: '80777', minLength: 3, maxLength: 32, pattern: AGENT_CODE_PATTERN.source, description: 'Issued by the company: digits only.' })
   @Transform(trimmed)
   @IsString()
-  @Matches(AGENT_CODE_PATTERN, { message: 'agentCode must be digits only, 3 to 32 of them' })
+  @Matches(AGENT_CODE_PATTERN, { message: field(SAY.agentCodeShape) })
   agentCode!: string;
 
   @ApiProperty({ example: 'Hendra Wijaya', maxLength: INVITES.NAME_MAX })
   @Transform(trimmed)
   @IsString()
-  @MinLength(1, { message: 'fullName must not be empty' })
+  @MinLength(1, { message: field(SAY.fullNameEmpty) })
   @MaxLength(INVITES.NAME_MAX)
   fullName!: string;
 
   @ApiProperty({ example: '0812-3456-7890', description: 'Their WhatsApp number, as typed. The share link reads it.' })
   @Transform(trimmed)
   @IsString()
-  @Matches(PHONE_SHAPE, { message: 'phone must be a phone number: digits, spaces or dashes, with a + in front at most' })
+  @Matches(PHONE_SHAPE, { message: field(SAY.phoneShape) })
   phone!: string;
 
   @ApiPropertyOptional({
@@ -38,7 +43,7 @@ export class AddAgentDto {
   })
   @IsOptional()
   @IsString()
-  @Matches(DATE_SHAPE, { message: 'joinDate must be a date, YYYY-MM-DD' })
+  @Matches(DATE_SHAPE, { message: field(SAY.joinDateShape) })
   joinDate?: string;
 
   @ApiPropertyOptional({

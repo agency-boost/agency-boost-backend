@@ -4,6 +4,9 @@ import {
   IsArray, IsBoolean, IsEnum, IsInt, IsMongoId, IsNotEmpty, IsOptional, IsString, Matches, Max,
   MaxLength, Min, MinLength, ValidateIf, ValidateNested,
 } from 'class-validator';
+import { field } from '@/common/validation/violations';
+import { JOINING_REFUSALS } from '@/domain/constants/joining.messages';
+import { ORG_REFUSALS } from './org.messages';
 
 export class DirectoryQueryDto {
   @ApiPropertyOptional({ description: 'Name, email or agent code. Case-insensitive.' })
@@ -93,7 +96,11 @@ export class InviteCodeQueryDto {
 
 /** An office date, as every date field in a body is written. Whether it is a real day is the service's check. */
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
-const JOIN_DATE_MESSAGE = 'joinDate must be a real date, written YYYY-MM-DD.';
+/**
+ * The pipe's refusal of a join date's shape: the same sentence the service refuses a date that is no real day with
+ * (`joinDateViolation`), both languages (`field`, P18.98-T5 AC-3).
+ */
+const JOIN_DATE_MESSAGE = field(JOINING_REFUSALS.VALIDATION_FAILED.notADate);
 
 /** The join date a leader gives when letting somebody in (ADR-0169, P18.96-T2), on an approval and on a tag. */
 const JOIN_DATE_PROPERTY = {
@@ -166,7 +173,7 @@ export class ChangeRoleDto {
       + 'is no active rung is refused `409 ORG_LEVEL_NOT_ON_LADDER`.',
   })
   @IsString()
-  @Matches(RUNG_CODE, { message: 'toRole must be a rung code' })
+  @Matches(RUNG_CODE, { message: field(ORG_REFUSALS.VALIDATION_FAILED.toRoleShape) })
   toRole!: string;
 
   @ApiPropertyOptional({
@@ -294,7 +301,7 @@ export class CreateLeaderLimitRequestDto {
   @ApiPropertyOptional({ example: 'AAB', description: 'For `promote`: the rung, by its code on the company\u2019s ladder.' })
   @IsOptional()
   @IsString()
-  @Matches(RUNG_CODE, { message: 'orgLevelCode must be a rung code' })
+  @Matches(RUNG_CODE, { message: field(ORG_REFUSALS.VALIDATION_FAILED.orgLevelCodeShape) })
   orgLevelCode?: string;
 
   @ApiPropertyOptional({

@@ -186,6 +186,12 @@ export class ProductionReadings {
    * imported or corrected, `null` where none is — the figure `ledgersFor` reads as a December's `yearToDate` and as the
    * next month's `throughLastMonth`. It refuses a month whose January the range does not reach, or past its end, and a
    * member not read: each would answer a figure short of months it never read.
+   *
+   * **`standingsFor(ids, month)`** answers each of them what `standingsFor` (`ledgersFor`'s standing) answers for the
+   * month — the year's latest year to date, the year to date through last month and the month's own APE, each a held
+   * figure with whoever corrected it (the analytics at 500 members, 2026-10-29: it read `ledgersFor` once, or twice for
+   * *Previous month*, beside `monthCellsFor`, the same rows hydrated three times). `ledgersFor` reads the month's whole
+   * year, so this refuses a month whose January or December the range does not reach, and a member not read.
    */
   async monthCellsAndYearToDateFor(
     ctx: RequestContext, membershipIds: readonly string[], range: { from: string; to: string },
@@ -194,6 +200,8 @@ export class ProductionReadings {
     const cells = new Map<string, Map<string, MonthCells>>(membershipIds.map((id) => [id, new Map()]));
     // Each member's months holding a year-to-date figure: a cell emptied by hand, or never given, holds none.
     const held = new Map<string, { month: string; cell: MetricValue }[]>(ids.map((id) => [id, []]));
+    // And the months holding the month's own APE, with its cell: a standing's *this month*.
+    const ownApe = new Map<string, Map<string, MetricValue>>(ids.map((id) => [id, new Map()]));
     const rows = ids.length === 0 ? [] : await this.data.findCells(
       ctx,
       { membershipId: { $in: ids }, month: { $gte: range.from, $lte: range.to } },
@@ -204,6 +212,9 @@ export class ProductionReadings {
       (cells.get(row.membershipId) as Map<string, MonthCells>).set(row.month, monthCellsOf(row));
       if (row.apeYtd !== null && row.apeYtd.value !== null) {
         (held.get(row.membershipId) as { month: string; cell: MetricValue }[]).push({ month: row.month, cell: row.apeYtd });
+      }
+      if (row.apeMonthly !== null && row.apeMonthly.value !== null) {
+        (ownApe.get(row.membershipId) as Map<string, MetricValue>).set(row.month, row.apeMonthly);
       }
     }
     const apeYearToDateThrough = (forIds: readonly string[], month: string): Map<string, HeldFigure | null> => {
@@ -224,7 +235,28 @@ export class ProductionReadings {
       }
       return out;
     };
-    return { cells, apeYearToDateThrough };
+    const standingsFor = (forIds: readonly string[], month: string): Map<string, MonthStanding> => {
+      const year = month.slice(0, 4);
+      if (!/^\d{4}-\d{2}$/.test(month) || `${year}-01` < range.from || `${year}-12` > range.to) {
+        throw new Error(`A standing at ${month} reads ${year}-01 to ${year}-12; ${range.from} to ${range.to} was read.`);
+      }
+      // `ledgersFor`'s three, by its rules: the year's latest, the latest through last month — none in January — and
+      // the month's own APE where it is held.
+      const monthNumber = Number(month.slice(5, 7));
+      const previous = monthNumber === 1 ? null : `${year}-${String(monthNumber - 1).padStart(2, '0')}`;
+      const yearToDate = apeYearToDateThrough(forIds, `${year}-12`);
+      const throughLastMonth = previous === null ? null : apeYearToDateThrough(forIds, previous);
+      return new Map(forIds.map((id) => {
+        // A member not read was refused by `apeYearToDateThrough` above.
+        const own = (ownApe.get(id) as Map<string, MetricValue>).get(month);
+        return [id, {
+          yearToDate: yearToDate.get(id) as HeldFigure | null,
+          throughLastMonth: throughLastMonth === null ? null : throughLastMonth.get(id) as HeldFigure | null,
+          thisMonth: own === undefined ? null : heldOf(own, month),
+        }];
+      }));
+    };
+    return { cells, apeYearToDateThrough, standingsFor };
   }
 
   /**
@@ -316,6 +348,8 @@ export interface MonthCellsAndYearToDate {
   cells: Map<string, Map<string, MonthCells>>;
   /** Each member's latest year-to-date figure from `month`'s January to it, as `apeYearToDateThrough`; `null` where none is held. */
   apeYearToDateThrough(membershipIds: readonly string[], month: string): Map<string, HeldFigure | null>;
+  /** Each member's standing at `month`, as `standingsFor` (`ledgersFor`'s standing); the range must hold the month's whole year. */
+  standingsFor(membershipIds: readonly string[], month: string): Map<string, MonthStanding>;
 }
 
 /** A member's month as a campaign reads it (Phase 18.5): each cell as the month table reads it — `null` is nothing held. */

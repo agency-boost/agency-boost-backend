@@ -3,6 +3,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import type { Reader } from '@/common/i18n/reader';
 import {
   metricByKey, isCampaignMetric,
   type CampaignKind, type CampaignPosterColor, type CampaignSubtype, type CampaignWindow, type MetricUnit,
@@ -20,6 +21,7 @@ import { CampaignEvaluation, evaluationInput, isEligible } from './campaign-eval
 import type { CampaignDocument } from './campaign.schema';
 import { CampaignRepository } from './campaign.repository';
 import { campaignOrder } from './campaign-words';
+import { CAMPAIGNS_REFUSALS } from './campaigns.messages';
 
 export type CampaignPhase = 'upcoming' | 'running' | 'ended';
 
@@ -190,7 +192,7 @@ export class CampaignAgentService {
     ]);
     return {
       membershipId: subject.membershipId,
-      campaigns: reading.byMember.get(subject.membershipId)!.map((c) => chasedView(c, timezone)),
+      campaigns: reading.byMember.get(subject.membershipId)!.map((c) => chasedView(c, timezone, ctx.reader)),
     };
   }
 
@@ -204,7 +206,7 @@ export class CampaignAgentService {
     if (phase === 'ended') {
       throw new DomainException(
         ErrorCode.CAMPAIGN_NOT_OPEN,
-        'This campaign has ended, so it can no longer be chased or dropped.',
+        CAMPAIGNS_REFUSALS.CAMPAIGN_NOT_OPEN.ended,
         HttpStatus.CONFLICT,
         { code: row.code },
       );
@@ -213,7 +215,7 @@ export class CampaignAgentService {
     if (on && !eligible) {
       throw new DomainException(
         ErrorCode.CAMPAIGN_NOT_ELIGIBLE,
-        'This campaign is not open to your role.',
+        CAMPAIGNS_REFUSALS.CAMPAIGN_NOT_ELIGIBLE.notYourRole,
         HttpStatus.FORBIDDEN,
         { code: row.code },
       );
@@ -272,7 +274,7 @@ export class CampaignAgentService {
       phase,
       startsAt: row.startsAt.toISOString(),
       endsAt: row.endsAt ? row.endsAt.toISOString() : null,
-      duration: durationWords({ window: row.window, startsAt: row.startsAt, endsAt: row.endsAt }, timezone),
+      duration: durationWords({ window: row.window, startsAt: row.startsAt, endsAt: row.endsAt }, timezone, ctx.reader),
       poster: posterOf(row),
       blurb: row.blurb,
       reward: row.reward,
@@ -300,15 +302,16 @@ function posterOf(row: { poster: { emoji: string; color: CampaignPosterColor } }
   return { emoji: row.poster.emoji, color: row.poster.color };
 }
 
-function chasedView(c: ChasedCampaign, timezone: string): ChasedCampaignView {
+/** A chased campaign as its row draws it, its words for `reader` (P18.98-T5 AC-4). */
+function chasedView(c: ChasedCampaign, timezone: string, reader: Reader): ChasedCampaignView {
   return {
     code: c.code,
     title: c.title,
     kind: c.kind,
     subtype: c.subtype,
     phase: c.phase,
-    duration: durationWords({ window: c.window, startsAt: c.startsAt, endsAt: c.endsAt }, timezone),
-    runs: runsWords({ window: c.window, startsAt: c.startsAt, endsAt: c.endsAt }, timezone),
+    duration: durationWords({ window: c.window, startsAt: c.startsAt, endsAt: c.endsAt }, timezone, reader),
+    runs: runsWords({ window: c.window, startsAt: c.startsAt, endsAt: c.endsAt }, timezone, reader),
     poster: c.poster,
   };
 }

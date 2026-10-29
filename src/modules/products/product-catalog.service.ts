@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { NotFoundException } from '@/common/errors/domain.exception';
+import { render } from '@/common/i18n/sentence';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import {
   ASSET_LIMITS, PRODUCT_AGE_BAND_LABELS, PRODUCT_BUDGET_BAND_LABELS, PRODUCT_CATEGORY_LABELS,
@@ -221,7 +222,8 @@ export class ProductCatalogService {
       bestFit: product.bestFor,
       ageBands: product.eligibleAgeBands.map((band) => PRODUCT_AGE_BAND_LABELS[band] ?? String(band)),
       budgetBands: product.eligibleBudgetBands.map((band) => PRODUCT_BUDGET_BAND_LABELS[band] ?? String(band)),
-      runOffNote: product.lifecycle === 'closed_to_new_business' ? PRODUCT_RUN_OFF_NOTE : null,
+      // Written for the reader (P18.98-T5 AC-4): the drawer's note in their language.
+      runOffNote: product.lifecycle === 'closed_to_new_business' ? render(PRODUCT_RUN_OFF_NOTE, ctx.reader) : null,
       successorCode: item.successorCode,
       // One schedule per product, every agent's (OD-135), so any scope of the grant reads it.
       ...(scopeFor(ctx, 'commission_rates:read') !== null

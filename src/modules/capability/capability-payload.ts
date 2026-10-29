@@ -1,6 +1,10 @@
+import type { FieldSentence } from '@/common/validation/fields';
 import {
   SEED_CAPABILITY_GRIDS, SEED_CAPABILITY_MILESTONES, SEED_CAPABILITY_STAGES,
 } from '@/domain/constants';
+import { CAPABILITY_REFUSALS, type CapabilityPlace } from './capability.messages';
+
+const SAY = CAPABILITY_REFUSALS.VALIDATION_FAILED;
 
 /** A `capability_ladder` payload: the three lists, without status or ids of the document itself. */
 export interface CapabilityLadderPayload {
@@ -34,20 +38,20 @@ export function defaultCapabilityLadder(): CapabilityLadderPayload {
 }
 
 /**
- * What would make a `capability_ladder` payload produce a broken office — one sentence each,
- * empty when there is nothing (P5-T8 AC-5).
+ * What would make a `capability_ladder` payload produce a broken office — one sentence each, in both languages
+ * (P18.98-T5 AC-3), empty when there is nothing (P5-T8 AC-5).
  *
  * **Today a payload of any shape publishes.** A catalog with no stages, or two items sharing a
  * code, or a stage requiring a milestone nobody defined, reaches every office created afterwards
  * and nothing says so until a leader opens an assessment and finds it cannot be scored.
  */
-export function capabilityLadderProblems(payload: unknown): string[] {
-  const problems: string[] = [];
+export function capabilityLadderProblems(payload: unknown): FieldSentence[] {
+  const problems: FieldSentence[] = [];
   const source = (payload ?? {}) as Record<string, unknown>;
 
   const list = (key: 'stages' | 'milestones' | 'grids'): Record<string, unknown>[] => {
     if (Array.isArray(source[key])) return source[key] as Record<string, unknown>[];
-    problems.push(`${key} must be a list.`);
+    problems.push(SAY.notAList({ key }));
     return [];
   };
 
@@ -56,69 +60,66 @@ export function capabilityLadderProblems(payload: unknown): string[] {
   const grids = list('grids');
 
   if (stages.length === 0) {
-    problems.push('A capability catalog with no stages is a ladder nobody can be on.');
+    problems.push(SAY.noStages);
   }
   if (milestones.length === 0) {
-    problems.push('A capability catalog with no milestones can never place anybody on a stage.');
+    problems.push(SAY.noMilestones);
   }
 
   const seen = new Set<string>();
-  const readCode = (row: Record<string, unknown>, where: string): string | null => {
+  const readCode = (row: Record<string, unknown>, place: CapabilityPlace): string | null => {
     const code = String(row.code ?? '').trim().toUpperCase();
     if (!code) {
-      problems.push(`${where} has no code. Every item carries one, so a rename never moves a tick.`);
+      problems.push(SAY.noCode({ place }));
       return null;
     }
     if (seen.has(code)) {
       // Across the whole catalog: a tick names a code, not a code within a list.
-      problems.push(`The code ${code} is used twice. A tick names a code, so two would be one tick.`);
+      problems.push(SAY.codeTwice({ code }));
     }
     seen.add(code);
-    if (!String(row.label ?? '').trim()) problems.push(`${where} has no label.`);
+    if (!String(row.label ?? '').trim()) problems.push(SAY.noLabel({ place }));
     return code;
   };
 
   const milestoneCodes = new Set<string>();
   milestones.forEach((m, i) => {
-    const code = readCode(m, `Milestone ${i + 1}`);
+    const code = readCode(m, { part: 'milestone', n: i + 1 });
     if (code) milestoneCodes.add(code);
   });
 
   const stageOrders = new Set<number>();
   stages.forEach((s, i) => {
-    readCode(s, `Stage ${i + 1}`);
+    readCode(s, { part: 'stage', n: i + 1 });
     const order = Number(s.stageOrder);
     if (!Number.isInteger(order) || order < 1) {
-      problems.push(`Stage ${i + 1} needs a stageOrder of 1 or more — it is how senior the stage is.`);
+      problems.push(SAY.stageOrderMin({ stage: i + 1 }));
     } else if (stageOrders.has(order)) {
       // Two stages at one rank make "the highest reached" ambiguous.
-      problems.push(`Two stages share stageOrder ${order}, so which one somebody reached is undecidable.`);
+      problems.push(SAY.stageOrderShared({ order }));
     } else {
       stageOrders.add(order);
     }
 
     const required = Array.isArray(s.requiredMilestoneCodes) ? s.requiredMilestoneCodes : [];
     if (required.length === 0) {
-      problems.push(`Stage ${i + 1} requires no milestone, so everybody is already on it.`);
+      problems.push(SAY.stageNoMilestone({ stage: i + 1 }));
     }
     for (const raw of required) {
       const code = String(raw).trim().toUpperCase();
       if (!milestoneCodes.has(code)) {
-        problems.push(
-          `Stage ${i + 1} requires ${code}, which no milestone in this catalog is — nobody could `
-          + 'ever reach it.',
-        );
+        problems.push(SAY.stageUnknownMilestone({ stage: i + 1, code }));
       }
     }
   });
 
   grids.forEach((g, i) => {
-    readCode(g, `Grid ${i + 1}`);
+    readCode(g, { part: 'grid', n: i + 1 });
     const items = Array.isArray(g.items) ? (g.items as Record<string, unknown>[]) : [];
     if (items.length === 0) {
-      problems.push(`Grid ${i + 1} has no items, so there is nothing to assess in it.`);
+      problems.push(SAY.gridNoItems({ grid: i + 1 }));
     }
-    items.forEach((item, j) => readCode(item, `Grid ${i + 1}, item ${j + 1}`));
+    items.forEach((item, j) => readCode(item, { part: 'item', grid: i + 1, n: j + 1 }));
   });
 
   return problems;

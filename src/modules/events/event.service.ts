@@ -1,7 +1,7 @@
-import { BadRequestException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
+import { DomainException, InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { localDayOf } from '@/common/time/local-day';
 import {
@@ -18,6 +18,9 @@ import {
 import { refuseWith } from '@/common/validation/fields';
 import { checkEvent, checkEventType, type CheckedEvent } from './event-input';
 import { eventPhase, hasEnded } from './event-phase';
+import { EVENTS_REFUSALS } from './events.messages';
+
+const SAY = EVENTS_REFUSALS.VALIDATION_FAILED;
 
 export interface EventTypeView {
   id: string;
@@ -100,7 +103,7 @@ export class EventService {
   async createType(ctx: RequestContext, body: unknown): Promise<EventTypeView> {
     const input = checkEventType(body);
     if (await this.types.exists(ctx, { code: input.code })) {
-      throw new BadRequestException(`This office already has an event type with the code ${input.code}.`);
+      throw new InvalidRequestException(SAY.typeCodeTaken({ code: input.code! }));
     }
     const last = await this.types.find(ctx, {}, { sort: { displayOrder: -1 }, limit: 1 });
     const created = await this.types.create(ctx, {
@@ -151,7 +154,7 @@ export class EventService {
     await this.requireActiveType(ctx, input.typeCode!);
     await this.requireInvitees(ctx, input);
     if (await this.events.exists(ctx, { code: input.code })) {
-      throw new BadRequestException(`This office already has an event with the code ${input.code}.`);
+      throw new InvalidRequestException(SAY.eventCodeTaken({ code: input.code! }));
     }
 
     const created = await this.events.create(ctx, { ...input, version: 1, status: 'active' } as never);
@@ -172,7 +175,7 @@ export class EventService {
     if (!current) throw new NotFoundException('Event');
     const startsAt = input.startsAt ?? current.startsAt;
     const endsAt = input.endsAt ?? current.endsAt;
-    if (endsAt.getTime() <= startsAt.getTime()) refuseWith(['endsAt must be after startsAt.']);
+    if (endsAt.getTime() <= startsAt.getTime()) refuseWith([SAY.endsAfterStarts]);
     if (input.typeCode) await this.requireActiveType(ctx, input.typeCode);
     if (input.audience) await this.requireInvitees(ctx, input as CheckedEvent, current.audience);
     await this.refuseReshapingAnswered(ctx, current, { startsAt, endsAt, audience: input.audience });
@@ -264,8 +267,7 @@ export class EventService {
     if (answered) {
       throw new DomainException(
         ErrorCode.EVENT_HAS_RESPONSES,
-        'People have already answered this event, so its start, its audience and an end in the future cannot change. '
-          + 'Add a new event instead.',
+        EVENTS_REFUSALS.EVENT_HAS_RESPONSES.answered,
         HttpStatus.CONFLICT,
         {
           // Which field the screen puts the refusal under (FE-events): the audience when it changed, else the dates.
@@ -278,12 +280,8 @@ export class EventService {
 
   private async requireActiveType(ctx: RequestContext, code: string): Promise<void> {
     const type = await this.types.findOne(ctx, { code });
-    if (!type) throw new BadRequestException(`${code} is not an event type in this office.`);
-    if (type.status === 'archived') {
-      throw new BadRequestException(
-        `${code} is archived, so no new event may be filed under it. Restore it first.`,
-      );
-    }
+    if (!type) throw new InvalidRequestException(SAY.notAType({ code }));
+    if (type.status === 'archived') throw new InvalidRequestException(SAY.typeArchived({ code }));
   }
 
   /**
@@ -298,10 +296,7 @@ export class EventService {
     const { scope, inviteeMembershipIds: chosen } = input.audience;
     if (!SELECT_AUDIENCE_SCOPES.includes(scope)) return;
     if (chosen.length === 0) {
-      throw new BadRequestException(
-        'A "select" audience needs at least one person. Choose everybody instead if that is what '
-        + 'you mean.',
-      );
+      throw new InvalidRequestException(SAY.selectNeedsSomebody);
     }
     // *The exit review:* only the people this write **adds** are checked. Somebody already on the event under the
     // same scope stays — they were checked when they were added, and a past event keeps the people it was for even
@@ -327,10 +322,7 @@ export class EventService {
       )).map((m) => m.leaderId));
       const notLeading = found.filter((m) => !leading.has(String(m._id)));
       if (notLeading.length > 0) {
-        throw new BadRequestException(
-          `${notLeading.length} of the people you chose lead nobody, so they are not leaders for `
-          + 'this purpose. Being an AB or an AAB is a rung; leading is having somebody under you.',
-        );
+        throw new InvalidRequestException(SAY.notLeaders({ count: notLeading.length }));
       }
     }
   }

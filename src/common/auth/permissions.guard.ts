@@ -5,6 +5,7 @@ import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { can, isOwnerReserved, Permission } from '@/modules/rbac/permissions';
 import { ALLOWED_WHILE_READ_ONLY, REFUSED_IN_SUPPORT_SESSION, REQUIRED_PERMISSION } from './auth.decorators';
+import { AUTH_GUARD_REFUSALS } from './auth.messages';
 
 /**
  * Methods that change nothing. Everything else is a write — including a request that
@@ -41,12 +42,7 @@ export class PermissionsGuard implements CanActivate {
       execution.getHandler(),
       execution.getClass(),
     ])) {
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        'A support session cannot change anybody\'s own account: their profile, their password or where '
-          + 'they are signed in. Only they can.',
-        HttpStatus.FORBIDDEN,
-      );
+      throw new DomainException(ErrorCode.PERM_DENIED, AUTH_GUARD_REFUSALS.PERM_DENIED.ownAccount, HttpStatus.FORBIDDEN);
     }
 
     /*
@@ -76,11 +72,8 @@ export class PermissionsGuard implements CanActivate {
         throw new DomainException(
           ErrorCode.PERM_DENIED,
           ctx.impersonationPurpose === 'setup'
-            ? 'This setup session can change the office\'s settings, import people and upload production '
-              + 'files, and nothing else. Ask the office to make this change, or request write access from '
-              + 'a second Super Admin.'
-            : 'This is a read-only support session. Ask the office to make the change, or '
-              + 'request write access from a second Super Admin.',
+            ? AUTH_GUARD_REFUSALS.PERM_DENIED.setupScope
+            : AUTH_GUARD_REFUSALS.PERM_DENIED.readOnly,
           HttpStatus.FORBIDDEN,
           required ? { permission: required } : {},
         );
@@ -96,9 +89,7 @@ export class PermissionsGuard implements CanActivate {
     const ownerReserved = ctx?.kpmId != null && isOwnerReserved(required);
     throw new DomainException(
       ownerReserved ? ErrorCode.PERM_OWNER_ONLY : ErrorCode.PERM_DENIED,
-      ownerReserved
-        ? 'Only this office’s Owner can do that.'
-        : 'You do not have permission to perform this action.',
+      ownerReserved ? AUTH_GUARD_REFUSALS.PERM_OWNER_ONLY.ownerOnly : AUTH_GUARD_REFUSALS.PERM_DENIED.noPermission,
       HttpStatus.FORBIDDEN,
       { permission: required },
     );

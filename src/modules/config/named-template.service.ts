@@ -1,10 +1,13 @@
-import { BadRequestException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
+import {
+  DomainException, InvalidRequestException, NotFoundException, PermissionDeniedException,
+} from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import type { Sentence } from '@/common/i18n/sentence';
 import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
@@ -17,6 +20,7 @@ import type { TemplateKinds } from './office-template';
 import {
   OFFICE_TEMPLATE_KINDS, platformDefaultPayload, type OfficeTemplateKind,
 } from './template-defaults';
+import { TEMPLATE_REFUSALS } from './template.messages';
 
 /**
  * How a new template starts (ADR-0115 §5): empty, the AgencyBoost defaults, or **a copy of one of the
@@ -195,9 +199,7 @@ export class NamedTemplateService {
     if (renaming && template.status === 'active') await this.refuseNameTaken(companyId, name, templateId);
     if (input.isDefault === false && template.isDefault) {
       // A company always has exactly one default: it moves by making another the default.
-      throw this.isDefault(
-        template.name, 'cannot stop being the default on its own. Make another template the default instead.',
-      );
+      throw this.isDefault(TEMPLATE_REFUSALS.TEMPLATE_IS_DEFAULT.cannotStopBeingDefault({ name: template.name }));
     }
     const makingDefault = input.isDefault === true && !template.isDefault;
     if (makingDefault && template.status === 'archived') throw this.archivedCannotBeDefault();
@@ -422,7 +424,7 @@ export class NamedTemplateService {
 
   private cleanName(raw: string): string {
     const name = raw.trim().replace(/\s+/g, ' ');
-    if (!name) throw new BadRequestException('A template needs a name.');
+    if (!name) throw new InvalidRequestException(TEMPLATE_REFUSALS.VALIDATION_FAILED.templateNeedsName);
     return name;
   }
 
@@ -439,14 +441,7 @@ export class NamedTemplateService {
 
   /** `company_template:write`, or `403 PERM_DENIED` — before anything is read or written. */
   private require(ctx: RequestContext): void {
-    if (!can(ctx, 'company_template:write')) {
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        'You do not have permission to perform this action.',
-        HttpStatus.FORBIDDEN,
-        { permission: 'company_template:write' },
-      );
-    }
+    if (!can(ctx, 'company_template:write')) throw new PermissionDeniedException('company_template:write');
   }
 
   /**
@@ -509,13 +504,11 @@ export class NamedTemplateService {
   }
 
   private archivingTheDefault(name: string): DomainException {
-    return this.isDefault(
-      name, 'cannot be archived. Make another template the default first, then archive this one.',
-    );
+    return this.isDefault(TEMPLATE_REFUSALS.TEMPLATE_IS_DEFAULT.cannotArchive({ name }));
   }
 
-  private archivedCannotBeDefault(): BadRequestException {
-    return new BadRequestException('An archived template cannot be the default. Use an active one.');
+  private archivedCannotBeDefault(): InvalidRequestException {
+    return new InvalidRequestException(TEMPLATE_REFUSALS.VALIDATION_FAILED.archivedCannotBeDefault);
   }
 
   /**
@@ -526,25 +519,20 @@ export class NamedTemplateService {
   private defaultMoved(): DomainException {
     return new DomainException(
       ErrorCode.VERSION_CONFLICT,
-      'This company’s default template changed while this was being saved, and nothing was changed. '
-        + 'Reload the templates and try again.',
+      TEMPLATE_REFUSALS.VERSION_CONFLICT.defaultMoved,
       HttpStatus.CONFLICT,
     );
   }
 
   /** `TEMPLATE_IS_DEFAULT` (409): archiving the default, or un-defaulting it without a successor. */
-  private isDefault(name: string, what: string): DomainException {
-    return new DomainException(
-      ErrorCode.TEMPLATE_IS_DEFAULT,
-      `${name} is this company’s default template, so it ${what}`,
-      HttpStatus.CONFLICT,
-    );
+  private isDefault(why: Sentence<'TEMPLATE_IS_DEFAULT'>): DomainException {
+    return new DomainException(ErrorCode.TEMPLATE_IS_DEFAULT, why, HttpStatus.CONFLICT);
   }
 
   private nameTaken(name: string): DomainException {
     return new DomainException(
       ErrorCode.TEMPLATE_NAME_TAKEN,
-      `This company already has a template called ${name}. Choose another name.`,
+      TEMPLATE_REFUSALS.TEMPLATE_NAME_TAKEN.taken({ name }),
       HttpStatus.CONFLICT,
       { name },
     );

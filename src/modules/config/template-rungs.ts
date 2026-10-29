@@ -2,6 +2,7 @@ import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { rungCodesOf, type TemplateKinds } from './office-template';
+import { TEMPLATE_REFUSALS } from './template.messages';
 
 /**
  * **Every rung the kinds name, on the destination's ladder** (ADR-0115 §6): a ratio's or an activity section's
@@ -20,9 +21,7 @@ export async function refuseUnknownRungs(kinds: TemplateKinds, ladder: () => Pro
   if (codes.length === 0) return;
   throw new DomainException(
     ErrorCode.TEMPLATE_RUNG_UNKNOWN,
-    `This company’s role ladder has no ${codes.join(', ')}, and the settings being copied show `
-      + `ratios or activity sections to ${codes.length === 1 ? 'that role' : 'those roles'}. Add `
-      + `${codes.length === 1 ? 'it' : 'them'} to the company’s ladder first, or copy other settings.`,
+    TEMPLATE_REFUSALS.TEMPLATE_RUNG_UNKNOWN.notOnTheLadder({ codes }),
     HttpStatus.CONFLICT,
     { codes },
   );

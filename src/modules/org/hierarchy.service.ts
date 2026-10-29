@@ -19,6 +19,7 @@ import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { generateLeaderCode } from './leader-code';
 import { withLeaderSeat, type ApprovedPastLimit, type LeaderSeatOptions } from './leader-limit';
 import { DirectCounts, HierarchyRole, MembershipDocument } from './membership.schema';
+import { ORG_REFUSALS } from './org.messages';
 import type { WorkStatus } from '@/domain/constants';
 
 export interface CreateMembershipInput {
@@ -128,7 +129,7 @@ export class HierarchyService {
     }
     throw new DomainException(
       ErrorCode.INTERNAL_ERROR,
-      'Could not allocate a leader code.',
+      ORG_REFUSALS.INTERNAL_ERROR.leaderCode,
       HttpStatus.INTERNAL_SERVER_ERROR,
     );
   }
@@ -237,7 +238,7 @@ export class HierarchyService {
     if (!kpmId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
-        'You are not in an office.',
+        ORG_REFUSALS.TENANT_NO_MEMBERSHIP.notInOffice,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -319,6 +320,7 @@ export class HierarchyService {
   async joining(ctx: RequestContext, given: JoiningInput = {}): Promise<JoiningFields> {
     const today = await this.officeToday(ctx);
     if (given.joinDate !== undefined) {
+      // A sentence in both languages (`joining.messages.ts`), refused in the shared envelope (P18.98-T5 AC-3).
       const violation = joinDateViolation(given.joinDate, today);
       if (violation) refuseWith([violation]);
     }
@@ -425,7 +427,7 @@ export class HierarchyService {
     if (!kpmId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
-        'You are not in an office.',
+        ORG_REFUSALS.TENANT_NO_MEMBERSHIP.notInOffice,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -508,7 +510,7 @@ export class HierarchyService {
     if (!leader || leader.status === 'removed') {
       throw new DomainException(
         ErrorCode.ORG_LEADER_NOT_IN_KPM,
-        'That leader is not a member of this office.',
+        ORG_REFUSALS.ORG_LEADER_NOT_IN_KPM.notAMember,
         HttpStatus.UNPROCESSABLE_ENTITY,
         { leaderId },
       );
@@ -576,7 +578,7 @@ export class HierarchyService {
     if (wouldCycle) {
       throw new DomainException(
         ErrorCode.ORG_CYCLE_DETECTED,
-        'That would make this member their own leader.',
+        ORG_REFUSALS.ORG_CYCLE_DETECTED.ownLeader,
         HttpStatus.CONFLICT,
         { membershipId, leaderId: newLeaderId },
       );

@@ -167,6 +167,46 @@ describe('P18.8-T7 — the owner’s own order, over HTTP', () => {
         details: { violations: ['1 of your open leads is missing from ids'] },
       });
     });
+
+    it('P18.98-T5 AC-7 says what is wrong with the list in Indonesian: one form for one and many, *leads* kept English', async () => {
+      const [first] = await threeOf('RINA');
+      const budis = await leadOf('BUDI', 'BUDI own');
+      as('RINA');
+
+      const sent = [first, first, budis];
+      const res = await order(...sent).set('Accept-Language', 'id').expect(400);
+      expect(res.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'Kirim semua lead Anda yang masih terbuka, masing-masing sekali, dalam urutan yang Anda inginkan. '
+          + 'Daftar Anda mungkin sudah berubah sejak Anda membukanya: muat ulang, lalu coba lagi.',
+        details: { violations: [
+          '1 dari id yang dikirim bukan lead Anda yang masih terbuka',
+          'ids menyebut satu lead lebih dari sekali',
+          '2 leads Anda yang masih terbuka tidak ada di ids',
+        ] },
+      });
+
+      // In English, as before: the verb agrees with the count.
+      const english = await order(...sent).expect(400);
+      expect(english.body.error.details.violations).toEqual([
+        '1 of the ids sent is not one of your open leads',
+        'ids names a lead more than once',
+        '2 of your open leads are missing from ids',
+      ]);
+
+      // Two strangers, and nothing else wrong: *are* in English, the one form in Indonesian.
+      const rinaFourth = await leadOf('RINA', 'RINA fourth');
+      const budiSecond = await leadOf('BUDI', 'BUDI second');
+      as('RINA');
+      const rinas = (await db().collection('leads').find({ ownerMembershipId: office.id.RINA }).toArray()).map((l) => String(l._id));
+      expect(rinas).toHaveLength(4);
+      expect(rinas).toContain(rinaFourth);
+      const twoStrangers = [...rinas, budis, budiSecond];
+      expect((await order(...twoStrangers).expect(400)).body.error.details.violations)
+        .toEqual(['2 of the ids sent are not one of your open leads']);
+      expect((await order(...twoStrangers).set('Accept-Language', 'id').expect(400)).body.error.details.violations)
+        .toEqual(['2 dari id yang dikirim bukan lead Anda yang masih terbuka']);
+    });
   });
 
   describe('what the pipe refuses before the service is asked', () => {

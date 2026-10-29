@@ -1,13 +1,18 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
 import { SEED_PRODUCTS, type ProductLifecycle } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { plainText } from '@/common/validation/plain-text';
 import { Product, ProductDocument } from './product.schema';
+import { PRODUCTS_REFUSALS } from './products.messages';
+
+/** The company's catalogue, refused in both languages (P18.98-T5 AC-3). */
+const SAY = PRODUCTS_REFUSALS.VALIDATION_FAILED;
 
 export interface CommissionYearView {
   year: number;
@@ -110,7 +115,7 @@ export class ProductService {
     ctx: RequestContext, companyId: string, productId: string, input: Record<string, unknown>,
   ): Promise<ProductView> {
     const set = this.writable(input);
-    if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
+    if (Object.keys(set).length === 0) throw new InvalidRequestException(SAY.nothingToChange);
 
     /*
      * **The row as it was, taken by the write itself** (the Phase 14 exit review, N3): the audit row
@@ -149,9 +154,7 @@ export class ProductService {
     if (replacedByProductId) {
       const successor = await this.of(companyId).findOne({ _id: replacedByProductId }).exec();
       if (!successor) {
-        throw new BadRequestException(
-          'The product you named as its replacement is not on this company’s shelf.',
-        );
+        throw new InvalidRequestException(SAY.replacementNotOnShelf);
       }
     }
 
@@ -184,9 +187,7 @@ export class ProductService {
     const wanted = new Set(ids);
     if (ids.length !== rows.length || wanted.size !== ids.length
       || ids.some((id) => !known.has(id))) {
-      throw new BadRequestException(
-        `Send every product of this company, once each — ${rows.length} of them.`,
-      );
+      throw new InvalidRequestException(SAY.sendEveryProduct({ count: rows.length }));
     }
 
     await Promise.all(ids.map((id, index) => this.products.updateOne(
@@ -303,9 +304,7 @@ export class ProductService {
     // Counting withdrawn rows: a retired code that came back as something else would change the
     // meaning of every policy and every attack plan still pointing at it.
     if (await this.products.exists({ companyId, code, deletedAt: null })) {
-      throw new BadRequestException(
-        `This company already has a product with the code ${code}. A code is never reused.`,
-      );
+      throw new InvalidRequestException(SAY.codeTaken({ code }));
     }
   }
 
@@ -357,10 +356,7 @@ export class ProductService {
       .map((row) => ({ year: row.year, rate: row.rate }))
       .sort((a, b) => a.year - b.year);
     if (sorted.some((row, index) => row.year !== index + 1)) {
-      throw new BadRequestException(
-        'A commission schedule is a rate for each policy year from year 1, with no year missing and '
-        + `none twice. This one has year ${sorted.map((row) => row.year).join(', ')}.`,
-      );
+      throw new InvalidRequestException(SAY.scheduleGaps({ years: sorted.map((row) => row.year) }));
     }
     return sorted;
   }

@@ -4,8 +4,15 @@ import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, givenDefaultTemplate, provisionFrom } from '../../../test/config-module';
 import { SUPER_ADMIN } from '../../../test/http-permissions';
 import { defaultBinding } from './activity-binding';
-import { templateKindsFromOffice } from './office-template';
+import { templateKindsFromOffice as kindsWithSentences, type OfficeSettings } from './office-template';
+import { english } from '../../../test/i18n';
 import { platformDefaultPayload } from './template-defaults';
+
+/** The function, each dropped reason read as the API's English writes it (P18.98-T5 AC-4: a sentence in both languages). */
+const templateKindsFromOffice = (settings: OfficeSettings) => {
+  const made = kindsWithSentences(settings);
+  return { ...made, dropped: made.dropped.map((d) => ({ ...d, reason: english(d.reason) })) };
+};
 
 const NOW = new Date('2026-10-26T03:00:00Z');
 const COMPANY = '66f0000000000000000000c1';

@@ -5,6 +5,8 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { readerOf, type Reader } from '@/common/i18n/reader';
+import { render } from '@/common/i18n/sentence';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
@@ -18,6 +20,8 @@ import { JoinRequestRepository } from './org.repositories';
 import { leaderCodeUrl } from './leader-code';
 import { MembershipRepository } from './membership.repository';
 import { MembershipDocument } from './membership.schema';
+import { ONBOARDING_MESSAGES, ONBOARDING_REFUSALS } from './onboarding.messages';
+import { ORG_MESSAGES } from './org.messages';
 
 /** A leader's own code, in the three forms the prototype shows it. */
 export interface MyLeaderCode {
@@ -93,8 +97,7 @@ export class LeaderCodeService {
     const refuse = () =>
       new DomainException(
         ErrorCode.ORG_INVITE_EXPIRED,
-        'That code is not valid. It may be mistyped, or the person who gave it to you may '
-          + 'have left — ask them to check it.',
+        ONBOARDING_REFUSALS.ORG_INVITE_EXPIRED.codeNotValid,
         HttpStatus.GONE,
       );
 
@@ -117,16 +120,18 @@ export class LeaderCodeService {
    * **Authenticated**, deliberately. A code space of 32⁶ and a preview that names an
    * office and a real person is a directory anybody could walk; requiring a session means
    * a prober needs an account first, and an account is auditable. Settled 2026-09-09.
+   *
+   * `reader`: the request's, for the words written where a name is missing (P18.98-T5 AC-4).
    */
-  async preview(code: string): Promise<InvitePreview> {
+  async preview(code: string, reader: Reader = readerOf()): Promise<InvitePreview> {
     const { leader, kpm } = await this.resolve(code);
     const company = await this.companies.findOne({ _id: kpm.companyId }).exec();
     const leaderUser = await this.users.findOne({ _id: leader.userId }).exec();
 
     return {
       code: leader.leaderCode,
-      kpmLabel: `${company?.name ?? 'Unknown'} — KPM ${kpm.code} · ${kpm.branchName}`,
-      leaderName: leaderUser?.fullName ?? 'a leader',
+      kpmLabel: `${company?.name ?? render(ORG_MESSAGES.unknownName, reader)} — KPM ${kpm.code} · ${kpm.branchName}`,
+      leaderName: leaderUser?.fullName ?? render(ONBOARDING_MESSAGES.aLeader, reader),
     };
   }
 
@@ -141,7 +146,7 @@ export class LeaderCodeService {
     if (ctx.membership) {
       throw new DomainException(
         ErrorCode.ORG_AGENT_ALREADY_TAGGED,
-        'You are already registered to an office.',
+        ONBOARDING_REFUSALS.ORG_AGENT_ALREADY_TAGGED.alreadyRegistered,
         HttpStatus.CONFLICT,
         { kpmId: ctx.kpmId },
       );
@@ -173,7 +178,8 @@ export class LeaderCodeService {
       kpmId: String(kpm._id),
       templateId: NotificationTemplate.MEMBER_TAGGED_BY_LEADER,
       payload: {
-        joinerName: joiner?.fullName ?? 'Somebody',
+        // No name, no word: the inbox writes its own for a notice with none, in its reader's language (P18.98-T5 AC-4).
+        joinerName: joiner?.fullName ?? null,
         via: 'leader-code',
         code: leader.leaderCode,
       },
@@ -190,6 +196,9 @@ export class LeaderCodeService {
     await startActivation(this.activations, scoped, String(membership._id));
 
     const leaderUser = await this.users.findOne({ _id: leader.userId }).exec();
-    return { kpmId: String(kpm._id), leaderName: leaderUser?.fullName ?? 'your leader' };
+    return {
+      kpmId: String(kpm._id),
+      leaderName: leaderUser?.fullName ?? render(ONBOARDING_MESSAGES.yourLeader, ctx.reader),
+    };
   }
 }

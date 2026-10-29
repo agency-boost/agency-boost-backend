@@ -1,3 +1,4 @@
+import type { Sentence } from '@/common/i18n/sentence';
 import { trainingLinkModuleCode } from '@/modules/activation/activation-input';
 import type { StoredObject } from '@/modules/assets/storage.port';
 import type { TrainingContentPayload, TrainingTaxonomyPayload } from '@/modules/training/training-payload';
@@ -5,6 +6,10 @@ import { withCascadeTypes, type OfficeTemplateKind } from './template-defaults';
 import {
   BINDING_ROLE_LABEL, BINDING_ROLES, bindingOfPayload, defaultBinding, type CascadeBinding,
 } from './activity-binding';
+import { TEMPLATE_MESSAGES } from './template.messages';
+
+/** Why a setting was left out, in both languages (P18.98-T5 AC-4): written for the person who saved. */
+const SAY = TEMPLATE_MESSAGES;
 
 /**
  * **An office's published settings, as a template's kinds** (P13.2-T7, ADR-0115 §5, §6).
@@ -121,18 +126,20 @@ export interface DroppedSetting {
   kind: OfficeTemplateKind;
   /** The ratio, stage, grid or checklist item concerned; `null` when the whole kind is left out. */
   code: string | null;
-  /** One sentence, naming the codes, as the office page shows it. */
+  /**
+   * One sentence, naming the codes, in both languages (P18.98-T5 AC-4): written for the person who saved where the
+   * answer and the audit row are made (`TemplateCopyService.saveOffice`), as the office page shows it.
+   */
+  reason: Sentence<null>;
+}
+
+/** A dropped setting as the answer and the audit row carry it: its reason written for its reader. */
+export interface DroppedSettingView extends Omit<DroppedSetting, 'reason'> {
   reason: string;
 }
 
 const live = (row: { status?: Status }) => (row.status ?? 'active') === 'active';
 const byOrder = <T extends { displayOrder: number }>(a: T, b: T) => a.displayOrder - b.displayOrder;
-const list = (codes: readonly string[]) => codes.join(', ');
-const isAre = (codes: readonly string[]) => (codes.length === 1 ? 'which is' : 'which are');
-/** `OLD_VISIT, which is not an active activity type` — or, for several, `…, which are not active activity types`. */
-const notActiveTypes = (codes: readonly string[]) => (codes.length === 1
-  ? `${codes[0]}, which is not an active activity type`
-  : `${list(codes)}, which are not active activity types`);
 
 /**
  * **What an office's agents read, as template kinds** (ADR-0115 §5).
@@ -246,9 +253,7 @@ function bindingFrom(settings: OfficeSettings, taxonomy: Record<string, unknown>
     dropped.push({
       kind: 'activity_taxonomy',
       code: null,
-      reason: `The activity binding was left out: ${empty.map((role) => BINDING_ROLE_LABEL[role]).join(', ')} `
-        + `would count ${gone.length ? `only ${notActiveTypes(gone)}` : 'nothing'} in this office. Offices made from the template count the `
-        + 'default binding.',
+      reason: SAY.bindingLeftOut({ roles: empty.map((role) => BINDING_ROLE_LABEL[role]), gone }),
     });
     return null;
   }
@@ -256,7 +261,7 @@ function bindingFrom(settings: OfficeSettings, taxonomy: Record<string, unknown>
     dropped.push({
       kind: 'activity_taxonomy',
       code: null,
-      reason: `The activity binding no longer counts ${notActiveTypes(gone)} in this office.`,
+      reason: SAY.bindingNoLonger({ gone }),
     });
   }
   return kept;
@@ -291,20 +296,15 @@ function ratiosFrom(snapshot: Row, kinds: TemplateKinds, dropped: DroppedSetting
     const bottom = denominator.filter((c) => typeCodes.has(c));
 
     if (gone.length && (top.length === 0 || bottom.length === 0)) {
-      const side = top.length === 0 && bottom.length === 0 ? 'its numerator and its denominator count'
-        : top.length === 0 ? 'its numerator counts' : 'its denominator counts';
-      dropped.push({
-        kind: 'ratio_set',
-        code,
-        reason: `Ratio ${code} was left out: ${side} only ${notActiveTypes(gone)} in this office.`,
-      });
+      const side = top.length === 0 && bottom.length === 0 ? 'both' : top.length === 0 ? 'numerator' : 'denominator';
+      dropped.push({ kind: 'ratio_set', code, reason: SAY.ratioLeftOut({ code, side, gone }) });
       continue;
     }
     if (gone.length) {
       dropped.push({
         kind: 'ratio_set',
         code,
-        reason: `Ratio ${code} no longer counts ${notActiveTypes(gone)} in this office.`,
+        reason: SAY.ratioNoLonger({ code, gone }),
       });
     }
     kept.push({
@@ -345,8 +345,7 @@ function checklistFrom(
           dropped.push({
             kind: 'activation_checklist',
             code: item.code,
-            reason: `Checklist item ${item.code} is kept as a manual item: the training module ${moduleCode} `
-              + 'it linked to is not offered in this office.',
+            reason: SAY.checklistManual({ item: item.code, moduleCode }),
           });
           return { code: item.code, label: item.label, autoLink: null };
         }
@@ -436,8 +435,7 @@ function capabilityFrom(catalog: SnapshotCapability | null, dropped: DroppedSett
       found.push({
         kind: 'capability_ladder',
         code: s.code,
-        reason: `Stage ${s.code} was left out: every milestone it requires (${list(gone)}) is archived in `
-          + 'this office, so an office made from the template would put everybody on it.',
+        reason: SAY.stageLeftOut({ code: s.code, gone }),
       });
       return [];
     }
@@ -445,7 +443,7 @@ function capabilityFrom(catalog: SnapshotCapability | null, dropped: DroppedSett
       found.push({
         kind: 'capability_ladder',
         code: s.code,
-        reason: `Stage ${s.code} no longer requires ${list(gone)}, ${isAre(gone)} archived in this office.`,
+        reason: SAY.stageNoLonger({ code: s.code, gone }),
       });
     }
     return [{ code: s.code, label: s.label, requiredMilestoneCodes: required, stageOrder: s.stageOrder }];
@@ -457,7 +455,7 @@ function capabilityFrom(catalog: SnapshotCapability | null, dropped: DroppedSett
       found.push({
         kind: 'capability_ladder',
         code: g.code,
-        reason: `Grid ${g.code} was left out: every item in it is archived in this office.`,
+        reason: SAY.gridLeftOut({ code: g.code }),
       });
       return [];
     }
@@ -473,9 +471,7 @@ function capabilityFrom(catalog: SnapshotCapability | null, dropped: DroppedSett
     dropped.push(...found, {
       kind: 'capability_ladder',
       code: null,
-      reason: `The capability ladder was left out: it has no active ${stages.length === 0 ? 'stage' : 'milestone'} `
-        + 'left, so it could place nobody. An office made from the template starts with AgencyBoost’s standard '
-        + 'capability ladder instead.',
+      reason: SAY.ladderLeftOut({ missing: stages.length === 0 ? 'stage' : 'milestone' }),
     });
     return null;
   }

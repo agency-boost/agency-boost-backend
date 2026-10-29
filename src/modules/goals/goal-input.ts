@@ -1,5 +1,11 @@
 import { Fields } from '@/common/validation/fields';
+import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
 import { GOAL_MODES, type GoalMode } from './goal.schema';
+import { GOAL_REFUSALS } from './goals.messages';
+
+/** A goal's field sentences, in both languages (P18.98-T5 AC-3): its own, and the shared *… is required.* */
+const SAY = GOAL_REFUSALS.VALIDATION_FAILED;
+const REQUIRED = VALIDATION_REFUSALS.VALIDATION_FAILED.required;
 
 /**
  * What a goal's fields may hold (P8-T1).
@@ -72,9 +78,9 @@ export function checkGoal(body: unknown, opts: { partial?: boolean } = {}): Chec
    */
   const period = raw(body, 'period');
   if (period === undefined) {
-    if (required) f.violations.push('period is required.');
+    if (required) f.violations.push(REQUIRED({ field: 'period' }));
   } else if (typeof period !== 'string' || !PERIOD.test(period)) {
-    f.violations.push('period must be a calendar year, written YYYY.');
+    f.violations.push(SAY.periodShape);
   } else {
     out.period = period;
   }
@@ -91,7 +97,7 @@ export function checkGoal(body: unknown, opts: { partial?: boolean } = {}): Chec
     const value = f.number(field, GOAL_BOUNDS.money, required);
     if (value === undefined) continue;
     if (!Number.isInteger(value)) {
-      f.violations.push(`${field} is IDR sen and must be a whole number.`);
+      f.violations.push(SAY.wholeSen({ field }));
       continue;
     }
     out[field] = value;
@@ -110,11 +116,11 @@ export function checkGoal(body: unknown, opts: { partial?: boolean } = {}): Chec
   for (const field of PERCENT) {
     const value = raw(body, field);
     if (value === undefined) {
-      if (required) f.violations.push(`${field} is required.`);
+      if (required) f.violations.push(REQUIRED({ field }));
       continue;
     }
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-      f.violations.push(`${field} must be a percentage, written as a number like 30 or 12.5.`);
+      f.violations.push(SAY.percentShape({ field }));
       continue;
     }
     out[field] = value;

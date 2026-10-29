@@ -277,6 +277,34 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
       expect(await revision()).toBe(before);
     });
+
+    /*
+     * **The save's refusals in Indonesian** (P18.98-T5 AC-7): the words follow the request's `Accept-Language`, the
+     * office's month in the reader's figures; the code and every detail — the field each names — are the same.
+     */
+    it('P18.98-T5 AC-7 refuses another month, a row with no figure, a person twice and a malformed month, in Indonesian', async () => {
+      as('SARI');
+      const before = await revision();
+      const save = (over: Record<string, unknown>) =>
+        patch({ month: UNIT_MONTH, revision: before, ...over }).set('Accept-Language', 'id').expect(400);
+
+      expect((await save({ month: '2026-08', rows: [{ membershipId: 'x', apeYtdMinor: 1 }] })).body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'Produksi hanya dapat diperbarui di sini untuk Sep 2026, bulan berjalan KPM.',
+        details: { field: 'month', month: UNIT_MONTH },
+      });
+      expect((await save({ rows: [{ membershipId: 'x' }] })).body.error).toMatchObject({
+        message: 'Setiap baris memerlukan angka bulan ini, angka tahun ini, atau keduanya.', details: { field: 'rows[0]' },
+      });
+      expect((await save({ rows: [{ membershipId: 'x', apeYtdMinor: 1 }, { membershipId: 'x', apeMonthlyMinor: 1 }] })).body.error)
+        .toMatchObject({
+          message: 'Setiap orang hanya boleh muncul sekali dalam satu penyimpanan.',
+          details: { field: 'rows[1].membershipId', membershipId: 'x' },
+        });
+      expect((await save({ month: 'September', rows: [{ membershipId: 'x', apeYtdMinor: 1 }] })).body.error.details)
+        .toEqual({ violations: ['month harus dengan format YYYY-MM'] });
+      expect(await revision()).toBe(before);
+    });
   });
 
   /*

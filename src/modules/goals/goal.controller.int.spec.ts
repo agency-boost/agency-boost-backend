@@ -251,6 +251,48 @@ describe('goals over HTTP (P8-T3)', () => {
     });
   });
 
+  /*
+   * **The same refusals in Indonesian** (P18.98-T5 AC-7): the request's `Accept-Language` decides the words. Goal
+   * Settings' own labels — *Closing rate* — stay English in both (glossary §A.4), and a figure is written the reader's
+   * way: *12,5*.
+   */
+  describe('P18.98-T5 AC-7 in Indonesian', () => {
+    it('P18.98-T5 AC-7 refuses a period that has ended in Indonesian, its details unchanged', async () => {
+      const res = await http().put('/goals/2025').set('Accept-Language', 'id').send(plan()).expect(409);
+
+      expect(res.body.error).toMatchObject({
+        code: 'GOAL_PERIOD_LOCKED',
+        message: '2025 sudah berakhir. Rencananya adalah yang disepakati saat itu dan tetap seperti semula; '
+          + 'buat rencana untuk 2026 sebagai gantinya.',
+        details: { period: '2025', currentPeriod: '2026' },
+      });
+    });
+
+    it('P18.98-T5 AC-7 says every assumption that cannot make a plan in Indonesian, one after another', async () => {
+      const res = await http().put(url).set('Accept-Language', 'id')
+        .send(plan({ caseSizeMinor: 0, closingRatePct: 101 })).expect(422);
+
+      const violations = [
+        'Average case size harus di atas nol: itulah nilai satu polis.',
+        'Closing rate harus di atas 0 dan paling tinggi 100 persen.',
+      ];
+      expect(res.body.error).toMatchObject({ code: 'GOAL_INVALID_ASSUMPTION', message: violations.join(' '), details: { violations } });
+    });
+
+    it('P18.98-T5 AC-7 refuses a goal’s own fields in Indonesian, a figure in Indonesian figures', async () => {
+      const res = await http().put(url).set('Accept-Language', 'id')
+        .send(plan({ caseSizeMinor: 1_000.5, commissionRatePct: -1 })).expect(400);
+
+      expect(res.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        details: { violations: [
+          'caseSizeMinor dalam satuan sen IDR dan harus berupa bilangan bulat.',
+          'commissionRatePct harus berupa persentase, ditulis sebagai angka seperti 30 atau 12,5.',
+        ] },
+      });
+    });
+  });
+
   describe('who may do what (§3.6)', () => {
     it.each(EVERY_MEMBER)('lets %s keep their own goal', async (_name, who) => {
       session.current = who;

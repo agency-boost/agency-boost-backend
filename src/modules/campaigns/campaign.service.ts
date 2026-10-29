@@ -16,6 +16,7 @@ import { Kpm } from '@/modules/tenants/kpm.schema';
 import { CampaignDocument, QualificationRule, QualificationRuleDocument } from './campaign.schema';
 import { CampaignRepository } from './campaign.repository';
 import { checkCampaign, checkCampaignShape, type CheckedRequirement } from './campaign-input';
+import { CAMPAIGNS_REFUSALS } from './campaigns.messages';
 
 export interface RequirementView {
   metricKey: string;
@@ -109,9 +110,10 @@ export class CampaignService {
     if (whole.endsAt) whole.endsAt = inclusiveEnd(whole.endsAt, timezone);
     await this.checkShape(ctx, { ...whole, startsAt: whole.startsAt as Date }, 'all', timezone);
     if (await this.campaigns.exists(ctx, { code: input.code })) {
+      const code = input.code!;
       throw new DomainException(
-        ErrorCode.VALIDATION_FAILED, `A campaign with the code ${input.code} already exists. Choose another code.`,
-        HttpStatus.BAD_REQUEST, { field: 'code', violations: [`A campaign with the code ${input.code} already exists.`] },
+        ErrorCode.VALIDATION_FAILED, CAMPAIGNS_REFUSALS.VALIDATION_FAILED.codeTaken({ code }),
+        HttpStatus.BAD_REQUEST, { field: 'code', violations: [CAMPAIGNS_REFUSALS.VALIDATION_FAILED.codeTakenField({ code })] },
       );
     }
     const created = await this.campaigns.create(ctx, {
@@ -334,11 +336,9 @@ export class CampaignService {
     if (scope === 'company') {
       // Company-wide campaigns are deferred beyond v1 (OD-156, ADR-0146): a field this product does not take, so a
       // validation refusal, never a 403 (the review, item 15).
+      const said = CAMPAIGNS_REFUSALS.VALIDATION_FAILED.companyWide;
       throw new DomainException(
-        ErrorCode.VALIDATION_FAILED,
-        'Company-wide campaigns are not available. Every campaign here is your own.',
-        HttpStatus.BAD_REQUEST,
-        { field: 'scope', violations: ['Company-wide campaigns are not available. Every campaign here is your own.'] },
+        ErrorCode.VALIDATION_FAILED, said, HttpStatus.BAD_REQUEST, { field: 'scope', violations: [said] },
       );
     }
   }

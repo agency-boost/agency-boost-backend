@@ -4,8 +4,13 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CODE_MESSAGE, CODE_PATTERN } from '@/common/validation/fields';
+import { CODE_PATTERN } from '@/common/validation/fields';
+import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
+import { field } from '@/common/validation/violations';
 import { ACTIVATION_BOUNDS } from './activation-input';
+
+/** `code: A code is 3–40 characters…` — the shared sentence, naming the field, in both languages (P18.98-T5 AC-3). */
+const CODE_FIELD_MESSAGE = field(VALIDATION_REFUSALS.VALIDATION_FAILED.fieldCodeShape({ field: 'code' }));
 
 /**
  * The bounds are the checker's (ADR-0030) — these decorators exist for the pipe's whitelist and for
@@ -13,7 +18,7 @@ import { ACTIVATION_BOUNDS } from './activation-input';
  */
 export class ActivationItemDraftDto {
   @ApiProperty({ example: 'GOAL_SETTING', description: 'Permanent. A hire\'s progress names it.' })
-  @Matches(CODE_PATTERN, { message: `code: ${CODE_MESSAGE}` })
+  @Matches(CODE_PATTERN, { message: CODE_FIELD_MESSAGE })
   code!: string;
 
   @ApiProperty({ example: 'Goal setting: APE & activity targets' })
@@ -37,7 +42,7 @@ export class ActivationItemDraftDto {
 
 export class ActivationAspectDraftDto {
   @ApiProperty({ example: 'INITIAL_SETUP' })
-  @Matches(CODE_PATTERN, { message: `code: ${CODE_MESSAGE}` })
+  @Matches(CODE_PATTERN, { message: CODE_FIELD_MESSAGE })
   code!: string;
 
   @ApiProperty({ example: '2. Initial Setup' })

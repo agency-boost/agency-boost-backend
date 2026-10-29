@@ -3,6 +3,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
@@ -11,6 +12,7 @@ import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import type { MembershipDocument } from './membership.schema';
 import { MemberDeparture } from './member-departure.port';
+import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
 import { visibleTo } from './reader-visibility';
 import { RoleChangeService, TeamMember } from './role-change.service';
 
@@ -21,9 +23,11 @@ export type SubtreeDisposition =
 
 /**
  * The confirmation word. Trimmed and upper-cased before comparison, exactly as the
- * prototype does it (`Overall.html:9089`).
+ * prototype does it (`Overall.html:9089`). The same word in both languages: it is compared as typed.
  */
 export const REMOVAL_CONFIRMATION = 'REMOVE';
+
+const SAY = ORG_REFUSALS;
 
 /**
  * Removing somebody from the office.
@@ -76,7 +80,7 @@ export class RemovalService {
     if (!ctx.kpmId || !ctx.membershipId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
-        'You are not in an office.',
+        SAY.TENANT_NO_MEMBERSHIP.notInOffice,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -87,7 +91,7 @@ export class RemovalService {
     if (input.confirmation?.trim().toUpperCase() !== REMOVAL_CONFIRMATION) {
       throw new DomainException(
         ErrorCode.ORG_REMOVAL_NOT_CONFIRMED,
-        `Type ${REMOVAL_CONFIRMATION} to confirm.`,
+        SAY.ORG_REMOVAL_NOT_CONFIRMED.typeToConfirm({ word: REMOVAL_CONFIRMATION }),
         HttpStatus.BAD_REQUEST,
         { expected: REMOVAL_CONFIRMATION },
       );
@@ -98,7 +102,7 @@ export class RemovalService {
     if (target.status === 'removed') {
       throw new DomainException(
         ErrorCode.ORG_ALREADY_REMOVED,
-        'They have already been removed from this office.',
+        SAY.ORG_ALREADY_REMOVED.alreadyRemoved,
         HttpStatus.CONFLICT,
         { membershipId, removedAt: target.removedAt?.toISOString() ?? null },
       );
@@ -107,7 +111,7 @@ export class RemovalService {
     if (membershipId === me) {
       throw new DomainException(
         ErrorCode.ORG_REMOVAL_NOT_PERMITTED,
-        'You cannot remove yourself from the office.',
+        SAY.ORG_REMOVAL_NOT_PERMITTED.yourself,
         HttpStatus.FORBIDDEN,
         { membershipId },
       );
@@ -119,7 +123,7 @@ export class RemovalService {
     if (!tenantAdmin && target.leaderId !== me) {
       throw new DomainException(
         ErrorCode.ORG_REMOVAL_NOT_PERMITTED,
-        'Only somebody’s direct leader can remove them.',
+        SAY.ORG_REMOVAL_NOT_PERMITTED.directLeaderOnly,
         HttpStatus.FORBIDDEN,
         { membershipId },
       );
@@ -135,8 +139,7 @@ export class RemovalService {
       if (!input.subtree) {
         throw new DomainException(
           ErrorCode.ORG_SUBTREE_DISPOSITION_REQUIRED,
-          `${reports.length} ${reports.length === 1 ? 'person reports' : 'people report'} to them. ` +
-            'Say where they go before removing this leader.',
+          SAY.ORG_SUBTREE_DISPOSITION_REQUIRED.sayWhere({ count: reports.length }),
           HttpStatus.BAD_REQUEST,
           { membershipId, directCount: reports.length },
         );
@@ -147,7 +150,7 @@ export class RemovalService {
       if (destination === membershipId) {
         throw new DomainException(
           ErrorCode.ORG_SUBTREE_DISPOSITION_REQUIRED,
-          'Their reports cannot be moved to the person being removed.',
+          SAY.ORG_SUBTREE_DISPOSITION_REQUIRED.notToThem,
           HttpStatus.BAD_REQUEST,
           { membershipId, directCount: reports.length },
         );
@@ -176,16 +179,14 @@ export class RemovalService {
         if (!reachable) throw new NotFoundException('Membership');
       }
 
+      // The edge's reason is stored, so it is written in the remover's language and shown as stored (P18.98-T5
+      // AC-6); the reason they typed is kept as typed.
+      const moved = render(ORG_MESSAGES.leaderRemoved({ reason: input.reason?.trim() || null }), ctx.reader);
       for (const report of reports) {
         // `reparent` carries the cycle check and the re-splice, and writes the
         // `re_parented` history row — so the move is legible afterwards as its own
         // event rather than being inferred from a removal.
-        await this.hierarchy.reparent(
-          ctx,
-          String(report._id),
-          destination,
-          `Leader removed from the office${input.reason?.trim() ? `: ${input.reason.trim()}` : ''}`,
-        );
+        await this.hierarchy.reparent(ctx, String(report._id), destination, moved);
       }
     }
 
@@ -211,7 +212,7 @@ export class RemovalService {
     if (target.leaderId === null) {
       throw new DomainException(
         ErrorCode.ORG_REMOVAL_NOT_PERMITTED,
-        'The office’s root member cannot be removed. Reassign the office first.',
+        SAY.ORG_REMOVAL_NOT_PERMITTED.root,
         HttpStatus.FORBIDDEN,
         { membershipId },
       );
@@ -231,7 +232,7 @@ export class RemovalService {
     if (await this.hierarchy.ownsTheOffice(ctx, target)) {
       throw new DomainException(
         ErrorCode.ORG_REMOVAL_NOT_PERMITTED,
-        'They own this office. Transfer it first — only the platform can do that.',
+        SAY.ORG_REMOVAL_NOT_PERMITTED.owner,
         HttpStatus.FORBIDDEN,
         { membershipId },
       );
@@ -283,9 +284,8 @@ export class RemovalService {
       templateId: NotificationTemplate.MEMBER_REMOVED,
       payload: {
         reason: input.reason ?? null,
-        // What the prototype's own copy tells them to do next.
-        nextStep:
-          'Search for a leader and request to join again if you want to come back.',
+        // What the prototype's own copy tells them to do next — stored, so in the remover's language (AC-6).
+        nextStep: render(ORG_MESSAGES.removedNextStep, ctx.reader),
       },
     });
 

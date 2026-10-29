@@ -11,6 +11,7 @@ import {
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
 import type { SaveCoachingProfileDto } from './coaching-profile.dto';
+import { COACHING_REFUSALS } from './coaching.messages';
 import { CoachingProfileRepository } from './coaching-profile.repository';
 import type { CoachingProfileDocument } from './coaching-profile.schema';
 
@@ -133,7 +134,7 @@ export class CoachingProfileService {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
         // ADR-0084 rule 2: a string coaching writes itself uses none of the six words.
-        'Every tick must name a milestone or a skill item in the capability catalog.',
+        COACHING_REFUSALS.VALIDATION_FAILED.unknownTick,
         HttpStatus.BAD_REQUEST,
         { unknown },
       );
@@ -152,7 +153,7 @@ export class CoachingProfileService {
       throw new DomainException(
         ErrorCode.CONFIG_ARCHIVED,
         // Shown in the Leader Notes tab's banner as written (ADR-0084 rule 2; parity L-66).
-        'This item has been retired. A profile that already had it keeps it; nobody ticks it anew.',
+        COACHING_REFUSALS.CONFIG_ARCHIVED.itemRetired,
         HttpStatus.UNPROCESSABLE_ENTITY,
         { codes: archivedAnew },
       );

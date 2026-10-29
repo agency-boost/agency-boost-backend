@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn } from '@/common/i18n/reader';
 import { UNIT_DASHBOARD_CORRECTION_REASON } from '@/domain/constants';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
@@ -763,6 +764,26 @@ describe('the Unit Dashboard (Phase 15)', () => {
       const flagged = preview.rows.flatMap((r) => r.cells).filter((c) => c.correction);
       expect(flagged.map((c) => [c.metric, c.cadence, c.correction!.by, c.correction!.reason]))
         .toContainEqual(['ape', 'monthly', 'Sari Puspita', UNIT_DASHBOARD_CORRECTION_REASON]);
+    });
+    it('P18.98-T5 AC-6 stores the fixed reason in the saving reader’s language, and shows it as stored', async () => {
+      // An English reader's save first, then the Owner's, reading Indonesian: each reason is written once, in its
+      // writer's language, and kept as text.
+      await wired.unitDashboard.updateProduction(office.as('OWNER').withReader(readerIn('en')), {
+        month: UNIT_MONTH, revision: (await state()).revision,
+        rows: [{ membershipId: office.id.PEER_AGENT, apeYtdMinor: 9 * M }],
+      });
+      await wired.unitDashboard.updateProduction(office.as('OWNER').withReader(readerIn('id')), {
+        month: UNIT_MONTH, revision: (await state()).revision,
+        rows: [{ membershipId: office.id.PEER_AGENT, apeMonthlyMinor: 7 * M }],
+      });
+      expect(await cell('PEER_AGENT', 'apeMonthly')).toMatchObject({
+        value: 7 * M, provenance: 'corrected', reason: 'Diperbarui di Unit Dashboard dari laporan perusahaan.',
+      });
+      // A cell an English reader saved keeps the English beside it; neither is translated afterwards.
+      expect((await cell('PEER_AGENT', 'apeYtd'))?.reason).toBe(UNIT_DASHBOARD_CORRECTION_REASON);
+      const table = await wired.production.readMonth(office.as('OWNER').withReader(readerIn('en')), UNIT_MONTH);
+      expect(table.rows.find((r) => r.membershipId === office.id.PEER_AGENT)!.metrics.ape.monthly)
+        .toMatchObject({ correction: { reason: 'Diperbarui di Unit Dashboard dari laporan perusahaan.' } });
     });
   });
 

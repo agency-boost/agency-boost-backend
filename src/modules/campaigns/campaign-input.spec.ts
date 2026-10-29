@@ -1,3 +1,5 @@
+import type { DomainException } from '@/common/errors/domain.exception';
+import { readerIn } from '@/common/i18n/reader';
 import { CAMPAIGN_EVALUATION_PHASE, CAMPAIGN_METRICS, METRIC_REGISTRY, metricByKey } from '@/domain/constants';
 import * as metricsModule from '@/domain/constants/metrics';
 import { checkCampaign, checkCampaignShape, type CampaignShape } from './campaign-input';
@@ -310,5 +312,98 @@ describe('reading one campaign (P5-T7)', () => {
       expect(refused(shape({ appliesToOrgLevelCodes: ['AGENT', 'SENIOR_AB'] }))).toMatch(/SENIOR_AB is not a rung of your company's ladder/);
       expect(refused(shape({ appliesToOrgLevelCodes: ['X1', 'X2'] }))).toMatch(/X1, X2 are not rungs/);
     });
+  });
+});
+
+/**
+ * **A campaign's refusals, in Bahasa Indonesia** (P18.98-T5 AC-3): each field sentence in the reader's language,
+ * named as the API names its field — *Syarat 2* for *Requirement 2* — and the English, the code and the order as before.
+ */
+describe('P18.98-T5 AC-3 a campaign’s violations, in both languages', () => {
+  const caught = (read: () => unknown): DomainException => {
+    try {
+      read();
+    } catch (err) {
+      return err as DomainException;
+    }
+    throw new Error('expected a refusal');
+  };
+  const indonesian = (read: () => unknown) =>
+    (caught(read).detailsFor(readerIn('id')) as { violations: string[] }).violations;
+
+  it('P18.98-T5 AC-3 the fields and the requirements of one campaign, in Indonesian', () => {
+    expect(indonesian(() => checkCampaign(whole({
+      code: 'chasing', endsAt: 'never', poster: { emoji: 'star', color: 'red', size: 2 },
+      requirements: [
+        null,
+        { metricKey: 'NO_SUCH_METRIC', comparator: 'about', value: 'lots' },
+        { metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 1.5 },
+        { metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 2 },
+      ],
+    })))).toEqual([
+      'CHASING sudah dipakai oleh halaman Campaigns sendiri. Pilih kode lain.',
+      'endsAt bukan tanggal dan waktu yang valid.',
+      'properti poster.size tidak dikenal',
+      'poster.emoji harus berupa satu emoji.',
+      `poster.color harus salah satu dari amber, amber-dark, navy, navy-soft, muted, success, gold.`,
+      'Syarat 1 harus berupa objek berisi kolom.',
+      `Syarat 2: "NO_SUCH_METRIC" bukan metrik yang diukur produk ini. Salah satu dari: ${CAMPAIGN_METRICS.map((m) => m.key).join(', ')}.`,
+      'Syarat 2: comparator harus salah satu dari gte, gt, lte, lt, eq.',
+      'Syarat 2: value harus berupa angka.',
+      'Syarat 3: APE achieved adalah uang, jadi nilainya harus sen bulat — 1,5 bukan sen bulat.',
+      'Syarat 4: APE achieved sudah diminta. Campaign meminta setiap angka satu kali saja.',
+    ]);
+    expect(indonesian(() => checkCampaign({ requirements: 'APE 1M' }, { partial: true }))).toEqual(['requirements harus berupa daftar.']);
+    expect(indonesian(() => checkCampaign({ poster: '🎯' }, { partial: true }))).toEqual(['poster harus berupa objek berisi emoji dan color.']);
+    expect(indonesian(() => checkCampaign({ startsAt: '2026-10-01T00:00:00Z', endsAt: '2026-09-01T00:00:00Z' }, { partial: true })))
+      .toEqual(['endsAt harus setelah startsAt.']);
+    expect(indonesian(() => checkCampaign({}))).toEqual(expect.arrayContaining(['code wajib diisi.', 'startsAt wajib diisi.']));
+  });
+
+  it('P18.98-T5 AC-3 the metric rules in Indonesian: the office’s count, a metric not measured yet, one no campaign measures', () => {
+    const office = METRIC_REGISTRY.find((m) => m.requirable === false)!;
+    expect(indonesian(() => checkCampaign(whole({ requirements: [{ metricKey: office.key, comparator: 'lte', value: 1 }] }))))
+      .toEqual([`Syarat 1: ${office.name} menghitung KPM, bukan hasil kerja seseorang, jadi campaign tidak dapat memintanya.`]);
+    const unmeasurable = METRIC_REGISTRY.find((m) => m.requirable !== false && m.phase <= CAMPAIGN_EVALUATION_PHASE
+      && !CAMPAIGN_METRICS.some((c) => c.key === m.key))!;
+    expect(indonesian(() => checkCampaign(whole({ requirements: [{ metricKey: unmeasurable.key, comparator: 'gte', value: 1 }] }))))
+      .toEqual([`Syarat 1: ${unmeasurable.name} bukan sesuatu yang dapat diukur campaign. Salah satu dari: `
+        + `${CAMPAIGN_METRICS.map((m) => m.name).join(', ')}.`]);
+    const later = jest.spyOn(metricsModule, 'metricByKey')
+      .mockReturnValue({ ...metricByKey('APE_ACHIEVED')!, phase: CAMPAIGN_EVALUATION_PHASE + 1 });
+    try {
+      expect(indonesian(() => checkCampaign(whole())))
+        .toEqual(['Syarat 1: APE achieved belum diukur, jadi campaign yang memintanya tidak akan pernah membuat siapa pun memenuhi '
+          + 'syarat.']);
+    } finally {
+      later.mockRestore();
+    }
+  });
+
+  it('P18.98-T5 AC-3 a campaign across its fields, in Indonesian', () => {
+    const JKT = { timezone: 'Asia/Jakarta', rungCodes: ['AB', 'AAB', 'AGENT'] };
+    const wib = (local: string) => new Date(`${local}+07:00`);
+    const shape = (over: Partial<CampaignShape> = {}): CampaignShape => ({
+      kind: 'seasonal', subtype: null, window: 'campaign_dates', startsAt: wib('2026-08-15T00:00:00'),
+      endsAt: wib('2026-09-15T23:59:00'), requirements: [{ metricKey: 'APE_ACHIEVED' }], appliesToOrgLevelCodes: ['X1'], ...over,
+    });
+    expect(indonesian(() => checkCampaignShape(shape(), JKT))).toEqual([
+      'Campaign yang meminta angka dari file produksi bulanan berjalan dalam bulan penuh: mulai pada tanggal 1 dan akhiri pada hari '
+        + 'terakhir suatu bulan.',
+      'X1 bukan jenjang di susunan jenjang perusahaan Anda.',
+    ]);
+    expect(indonesian(() => checkCampaignShape(shape({ endsAt: null, window: 'calendar_year', subtype: 'ongoing', appliesToOrgLevelCodes: [] }), JKT)))
+      .toEqual([
+        'Campaign musiman memerlukan waktu selesai: endsAt wajib diisi.',
+        'Campaign musiman dinilai berdasarkan tanggalnya sendiri: window harus campaign_dates.',
+        'Hanya campaign struktural yang memiliki subtype.',
+      ]);
+    expect(indonesian(() => checkCampaignShape(shape({
+      kind: 'structural', startsAt: wib('2026-07-01T00:00:00'), endsAt: wib('2026-09-30T23:59:00'), appliesToOrgLevelCodes: [],
+    }), JKT)))
+      .toEqual([
+        'Campaign struktural adalah jalur promosi atau insentif berkelanjutan: subtype wajib diisi.',
+        'Campaign struktural dinilai berdasarkan calendar_year atau rolling_12m.',
+      ]);
   });
 });

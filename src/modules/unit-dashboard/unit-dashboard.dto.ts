@@ -4,7 +4,9 @@ import {
   ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min,
   ValidateIf, ValidateNested,
 } from 'class-validator';
+import { field } from '@/common/validation/violations';
 import { UNIT_DASHBOARD, type UnitDashboardPeriod } from '@/domain/constants';
+import { UNIT_DASHBOARD_REFUSALS } from './unit-dashboard.messages';
 
 /**
  * **`period` and `for`, and nothing else** (P15-T1 AC-10): a period it does not know, or a parameter of any
@@ -67,7 +69,7 @@ export class ProductionRowDto {
 export class UpdateProductionDto {
   @ApiProperty({ example: '2026-09', description: 'The agency’s current month, `YYYY-MM`. No other month is accepted.' })
   @IsString()
-  @Matches(/^\d{4}-\d{2}$/, { message: 'month must be YYYY-MM' })
+  @Matches(/^\d{4}-\d{2}$/, { message: field(UNIT_DASHBOARD_REFUSALS.VALIDATION_FAILED.monthShape) })
   month!: string;
 
   @ApiProperty({ minimum: 0, description: 'The month’s revision as the dashboard read it (`production.revision`).' })

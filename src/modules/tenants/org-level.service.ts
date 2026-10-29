@@ -14,6 +14,7 @@ import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from './company.schema';
 import { Kpm, KpmDocument } from './kpm.schema';
 import { CompanyOrgLevel, CompanyOrgLevelDocument } from './company-org-level.schema';
+import { TENANTS_REFUSALS } from './tenants.messages';
 
 /** One rung, as the console reads it. */
 export interface OrgLevelRow {
@@ -99,7 +100,7 @@ export class OrgLevelService {
    * `subject` names what is being scoped, because the same refusal has to read sensibly
    * for a ratio and for an activity category.
    */
-  async checkedRungs(ctx: RequestContext, codes: string[], subject: string): Promise<string[]> {
+  async checkedRungs(ctx: RequestContext, codes: string[], subject: 'ratio' | 'section'): Promise<string[]> {
     if (codes.length === 0) return [];
     const normalised = [...new Set(codes.map((c) => c.trim().toUpperCase()))];
     const ladder = await this.ladderForOffice(ctx);
@@ -108,9 +109,7 @@ export class OrgLevelService {
     if (unknown.length) {
       throw new DomainException(
         ErrorCode.CONFIG_RUNG_UNKNOWN,
-        `${unknown.join(', ')} is not an active rung on your company\u2019s ladder. A `
-          + `${subject} applies to rungs the company promotes people along; the platform `
-          + 'defines those, not the office.',
+        TENANTS_REFUSALS.CONFIG_RUNG_UNKNOWN.notOnTheLadder({ codes: unknown, subject }),
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -129,7 +128,7 @@ export class OrgLevelService {
     if (!can(ctx, permission)) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'You do not have permission to do that.',
+        TENANTS_REFUSALS.PERM_DENIED.noPermissionForThat,
         HttpStatus.FORBIDDEN,
         { permission },
       );
@@ -210,8 +209,8 @@ export class OrgLevelService {
       throw new DomainException(
         ErrorCode.ORG_LEVEL_NOT_ON_LADDER,
         purpose === 'owner'
-          ? "This company's ladder has no Senior Leader rung for an office's Owner."
-          : "This company's ladder has no rung that leads nobody, for somebody joining.",
+          ? TENANTS_REFUSALS.ORG_LEVEL_NOT_ON_LADDER.noOwnerRung
+          : TENANTS_REFUSALS.ORG_LEVEL_NOT_ON_LADDER.noJoinerRung,
         HttpStatus.CONFLICT,
         { companyId, purpose },
       );
@@ -302,7 +301,7 @@ export class OrgLevelService {
     if (!level) {
       throw new DomainException(
         ErrorCode.ORG_LEVEL_NOT_ON_LADDER,
-        `No active level with the code ${code.toUpperCase()} on this company's ladder.`,
+        TENANTS_REFUSALS.ORG_LEVEL_NOT_ON_LADDER.noLevel({ code: code.toUpperCase() }),
         HttpStatus.CONFLICT,
         { companyId, code: code.toUpperCase() },
       );
@@ -327,8 +326,7 @@ export class OrgLevelService {
     if (clash) {
       throw new DomainException(
         ErrorCode.ORG_LEVEL_CODE_TAKEN,
-        `${company.name} already has a level with the code ${code}` +
-          (clash.status === 'archived' ? ', archived. An archived code is never reused.' : '.'),
+        TENANTS_REFUSALS.ORG_LEVEL_CODE_TAKEN.taken({ company: company.name, code, archived: clash.status === 'archived' }),
         HttpStatus.CONFLICT,
         { companyId: input.companyId, code, status: clash.status },
       );
@@ -395,9 +393,7 @@ export class OrgLevelService {
       if (members > 0) {
         throw new DomainException(
           ErrorCode.ORG_LEVEL_TIER_IN_USE,
-          `${members} ${members === 1 ? 'person stands' : 'people stand'} on ${level.label}. Its leader tier `
-            + 'decides what they may do, so it cannot change while anybody holds it. Move them to another '
-            + 'rung first, or add a new rung.',
+          TENANTS_REFUSALS.ORG_LEVEL_TIER_IN_USE.held({ members, label: level.label }),
           HttpStatus.CONFLICT,
           { orgLevelId: String(level._id), code: level.code, members },
         );
@@ -432,7 +428,7 @@ export class OrgLevelService {
     if (!this.members) {
       throw new DomainException(
         ErrorCode.INTERNAL_ERROR,
-        'The ladder cannot tell who stands on a rung, so it will not change a leader tier.',
+        TENANTS_REFUSALS.INTERNAL_ERROR.ladderCannotCount,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

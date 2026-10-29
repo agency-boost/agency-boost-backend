@@ -1,4 +1,5 @@
-import { Fields, refuseWith } from '@/common/validation/fields';
+import { Fields, refuseWith, type FieldSentence } from '@/common/validation/fields';
+import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
 import {
   CAMPAIGN_EVALUATION_PHASE, CAMPAIGN_KINDS, CAMPAIGN_LIMITS, CAMPAIGN_METRICS, CAMPAIGN_POSTER_COLORS,
   CAMPAIGN_SUBTYPES, CAMPAIGN_WINDOWS, REQUIREMENT_COMPARATORS, RESERVED_CAMPAIGN_CODES, STRUCTURAL_CAMPAIGN_WINDOWS,
@@ -6,6 +7,11 @@ import {
   type CampaignKind, type CampaignPosterColor, type CampaignSubtype, type CampaignWindow, type RequirementComparator,
 } from '@/domain/constants';
 import { isWholeMonths } from '@/domain/metrics/campaign-window';
+import { CAMPAIGNS_REFUSALS } from './campaigns.messages';
+
+/** What a campaign's fields are refused with (P18.98-T5 AC-3): this module's sentences, and the shared envelope's. */
+const SAY = CAMPAIGNS_REFUSALS.VALIDATION_FAILED;
+const FIELD = VALIDATION_REFUSALS.VALIDATION_FAILED;
 
 export interface CheckedRequirement {
   metricKey: string;
@@ -85,13 +91,13 @@ export function checkCampaign(
   const violations = [...f.violations];
 
   if (code !== undefined && RESERVED_CAMPAIGN_CODES.includes(code)) {
-    violations.push(`${code} is a word the Campaigns pages use for themselves. Choose another code.`);
+    violations.push(SAY.reservedCode({ code }));
   }
   const startsAt = instant(source.startsAt, 'startsAt', required, violations);
   // `null` is a structural campaign with no end; whether a campaign may have none is `checkCampaignShape`'s.
   const endsAt = source.endsAt === null ? null : instant(source.endsAt, 'endsAt', false, violations);
   if (startsAt && endsAt && endsAt.getTime() <= startsAt.getTime()) {
-    violations.push('endsAt must be after startsAt.');
+    violations.push(SAY.endsAfterStarts);
   }
   const poster = readPoster(source.poster, violations);
 
@@ -141,88 +147,83 @@ export function checkCampaignShape(
 ): void {
   const changed = opts.changed ?? 'all';
   const touches = (...fields: string[]) => changed === 'all' || fields.some((f) => changed.includes(f));
-  const violations: string[] = [];
+  const violations: FieldSentence[] = [];
   if (campaign.kind === 'seasonal') {
-    if (campaign.endsAt === null) violations.push('A seasonal campaign needs an end: endsAt is required.');
-    if (campaign.window !== 'campaign_dates') {
-      violations.push('A seasonal campaign is read over its own dates: window is campaign_dates.');
-    }
-    if (campaign.subtype !== null) violations.push('Only a structural campaign has a subtype.');
+    if (campaign.endsAt === null) violations.push(SAY.seasonalNeedsEnd);
+    if (campaign.window !== 'campaign_dates') violations.push(SAY.seasonalWindow);
+    if (campaign.subtype !== null) violations.push(SAY.subtypeOnlyStructural);
   } else {
-    if (campaign.subtype === null) violations.push('A structural campaign is a promotion path or an ongoing incentive: subtype is required.');
+    if (campaign.subtype === null) violations.push(SAY.structuralSubtype);
     if (!STRUCTURAL_CAMPAIGN_WINDOWS.includes(campaign.window)) {
-      violations.push(`A structural campaign is read over ${STRUCTURAL_CAMPAIGN_WINDOWS.join(' or ')}.`);
+      violations.push(SAY.structuralWindow({ windows: STRUCTURAL_CAMPAIGN_WINDOWS }));
     }
   }
   const readsFile = campaign.requirements.some((r) => metricByKey(r.metricKey)?.campaign?.source === 'file');
   if (touches('startsAt', 'endsAt', 'requirements', 'window', 'kind')
     && campaign.window === 'campaign_dates' && readsFile && campaign.endsAt !== null
     && !isWholeMonths(campaign.startsAt, campaign.endsAt, opts.timezone)) {
-    violations.push(
-      'A campaign asking for figures from the monthly production file runs in whole months: start it on the 1st '
-      + 'and end it on the last day of a month.',
-    );
+    violations.push(SAY.wholeMonths);
   }
   const unknown = touches('appliesToOrgLevelCodes')
     ? campaign.appliesToOrgLevelCodes.filter((code) => !opts.rungCodes.includes(code))
     : [];
   if (unknown.length > 0) {
-    violations.push(`${unknown.join(', ')} ${unknown.length === 1 ? 'is not a rung' : 'are not rungs'} of your company's ladder.`);
+    violations.push(SAY.notRungs({ codes: unknown }));
   }
   if (violations.length > 0) refuseWith(violations);
 }
 
 /** The card's poster: one emoji and a colour from the token palette — never a hex (D-fields). */
 function readPoster(
-  raw: unknown, violations: string[],
+  raw: unknown, violations: FieldSentence[],
 ): { emoji: string; color: CampaignPosterColor } | undefined {
   if (raw === undefined) return undefined;
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    violations.push('poster must be an object with an emoji and a color.');
+    violations.push(SAY.posterNotObject);
     return undefined;
   }
   const { emoji, color, ...rest } = raw as Record<string, unknown>;
-  for (const key of Object.keys(rest)) violations.push(`property poster.${key} should not exist`);
+  for (const key of Object.keys(rest)) violations.push(FIELD.unknownField({ key: `poster.${key}` }));
   const text = typeof emoji === 'string' ? emoji.trim() : '';
   if (text.length < 1 || [...text].length > CAMPAIGN_LIMITS.POSTER_EMOJI_MAX || /[A-Za-z0-9<>]/.test(text)) {
-    violations.push('poster.emoji is one emoji.');
+    violations.push(SAY.posterEmoji);
   }
   if (!(CAMPAIGN_POSTER_COLORS as readonly unknown[]).includes(color)) {
-    violations.push(`poster.color is one of ${CAMPAIGN_POSTER_COLORS.join(', ')}.`);
+    violations.push(SAY.posterColor({ colors: CAMPAIGN_POSTER_COLORS }));
   }
   return { emoji: text, color: color as CampaignPosterColor };
 }
 
 function instant(
-  raw: unknown, field: string, required: boolean, violations: string[],
+  raw: unknown, field: string, required: boolean, violations: FieldSentence[],
 ): Date | undefined {
   if (raw === undefined) {
-    if (required) violations.push(`${field} is required.`);
+    if (required) violations.push(FIELD.required({ field }));
     return undefined;
   }
   const value = new Date(String(raw));
   if (Number.isNaN(value.getTime())) {
-    violations.push(`${field} is not a date and time.`);
+    violations.push(SAY.notADateTime({ field }));
     return undefined;
   }
   return value;
 }
 
 function readRequirements(
-  raw: unknown, violations: string[], keep: readonly CheckedRequirement[],
+  raw: unknown, violations: FieldSentence[], keep: readonly CheckedRequirement[],
 ): CheckedRequirement[] | undefined {
   if (raw === undefined) return undefined;
   if (!Array.isArray(raw)) {
-    violations.push('requirements must be a list.');
+    violations.push(SAY.requirementsNotList);
     return undefined;
   }
 
   const read: CheckedRequirement[] = [];
   const seen = new Set<string>();
   raw.forEach((row, index) => {
-    const where = `Requirement ${index + 1}`;
+    const n = index + 1;
     if (row === null || typeof row !== 'object' || Array.isArray(row)) {
-      violations.push(`${where} must be an object of fields.`);
+      violations.push(SAY.requirementNotObject({ n }));
       return;
     }
     const r = row as Record<string, unknown>;
@@ -232,7 +233,7 @@ function readRequirements(
     // One requirement per figure (the review, item 9): two on one metric are one requirement stated twice, or a
     // contradiction nobody could meet, and the dialog would print two rows of one figure.
     if (seen.has(metricKey)) {
-      violations.push(`${where}: ${metricByKey(metricKey)?.name ?? metricKey} is asked for already. A campaign asks for each figure once.`);
+      violations.push(SAY.metricTwice({ n, name: metricByKey(metricKey)?.name ?? metricKey }));
       return;
     }
     seen.add(metricKey);
@@ -247,49 +248,34 @@ function readRequirements(
     const metric = metricByKey(metricKey);
     if (!metric) {
       // Named, and with the alternatives: "that is not a metric" leaves somebody guessing what is.
-      violations.push(
-        `${where}: "${metricKey}" is not a metric this product measures. One of: `
-        + `${CAMPAIGN_METRICS.map((m) => m.key).join(', ')}.`,
-      );
+      violations.push(SAY.notAMetric({ n, key: metricKey, keys: CAMPAIGN_METRICS.map((m) => m.key) }));
     } else if (metric.requirable === false) {
       // An office's count, not anybody's work (P13.2-T4, `LEADERS_USED`): nobody could qualify by it.
-      violations.push(
-        `${where}: ${metric.name} counts the office, not anybody’s work, so a campaign cannot ask for it.`,
-      );
+      violations.push(SAY.countsTheOffice({ n, name: metric.name }));
     } else if (metric.phase > CAMPAIGN_EVALUATION_PHASE) {
       // Accepting it would be a campaign nobody can ever qualify for, failing silently. The Owner
       // reads this, so it says what is true now and names no phase: a phase number is our
       // schedule, and an Owner can do nothing with it (P10.1-T2 AC-3, ADR-0062 §3).
-      violations.push(
-        `${where}: ${metric.name} is not measured yet, so a campaign asking for it could never `
-        + 'qualify anybody.',
-      );
+      violations.push(SAY.notMeasuredYet({ n, name: metric.name }));
     } else if (!isCampaignMetric(metricKey)) {
       /*
        * P18.5-T8 AC-1, D-evaluable: a target, an enum, a boolean, a per-event rate or a self-declared toggle is not
        * something anybody achieves over a campaign's window. A requirement stored before the set existed stays,
        * and reads *Not measured yet*; a new one is refused, with what may be named instead.
        */
-      violations.push(
-        `${where}: ${metric.name} is not something a campaign can measure. One of: `
-        + `${CAMPAIGN_METRICS.map((m) => m.name).join(', ')}.`,
-      );
+      violations.push(SAY.notACampaignMetric({ n, name: metric.name, names: CAMPAIGN_METRICS.map((m) => m.name) }));
     }
 
     if (!(REQUIREMENT_COMPARATORS as readonly string[]).includes(comparator)) {
-      violations.push(
-        `${where}: comparator is one of ${REQUIREMENT_COMPARATORS.join(', ')}.`,
-      );
+      violations.push(SAY.comparatorOneOf({ n, values: REQUIREMENT_COMPARATORS }));
     }
 
     const value = Number(r.value);
     if (!Number.isFinite(value)) {
-      violations.push(`${where}: value must be a number.`);
+      violations.push(SAY.valueNotNumber({ n }));
     } else if (metric?.unit === 'idr_minor' && !Number.isInteger(value)) {
       // Money is integer minor units, never a float (invariant §9).
-      violations.push(
-        `${where}: ${metric.name} is money, so it is whole sen — ${value} is not.`,
-      );
+      violations.push(SAY.moneyWholeSen({ n, name: metric.name, value }));
     }
 
     if (metric && (REQUIREMENT_COMPARATORS as readonly string[]).includes(comparator)

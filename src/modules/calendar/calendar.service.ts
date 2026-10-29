@@ -6,8 +6,9 @@ import {
   DomainException, NoMembershipException, NotFoundException, VersionConflictException,
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import type { ResourceName } from '@/common/errors/resources';
 import { addDays, isLocalDate } from '@/common/time/local-day';
-import { refuseWith } from '@/common/validation/fields';
+import { refuseWith, type FieldSentence } from '@/common/validation/fields';
 import { CALENDAR_ALL_DAY_TYPE, type CalendarEntryType } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
@@ -21,6 +22,7 @@ import { TenantDay, type Office } from '@/modules/tenants/tenant-day.service';
 import { CalendarEventRepository, type CalendarEntryFields } from './calendar-event.repository';
 import type { CalendarAnswer, CalendarAttendee, CalendarEventDocument } from './calendar-event.schema';
 import { CalendarNotices } from './calendar-notices';
+import { CALENDAR_REFUSALS } from './calendar.messages';
 import {
   officeClockOf, officeDateOf, officeTimingOf, periodOf, startOfOfficeDay, timingOf,
   type CalendarView, type TimingInput,
@@ -80,7 +82,7 @@ export interface CalendarSettings {
 /** The record a change of the settings leaves: ids and the setting, never anything typed. */
 export const CALENDAR_SETTINGS_AUDIT_ACTION = 'calendar_settings.updated';
 
-const ENTRY = 'Calendar entry';
+const ENTRY: ResourceName = 'Calendar entry';
 const TIMING_FIELDS = ['date', 'start', 'end', 'startsOn', 'endsOn'] as const;
 
 /**
@@ -147,7 +149,7 @@ export class CalendarService {
     const compared = query.for !== undefined;
     const office = await this.days.office(ctx);
     const date = query.date ?? office.today;
-    if (!isLocalDate(date)) refuseWith(['date must be a day, written YYYY-MM-DD.']);
+    if (!isLocalDate(date)) refuseWith([CALENDAR_REFUSALS.VALIDATION_FAILED.dayShape({ field: 'date' })]);
 
     let subject = { membershipId: me, orgLevelCode: ctx.membership!.orgLevelCode };
     if (compared) {
@@ -383,7 +385,7 @@ export class CalendarService {
     if (entry.attendees.some((a) => a.membershipId === me && a.placed)) {
       throw new DomainException(
         ErrorCode.CALENDAR_BLOCK_NOT_ANSWERABLE,
-        'This time was placed on your calendar by a leader above you. There is nothing to accept or decline.',
+        CALENDAR_REFUSALS.CALENDAR_BLOCK_NOT_ANSWERABLE.placedByLeader,
         HttpStatus.CONFLICT,
         { entryId },
       );
@@ -609,10 +611,10 @@ function mergedTiming(
  * that member is placed, not invited, and no list names them. Distinct and at most 50 the DTO has said.
  */
 function inviteesOf(ids: readonly string[], not: { reader: string; placed?: string | null }): string[] {
-  const violations: string[] = [];
-  if (ids.includes(not.reader)) violations.push('inviteeIds must not include you: you are on your own entry already.');
+  const violations: FieldSentence[] = [];
+  if (ids.includes(not.reader)) violations.push(CALENDAR_REFUSALS.VALIDATION_FAILED.inviteeSelf);
   if (not.placed && ids.includes(not.placed)) {
-    violations.push('inviteeIds must not include the member the time is placed on: they are on it already.');
+    violations.push(CALENDAR_REFUSALS.VALIDATION_FAILED.inviteePlaced);
   }
   if (violations.length) refuseWith(violations);
   return [...ids];

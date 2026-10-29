@@ -4,6 +4,10 @@ import { Model, isValidObjectId } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { MembershipRepository } from './membership.repository';
+import type { MembershipDocument } from './membership.schema';
+
+/** A membership as `MembershipRepository` answered it, with the two fields naming it reads. */
+export type ReadMembership = Pick<MembershipDocument, '_id' | 'userId'>;
 
 /**
  * A person as a sentence about them names them: the name, and the pronoun the copy is written in.
@@ -71,6 +75,26 @@ export class MemberNames {
     if (unique.length === 0) return new Map();
 
     const members = await this.memberships.find(ctx, { _id: { $in: unique } });
+    return this.peopleOf(members);
+  }
+
+  /**
+   * **`byMembershipId`, for memberships the caller has just read through the tenant repository** (the Owner's
+   * reporting at 500 members, 2026-10-29): their `_id` and `userId`, as `MembershipRepository` answered them, so they
+   * are not read a second time — the users read alone. `OfficePeople` reads every member's row for its figures; asking
+   * `byMembershipId` beside it read all of them again, whole, for the one field — 16.7 ms of the names' 19.
+   *
+   * The same rules, from the same code: a membership whose person has no name on file is absent. **Rows from a
+   * scoped read, never ids a caller put together**: the first hop is still the tenant repository's, so the user read
+   * that follows reaches only people the office holds a membership for.
+   */
+  async byReadMemberships(members: readonly ReadMembership[]): Promise<Map<string, string>> {
+    const people = await this.peopleOf(members);
+    return new Map([...people].map(([membershipId, person]) => [membershipId, person.name]));
+  }
+
+  /** The second hop: the users behind memberships already read, each once, over their primary key. */
+  private async peopleOf(members: readonly ReadMembership[]): Promise<Map<string, NamedPerson>> {
     const userIds = [...new Set(members.map((m) => String(m.userId)))];
     if (userIds.length === 0) return new Map();
 

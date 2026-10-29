@@ -5,7 +5,9 @@ import {
   ROSTER_EXAMPLES,
   ROSTER_TEMPLATE,
   ROSTER_TEMPLATE_HEADER,
+  type RosterIssue,
 } from './roster-csv';
+import { english, indonesian } from '../../../test/i18n';
 
 const H = ROSTER_TEMPLATE_HEADER;
 /** The office's calendar day the four personal columns are measured against (ADR-0158 §2). */
@@ -13,7 +15,11 @@ const TODAY = '2026-10-26';
 /** What a person records, for a row whose test is about something else (P18.8-T4). */
 const P = ',1990-03-15,2021-07,full-time,female';
 const P_TAB = P.split(',').join('\t');
-const parseRoster = (text: string) => parse(text, TODAY);
+/** Each issue as the API's English writes it: an issue is a sentence in both languages (P18.98-T5 AC-3). */
+const inEnglish = <T extends { issues: RosterIssue[] }>(result: T) => ({
+  ...result, issues: result.issues.map((issue) => ({ ...issue, message: english(issue.message) })),
+});
+const parseRoster = (text: string) => inEnglish(parse(text, TODAY));
 
 describe('the roster file (P3.6-T4)', () => {
   describe('parsing', () => {
@@ -104,6 +110,30 @@ describe('the roster file (P3.6-T4)', () => {
         { line: 4, column: 'agentCode', message: 'Already on line 2.' },
       ]);
     });
+  });
+
+  it('P18.98-T5 AC-7 says each issue in Indonesian too, the file’s own words kept as the file writes them', () => {
+    const { issues } = parse(
+      `${H}\nRina,r@k.test,8a1,senior manager,,15/03/1990,2021-07,fulltime,f\nB,r@k.test,882,agent,${P}\n`, TODAY,
+    );
+    expect(issues.map(({ line, column, message }) => ({ line, column, message: indonesian(message) }))).toEqual([
+      { line: 2, column: 'agentCode', message: '"8a1" bukan kode agen. Gunakan angka saja, 3 sampai 32 digit.' },
+      {
+        line: 2, column: 'role',
+        message: '"senior manager" bukan jenjang. Gunakan kode jenjang dari susunan jenjang perusahaan Anda — AB, AAB, '
+          + 'atau Agent, atau jenjang yang ditambahkannya.',
+      },
+      {
+        line: 2, column: 'dateOfBirth',
+        message: '"15/03/1990" bukan tanggal lahir. Tulis dengan format YYYY-MM-DD, misalnya 1990-03-15.',
+      },
+      { line: 2, column: 'workStatus', message: '"fulltime" bukan status kerja. Gunakan full-time atau part-time.' },
+      { line: 2, column: 'gender', message: '"f" bukan jenis kelamin. Gunakan male atau female.' },
+      { line: 3, column: 'email', message: 'Sudah ada di baris 2.' },
+    ]);
+    expect(indonesian(parse('', TODAY).issues[0].message)).toBe('File ini kosong.');
+    expect(indonesian(parse('name,email\nRina,r@k.test\n', TODAY).issues[0].message))
+      .toBe(`Header harus persis: ${H}. Unduh templat.`);
   });
 
   describe('what a person records (P18.8-T4, ADR-0158)', () => {

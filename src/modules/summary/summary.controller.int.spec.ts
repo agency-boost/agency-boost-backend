@@ -9,7 +9,7 @@ import { Goal } from '@/modules/goals/goal.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import {
-  declaredPermissions, EVERY_MEMBER, FIXTURE_KPM, OWNER, productionPipe, session, StubAuth, SUPER_ADMIN,
+  declaredPermissions, EVERY_MEMBER, FIXTURE_KPM, OWNER, productionPipe, savedLanguage, session, StubAuth, SUPER_ADMIN,
 } from '../../../test/http-permissions';
 import { SummaryController } from './summary.controller';
 import { SummaryService } from './summary.service';
@@ -133,6 +133,46 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
     ])('P18.8-T11 AC-1 refuses %s 400 VALIDATION_FAILED, saying what there is', async (_what, query, details) => {
       const res = await request(app.getHttpServer()).get('/summary').query(query).expect(400);
       expect(res.body.error).toMatchObject({ code: 'VALIDATION_FAILED', details });
+    });
+  });
+
+  /*
+   * **The period's refusals in the reader's language, each month in the reader's figures** (P18.98-T5 AC-1, AC-7):
+   * *Okt 2026* in Indonesian; in English *Okt 2026* still for a reader who has chosen nothing — the API's figures as
+   * they were — and *Oct 2026* for one who saved English. A year is a name, the same in both.
+   */
+  describe('P18.98-T5 AC-7 the period in Indonesian', () => {
+    const summary = () => request(app.getHttpServer()).get('/summary');
+    afterEach(() => { savedLanguage.current = null; });
+
+    it('P18.98-T5 AC-7 refuses a month to come, and one before the office, in Indonesian, each month in Indonesian', async () => {
+      const future = await summary().set('Accept-Language', 'id').query({ month: '2026-10' }).expect(400);
+      expect(future.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'Okt 2026 belum dimulai: bulan terakhir yang ada adalah Sep 2026.',
+        details: { field: 'month', earliest: '2026-01', latest: '2026-09' },
+      });
+      const before = await summary().set('Accept-Language', 'id').query({ month: '2025-12' }).expect(400);
+      expect(before.body.error.message).toBe('Des 2025 sebelum bulan pertama yang ada, Jan 2026.');
+      const year = await summary().set('Accept-Language', 'id').query({ year: '2027' }).expect(400);
+      expect(year.body.error.message).toBe('2027 belum dimulai: tahun terakhir yang ada adalah 2026.');
+    });
+
+    it('P18.98-T5 AC-1 writes the months in the reader’s figures: Indonesian until they choose, English once they have', async () => {
+      const unchosen = await summary().query({ month: '2026-10' }).expect(400);
+      expect(unchosen.body.error.message).toBe('Okt 2026 has not begun yet: the latest month is Sep 2026.');
+
+      savedLanguage.current = 'en';
+      const chosen = await summary().query({ month: '2026-10' }).expect(400);
+      expect(chosen.body.error.message).toBe('Oct 2026 has not begun yet: the latest month is Sep 2026.');
+    });
+
+    it('P18.98-T5 AC-7 refuses the query’s shapes with its own sentences, in Indonesian', async () => {
+      const res = await summary().set('Accept-Language', 'id').query({ month: '2026-13', year: '26' }).expect(400);
+      expect(res.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        details: { violations: ['month harus berupa bulan, YYYY-MM', 'year harus berupa tahun, YYYY'] },
+      });
     });
   });
 });

@@ -1,9 +1,31 @@
+import type { DomainException } from '@/common/errors/domain.exception';
+import { readerIn, SOURCE_READER, type Reader } from '@/common/i18n/reader';
+import { english, indonesian } from '../../../test/i18n';
 import { PRODUCTION_METRICS } from './monthly-agent-data.schema';
 import {
   buildPreview, headerKey, matchCode, readCell, readNumber, readUpload, type RosterMember,
   type PreviewCell, type PreviewRow, type StoredFigures, templateVersionOf, VALUE_COLUMNS,
 } from './production-preview';
 import { TEMPLATE_HEADER_V1 } from './production-template';
+
+/** A value read, its reason in English: what the import says after the cell (`readCell`, `readNumber`). */
+const said = (read: ReturnType<typeof readCell>) => ('reason' in read ? { reason: english(read.reason) } : read);
+
+/** A code matched, its reason in English. */
+const matched = (code: string, roster: readonly RosterMember[]) => {
+  const match = matchCode(code, roster);
+  return { ...match, reason: english(match.reason) };
+};
+
+/** The refusal a call throws, for its words in either language. */
+const refusalOf = (fn: () => unknown): DomainException => {
+  try {
+    fn();
+  } catch (err) {
+    return err as DomainException;
+  }
+  throw new Error('nothing was refused');
+};
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 
@@ -24,7 +46,7 @@ const records = (...rows: string[][]) => rows.map((cells, i) => ({ line: i + 2, 
 
 const preview = (
   rows: string[][],
-  opts: { delimiter?: ',' | ';' | '\t'; stored?: Record<string, Partial<Record<string, number>>> } = {},
+  opts: { delimiter?: ',' | ';' | '\t'; stored?: Record<string, Partial<Record<string, number>>>; reader?: Reader } = {},
 ) => buildPreview({
   records: records(...rows),
   delimiter: opts.delimiter ?? ',',
@@ -37,7 +59,7 @@ const preview = (
     }
     return s;
   },
-});
+}, opts.reader ?? SOURCE_READER);
 
 const cell = (r: PreviewRow, key: string): PreviewCell =>
   r.cells.find((c) => `${c.metric}.${c.cadence}` === key)!;
@@ -84,6 +106,26 @@ describe('the preview (P9-T3)', () => {
       expect(() => templateVersionOf(row('PRU-001', 'Rina Wijaya')))
         .toThrow(expect.objectContaining({ details: expect.objectContaining({ column: 1, found: 'PRU-001' }) }));
     });
+
+    it('P18.98-T5 AC-2 says which column differs in both languages, naming the columns as the file does', () => {
+      const renamed = [...TEMPLATE_HEADER_V1];
+      renamed[4] = 'Recruits — This Month';
+      const differs = refusalOf(() => templateVersionOf(renamed)).sentence;
+      expect(english(differs)).toBe('Column 5 of the header reads “Recruits — This Month”; the template’s reads '
+        + '“Recruitment — This Month”. Download the template for this month and fill that in — nothing has been read.');
+      expect(indonesian(differs)).toBe('Kolom 5 di header berisi “Recruits — This Month”; di templat berisi '
+        + '“Recruitment — This Month”. Unduh templat untuk bulan ini dan isi templat itu — belum ada yang dibaca.');
+      const stops = refusalOf(() => templateVersionOf(TEMPLATE_HEADER_V1.slice(0, 13))).sentence;
+      expect(english(stops)).toBe('The header stops at column 13; the template’s column 14 reads “# of Policy — YTD”. '
+        + 'Download the template for this month and fill that in — nothing has been read.');
+      expect(indonesian(stops)).toBe('Header berhenti di kolom 13; kolom 14 di templat berisi “# of Policy — YTD”. '
+        + 'Unduh templat untuk bulan ini dan isi templat itu — belum ada yang dibaca.');
+      const extra = refusalOf(() => templateVersionOf([...TEMPLATE_HEADER_V1, 'Notes'])).sentence;
+      expect(english(extra)).toBe('The header has a column the template does not: “Notes”, column 15. '
+        + 'Download the template for this month and fill that in — nothing has been read.');
+      expect(indonesian(extra)).toBe('Header memiliki kolom yang tidak ada di templat: “Notes”, kolom 15. '
+        + 'Unduh templat untuk bulan ini dan isi templat itu — belum ada yang dibaca.');
+    });
   });
 
   describe('a number: the decimal mark follows the delimiter (ADR-0052)', () => {
@@ -102,46 +144,56 @@ describe('the preview (P9-T3)', () => {
       ['1.5E+3', '.', 'not a number'],
     ])('refuses %j with “%s”', (raw, mark, reason) => {
       const read = readNumber(raw, mark as ',' | '.', false);
-      expect('reason' in read && read.reason).toContain(reason);
+      expect('reason' in read && english(read.reason)).toContain(reason);
+    });
+
+    it('P18.98-T5 says why in Indonesian too, the end of a sentence after the cell', () => {
+      const why = (raw: string, mark: ',' | '.') => {
+        const read = readNumber(raw, mark, false);
+        return 'reason' in read ? indonesian(read.reason) : null;
+      };
+      expect(why('1.500', ',')).toBe('memakai “.”, padahal di file ini tanda desimalnya “,”. Tulis tanpa pemisah ribuan.');
+      expect(why('1.234,5', ',')).toBe('berisi “.” dan “,” sekaligus. Tulis tanpa pemisah ribuan.');
+      expect(why('abc', '.')).toBe('bukan angka.');
     });
 
     it('takes a % after a persistency figure, and only there', () => {
-      expect(readCell('persistency', '85%', '.')).toEqual({ value: 85 });
+      expect(said(readCell('persistency', '85%', '.'))).toEqual({ value: 85 });
       expect('reason' in readCell('recruitment', '85%', '.')).toBe(true);
     });
   });
 
   describe('AC-5, AC-7 — a value, in the unit it is stored in', () => {
     it('turns Rp M into integer sen: 1.5 is Rp 1,500,000 is 150,000,000 sen', () => {
-      expect(readCell('ape', '1.5', '.')).toEqual({ value: 150_000_000 });
-      expect(readCell('fyp', '0,29', ',')).toEqual({ value: 29_000_000 });
-      expect(readCell('ape', '1200', '.')).toEqual({ value: 120_000_000_000 });
+      expect(said(readCell('ape', '1.5', '.'))).toEqual({ value: 150_000_000 });
+      expect(said(readCell('fyp', '0,29', ','))).toEqual({ value: 29_000_000 });
+      expect(said(readCell('ape', '1200', '.'))).toEqual({ value: 120_000_000_000 });
     });
 
     it('holds persistency to 0–100', () => {
-      expect(readCell('persistency', '100', '.')).toEqual({ value: 100 });
-      expect(readCell('persistency', '92.5', '.')).toEqual({ value: 92.5 });
-      expect(readCell('persistency', '140', '.')).toEqual({ reason: expect.stringContaining('above 100') });
+      expect(said(readCell('persistency', '100', '.'))).toEqual({ value: 100 });
+      expect(said(readCell('persistency', '92.5', '.'))).toEqual({ value: 92.5 });
+      expect(said(readCell('persistency', '140', '.'))).toEqual({ reason: expect.stringContaining('above 100') });
     });
 
     it('refuses a negative figure anywhere', () => {
-      for (const m of PRODUCTION_METRICS) expect(readCell(m, '-1', '.')).toEqual({ reason: 'is negative.' });
+      for (const m of PRODUCTION_METRICS) expect(said(readCell(m, '-1', '.'))).toEqual({ reason: 'is negative.' });
     });
 
     it('refuses a fraction of a person or a policy', () => {
-      expect(readCell('policyCount', '2.5', '.')).toEqual({ reason: expect.stringContaining('policies') });
-      expect(readCell('recruitment', '1,5', ',')).toEqual({ reason: expect.stringContaining('people') });
-      expect(readCell('newActiveAgents', '3,0', ',')).toEqual({ value: 3 });
+      expect(said(readCell('policyCount', '2.5', '.'))).toEqual({ reason: expect.stringContaining('policies') });
+      expect(said(readCell('recruitment', '1,5', ','))).toEqual({ reason: expect.stringContaining('people') });
+      expect(said(readCell('newActiveAgents', '3,0', ','))).toEqual({ value: 3 });
     });
 
     it('refuses money no integer can hold', () => {
-      expect(readCell('ape', '999999999999', '.')).toEqual({ reason: expect.stringContaining('larger') });
+      expect(said(readCell('ape', '999999999999', '.'))).toEqual({ reason: expect.stringContaining('larger') });
     });
   });
 
   describe('AC-6 — the agent code, and only the code', () => {
     it('matches exactly, ignoring letter case', () => {
-      expect(matchCode('pru-001', ROSTER)).toMatchObject({ member: ROSTER[0], recovered: false });
+      expect(matchCode('pru-001', ROSTER)).toMatchObject({ member: ROSTER[0], recovered: false, reason: null });
     });
 
     it('recovers an all-digit code a spreadsheet stripped of its zeros, when one member fits', () => {
@@ -150,7 +202,7 @@ describe('the preview (P9-T3)', () => {
 
     it('does not guess when two members fit', () => {
       const two = [...ROSTER, { membershipId: 'm-x', agentCode: '088213', name: 'X' }];
-      expect(matchCode('88213', two)).toMatchObject({ member: null, reason: expect.stringContaining('not guessed') });
+      expect(matched('88213', two)).toMatchObject({ member: null, reason: expect.stringContaining('not guessed') });
     });
 
     it.each([
@@ -161,7 +213,7 @@ describe('the preview (P9-T3)', () => {
       ['PRU-999', 'No active member of this office has this code.'],
       ['', 'no agent code'],
     ])('refuses %j, saying %j', (code, reason) => {
-      expect(matchCode(code, ROSTER)).toMatchObject({ member: null, reason: expect.stringContaining(reason) });
+      expect(matched(code, ROSTER)).toMatchObject({ member: null, reason: expect.stringContaining(reason) });
     });
 
     it('never reads the name: a different name still matches, and says so', () => {
@@ -251,6 +303,34 @@ describe('the preview (P9-T3)', () => {
       expect(cell(rows[0], 'recruitment.ytd').status).toBe('refused');
     });
 
+    it('P18.98-T5 AC-4 writes every issue for the preview’s reader: in Indonesian, the cells named as the file names them', () => {
+      const { rows } = preview([
+        row('PRU-001', 'Rina', { 'policyCount.monthly': '5', 'policyCount.ytd': '3', 'persistency.monthly': '140' }),
+        row('PRU-002', 'Budi', { 'ape.monthly': '2' }),
+        row('PRU-999', 'Nobody'),
+        row('8.8213E+04', 'Sari'),
+        ['00088213', 'Sari', ...Array(13).fill('1')],
+      ], { reader: readerIn('id'), stored: { 'm-budi': { 'ape.ytd': 150_000_000 } } });
+      expect(rows.map((r) => r.issues.map((i) => [i.code, i.message]))).toEqual([
+        [
+          ['UPLOAD_VALUE_OUT_OF_RANGE', 'Rolling Persistency (%) — This Month: “140” lebih dari 100 — persistency adalah persentase.'],
+          ['UPLOAD_VALUE_OUT_OF_RANGE', '# of Policy — YTD: “3” lebih kecil dari angka bulan ini, “5” — YTD sudah mencakup bulan ini.'],
+          ['UPLOAD_VALUE_OUT_OF_RANGE', '# of Policy — This Month: “5” ikut ditahan bersama YTD-nya, yang ditolak.'],
+        ],
+        [['UPLOAD_VALUE_OUT_OF_RANGE', 'APE (Rp M) — This Month: “2” lebih besar dari YTD yang sudah tersimpan, 1.5. Isi juga kolom YTD.']],
+        [['UPLOAD_UNKNOWN_AGENT_CODE', 'Tidak ada anggota aktif KPM ini yang memiliki kode ini.']],
+        [['UPLOAD_UNKNOWN_AGENT_CODE', 'Tidak ada anggota aktif dengan kode ini, dan kode ini terbaca seperti angka dalam notasi '
+          + 'ilmiah. Spreadsheet mungkin telah mengubahnya: format kolom Agent Code sebagai teks, lalu salin kode dari templat.']],
+        [['UPLOAD_MALFORMED_CSV', 'Baris ini memiliki 15 sel; templat memiliki 14. Nilai yang berisi koma atau titik koma '
+          + 'harus diapit tanda kutip.']],
+      ]);
+      const twice = preview([row('PRU-001', 'Rina'), row('pru-001', 'Rina')], { reader: readerIn('id') });
+      expect(twice.rows[0].issues[0].message)
+        .toBe('Rina Wijaya juga ada di baris 3. Kedua baris tidak diambil — pertahankan salah satunya, lalu unggah lagi.');
+      expect(preview([row('', 'Rina', { 'ape.monthly': '1' })], { reader: readerIn('id') }).rows[0].issues[0].message)
+        .toBe('Baris ini tidak memiliki kode agen.');
+    });
+
     it('does not apply to persistency, which is a rate', () => {
       const { rows } = preview([row('PRU-001', 'Rina', { 'persistency.monthly': '95', 'persistency.ytd': '80' })]);
       expect(rows[0].issues).toEqual([]);
@@ -297,7 +377,9 @@ describe('the preview (P9-T3)', () => {
       const read = readUpload(bytes);
       expect(read).toMatchObject({ encoding: 'windows-1252', delimiter: ';', templateVersion: 1 });
 
-      const { rows, summary } = buildPreview({ records: read.records, delimiter: read.delimiter, roster: ROSTER, stored: nothing });
+      const { rows, summary } = buildPreview(
+        { records: read.records, delimiter: read.delimiter, roster: ROSTER, stored: nothing }, SOURCE_READER,
+      );
       expect(summary).toMatchObject({ rows: 1, ready: 1, refused: 0, newCells: 12, refusedCells: 0 });
       expect(rows[0]).toMatchObject({ membershipId: 'm-sari', codeRecovered: true, resolvedAgentCode: '00088213' });
       expect(cell(rows[0], 'ape.monthly').after).toBe(150_000_000);
@@ -311,6 +393,8 @@ describe('the preview (P9-T3)', () => {
 
     it('refuses a file of blank lines as empty', () => {
       expect(() => readUpload(utf8('\n\n  \n'))).toThrow(expect.objectContaining({ code: 'UPLOAD_MALFORMED_CSV' }));
+      const empty = refusalOf(() => readUpload(utf8('\n\n  \n')));
+      expect([empty.message, empty.messageFor(readerIn('id'))]).toEqual(['The file is empty.', 'File ini kosong.']);
     });
   });
 });

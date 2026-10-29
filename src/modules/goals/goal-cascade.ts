@@ -1,8 +1,13 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { joinSentences, type Sentence } from '@/common/i18n/sentence';
 import { localDayOf } from '@/common/time/local-day';
 import { GOAL_DEFAULT_RATIOS, GOAL_DEFAULTS, TIME } from '@/domain/constants';
+import { GOAL_REFUSALS } from './goals.messages';
+
+/** The cascade's refusals, in both languages (P18.98-T5 AC-2). */
+const SAY = GOAL_REFUSALS.GOAL_INVALID_ASSUMPTION;
 
 /**
  * The five-step cascade (P8-T2).
@@ -73,10 +78,7 @@ export function annualTargetOf(inputs: CascadeInputs): number {
 
   const rate = inputs.commissionRatePct / 100;
   if (rate <= 0) {
-    throw invalid(
-      'A savings target needs a commission rate above zero to become an APE target.',
-      { commissionRatePct: inputs.commissionRatePct },
-    );
+    throw invalid(SAY.commissionRate, { commissionRatePct: inputs.commissionRatePct });
   }
   // Rounded to whole sen: money is an integer in this product, and a division rarely lands on one.
   return Math.round(inputs.savingsTargetMinor / rate);
@@ -238,10 +240,10 @@ export function defaultRates(
  * wrong.
  */
 function requireUsableAssumptions(inputs: CascadeInputs): void {
-  const violations: string[] = [];
+  const violations: Sentence<'GOAL_INVALID_ASSUMPTION'>[] = [];
 
   if (!(inputs.caseSizeMinor > 0)) {
-    violations.push('Average case size must be above zero: it is what a policy is worth.');
+    violations.push(SAY.caseSize);
   }
   // The fields' own labels on Goal Settings (ADR-0160 §4), so the refusal names what the reader sees.
   for (const [field, label] of [
@@ -250,16 +252,17 @@ function requireUsableAssumptions(inputs: CascadeInputs): void {
   ] as const) {
     const value = inputs[field];
     if (!(value > 0) || value > 100) {
-      violations.push(`${label} must be above 0 and at most 100 per cent.`);
+      violations.push(SAY.percentBounds({ label }));
     }
   }
 
   if (violations.length > 0) {
-    throw invalid(violations.join(' '), { violations });
+    // One sentence after another, as they were joined before; `details.violations` written for the reader.
+    throw invalid(joinSentences(violations, ' '), { violations });
   }
 }
 
-function invalid(message: string, details: Record<string, unknown>): DomainException {
+function invalid(message: Sentence<'GOAL_INVALID_ASSUMPTION'>, details: Record<string, unknown>): DomainException {
   return new DomainException(
     ErrorCode.GOAL_INVALID_ASSUMPTION,
     message,

@@ -1,8 +1,12 @@
+import type { FieldSentence } from '@/common/validation/fields';
 import {
   CRITERIA_MODES, QUALIFICATION_RULE_KINDS, REQUIREMENT_COMPARATORS,
   SEED_MOC_RULES, SEED_PRODUCTION_CLUB_TIERS, metricByKey,
   type CriteriaMode, type QualificationRuleKind,
 } from '@/domain/constants';
+import { CAMPAIGNS_REFUSALS } from './campaigns.messages';
+
+const SAY = CAMPAIGNS_REFUSALS.VALIDATION_FAILED;
 
 /** One thing a rule asks for: a metric, a comparator and a number — never a display string. */
 export interface RulePayloadCriterion {
@@ -78,20 +82,20 @@ export function defaultCampaignKinds(): CampaignKindsPayload {
  * ADR-0035 already has an honest answer for it: the rule records what it is waiting on and the
  * screen says so. What is refused is a **misspelling that could have been a real metric**, which
  * is why the check below reports unknown keys as a warning rather than dropping them silently.
+ *
+ * **Each problem in both languages** (P18.98-T5 AC-3), named by its place — *Rule 2, group 1* — in the reader's words.
  */
-export function campaignKindsProblems(payload: unknown): string[] {
-  const problems: string[] = [];
+export function campaignKindsProblems(payload: unknown): FieldSentence[] {
+  const problems: FieldSentence[] = [];
   const source = (payload ?? {}) as Record<string, unknown>;
 
   if (!Array.isArray(source.rules)) {
-    problems.push('rules must be a list.');
+    problems.push(SAY.rulesNotList);
     return problems;
   }
   const rules = source.rules as Record<string, unknown>[];
   if (rules.length === 0) {
-    problems.push(
-      'A rule set with no rules leaves every office of this company with nothing to qualify for.',
-    );
+    problems.push(SAY.rulesEmpty);
   }
 
   /** Codes are unique per kind: a production club and an MOC rule may share a name, not a list. */
@@ -99,33 +103,30 @@ export function campaignKindsProblems(payload: unknown): string[] {
   const ranks = new Set<string>();
 
   rules.forEach((rule, i) => {
-    const where = `Rule ${i + 1}`;
+    const where = { rule: i + 1 };
     const kind = String(rule.kind ?? '').trim();
     if (!(QUALIFICATION_RULE_KINDS as readonly string[]).includes(kind)) {
-      problems.push(
-        `${where}: ${kind || '(none)'} is not a rule kind. One of `
-        + `${QUALIFICATION_RULE_KINDS.join(', ')}.`,
-      );
+      problems.push(SAY.notARuleKind({ at: where, kind, kinds: QUALIFICATION_RULE_KINDS }));
     }
 
     const code = String(rule.code ?? '').trim().toUpperCase();
     if (!code) {
-      problems.push(`${where} has no code. A standing row names the code, never the label.`);
+      problems.push(SAY.ruleNoCode({ at: where }));
     } else if (seen.has(`${kind}:${code}`)) {
-      problems.push(`The code ${code} is used twice in ${kind}, so one rule would wear two names.`);
+      problems.push(SAY.ruleCodeTwice({ code, kind }));
     }
     seen.add(`${kind}:${code}`);
 
     if (!String(rule.name ?? '').trim()) {
-      problems.push(`${where} has no name, so it would render as a blank row.`);
+      problems.push(SAY.ruleNoName({ at: where }));
     }
 
     const rank = Number(rule.rank);
     if (!Number.isInteger(rank) || rank < 1) {
-      problems.push(`${where} needs a rank of 1 or more — it is the order the tiers are climbed in.`);
+      problems.push(SAY.ruleRank({ at: where }));
     } else if (ranks.has(`${kind}:${rank}`)) {
       // Two tiers at one rank make "the highest reached" undecidable, exactly as with stages.
-      problems.push(`Two ${kind} rules share rank ${rank}, so which one is higher is undecidable.`);
+      problems.push(SAY.ruleRankShared({ kind, rank }));
     } else {
       ranks.add(`${kind}:${rank}`);
     }
@@ -133,42 +134,39 @@ export function campaignKindsProblems(payload: unknown): string[] {
     const groups = Array.isArray(rule.criteriaGroups)
       ? (rule.criteriaGroups as Record<string, unknown>[]) : [];
     if (groups.length === 0) {
-      problems.push(
-        `${where} asks for nothing, so everybody qualifies for it the day it publishes.`,
-      );
+      problems.push(SAY.ruleAsksNothing({ at: where }));
     }
     for (const mode of [rule.groupMode].filter((m) => m !== undefined)) {
       if (!(CRITERIA_MODES as readonly string[]).includes(String(mode))) {
-        problems.push(`${where}: groupMode must be ${CRITERIA_MODES.join(' or ')}.`);
+        problems.push(SAY.groupModeOneOf({ at: where, modes: CRITERIA_MODES }));
       }
     }
 
     groups.forEach((group, g) => {
+      const inGroup = { ...where, group: g + 1 };
       if (!(CRITERIA_MODES as readonly string[]).includes(String(group.mode))) {
-        problems.push(`${where}, group ${g + 1}: mode must be ${CRITERIA_MODES.join(' or ')}.`);
+        problems.push(SAY.modeOneOf({ at: inGroup, modes: CRITERIA_MODES }));
       }
       const criteria = Array.isArray(group.criteria)
         ? (group.criteria as Record<string, unknown>[]) : [];
       if (criteria.length === 0) {
-        problems.push(`${where}, group ${g + 1} asks for nothing, so it passes for everybody.`);
+        problems.push(SAY.groupAsksNothing({ at: inGroup }));
       }
       criteria.forEach((c, j) => {
-        const at = `${where}, group ${g + 1}, criterion ${j + 1}`;
-        if (!String(c.metricKey ?? '').trim()) {
-          problems.push(`${at} names no metric.`);
-        } else if (metricByKey(String(c.metricKey).trim().toUpperCase())?.requirable === false) {
+        const at = { ...inGroup, criterion: j + 1 };
+        const metricKey = String(c.metricKey ?? '').trim();
+        const metric = metricByKey(metricKey.toUpperCase());
+        if (!metricKey) {
+          problems.push(SAY.criterionNoMetric({ at }));
+        } else if (metric?.requirable === false) {
           // An office's count, not anybody's work (P13.2-T4): a rule asking for it qualifies nobody.
-          problems.push(`${at}: ${metricByKey(String(c.metricKey).trim().toUpperCase())?.name} counts `
-            + 'the office, not anybody’s work, so a rule cannot ask for it.');
+          problems.push(SAY.criterionCountsTheOffice({ at, name: metric.name }));
         }
         if (!(REQUIREMENT_COMPARATORS as readonly string[]).includes(String(c.comparator))) {
-          problems.push(
-            `${at}: ${String(c.comparator)} is not a comparator. One of `
-            + `${REQUIREMENT_COMPARATORS.join(', ')}.`,
-          );
+          problems.push(SAY.criterionComparator({ at, comparator: String(c.comparator), values: REQUIREMENT_COMPARATORS }));
         }
         if (!Number.isFinite(Number(c.value))) {
-          problems.push(`${at} has no number to compare against.`);
+          problems.push(SAY.criterionNoNumber({ at }));
         }
       });
     });

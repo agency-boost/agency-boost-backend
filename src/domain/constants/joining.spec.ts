@@ -1,3 +1,4 @@
+import { english, indonesian } from '../../../test/i18n';
 import { INVITES, JOINED_AS, JOINING, REGISTRATION, joinDateViolation, joinedAsFor } from './index';
 
 /**
@@ -30,11 +31,19 @@ describe('the join date and its classification (ADR-0169)', () => {
     expect(joinDateViolation('2026-10-27', today)).toBeNull();
     expect(joinDateViolation('1980-01-01', today)).toBeNull();
     expect(joinDateViolation('2004-06-15', today)).toBeNull();
-    expect(joinDateViolation('2026-10-28', today)).toBe('joinDate cannot be after today.');
-    expect(joinDateViolation('1979-12-31', today)).toBe('joinDate cannot be before 1980.');
+    expect(english(joinDateViolation('2026-10-28', today))).toBe('joinDate cannot be after today.');
+    expect(english(joinDateViolation('1979-12-31', today))).toBe('joinDate cannot be before 1980.');
     for (const no of ['2026-02-30', '27/10/2026', '', 20261027, null]) {
-      expect(joinDateViolation(no, today)).toBe('joinDate must be a real date, written YYYY-MM-DD.');
+      expect(english(joinDateViolation(no, today))).toBe('joinDate must be a real date, written YYYY-MM-DD.');
     }
+  });
+
+  it('P18.98-T5 AC-3 says each refusal in Indonesian too, the field named as the API names it', () => {
+    const today = '2026-10-27';
+    expect(indonesian(joinDateViolation('2026-10-28', today))).toBe('joinDate tidak boleh setelah hari ini.');
+    expect(indonesian(joinDateViolation('1979-12-31', today))).toBe('joinDate tidak boleh sebelum tahun 1980.');
+    expect(indonesian(joinDateViolation('27/10/2026', today)))
+      .toBe('joinDate harus berupa tanggal yang benar, dengan format YYYY-MM-DD.');
   });
 });
 

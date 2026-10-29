@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { DomainException } from '@/common/errors/domain.exception';
+import { readerIn } from '@/common/i18n/reader';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
@@ -12,11 +14,12 @@ import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { ROSTER_TEMPLATE_HEADER } from '@/modules/tenants/roster-csv';
 import { RosterImportService } from '@/modules/tenants/roster-import.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
+import { english, indonesian } from '../../../test/i18n';
 import { clearCollections, seedLadder, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
 import { ApprovalsService } from './approvals.service';
 import { HierarchyService } from './hierarchy.service';
 import { JoinRequest, JoinRequestSchema } from './join-request.schema';
-import { countLeadersUsed } from './leader-limit';
+import { countLeadersUsed, leaderLimitReached } from './leader-limit';
 import { LeaderLimitRequest, LeaderLimitRequestSchema } from './leader-limit-request.schema';
 import { LeaderLimitRequestService, staleReason } from './leader-limit-request.service';
 import { MembershipHistory, MembershipHistorySchema } from './membership-history.schema';
@@ -357,11 +360,16 @@ describe('P18.8-T2 — a leader past the limit waits for AgencyBoost', () => {
       await approvals.approve(await asOwner(), String(open!._id));
       await expect(service.approve(SA, request.requestId)).rejects.toMatchObject({ code: 'LEADER_LIMIT_REQUEST_STALE' });
 
-      expect(staleReason({ action: 'promote', fromOrgLevelCode: 'AGENT' }, null)).toMatch(/no longer a member/);
-      expect(staleReason({ action: 'promote', fromOrgLevelCode: 'AGENT' }, { status: 'removed', orgLevelCode: 'AGENT' }))
+      expect(english(staleReason({ action: 'promote', fromOrgLevelCode: 'AGENT' }, null))).toMatch(/no longer a member/);
+      expect(english(staleReason({ action: 'promote', fromOrgLevelCode: 'AGENT' }, { status: 'removed', orgLevelCode: 'AGENT' })))
         .toMatch(/no longer a member/);
       expect(staleReason({ action: 'promote', fromOrgLevelCode: 'AGENT' }, { status: 'pending', orgLevelCode: 'AGENT' }))
         .toBeNull();
+      // P18.98-T5: the reason is a sentence, in both languages.
+      expect(indonesian(staleReason({ action: 'promote', fromOrgLevelCode: 'AGENT' }, null)))
+        .toBe('Dia sudah bukan anggota KPM ini.');
+      expect(indonesian(staleReason({ action: 'activate', fromOrgLevelCode: 'AGENT' }, { status: 'active', orgLevelCode: 'AGENT' })))
+        .toBe('Dia sudah diterima bergabung sejak permintaan ini diajukan.');
     });
 
     it('a promotion onto a rung archived since is stale', async () => {
@@ -438,6 +446,104 @@ describe('P18.8-T2 — a leader past the limit waits for AgencyBoost', () => {
       await expect(service.decline(await asOwner(), request.requestId, { reason: 'x' })).rejects.toMatchObject({ code: 'PERM_DENIED' });
       await expect(service.approve(SA, new mongoose.Types.ObjectId().toString())).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(service.approve(SA, 'not-an-id')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+  });
+
+  /*
+   * **P18.98-T5 — the leader limit's words, in the reader's language** (ADR-0179 §7). The refusals are written for
+   * their reader by the error filter (`messageFor`); `Error.message` and `details` stay the English the API wrote. A
+   * stale request's decline reason is stored, so it is written in the deciding Super Admin's language (AC-6).
+   */
+  describe('P18.98-T5 in Indonesian', () => {
+    const ID = readerIn('id');
+    const refusalOf = async (work: Promise<unknown>): Promise<DomainException> => {
+      const err = await work.then(() => null, (e: unknown) => e);
+      expect(err).toBeInstanceOf(DomainException);
+      return err as DomainException;
+    };
+
+    it('P18.98-T5 AC-7 says the limit both ways — ask AgencyBoost, or wait for it to raise the limit — the English as before', async () => {
+      const asked = await refusalOf(roles.change(await asOwner(), other, 'aab'));
+      expect(asked.code).toBe('LEADER_LIMIT_REACHED');
+      expect(asked.message).toBe(
+        'This office has reached its limit of 2 leaders — ABs and AABs together, the Owner included. '
+        + 'Ask AgencyBoost to approve this one past the limit, or to raise it.',
+      );
+      expect(asked.messageFor(ID)).toBe(
+        'KPM ini sudah mencapai batas 2 leaders — AB dan AAB dihitung bersama, termasuk Owner. '
+        + 'Minta AgencyBoost menyetujui yang satu ini melebihi batas, atau menaikkan batasnya.',
+      );
+      const final = leaderLimitReached(1, 1, false);
+      expect(final.message).toBe(
+        'This office has reached its limit of 1 leaders — ABs and AABs together, the Owner included. '
+        + 'Nobody else can be made a leader until AgencyBoost raises it.',
+      );
+      expect(final.messageFor(ID)).toBe(
+        'KPM ini sudah mencapai batas 1 leader — AB dan AAB dihitung bersama, termasuk Owner. '
+        + 'Tidak ada lagi yang dapat dijadikan leader sampai AgencyBoost menaikkan batasnya.',
+      );
+      expect(leaderLimitReached(1500, 1500).messageFor(ID)).toMatch(/^KPM ini sudah mencapai batas 1\.500 leaders /);
+    });
+
+    it('P18.98-T5 AC-6, AC-7 a stale approval is refused in the Super Admin’s language, and closed with its reason in it', async () => {
+      const request = await service.create(await asOwner(), other, promote);
+      await mongoose.model(Membership.name).updateOne({ _id: other }, { $set: { orgLevelCode: 'AB', role: 'ab' } });
+
+      const stale = await refusalOf(service.approve(SA.withReader(ID), request.requestId));
+      expect(stale.code).toBe('LEADER_LIMIT_REQUEST_STALE');
+      expect(stale.messageFor(ID)).toBe(
+        'Permintaan ini sudah tidak berlaku: Dia sudah pindah jenjang sejak permintaan ini diajukan. '
+        + 'Permintaan ini ditutup, dan tidak ada yang diubah.',
+      );
+      // The exception keeps the English; the response writes `why` for its reader.
+      expect(stale.message).toBe(
+        'This request no longer applies: They have moved rung since it was asked. It has been closed, and nothing was changed.',
+      );
+      expect(stale.details).toEqual({ requestId: request.requestId, why: 'They have moved rung since it was asked.' });
+      expect(stale.detailsFor(ID)).toEqual({
+        requestId: request.requestId, why: 'Dia sudah pindah jenjang sejak permintaan ini diajukan.',
+      });
+
+      // Stored in the writer's language, and shown as stored — on the office's list and in the asker's notice.
+      const reason = 'Sudah tidak berlaku: Dia sudah pindah jenjang sejak permintaan ini diajukan.';
+      expect((await rows.findById(request.requestId).lean().exec())!.declineReason).toBe(reason);
+      expect((await service.list(await asOwner()))[0]).toMatchObject({ status: 'declined', declineReason: reason });
+      expect(sent.find((s) => s.templateId === NotificationTemplate.LEADER_LIMIT_REQUEST_DECLINED)?.payload)
+        .toMatchObject({ reason });
+    });
+
+    it('P18.98-T5 AC-7 refuses an ask, a second ask and a decision in Indonesian', async () => {
+      const unnamed = await refusalOf(service.create(await asOwner(), other, { action: 'promote' }));
+      expect([unnamed.code, unnamed.messageFor(ID)])
+        .toEqual(['VALIDATION_FAILED', 'Sebutkan jenjang yang akan diberikan kepadanya.']);
+
+      const first = await service.create(await asOwner(), other, promote);
+      const again = await refusalOf(service.create(await asOwner(), other, promote));
+      expect([again.code, again.messageFor(ID)]).toEqual([
+        'LEADER_LIMIT_REQUEST_OPEN',
+        'AgencyBoost sedang memutuskan permintaan tentang dia. Tunggu keputusannya, atau batalkan dulu.',
+      ]);
+
+      const noReason = await refusalOf(service.decline(SA, first.requestId, { reason: ' ' }));
+      expect(noReason.messageFor(ID)).toBe(
+        'Jelaskan alasannya. KPM akan membacanya, dan penolakan tanpa hal yang dapat ditindaklanjuti bukanlah jawaban.',
+      );
+      const notTheOffice = await refusalOf(service.approve(await asOwner(), first.requestId));
+      expect([notTheOffice.code, notTheOffice.messageFor(ID)])
+        .toEqual(['PERM_DENIED', 'Hanya AgencyBoost yang memutuskan permintaan ini.']);
+
+      await service.cancel(await asOwner(), first.requestId);
+      const decided = await refusalOf(service.cancel(await asOwner(), first.requestId));
+      expect([decided.code, decided.message, decided.messageFor(ID)]).toEqual([
+        'LEADER_LIMIT_REQUEST_DECIDED', 'That request was already cancelled.', 'Permintaan itu sudah dibatalkan.',
+      ]);
+    });
+
+    it('P18.98-T5 AC-4 names a person whose account is gone in the reader’s language', async () => {
+      await service.create(await asOwner(), other, promote);
+      await users.deleteOne({ _id: (await members.findById(office(KPM_A), other))!.userId });
+      expect((await service.list(await asOwner()))[0].subjectName).toBe('Unknown');
+      expect((await service.list((await asOwner()).withReader(ID)))[0].subjectName).toBe('Tidak diketahui');
     });
   });
 

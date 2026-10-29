@@ -6,6 +6,7 @@ import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common
 import { SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 
+import { validationRefusal } from './common/validation/violations';
 import { corsOriginsOf } from './config/cors-origins';
 import { buildOpenApiDocument } from './openapi';
 
@@ -32,6 +33,12 @@ export const VALIDATION_PIPE_OPTIONS = {
   // @Type(() => Number). That is more typing and it is the right trade: this
   // product's premise is that a silently wrong number is worse than a crash.
   transformOptions: { enableImplicitConversion: false },
+  /*
+   * **The refusal in the reader's language** (P18.98-T5 AC-3): `400 VALIDATION_FAILED` with `details.violations`, as
+   * Nest's own factory answers — the same English, so every assertion on it stands — each violation a sentence the
+   * error filter writes for the request's reader (`common/validation/violations.ts`).
+   */
+  exceptionFactory: validationRefusal,
 } as const;
 
 /**

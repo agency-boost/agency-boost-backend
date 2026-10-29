@@ -25,6 +25,7 @@ import { measuredRates, type MeasuredRates } from '@/domain/metrics/measured-rat
 import { rollingWindow, type LocalDate } from '@/common/time/local-day';
 import { computeCascade, defaultMonthsLeft, defaultRates, type CascadeInputs, type CascadeResult } from './goal-cascade';
 import { checkGoal } from './goal-input';
+import { GOAL_REFUSALS } from './goals.messages';
 import { GoalRepository } from './goal.repository';
 import type { GoalDocument, GoalMode } from './goal.schema';
 
@@ -570,8 +571,7 @@ export class GoalService {
     if (period >= thisYear) return;
     throw new DomainException(
       ErrorCode.GOAL_PERIOD_LOCKED,
-      `${period} has ended. Its plan is what was agreed at the time and stays as it was; `
-      + `set a plan for ${thisYear} instead.`,
+      GOAL_REFUSALS.GOAL_PERIOD_LOCKED.ended({ period, thisYear }),
       HttpStatus.CONFLICT,
       { period, currentPeriod: thisYear },
     );

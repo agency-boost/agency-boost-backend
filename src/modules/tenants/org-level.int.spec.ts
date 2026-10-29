@@ -12,6 +12,7 @@ import { MembershipRepository } from '@/modules/org/membership.repository';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import { EVERY_MEMBER, productionPipe, session, StubAuth, SUPER_ADMIN } from '../../../test/http-permissions';
 import { listenOnLoopback } from '../../../test/listen';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { AdminController } from './admin.controller';
 import { Company, CompanySchema } from './company.schema';
@@ -161,6 +162,21 @@ describe('POST and PATCH /admin/org-levels — the leader tier (P18.8-T1)', () =
     const refused = await patch(rung.orgLevelId, { leaderTier: 'associate' }).expect(409);
     expect(refused.body.error.details.members).toBe(1);
     expect(refused.body.error.message).toContain('1 person stands on Unit Manager');
+  });
+
+  it('P18.98-T5 AC-7 refuses the change in Indonesian for an Indonesian reader, the count and the label as they are', async () => {
+    const [rung] = (await add({ code: 'SM', label: 'Senior Manager' }).expect(201)).body;
+    await stand(rung.orgLevelId, 'SM', '66f0000000000000000000a1');
+    await stand(rung.orgLevelId, 'SM', '66f0000000000000000000b1');
+
+    const refused = await patch(rung.orgLevelId, { leaderTier: 'senior' }).set(...IN_INDONESIAN).expect(409);
+    expect(refused.body.error).toMatchObject({
+      code: 'ORG_LEVEL_TIER_IN_USE',
+      details: { orgLevelId: rung.orgLevelId, code: 'SM', members: 2 },
+      message: '2 orang berada di Senior Manager. Tingkat leader-nya menentukan apa yang boleh mereka lakukan, jadi '
+        + 'tidak dapat diubah selama masih ada yang menempatinya. Pindahkan mereka ke jenjang lain terlebih dahulu, '
+        + 'atau tambahkan jenjang baru.',
+    });
   });
 
   it('AC-1 reads a rung written before the field as the migration writes it', async () => {

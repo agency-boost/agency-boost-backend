@@ -3,6 +3,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
 import {
   ACTIVATION_3M_LOCKS, activation3MDecided, newHiresWindow, type Activation3MInput, type Activation3MLock,
   type Activation3MResult,
@@ -15,6 +16,7 @@ import { scopeFor } from '@/modules/rbac/permissions';
 import type { Membership } from '@/modules/org/membership.schema';
 import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
 import type { NewHireMarkedLeftView } from './activation-progress.view';
+import { ACTIVATION_MESSAGES, ACTIVATION_REFUSALS } from './activation.messages';
 
 /** What a membership's 3M result is read from: who they are, and its four inputs. */
 export type Activation3MMember = Pick<Membership, 'joinedAs' | 'joinDate' | 'firstSaleDate' | 'leftAt' | 'activation3M'> & {
@@ -147,7 +149,7 @@ export class Activation3MService {
     if (member.joinedAs !== 'new_hire') {
       throw new DomainException(
         ErrorCode.NOT_A_NEW_HIRE,
-        'They joined as an existing agent, so they have no 3M activation to end. Only a new hire is marked as left.',
+        ACTIVATION_REFUSALS.NOT_A_NEW_HIRE.existingAgent,
         HttpStatus.CONFLICT,
       );
     }
@@ -160,8 +162,7 @@ export class Activation3MService {
     if (reports > 0) {
       throw new DomainException(
         ErrorCode.NEW_HIRE_HAS_REPORTS,
-        `${reports} ${reports === 1 ? 'person reports' : 'people report'} to them. Move ${reports === 1 ? 'them' : 'those people'} `
-          + 'to another leader before marking them as left.',
+        ACTIVATION_REFUSALS.NEW_HIRE_HAS_REPORTS.reportsToThem({ reports }),
         HttpStatus.CONFLICT,
         { directCount: reports },
       );
@@ -177,9 +178,10 @@ export class Activation3MService {
       const now = await this.memberships.findById(ctx, membershipId);
       throw alreadyLeft(now?.leftAt ? this.clock.localDateFor(office.timezone, now.leftAt) : office.today);
     }
-    // Out of the office, as every leaver is — the same instant, so a count by day reads them gone from it.
+    // Out of the office, as every leaver is — the same instant, so a count by day reads them gone from it. The reason is
+    // the API's own words, stored as text in the language of the leader marking it (P18.98-T5 AC-6), and shown as stored.
     try {
-      await this.removal.depart(ctx, member, { at, reason: 'Left the office as a new hire.' });
+      await this.removal.depart(ctx, member, { at, reason: render(ACTIVATION_MESSAGES.leftAsNewHire, ctx.reader) });
     } catch (err) {
       // L5: a removal that failed before it removed them leaves an active member, so their leaving is put back with it.
       await this.memberships.updateMany(ctx, { _id: membershipId, leftAt: at, status: 'active' }, { $set: { leftAt: null } });
@@ -209,8 +211,7 @@ export class Activation3MService {
     if (joinDate === null || joinDate < year.from || joinDate > year.to) {
       throw new DomainException(
         ErrorCode.NEW_HIRE_NOT_MARKABLE,
-        'They joined more than a year ago, so they are no longer on New Hires and there is no 3M result to decide. '
-          + 'To take them out of the team, remove them.',
+        ACTIVATION_REFUSALS.NEW_HIRE_NOT_MARKABLE.pastTheYear,
         HttpStatus.CONFLICT,
         { reason: 'past_the_year', joinDate },
       );
@@ -246,7 +247,7 @@ export class Activation3MService {
 function alreadyLeft(leftOn: string): DomainException {
   return new DomainException(
     ErrorCode.NEW_HIRE_ALREADY_LEFT,
-    'They are marked as left already.',
+    ACTIVATION_REFUSALS.NEW_HIRE_ALREADY_LEFT.already,
     HttpStatus.CONFLICT,
     { leftOn },
   );

@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import type { DomainException } from '@/common/errors/domain.exception';
+import { readerIn } from '@/common/i18n/reader';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { DataUploadBatch } from './data-upload-batch.schema';
@@ -302,6 +304,27 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
       await expect(wired.productionImport.revert(A, batch.id)).rejects.toMatchObject({
         code: 'UPLOAD_MONTH_LOCKED', message: expect.stringContaining('locked by Rina Wijaya'),
       });
+    });
+
+    it('P18.98-T5 AC-2 says who locked it, and what to revert first, in Indonesian', async () => {
+      const inIndonesian = async (call: Promise<unknown>) =>
+        ((await call.catch((err: unknown) => err)) as DomainException).messageFor(readerIn('id'));
+      const first = await importFile(A, '2026-09', file('a.csv', ['PRU-001', { 'ape.monthly': '1' }]));
+      const second = await importFile(A, '2026-09', file('b.csv', ['PRU-001', { 'ape.monthly': '2' }]));
+      expect(await inIndonesian(wired.productionImport.revert(A, first.batch.id)))
+        .toBe('“b.csv” diimpor ke bulan ini setelahnya. Batalkan impor itu dulu.');
+      await wired.productionMonths.lock(A, '2026-09');
+      expect(await inIndonesian(wired.productionImport.revert(A, second.batch.id)))
+        .toBe('Sep 2026 dikunci oleh Rina Wijaya. Buka kembali bulan ini untuk mengubah angkanya.');
+      await wired.productionMonths.reopen(A, '2026-09');
+      const twice = await importFile(A, '2026-09', file('c.csv', ['PRU-001', { 'ape.monthly': '3' }]));
+      await wired.productionImport.revert(A, twice.batch.id);
+      expect(await inIndonesian(wired.productionImport.revert(A, twice.batch.id))).toBe('Impor ini sudah dibatalkan.');
+      await db().collection('dataUploadBatches').updateOne(
+        { _id: new mongoose.Types.ObjectId(twice.batch.id) }, { $set: { status: 'failed' } },
+      );
+      expect(await inIndonesian(wired.productionImport.revert(A, twice.batch.id)))
+        .toBe('Impor ini tidak pernah selesai, jadi tidak ada yang perlu dibatalkan.');
     });
 
     it('leaves a month already in the state asked for as it is, and audits nothing', async () => {

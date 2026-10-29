@@ -12,8 +12,10 @@ import {
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { AUTH_REFUSALS } from './auth.messages';
+import { readerOfRequest } from '@/common/i18n/reader';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
-import { REGISTRATION } from '@/domain/constants';
+import { isLanguage, languageOf, REGISTRATION } from '@/domain/constants';
 import { corsOriginsOf } from '@/config/cors-origins';
 import { initialsOf, User, UserDocument } from '@/modules/users/user.schema';
 import { preferredNameOf } from '@/modules/users/display-name';
@@ -168,7 +170,7 @@ export class AuthController {
     if (!token) {
       throw new DomainException(
         ErrorCode.AUTH_TOKEN_INVALID,
-        'No session to refresh. Sign in again.',
+        AUTH_REFUSALS.AUTH_TOKEN_INVALID.noSession,
         HttpStatus.UNAUTHORIZED,
       );
     }
@@ -194,7 +196,7 @@ export class AuthController {
     if (!isForeignOrigin(req.headers.origin, allowed)) return;
     throw new DomainException(
       ErrorCode.AUTH_ORIGIN_REFUSED,
-      'Signing in, refreshing a session and signing out are not accepted from that site.',
+      AUTH_REFUSALS.AUTH_ORIGIN_REFUSED.foreignSite,
       HttpStatus.FORBIDDEN,
     );
   }
@@ -214,7 +216,7 @@ export class AuthController {
     if (retryAfter !== null) {
       throw new DomainException(
         ErrorCode.AUTH_RATE_LIMITED,
-        `Too many attempts. Try again in ${Math.ceil(retryAfter / 60)} minute(s).`,
+        AUTH_REFUSALS.AUTH_RATE_LIMITED.tooMany({ minutes: Math.ceil(retryAfter / 60) }),
         HttpStatus.TOO_MANY_REQUESTS,
         { retryAfterSeconds: retryAfter },
       );
@@ -249,7 +251,8 @@ export class AuthController {
     this.limit(registrationLimitKey(req.ip ?? 'unknown'), REGISTRATION.MAX_PER_ADDRESS, REGISTRATION.WINDOW_SECONDS);
     const { inviteToken, ...input } = dto;
     if (!inviteToken || !this.invites) {
-      await this.auth.register(input);
+      // The verification email in the language of the page that asked (P18.98-T5 AC-5).
+      await this.auth.register(input, readerOfRequest(req));
       return { status: 'verification_sent' };
     }
     /*
@@ -259,7 +262,7 @@ export class AuthController {
      * somebody else's account to an office.
      */
     const held = await this.invites.forRegistration(inviteToken);
-    const { user, created } = await this.auth.registerAccount({ ...input, ...held });
+    const { user, created } = await this.auth.registerAccount({ ...input, ...held }, readerOfRequest(req));
     if (created) await this.invites.acceptForNewAccount(inviteToken, String(user._id));
     return { status: 'verification_sent' };
   }
@@ -404,9 +407,10 @@ export class AuthController {
     summary: 'Request a password reset',
     description: 'Always 202, whether or not the address exists.',
   })
-  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+  async forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: Request) {
     this.limit(`forgot:${dto.email.toLowerCase()}`, FORGOT_LIMIT, FORGOT_WINDOW_SECONDS);
-    await this.auth.forgotPassword(dto.email);
+    // The reset email in the language of the page that asked, for a person who has saved none (P18.98-T5 AC-5).
+    await this.auth.forgotPassword(dto.email, readerOfRequest(req));
     return { status: 'accepted' };
   }
 
@@ -433,11 +437,11 @@ export class AuthController {
       + 'this way. `agent/01-getting-started.md` told readers to request another before this '
       + 'route existed.',
   })
-  async resendVerification(@Body() dto: ForgotPasswordDto) {
+  async resendVerification(@Body() dto: ForgotPasswordDto, @Req() req: Request) {
     const email = dto.email.toLowerCase().trim();
     this.limit(`resend:${email}`, RESEND_LIMIT, RESEND_WINDOW_SECONDS);
     // Deliberately not awaited into a different answer: the reply is the same either way.
-    await this.auth.resendVerification(email);
+    await this.auth.resendVerification(email, readerOfRequest(req));
     return { status: 'accepted' };
   }
 
@@ -536,6 +540,14 @@ export class AuthController {
         gender: user?.gender ?? null,
         companyJoinMonth: user?.companyJoinMonth ?? null,
         workStatus: ctx.membershipId ? (membership?.workStatus ?? null) : (user?.registeredWorkStatus ?? null),
+        /*
+         * **The language in force, and whether it was chosen** (ADR-0179 §2; P18.98-T2 AC-1, AC-5). `locale` is never
+         * `null`: a person who has chosen nothing reads Bahasa Indonesia (`languageOf`). `localeChosen` says which it
+         * is, because the app treats the two apart at sign-in — a saved choice wins over the browser's cookie and
+         * rewrites it, and an account with none keeps the language the browser already had, writing nothing.
+         */
+        locale: languageOf(user?.locale),
+        localeChosen: isLanguage(user?.locale),
       },
       /*
        * The context's membership — its `isCoreLeader` the effective flag, the tag on a leader rung (ADR-0159 §4) — and
@@ -578,12 +590,14 @@ export class AuthController {
   @ApiOperation({
     summary: 'Update your own account',
     description:
-      'Your name, preferred name and pronoun; and your date of birth, gender, company join month and work '
-      + 'status (ADR-0158) — each optional, none clearable. A birth date must be in the past and at least 18 '
-      + 'years ago and a join month not in the future, else `400 VALIDATION_FAILED` naming the field. Work '
-      + 'status is written on your membership in your office, and on your account until you have one. '
-      + '**Refused `403 PERM_DENIED` in any support session**, read-only, setup or elevated: a person\'s own '
-      + 'account is theirs to change.',
+      'Your name, preferred name and pronoun; your date of birth, gender, company join month and work '
+      + 'status (ADR-0158); and the language you read AgencyBoost in, `locale` (`id` or `en`, ADR-0179) — each '
+      + 'optional, none clearable. A birth date must be in the past and at least 18 years ago and a join month not '
+      + 'in the future, else `400 VALIDATION_FAILED` naming the field; a `locale` that is not `id` or `en`, `null` '
+      + 'included, is `400 VALIDATION_FAILED` with `details.violations`. Work status is written on your membership '
+      + 'in your office, and on your account until you have one. **Refused `403 PERM_DENIED` in any support '
+      + 'session**, read-only, setup or elevated: a person\'s own account, their language included, is theirs to '
+      + 'change.',
   })
   async updateMe(@Ctx() ctx: RequestContext, @Body() dto: UpdateProfileDto) {
     const { workStatus, ...account } = dto;
@@ -594,6 +608,7 @@ export class AuthController {
      */
     this.auth.refusePersonalData(dto);
 
+    // The account's own fields, the language among them (`users.locale`, ADR-0179 §2): the person's, never an office's.
     await this.users.updateOne({ _id: ctx.userId }, { $set: { ...account } }).exec();
     if (workStatus !== undefined) {
       if (ctx.membershipId) {
