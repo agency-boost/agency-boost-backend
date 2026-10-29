@@ -6,6 +6,7 @@ import { NotificationTemplate } from '@/modules/notifications/notification.types
 import type { CalendarEntryView, CalendarPeriodView } from '@/modules/calendar/calendar-view';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
+import { CALENDAR_WORDS as T } from '../calendar-fixture';
 import { seedDemo, type SeedResult } from '../demo';
 
 /**
@@ -66,59 +67,59 @@ describe.each([
   it('Seed: Agus’s week in the prototype’s rhythm — two standups, the goal review, a task, a two-day trip, his client review', async () => {
     const week = await wired.calendar.read(await as('agus@kpm0417.test'), {});
     expect(week.from).toBe(monday);
-    const standups = week.entries.filter((e) => 'title' in e && e.title === 'Weekly unit standup') as CalendarEntryView[];
+    const standups = week.entries.filter((e) => 'title' in e && e.title === T.standup) as CalendarEntryView[];
     expect(standups.map((e) => [e.date, e.start, e.end])).toEqual([[monday, '09:00', '09:30'], [addDays(monday, 3), '09:00', '09:30']]);
     expect(titles(week)).toEqual(expect.arrayContaining([
-      'Goal review — Q4 planning', 'Prospecting call block', 'Client trip — Surabaya', 'Client review — Hartono family',
-      'AAB sync — Sari Puspita', 'Pipeline check', '1:1 with Indah Permatasari', '1:1 coaching — Indah Permatasari',
+      T.goalReview, T.prospecting, T.trip, T.clientReview,
+      T.aabSync, T.pipeline, T.blockOnIndah, T.oneToOne('Indah Permatasari'),
     ]));
-    expect(named(week, 'Client trip — Surabaya')).toMatchObject({ allDay: true, startsOn: addDays(monday, 4), endsOn: addDays(monday, 5) });
-    expect(named(week, 'Client review — Hartono family')!.notes).toContain('Jl. Sudirman No. 12');
+    expect(named(week, T.trip)).toMatchObject({ allDay: true, startsOn: addDays(monday, 4), endsOn: addDays(monday, 5) });
+    expect(named(week, T.clientReview)!.notes).toContain('Jl. Sudirman No. 12');
     // His 1:1 with Indah is today, the day his draft with her is open; its chip opens her session.
-    expect(named(week, '1:1 coaching — Indah Permatasari')).toMatchObject({ date: today, invitees: [expect.objectContaining({ readerCoaches: true })] });
+    expect(named(week, T.oneToOne('Indah Permatasari'))).toMatchObject({ date: today, invitees: [expect.objectContaining({ readerCoaches: true })] });
   });
 
   it('Seed: invitations in every state — the standup accepted by Indah and Sari, the goal review pending for Sari, the huddle declined by Rina', async () => {
     const sari = await wired.calendar.read(await as('sari@kpm0417.test'), {});
-    expect(named(sari, 'Weekly unit standup')).toMatchObject({ readerIs: 'invitee', myAnswer: 'accepted' });
-    expect(named(sari, 'Goal review — Q4 planning')).toMatchObject({ readerIs: 'invitee', myAnswer: 'pending' });
+    expect(named(sari, T.standup)).toMatchObject({ readerIs: 'invitee', myAnswer: 'accepted' });
+    expect(named(sari, T.goalReview)).toMatchObject({ readerIs: 'invitee', myAnswer: 'pending' });
     const indah = await wired.calendar.read(await as('indah@kpm0417.test'), {});
-    expect(named(indah, 'Weekly unit standup')).toMatchObject({ myAnswer: 'accepted' });
+    expect(named(indah, T.standup)).toMatchObject({ myAnswer: 'accepted' });
 
     const rinaCtx = await as('rina@kpm0417.test');
     const rina = await wired.calendar.read(rinaCtx, {});
-    expect(titles(rina)).not.toContain('Unit huddle');
-    expect(titles(rina)).toEqual(expect.arrayContaining(['Client meeting — Pak Gunadi', 'Prepare SPAJ documents']));
+    expect(titles(rina)).not.toContain(T.huddle);
+    expect(titles(rina)).toEqual(expect.arrayContaining([T.clientMeeting, T.spaj]));
     await expect(wired.calendar.readOne(rinaCtx, first.calendar.marked.declinedHuddle)).resolves.toMatchObject({ myAnswer: 'declined' });
   });
 
   it('P18.95-T8 AC-2 Seed: Agus’s week holds a Zoom address and another meeting address, so Join Zoom and Join meeting can be walked', async () => {
     const week = await wired.calendar.read(await as('agus@kpm0417.test'), {});
-    expect(named(week, 'Weekly unit standup')!.notes).toBe('Zoom — zoom.us/j/91827364');
-    expect(named(week, 'Goal review — Q4 planning')!.notes).toBe('Office — Conference Room A, or Google Meet: meet.google.com/xqv-pkbt-wmr');
+    expect(named(week, T.standup)!.notes).toBe(T.zoom);
+    expect(named(week, T.goalReview)!.notes).toBe(T.goalReviewNotes);
   });
 
   it('P18.95-T8 AC-2 Seed: Agus compares Sari’s month too — the same projection as her week, her client visit in full', async () => {
     const sari = await memberOf('sari@kpm0417.test');
     const month = await wired.calendar.read(await as('agus@kpm0417.test'), { view: 'month', for: String(sari._id) });
     expect(month.view).toBe('month');
-    expect(named(month, 'Client visit — Tanjung family')).toMatchObject({ type: 'client', readerIs: 'ancestor' });
-    expect(titles(month)).not.toContain('Branch leaders review');
+    expect(named(month, T.clientVisit)).toMatchObject({ type: 'client', readerIs: 'ancestor' });
+    expect(titles(month)).not.toContain(T.leadersReview);
   });
 
   it('Seed: Agus compares Sari — her client visit in full, address and all; the Owner’s review she attends is busy', async () => {
     const sari = await memberOf('sari@kpm0417.test');
     const pane = await wired.calendar.read(await as('agus@kpm0417.test'), { for: String(sari._id) });
-    expect(named(pane, 'Client visit — Tanjung family')).toMatchObject({
-      type: 'client', readerIs: 'ancestor', notes: 'Client site — Tanjung residence, Jl. Kenanga No. 7, BSD City',
+    expect(named(pane, T.clientVisit)).toMatchObject({
+      type: 'client', readerIs: 'ancestor', notes: T.clientVisitNotes,
     });
-    expect(titles(pane)).not.toContain('Branch leaders review');
+    expect(titles(pane)).not.toContain(T.leadersReview);
     expect(pane.entries.filter((e) => 'busy' in e)).toEqual([expect.objectContaining({ date: addDays(monday, 3), start: '15:00' })]);
   });
 
   it('Seed: Agus’s block on Indah is placed, read with Close alone, and announced once', async () => {
     const indah = await wired.calendar.read(await as('indah@kpm0417.test'), {});
-    expect(named(indah, '1:1 with Indah Permatasari')).toMatchObject({ readerIs: 'placed', myAnswer: null });
+    expect(named(indah, T.blockOnIndah)).toMatchObject({ readerIs: 'placed', myAnswer: null });
     const member = await memberOf('indah@kpm0417.test');
     const notices = await col('notifications').find({ userId: String(member.userId), templateId: NotificationTemplate.CALENDAR_BLOCK_PLACED }).toArray();
     expect(notices.map((n) => n.payload)).toEqual([{ entryId: first.calendar.marked.agusBlockOnIndah, date: addDays(monday, 2) }]);
@@ -152,12 +153,12 @@ describe.each([
       .sort();
     expect(theirs).toHaveLength(3);
     const oneToOnes = first.calendar.entries
-      .filter((e) => e.title === '1:1 coaching — Rina Wijaya')
+      .filter((e) => e.title === T.oneToOne('Rina Wijaya'))
       .map((e) => clock.localDateFor(TZ, e.startsAt))
       .sort();
     expect(oneToOnes).toEqual(theirs);
     const rinaWeek = await wired.calendar.read(await as('rina@kpm0417.test'), { date: theirs.at(-1) });
-    const entry = named(rinaWeek, '1:1 coaching — Rina Wijaya')!;
+    const entry = named(rinaWeek, T.oneToOne('Rina Wijaya'))!;
     expect(entry.invitees.every((i) => i.readerCoaches === false)).toBe(true);
   });
 

@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { SEED_LEAD_STATUSES } from '@/domain/constants';
+import { SEEDED_LEAD_STATUS_LABELS_BEFORE_OD_238 } from '@/domain/constants/activity-taxonomy';
 import { TEMPLATE_LIBRARY } from '@/modules/tenants/template-library';
 import { clearCollections, startMongo, stopMongo } from '../../test/mongo';
 import { up } from './0038-first-status-wording';
@@ -41,8 +42,12 @@ describe('0038 — the recruitment pipeline’s first status in the sales pipeli
     kpmId, version, sourceVersion: 3, publishedAt: new Date(), publishedBy: null, deletedAt: null,
     payload: { activity: [], ratios: [], leadPipelines: pipelines(rows) },
   });
+  /** The seed's statuses in the English it gave before P18.98-T7 (OD-238), which is what 0038 was written over. */
+  const english = SEED_LEAD_STATUSES.map((s) => ({
+    ...s, label: SEEDED_LEAD_STATUS_LABELS_BEFORE_OD_238[s.pipeline][s.code] ?? s.label,
+  }));
   /** A Company template's statuses, as `platformDefaultPayload('lead_pipeline')` wrote them before ADR-0167. */
-  const templateStatuses = (first = OLD) => SEED_LEAD_STATUSES.map((s) => ({
+  const templateStatuses = (first = OLD) => english.map((s) => ({
     ...s, label: s.code === 'NOT_APPROACHED' ? first : s.label,
   }));
 
@@ -136,9 +141,10 @@ describe('0038 — the recruitment pipeline’s first status in the sales pipeli
       ['c2', 'published', 1, [OWNERS]],
       [TEMPLATE_LIBRARY.companyId, 'published', 1, [NEW]],
     ]);
-    // Every other status of a rewritten template is the seed's, as it was.
+    // Every other status of a rewritten template is the seed's English, as it was: 0038 writes the words it was
+    // written for, and the Indonesian since P18.98-T7 is 0046's to give (OD-238).
     const defaults = templates.find((t) => t.templateId === TEMPLATE_LIBRARY.defaultTemplateId)!;
-    expect(defaults.payload.statuses).toEqual(SEED_LEAD_STATUSES.map((s) => ({ ...s })));
+    expect(defaults.payload.statuses).toEqual(english);
 
     const other = await db().collection('companyTemplates').findOne({ kind: 'activity_taxonomy' });
     expect(other!.payload.statuses).toEqual(templateStatuses());

@@ -12,7 +12,9 @@
  *
  * **Codes, never numbers.** The prototype keys modules by the integers 1–10, and an
  * activation item or a progress record that pointed at a position would follow whatever moved
- * into it. The codes are ours; the labels are the prototype's, verbatim.
+ * into it. The codes are ours; the labels are the prototype's, **written in Bahasa Indonesia since
+ * P18.98-T7** (OD-238, option 1; ADR-0179 §5) — *Sales*, *Recruitment* and *Closing* kept English by the
+ * approved glossary (§A.3, §A.6). The English is `SEEDED_TRAINING_WORDINGS_BEFORE_OD_238`'s.
  */
 
 /** Whether a module is offered to agents at all — not when (that is the office's publish). */
@@ -88,51 +90,99 @@ export const SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97: Readonly<Record<string,
  */
 export const SEED_TRAINING_CATEGORIES: readonly SeedTrainingCategory[] = [
   {
+    // *Sales* is kept English in both languages, as the tab beside *Recruit* is (the approved glossary, §A.3).
     code: 'SALES',
     label: 'Sales',
-    description: 'Find prospects, uncover their needs, answer objections and close.',
+    description: 'Temukan prospek, gali kebutuhannya, jawab keberatan, dan lakukan closing.',
     displayOrder: 1,
   },
   {
     code: 'PRODUCT',
-    label: 'Product',
-    description: 'What each product covers, who it suits and how to explain it.',
+    label: 'Produk',
+    description: 'Apa yang dilindungi setiap produk, untuk siapa produk itu cocok, dan cara menjelaskannya.',
     displayOrder: 2,
   },
   {
     code: 'RECRUITING',
-    label: 'Recruiting',
-    description: 'Find, approach and bring in the people who will build your team.',
+    label: 'Recruitment',
+    description: 'Temukan, dekati, dan rekrut orang-orang yang akan membangun tim Anda.',
     displayOrder: 3,
   },
   {
     code: 'TEAM_MANAGEMENT',
-    label: 'Team Management',
-    description: 'Lead your unit: set goals, coach your agents and help new ones start.',
+    label: 'Manajemen tim',
+    description: 'Pimpin unit Anda: tetapkan goal, beri coaching kepada agen Anda, dan bantu agen baru memulai.',
     displayOrder: 4,
   },
   {
     code: 'SOFT_SKILLS',
-    label: 'Soft Skills',
-    description: 'Communication, confidence and the daily habits behind steady selling.',
+    label: 'Soft skills',
+    description: 'Komunikasi, rasa percaya diri, dan kebiasaan harian di balik penjualan yang konsisten.',
     displayOrder: 5,
   },
   {
     code: 'COMPANY_AND_KPM',
-    label: 'Company and KPM',
-    description: 'How your insurer and this office work, and who to ask for what.',
+    label: 'Perusahaan dan KPM',
+    description: 'Cara kerja perusahaan asuransi Anda dan KPM ini, serta kepada siapa bertanya untuk setiap hal.',
     displayOrder: 6,
   },
 ];
 
+/**
+ * **The words the seed gave before P18.98-T7** (OD-238, option 1), per code — the prototype's English labels and
+ * titles (`KPM_Owner.html:4267-4291`) and P18.97-T4's English descriptions. Kept only so migration `0046` can
+ * recognise the Template company's Default template where it still holds them, so `0045` still writes the words it
+ * was written for, and for the specs. No office and no template is given them any more. *Sales* and *Closing* are
+ * kept English, so their labels are not here.
+ */
+export const SEEDED_TRAINING_WORDINGS_BEFORE_OD_238: {
+  readonly categories: Readonly<Record<string, { readonly label?: string; readonly description: string }>>;
+  readonly skills: Readonly<Record<string, string>>;
+  readonly modules: Readonly<Record<string, string>>;
+} = {
+  categories: {
+    SALES: { description: 'Find prospects, uncover their needs, answer objections and close.' },
+    PRODUCT: { label: 'Product', description: 'What each product covers, who it suits and how to explain it.' },
+    RECRUITING: { label: 'Recruiting', description: 'Find, approach and bring in the people who will build your team.' },
+    TEAM_MANAGEMENT: {
+      label: 'Team Management', description: 'Lead your unit: set goals, coach your agents and help new ones start.',
+    },
+    SOFT_SKILLS: {
+      label: 'Soft Skills', description: 'Communication, confidence and the daily habits behind steady selling.',
+    },
+    COMPANY_AND_KPM: {
+      label: 'Company and KPM', description: 'How your insurer and this office work, and who to ask for what.',
+    },
+  },
+  skills: {
+    PROSPECTING: 'Prospecting',
+    NEEDS_ANALYSIS: 'Needs Analysis',
+    OBJECTION_HANDLING: 'Objection Handling',
+    CROSS_SELL: 'Cross-sell',
+    RETENTION: 'Retention',
+  },
+  modules: {
+    PROSPECT_LIST: 'Building Your Prospect List',
+    REFERRAL_GENERATION: 'Referral Generation Techniques',
+    COLD_APPROACH_SCRIPTS: 'Cold Approach Scripts',
+    FINANCIAL_NEEDS_ANALYSIS: 'Conducting a Financial Needs Analysis',
+    DISCOVERY_QUESTIONS: 'Asking the Right Discovery Questions',
+    OBJECTION_FUNDAMENTALS: 'Objection Handling Fundamentals',
+    CLOSING_TECHNIQUES: 'Closing Techniques That Work',
+    PRICE_OBJECTIONS: 'Handling Price Objections',
+    CROSS_SELL_OPPORTUNITIES: 'Identifying Cross-sell Opportunities',
+    CLIENT_RETENTION: 'Client Retention Best Practices',
+  },
+};
+
 /** `KPM_Owner.html:4272-4277`. Only Sales has skills; the rest start empty. */
 export const SEED_TRAINING_SKILLS: readonly SeedTrainingSkill[] = [
-  { code: 'PROSPECTING', categoryCode: 'SALES', label: 'Prospecting', displayOrder: 1 },
-  { code: 'NEEDS_ANALYSIS', categoryCode: 'SALES', label: 'Needs Analysis', displayOrder: 2 },
-  { code: 'OBJECTION_HANDLING', categoryCode: 'SALES', label: 'Objection Handling', displayOrder: 3 },
+  { code: 'PROSPECTING', categoryCode: 'SALES', label: 'Pencarian prospek', displayOrder: 1 },
+  { code: 'NEEDS_ANALYSIS', categoryCode: 'SALES', label: 'Analisis kebutuhan', displayOrder: 2 },
+  { code: 'OBJECTION_HANDLING', categoryCode: 'SALES', label: 'Penanganan keberatan', displayOrder: 3 },
   { code: 'CLOSING', categoryCode: 'SALES', label: 'Closing', displayOrder: 4 },
-  { code: 'CROSS_SELL', categoryCode: 'SALES', label: 'Cross-sell', displayOrder: 5 },
-  { code: 'RETENTION', categoryCode: 'SALES', label: 'Retention', displayOrder: 6 },
+  { code: 'CROSS_SELL', categoryCode: 'SALES', label: 'Penjualan silang', displayOrder: 5 },
+  { code: 'RETENTION', categoryCode: 'SALES', label: 'Retensi nasabah', displayOrder: 6 },
 ];
 
 /**
@@ -140,14 +190,14 @@ export const SEED_TRAINING_SKILLS: readonly SeedTrainingSkill[] = [
  * module sits between two Objection Handling ones), so `displayOrder` counts within the skill.
  */
 export const SEED_TRAINING_MODULES: readonly SeedTrainingModule[] = [
-  { code: 'PROSPECT_LIST', skillCode: 'PROSPECTING', title: 'Building Your Prospect List', publishState: 'published', displayOrder: 1 },
-  { code: 'REFERRAL_GENERATION', skillCode: 'PROSPECTING', title: 'Referral Generation Techniques', publishState: 'published', displayOrder: 2 },
-  { code: 'COLD_APPROACH_SCRIPTS', skillCode: 'PROSPECTING', title: 'Cold Approach Scripts', publishState: 'published', displayOrder: 3 },
-  { code: 'FINANCIAL_NEEDS_ANALYSIS', skillCode: 'NEEDS_ANALYSIS', title: 'Conducting a Financial Needs Analysis', publishState: 'published', displayOrder: 1 },
-  { code: 'DISCOVERY_QUESTIONS', skillCode: 'NEEDS_ANALYSIS', title: 'Asking the Right Discovery Questions', publishState: 'published', displayOrder: 2 },
-  { code: 'OBJECTION_FUNDAMENTALS', skillCode: 'OBJECTION_HANDLING', title: 'Objection Handling Fundamentals', publishState: 'published', displayOrder: 1 },
-  { code: 'CLOSING_TECHNIQUES', skillCode: 'CLOSING', title: 'Closing Techniques That Work', publishState: 'published', displayOrder: 1 },
-  { code: 'PRICE_OBJECTIONS', skillCode: 'OBJECTION_HANDLING', title: 'Handling Price Objections', publishState: 'published', displayOrder: 2 },
-  { code: 'CROSS_SELL_OPPORTUNITIES', skillCode: 'CROSS_SELL', title: 'Identifying Cross-sell Opportunities', publishState: 'published', displayOrder: 1 },
-  { code: 'CLIENT_RETENTION', skillCode: 'RETENTION', title: 'Client Retention Best Practices', publishState: 'published', displayOrder: 1 },
+  { code: 'PROSPECT_LIST', skillCode: 'PROSPECTING', title: 'Menyusun daftar prospek Anda', publishState: 'published', displayOrder: 1 },
+  { code: 'REFERRAL_GENERATION', skillCode: 'PROSPECTING', title: 'Teknik mendapatkan referensi', publishState: 'published', displayOrder: 2 },
+  { code: 'COLD_APPROACH_SCRIPTS', skillCode: 'PROSPECTING', title: 'Script pendekatan prospek baru', publishState: 'published', displayOrder: 3 },
+  { code: 'FINANCIAL_NEEDS_ANALYSIS', skillCode: 'NEEDS_ANALYSIS', title: 'Melakukan analisis kebutuhan finansial', publishState: 'published', displayOrder: 1 },
+  { code: 'DISCOVERY_QUESTIONS', skillCode: 'NEEDS_ANALYSIS', title: 'Mengajukan pertanyaan penggalian yang tepat', publishState: 'published', displayOrder: 2 },
+  { code: 'OBJECTION_FUNDAMENTALS', skillCode: 'OBJECTION_HANDLING', title: 'Dasar-dasar penanganan keberatan', publishState: 'published', displayOrder: 1 },
+  { code: 'CLOSING_TECHNIQUES', skillCode: 'CLOSING', title: 'Teknik closing yang efektif', publishState: 'published', displayOrder: 1 },
+  { code: 'PRICE_OBJECTIONS', skillCode: 'OBJECTION_HANDLING', title: 'Menangani keberatan soal harga', publishState: 'published', displayOrder: 2 },
+  { code: 'CROSS_SELL_OPPORTUNITIES', skillCode: 'CROSS_SELL', title: 'Mengenali peluang penjualan silang', publishState: 'published', displayOrder: 1 },
+  { code: 'CLIENT_RETENTION', skillCode: 'RETENTION', title: 'Praktik terbaik mempertahankan nasabah', publishState: 'published', displayOrder: 1 },
 ];

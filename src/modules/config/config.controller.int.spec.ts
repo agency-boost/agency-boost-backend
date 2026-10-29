@@ -300,7 +300,7 @@ describe('the configuration controllers', () => {
       const saved = await request(app.getHttpServer())
         .put('/kpm/settings/activation-checklist').send(next).expect(200);
       expect(saved.body.draft).toMatchObject({ version: 2, status: 'draft' });
-      expect(saved.body.published.aspects[0].label).toBe('1. Introduction');
+      expect(saved.body.published.aspects[0].label).toBe('1. Pengenalan');
 
       const published = await request(app.getHttpServer())
         .post('/kpm/settings/activation-checklist/publish').expect(201);
@@ -654,10 +654,10 @@ describe('the configuration controllers', () => {
       const selling = await section('SELLING');
       const res = await request(app.getHttpServer())
         .patch(`/kpm/settings/activity-categories/${selling.id}`)
-        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development' })
+        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Pengembangan' })
         .expect(200);
       expect(res.body).toMatchObject({
-        summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development', version: selling.version + 1,
+        summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Pengembangan', version: selling.version + 1,
       });
     });
 
@@ -669,7 +669,7 @@ describe('the configuration controllers', () => {
         .expect(422);
       expect(res.body.error).toMatchObject({
         code: 'CONFIG_SUMMARY_GROUP_LABEL_MISMATCH',
-        details: { summaryGroupCode: 'DEVELOPMENT', labels: ['Growth', 'Development'] },
+        details: { summaryGroupCode: 'DEVELOPMENT', labels: ['Growth', 'Pengembangan'] },
       });
 
       const batch = await request(app.getHttpServer())
@@ -683,7 +683,7 @@ describe('the configuration controllers', () => {
         .expect(422);
       expect(batch.body.error).toMatchObject({
         code: 'CONFIG_SUMMARY_GROUP_LABEL_MISMATCH',
-        details: { summaryGroupCode: 'DEVELOPMENT', labels: ['Growth', 'Development'] },
+        details: { summaryGroupCode: 'DEVELOPMENT', labels: ['Growth', 'Pengembangan'] },
       });
     });
 
@@ -712,8 +712,8 @@ describe('the configuration controllers', () => {
         LEADS_GENERATION: [null, null],
         SELLING: [null, null],
         RECRUITMENT: [null, null],
-        PERSONAL_DEVELOPMENT: ['DEVELOPMENT', 'Development'],
-        TEAM_DEVELOPMENT: ['DEVELOPMENT', 'Development'],
+        PERSONAL_DEVELOPMENT: ['DEVELOPMENT', 'Pengembangan'],
+        TEAM_DEVELOPMENT: ['DEVELOPMENT', 'Pengembangan'],
         REFERRALS: [null, null],
       });
     });
@@ -723,13 +723,13 @@ describe('the configuration controllers', () => {
       current = AGENT;
       await request(app.getHttpServer())
         .patch(`/kpm/settings/activity-categories/${selling.id}`)
-        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development' })
+        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Pengembangan' })
         .expect(403);
 
       current = ADMIN;
       await request(app.getHttpServer())
         .patch(`/kpm/settings/activity-categories/${selling.id}`)
-        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development' })
+        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Pengembangan' })
         .expect(200);
     });
   });

@@ -1,3 +1,4 @@
+import { SOURCE_READER } from '@/common/i18n/reader';
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
@@ -166,7 +167,7 @@ describe('a company’s recruitment playbook (RecruitmentPlaybookService)', () =
   it('P17-T8 AC-3 refuses an unknown company, a deleted one and a malformed id: 404, nothing written', async () => {
     await db().collection('companies').updateOne({ _id: new mongoose.Types.ObjectId(ALLIANZ) }, { $set: { deletedAt: NOW } });
     for (const id of ['66f0000000000000000000ee', ALLIANZ, 'nope']) {
-      expect(await refusalOf(service().readForAdmin(id))).toMatchObject({ status: 404, code: 'NOT_FOUND' });
+      expect(await refusalOf(service().readForAdmin(id, SOURCE_READER))).toMatchObject({ status: 404, code: 'NOT_FOUND' });
       expect(await refusalOf(service().save(operator, id, { version: null, body: defaultPlaybookBody() })))
         .toMatchObject({ status: 404, code: 'NOT_FOUND' });
     }

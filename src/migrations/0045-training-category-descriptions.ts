@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import {
-  SEED_TRAINING_CATEGORIES, SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97,
+  SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97, SEEDED_TRAINING_WORDINGS_BEFORE_OD_238,
 } from '@/domain/constants/training-taxonomy';
 
 /** A category as the three places below hold it: its code, its words, and — on an office's rows — its version. */
@@ -27,7 +27,14 @@ function holdsSeed(category: Held, { versioned }: { versioned: boolean }): boole
   return isNone(category.description) && (!versioned || category.version === 1);
 }
 
-const AFTER = new Map(SEED_TRAINING_CATEGORIES.map((c) => [c.code, c.description]));
+/**
+ * **The lines it was written for**, P18.97-T4's English: the seed has said them in Bahasa Indonesia since P18.98-T7
+ * (OD-238), and an office's own configuration keeps its language. Migration `0046` gives the Template company's
+ * Default template the Indonesian, where it still holds these.
+ */
+const AFTER = new Map(
+  Object.entries(SEEDED_TRAINING_WORDINGS_BEFORE_OD_238.categories).map(([code, c]) => [code, c.description]),
+);
 
 /** The `$set` that gives each category of `list` still holding its seeded words its new line, at `path.{i}`. */
 function rewrites(list: unknown, path: string, versioned: boolean): Record<string, string> {
@@ -41,8 +48,8 @@ function rewrites(list: unknown, path: string, versioned: boolean): Record<strin
 
 /**
  * **One real line of description for each default training category** (P18.97-T4 AC-9, ADR-0176 §9; the client's
- * UI-031: Sales's *"Structured modules — tracked here."* is generic, and the other five said nothing). A new office is
- * given `SEED_TRAINING_CATEGORIES`' words; this gives them to the places that still hold the seeded ones:
+ * UI-031: Sales's *"Structured modules — tracked here."* is generic, and the other five said nothing). A new office was
+ * given these words (in Bahasa Indonesia since P18.98-T7); this gives them to the places that still hold the seeded ones:
  *
  * - **the working copy** (`trainingCategories`), which Settings › Training edits — archived rows too, which still
  *   render a member's history;

@@ -57,8 +57,8 @@ describe('the office activation checklist (P5-T3)', () => {
       expect(view.draft).toBeNull();
       expect(view.published).toMatchObject({ version: 1, status: 'published' });
       expect(view.published!.aspects.map((a) => a.label)).toEqual([
-        '1. Introduction', '2. Initial Setup', '3. Training & Certification',
-        '4. First Sale', '5. Ongoing Habits',
+        '1. Pengenalan', '2. Persiapan awal', '3. Pelatihan & sertifikasi',
+        '4. Penjualan pertama', '5. Kebiasaan rutin',
       ]);
       expect(view.published!.aspects.flatMap((a) => a.items)).toHaveLength(16);
     });
@@ -236,7 +236,7 @@ describe('the office activation checklist (P5-T3)', () => {
       expect(after.draft!.aspects[0].label).toBe('1. Welcome');
       // Hires starting now still get what they were promised.
       expect(after.published!.version).toBe(1);
-      expect(after.published!.aspects[0].label).toBe('1. Introduction');
+      expect(after.published!.aspects[0].label).toBe('1. Pengenalan');
     });
 
     it('publishes the draft as the next version, and leaves no draft behind', async () => {
@@ -259,7 +259,7 @@ describe('the office activation checklist (P5-T3)', () => {
 
       const one = await activation.findVersion(ctx(KPM_A), 1);
       const two = await activation.findVersion(ctx(KPM_A), 2);
-      expect(one!.aspects[0].items[0].label).toBe('Learn insurance basics');
+      expect(one!.aspects[0].items[0].label).toBe('Pelajari dasar-dasar asuransi');
       expect(two!.aspects[0].items[0].label).toBe('Learn the basics');
       expect(await activation.findVersion(ctx(KPM_A), 3)).toBeNull();
     });
@@ -324,7 +324,7 @@ describe('the office activation checklist (P5-T3)', () => {
       // The link reads as the module's own title, not its code, and goes to the module's own page (P18.5-T3 AC-1, AC-5).
       expect(item.link).toEqual({
         kind: 'training:PROSPECT_LIST',
-        label: 'Building Your Prospect List',
+        label: 'Menyusun daftar prospek Anda',
         route: '/training/SALES/PROSPECT_LIST',
         completesWhen: 'the hire has completed that training module',
         live: true,
@@ -413,7 +413,7 @@ describe('the office activation checklist (P5-T3)', () => {
       next.aspects[2].items[0].autoLink = 'training:PROSPECT_LIST';
       const saved = await activation.saveDraft(inIndonesian(KPM_A), next);
       expect(saved.draft!.aspects[2].items[0].link).toMatchObject({
-        label: 'Building Your Prospect List', completesWhen: 'rekrut telah menyelesaikan modul training tersebut',
+        label: 'Menyusun daftar prospek Anda', completesWhen: 'rekrut telah menyelesaikan modul training tersebut',
       });
     });
 

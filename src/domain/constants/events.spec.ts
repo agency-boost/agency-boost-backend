@@ -1,6 +1,6 @@
 import {
   EVENT_ATTENDANCE_STATUSES, EVENT_AUDIENCE_SCOPES, EVENT_FEEDBACK_TEXT_MAX, EVENT_ISSUERS, EVENT_PHASES, NPS,
-  SELECT_AUDIENCE_SCOPES,
+  SEED_EVENT_TYPES, SEEDED_EVENT_TYPE_LABELS_BEFORE_OD_238, SELECT_AUDIENCE_SCOPES,
 } from './events';
 
 /** Every value the events' rules read, pinned once (invariant §7; `metrics-and-definitions.md` §B). */
@@ -19,5 +19,23 @@ describe('the events’ constants (Phase 5, Phase 18.5)', () => {
   it('P18.5-T6 AC-3 the NPS scale and its buckets (`KPM_Owner.html:3754-3761`), and the answers’ length', () => {
     expect(NPS).toEqual({ SCALE_MIN: 0, SCALE_MAX: 10, PROMOTER_MIN: 9, DETRACTOR_MAX: 6 });
     expect(EVENT_FEEDBACK_TEXT_MAX).toBe(1000);
+  });
+
+  /*
+   * P18.98-T7 (OD-238, option 1; ADR-0179 §5): the event types a new office starts with, in Bahasa Indonesia —
+   * *Recruitment* kept English (the approved glossary, §A.6) — and the English recorded for migration 0046 is exactly
+   * what changed. Codes, emoji and colours are as they were.
+   */
+  it('P18.98-T7 the five default event types in Bahasa Indonesia, their codes unchanged', () => {
+    expect(SEED_EVENT_TYPES.map((t) => [t.code, t.label])).toEqual([
+      ['TRAINING', 'Pelatihan'],
+      ['PRODUCT_LAUNCH', 'Peluncuran produk'],
+      ['RECOGNITION', 'Penghargaan'],
+      ['RECRUITMENT', 'Recruitment'],
+      ['COMMUNITY', 'Komunitas'],
+    ]);
+    expect(SEEDED_EVENT_TYPE_LABELS_BEFORE_OD_238).toEqual({
+      TRAINING: 'Training', PRODUCT_LAUNCH: 'Product launch', RECOGNITION: 'Recognition', COMMUNITY: 'Community',
+    });
   });
 });

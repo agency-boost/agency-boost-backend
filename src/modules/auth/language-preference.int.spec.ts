@@ -202,6 +202,16 @@ describe('P18.98-T2 the language on the account, over HTTP', () => {
     });
   });
 
+  // Phase 18.98's exit permission review: a language is saved by somebody, never by nobody.
+  it('refuses a language with no session, 401, and writes nothing', async () => {
+    const userId = await person('agent', 'en');
+
+    const res = await request(app.getHttpServer()).patch('/api/v1/auth/me').send({ locale: 'id' }).expect(401);
+
+    expect(res.body.error.code).toBeDefined();
+    expect(await stored(userId)).toBe('en');
+  });
+
   describe('AC-2 in a support session the person’s language is theirs', () => {
     it.each(Object.keys(SESSIONS) as SessionKind[])('refuses PATCH /auth/me in %s, 403 PERM_DENIED', async (kind) => {
       liveSession = SESSIONS[kind];

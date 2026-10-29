@@ -66,7 +66,7 @@ describe('a balance an office builds, read with its own ends (P13.1-T6)', () => 
 
     expect(await read('PROSPECTING_VS_SELLING')).toMatchObject({
       comparison: 'band', displayUnit: 'points', tag: { label: 'Balance' },
-      sides: { numerator: 'Leads Generation', denominator: 'Selling' },
+      sides: { numerator: 'Pencarian leads', denominator: 'Penjualan' },
       numeratorCount: 2, denominatorCount: 3, value: -20, share: 40, status: 'success',
     });
   });
@@ -78,15 +78,15 @@ describe('a balance an office builds, read with its own ends (P13.1-T6)', () => 
 
   it('AC-6: names both ends by their one section when both count it, which the screen will not repeat', async () => {
     await balance('PRESENTING_VS_SUBMITTING', ['SELL_PRESENTATION'], ['SELL_SUBMISSION']);
-    expect((await read('PRESENTING_VS_SUBMITTING'))!.sides).toEqual({ numerator: 'Selling', denominator: 'Selling' });
+    expect((await read('PRESENTING_VS_SUBMITTING'))!.sides).toEqual({ numerator: 'Penjualan', denominator: 'Penjualan' });
   });
 
   it('AC-6: follows a section the office renames, rather than the words it was seeded with', async () => {
     await balance('PROSPECTING_VS_SELLING', ['LEADS_CONTACTED'], ['SELL_PRESENTATION']);
     const selling = (await wired.activity.list(owner())).find((c) => c.code === 'SELLING')!;
-    await wired.activity.updateCategory(owner(), selling.id, { label: 'Penjualan' });
+    await wired.activity.updateCategory(owner(), selling.id, { label: 'Jualan langsung' });
 
-    expect((await read('PROSPECTING_VS_SELLING'))!.sides).toEqual({ numerator: 'Leads Generation', denominator: 'Penjualan' });
+    expect((await read('PROSPECTING_VS_SELLING'))!.sides).toEqual({ numerator: 'Pencarian leads', denominator: 'Jualan langsung' });
   });
 
   it('AC-6: is one office’s own — another office has no such ratio, and its counts never reach it', async () => {

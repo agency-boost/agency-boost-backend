@@ -350,4 +350,12 @@ export const TENANTS_MESSAGES = messages('modules/tenants', {
       + 'terjadi, orang itu tidak dapat masuk.',
   },
   decideAction: { en: 'Decide', id: 'Putuskan' },
+  /*
+   * A row whose person or company has gone, on the console's lists (P18.98-T7): *Unknown* says the record is missing,
+   * which is a different problem from none. Written for the Super Admin reading the list, in the words the org
+   * module's *Unknown* uses (`org.messages.ts`, *Tidak diketahui*).
+   */
+  unknownPerson: { en: 'Unknown', id: 'Tidak diketahui' },
+  unknownCompany: { en: 'Unknown company', id: 'Perusahaan tidak diketahui' },
+  unknownOffice: { en: 'Unknown office', id: 'KPM tidak diketahui' },
 });

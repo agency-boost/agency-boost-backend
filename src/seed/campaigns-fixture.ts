@@ -155,62 +155,62 @@ export async function seedCampaignsFixture(deps: CampaignsFixtureDeps): Promise<
   const CAMPAIGNS0417: SeedCampaign[] = [
     {
       ...seasonal, code: 'APE_SPRINT', title: `${shortMonth(sprintFrom)}–${shortMonth(M)} APE Sprint`, from: sprintFrom, to: M,
-      description: 'Ranked by APE booked over the three months. Everybody who clears the APE target with at least the '
-        + 'new hires asked for earns the cash bonus.',
-      poster: { emoji: '🚀', color: 'amber' }, blurb: 'Push for APE this quarter — top 10 unit-wide win a trip.',
-      reward: 'Top 10 unit-wide: a two-night trip · Every qualifier: a cash bonus',
+      description: 'Peringkat berdasarkan APE yang dibukukan selama tiga bulan. Setiap agen yang melewati target APE, '
+        + 'dengan new hire minimal sebanyak yang diminta, mendapat bonus tunai.',
+      poster: { emoji: '🚀', color: 'amber' }, blurb: 'Kejar APE kuartal ini — 10 besar se-unit dapat trip.',
+      reward: '10 besar se-unit: trip dua malam · Setiap yang lolos: bonus tunai',
       requirements: [ape(sprintApe), count('NEW_HIRES', sprintHires)],
     },
     {
       ...seasonal, code: 'NEW_HIRE_BLITZ', title: 'New Hire Blitz', from: M, to: M,
-      description: 'A one-month recruitment blitz: three confirmed, licensed hires within the month earn a cash bonus.',
-      poster: { emoji: '🧲', color: 'navy-soft' }, blurb: 'Recruit fast — three confirmed hires this month unlocks a cash bonus.',
-      reward: 'A cash bonus per qualifying agent', requirements: [count('NEW_HIRES', 3)],
+      description: 'Recruitment kilat sebulan: tiga new hire berlisensi yang terkonfirmasi dalam bulan ini mendapat bonus tunai.',
+      poster: { emoji: '🧲', color: 'navy-soft' }, blurb: 'Rekrut cepat — tiga new hire terkonfirmasi bulan ini membuka bonus tunai.',
+      reward: 'Bonus tunai untuk setiap agen yang lolos', requirements: [count('NEW_HIRES', 3)],
     },
     {
       ...seasonal, code: 'APE_CHALLENGE_NEXT', title: `${quarter} APE Challenge`, from: quarterStart, to: addMonths(quarterStart, 2),
-      description: 'Next quarter’s APE challenge. Tiered rewards are published before it starts.',
-      poster: { emoji: '📊', color: 'navy' }, blurb: `Next quarter’s APE push — starts ${monthRangeWords(quarterStart, quarterStart)}.`,
-      reward: 'To be announced — tiered rewards published before it starts', requirements: [ape(300 * JT)],
+      description: 'APE challenge kuartal depan. Hadiah bertingkat diumumkan sebelum dimulai.',
+      poster: { emoji: '📊', color: 'navy' }, blurb: `Kejar APE kuartal depan — mulai ${monthRangeWords(quarterStart, quarterStart)}.`,
+      reward: 'Segera diumumkan — hadiah bertingkat diumumkan sebelum dimulai', requirements: [ape(300 * JT)],
     },
     {
       ...seasonal, code: 'PERSISTENCY_PUSH', title: persistency.title, from: last, to: last,
-      description: 'A one-month campaign. It has ended; its results are final once the month locks.',
-      poster: { emoji: '📉', color: 'muted' }, blurb: 'Closed out at month end — results posted at the branch.',
-      reward: 'A cash bonus',
+      description: 'Campaign satu bulan. Sudah berakhir; hasilnya final setelah bulannya dikunci.',
+      poster: { emoji: '📉', color: 'muted' }, blurb: 'Ditutup di akhir bulan — hasilnya diumumkan di kantor cabang.',
+      reward: 'Bonus tunai',
       requirements: [{ metricKey: persistency.metricKey, comparator: 'gte', value: persistency.value, unit: persistency.unit }],
     },
     {
-      code: 'PROMOTION_AGENT_AAB', title: 'Promotion: Agent → AAB', kind: 'structural', subtype: 'promotion', window: 'rolling_12m',
+      code: 'PROMOTION_AGENT_AAB', title: 'Promosi: Agent → AAB', kind: 'structural', subtype: 'promotion', window: 'rolling_12m',
       from: `${M.slice(0, 4)}-01`, to: null, appliesToOrgLevelCodes: ['AGENT'],
-      description: 'Standing promotion criteria, evaluated over the last twelve months on file, for review as an AAB.',
-      poster: { emoji: '🎖️', color: 'navy' }, blurb: 'Standing criteria to move up to AAB.',
-      reward: 'Review for promotion to AAB', requirements: [ape(1_200 * JT), count('NEW_ACTIVE_AGENTS', 3)],
+      description: 'Kriteria promosi tetap, dinilai dari dua belas bulan terakhir yang tercatat, untuk ditinjau menjadi AAB.',
+      poster: { emoji: '🎖️', color: 'navy' }, blurb: 'Kriteria tetap untuk naik ke AAB.',
+      reward: 'Ditinjau untuk promosi ke AAB', requirements: [ape(1_200 * JT), count('NEW_ACTIVE_AGENTS', 3)],
     },
     {
-      code: 'PROMOTION_AAB_AB', title: 'Promotion: AAB → AB', kind: 'structural', subtype: 'promotion', window: 'rolling_12m',
+      code: 'PROMOTION_AAB_AB', title: 'Promosi: AAB → AB', kind: 'structural', subtype: 'promotion', window: 'rolling_12m',
       from: `${M.slice(0, 4)}-01`, to: null, appliesToOrgLevelCodes: ['AAB'],
-      description: 'Standing promotion criteria, evaluated over the last twelve months on file, for review as an AB.',
-      poster: { emoji: '🏅', color: 'navy' }, blurb: 'Standing criteria to move up to AB.',
-      reward: 'Review for promotion to AB', requirements: [count('MAA_COUNT_IN_UNIT', 5), count('NEW_HIRES', 6)],
+      description: 'Kriteria promosi tetap, dinilai dari dua belas bulan terakhir yang tercatat, untuk ditinjau menjadi AB.',
+      poster: { emoji: '🏅', color: 'navy' }, blurb: 'Kriteria tetap untuk naik ke AB.',
+      reward: 'Ditinjau untuk promosi ke AB', requirements: [count('MAA_COUNT_IN_UNIT', 5), count('NEW_HIRES', 6)],
     },
     {
-      code: 'MDRT_QUALIFICATION', title: 'MDRT Qualification', kind: 'structural', subtype: 'ongoing', window: 'calendar_year',
+      code: 'MDRT_QUALIFICATION', title: 'Kualifikasi MDRT', kind: 'structural', subtype: 'ongoing', window: 'calendar_year',
       from: `${M.slice(0, 4)}-01`, to: null, appliesToOrgLevelCodes: [],
-      description: 'The annual production benchmark for Million Dollar Round Table membership, read as APE for the calendar '
-        + 'year until the file carries first-year commission.',
-      poster: { emoji: '🏆', color: 'gold' }, blurb: 'Standing production benchmark for Million Dollar Round Table membership.',
-      reward: 'MDRT membership — global recognition and the annual meeting', requirements: [ape(mdrtApe)],
+      description: 'Benchmark produksi tahunan untuk keanggotaan Million Dollar Round Table, dibaca sebagai APE tahun '
+        + 'kalender sampai file memuat komisi tahun pertama.',
+      poster: { emoji: '🏆', color: 'gold' }, blurb: 'Benchmark produksi tetap untuk keanggotaan Million Dollar Round Table.',
+      reward: 'Keanggotaan MDRT — pengakuan global dan pertemuan tahunannya', requirements: [ape(mdrtApe)],
     },
     {
-      ...seasonal, code: 'ARCHIVED_DRIVE', title: 'Archived drive', from: addMonths(M, -4), to: addMonths(M, -4), status: 'archived',
+      ...seasonal, code: 'ARCHIVED_DRIVE', title: 'Campaign lama', from: addMonths(M, -4), to: addMonths(M, -4), status: 'archived',
       description: '', poster: { emoji: '🎯', color: 'navy' }, blurb: '', reward: '', requirements: [ape(100 * JT)],
     },
   ];
   const CAMPAIGNS0555: SeedCampaign[] = [{
     ...seasonal, code: 'GADING_PUSH', title: 'Gading Push', from: M, to: M,
-    description: 'The branch’s own month of APE.', poster: { emoji: '🚀', color: 'success' }, blurb: 'A month of APE for the branch.',
-    reward: 'Branch dinner', requirements: [ape(50 * JT)],
+    description: 'Bulan APE milik cabang ini.', poster: { emoji: '🚀', color: 'success' }, blurb: 'Sebulan kejar APE untuk cabang.',
+    reward: 'Makan malam bersama cabang', requirements: [ape(50 * JT)],
   }];
 
   const writeCampaigns = async (office: string, list: readonly SeedCampaign[]) => {
@@ -258,7 +258,7 @@ export async function seedCampaignsFixture(deps: CampaignsFixtureDeps): Promise<
     rina@kpm0417.test            /campaigns: both tabs, every section; ⭐ on her three; APE Sprint's dialog
                                  APE ✓ (target ${rp(sprintApe)}) and New Hire "Not uploaded yet" (the month
                                  before last is the office's empty one); ${persistency.title} ended, chase
-                                 disabled, final (${pTarget}): qualified; Promotion: AAB → AB not open to
+                                 disabled, final (${pTarget}): qualified; Promosi: AAB → AB not open to
                                  her role. /summary's card: APE Sprint and MDRT — the ended one dropped
     budi@kpm0417.test            /summary: "You're not chasing any campaigns yet…" (his one chase ended);
                                  not met on ${persistency.title}

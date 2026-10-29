@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import { RECRUITMENT_PITCH_SLOTS, SEED_RECRUITMENT_PLAYBOOK } from '@/domain/constants';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
@@ -24,14 +25,18 @@ const BLANK = '66f0000000000000000000c3';
 type Role = 'OWNER' | 'ADMIN' | 'AB' | 'AAB' | 'AGENT';
 const ROLES: readonly Role[] = ['OWNER', 'ADMIN', 'AB', 'AAB', 'AGENT'];
 
-/** A member of an office, in one of the five roles, signed in as themselves. */
+/**
+ * A member of an office, in one of the five roles, signed in as themselves — reading the API's English, as an
+ * `Accept-Language: en` request does (ADR-0179 §9); `inIndonesian` for one reading Bahasa Indonesia.
+ */
 function member(kpmId: string, role: Role = 'AGENT'): RequestContext {
   const rung = role === 'AAB' ? 'AAB' : role === 'AGENT' ? 'AGENT' : 'AB';
   return new RequestContext(`u-${role}-${kpmId}`, 'none', {
     membershipId: `mem-${role}-${kpmId}`, kpmId, orgLevelCode: rung, hierarchyRole: rung.toLowerCase(),
     status: 'active', isKpmOwner: role === 'OWNER', isKpmAdmin: role === 'ADMIN', directCount: 0,
-  } as never);
+  } as never).withReader(SOURCE_READER);
 }
+const inIndonesian = (ctx: RequestContext) => ctx.withReader(readerIn('id'));
 const owner = (kpmId: string) => member(kpmId, 'OWNER');
 
 /** What a refusal was, or `null` when the call succeeded. */
@@ -262,6 +267,62 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
       const key = await uploadTo(KPM_A, 'x.pdf');
       await db().collection('assets').updateOne({ storageKey: key }, { $set: { originalFilename: null } });
       expect((await wired.recruitmentPitch.attach(owner(KPM_A), 'faq', key)).file!.name).toBe('FAQ');
+    });
+  });
+
+  describe('P18.98-T7 the slots’ words in the reader’s language (ADR-0179 §7)', () => {
+    it('serves each title, line and checklist label in Indonesian to an Indonesian reader; codes, states and order as they are', async () => {
+      const view = await wired.recruitmentPitch.read(inIndonesian(member(KPM_A)));
+      expect(view.slots.map((s) => [s.slot, s.title, s.required, s.state])).toEqual([
+        ['opportunity', 'Ikhtisar peluang', true, 'missing'],
+        ['proof', 'Bukti & kredibilitas', true, 'missing'],
+        ['faq', 'FAQ', true, 'missing'],
+        ['howtojoin', 'Cara bergabung', true, 'missing'],
+        ['company', 'Profil perusahaan', false, 'missing'],
+        ['agency', 'Profil agensi', false, 'missing'],
+      ]);
+      expect(view.slots.map((s) => s.line)).toEqual([
+        'Pitch utama: perannya, penghasilannya, dan apa yang dibutuhkan.',
+        'Rekam jejak, testimoni, dan alasan untuk percaya.',
+        'Jawaban lugas atas pertanyaan yang selalu diajukan kandidat.',
+        'Langkah pendaftaran, dokumen yang diperlukan, dan penandaan ke KPM.',
+        'Profil perusahaan asuransi yang produknya dipasarkan agensi ini.',
+        'Profil agensi ini sendiri.',
+      ]);
+      expect(view.slots[0].checklist).toEqual([
+        { code: 'career-path', label: 'Jenjang karier (Agent → AAB → AB)', ticked: false },
+        { code: 'income', label: 'Potensi penghasilan / ilustrasi kompensasi', ticked: false },
+        { code: 'support', label: 'Dukungan yang diberikan (pelatihan, coaching, alat bantu)', ticked: false },
+        { code: 'commitment', label: 'Komitmen yang dibutuhkan — pemeliharaan kontrak dan aktivitas wajib', ticked: false },
+      ]);
+      expect(view.summary).toEqual((await read(KPM_A)).summary);
+    });
+
+    it('a write answers in the writer’s language, and a file with no name takes the title in the uploader’s', async () => {
+      const key = await uploadTo(KPM_A, 'x.pdf');
+      await db().collection('assets').updateOne({ storageKey: key }, { $set: { originalFilename: null } });
+      const slot = await wired.recruitmentPitch.attach(inIndonesian(owner(KPM_A)), 'howtojoin', key);
+      expect([slot.title, slot.file!.name]).toEqual(['Cara bergabung', 'Cara bergabung']);
+      // Another reader reads the slot in their own language; the stored name is what was written.
+      const english = await slotOf(KPM_A, 'howtojoin');
+      expect([english.title, english.file!.name]).toEqual(['How to Join', 'Cara bergabung']);
+    });
+
+    it('a refusal names the slot in its reader’s language', async () => {
+      const refused = async (ctx: RequestContext, item: string) => {
+        try {
+          await wired.recruitmentPitch.confirm(ctx, 'opportunity', item, { ticked: true, version: 0 });
+        } catch (error) {
+          return (error as DomainException).messageFor(readerIn('id'));
+        }
+        return null;
+      };
+      expect(await refused(inIndonesian(owner(KPM_A)), 'income')).toBe(
+        'Ikhtisar peluang belum memiliki file: unggah file dulu sebelum mengonfirmasi isinya.',
+      );
+      expect(await refused(inIndonesian(owner(KPM_A)), 'nope')).toBe(
+        'Ikhtisar peluang tidak memiliki item "nope" untuk dikonfirmasi.',
+      );
     });
   });
 

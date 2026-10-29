@@ -178,7 +178,7 @@ describe('P11-T4 — the coachee’s ratios and week, over HTTP', () => {
       const res = await week({ membershipId: office.id.INDAH }).expect(200);
 
       expect(res.body.sections.map((s: { code: string; label: string }) => [s.code, s.label]))
-        .toEqual([['RECRUITMENT', 'Recruitment'], ['DEVELOPMENT', 'Development']]);
+        .toEqual([['RECRUITMENT', 'Recruitment'], ['DEVELOPMENT', 'Pengembangan']]);
       const recruitment = res.body.sections[0];
       expect(recruitment.total).toBe(111);
       expect(recruitment.rows).toEqual(expect.arrayContaining([{ code: 'RECRUIT_FOLLOWUP', label: expect.any(String), count: 111 }]));

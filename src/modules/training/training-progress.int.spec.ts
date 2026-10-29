@@ -235,7 +235,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
         $set: { officeContent: { files: [], videos: [], links: [{ id: '01JLINKNEW000000000000000', label: 'New talk', url: 'https://learn.example.com/close' }] } },
       });
       const page = (await h.http().get('/training/modules/CLOSING_TECHNIQUES').expect(200)).body;
-      expect(page.title).toBe('Closing Techniques That Work');
+      expect(page.title).toBe('Teknik closing yang efektif');
       expect(page.items.map((i: { label: string }) => i.label)).toEqual(['New talk']);
     });
   });
@@ -248,8 +248,8 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       const page = (await h.http().get('/training/modules/prospect_list').expect(200)).body;
       expect(Object.keys(page).sort()).toEqual(PAGE_KEYS);
       expect(page).toMatchObject({
-        code: 'PROSPECT_LIST', title: 'Building Your Prospect List',
-        category: { code: 'SALES', label: 'Sales' }, skill: { code: 'PROSPECTING', label: 'Prospecting' },
+        code: 'PROSPECT_LIST', title: 'Menyusun daftar prospek Anda',
+        category: { code: 'SALES', label: 'Sales' }, skill: { code: 'PROSPECTING', label: 'Pencarian prospek' },
         status: 'not_started', startedAt: null, completedAt: null, openedItemIds: [], can: { update: true },
       });
       expect(page.items).toEqual([
@@ -447,7 +447,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       // The skill is still offered, with nothing offered in it: its card holds the history alone.
       expect(retention).toMatchObject({ offered: true, done: 0, total: 0, modules: [] });
       expect(retention.archived).toEqual([
-        { code: 'CLIENT_RETENTION', title: 'Client Retention Best Practices', formats: [], status: 'done', completedAt: '2026-09-14T03:00:00.000Z' },
+        { code: 'CLIENT_RETENTION', title: 'Praktik terbaik mempertahankan nasabah', formats: [], status: 'done', completedAt: '2026-09-14T03:00:00.000Z' },
       ]);
       // A module in progress when it was withdrawn is not history: only done is.
       expect(await stored('RINA', 'CLIENT_RETENTION')).toMatchObject({ status: 'done' });
@@ -740,7 +740,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(itemOf(view, 'MANDATORY_TRAINING')).toMatchObject({
         done: false,
         link: {
-          kind: 'training:CLOSING_TECHNIQUES', label: 'Closing Techniques That Work', live: true,
+          kind: 'training:CLOSING_TECHNIQUES', label: 'Teknik closing yang efektif', live: true,
           route: '/training/SALES/CLOSING_TECHNIQUES', completesWhen: 'the hire has completed that training module',
         },
       });
@@ -824,7 +824,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       await h.wired.training.archiveModule(h.office.as('OWNER'), (await h.moduleRow('CLOSING_TECHNIQUES')).id);
       await h.publish();
       expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING').link).toMatchObject({
-        kind: 'training:CLOSING_TECHNIQUES', label: 'Closing Techniques That Work', route: null, live: false,
+        kind: 'training:CLOSING_TECHNIQUES', label: 'Teknik closing yang efektif', route: null, live: false,
       });
 
       h.as('BUDI');
@@ -880,11 +880,11 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       // *Go to* to a page that would not answer (the second training review, a).
       expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING')).toMatchObject({
         done: true, source: 'link',
-        link: { kind: 'training:CLOSING_TECHNIQUES', label: 'Closing Techniques That Work', route: null, live: true },
+        link: { kind: 'training:CLOSING_TECHNIQUES', label: 'Teknik closing yang efektif', route: null, live: true },
       });
       h.as('SARI');
       expect(itemOf((await h.http().get(`/new-hires/${id('BUDI')}`).expect(200)).body, 'MANDATORY_TRAINING').link)
-        .toMatchObject({ label: 'Closing Techniques That Work', route: null, live: true });
+        .toMatchObject({ label: 'Teknik closing yang efektif', route: null, live: true });
       h.as('BUDI');
       for (const done of [false, true]) {
         const res = await h.http().put('/activation/me/items/MANDATORY_TRAINING').send({ done }).expect(409);
@@ -915,10 +915,10 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       const module = await h.moduleRow('CLOSING_TECHNIQUES');
       await h.wired.training.updateModule(h.office.as('OWNER'), module.id, { title: 'Closing, renamed in the draft' });
       // Not yet published: the hire and the leader read the offered title.
-      expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING').link).toMatchObject({ label: 'Closing Techniques That Work' });
+      expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING').link).toMatchObject({ label: 'Teknik closing yang efektif' });
       h.as('SARI');
       expect(itemOf((await h.http().get(`/new-hires/${id('BUDI')}`).expect(200)).body, 'MANDATORY_TRAINING').link)
-        .toMatchObject({ label: 'Closing Techniques That Work' });
+        .toMatchObject({ label: 'Teknik closing yang efektif' });
 
       // Unpublished and published since: not offered, so its code, and the catalog — never the draft's title.
       await h.wired.training.updateModule(h.office.as('OWNER'), module.id, { publishState: 'draft' });

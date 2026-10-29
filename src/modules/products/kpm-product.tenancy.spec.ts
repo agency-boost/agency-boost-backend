@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { SEED_PRODUCTS } from '@/domain/constants';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
@@ -15,7 +16,7 @@ const member = (kpmId: string, over: Record<string, unknown> = {}) =>
   new RequestContext('u1', 'none', {
     membershipId: `mem-${kpmId}`, kpmId, orgLevelCode: 'AB', hierarchyRole: 'ab',
     status: 'active', isKpmOwner: true, isKpmAdmin: false, directCount: 0, ...over,
-  } as never);
+  } as never).withReader(SOURCE_READER); // the API's English, as an `Accept-Language: en` request reads it
 
 const superAdmin = () => RequestContext.platform('root');
 
@@ -474,6 +475,16 @@ describe('an office’s product decisions (P5-T5)', () => {
       expect(row.documents.map((d) => d.slot)).toEqual(['brochure', 'illustration', 'productDoc']);
       expect(row.documents.map((d) => d.source)).toEqual(['none', 'none', 'none']);
       expect(row.documents[1].label).toBe('Illustration / Simulation');
+    });
+
+    it('P18.98-T7 names each slot in the reader’s language; an office’s own file keeps the name it was given', async () => {
+      const ctx = member(KPM_A);
+      await wired.kpmProducts.setDocument(ctx, mapanId, 'brochure', { storageKey: await upload(ctx), label: 'Brosur kami' });
+      const inIndonesian = await mine(member(KPM_A).withReader(readerIn('id')));
+      expect(inIndonesian.documents.map((d) => d.label)).toEqual(['Brosur', 'Ilustrasi / Simulasi', 'Dokumen produk']);
+      expect(inIndonesian.documents[0]).toMatchObject({ slot: 'brochure', source: 'kpm', filename: 'Brosur kami' });
+      expect((await mine(member(KPM_A))).documents.map((d) => d.label))
+        .toEqual(['Brochure', 'Illustration / Simulation', 'Product Document']);
     });
 
     it('fills one slot and leaves the other two alone', async () => {

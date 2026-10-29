@@ -47,7 +47,7 @@ import { SALES } from './training-fixture';
  * | Signed in as | Sees |
  * |---|---|
  * | `owner@kpm0417.test` (Wilson Tanoto), `admin@kpm0417.test` (Maya Halim) at `/kpm/analytics/compliance` | **Training**, Yosef's agency: **Arini** all ten Sales modules *Completed* — the chip moves from two (Agus, Siti) to three — **Bonar** five, **Cahya** and **Damar** one *In progress*, **Elsa** none, Yosef none; **Winda's unit** (Winda, Ikhsan, Jihan, Kemal) two each; **Satria's agency** none — so every unit card holds every training state |
- * | the same, *Campaigns* → the persistency push (*Seasonal — Past*) | **Rina** *Achieved*; **Budi** *Achieved* with the override's icon — *"Overridden by Wilson Tanoto on {date}: Persistency corrected by the carrier after the month locked."* — where the campaign reads *Not met*; clear it with a reason and it reads *Not achieved* |
+ * | the same, *Campaigns* → the persistency push (*Seasonal — Past*) | **Rina** *Achieved*; **Budi** *Achieved* with the override's icon — *"Overridden by Wilson Tanoto on {date}: Persistency diralat oleh perusahaan setelah bulannya dikunci."* — where the campaign reads *Not met*; clear it with a reason and it reads *Not achieved* |
  * | `admin@kpm0417.test` at `/admin/audit` | `campaign_standing.finalised` for the push's window and `campaign_standing.overridden` for Budi, both by the Owner |
  * | `budi@kpm0417.test` | The push's dialog **unchanged** — its rows, no status (ADR-0147) |
  *
@@ -88,7 +88,9 @@ export const COMPLIANCE_TRAINING_SEED: Readonly<Partial<Record<ReportingKey, { d
 export const COMPLIANCE_OVERRIDE_SEED = {
   campaignCode: 'PERSISTENCY_PUSH',
   status: 'qualified',
-  reason: 'Persistency corrected by the carrier after the month locked.',
+  reason: 'Persistency diralat oleh perusahaan setelah bulannya dikunci.',
+  /** The reason the seed typed before P18.98-T7: an override an earlier run wrote with it is still the seed's. */
+  formerReason: 'Persistency corrected by the carrier after the month locked.',
 } as const;
 
 export interface ComplianceFixtureDeps {
@@ -185,7 +187,7 @@ export async function seedComplianceFixture(deps: ComplianceFixtureDeps): Promis
     isKpmOwner: true, isKpmAdmin: false, directCount: 0,
   });
 
-  const { campaignCode, status, reason } = COMPLIANCE_OVERRIDE_SEED;
+  const { campaignCode, status, reason, formerReason } = COMPLIANCE_OVERRIDE_SEED;
   const push = await campaigns.findOne(ctx, { code: campaignCode, status: 'active' });
   let override: ComplianceFixture['override'];
   let title: string = campaignCode;
@@ -206,7 +208,7 @@ export async function seedComplianceFixture(deps: ComplianceFixtureDeps): Promis
       // **Any override history** — the seed's own, or one a walk set or cleared since (the row's version moves with
       // every override write): a re-run without `--reset` restores nothing a walk undid, and audits nothing again.
       const o = stored.override;
-      override = o !== null && o.status === status && o.reason === reason
+      override = o !== null && o.status === status && ([reason, formerReason] as readonly string[]).includes(o.reason ?? '')
         ? 'set'
         : `history: Budi's standing in ${title} was ${o === null ? 'overridden and then cleared' : 'overridden again'} since the seed`;
     } else if (stored.status === status) {
@@ -225,8 +227,8 @@ export async function seedComplianceFixture(deps: ComplianceFixtureDeps): Promis
                                  Winda's unit two each; Satria's agency none
                                  Campaigns › ${title} (Seasonal — Past): Rina Achieved; ${override === 'set'
     ? `Budi Achieved
-                                 with the override's icon — "Persistency corrected by the carrier after
-                                 the month locked." Clear it with a reason: Not achieved`
+                                 with the override's icon — "${reason}"
+                                 Clear it with a reason: Not achieved`
     : override.startsWith('history: ')
       ? `Budi as the walks
                                  left him: ${override.replace(/^history: /, '')} — left as it

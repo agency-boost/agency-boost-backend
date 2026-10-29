@@ -188,8 +188,8 @@ export class RecruitmentPlaybookController {
       + '(`limits`).',
   })
   @ApiResponse({ status: 200, type: RecruitmentPlaybookAdminDto })
-  async read(@Param('companyId') companyId: string) {
-    return this.playbooks.readForAdmin(companyId);
+  async read(@Ctx() ctx: RequestContext, @Param('companyId') companyId: string) {
+    return this.playbooks.readForAdmin(companyId, ctx.reader);
   }
 
   @Put()

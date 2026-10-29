@@ -113,7 +113,7 @@ describe('0021 — the summary tiles for offices and templates that already exis
     it('keeps a pending change pending, and nothing more', async () => {
       await existingOffice(KPM_A, '0417');
       const selling = (await wired.activity.list(owner(KPM_A))).find((c) => c.code === 'SELLING')!;
-      await wired.activity.updateCategory(owner(KPM_A), selling.id, { label: 'Penjualan' });
+      await wired.activity.updateCategory(owner(KPM_A), selling.id, { label: 'Penjualan langsung' });
       await beforeTheField(KPM_A);
 
       await up(db());
@@ -125,9 +125,9 @@ describe('0021 — the summary tiles for offices and templates that already exis
       expect(tilesOf(await published(KPM_A)).SELLING).toEqual([null, null]);
       const label = async () => ((await published(KPM_A)) as { code: string; label?: string }[])
         .find((r) => r.code === 'SELLING')!.label;
-      expect(await label()).toBe('Selling');
+      expect(await label()).toBe(selling.label);
       await wired.config.publish(owner(KPM_A));
-      expect(await label()).toBe('Penjualan');
+      expect(await label()).toBe('Penjualan langsung');
     });
 
     it('does not relabel a development section the office holds alone', async () => {
@@ -226,7 +226,12 @@ describe('0021 — the summary tiles for offices and templates that already exis
         _id: KPM_A, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta',
       } as never);
 
-      await wired.provisioning.seedActivityTaxonomy(KPM_A);
+      // Built from the template itself, as provisioning hands it a source: the platform's defaults say *Pengembangan*
+      // since P18.98-T7, so only the template's own tile reads *Development*.
+      const template = await templates().findOne({ kind: 'activity_taxonomy' });
+      await wired.provisioning.seedActivityTaxonomy(KPM_A, {
+        payload: template!.payload as Record<string, unknown>, seededFrom: { templateId: null, version: 1 },
+      });
 
       expect(tilesOf(await working(KPM_A)).TEAM_DEVELOPMENT).toEqual(['DEVELOPMENT', 'Development']);
     });

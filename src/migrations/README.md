@@ -92,3 +92,13 @@ snapshot rewritten the same way, and the `training_taxonomy` company templates, 
 held the seeded sentence (the Template company's *Default template* among them). An office's own words, a description an
 Owner cleared, and a template somebody edited are not touched. No version moves. A second run writes none. There is
 no `0044`: it was held for P18.97-T1's frozen scorecards, which are read tolerantly and needed none (AC-19).
+`0046-default-template-in-indonesian` (Phase 18.98, P18.98-T7; OD-238, ADR-0179 §5) prints `{ templates, fields }`: the
+Template company's *Default template* (`TEMPLATE_LIBRARY`'s fixed ids) written in Bahasa Indonesia — the versions,
+draft and published, of its six kinds that carry words (`ratio_set` is not one: a ratio's name is a metric name, kept
+English) it rewrote, and how many fields. A field is rewritten only where it still holds exactly the English the seed
+gave before (`SEEDED_*_BEFORE_OD_238`), found by code — a lead status by code within its pipeline — and takes the seed's
+Indonesian. A field the Super Admin edited keeps their words; an office's own configuration, its snapshots, an insurer's
+templates and every template saved from an office are copies, never links (ADR-0164), and are not touched. No version
+moves. A second run, and a run on a database `0037` made from today's seed, write none. `0038` and `0045` write the
+English they were written for since this change, so an office still holding the older seeded words is given the English,
+as it would have been — never the Indonesian.

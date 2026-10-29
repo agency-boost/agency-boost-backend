@@ -11,7 +11,9 @@
  * the document that defines the item (ADR-0031).
  *
  * **Codes, never positions.** A hire's progress names its items by code, so a code that moved would
- * re-score somebody. The codes are ours; every label is the prototype's.
+ * re-score somebody. The codes are ours; every label is the prototype's, **written in Bahasa Indonesia since
+ * P18.98-T7** (OD-238, option 1): the platform's Default template is in the client's default language, with the
+ * approved glossary's kept-English terms (*goal*, *leader*, *closing*, *case*, *1-on-1*, *milestone*) kept.
  */
 
 /** What an item waits for, or `none` for one a leader ticks. `training:` carries a module code. */
@@ -124,13 +126,17 @@ export interface SeedActivationItem {
   readonly autoLink: ActivationFeatureLink | null;
 }
 
-/** The prototype's five sections, in its order and with its numbering in the label. */
+/**
+ * The prototype's five sections, in its order and with its numbering in the label — **in Bahasa Indonesia since
+ * P18.98-T7** (OD-238, option 1; ADR-0179 §5), as the sixteen items are. The prototype's English is
+ * `SEEDED_ACTIVATION_LABELS_BEFORE_OD_238`'s.
+ */
 export const SEED_ACTIVATION_ASPECTS: readonly SeedActivationAspect[] = [
-  { code: 'INTRODUCTION', label: '1. Introduction', displayOrder: 1 },
-  { code: 'INITIAL_SETUP', label: '2. Initial Setup', displayOrder: 2 },
-  { code: 'TRAINING_AND_CERTIFICATION', label: '3. Training & Certification', displayOrder: 3 },
-  { code: 'FIRST_SALE', label: '4. First Sale', displayOrder: 4 },
-  { code: 'ONGOING_HABITS', label: '5. Ongoing Habits', displayOrder: 5 },
+  { code: 'INTRODUCTION', label: '1. Pengenalan', displayOrder: 1 },
+  { code: 'INITIAL_SETUP', label: '2. Persiapan awal', displayOrder: 2 },
+  { code: 'TRAINING_AND_CERTIFICATION', label: '3. Pelatihan & sertifikasi', displayOrder: 3 },
+  { code: 'FIRST_SALE', label: '4. Penjualan pertama', displayOrder: 4 },
+  { code: 'ONGOING_HABITS', label: '5. Kebiasaan rutin', displayOrder: 5 },
 ] as const;
 
 /**
@@ -142,28 +148,28 @@ export const SEED_ACTIVATION_ASPECTS: readonly SeedActivationAspect[] = [
  * a module the office might archive would refuse its own provisioning.
  */
 export const SEED_ACTIVATION_ITEMS: readonly SeedActivationItem[] = [
-  { code: 'INSURANCE_BASICS', aspectCode: 'INTRODUCTION', label: 'Learn insurance basics', displayOrder: 1, autoLink: null },
-  { code: 'CAREER_MINDSET', aspectCode: 'INTRODUCTION', label: 'Learn agency career mindset', displayOrder: 2, autoLink: null },
-  { code: 'COMPANY_PROFILE', aspectCode: 'INTRODUCTION', label: 'Learn company profile', displayOrder: 3, autoLink: null },
-  { code: 'KPM_INTRO_SESSION', aspectCode: 'INTRODUCTION', label: 'Join KPM introduction session', displayOrder: 4, autoLink: null },
+  { code: 'INSURANCE_BASICS', aspectCode: 'INTRODUCTION', label: 'Pelajari dasar-dasar asuransi', displayOrder: 1, autoLink: null },
+  { code: 'CAREER_MINDSET', aspectCode: 'INTRODUCTION', label: 'Pelajari pola pikir karier keagenan', displayOrder: 2, autoLink: null },
+  { code: 'COMPANY_PROFILE', aspectCode: 'INTRODUCTION', label: 'Pelajari profil perusahaan', displayOrder: 3, autoLink: null },
+  { code: 'KPM_INTRO_SESSION', aspectCode: 'INTRODUCTION', label: 'Ikuti sesi pengenalan KPM', displayOrder: 4, autoLink: null },
 
-  { code: 'GOAL_SETTING', aspectCode: 'INITIAL_SETUP', label: 'Goal setting: APE & activity targets', displayOrder: 1, autoLink: 'feature:goals' },
-  { code: 'CRM_SETUP', aspectCode: 'INITIAL_SETUP', label: 'Set up company CRM system', displayOrder: 2, autoLink: null },
-  { code: 'ADD_PROSPECTS', aspectCode: 'INITIAL_SETUP', label: 'Add prospects in Leads Management', displayOrder: 3, autoLink: 'feature:leads' },
-  { code: 'CHECK_CONTEST', aspectCode: 'INITIAL_SETUP', label: 'Check nearest contest', displayOrder: 4, autoLink: null },
+  { code: 'GOAL_SETTING', aspectCode: 'INITIAL_SETUP', label: 'Atur goal: target APE & aktivitas', displayOrder: 1, autoLink: 'feature:goals' },
+  { code: 'CRM_SETUP', aspectCode: 'INITIAL_SETUP', label: 'Siapkan sistem CRM perusahaan', displayOrder: 2, autoLink: null },
+  { code: 'ADD_PROSPECTS', aspectCode: 'INITIAL_SETUP', label: 'Tambahkan prospek di Leads Management', displayOrder: 3, autoLink: 'feature:leads' },
+  { code: 'CHECK_CONTEST', aspectCode: 'INITIAL_SETUP', label: 'Cek kontes terdekat', displayOrder: 4, autoLink: null },
 
-  { code: 'MANDATORY_TRAINING', aspectCode: 'TRAINING_AND_CERTIFICATION', label: 'Mandatory training: selling skill & product knowledge', displayOrder: 1, autoLink: null },
-  { code: 'CERTIFY_PRODUCTS', aspectCode: 'TRAINING_AND_CERTIFICATION', label: 'Certify priority products', displayOrder: 2, autoLink: null },
-  { code: 'ROLE_PLAY', aspectCode: 'TRAINING_AND_CERTIFICATION', label: 'Role play with leader', displayOrder: 3, autoLink: null },
+  { code: 'MANDATORY_TRAINING', aspectCode: 'TRAINING_AND_CERTIFICATION', label: 'Pelatihan wajib: keterampilan menjual & pengetahuan produk', displayOrder: 1, autoLink: null },
+  { code: 'CERTIFY_PRODUCTS', aspectCode: 'TRAINING_AND_CERTIFICATION', label: 'Sertifikasi produk prioritas', displayOrder: 2, autoLink: null },
+  { code: 'ROLE_PLAY', aspectCode: 'TRAINING_AND_CERTIFICATION', label: 'Role play dengan leader', displayOrder: 3, autoLink: null },
 
-  { code: 'JOINT_FIELD_WORK', aspectCode: 'FIRST_SALE', label: 'Joint Field Work with leader', displayOrder: 1, autoLink: null },
-  // ADR-0031: the Owner template's wording. `Overall.html:6453` drops the last word, and the item
-  // before it is the one done *with* a leader.
-  { code: 'FIRST_CASE_CLOSED', aspectCode: 'FIRST_SALE', label: 'Close first case independently', displayOrder: 2, autoLink: null },
+  { code: 'JOINT_FIELD_WORK', aspectCode: 'FIRST_SALE', label: 'Joint field work dengan leader', displayOrder: 1, autoLink: null },
+  // ADR-0031: the Owner template's wording, *Close first case independently*. `Overall.html:6453` drops the last
+  // word, and the item before it is the one done *with* a leader.
+  { code: 'FIRST_CASE_CLOSED', aspectCode: 'FIRST_SALE', label: 'Closing case pertama secara mandiri', displayOrder: 2, autoLink: null },
 
-  { code: 'ACTIVITY_TRACKER_WEEKLY', aspectCode: 'ONGOING_HABITS', label: 'Fill Activity Tracker weekly', displayOrder: 1, autoLink: 'feature:activity' },
-  { code: 'WEEKLY_CHECK_IN', aspectCode: 'ONGOING_HABITS', label: 'Weekly 1-on-1 check-in (4 weeks)', displayOrder: 2, autoLink: null },
-  { code: 'INDEPENDENT_AGENT_MILESTONE', aspectCode: 'ONGOING_HABITS', label: 'Reach Independent Agent milestone (3 independent closings)', displayOrder: 3, autoLink: null },
+  { code: 'ACTIVITY_TRACKER_WEEKLY', aspectCode: 'ONGOING_HABITS', label: 'Isi Activity Tracker setiap minggu', displayOrder: 1, autoLink: 'feature:activity' },
+  { code: 'WEEKLY_CHECK_IN', aspectCode: 'ONGOING_HABITS', label: 'Check-in 1-on-1 mingguan (4 minggu)', displayOrder: 2, autoLink: null },
+  { code: 'INDEPENDENT_AGENT_MILESTONE', aspectCode: 'ONGOING_HABITS', label: 'Capai milestone agen mandiri (3 kali closing secara mandiri)', displayOrder: 3, autoLink: null },
 ] as const;
 
 /**
@@ -172,6 +178,42 @@ export const SEED_ACTIVATION_ITEMS: readonly SeedActivationItem[] = [
  * ADR-0054's *AA* or *MAA*, and no metric (invariant §8): a checklist item is done or it is not.
  */
 export const ACTIVATION_FIRST_CASE_CODE = 'FIRST_CASE_CLOSED';
+
+/**
+ * **The words the seed gave before P18.98-T7** (OD-238, option 1), per code — the prototype's English
+ * (`Overall.html:6435-6458`; item 13 `KPM_Owner.html:1553`). Kept only so migration `0046` can recognise the Template company's
+ * Default template where it still holds them, and for the specs. No office and no template is given them any more.
+ */
+export const SEEDED_ACTIVATION_LABELS_BEFORE_OD_238: {
+  readonly aspects: Readonly<Record<string, string>>;
+  readonly items: Readonly<Record<string, string>>;
+} = {
+  aspects: {
+    INTRODUCTION: '1. Introduction',
+    INITIAL_SETUP: '2. Initial Setup',
+    TRAINING_AND_CERTIFICATION: '3. Training & Certification',
+    FIRST_SALE: '4. First Sale',
+    ONGOING_HABITS: '5. Ongoing Habits',
+  },
+  items: {
+    INSURANCE_BASICS: 'Learn insurance basics',
+    CAREER_MINDSET: 'Learn agency career mindset',
+    COMPANY_PROFILE: 'Learn company profile',
+    KPM_INTRO_SESSION: 'Join KPM introduction session',
+    GOAL_SETTING: 'Goal setting: APE & activity targets',
+    CRM_SETUP: 'Set up company CRM system',
+    ADD_PROSPECTS: 'Add prospects in Leads Management',
+    CHECK_CONTEST: 'Check nearest contest',
+    MANDATORY_TRAINING: 'Mandatory training: selling skill & product knowledge',
+    CERTIFY_PRODUCTS: 'Certify priority products',
+    ROLE_PLAY: 'Role play with leader',
+    JOINT_FIELD_WORK: 'Joint Field Work with leader',
+    FIRST_CASE_CLOSED: 'Close first case independently',
+    ACTIVITY_TRACKER_WEEKLY: 'Fill Activity Tracker weekly',
+    WEEKLY_CHECK_IN: 'Weekly 1-on-1 check-in (4 weeks)',
+    INDEPENDENT_AGENT_MILESTONE: 'Reach Independent Agent milestone (3 independent closings)',
+  },
+};
 
 /*
  * ── The data-backed items (ADR-0171 §3, P18.96-T4) ──────────────────────────────────────────────────

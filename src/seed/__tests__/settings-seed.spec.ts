@@ -59,7 +59,7 @@ describe('P13.1-T3 the seed follows the prototype — a run at 10:00 on 7 Octobe
     expect(statuses.map((s) => [s.code, s.status, s.version]))
       .toEqual(SEED_LEAD_STATUSES.map((s) => [s.code, 'active', 1]));
 
-    // The platform's five, at its benchmarks: no *Referral rate*, *Selling success rate* at 30% (ADR-0160).
+    // The platform's five, at its benchmarks: no *Rasio referral*, *Selling success rate* at 30% (ADR-0160).
     const ratios = await col('ratioDefinitions').find({ kpmId }).sort({ displayOrder: 1 }).toArray();
     expect(ratios.map((r) => [r.code, r.label, r.benchmark, r.origin, r.status, r.version]))
       .toEqual(SEED_RATIO_DEFINITIONS.map((r) => [r.code, r.label, r.benchmark, 'platform', 'active', 1]));
@@ -84,7 +84,7 @@ describe('P13.1-T3 the seed follows the prototype — a run at 10:00 on 7 Octobe
     expect(await col('ratioDefinitions').findOne({ kpmId, code: 'SELLING_SUCCESS_RATE' }))
       .toMatchObject({ benchmark: 0.4, version: 2, status: 'active' });
     expect(await col('ratioDefinitions').findOne({ kpmId, code: 'REFERRAL_RATE' }))
-      .toMatchObject({ origin: 'office', label: 'Referral rate', status: 'active' });
+      .toMatchObject({ origin: 'office', label: 'Rasio referral', status: 'active' });
 
     expect(await wired.config.state(await as('owner@kpm0555.test', true)))
       .toMatchObject({ publishedVersion: 1, hasUnpublishedChanges: true });

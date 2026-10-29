@@ -101,6 +101,9 @@ const WORDS: [entry: keyof typeof M, sentence: Message, values: string[]][] = [
   ['requestTitle', M.requestTitle({ count: 2 }), ['2']],
   ['requestDetail', M.requestDetail, []],
   ['decideAction', M.decideAction, []],
+  ['unknownPerson', M.unknownPerson, []],
+  ['unknownCompany', M.unknownCompany, []],
+  ['unknownOffice', M.unknownOffice, []],
 ];
 
 describe('P18.98-T5 AC-2 the tenants module’s sentences', () => {

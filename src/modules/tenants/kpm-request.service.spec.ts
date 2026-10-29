@@ -9,6 +9,7 @@ import {
 } from '@/modules/activation/activation-template.schema';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
@@ -230,13 +231,16 @@ describe('KpmRequestService (P3.5-T2)', () => {
       await mongoose.model(Company.name).deleteOne({ _id: companyId });
       await mongoose.model(User.name).deleteOne({ _id: requesterId });
 
-      const [seen] = await service.queue(platform());
+      const [seen] = await service.queue(platform().withReader(SOURCE_READER));
       expect(seen).toMatchObject({
         requestId: row.requestId,
         companyName: 'Unknown',
         requestedByName: 'Unknown',
         requestedByEmail: '',
       });
+      // P18.98-T7: in the reader's language — the Super Admin reading Bahasa Indonesia reads *Tidak diketahui*.
+      const [inIndonesian] = await service.queue(platform().withReader(readerIn('id')));
+      expect(inIndonesian).toMatchObject({ companyName: 'Tidak diketahui', requestedByName: 'Tidak diketahui' });
     });
 
   describe('deciding', () => {

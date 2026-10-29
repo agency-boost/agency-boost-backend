@@ -1,13 +1,19 @@
 import mongoose from 'mongoose';
-import { SEED_LEAD_STATUSES, SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167 } from '@/domain/constants/activity-taxonomy';
+import {
+  SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167, SEEDED_LEAD_STATUS_LABELS_BEFORE_OD_238,
+} from '@/domain/constants/activity-taxonomy';
 
 /** The status this rewrites, by code: the recruitment pipeline's first. */
 const CODE = 'NOT_APPROACHED';
 
-/** Which pipeline, the seeded words it may still hold, and the words it takes — all read from the constants. */
+/**
+ * Which pipeline, the seeded words it may still hold, and the words it takes — all read from the constants. **The
+ * words it takes are the ones it was written for**, *Not yet approached*: the seed has said *Belum didekati* since
+ * P18.98-T7 (OD-238), and an office's own configuration keeps its language — a template is a copy, never a link.
+ */
 function rewrite(): { pipeline: string; labels: string[]; label: string } {
   const before = SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167[CODE];
-  const label = SEED_LEAD_STATUSES.find((s) => s.pipeline === before.pipeline && s.code === CODE)!.label;
+  const label = SEEDED_LEAD_STATUS_LABELS_BEFORE_OD_238[before.pipeline][CODE];
   return { pipeline: before.pipeline, labels: [...before.labels], label };
 }
 

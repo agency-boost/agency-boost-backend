@@ -5,6 +5,12 @@ import type { GuestEvent } from '@/modules/events/event-guest.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { seedDemo, type SeedResult } from '../demo';
+import {
+  CONFIGURED_EVENTS, EVENT_ANSWERS, EVENTS_FIXTURE_TITLES as TITLE, TOWN_HALL_ANSWERS,
+} from '../events-fixture';
+
+/** The Town Hall's title, naming its month in Indonesian as the office typed it (P18.98-T7). */
+const townHall = (month: string) => TITLE.townHall(month);
 
 const RUN_MS = 300_000;
 const quiet = () => undefined;
@@ -66,20 +72,20 @@ describe('Phase 18.5 the events seed — a run at 10:00 on 10 October 2026 in Ja
     expect(await col('eventFeedback').countDocuments({ kpmId: { $ne: kpm0417 } })).toBe(0);
     expect(seeded.events.written).toBe(4 + 18 + 12);
     expect((await col('events').findOne({ _id: new mongoose.Types.ObjectId(seeded.events.events.TOWN_HALL) }))!.title)
-      .toBe('September Town Hall');
+      .toBe(townHall('September'));
   });
 
   it('P18.5-T5 AC-11 Rina’s /events shows all five card states, and no Leaders’ huddle', async () => {
     const events = await list('rina@kpm0417.test');
     expect(events.map((e) => [e.title, pill(e)])).toEqual([
-      ['New Agent Bootcamp', 'Feedback sent'],
-      ['September Town Hall', "Didn't join"],
-      ['PRULink briefing', 'Feedback pending'],
-      ['Sales clinic', "Didn't join"],
-      ['Product refresh briefing', 'Going'],
-      ['Kickoff 2026', 'Not joined'],
+      [TITLE.NEW_AGENT_BOOTCAMP, 'Feedback sent'],
+      [townHall('September'), "Didn't join"],
+      [CONFIGURED_EVENTS.PRULINK_BRIEFING.title, 'Feedback pending'],
+      [TITLE.SALES_CLINIC, "Didn't join"],
+      [TITLE.PRODUCT_REFRESH, 'Going'],
+      [CONFIGURED_EVENTS.KICKOFF.title, 'Not joined'],
     ]);
-    expect(events[0].me.feedback).toMatchObject({ score: 9, why: 'Clear and practical — I left with a plan for my first 30 days.' });
+    expect(events[0].me.feedback).toMatchObject({ score: 9, why: EVENT_ANSWERS.rinaBootcamp[1] });
   });
 
   it('P18.5-T5 AC-11 every seeded event starts at a plausible hour of the office’s day; only the huddle is the run’s', async () => {
@@ -136,8 +142,7 @@ describe('Phase 18.5 the events seed — a run at 10:00 on 10 October 2026 in Ja
     const summary = await wired.eventRollCalls.feedbackSummary(owner, seeded.events.events.TOWN_HALL);
     expect(summary).toMatchObject({ nps: 0, counted: 8, responses: 8, awaitingConfirmation: 0, promoters: 3, passives: 2, detractors: 3 });
     expect(summary.rows[0]).toMatchObject({
-      name: 'Wilson Tanoto', score: 10, why: 'Great energy — the recognition segment really landed.',
-      improve: 'Keep leaning into recognition moments — repeat this format.',
+      name: 'Wilson Tanoto', score: 10, why: TOWN_HALL_ANSWERS[0][1], improve: TOWN_HALL_ANSWERS[0][2],
     });
     const asOwner = await wired.eventRollCalls.rollCall(owner, seeded.events.events.TOWN_HALL);
     const ownRow = asOwner.people.find((p) => p.membershipId === owner.membershipId)!;
@@ -182,8 +187,8 @@ describe('Phase 18.5 the events seed — a run at 10:00 on 10 October 2026 in Ja
     const printed: string[] = [];
     const later = await seedDemo({ clock: new FixedClock(new Date('2026-11-20T03:00:00Z')), log: (text) => printed.push(text) });
     expect(later.events.written).toBe(0);
-    expect(later.events.guide).toContain('September Town Hall');
-    expect(printed.join('\n')).toContain('September Town Hall');
-    expect(later.events.guide).not.toContain('October Town Hall');
+    expect(later.events.guide).toContain(townHall('September'));
+    expect(printed.join('\n')).toContain(townHall('September'));
+    expect(later.events.guide).not.toContain(townHall('Oktober'));
   }, RUN_MS);
 });

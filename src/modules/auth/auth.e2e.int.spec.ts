@@ -1568,7 +1568,8 @@ describe('auth and admin over HTTP', () => {
   /*
    * **P18.98-T5 — the auth family in the reader's language** (ADR-0179 §7): a refusal, a validation message and the two
    * auth emails, over HTTP. The request's language is the `Accept-Language` the app sends, else the signed-in person's
-   * saved `users.locale`, else a reader who has chosen nothing — English until the Indonesian default is live.
+   * saved `users.locale`, else a reader who has chosen nothing — Bahasa Indonesia, the default since P18.98-T4's exit
+   * (2026-10-29; English before it went live).
    */
   describe('P18.98-T5 the auth family in the reader’s language', () => {
     it('AC-7 refuses a wrong password in Indonesian, the code unchanged', async () => {

@@ -28,7 +28,7 @@ import { demonstrationPdf } from './recruitment-fixture';
  * | `siti@kpm0417.test` | Graduated; ten done |
  * | `removed@kpm0417.test` (Yanti) | **The re-join**: three done on her first, removed membership; none on the current one — *(0/10)* |
  * | `budi@`, `dewi@`, `admin@kpm0417.test` | Budi one *In progress*; Dewi three done; Maya Halim two done (she learns as the AB she is) |
- * | `agent@kpm0555.test` (Lina) | **T3** (D-seed-link a): 0555's checklist binds item 9 to *Closing Techniques That Work*. `/activation` (day 61, prospects done) shows item 9 *Auto* with *Go to Closing Techniques That Work →*; mark it Done and item 9 ticks, attributed. **D-history**: *Client Retention Best Practices*, which she did, is archived — absent from her `/training`, *Archived* on her person tab, outside *Sales (1/9)*. **A draft**: *PRUMapan Basics* in *Product* is not offered |
+ * | `agent@kpm0555.test` (Lina) | **T3** (D-seed-link a): 0555's checklist binds item 9 to *Closing Techniques That Work*. `/activation` (day 61, prospects done) shows item 9 *Auto* with *Go to Closing Techniques That Work →*; mark it Done and item 9 ticks, attributed. **D-history**: *Client Retention Best Practices*, which she did, is archived — absent from her `/training`, *Archived* on her person tab, outside *Sales (1/9)*. **A draft**: *Dasar-dasar PRUMapan* in *Product* is not offered |
  * | `owner@kpm0555.test` (Hendra) | Settings › Activation checklist: item 9 *Auto*. Field view → coaching → Lina → *Training* |
  *
  * **Content.** *Closing Techniques That Work* carries one `https` link, *External resource*, in both offices. Where
@@ -90,15 +90,15 @@ export const TRAINING_SEED_LINA = {
 export const TRAINING_SEED_0555 = {
   archived: 'CLIENT_RETENTION',
   bound: { item: 'MANDATORY_TRAINING', link: 'training:CLOSING_TECHNIQUES' },
-  draftSkill: { code: 'PRODUCT_KNOWLEDGE', categoryCode: 'PRODUCT', label: 'Product Knowledge' },
-  draftModule: { code: 'PRUMAPAN_BASICS', skillCode: 'PRODUCT_KNOWLEDGE', title: 'PRUMapan Basics' },
+  draftSkill: { code: 'PRODUCT_KNOWLEDGE', categoryCode: 'PRODUCT', label: 'Pengetahuan produk' },
+  draftModule: { code: 'PRUMAPAN_BASICS', skillCode: 'PRODUCT_KNOWLEDGE', title: 'Dasar-dasar PRUMapan' },
 } as const;
 
 /** The company's link on *Closing Techniques That Work*, in both offices. */
 export const TRAINING_SEED_LINK = {
   moduleCode: 'CLOSING_TECHNIQUES',
   id: seedObjectId('training-fixture', 'item', 'CLOSING_TECHNIQUES', 'link'),
-  label: 'Closing techniques: further reading',
+  label: 'Teknik closing: bacaan lanjutan',
   url: 'https://www.prudential.co.id/',
 } as const;
 
@@ -218,8 +218,8 @@ export async function seedTrainingFixture(deps: TrainingFixtureDeps): Promise<Tr
           owner: { kind: 'company', companyId: deps.companyId }, folder: 'training', name: `${code}-demonstration`,
           mimeType: 'application/pdf',
           body: demonstrationPdf([
-            'AgencyBoost - demonstration document', title, 'Prudential company training material, by reference.',
-            'A one-page PDF the demo seed wrote. It is not real training material.',
+            'AgencyBoost - dokumen demonstrasi', title, 'Materi pelatihan perusahaan Prudential, sebagai rujukan.',
+            'PDF satu halaman yang ditulis seed demo. Ini bukan materi pelatihan sungguhan.',
           ]),
         });
         if (stored.sent) sent += 1;
@@ -352,20 +352,27 @@ export async function seedTrainingFixture(deps: TrainingFixtureDeps): Promise<Tr
     written += 1;
   }
 
+  // The modules by the titles the offices hold: the company's words, which a database seeded before keeps (P18.98-T7).
+  const titleIn = async (office: string, code: string) =>
+    String((await Modules.findOne({ kpmId: office, code }).lean().exec())?.title ?? code);
+  const discovery = await titleIn(office0417.kpmId, 'DISCOVERY_QUESTIONS');
+  const closing = await titleIn(office0555.kpmId, TRAINING_SEED_LINK.moduleCode);
+  const retention = await titleIn(office0555.kpmId, archived);
+  const draft = await titleIn(office0555.kpmId, draftModule.code);
   const guide = `
   TRAINING at /training, /coaching/me/training and a coachee's Training tab  (trainingProgress, from
            src/seed/training-fixture.ts; a status is the member's own word, set on the module's page)
-    rina@kpm0417.test            Sales: 4 Done, "Asking the Right Discovery Questions" In progress;
+    rina@kpm0417.test            Sales: 4 Done, "${discovery}" In progress;
                                  Closing's link already Opened. Mark Discovery Done: (4/10) -> (5/10)
     sari@kpm0417.test            Rina's Training tab reads what Rina sees; one recorded read, surface training
     agus@kpm0417.test            all ten Done (10/10); Indah 5 done + 2 in progress, Dimas 4 + 1
     arief@kpm0417.test           Novi nothing started (0/10); Wahyu 2 done
     siti@kpm0417.test            ten done          budi@  one In progress     dewi@  three done
     removed@kpm0417.test         Yanti: three done on her first membership, (0/10) on the current one
-    agent@kpm0555.test           Lina: /activation item 9 Auto, "Go to Closing Techniques That Work ->";
-                                 mark it Done and the item ticks. "Client Retention Best Practices" was
+    agent@kpm0555.test           Lina: /activation item 9 Auto, "Go to ${closing} ->";
+                                 mark it Done and the item ticks. "${retention}" was
                                  archived after she did it: gone from /training, Archived on her person
-                                 tab, outside Sales (1/9). "PRUMapan Basics" in Product is a draft
+                                 tab, outside Sales (1/9). "${draft}" in Product is a draft
     owner@kpm0555.test           Hendra: Settings > Activation checklist, item 9 Auto
     owner@kpm0701.test           Hadi: the field view's /training is the empty state
     The company's material      ${files === 'stored' ? 'a PDF on every Sales module, by reference, and Closing\'s link' : `the link on Closing only; the PDFs were ${files}`}

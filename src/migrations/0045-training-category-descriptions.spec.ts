@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import {
-  SEED_TRAINING_CATEGORIES, SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97,
+  SEED_TRAINING_CATEGORIES, SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97, SEEDED_TRAINING_WORDINGS_BEFORE_OD_238,
 } from '@/domain/constants/training-taxonomy';
 import { clearCollections, startMongo, stopMongo } from '../../test/mongo';
 import { up } from './0045-training-category-descriptions';
@@ -8,7 +8,10 @@ import { up } from './0045-training-category-descriptions';
 const KPM_A = '66f0000000000000000000a1';
 const KPM_B = '66f0000000000000000000b1';
 const OLD_SALES = SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97.SALES;
-const NEW = Object.fromEntries(SEED_TRAINING_CATEGORIES.map((c) => [c.code, c.description]));
+/** The English lines it was written for — the seed's Indonesian since P18.98-T7 is `0046`'s to give a template. */
+const NEW = Object.fromEntries(
+  Object.entries(SEEDED_TRAINING_WORDINGS_BEFORE_OD_238.categories).map(([code, c]) => [code, c.description]),
+);
 const CODES = SEED_TRAINING_CATEGORIES.map((c) => c.code);
 
 /**
@@ -68,6 +71,8 @@ describe('0045 — the default training categories’ descriptions (P18.97-T4 AC
     expect(await up(db())).toEqual({ categories: 10, snapshots: 2, templates: 1 });
 
     expect(await descriptions(KPM_A)).toEqual(NEW);
+    // P18.98-T7 (OD-238): the English it was written for, never the seed's Indonesian — an office keeps its language.
+    expect(Object.values(await descriptions(KPM_A))).not.toContain(SEED_TRAINING_CATEGORIES[0].description);
     const versions = (await db().collection('trainingCategories').find({ kpmId: KPM_A }).toArray()).map((c) => c.version);
     expect(versions).toEqual([1, 1, 1, 1, 1, 1]);
   });

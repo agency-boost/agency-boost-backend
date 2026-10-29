@@ -71,8 +71,8 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
         total: 16, graduatedAt: null, graduatedBy: null, note: null, firstCaseClosed: false,
       });
       expect(view.aspects.map((a: { label: string; total: number }) => [a.label, a.total])).toEqual([
-        ['1. Introduction', 4], ['2. Initial Setup', 4], ['3. Training & Certification', 3], ['4. First Sale', 2],
-        ['5. Ongoing Habits', 3],
+        ['1. Pengenalan', 4], ['2. Persiapan awal', 4], ['3. Pelatihan & sertifikasi', 3], ['4. Penjualan pertama', 2],
+        ['5. Kebiasaan rutin', 3],
       ]);
       expect(Object.keys(items(view)[0]).sort()).toEqual(ITEM_KEYS);
     });
@@ -235,7 +235,7 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
       expect(link('WEEKLY_CHECK_IN')).toMatchObject({ label: 'Sesi coaching', form: 'one_on_one' });
       // What the hire's office typed stays as typed, in both languages.
       expect(item(view, 'GOAL_SETTING')).toMatchObject({ code: 'GOAL_SETTING' });
-      expect(view.aspects[0].label).toBe('1. Introduction');
+      expect(view.aspects[0].label).toBe('1. Pengenalan');
     });
 
     /*

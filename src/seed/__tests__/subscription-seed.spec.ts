@@ -19,7 +19,7 @@ import { subscriptionStateOf } from '@/modules/tenants/subscription';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { seedDemo, type SeedResult } from '../demo';
-import { planSubscriptions, SUBSCRIPTION_OFFICES } from '../subscription-fixture';
+import { planSubscriptions, SUBSCRIPTION_OFFICES, SUBSCRIPTION_PROMOTION_REASON } from '../subscription-fixture';
 import { COHORT_HIRES } from '../cohort-fixture';
 
 /**
@@ -147,7 +147,7 @@ describe('the subscription seed', () => {
       const m = await col('memberships').findOne({ _id: new mongoose.Types.ObjectId(r.subjectMembershipId) });
       expect([m!.orgLevelCode, m!.role]).toEqual(['AAB', 'aab']);
       expect(await col('membershipHistory').findOne({ membershipId: r.subjectMembershipId, eventType: 'role_changed', validTo: null }))
-        .toMatchObject({ fromRole: 'agent', toRole: 'aab', reason: 'Leads the weekend team already' });
+        .toMatchObject({ fromRole: 'agent', toRole: 'aab', reason: SUBSCRIPTION_PROMOTION_REASON });
       expect(r.decidedByUserId).toBe(await userIdOf('superadmin@agencyboost.test'));
     }
     // Rizky waits: still an Agent, the Owner's ask open.

@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { SEED_ACTIVITY_CATEGORIES } from '@/domain/constants';
+import { SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238 } from '@/domain/constants/activity-taxonomy';
 
 /**
  * Give every existing office the prototype's four summary tiles (ADR-0064, P10.1-T5).
@@ -50,13 +51,19 @@ interface SeedTile {
   members: string[];
 }
 
-/** The seed's tiles, by code — read from the seed, the one place the mapping is written. */
+/**
+ * The seed's tiles, by code — read from the seed, the one place the mapping is written. **The label is the one it was
+ * written for**, *Development*: the seed has said *Pengembangan* since P18.98-T7 (OD-238), and an office's own
+ * configuration keeps its language.
+ */
 function seedTiles(): Map<string, SeedTile> {
   const tiles = new Map<string, SeedTile>();
   for (const category of SEED_ACTIVITY_CATEGORIES) {
     if (!category.summaryGroupCode || !category.summaryGroupLabel) continue;
+    const label = SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238.categories[category.code]?.summaryGroupLabel
+      ?? category.summaryGroupLabel;
     const tile = tiles.get(category.summaryGroupCode)
-      ?? { label: category.summaryGroupLabel, members: [] };
+      ?? { label, members: [] };
     tile.members.push(category.code);
     tiles.set(category.summaryGroupCode, tile);
   }

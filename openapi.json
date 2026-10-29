@@ -26310,7 +26310,7 @@
   },
   "info": {
     "title": "AgencyBoost API",
-    "description": "Multi-tenant SaaS for insurance agency offices (KPM).\n\nEvery failure uses one envelope — `{ error: { code, message, details?, requestId } }` — and every `code` has a row in `docs/02-specs/api/error-catalog.md`. **Branch on the code, never on the message.**\n\nA resource in another tenant answers `404`, not `403`: a `403` would confirm the id exists.\n\n**Every sentence is in the request's language** — a refusal's `message`, its `details.violations`, a notice: `Accept-Language` (`id` or `en`, exactly), else the signed-in person's saved language, else English until the Indonesian default is live (`docs/02-specs/api/conventions.md`). `code` and every other detail are the same in both.",
+    "description": "Multi-tenant SaaS for insurance agency offices (KPM).\n\nEvery failure uses one envelope — `{ error: { code, message, details?, requestId } }` — and every `code` has a row in `docs/02-specs/api/error-catalog.md`. **Branch on the code, never on the message.**\n\nA resource in another tenant answers `404`, not `403`: a `403` would confirm the id exists.\n\n**Every sentence is in the request's language** — a refusal's `message`, its `details.violations`, a notice: `Accept-Language` (`id` or `en`, exactly), else the signed-in person's saved language, else Bahasa Indonesia, the default since 2026-10-29 (`docs/02-specs/api/conventions.md`). `code` and every other detail are the same in both.",
     "version": "1.0",
     "contact": {}
   },
@@ -26982,7 +26982,7 @@
           "message": {
             "type": "string",
             "example": "You do not have permission to do that.",
-            "description": "Written for a person, in the request's language: `Accept-Language` (`id` or `en`), else the signed-in person's saved language, else English until the Indonesian default is live. Wording may change; the code will not."
+            "description": "Written for a person, in the request's language: `Accept-Language` (`id` or `en`), else the signed-in person's saved language, else Bahasa Indonesia, the default since 2026-10-29. Wording may change; the code will not."
           },
           "details": {
             "type": "object",

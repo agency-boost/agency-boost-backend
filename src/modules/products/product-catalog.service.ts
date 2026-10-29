@@ -10,6 +10,7 @@ import {
 } from '@/domain/constants';
 import { scopeFor } from '@/modules/rbac/permissions';
 import { planFor, type Brief, type ScoredProduct } from './attack-plan.scorer';
+import { budgetBandWords } from './products.messages';
 import {
   effectiveWordsOf, KpmProductService, type OfficeShelf, type OfficeShelfEntry,
 } from './kpm-product.service';
@@ -221,7 +222,11 @@ export class ProductCatalogService {
       differentiator: product.differentiator,
       bestFit: product.bestFor,
       ageBands: product.eligibleAgeBands.map((band) => PRODUCT_AGE_BAND_LABELS[band] ?? String(band)),
-      budgetBands: product.eligibleBudgetBands.map((band) => PRODUCT_BUDGET_BAND_LABELS[band] ?? String(band)),
+      // *Lump-sum* is a word, written for the reader (P18.98-T7); a range of sums reads the same in both.
+      budgetBands: product.eligibleBudgetBands.map((band) => {
+        const words = budgetBandWords(band);
+        return words ? render(words, ctx.reader) : (PRODUCT_BUDGET_BAND_LABELS[band] ?? String(band));
+      }),
       // Written for the reader (P18.98-T5 AC-4): the drawer's note in their language.
       runOffNote: product.lifecycle === 'closed_to_new_business' ? render(PRODUCT_RUN_OFF_NOTE, ctx.reader) : null,
       successorCode: item.successorCode,

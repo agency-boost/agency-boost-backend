@@ -514,14 +514,14 @@ describe('the coaching session over HTTP (P11-T5)', () => {
       const sari = { membershipId: id('SARI'), orgLevelCode: 'AAB', self: false };
       const live = await wired.activityLogs.ratiosOf(office.as('AGUS'), sari);
       expect(live.ratios.find((r) => r.code === 'SELLING_VS_RECRUITMENT')!.sides)
-        .toEqual({ numerator: 'Selling', denominator: 'Recruitment' });
+        .toEqual({ numerator: 'Penjualan', denominator: 'Recruitment' });
 
       const done = await finalized('AGUS', 'SARI');
       const rows = (done.snapshot as { ratios: { rows: Doc[] } }).ratios.rows;
 
       // Each row's sides are the live answer's, the balance's named and every rate's `null`.
       expect(rows.map((r) => [r.code, r.sides])).toEqual(live.ratios.map((r) => [r.code, r.sides]));
-      expect(rows.find((r) => r.code === 'SELLING_VS_RECRUITMENT')!.sides).toEqual({ numerator: 'Selling', denominator: 'Recruitment' });
+      expect(rows.find((r) => r.code === 'SELLING_VS_RECRUITMENT')!.sides).toEqual({ numerator: 'Penjualan', denominator: 'Recruitment' });
       expect(rows.filter((r) => r.comparison === 'gte').every((r) => r.sides === null)).toBe(true);
       // Stored as answered, and read back the same.
       const stored = await col('coachingSessions').findOne({ _id: new mongoose.Types.ObjectId(done.sessionId) });

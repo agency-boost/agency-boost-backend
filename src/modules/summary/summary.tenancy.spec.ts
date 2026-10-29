@@ -389,7 +389,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       // Leads Generation and Selling hold the cascade's codes, so the three target chips stand for them.
       // Personal and Team Development share the tile DEVELOPMENT (ADR-0064): the prototype's two chips.
       expect(sections.map((s) => [s.code, s.label, s.total])).toEqual([
-        ['RECRUITMENT', 'Recruitment', 6], ['DEVELOPMENT', 'Development', 5],
+        ['RECRUITMENT', 'Recruitment', 6], ['DEVELOPMENT', 'Pengembangan', 5],
       ]);
       expect(sections[0].rows.map((r) => [r.code, r.count])).toEqual([
         ['RECRUIT_PRESENTATION', 3], ['RECRUIT_FOLLOWUP', 2], ['RECRUIT_AGENT_CODE', 1],
@@ -408,7 +408,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       await day('2026-09-03', { DEV_TRAINING_ATTEND: 2, DEV_TEAM_ACTIVITY: 4 });
 
       const asAgent = (await wired.summary.read(agent())).activity.monthly.sections;
-      expect(asAgent.find((s) => s.code === 'DEVELOPMENT')).toMatchObject({ label: 'Development', total: 2 });
+      expect(asAgent.find((s) => s.code === 'DEVELOPMENT')).toMatchObject({ label: 'Pengembangan', total: 2 });
 
       await mongoose.connection.db!.collection('activityCategories').updateMany(
         { code: { $in: ['PERSONAL_DEVELOPMENT', 'TEAM_DEVELOPMENT'] } },
@@ -416,7 +416,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       );
       const ungrouped = (await wired.summary.read(agent())).activity.monthly.sections;
       expect(ungrouped.map((s) => [s.code, s.label, s.total])).toEqual([
-        ['RECRUITMENT', 'Recruitment', 0], ['PERSONAL_DEVELOPMENT', 'Personal Development', 2], ['TEAM_DEVELOPMENT', 'Team Development', 4],
+        ['RECRUITMENT', 'Recruitment', 0], ['PERSONAL_DEVELOPMENT', 'Pengembangan diri', 2], ['TEAM_DEVELOPMENT', 'Pengembangan tim', 4],
       ]);
     });
 

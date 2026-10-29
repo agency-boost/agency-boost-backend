@@ -290,7 +290,7 @@ describe('the activity binding (P18.9-T2, ADR-0163)', () => {
       const development = (await wired.summary.read(office.as('B_AGENT'))).activity.monthly.sections
         .find((s) => s.code === 'DEVELOPMENT');
       expect(development).toEqual({
-        code: 'DEVELOPMENT', label: 'Development', total: 5,
+        code: 'DEVELOPMENT', label: 'Pengembangan', total: 5,
         rows: [
           { code: 'DEV_TRAINING_ATTEND', label: expect.any(String), count: 3 },
           { code: 'DEV_TEAM_ACTIVITY', label: expect.any(String), count: 2 },

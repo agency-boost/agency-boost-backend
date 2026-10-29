@@ -36,14 +36,30 @@ export const SELECT_AUDIENCE_SCOPES: readonly EventAudienceScope[] = ['select_ag
 export const EVENT_PHASES = ['upcoming', 'running', 'past'] as const;
 export type EventPhase = (typeof EVENT_PHASES)[number];
 
-/** The event types an office starts with, from the prototype's own list. */
+/**
+ * The event types an office starts with, from the prototype's own list — **in Bahasa Indonesia since P18.98-T7**
+ * (OD-238, option 1; ADR-0179 §5). *Recruitment* is kept English (the approved glossary, §A.6); *training* in a
+ * sentence is *pelatihan* (§B.10). The English is `SEEDED_EVENT_TYPE_LABELS_BEFORE_OD_238`'s.
+ */
 export const SEED_EVENT_TYPES = [
-  { code: 'TRAINING', label: 'Training', emoji: '📚', color: '#2D9CDB' },
-  { code: 'PRODUCT_LAUNCH', label: 'Product launch', emoji: '🚀', color: '#F2994A' },
-  { code: 'RECOGNITION', label: 'Recognition', emoji: '🏆', color: '#27AE60' },
+  { code: 'TRAINING', label: 'Pelatihan', emoji: '📚', color: '#2D9CDB' },
+  { code: 'PRODUCT_LAUNCH', label: 'Peluncuran produk', emoji: '🚀', color: '#F2994A' },
+  { code: 'RECOGNITION', label: 'Penghargaan', emoji: '🏆', color: '#27AE60' },
   { code: 'RECRUITMENT', label: 'Recruitment', emoji: '🤝', color: '#9B51E0' },
-  { code: 'COMMUNITY', label: 'Community', emoji: '🎉', color: '#EB5757' },
+  { code: 'COMMUNITY', label: 'Komunitas', emoji: '🎉', color: '#EB5757' },
 ] as const;
+
+/**
+ * **The words the seed gave before P18.98-T7** (OD-238, option 1), per code — the prototype's English. Kept only so
+ * migration `0046` can recognise the Template company's Default template where it still holds them, and for the
+ * specs. *Recruitment* is kept English, so it is not here.
+ */
+export const SEEDED_EVENT_TYPE_LABELS_BEFORE_OD_238: Readonly<Record<string, string>> = {
+  TRAINING: 'Training',
+  PRODUCT_LAUNCH: 'Product launch',
+  RECOGNITION: 'Recognition',
+  COMMUNITY: 'Community',
+};
 
 /**
  * **What a member is to an event they were invited to** — `EVENT_ATTENDANCE_STATUS` (P18.5-T5 AC-8; D-status, OD-31).

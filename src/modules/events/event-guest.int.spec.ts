@@ -224,7 +224,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       const past = body.events.find((e) => e.code === 'PAST_ALL')!;
       expect(past).toMatchObject({
         title: 'PAST ALL', blurb: 'PAST_ALL blurb', description: 'PAST_ALL description',
-        type: { code: 'PRODUCT_LAUNCH', label: 'Product launch', emoji: '🚀', color: '#F2994A' },
+        type: { code: 'PRODUCT_LAUNCH', label: 'Peluncuran produk', emoji: '🚀', color: '#F2994A' },
         audience: { issuer: 'company', scope: 'all_agents' },
         startsOn: '2026-08-24', startTime: '09:00', location: 'Kantor KPM', locationUrl: null,
         phase: 'past', ended: true, me: { rsvp: null, claimed: false, feedback: null },

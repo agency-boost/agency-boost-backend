@@ -184,8 +184,8 @@ describe('the office lead pipelines (P4-T3)', () => {
     it('renames a stage without touching the code every lead holds', async () => {
       const [sales] = await service.list(ctx(KPM_A));
       const stage = sales.statuses[0];
-      const renamed = await service.rename(ctx(KPM_A), stage.id, 'Belum didekati');
-      expect(renamed.label).toBe('Belum didekati');
+      const renamed = await service.rename(ctx(KPM_A), stage.id, 'Belum dihubungi');
+      expect(renamed.label).toBe('Belum dihubungi');
       expect(renamed.code).toBe(stage.code);
     });
 
@@ -301,7 +301,7 @@ describe('the office lead pipelines (P4-T3)', () => {
       await service.rename(ctx(KPM_A), sales.statuses[0].id, 'Only in A');
 
       const [theirs] = await service.list(ctx(KPM_B));
-      expect(theirs.statuses[0].label).toBe('Not yet approached');
+      expect(theirs.statuses[0].label).toBe('Belum didekati');
     });
 
     it('cannot rename another office’s stage — 404, never 403', async () => {

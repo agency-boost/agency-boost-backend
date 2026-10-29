@@ -17,7 +17,8 @@ export interface RecruitmentAttackPlanView {
 }
 
 /**
- * **The Recruitment Attack Plan's read** (D-plan, D-store; T2 AC-4 to AC-7).
+ * **The Recruitment Attack Plan's read** — the chips' labels written for the request's reader (P18.98-T7), the
+ * company's playbook as typed (D-plan, D-store; T2 AC-4 to AC-7).
  *
  * The reader's office's company, from the office's own row (`TenantDay.office`) — never a company the
  * caller names — and that company's playbook through its named company-filtered read: **those two reads and
@@ -43,8 +44,8 @@ export class RecruitmentPlanService {
     const playbook = companyId ? await this.playbooks.ofCompany(companyId) : null;
     return {
       hasPlaybook: playbook !== null,
-      vocabulary: recruitmentVocabulary(),
-      plan: playbook && brief ? recruitmentPlanFor(playbook.body, brief) : null,
+      vocabulary: recruitmentVocabulary(ctx.reader),
+      plan: playbook && brief ? recruitmentPlanFor(playbook.body, brief, ctx.reader) : null,
     };
   }
 }

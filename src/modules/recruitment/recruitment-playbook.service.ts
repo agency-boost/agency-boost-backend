@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { NotFoundException, VersionConflictException } from '@/common/errors/domain.exception';
+import type { Reader } from '@/common/i18n/reader';
 import { RECRUITMENT, type RecruitmentPlaybookBody } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
@@ -89,14 +90,17 @@ export class RecruitmentPlaybookService {
     return true;
   }
 
-  /** `GET /admin/companies/:companyId/recruitment-playbook`: the company's playbook or none, and the defaults. */
-  async readForAdmin(companyId: string): Promise<PlaybookAdminView> {
+  /**
+   * `GET /admin/companies/:companyId/recruitment-playbook`: the company's playbook or none, and the defaults — the
+   * chips' labels written for the reader (P18.98-T7), the playbook's words as typed.
+   */
+  async readForAdmin(companyId: string, reader: Reader): Promise<PlaybookAdminView> {
     await this.requireCompany(companyId);
     const row = await this.ofCompany(companyId);
     return {
       playbook: row ? await this.view(row) : null,
       defaults: defaultPlaybookBody(),
-      vocabulary: recruitmentVocabulary(),
+      vocabulary: recruitmentVocabulary(reader),
       limits: { textMax: RECRUITMENT.TEXT_MAX_LENGTH, benefitsMax: RECRUITMENT.BENEFITS_MAX },
     };
   }

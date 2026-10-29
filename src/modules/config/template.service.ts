@@ -5,12 +5,13 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { joinSentences, prefixed, refiled } from '@/common/i18n/sentence';
+import { readerOf, type Reader } from '@/common/i18n/reader';
+import { joinSentences, prefixed, refiled, render } from '@/common/i18n/sentence';
 import type { FieldSentence } from '@/common/validation/fields';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import {
-  activationLinkKinds, resolveDisplayUnit, SEED_ACTIVITY_TYPES, type SeedActivityCategory, type SeedActivityType,
+  ACTIVATION_TRAINING_LINK_PREFIX, activationLinkKinds, resolveDisplayUnit, SEED_ACTIVITY_TYPES, type SeedActivityCategory, type SeedActivityType,
 } from '@/domain/constants';
 import {
   CompanyTemplate, CompanyTemplateDocument, TemplateKind,
@@ -28,6 +29,7 @@ import { bindingOfPayload, bindingProblems, defaultBinding } from './activity-bi
 import { CampaignKindsApplier } from './campaign-kinds.port';
 import { trainingTaxonomyProblems } from '@/modules/training/training-payload';
 import { activationChecklistProblems } from '@/modules/activation/activation-payload';
+import { completesWhenOf } from '@/modules/activation/activation.messages';
 import { capabilityLadderProblems } from '@/modules/capability/capability-payload';
 import { eventTypesProblems } from '@/modules/events/event-types-payload';
 import {
@@ -144,7 +146,9 @@ export class TemplateService {
    *
    * `templateId` names the template; absent, the company's default.
    */
-  async read(companyId: string, kind: TemplateKind, templateId?: string | null): Promise<TemplateView> {
+  async read(
+    companyId: string, kind: TemplateKind, templateId?: string | null, reader: Reader = readerOf(),
+  ): Promise<TemplateView> {
     const company = await this.requireCompany(companyId);
     const at = await this.address(companyId, kind, templateId);
 
@@ -154,8 +158,8 @@ export class TemplateService {
 
     const standing = await this.standing(at, published?.version ?? null);
 
-    if (draft) return this.view(draft, published?.version ?? null, standing);
-    if (published) return this.view(published, published.version, standing);
+    if (draft) return this.view(draft, published?.version ?? null, standing, reader);
+    if (published) return this.view(published, published.version, standing, reader);
 
     return {
       id: '',
@@ -176,7 +180,7 @@ export class TemplateService {
       publishedVersion: null,
       officesBehind: standing.behind,
       officesUnrecorded: standing.unrecorded,
-      ...linkKindsOf(kind),
+      ...linkKindsOf(kind, reader),
     };
   }
 
@@ -234,6 +238,7 @@ export class TemplateService {
       saved!,
       published?.version ?? null,
       await this.standing(at, published?.version ?? null),
+      ctx.reader,
     );
   }
 
@@ -285,12 +290,12 @@ export class TemplateService {
       after: { companyId, templateId: at.templateId, kind, version: draft.version },
     });
 
-    return this.view(draft, draft.version, await this.standing(at, draft.version));
+    return this.view(draft, draft.version, await this.standing(at, draft.version), ctx.reader);
   }
 
   /** Every version of one kind of one template, newest first. The history panel. */
   async history(
-    companyId: string, kind: TemplateKind, templateId?: string | null,
+    companyId: string, kind: TemplateKind, templateId?: string | null, reader: Reader = readerOf(),
   ): Promise<TemplateView[]> {
     await this.requireCompany(companyId);
     const at = await this.address(companyId, kind, templateId);
@@ -299,7 +304,7 @@ export class TemplateService {
       .sort({ version: -1 })
       .exec();
     const published = rows.find((r) => r.status === 'published');
-    return rows.map((r) => this.view(r, published?.version ?? null, NO_STANDING));
+    return rows.map((r) => this.view(r, published?.version ?? null, NO_STANDING, reader));
   }
 
   // -------------------------------------------------------------- internals
@@ -539,6 +544,7 @@ export class TemplateService {
     doc: CompanyTemplateDocument,
     publishedVersion: number | null,
     standing: OfficeStanding,
+    reader: Reader,
   ): TemplateView {
     return {
       id: String(doc._id),
@@ -552,12 +558,23 @@ export class TemplateService {
       publishedVersion,
       officesBehind: standing.behind,
       officesUnrecorded: standing.unrecorded,
-      ...linkKindsOf(doc.kind),
+      ...linkKindsOf(doc.kind, reader),
     };
   }
 }
 
-/** The link registry an `activation_checklist` read carries (P18.5-T3 AC-6); nothing for any other kind. */
-function linkKindsOf(kind: TemplateKind): Pick<TemplateView, 'linkKinds'> {
-  return kind === 'activation_checklist' ? { linkKinds: activationLinkKinds() } : {};
+/**
+ * The link registry an `activation_checklist` read carries (P18.5-T3 AC-6); nothing for any other kind. **What
+ * completes each kind is written for the reader** (P18.98-T7; ADR-0179 §7), the activation module's own sentence
+ * (`completesWhenOf`) — the same words the office's checklist serves. A feature kind's label is a page's name, and
+ * *Training module* the kind's, the same in both (§A.1, §A.2).
+ */
+function linkKindsOf(kind: TemplateKind, reader: Reader): Pick<TemplateView, 'linkKinds'> {
+  if (kind !== 'activation_checklist') return {};
+  const kinds = activationLinkKinds();
+  const written = Object.fromEntries(Object.entries(kinds).map(([key, linkKind]) => [key, {
+    ...linkKind,
+    completesWhen: render(completesWhenOf(key === 'training' ? ACTIVATION_TRAINING_LINK_PREFIX : key), reader),
+  }])) as unknown as typeof kinds;
+  return { linkKinds: written };
 }

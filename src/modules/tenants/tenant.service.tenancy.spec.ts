@@ -1355,7 +1355,7 @@ describe('TenantService', () => {
         ['SELL_SUBMISSION', 'SELLING', 'active'],
       ]);
       expect((await col('activityCategories').find({ kpmId: kpm._id }).sort({ displayOrder: 1 }).toArray())
-        .map((c) => [c.code, c.label])).toEqual([['LEADS_GENERATION', 'Leads Generation'], ['SELLING', 'Selling']]);
+        .map((c) => [c.code, c.label])).toEqual([['LEADS_GENERATION', 'Pencarian leads'], ['SELLING', 'Penjualan']]);
       // ADR-0116: the platform capability ladder, recorded on the office and in kpm.created as supplied.
       const ladder = (await col('capabilityCatalogs').findOne({ kpmId: kpm._id }))!;
       expect([ladder.stages.length, ladder.milestones.length, ladder.grids.length]).toEqual([4, 5, 4]);

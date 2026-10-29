@@ -3,6 +3,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import type { Reader } from '@/common/i18n/reader';
+import { render } from '@/common/i18n/sentence';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -12,7 +14,7 @@ import { Company, CompanyDocument } from './company.schema';
 import { KpmRequest, KpmRequestDocument, KpmRequestStatus } from './kpm-request.schema';
 import { TenantService } from './tenant.service';
 import { INSURERS_ONLY } from './template-library';
-import { TENANTS_REFUSALS } from './tenants.messages';
+import { TENANTS_MESSAGES, TENANTS_REFUSALS } from './tenants.messages';
 
 export interface KpmRequestRow {
   requestId: string;
@@ -124,7 +126,7 @@ export class KpmRequestService {
       after: { companyId: input.companyId, branchName: created.branchName },
     });
 
-    return (await this.rows([created]))[0];
+    return (await this.rows([created], ctx.reader))[0];
   }
 
   /** What the requester asked for, so their own screen can say where it stands. */
@@ -134,7 +136,7 @@ export class KpmRequestService {
       .findOne({ requestedByUserId: ctx.userId, deletedAt: null })
       .sort({ createdAt: -1 })
       .exec();
-    return own ? (await this.rows([own]))[0] : null;
+    return own ? (await this.rows([own], ctx.reader))[0] : null;
   }
 
   /** The platform's queue. Pending first, because that is what needs deciding. */
@@ -146,7 +148,7 @@ export class KpmRequestService {
     // `approved` and `declined` ahead of `pending` — the exact inverse of what a queue
     // is for. A test asserts the order for that reason.
     const RANK: Record<KpmRequestStatus, number> = { pending: 0, approved: 1, declined: 2 };
-    return this.rows([...rows].sort((a, b) => RANK[a.status] - RANK[b.status]));
+    return this.rows([...rows].sort((a, b) => RANK[a.status] - RANK[b.status]), ctx.reader);
   }
 
   /**
@@ -254,7 +256,8 @@ export class KpmRequestService {
     return request;
   }
 
-  private async rows(requests: KpmRequestDocument[]): Promise<KpmRequestRow[]> {
+  /** The rows, a missing company or requester named *Unknown* in the reader's language (P18.98-T7). */
+  private async rows(requests: KpmRequestDocument[], reader: Reader): Promise<KpmRequestRow[]> {
     if (requests.length === 0) return [];
 
     const [companies, users] = await Promise.all([
@@ -270,8 +273,8 @@ export class KpmRequestService {
         requestId: String(r._id),
         branchName: r.branchName,
         companyId: r.companyId,
-        companyName: companyName.get(r.companyId) ?? 'Unknown',
-        requestedByName: who?.fullName ?? 'Unknown',
+        companyName: companyName.get(r.companyId) ?? render(TENANTS_MESSAGES.unknownPerson, reader),
+        requestedByName: who?.fullName ?? render(TENANTS_MESSAGES.unknownPerson, reader),
         requestedByEmail: who?.email ?? '',
         note: r.note,
         status: r.status,

@@ -115,7 +115,7 @@ describe('the office’s ratios, over a member’s last 30 days (P10-T2, P10-T3)
       await day(TODAY, { SELL_PRESENTATION: 9, RECRUIT_PRESENTATION: 1 }, { membershipId: 'mem-leader' });
       expect((await byCode(leader())).SELLING_VS_RECRUITMENT).toMatchObject({
         comparison: 'band', displayUnit: 'points', value: 80, share: 90, status: 'alert', tag: { label: 'Balance' },
-        sides: { numerator: 'Selling', denominator: 'Recruitment' },
+        sides: { numerator: 'Penjualan', denominator: 'Recruitment' },
       });
       expect((await byCode(leader())).SELLING_SUCCESS_RATE.sides).toBeNull();
     });
@@ -123,7 +123,7 @@ describe('the office’s ratios, over a member’s last 30 days (P10-T2, P10-T3)
     it('P18.98-T5 AC-4 tags the balance in the reader’s language; its sides are the office’s own labels, as typed', async () => {
       await day(TODAY, { SELL_PRESENTATION: 9, RECRUIT_PRESENTATION: 1 }, { membershipId: 'mem-leader' });
       expect((await byCode(leader().withReader(readerIn('id')))).SELLING_VS_RECRUITMENT).toMatchObject({
-        tag: { code: null, label: 'Keseimbangan' }, sides: { numerator: 'Selling', denominator: 'Recruitment' },
+        tag: { code: null, label: 'Keseimbangan' }, sides: { numerator: 'Penjualan', denominator: 'Recruitment' },
       });
     });
 
@@ -131,7 +131,7 @@ describe('the office’s ratios, over a member’s last 30 days (P10-T2, P10-T3)
       const view = await byCode(agent());
       expect(view.SELLING_SUCCESS_RATE.numerator).toEqual([{ code: 'SELL_SUBMISSION', label: expect.any(String), displayOrder: 6 }]);
       expect(view.SELLING_SUCCESS_RATE.denominator.map((t) => t.displayOrder)).toEqual([4, 5]);
-      expect(view.SELLING_SUCCESS_RATE.tag).toEqual({ code: 'SELLING', label: 'Selling' });
+      expect(view.SELLING_SUCCESS_RATE.tag).toEqual({ code: 'SELLING', label: 'Penjualan' });
       expect(view.MEETING_PER_APPROACH.tag).toMatchObject({ code: 'LEADS_GENERATION' });
       expect(view.SELLING_SUCCESS_RATE.purpose).toBe('Mengukur tingkat konversi aktivitas selling menjadi submission');
       expect(view.SELLING_SUCCESS_RATE.divergesFromStandard).toBe(false);

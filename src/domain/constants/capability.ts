@@ -48,13 +48,18 @@ export interface CapabilityGrid {
   readonly items: readonly CapabilityGridItem[];
 }
 
-/** The five, in the prototype's own wording (`Unit_Section_Coaching.html:1718-1721`). */
+/**
+ * The five, in the prototype's own wording (`Unit_Section_Coaching.html:1718-1721`) — **written in Bahasa Indonesia
+ * since P18.98-T7** (OD-238, option 1; ADR-0179 §5), as the grids are. The four stages keep their English names: they
+ * are the ladder's titles, as the role ladder's *Agency Builder* is (the approved glossary's §A.5), and a milestone
+ * names them as they are. The English is `SEEDED_CAPABILITY_LABELS_BEFORE_OD_238`'s.
+ */
 export const SEED_CAPABILITY_MILESTONES: readonly CapabilityMilestone[] = [
-  { code: 'SELLS_INDEPENDENTLY', label: 'Sells policies independently' },
-  { code: 'SELLS_OUTSIDE_NETWORK', label: 'Sells outside direct network' },
-  { code: 'RECRUITS_QUALITY', label: 'Recruits quality agents' },
-  { code: 'DEVELOPS_TO_INDEPENDENT', label: 'Develops downline agent to Independent Producer' },
-  { code: 'DEVELOPS_TO_PRODUCTIVE', label: 'Develops downline leader to Productive Team Builder' },
+  { code: 'SELLS_INDEPENDENTLY', label: 'Menjual polis secara mandiri' },
+  { code: 'SELLS_OUTSIDE_NETWORK', label: 'Menjual di luar jaringan langsung' },
+  { code: 'RECRUITS_QUALITY', label: 'Merekrut agen berkualitas' },
+  { code: 'DEVELOPS_TO_INDEPENDENT', label: 'Membina agen downline hingga menjadi Independent Producer' },
+  { code: 'DEVELOPS_TO_PRODUCTIVE', label: 'Membina leader downline hingga menjadi Productive Team Builder' },
 ];
 
 /** Strictly cumulative: each stage requires everything the one below it does, and one more. */
@@ -101,16 +106,16 @@ export const SEED_CAPABILITY_STAGES: readonly CapabilityStage[] = [
 export const SEED_CAPABILITY_GRIDS: readonly CapabilityGrid[] = [
   {
     code: 'PERSONAL_SELLING',
-    label: 'Personal selling',
+    label: 'Penjualan pribadi',
     requiresDownline: false,
     items: [
-      { code: 'LEADS_GEN', label: 'Leads generation consistency' },
-      { code: 'APPROACH', label: 'Approach & appointment setting' },
-      { code: 'FACT_FINDING', label: 'Fact finding & needs ID' },
-      { code: 'PRODUCT_ADVISORY', label: 'Product advisory & knowledge' },
-      { code: 'PRESENTATION', label: 'Presentation' },
-      { code: 'OBJECTION_HANDLING', label: 'Objection handling & closing' },
-      { code: 'AFTER_SALES', label: 'After-sales service' },
+      { code: 'LEADS_GEN', label: 'Konsistensi pencarian leads' },
+      { code: 'APPROACH', label: 'Pendekatan & set appointment' },
+      { code: 'FACT_FINDING', label: 'Penggalian fakta & identifikasi kebutuhan' },
+      { code: 'PRODUCT_ADVISORY', label: 'Pengetahuan & saran produk' },
+      { code: 'PRESENTATION', label: 'Presentasi' },
+      { code: 'OBJECTION_HANDLING', label: 'Penanganan keberatan & closing' },
+      { code: 'AFTER_SALES', label: 'Layanan purnajual' },
     ],
   },
   {
@@ -118,43 +123,97 @@ export const SEED_CAPABILITY_GRIDS: readonly CapabilityGrid[] = [
     label: 'Recruitment',
     requiresDownline: false,
     items: [
-      { code: 'CANDIDATE_LEADS_GEN', label: 'Candidate leads generation' },
-      { code: 'FILTERING', label: 'Filtering potential candidates' },
-      { code: 'RECRUIT_APPROACH', label: 'Approaching' },
-      { code: 'PROFILING', label: 'Profiling (motivation / hot button)' },
-      { code: 'PITCHING', label: 'Pitching the business opportunity' },
-      { code: 'RECRUIT_CLOSING', label: 'Closing recruitment & FLC accompaniment' },
+      { code: 'CANDIDATE_LEADS_GEN', label: 'Pencarian leads kandidat' },
+      { code: 'FILTERING', label: 'Penyaringan calon kandidat' },
+      { code: 'RECRUIT_APPROACH', label: 'Pendekatan' },
+      { code: 'PROFILING', label: 'Pemetaan profil (motivasi / pemicu utama)' },
+      { code: 'PITCHING', label: 'Pitch peluang bisnis' },
+      { code: 'RECRUIT_CLOSING', label: 'Closing recruitment & pendampingan FLC' },
     ],
   },
   {
     code: 'DEVELOPING_DOWNLINE_AGENT',
-    label: 'Developing downline agent',
+    label: 'Membina agen downline',
     requiresDownline: true,
     items: [
-      { code: 'AGENT_VISIBILITY', label: "Visibility into each agent's progress & goals" },
-      { code: 'AGENT_TRACKING', label: 'Consistent activity tracking & 1-on-1 check-ins' },
-      { code: 'AGENT_SKILL_GAPS', label: "Identifying agents' selling skill gaps" },
-      { code: 'AGENT_SALES_COACHING', label: 'Delivering effective sales coaching to agents' },
-      { code: 'AGENT_MINDSET', label: 'Reinforcing agent mindset & motivation' },
-      { code: 'AGENT_ACTIVATION', label: 'Structured 90-day activation (incl. Join Field Work)' },
-      { code: 'AGENT_REACTIVATION', label: 'Reactivating unproductive agents' },
+      { code: 'AGENT_VISIBILITY', label: 'Visibilitas atas progres & goal setiap agen' },
+      { code: 'AGENT_TRACKING', label: 'Pemantauan aktivitas & check-in 1-on-1 yang konsisten' },
+      { code: 'AGENT_SKILL_GAPS', label: 'Identifikasi kesenjangan keterampilan menjual agen' },
+      { code: 'AGENT_SALES_COACHING', label: 'Memberikan coaching penjualan yang efektif kepada agen' },
+      { code: 'AGENT_MINDSET', label: 'Memperkuat pola pikir & motivasi agen' },
+      { code: 'AGENT_ACTIVATION', label: '90-day activation yang terstruktur (termasuk Join Field Work)' },
+      { code: 'AGENT_REACTIVATION', label: 'Mengaktifkan kembali agen yang tidak produktif' },
     ],
   },
   {
     code: 'DEVELOPING_DOWNLINE_LEADER',
-    label: 'Developing downline leader',
+    label: 'Membina leader downline',
     requiresDownline: true,
     items: [
-      { code: 'LEADER_VISIBILITY', label: "Visibility into each leader's & their team's progress" },
-      { code: 'LEADER_TIME', label: 'Allocating time for team building' },
-      { code: 'LEADER_SKILL_GAPS', label: "Identifying downline leaders' recruitment skill gaps" },
-      { code: 'LEADER_RECRUIT_COACHING', label: 'Delivering effective recruitment coaching to leaders' },
-      { code: 'LEADER_JFW', label: 'Accompanying leaders on recruitment Join Field Work' },
-      { code: 'LEADER_CHECK_INS', label: "Consistent 1-on-1 check-ins across the leader's team" },
-      { code: 'LEADER_COACH_THE_COACH', label: "Coaching-the-coach: improving leaders' coaching effectiveness" },
+      { code: 'LEADER_VISIBILITY', label: 'Visibilitas atas progres setiap leader & timnya' },
+      { code: 'LEADER_TIME', label: 'Mengalokasikan waktu untuk membangun tim' },
+      { code: 'LEADER_SKILL_GAPS', label: 'Identifikasi kesenjangan keterampilan recruitment leader downline' },
+      { code: 'LEADER_RECRUIT_COACHING', label: 'Memberikan coaching recruitment yang efektif kepada leader' },
+      { code: 'LEADER_JFW', label: 'Mendampingi leader dalam Join Field Work recruitment' },
+      { code: 'LEADER_CHECK_INS', label: 'Check-in 1-on-1 yang konsisten di seluruh tim leader' },
+      { code: 'LEADER_COACH_THE_COACH', label: 'Coaching the coach: meningkatkan efektivitas coaching para leader' },
     ],
   },
 ];
+
+/**
+ * **The words the seed gave before P18.98-T7** (OD-238, option 1), per code — the prototype's English
+ * (`Unit_Section_Coaching.html:1718-1721` and its four grids). Kept only so migration `0046` can recognise the Template
+ * company's Default template where it still holds them, and for the specs. No office and no template is given them
+ * any more. The four stages' names and the *Recruitment* grid are kept English, so they are not here.
+ */
+export const SEEDED_CAPABILITY_LABELS_BEFORE_OD_238: {
+  readonly milestones: Readonly<Record<string, string>>;
+  readonly grids: Readonly<Record<string, string>>;
+  readonly items: Readonly<Record<string, string>>;
+} = {
+  milestones: {
+    SELLS_INDEPENDENTLY: 'Sells policies independently',
+    SELLS_OUTSIDE_NETWORK: 'Sells outside direct network',
+    RECRUITS_QUALITY: 'Recruits quality agents',
+    DEVELOPS_TO_INDEPENDENT: 'Develops downline agent to Independent Producer',
+    DEVELOPS_TO_PRODUCTIVE: 'Develops downline leader to Productive Team Builder',
+  },
+  grids: {
+    PERSONAL_SELLING: 'Personal selling',
+    DEVELOPING_DOWNLINE_AGENT: 'Developing downline agent',
+    DEVELOPING_DOWNLINE_LEADER: 'Developing downline leader',
+  },
+  items: {
+    LEADS_GEN: 'Leads generation consistency',
+    APPROACH: 'Approach & appointment setting',
+    FACT_FINDING: 'Fact finding & needs ID',
+    PRODUCT_ADVISORY: 'Product advisory & knowledge',
+    PRESENTATION: 'Presentation',
+    OBJECTION_HANDLING: 'Objection handling & closing',
+    AFTER_SALES: 'After-sales service',
+    CANDIDATE_LEADS_GEN: 'Candidate leads generation',
+    FILTERING: 'Filtering potential candidates',
+    RECRUIT_APPROACH: 'Approaching',
+    PROFILING: 'Profiling (motivation / hot button)',
+    PITCHING: 'Pitching the business opportunity',
+    RECRUIT_CLOSING: 'Closing recruitment & FLC accompaniment',
+    AGENT_VISIBILITY: "Visibility into each agent's progress & goals",
+    AGENT_TRACKING: 'Consistent activity tracking & 1-on-1 check-ins',
+    AGENT_SKILL_GAPS: "Identifying agents' selling skill gaps",
+    AGENT_SALES_COACHING: 'Delivering effective sales coaching to agents',
+    AGENT_MINDSET: 'Reinforcing agent mindset & motivation',
+    AGENT_ACTIVATION: 'Structured 90-day activation (incl. Join Field Work)',
+    AGENT_REACTIVATION: 'Reactivating unproductive agents',
+    LEADER_VISIBILITY: "Visibility into each leader's & their team's progress",
+    LEADER_TIME: 'Allocating time for team building',
+    LEADER_SKILL_GAPS: "Identifying downline leaders' recruitment skill gaps",
+    LEADER_RECRUIT_COACHING: 'Delivering effective recruitment coaching to leaders',
+    LEADER_JFW: 'Accompanying leaders on recruitment Join Field Work',
+    LEADER_CHECK_INS: "Consistent 1-on-1 check-ins across the leader's team",
+    LEADER_COACH_THE_COACH: "Coaching-the-coach: improving leaders' coaching effectiveness",
+  },
+};
 
 /**
  * Which stage somebody is at, from what has been ticked (P5-T8 AC-6).

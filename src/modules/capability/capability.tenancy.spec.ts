@@ -96,7 +96,7 @@ describe('the capability catalog (P5-T8)', () => {
       await wired.capability.rename(member(KPM_A), 'grid', 'PERSONAL_SELLING', 'Selling skills');
 
       expect((await wired.capability.read(member(KPM_A))).grids[0].label).toBe('Selling skills');
-      expect((await wired.capability.read(member(KPM_B))).grids[0].label).toBe('Personal selling');
+      expect((await wired.capability.read(member(KPM_B))).grids[0].label).toBe('Penjualan pribadi');
     });
   });
 

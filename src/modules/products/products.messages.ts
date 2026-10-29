@@ -1,5 +1,8 @@
 import { formatNumber } from '@/common/format/format';
-import { refusals } from '@/common/i18n/sentence';
+import { messages, refusals, type Sentence } from '@/common/i18n/sentence';
+import {
+  PRODUCT_BUDGET_BAND_LABELS, PRODUCT_DOCUMENT_SLOTS, PRODUCT_LUMP_SUM_BUDGET_BAND, type ProductDocumentSlot,
+} from '@/domain/constants';
 
 /** A count in an Indonesian sentence: grouped the Indonesian way once it reaches a thousand (*1.250*). */
 const idCount = (n: number) => formatNumber(n, undefined, 'id');
@@ -77,3 +80,40 @@ export const PRODUCTS_REFUSALS = refusals('modules/products', {
     },
   },
 });
+
+/** A document slot's English, read from the registry so the two cannot drift. */
+const SLOT = (key: ProductDocumentSlot) => PRODUCT_DOCUMENT_SLOTS.find((s) => s.key === key)!.label;
+
+/**
+ * **The products module's own words, in both languages** (P18.98-T7; ADR-0179 §7): what the API serves of the
+ * registry (`domain/constants/product-catalog.ts`) as words — the three document slots' names, on the office's
+ * *Products* settings and the catalog's drawer, and the one budget band that is a word, *Lump-sum* — written for the
+ * request's reader. Each English is the registry's, byte for byte; the slot keys and band numbers do not change. A
+ * file's own name, and everything the company typed about a product, is content and stays as typed (ADR-0179 §5).
+ * *Lump-sum* is the approved *Sekaligus* (§B.10, field selling).
+ */
+export const PRODUCTS_MESSAGES = messages('modules/products', {
+  brochureSlot: { en: SLOT('brochure'), id: 'Brosur' },
+  illustrationSlot: { en: SLOT('illustration'), id: 'Ilustrasi / Simulasi' },
+  productDocSlot: { en: SLOT('productDoc'), id: 'Dokumen produk' },
+  lumpSumBand: { en: PRODUCT_BUDGET_BAND_LABELS[PRODUCT_LUMP_SUM_BUDGET_BAND], id: 'Sekaligus' },
+});
+
+const SLOT_WORDS: Readonly<Record<ProductDocumentSlot, Sentence<null>>> = {
+  brochure: PRODUCTS_MESSAGES.brochureSlot,
+  illustration: PRODUCTS_MESSAGES.illustrationSlot,
+  productDoc: PRODUCTS_MESSAGES.productDocSlot,
+};
+
+/** A document slot's name, as a sentence. */
+export function documentSlotLabel(key: ProductDocumentSlot): Sentence<null> {
+  return SLOT_WORDS[key];
+}
+
+/**
+ * **A budget band's label** (`PRODUCT_BUDGET_BAND_LABELS`), as a sentence where it is a word — *Lump-sum* — and `null`
+ * where it is a range of sums, which reads the same in both (*Rp 500 rb–Rp 2 jt*, ADR-0167 §1).
+ */
+export function budgetBandWords(band: number): Sentence<null> | null {
+  return band === PRODUCT_LUMP_SUM_BUDGET_BAND ? PRODUCTS_MESSAGES.lumpSumBand : null;
+}

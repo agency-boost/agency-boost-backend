@@ -125,7 +125,7 @@ describe('the coaching profile (P11-T9)', () => {
       const view = await read('AGUS', 'RINA');
       expect(view.skillCodes).toEqual(['AFTER_SALES', 'LEADS_GEN']);
       const selling = view.catalog.grids.find((g) => g.code === 'PERSONAL_SELLING')!;
-      expect(selling.items.find((i) => i.code === 'AFTER_SALES')).toMatchObject({ status: 'archived', label: 'After-sales service' });
+      expect(selling.items.find((i) => i.code === 'AFTER_SALES')).toMatchObject({ status: 'archived', label: 'Layanan purnajual' });
     });
 
     it('P11-T9 AC-3 the config snapshot carries the capability catalog whole, archived rows with their status', async () => {

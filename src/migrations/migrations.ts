@@ -41,6 +41,7 @@ import { up as membershipJoinDate } from './0040-membership-join-date';
 import { up as membershipFirstSale } from './0042-membership-first-sale';
 import { up as leaderMeetingTargetRates } from './0043-leader-meeting-target-rates';
 import { up as trainingCategoryDescriptions } from './0045-training-category-descriptions';
+import { up as defaultTemplateInIndonesian } from './0046-default-template-in-indonesian';
 
 /*
  * The list on its own (P18.7-T3), so a spec can run every migration against an empty database without
@@ -108,4 +109,7 @@ export const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Dat
   // P18.97-T4 (ADR-0176 §9, UI-031): a real line for each default training category, where the seeded words are still held.
   // No 0044: it was held for P18.97-T1's frozen scorecards, which are read tolerantly and need none (AC-19).
   ['0045-training-category-descriptions', trainingCategoryDescriptions],
+  // P18.98-T7 (OD-238, ADR-0179 §5): the Template company's Default template in Bahasa Indonesia, where it still holds
+  // the seeded English — never an office's own words, nor any copy made from the template before.
+  ['0046-default-template-in-indonesian', defaultTemplateInIndonesian],
 ];

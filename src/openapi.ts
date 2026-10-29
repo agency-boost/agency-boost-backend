@@ -31,7 +31,7 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
           'exists.\n\n' +
           '**Every sentence is in the request\'s language** — a refusal\'s `message`, its `details.violations`, a ' +
           'notice: `Accept-Language` (`id` or `en`, exactly), else the signed-in person\'s saved language, else ' +
-          'English until the Indonesian default is live (`docs/02-specs/api/conventions.md`). `code` and every other ' +
+          'Bahasa Indonesia, the default since 2026-10-29 (`docs/02-specs/api/conventions.md`). `code` and every other ' +
           'detail are the same in both.',
       )
       .setVersion('1.0')

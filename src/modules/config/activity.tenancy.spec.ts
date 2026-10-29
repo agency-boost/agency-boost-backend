@@ -72,7 +72,7 @@ describe('the office activity taxonomy (P4-T1)', () => {
       expect(result.cascadeAdded).toEqual(['LEADS_CONTACTED', 'SELL_PRESENTATION', 'SELL_SUBMISSION']);
       const taxonomy = await service.list(ctx(KPM_A));
       expect(taxonomy.map((c) => [c.code, c.label])).toEqual([
-        ['ONLY', 'Only'], ['LEADS_GENERATION', 'Leads Generation'], ['SELLING', 'Selling'],
+        ['ONLY', 'Only'], ['LEADS_GENERATION', 'Pencarian leads'], ['SELLING', 'Penjualan'],
       ]);
       expect(taxonomy[0].types.map((t) => t.code)).toEqual(['ONLY_THING']);
       // Each with its platform label, active.

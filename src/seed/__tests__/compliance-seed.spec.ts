@@ -145,7 +145,7 @@ describe('Phase 18.6 the compliance seed — a run at 10:00 on 10 October 2026 i
 
   it('P18.6-T3 AC-1 the guide’s COMPLIANCE section says what it seeded', () => {
     expect(seeded.compliance.guide).toContain('COMPLIANCE at /kpm/analytics/compliance');
-    expect(seeded.compliance.guide).toContain('Persistency corrected by the carrier after');
+    expect(seeded.compliance.guide).toContain(COMPLIANCE_OVERRIDE_SEED.reason);
     expect(seeded.compliance.guide).toContain('Arini all ten Completed');
   });
 

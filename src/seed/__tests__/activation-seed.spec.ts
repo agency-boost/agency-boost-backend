@@ -6,7 +6,7 @@ import { addDays } from '@/common/time/local-day';
 import type { ActivationView } from '@/modules/activation/activation-progress.view';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
-import { SARI_NOTE_TO_RINA } from '../activation-fixture';
+import { ACTIVATION_TICK_NOTES, SARI_NOTE_TO_RINA } from '../activation-fixture';
 import { COHORT_HIRES } from '../cohort-fixture';
 import { seedDemo, type SeedResult } from '../demo';
 import { up as membershipJoinDate } from '../../migrations/0040-membership-join-date';
@@ -75,7 +75,7 @@ describe.each([
     for (const code of ['GOAL_SETTING', 'ADD_PROSPECTS', 'ACTIVITY_TRACKER_WEEKLY', 'FIRST_CASE_CLOSED', 'INDEPENDENT_AGENT_MILESTONE', 'WEEKLY_CHECK_IN']) {
       expect([code, item(rina, code).done, item(rina, code).source]).toEqual([code, true, 'link']);
     }
-    expect(item(rina, 'INSURANCE_BASICS')).toMatchObject({ source: 'hire', note: 'Read the starter pack with Sari in my first week.', date: addDays(today, -56) });
+    expect(item(rina, 'INSURANCE_BASICS')).toMatchObject({ source: 'hire', note: ACTIVATION_TICK_NOTES.rinaBasics, date: addDays(today, -56) });
     expect(item(rina, 'ROLE_PLAY')).toMatchObject({ source: 'leader', doneBy: { membershipId: String(sari._id), name: 'Sari Puspita' } });
     expect(rina.note).toMatchObject({ text: SARI_NOTE_TO_RINA, by: { name: 'Sari Puspita' } });
   });

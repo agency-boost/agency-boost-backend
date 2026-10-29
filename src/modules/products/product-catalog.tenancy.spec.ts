@@ -2,7 +2,8 @@ import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import {
-  ASSET_LIMITS, PRODUCT_AGE_BANDS, PRODUCT_BUDGET_BANDS, PRODUCT_NEEDS, PRODUCT_RUN_OFF_NOTE,
+  ASSET_LIMITS, PRODUCT_AGE_BANDS, PRODUCT_BUDGET_BANDS, PRODUCT_LUMP_SUM_BUDGET_BAND, PRODUCT_NEEDS, PRODUCT_RUN_OFF_NOTE,
+  SEED_PRODUCTS,
 } from '@/domain/constants';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
@@ -316,6 +317,19 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
       expect(Object.keys(mapan.script)).toEqual([
         'goodFit', 'opening', 'benefits', 'fullScript', 'objectionTheySay', 'objectionYouSay', 'nextAction',
       ]);
+    });
+
+    it('P18.98-T7 a band that is a word, *Lump-sum*, is written for the reader; a range of sums reads the same', async () => {
+      const lumpSum = SEED_PRODUCTS.find((p) => p.activeByDefault && p.eligibleBudgetBands.includes(PRODUCT_LUMP_SUM_BUDGET_BAND))!;
+      const english = await service.product(agent(KPM_A), lumpSum.code);
+      const inIndonesian = await service.product(agent(KPM_A).withReader(readerIn('id')), lumpSum.code);
+      expect(english.budgetBands).toContain('Lump-sum');
+      expect(inIndonesian.budgetBands).toContain('Sekaligus');
+      expect(inIndonesian.budgetBands).not.toContain('Lump-sum');
+      expect(inIndonesian.budgetBands.filter((b) => b !== 'Sekaligus'))
+        .toEqual(english.budgetBands.filter((b) => b !== 'Lump-sum'));
+      expect(inIndonesian.documents.map((d) => d.label)).toEqual(['Brosur', 'Ilustrasi / Simulasi', 'Dokumen produk']);
+      expect(english.documents.map((d) => d.label)).toEqual(['Brochure', 'Illustration / Simulation', 'Product Document']);
     });
 
     it('P14-T7 AC-5 a run-off product carries the drawer’s note, its blank script, and its successor’s code', async () => {

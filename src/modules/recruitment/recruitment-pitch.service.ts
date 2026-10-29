@@ -3,7 +3,8 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException, VersionConflictException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import type { Sentence } from '@/common/i18n/sentence';
+import type { Reader } from '@/common/i18n/reader';
+import { render, type Sentence } from '@/common/i18n/sentence';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import { localDayOf } from '@/common/time/local-day';
 import {
@@ -16,7 +17,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { RecruitmentPitchRepository } from './recruitment-pitch.repository';
 import type { RecruitmentPitchSlotDocument } from './recruitment-pitch.schema';
-import { RECRUITMENT_REFUSALS } from './recruitment.messages';
+import { pitchItemLabel, pitchSlotLine, pitchSlotTitle, RECRUITMENT_REFUSALS } from './recruitment.messages';
 
 /** One of the six slots, as both the agents' tab and the settings page read it (`PitchSlot`). */
 export interface PitchSlotView {
@@ -81,7 +82,7 @@ export class RecruitmentPitchService {
     this.requireOffice(ctx, 'read');
     const [rows, timezone] = await Promise.all([this.slots.find(ctx), this.offices.timezoneOf(ctx)]);
     const views = RECRUITMENT_PITCH_SLOTS.map((definition) =>
-      this.view(definition, rows.find((row) => row.slot === definition.code) ?? null, timezone));
+      this.view(definition, rows.find((row) => row.slot === definition.code) ?? null, timezone, ctx.reader));
     return { slots: views, summary: recruitmentPitchSummary(views) };
   }
 
@@ -128,12 +129,15 @@ export class RecruitmentPitchService {
     this.requireOffice(ctx, 'attach');
     const definition = this.requireSlot(slotCode);
     const current = await this.slots.findOne(ctx, { slot: definition.code });
-    if (current?.storageKey === storageKey) return this.view(definition, current, await this.offices.timezoneOf(ctx));
+    if (current?.storageKey === storageKey) {
+      return this.view(definition, current, await this.offices.timezoneOf(ctx), ctx.reader);
+    }
 
     const asset = await this.assets.confirmUpload(ctx, storageKey, RECRUITMENT.PITCH_MIME_TYPES);
     const file = {
       storageKey: asset.storageKey,
-      fileName: asset.originalFilename ?? definition.title,
+      // A file with no name of its own takes its slot's title, in the language of whoever uploads it (P18.98-T7).
+      fileName: asset.originalFilename ?? render(pitchSlotTitle(definition.code), ctx.reader),
       mimeType: asset.mimeType,
       bytes: asset.bytes,
       uploadedAt: this.clock.now(),
@@ -142,7 +146,7 @@ export class RecruitmentPitchService {
     const { previous, swapped } = await this.slots.attach(ctx, definition.code, file);
     const row = (await this.slots.findOne(ctx, { slot: definition.code }))!;
     // Another attach of this very file got there between the read above and this write: nothing changed.
-    if (!swapped) return this.view(definition, row, await this.offices.timezoneOf(ctx));
+    if (!swapped) return this.view(definition, row, await this.offices.timezoneOf(ctx), ctx.reader);
 
     // Referenced once more only by a write that swapped the file in; the one it replaced, once less.
     await this.assets.retain(ctx, asset.storageKey);
@@ -163,7 +167,7 @@ export class RecruitmentPitchService {
         version: (previous?.version ?? 0) + 1, clearedItems: cleared,
       },
     });
-    return this.view(definition, row, await this.offices.timezoneOf(ctx));
+    return this.view(definition, row, await this.offices.timezoneOf(ctx), ctx.reader);
   }
 
   /**
@@ -180,13 +184,14 @@ export class RecruitmentPitchService {
     const definition = this.requireSlot(slotCode);
     const item = (definition.checklist as readonly { code: string }[]).find((i) => i.code === itemCode);
     if (!item) {
-      throw invalid(RECRUITMENT_REFUSALS.VALIDATION_FAILED.noSuchItem({ title: definition.title, item: itemCode }), {
+      const title = pitchSlotTitle(definition.code);
+      throw invalid(RECRUITMENT_REFUSALS.VALIDATION_FAILED.noSuchItem({ title, item: itemCode }), {
         field: 'item', item: itemCode,
       });
     }
     const current = await this.slots.findOne(ctx, { slot: definition.code });
     if (!current) {
-      throw invalid(RECRUITMENT_REFUSALS.VALIDATION_FAILED.noFileYet({ title: definition.title }), {
+      throw invalid(RECRUITMENT_REFUSALS.VALIDATION_FAILED.noFileYet({ title: pitchSlotTitle(definition.code) }), {
         field: 'slot', slot: definition.code,
       });
     }
@@ -203,7 +208,7 @@ export class RecruitmentPitchService {
       // the write, which the version says.
       const now = (await this.slots.findOne(ctx, { slot: definition.code }))!;
       if (now.version !== input.version) throw new VersionConflictException(input.version, now.version);
-      return this.view(definition, now, timezone);
+      return this.view(definition, now, timezone, ctx.reader);
     }
     await this.audit.record(ctx, {
       action: input.ticked ? 'recruitment_pitch.ticked' : 'recruitment_pitch.unticked',
@@ -211,7 +216,7 @@ export class RecruitmentPitchService {
       targetId: String(written._id),
       after: { slot: definition.code, item: item.code, ticked: input.ticked, version: written.version, at: at.toISOString() },
     });
-    return this.view(definition, written, timezone);
+    return this.view(definition, written, timezone, ctx.reader);
   }
 
   // -------------------------------------------------------------------- internals
@@ -228,13 +233,22 @@ export class RecruitmentPitchService {
     return definition;
   }
 
-  private view(definition: SlotDefinition, row: RecruitmentPitchSlotDocument | null, timezone: string): PitchSlotView {
+  /**
+   * One slot, **its words written for the reader** (P18.98-T7; ADR-0179 §7): the title, the line and each checklist
+   * item's label are the platform's, served in the reader's language — the codes, the file's own name and the rest as
+   * they are.
+   */
+  private view(
+    definition: SlotDefinition, row: RecruitmentPitchSlotDocument | null, timezone: string, reader: Reader,
+  ): PitchSlotView {
     const ticked = new Set((row?.confirmations ?? []).map((c) => c.item));
-    const checklist = definition.checklist.map(({ code, label }) => ({ code, label, ticked: ticked.has(code) }));
+    const checklist = definition.checklist.map(({ code }) => ({
+      code, label: render(pitchItemLabel(code), reader), ticked: ticked.has(code),
+    }));
     return {
       slot: definition.code,
-      title: definition.title,
-      line: definition.line,
+      title: render(pitchSlotTitle(definition.code), reader),
+      line: render(pitchSlotLine(definition.code), reader),
       required: definition.required,
       state: recruitmentPitchState(row !== null, checklist),
       file: row ? { name: row.fileName, bytes: row.bytes, uploadedOn: localDayOf(row.uploadedAt, timezone) } : null,

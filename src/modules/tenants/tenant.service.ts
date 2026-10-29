@@ -205,7 +205,7 @@ export class TenantService {
    * silently loses the only name on the screen. That differs from `resolveOwner`, which
    * does filter, because that is a write path and this is a display one.
    */
-  private async toViews(kpms: KpmDocument[]): Promise<KpmView[]> {
+  private async toViews(kpms: KpmDocument[], reader: Reader): Promise<KpmView[]> {
     if (kpms.length === 0) return [];
 
     const ownerIds = [...new Set(kpms.map((k) => k.ownerUserId).filter((id): id is string => Boolean(id)))];
@@ -221,15 +221,15 @@ export class TenantService {
       return {
         _id: String(k._id),
         companyId: k.companyId,
-        companyName: byCompany.get(k.companyId)?.name ?? 'Unknown company',
+        companyName: byCompany.get(k.companyId)?.name ?? render(TENANTS_MESSAGES.unknownCompany, reader),
         code: k.code,
         branchName: k.branchName,
         address: k.address ?? null,
         contactPhone: k.contactPhone ?? null,
         ownerUserId: k.ownerUserId ?? null,
         // An owner whose account has gone still gets a row: 'Unknown' says the office is
-        // owned and the account is missing, which is a different problem from unowned.
-        ownerName: k.ownerUserId ? (owner?.fullName ?? 'Unknown') : null,
+        // owned and the account is missing, which is a different problem from unowned. In the reader's language.
+        ownerName: k.ownerUserId ? (owner?.fullName ?? render(TENANTS_MESSAGES.unknownPerson, reader)) : null,
         ownerEmail: k.ownerUserId ? (owner?.email ?? null) : null,
         timezone: k.timezone,
         locale: k.locale,
@@ -244,8 +244,8 @@ export class TenantService {
     });
   }
 
-  private async toView(kpm: KpmDocument): Promise<KpmView> {
-    return (await this.toViews([kpm]))[0];
+  private async toView(kpm: KpmDocument, reader: Reader): Promise<KpmView> {
+    return (await this.toViews([kpm], reader))[0];
   }
 
   /**
@@ -259,7 +259,7 @@ export class TenantService {
    */
   private async toAdminViews(ctx: RequestContext, kpms: KpmDocument[]): Promise<KpmAdminView[]> {
     const [views, leaders] = await Promise.all([
-      this.toViews(kpms),
+      this.toViews(kpms, ctx.reader),
       countLeadersUsedPerOffice(this.memberships, ctx, kpms.map((k) => String(k._id))),
     ]);
     return views.map((view, i) => ({
@@ -667,7 +667,7 @@ export class TenantService {
       },
     });
 
-    return this.toView(kpm);
+    return this.toView(kpm, ctx.reader);
   }
 
   /**
@@ -1091,14 +1091,14 @@ export class TenantService {
     return rows
       .map((r) => {
         const who = byUser.get(r.userId);
-        const fullName = who?.fullName ?? 'Unknown';
+        const fullName = who?.fullName ?? render(TENANTS_MESSAGES.unknownPerson, ctx.reader);
         return {
           membershipId: String(r._id),
           fullName,
           email: who?.email ?? '',
           initials: initialsOf(fullName),
           kpmId: r.kpmId,
-          kpmLabel: office.get(r.kpmId) ?? 'Unknown office',
+          kpmLabel: office.get(r.kpmId) ?? render(TENANTS_MESSAGES.unknownOffice, ctx.reader),
           isOwner: ownerOf.get(r.kpmId) === r.userId,
           isAdmin: Boolean(r.adminAccess?.isKpmAdmin),
           // An Owner's rights come with the office, not from a grant, so there is no date
@@ -1146,7 +1146,7 @@ export class TenantService {
       // uncaught CastError renders as INTERNAL_ERROR and is logged as unhandled.
       .catch(() => null);
     if (!kpm) throw new NotFoundException('KPM');
-    return ctx.isSuperAdmin ? this.toAdminView(ctx, kpm) : this.toView(kpm);
+    return ctx.isSuperAdmin ? this.toAdminView(ctx, kpm) : this.toView(kpm, ctx.reader);
   }
 
   /**
@@ -1216,6 +1216,6 @@ export class TenantService {
       after: set,
     });
 
-    return this.toView(kpm);
+    return this.toView(kpm, ctx.reader);
   }
 }

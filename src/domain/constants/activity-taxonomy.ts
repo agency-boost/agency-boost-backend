@@ -56,27 +56,33 @@ export interface SeedActivityType {
  * ADR-0064 has it): its tile's label *is* the section's, so renaming *Selling* renames its tile,
  * with no second field for the Owner to remember. Only a tile of two or more sections carries a
  * code and a label.
+ *
+ * **In Bahasa Indonesia since P18.98-T7** (OD-238, option 1; ADR-0179 §5): the platform's Default template is
+ * written in the client's default language, so a new office starts in it. The prototype's English section names
+ * are `SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238`'s, which migration `0046` recognises in the Template company's
+ * Default template. *Recruitment* stays, kept English by the approved glossary (§A.6).
  */
 export const SEED_ACTIVITY_CATEGORIES: readonly SeedActivityCategory[] = [
   {
-    code: 'LEADS_GENERATION', label: 'Leads Generation', displayOrder: 1,
+    code: 'LEADS_GENERATION', label: 'Pencarian leads', displayOrder: 1,
     summaryGroupCode: null, summaryGroupLabel: null,
   },
   {
-    code: 'SELLING', label: 'Selling', displayOrder: 2,
+    code: 'SELLING', label: 'Penjualan', displayOrder: 2,
     summaryGroupCode: null, summaryGroupLabel: null,
   },
   {
+    // *Recruitment* is kept English in both languages (the approved glossary, §A.6).
     code: 'RECRUITMENT', label: 'Recruitment', displayOrder: 3,
     summaryGroupCode: null, summaryGroupLabel: null,
   },
   {
-    code: 'PERSONAL_DEVELOPMENT', label: 'Personal Development', displayOrder: 4,
-    summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development',
+    code: 'PERSONAL_DEVELOPMENT', label: 'Pengembangan diri', displayOrder: 4,
+    summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Pengembangan',
   },
   {
-    code: 'TEAM_DEVELOPMENT', label: 'Team Development', displayOrder: 5,
-    summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development',
+    code: 'TEAM_DEVELOPMENT', label: 'Pengembangan tim', displayOrder: 5,
+    summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Pengembangan',
   },
 ];
 
@@ -167,7 +173,12 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
   {
     code: 'DEV_TRAINING_ATTEND',
     categoryCode: 'PERSONAL_DEVELOPMENT',
-    label: 'Menghadiri meeting atau training dari KPM atau Prudential',
+    /*
+     * **Our own words name no company** (the approved glossary's §C1, OD-237; P18.98-T7): `KPM_Owner.html:1422`
+     * reads *"… dari KPM atau Prudential"*, and the platform's default is every company's starting point. The
+     * company's name stays where it is data — `companies.name`, and the demo company.
+     */
+    label: 'Menghadiri meeting atau training dari KPM atau perusahaan',
     description: null,
     displayOrder: 10,
   },
@@ -210,6 +221,29 @@ export const SEEDED_ACTIVITY_WORDINGS_BEFORE_ADR_0160: Readonly<Record<
 };
 
 /**
+ * **The words the seed gave before P18.98-T7** (OD-238, option 1; the approved glossary's §C1), per code — kept only
+ * so migration `0046` and the prototype spec can recognise the Template company's Default template where it still
+ * holds them. No office and no template is given them any more.
+ *
+ * The five sections' English names and the *Development* tile, which are the prototype's (`KPM_Owner.html:1340-1440`,
+ * `Overall.html:2720-2726`), and item 10, which named the company. *Recruitment* is kept English, so it is not here.
+ */
+export const SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238: {
+  readonly categories: Readonly<Record<string, { readonly label: string; readonly summaryGroupLabel?: string }>>;
+  readonly types: Readonly<Record<string, { readonly label: string }>>;
+} = {
+  categories: {
+    LEADS_GENERATION: { label: 'Leads Generation' },
+    SELLING: { label: 'Selling' },
+    PERSONAL_DEVELOPMENT: { label: 'Personal Development', summaryGroupLabel: 'Development' },
+    TEAM_DEVELOPMENT: { label: 'Team Development', summaryGroupLabel: 'Development' },
+  },
+  types: {
+    DEV_TRAINING_ATTEND: { label: 'Menghadiri meeting atau training dari KPM atau Prudential' },
+  },
+};
+
+/**
  * The two lead pipelines a new office starts with (P4-T3).
  *
  * **Referenced by code, and that is the fix.** The prototype stores the status *label* on
@@ -249,24 +283,28 @@ export interface SeedLeadStatus {
  *
  * The office owns these flags from provisioning onward, like every other field here.
  *
- * **Both first statuses say *Not yet approached*** (ADR-0167 §10, OD-205; P18.95-T9 AC-6): the prototype's
+ * **Both first statuses say the same words** (ADR-0167 §10, OD-205; P18.95-T9 AC-6): the prototype's
  * recruitment ladder says *Not approached*, and the client asked for one wording. The code stays
  * `NOT_APPROACHED`, because a lead holds it.
+ *
+ * **In Bahasa Indonesia since P18.98-T7** (OD-238, option 1; ADR-0179 §5), in the approved glossary's words:
+ * *Follow-up* and *AAJI* are kept English (§A.6, §C11), *Dibayar dan diterbitkan* is §B.10's *paid and issued*,
+ * *Agen aktif baru* its *new active agent*. The English is `SEEDED_LEAD_STATUS_LABELS_BEFORE_OD_238`'s.
  */
 export const SEED_LEAD_STATUSES: readonly SeedLeadStatus[] = [
-  { pipeline: 'sales', code: 'NOT_YET_APPROACHED', label: 'Not yet approached', rank: 1, isTerminal: false, isLateStage: false },
+  { pipeline: 'sales', code: 'NOT_YET_APPROACHED', label: 'Belum didekati', rank: 1, isTerminal: false, isLateStage: false },
   { pipeline: 'sales', code: 'FOLLOW_UP', label: 'Follow-up', rank: 2, isTerminal: false, isLateStage: false },
-  { pipeline: 'sales', code: 'POLICY_SUBMITTED', label: 'Policy submitted', rank: 3, isTerminal: false, isLateStage: true },
-  { pipeline: 'sales', code: 'APPROVED_NOT_PAID', label: 'Approved, not paid', rank: 4, isTerminal: false, isLateStage: true },
-  { pipeline: 'sales', code: 'PAID_AND_ISSUED', label: 'Paid and issued', rank: 5, isTerminal: true, isLateStage: false },
+  { pipeline: 'sales', code: 'POLICY_SUBMITTED', label: 'Polis diajukan', rank: 3, isTerminal: false, isLateStage: true },
+  { pipeline: 'sales', code: 'APPROVED_NOT_PAID', label: 'Disetujui, belum dibayar', rank: 4, isTerminal: false, isLateStage: true },
+  { pipeline: 'sales', code: 'PAID_AND_ISSUED', label: 'Dibayar dan diterbitkan', rank: 5, isTerminal: true, isLateStage: false },
 
-  { pipeline: 'recruitment', code: 'NOT_APPROACHED', label: 'Not yet approached', rank: 1, isTerminal: false, isLateStage: false },
-  { pipeline: 'recruitment', code: 'MEETING_SCHEDULED', label: 'Meeting scheduled', rank: 2, isTerminal: false, isLateStage: false },
-  { pipeline: 'recruitment', code: 'RECRUITMENT_PRESENTATION', label: 'Recruitment presentation', rank: 3, isTerminal: false, isLateStage: false },
-  { pipeline: 'recruitment', code: 'AGENT_CODE_CREATED', label: 'Agent code created', rank: 4, isTerminal: false, isLateStage: true },
-  { pipeline: 'recruitment', code: 'AAJI_LICENSED', label: 'AAJI licensed', rank: 5, isTerminal: false, isLateStage: true },
-  { pipeline: 'recruitment', code: 'JOINT_FIELD_WORK_PLANNED', label: 'Joint field work planned', rank: 6, isTerminal: false, isLateStage: true },
-  { pipeline: 'recruitment', code: 'NEW_ACTIVE_AGENT', label: 'New active agent', rank: 7, isTerminal: true, isLateStage: false },
+  { pipeline: 'recruitment', code: 'NOT_APPROACHED', label: 'Belum didekati', rank: 1, isTerminal: false, isLateStage: false },
+  { pipeline: 'recruitment', code: 'MEETING_SCHEDULED', label: 'Pertemuan dijadwalkan', rank: 2, isTerminal: false, isLateStage: false },
+  { pipeline: 'recruitment', code: 'RECRUITMENT_PRESENTATION', label: 'Presentasi recruitment', rank: 3, isTerminal: false, isLateStage: false },
+  { pipeline: 'recruitment', code: 'AGENT_CODE_CREATED', label: 'Kode agen dibuat', rank: 4, isTerminal: false, isLateStage: true },
+  { pipeline: 'recruitment', code: 'AAJI_LICENSED', label: 'Berlisensi AAJI', rank: 5, isTerminal: false, isLateStage: true },
+  { pipeline: 'recruitment', code: 'JOINT_FIELD_WORK_PLANNED', label: 'Joint field work direncanakan', rank: 6, isTerminal: false, isLateStage: true },
+  { pipeline: 'recruitment', code: 'NEW_ACTIVE_AGENT', label: 'Agen aktif baru', rank: 7, isTerminal: true, isLateStage: false },
 ];
 
 /**
@@ -282,6 +320,33 @@ export const SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167: Readonly<Record<
   { readonly pipeline: SeedLeadStatus['pipeline']; readonly labels: readonly string[] }
 >> = {
   NOT_APPROACHED: { pipeline: 'recruitment', labels: ['Not approached'] },
+};
+
+/**
+ * **The words the seed gave before P18.98-T7** (OD-238, option 1), per pipeline and code — the prototype's English
+ * (`Overall.html:5366-5367`), but for the recruitment pipeline's first status, which said the sales pipeline's words
+ * since ADR-0167 §10. Kept only so migration `0046` can recognise the Template company's Default template where it
+ * still holds them, so `0038` still writes the words it was written for, and for the prototype spec. *Follow-up* is
+ * kept English, so it is not here.
+ */
+export const SEEDED_LEAD_STATUS_LABELS_BEFORE_OD_238: Readonly<Record<
+  SeedLeadStatus['pipeline'], Readonly<Record<string, string>>
+>> = {
+  sales: {
+    NOT_YET_APPROACHED: 'Not yet approached',
+    POLICY_SUBMITTED: 'Policy submitted',
+    APPROVED_NOT_PAID: 'Approved, not paid',
+    PAID_AND_ISSUED: 'Paid and issued',
+  },
+  recruitment: {
+    NOT_APPROACHED: 'Not yet approached',
+    MEETING_SCHEDULED: 'Meeting scheduled',
+    RECRUITMENT_PRESENTATION: 'Recruitment presentation',
+    AGENT_CODE_CREATED: 'Agent code created',
+    AAJI_LICENSED: 'AAJI licensed',
+    JOINT_FIELD_WORK_PLANNED: 'Joint field work planned',
+    NEW_ACTIVE_AGENT: 'New active agent',
+  },
 };
 
 /**

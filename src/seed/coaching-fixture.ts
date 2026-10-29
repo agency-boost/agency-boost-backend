@@ -71,7 +71,10 @@
  */
 import { createHash } from 'node:crypto';
 import type { Clock } from '@/common/clock/clock.port';
+import { readerIn } from '@/common/i18n/reader';
+import { render } from '@/common/i18n/sentence';
 import { addDays, type LocalDate } from '@/common/time/local-day';
+import { COACHING_MESSAGES } from '@/modules/coaching/coaching.messages';
 import type { CoacheeKey, RosterStatus } from './coaching-cast';
 
 /** A 24-hex id derived from its parts: the same row gets the same id on every run (AC-6). */
@@ -283,7 +286,9 @@ export function buildCoachingFixture(input: CoachingFixtureInput): CoachingFixtu
     return new Date(Math.min(now.getTime(), Math.max(startOfToday.getTime(), wanted)));
   };
 
-  const leadText = (lead: FixtureLead) => lead.nextActionNote ?? `Follow up with ${lead.name}`;
+  // A lead with no note: the line finalize stores, in the language its leader finalized in (P18.98-T5 AC-6) — Indonesian.
+  const leadText = (lead: FixtureLead) =>
+    lead.nextActionNote ?? render(COACHING_MESSAGES.followUpWith({ name: lead.name }), readerIn('id'));
 
   const chain = (
     coach: string,
@@ -390,14 +395,14 @@ export function buildCoachingFixture(input: CoachingFixtureInput): CoachingFixtu
     {
       slot: 'weekly-1', daysAgo: 14, status: 'finalized',
       newItems: [
-        { text: "Book three presentations from Thursday's BOP names", dueIn: 3 },
-        { text: 'Practise the critical-illness objection with Sari before Friday', dueIn: 4 },
-        { text: 'Log activity every day this week, the quiet days included', dueIn: 6 },
+        { text: 'Jadwalkan tiga presentasi dari nama-nama BOP hari Kamis', dueIn: 3 },
+        { text: 'Latihan menjawab keberatan soal penyakit kritis dengan Sari sebelum Jumat', dueIn: 4 },
+        { text: 'Catat aktivitas setiap hari minggu ini, hari yang sepi juga', dueIn: 6 },
       ],
       newTips: [
-        // The prototype's own example tip (`Overall.html:10692-10699`).
-        'Slow down on the opening line — let the client finish before pitching.',
-        'Ask for the referral before you leave, not on the follow-up call.',
+        // The prototype's own example tip (`Overall.html:10692-10699`), in Bahasa Indonesia since P18.98-T7.
+        'Pelan-pelan di kalimat pembuka — biarkan klien selesai bicara sebelum mulai pitch.',
+        'Minta referral sebelum pamit, jangan tunggu saat telepon follow up.',
       ],
       leadActions: [{ lead: 'Pak Hendro Gunawan', dueIn: 1 }, { lead: 'Ibu Wulan Sari', dueIn: 2 }],
     },
@@ -406,11 +411,11 @@ export function buildCoachingFixture(input: CoachingFixtureInput): CoachingFixtu
       // Last week: three typed items, then Pak Hendro and Ibu Wulan. Two typed items and the handover done.
       done: [0, 1, 4], carryDueIn: 6,
       newItems: [
-        { text: 'Prepare a needs analysis for Pak Surya before calling him', dueIn: 2 },
-        { text: 'Shadow Sari on one presentation', dueIn: 5 },
+        { text: 'Siapkan analisis kebutuhan untuk Pak Surya sebelum meneleponnya', dueIn: 2 },
+        { text: 'Dampingi Sari di satu presentasi', dueIn: 5 },
       ],
       keepTips: [0, 1],
-      newTips: ['Send the illustration the same day you present it.'],
+      newTips: ['Kirim ilustrasinya di hari yang sama dengan presentasinya.'],
       leadActions: [{ lead: 'Pak Hendro Gunawan', dueIn: 1 }, { lead: 'Ibu Kartika Dewanti', dueIn: 4 }],
     },
     {
@@ -418,11 +423,11 @@ export function buildCoachingFixture(input: CoachingFixtureInput): CoachingFixtu
       // Last week: the carried item, two new ones, then Pak Hendro and Ibu Kartika. Pak Hendro still waits.
       done: [0, 1, 4], carryDueIn: 3,
       newItems: [
-        { text: "Close Pak Hendro's illustration, or mark the lead lost", dueIn: 2 },
-        { text: "Book two appointments from this month's referrals", dueIn: 5 },
+        { text: 'Closing ilustrasi Pak Hendro, atau tandai lead-nya gagal', dueIn: 2 },
+        { text: 'Jadwalkan dua janji temu dari referral bulan ini', dueIn: 5 },
       ],
       keepTips: [2],
-      newTips: ['Keep the follow-up note on the lead itself, so the next 1:1 sees it.'],
+      newTips: ['Tulis catatan follow up langsung di lead-nya, supaya terlihat di 1:1 berikutnya.'],
       leadActions: 'as-they-stand',
     },
   ]);
@@ -431,13 +436,13 @@ export function buildCoachingFixture(input: CoachingFixtureInput): CoachingFixtu
     {
       slot: 'session-1', daysAgo: recent, status: 'finalized',
       newItems: [
-        { text: 'Ask Ibu Melati for two referrals at the policy handover', dueIn: 3 },
-        { text: 'Run the education-plan comparison for Pak Gilang', dueIn: 5 },
-        { text: 'Block Tuesday mornings for prospecting calls', dueIn: 6 },
+        { text: 'Minta dua referral ke Ibu Melati saat serah terima polis', dueIn: 3 },
+        { text: 'Buat perbandingan produk dana pendidikan untuk Pak Gilang', dueIn: 5 },
+        { text: 'Sisihkan Selasa pagi untuk telepon prospek', dueIn: 6 },
       ],
       newTips: [
-        "Lead with the family's goal, then the product.",
-        'Confirm the next meeting before you leave the current one.',
+        'Mulai dari tujuan keluarganya, baru bicara produk.',
+        'Pastikan jadwal pertemuan berikutnya sebelum pertemuan ini selesai.',
       ],
       leadActions: [{ lead: 'Ibu Melati Kusumawardani', dueIn: 2 }, { lead: 'Pak Gilang Ramadhan', dueIn: 5 }],
     },
@@ -445,7 +450,7 @@ export function buildCoachingFixture(input: CoachingFixtureInput): CoachingFixtu
       // The open draft: started today, saved once with the referral item ticked.
       slot: 'session-2', daysAgo: 0, status: 'draft',
       done: [0], carryDueIn: null,
-      newItems: [{ text: "Review Ibu Shinta's needs analysis together", dueIn: 3 }],
+      newItems: [{ text: 'Tinjau analisis kebutuhan Ibu Shinta bersama-sama', dueIn: 3 }],
       keepTips: [0, 1],
       newTips: [],
     },
@@ -455,19 +460,19 @@ export function buildCoachingFixture(input: CoachingFixtureInput): CoachingFixtu
     {
       slot: 'leader-1', daysAgo: overdue + 14, status: 'finalized',
       newItems: [
-        { text: 'Hold a 1:1 with each agent in the unit this week', dueIn: 5 },
-        { text: "Invite two candidates to Thursday's BOP", dueIn: 3 },
-        { text: "Go through Budi's lapsed prospects with him", dueIn: 6 },
+        { text: 'Adakan 1:1 dengan setiap agen di unit minggu ini', dueIn: 5 },
+        { text: 'Undang dua kandidat ke BOP hari Kamis', dueIn: 3 },
+        { text: 'Tinjau bersama Budi prospeknya yang terbengkalai', dueIn: 6 },
       ],
-      newTips: ['Coach the agent, not the number.'],
+      newTips: ['Coaching orangnya, bukan angkanya.'],
       leadActions: [{ lead: 'Pak Hasan Basri', dueIn: 4 }],
     },
     {
       slot: 'leader-2', daysAgo: overdue + 5, status: 'finalized',
       done: [0, 1], carryDueIn: 3,
-      newItems: [{ text: "Keep Rina's weekly 1:1 going, and add Budi to the rotation", dueIn: 5 }],
+      newItems: [{ text: 'Lanjutkan 1:1 mingguan dengan Rina, dan masukkan Budi ke jadwal', dueIn: 5 }],
       keepTips: [0],
-      newTips: ['Delegate the BOP invitations, so you keep your own prospecting time.'],
+      newTips: ['Delegasikan undangan BOP, supaya waktu Anda untuk mencari prospek tetap ada.'],
       leadActions: [{ lead: 'Pak Hasan Basri', dueIn: 3 }, { lead: 'Sdri. Anisa Rahma', dueIn: 5 }],
     },
   ]);
@@ -483,11 +488,11 @@ export function buildCoachingFixture(input: CoachingFixtureInput): CoachingFixtu
     {
       slot: 'former-1', daysAgo: clock.daysBetween(timezone, formerDay, today), status: 'finalized',
       newItems: [
-        { text: 'List thirty names for your warm market, each with a phone number', dueIn: 3 },
-        { text: 'Shadow Sari on one client meeting', dueIn: 4 },
-        { text: 'Book your first two fact-finding meetings', dueIn: 6 },
+        { text: 'Tulis tiga puluh nama dari lingkungan terdekat Anda, lengkap dengan nomor teleponnya', dueIn: 3 },
+        { text: 'Dampingi Sari di satu pertemuan klien', dueIn: 4 },
+        { text: 'Jadwalkan dua pertemuan penggalian kebutuhan pertama Anda', dueIn: 6 },
       ],
-      newTips: ['Write a new name down the day you meet them, not at the end of the week.'],
+      newTips: ['Catat nama baru di hari Anda bertemu orangnya, jangan menunggu akhir minggu.'],
     },
   ]);
   for (const session of ledFormerly) {
@@ -559,11 +564,11 @@ export function buildCoachingFixture(input: CoachingFixtureInput): CoachingFixtu
       kpmId,
       authorMembershipId: members.sari,
       coacheeMembershipId: members.rina,
-      text: 'Strong on first meetings; loses momentum after the illustration. Pair her with a closer for two weeks before the quarter ends.',
+      text: 'Kuat di pertemuan pertama; kehilangan momentum setelah ilustrasi. Pasangkan dengan agen yang jago closing selama dua minggu sebelum kuartal berakhir.',
       version: 2,
       revisions: [{
         version: 1,
-        text: 'Eager, and logs every day. Needs help turning presentations into submissions.',
+        text: 'Semangat, dan mencatat aktivitas setiap hari. Perlu dibantu mengubah presentasi menjadi submission.',
         at: sessionAt(rinaWeekly, 0, 55),
       }],
       deletedAt: null,
@@ -577,7 +582,7 @@ export function buildCoachingFixture(input: CoachingFixtureInput): CoachingFixtu
       kpmId,
       authorMembershipId: members.agus,
       coacheeMembershipId: members.indah,
-      text: 'Ready for a bigger book. Talk to her about the AAB track before the year ends.',
+      text: 'Siap mengelola portofolio yang lebih besar. Ajak bicara soal jalur AAB sebelum akhir tahun.',
       version: 1,
       revisions: [],
       deletedAt: null,

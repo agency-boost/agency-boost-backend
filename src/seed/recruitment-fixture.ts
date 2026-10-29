@@ -252,8 +252,8 @@ export async function seedRecruitmentFixture(deps: RecruitmentFixtureDeps): Prom
           const uploadedAt = daysAgo(seeded.uploadedDaysAgo);
           const stored = await store(
             office.kpmId, RECRUITMENT.PITCH_UPLOAD_FOLDER, `${seeded.slot}-demonstration`, seeded.fileName,
-            ['AgencyBoost - demonstration document', definition.title, seeded.fileName,
-              'A one-page PDF the demo seed wrote, so this slot can be opened.', 'It is not a real pitch document.'],
+            ['AgencyBoost - dokumen demonstrasi', definition.title, seeded.fileName,
+              'PDF satu halaman yang ditulis seed demo, agar slot ini bisa dibuka.', 'Ini bukan dokumen pitch sungguhan.'],
             office.owner, uploadedAt,
           );
           const confirmations = seeded.ticks.map((t, i) => ({
@@ -307,8 +307,8 @@ export async function seedRecruitmentFixture(deps: RecruitmentFixtureDeps): Prom
         const uploadedAt = daysAgo(brochure.uploadedDaysAgo);
         const stored = await store(
           office.kpmId, 'products', `${brochure.code}-${brochure.slot}-demonstration`, brochure.fileName,
-          ['AgencyBoost - demonstration document', 'PRUMapan - Brochure', brochure.fileName,
-            'A one-page PDF the demo seed wrote, as office 0417 BSD City\'s own brochure.', 'It is not Prudential\'s brochure.'],
+          ['AgencyBoost - dokumen demonstrasi', 'PRUMapan - Brosur', brochure.fileName,
+            'PDF satu halaman yang ditulis seed demo, sebagai brosur milik kantor 0417 BSD City.', 'Ini bukan brosur Prudential.'],
           office.owner, uploadedAt,
         );
         await Configs.updateOne({ _id: row._id }, {

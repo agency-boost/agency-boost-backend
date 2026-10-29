@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES, SEED_RATIO_DEFINITIONS, SEED_RATIO_PURPOSES,
   SEEDED_ACTIVITY_WORDINGS_BEFORE_ADR_0160, SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167, SEEDED_RATIO_VALUES_BEFORE_ADR_0160,
+  SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238, SEEDED_LEAD_STATUS_LABELS_BEFORE_OD_238,
 } from './activity-taxonomy';
 import { RATIO_BENCHMARKS } from './benchmarks';
 
@@ -21,6 +22,18 @@ import { RATIO_BENCHMARKS } from './benchmarks';
  * whether or not either matched the source.
  */
 const PROTOTYPE = join(__dirname, '../../../../prototype/AgencyBoost_KPM_Owner.html');
+
+/**
+ * **The seed in the English it gave before P18.98-T7** (OD-238): the platform's Default template is written in
+ * Bahasa Indonesia, so the prototype is compared against the words recorded for migration 0046 — and the Indonesian is
+ * pinned word for word in its own test below.
+ */
+const englishCategory = (c: { code: string; label: string }) =>
+  SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238.categories[c.code]?.label ?? c.label;
+const englishGroup = (c: { code: string; summaryGroupLabel: string | null }) =>
+  SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238.categories[c.code]?.summaryGroupLabel ?? c.summaryGroupLabel;
+const englishStatus = (s: { pipeline: 'sales' | 'recruitment'; code: string; label: string }) =>
+  SEEDED_LEAD_STATUS_LABELS_BEFORE_OD_238[s.pipeline][s.code] ?? s.label;
 
 /** Every `acttype-item` in document order: its number, title and optional description. */
 function prototypeItems(): { num: number; title: string; description: string | null }[] {
@@ -51,6 +64,9 @@ describe('the seeded activity taxonomy matches the prototype', () => {
    * second time it is renamed, after P13.1-T3's *Proses pendaftaran kode agen* — and item 8 says
    * *recruitment* where the prototype says *NBO*. Pinned by code and by both wordings, so the prototype still
    * has to say what it said, and a fourth label drifting from it fails here rather than joining these.
+   *
+   * **And a fourth, the approved glossary's §C1** (OD-237; P18.98-T7): item 10 says *the company* where the
+   * prototype names *Prudential* — our own words name no company.
    */
   const RENAMED: Readonly<Record<string, { prototype: string; ours: string }>> = {
     LEADS_CONTACTED: { prototype: 'Menghubungi prospek yang sudah ada', ours: 'Set Appointment' },
@@ -59,15 +75,21 @@ describe('the seeded activity taxonomy matches the prototype', () => {
       prototype: 'Melakukan diskusi follow up dari presentasi NBO sebelumnya',
       ours: 'Melakukan diskusi follow up dari presentasi recruitment sebelumnya',
     },
+    DEV_TRAINING_ATTEND: {
+      prototype: SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238.types.DEV_TRAINING_ATTEND.label,
+      ours: 'Menghadiri meeting atau training dari KPM atau perusahaan',
+    },
   };
 
-  it('P18.8-T8 AC-4 carries the same twelve labels, verbatim but for items 3, 7 and 8, renamed at the client’s request', () => {
+  it('P18.8-T8 AC-4 carries the same twelve labels, verbatim but for items 3, 7 and 8, renamed at the client’s request, and 10', () => {
     for (const [code, { prototype, ours }] of Object.entries(RENAMED)) {
       const index = SEED_ACTIVITY_TYPES.findIndex((t) => t.code === code);
       expect({ code, title: items[index].title }).toEqual({ code, title: prototype });
       expect({ code, label: SEED_ACTIVITY_TYPES[index].label }).toEqual({ code, label: ours });
     }
-    expect(SEED_ACTIVITY_TYPES.filter((t) => t.code in RENAMED).map((t) => t.displayOrder)).toEqual([3, 7, 8]);
+    expect(SEED_ACTIVITY_TYPES.filter((t) => t.code in RENAMED).map((t) => t.displayOrder)).toEqual([3, 7, 8, 10]);
+    expect(RENAMED.DEV_TRAINING_ATTEND.prototype).toBe('Menghadiri meeting atau training dari KPM atau Prudential');
+    expect(SEED_ACTIVITY_TYPES.map((t) => t.label).join(' ')).not.toContain('Prudential');
 
     expect(SEED_ACTIVITY_TYPES.map((t) => t.label))
       .toEqual(items.map((i, index) => RENAMED[SEED_ACTIVITY_TYPES[index].code]?.ours ?? i.title));
@@ -105,7 +127,7 @@ describe('the seeded activity taxonomy matches the prototype', () => {
     const html = readFileSync(PROTOTYPE, 'utf8');
     const headings = [...html.matchAll(/<div class="acttype-card-head"><h3>([^<]+)<\/h3>/g)]
       .map((m) => m[1]);
-    expect(SEED_ACTIVITY_CATEGORIES.map((c) => c.label)).toEqual(headings);
+    expect(SEED_ACTIVITY_CATEGORIES.map(englishCategory)).toEqual(headings);
   });
 
   it('groups the same counts into the same categories', () => {
@@ -129,7 +151,7 @@ describe('the seeded lead pipelines against the prototype', () => {
 
   it('matches the sales pipeline exactly', () => {
     const sales = SEED_LEAD_STATUSES.filter((l) => l.pipeline === 'sales');
-    expect(sales.map((l) => l.label)).toEqual(labelsIn('leadstatuses-sales'));
+    expect(sales.map(englishStatus)).toEqual(labelsIn('leadstatuses-sales'));
   });
 
   /*
@@ -155,12 +177,15 @@ describe('the seeded lead pipelines against the prototype', () => {
 
     // Ours: the same code, in the sales pipeline's first words — which the sales pipeline still has verbatim.
     const recruitment = SEED_LEAD_STATUSES.filter((l) => l.pipeline === 'recruitment');
-    expect(recruitment[0]).toMatchObject({ code: 'NOT_APPROACHED', label: 'Not yet approached', rank: 1 });
-    expect(recruitment[0].label).toBe(order('SALES_STATUS_ORDER')[0]);
-    expect(recruitment[0].label).toBe(labelsIn('leadstatuses-sales')[0]);
+    expect(recruitment[0]).toMatchObject({ code: 'NOT_APPROACHED', rank: 1 });
+    expect(englishStatus(recruitment[0])).toBe('Not yet approached');
+    expect(englishStatus(recruitment[0])).toBe(order('SALES_STATUS_ORDER')[0]);
+    expect(englishStatus(recruitment[0])).toBe(labelsIn('leadstatuses-sales')[0]);
+    // In Bahasa Indonesia since P18.98-T7, still the sales pipeline's first words.
+    expect(recruitment[0].label).toBe(SEED_LEAD_STATUSES[0].label);
 
     // Every other stage keeps the agent app's words (ADR-0043's seven).
-    expect(recruitment.map((l) => l.label)).toEqual(agentApp.map((label, i) => (i === 0 ? recruitment[0].label : label)));
+    expect(recruitment.map(englishStatus)).toEqual(agentApp.map((label, i) => (i === 0 ? englishStatus(recruitment[0]) : label)));
   });
 
   it('has two recruitment stages the Owner prototype does not — ratified by ADR-0043', () => {
@@ -181,10 +206,10 @@ describe('the seeded lead pipelines against the prototype', () => {
 
     expect(theirs).toHaveLength(6);
     expect(ours).toHaveLength(7);
-    expect(ours.map((l) => l.label)).toEqual(expect.arrayContaining(['Agent code created']));
+    expect(ours.map(englishStatus)).toEqual(expect.arrayContaining(['Agent code created']));
     // The terminal stage is the one both agree on, and the one everything downstream reads.
-    expect(ours.at(-1)!.label).toBe(theirs.at(-1));
-    expect(ours.filter((l) => l.isTerminal).map((l) => l.label)).toEqual(['New active agent']);
+    expect(englishStatus(ours.at(-1)!)).toBe(theirs.at(-1));
+    expect(ours.filter((l) => l.isTerminal).map(englishStatus)).toEqual(['New active agent']);
   });
 
   it('flags the stages after which the work is the counterparty’s (ADR-0043)', () => {
@@ -303,7 +328,7 @@ describe('the seeded summary tiles against the prototype’s strip (ADR-0064)', 
     const tiles = new Map<string, { label: string; items: number[] }>();
     for (const category of [...SEED_ACTIVITY_CATEGORIES].sort((a, b) => a.displayOrder - b.displayOrder)) {
       const key = category.summaryGroupCode ?? `category:${category.code}`;
-      const tile = tiles.get(key) ?? { label: category.summaryGroupLabel ?? category.label, items: [] };
+      const tile = tiles.get(key) ?? { label: englishGroup(category) ?? englishCategory(category), items: [] };
       tile.items.push(...SEED_ACTIVITY_TYPES
         .filter((t) => t.categoryCode === category.code).map((t) => t.displayOrder));
       tiles.set(key, tile);
@@ -336,5 +361,78 @@ describe('the seeded summary tiles against the prototype’s strip (ADR-0064)', 
     for (const [code, members] of [...labels.keys()].map((k) => [k, SEED_ACTIVITY_CATEGORIES.filter((c) => c.summaryGroupCode === k)] as const)) {
       expect({ code, members: members.length }).toEqual({ code, members: 2 });
     }
+  });
+});
+
+/*
+ * **The platform's Default template in Bahasa Indonesia** (P18.98-T7; OD-238, option 1; ADR-0179 §5). The words every
+ * new office starts with, pinned word for word: *Recruitment*, *Follow-up* and *AAJI* kept English by the approved
+ * glossary (§A.6, §C11), *Dibayar dan diterbitkan* and *Agen aktif baru* its §B.10 words. The English recorded for
+ * migration 0046 is exactly what changed — a code the seed no longer has, or a word it never changed, fails here.
+ */
+describe('P18.98-T7 the seeded taxonomy and pipelines in Bahasa Indonesia (OD-238)', () => {
+  it('names the five sections and the Development tile in Bahasa Indonesia', () => {
+    expect(SEED_ACTIVITY_CATEGORIES.map((c) => [c.label, c.summaryGroupLabel])).toEqual([
+      ['Pencarian leads', null],
+      ['Penjualan', null],
+      ['Recruitment', null],
+      ['Pengembangan diri', 'Pengembangan'],
+      ['Pengembangan tim', 'Pengembangan'],
+    ]);
+    for (const [code, was] of Object.entries(SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238.categories)) {
+      const now = SEED_ACTIVITY_CATEGORIES.find((c) => c.code === code)!;
+      expect(now.label).not.toBe(was.label);
+      // A tile's English is recorded only where it had one, and the Indonesian is not it.
+      expect(now.summaryGroupLabel === (was.summaryGroupLabel ?? null)).toBe(now.summaryGroupLabel === null);
+    }
+    expect(Object.keys(SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238.types)).toEqual(['DEV_TRAINING_ATTEND']);
+  });
+
+  it('names the twelve statuses in Bahasa Indonesia, both first ones alike, and records the English of every one it changed', () => {
+    expect(SEED_LEAD_STATUSES.map((s) => [s.pipeline, s.code, s.label])).toEqual([
+      ['sales', 'NOT_YET_APPROACHED', 'Belum didekati'],
+      ['sales', 'FOLLOW_UP', 'Follow-up'],
+      ['sales', 'POLICY_SUBMITTED', 'Polis diajukan'],
+      ['sales', 'APPROVED_NOT_PAID', 'Disetujui, belum dibayar'],
+      ['sales', 'PAID_AND_ISSUED', 'Dibayar dan diterbitkan'],
+      ['recruitment', 'NOT_APPROACHED', 'Belum didekati'],
+      ['recruitment', 'MEETING_SCHEDULED', 'Pertemuan dijadwalkan'],
+      ['recruitment', 'RECRUITMENT_PRESENTATION', 'Presentasi recruitment'],
+      ['recruitment', 'AGENT_CODE_CREATED', 'Kode agen dibuat'],
+      ['recruitment', 'AAJI_LICENSED', 'Berlisensi AAJI'],
+      ['recruitment', 'JOINT_FIELD_WORK_PLANNED', 'Joint field work direncanakan'],
+      ['recruitment', 'NEW_ACTIVE_AGENT', 'Agen aktif baru'],
+    ]);
+    // Recorded exactly where the words changed: *Follow-up* is kept, so it is the one status with no English recorded.
+    expect(SEED_LEAD_STATUSES.filter((s) => englishStatus(s) === s.label).map((s) => s.code)).toEqual(['FOLLOW_UP']);
+    for (const [pipeline, codes] of Object.entries(SEEDED_LEAD_STATUS_LABELS_BEFORE_OD_238)) {
+      for (const code of Object.keys(codes)) {
+        expect(SEED_LEAD_STATUSES.some((s) => s.pipeline === pipeline && s.code === code)).toBe(true);
+      }
+    }
+  });
+});
+
+/*
+ * **`metrics-and-definitions.md` Part 0 says what the seed gives** (P18.98-T7): its table of the twelve, read rather than
+ * retyped, names each item by the seed's label (a note may follow it) and its section by the seed's section. The row
+ * for item 10 changed with §C1, and the sections with OD-238: the document and the seed move together, or this fails.
+ */
+describe('P18.98-T7 metrics-and-definitions.md’s activity table against the seed', () => {
+  const doc = readFileSync(join(__dirname, '../../../../docs/00-product/metrics-and-definitions.md'), 'utf8');
+  const rows = [...doc.matchAll(/^\| (\d+) \| `([A-Z_]+)` \| (.+?) \| [^|]+ \| ([^|]+) \|$/gm)]
+    .map(([, num, code, label, category]) => ({ num: Number(num), code, label, category: category.trim() }))
+    .filter((r) => SEED_ACTIVITY_TYPES.some((t) => t.code === r.code));
+
+  it('lists the twelve, each by the seed’s label in its seed section — item 10 naming no company', () => {
+    expect(rows.map((r) => r.code)).toEqual(SEED_ACTIVITY_TYPES.map((t) => t.code));
+    for (const type of SEED_ACTIVITY_TYPES) {
+      const row = rows.find((r) => r.code === type.code)!;
+      const section = SEED_ACTIVITY_CATEGORIES.find((c) => c.code === type.categoryCode)!.label;
+      expect({ code: type.code, startsWithLabel: row.label.startsWith(type.label), category: row.category })
+        .toEqual({ code: type.code, startsWithLabel: true, category: section });
+    }
+    expect(rows.find((r) => r.code === 'DEV_TRAINING_ATTEND')!.label)
+      .toMatch(/^Menghadiri meeting atau training dari KPM atau perusahaan — /);
   });
 });

@@ -152,8 +152,8 @@ export async function seedActivation3MFixture(deps: Activation3MSeedDeps): Promi
       _id: leadId, kpmId, ownerMembershipId: lukman.id, type: 'sales', name: L.buyer,
       contact: { phone: null, email: null }, statusCode: FIRST_SALE_STAGE_CODE,
       statusId: paidAndIssued ? String(paidAndIssued._id) : null, commitments: [],
-      remarks: 'Health rider for the family. His first case, after his 90 days.', nextActionDate: null, nextActionNote: null,
-      outcome: 'won', outcomeAt: at(closed), dateRegistered: at(steps[0]), source: 'Walk-in — BSD', loggedFrom: null,
+      remarks: 'Rider kesehatan untuk keluarga. Case pertamanya, setelah 90 harinya lewat.', nextActionDate: null, nextActionNote: null,
+      outcome: 'won', outcomeAt: at(closed), dateRegistered: at(steps[0]), source: 'Datang langsung — BSD', loggedFrom: null,
       version: 1 + walk.length + 1,
       transitions: walk.map((code, i) => ({
         fromStatusCode: i === 0 ? null : walk[i - 1], toStatusCode: code, at: at(steps[i]), byMembershipId: lukman.id,

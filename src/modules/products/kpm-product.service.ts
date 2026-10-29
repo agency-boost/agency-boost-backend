@@ -4,6 +4,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
+import type { Reader } from '@/common/i18n/reader';
+import { render } from '@/common/i18n/sentence';
 import {
   APPROVED_PRODUCT_FIELDS, DOCUMENT_MIME_TYPES, OVERRIDABLE_PRODUCT_FIELDS, PRODUCT_DOCUMENT_FOLDER,
   PRODUCT_DOCUMENT_LABEL_MAX_LENGTH, PRODUCT_DOCUMENT_SLOTS,
@@ -17,7 +19,7 @@ import { Kpm } from '@/modules/tenants/kpm.schema';
 import { KpmProductConfigDocument } from './kpm-product-config.schema';
 import { KpmProductConfigRepository } from './kpm-product.repository';
 import { Product, ProductDocument } from './product.schema';
-import { PRODUCTS_REFUSALS } from './products.messages';
+import { documentSlotLabel, PRODUCTS_REFUSALS } from './products.messages';
 
 /** One value an office reads, and whether the office is the one who chose it. */
 export interface EffectiveField<T> {
@@ -180,7 +182,7 @@ export class KpmProductService {
         const row = byProduct.get(String(product._id)) ?? null;
         return {
           product,
-          view: this.view(product, row),
+          view: this.view(ctx.reader, product, row),
           approved: (row?.approvedOverrides ?? undefined) as Record<string, unknown> | undefined,
         };
       }),
@@ -206,7 +208,7 @@ export class KpmProductService {
 
     const row = await this.configs.upsert(ctx, productId, { $set: { active } });
     await this.record(ctx, 'kpm_product.activation_set', row, { code: product.code, active });
-    return this.view(product, row);
+    return this.view(ctx.reader, product, row);
   }
 
   /**
@@ -287,7 +289,7 @@ export class KpmProductService {
       code: product.code, fields: Object.keys(input), reviewState: row.reviewState,
       ...(Object.keys(unset).length > 0 ? { givenBack: ['description'] } : {}),
     });
-    return this.view(product, row);
+    return this.view(ctx.reader, product, row);
   }
 
   /**
@@ -317,7 +319,7 @@ export class KpmProductService {
       $inc: { version: 1 },
     });
     await this.record(ctx, 'kpm_product.override_reset', row, { code: product.code, field });
-    return this.view(product, row);
+    return this.view(ctx.reader, product, row);
   }
 
   /**
@@ -374,7 +376,7 @@ export class KpmProductService {
     }
 
     await this.record(ctx, 'kpm_product.document_set', row, { code: product.code, slot });
-    return this.view(product, row);
+    return this.view(ctx.reader, product, row);
   }
 
   /** Fall back to the company's document for one slot, leaving every other slot alone (AC-7). */
@@ -394,7 +396,7 @@ export class KpmProductService {
     if (existing) await this.assets.release(ctx, existing.storageKey);
 
     await this.record(ctx, 'kpm_product.document_reset', row, { code: product.code, slot });
-    return this.view(product, row);
+    return this.view(ctx.reader, product, row);
   }
 
   /**
@@ -410,7 +412,7 @@ export class KpmProductService {
     this.requireSlot(slot);
 
     const row = await this.configs.findOne(ctx, { productId });
-    const url = await this.signedUrl(ctx, companyId, this.view(product, row), slot);
+    const url = await this.signedUrl(ctx, companyId, this.view(ctx.reader, product, row), slot);
     if (url === null) throw new NotFoundException('Document');
     return url;
   }
@@ -473,7 +475,7 @@ export class KpmProductService {
     await this.record(ctx, 'sales_script.approved', approved, {
       code: product.code, version: row.version,
     });
-    return this.view(product, approved);
+    return this.view(ctx.reader, product, approved);
   }
 
   /**
@@ -505,7 +507,7 @@ export class KpmProductService {
     await this.record(ctx, 'sales_script.rejected', rejected, {
       code: product.code, reason: trimmed,
     });
-    return this.view(product, rejected);
+    return this.view(ctx.reader, product, rejected);
   }
 
   /**
@@ -630,9 +632,12 @@ export class KpmProductService {
     });
   }
 
-  /** The company's product with the office's decisions laid over it, field by field. */
+  /**
+   * The company's product with the office's decisions laid over it, field by field — **each document slot named in
+   * the reader's language** (P18.98-T7), its file's own name as typed.
+   */
   private view(
-    product: ProductDocument, row: KpmProductConfigDocument | null,
+    reader: Reader, product: ProductDocument, row: KpmProductConfigDocument | null,
   ): KpmProductView {
     const overrides = (row?.overrides ?? {}) as Record<string, unknown>;
     const has = (field: string) => Object.prototype.hasOwnProperty.call(overrides, field);
@@ -668,7 +673,8 @@ export class KpmProductService {
       script,
       reviewState: row?.reviewState ?? 'none',
       rejectionReason: row?.rejectionReason ?? null,
-      documents: PRODUCT_DOCUMENT_SLOTS.map(({ key, label }) => {
+      documents: PRODUCT_DOCUMENT_SLOTS.map(({ key }) => {
+        const label = render(documentSlotLabel(key), reader);
         const own = row?.documents?.get(key);
         const theirs = product.defaultDocuments?.get(key) as
           { storageKey?: string; label?: string } | undefined;

@@ -1,17 +1,18 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import type { Sentence } from '@/common/i18n/sentence';
+import type { Reader } from '@/common/i18n/reader';
+import { render, type Sentence } from '@/common/i18n/sentence';
 import {
   RECRUITMENT_CANDIDATE_TYPES, RECRUITMENT_HESITATIONS, RECRUITMENT_MOTIVATIONS,
   type RecruitmentHesitationCode, type RecruitmentMotivationCode, type RecruitmentPlaybookBody,
   type RecruitmentTypeCode,
 } from '@/domain/constants';
-import { RECRUITMENT_REFUSALS } from './recruitment.messages';
+import { briefChipLabel, RECRUITMENT_REFUSALS } from './recruitment.messages';
 
 const SAY = RECRUITMENT_REFUSALS.VALIDATION_FAILED;
 
-/** A chip: its code, and its label verbatim (`:302-331`). */
+/** A chip: its code, and its label — the registry's, written for the reader (P18.98-T7). */
 export interface Choice {
   code: string;
   label: string;
@@ -40,10 +41,18 @@ export interface RecruitmentPlan {
   nextAction: string;
 }
 
-const choice = ({ code, label }: { code: string; label: string }): Choice => ({ code, label });
+type ChipCode = RecruitmentTypeCode | RecruitmentMotivationCode | RecruitmentHesitationCode;
+
+/**
+ * A chip as served: its code, and its label **in the reader's language** (P18.98-T7; ADR-0179 §7) — the platform's
+ * words, the English the registry's byte for byte. The playbook's own words are the company's, and stay as typed.
+ */
+const choiceFor = (reader: Reader) => ({ code }: { code: ChipCode }): Choice =>
+  ({ code, label: render(briefChipLabel(code), reader) });
 
 /** The chips, in order — what step 1 draws, served rather than re-declared in the browser (invariant §7). */
-export function recruitmentVocabulary(): RecruitmentVocabulary {
+export function recruitmentVocabulary(reader: Reader): RecruitmentVocabulary {
+  const choice = choiceFor(reader);
   return {
     types: RECRUITMENT_CANDIDATE_TYPES.map(choice),
     motivations: RECRUITMENT_MOTIVATIONS.map(choice),
@@ -102,10 +111,13 @@ export function readBrief(query: { type?: string; motivation?: string; hesitatio
  * for that pair (`profileOwn`), else the base; the next action. A lookup over the company's words and
  * nothing else — no office's text, no member's data — and nothing about the brief is kept (D-store).
  */
-export function recruitmentPlanFor(body: RecruitmentPlaybookBody, brief: RecruitmentBrief): RecruitmentPlan {
+export function recruitmentPlanFor(
+  body: RecruitmentPlaybookBody, brief: RecruitmentBrief, reader: Reader,
+): RecruitmentPlan {
   const profile = body.profiles[brief.type];
   const own = body.profileObjections[brief.type] ?? {};
-  const label = <C extends string>(vocabulary: readonly { code: C; label: string }[], code: C): Choice =>
+  const choice = choiceFor(reader);
+  const label = <C extends ChipCode>(vocabulary: readonly { code: C; label: string }[], code: C): Choice =>
     choice(vocabulary.find((c) => c.code === code)!);
 
   return {

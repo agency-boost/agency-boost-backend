@@ -7,7 +7,7 @@ import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { buildForumServices, scorecardServiceOf, type ForumServices } from '../../../test/forum-office';
 import { seedDemo, type SeedResult } from '../demo';
-import { FORUM_TOKENS, seedLeaderForumFixture } from '../leader-forum-fixture';
+import { FORUM_REMARKS, FORUM_TOKENS, seedLeaderForumFixture } from '../leader-forum-fixture';
 
 const RUN_MS = 300_000;
 const quiet = () => undefined;
@@ -67,15 +67,16 @@ describe('Phase 18.1 the Strategic Leader Forum seed — a run at 10:00 on 10 Oc
   it('P18.1-T2 AC-10, P18.97-T2 AC-4 #14: live; the ten items naming October, its own month; the four rows, the first remark dated from it', () => {
     const view = views[14];
     expect(view.scorecard.frozenAt).toBeNull();
-    expect(view.agenda.preparation.map((i) => i.text)[1]).toBe('Prepare October performance data');
+    // In Bahasa Indonesia, as the service writes it for an Indonesian reader (P18.98-T7).
+    expect(view.agenda.preparation.map((i) => i.text)[1]).toBe('Siapkan data kinerja Oktober');
     expect([view.agenda.preparation, view.agenda.during, view.agenda.post].map((s) => s.length)).toEqual([3, 5, 2]);
     expect([...view.agenda.preparation, ...view.agenda.during, ...view.agenda.post].every((i) => i.pic === '' && !i.done)).toBe(true);
     expect(view.actionItems.map((r) => [r.initiative, r.status])).toEqual([
-      ['Activity tracking tool adoption', 'planned'], ['Activity tracking tool adoption', 'planned'],
-      ['Leads Generation Playbook', 'not_planned'], ['Team Management Playbook', 'not_planned'],
+      ['Adopsi Activity Tracking Tool', 'planned'], ['Adopsi Activity Tracking Tool', 'planned'],
+      ['Playbook Leads Generation', 'not_planned'], ['Playbook Team Management', 'not_planned'],
     ]);
     // A week after #14's 13 October, where the prototype's *"Scheduled for 2 Sept"* stood still.
-    expect(view.actionItems[0].remarks).toBe('Scheduled for 20 Okt');
+    expect(view.actionItems[0].remarks).toBe(FORUM_REMARKS.scheduled('20 Okt'));
   });
 
   it('P18.97-T1 AC-20 #14’s targets are rates — the prototype’s as migration 0043 reads them — × its 9 units; New AA’s kept, not drawn', async () => {
@@ -147,10 +148,10 @@ describe('Phase 18.1 the Strategic Leader Forum seed — a run at 10:00 on 10 Oc
     ]);
     expect(views[13].actionItems.map((r) => r.status)).toEqual(['not_planned', 'planned', 'implemented']);
     // P18.97-T2 AC-4: the follow-ups the session before's; the month item #13's own month.
-    expect(views[13].agenda.preparation.map((i) => i.text)).toEqual(['Compile follow-ups from August session', 'Prepare September performance data']);
-    expect(views[13].actionItems[1].remarks).toBe('Scheduled for 3 Okt');
+    expect(views[13].agenda.preparation.map((i) => i.text)).toEqual(['Kumpulkan follow-up dari sesi Agustus', 'Siapkan data kinerja September']);
+    expect(views[13].actionItems[1].remarks).toBe(FORUM_REMARKS.scheduled('3 Okt'));
     expect(views[12].openItems).toBe(0);
-    expect(views[12].actionItems[0].remarks).toBe('Done 5 Sep');
+    expect(views[12].actionItems[0].remarks).toBe(FORUM_REMARKS.done('5 Sep'));
     expect(views[12].scorecard.frozenAt).toBe(new Date('2026-09-13T02:00:00Z').toISOString());
     // *3M new agent %* has a figure in FY: the cohort is seeded before the freeze.
     const threeMonths = views[13].scorecard.rows.find((r) => r.key === 'new_agent_3m')!;

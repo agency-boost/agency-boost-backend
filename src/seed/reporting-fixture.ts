@@ -343,7 +343,7 @@ export async function seedReportingFixture(deps: ReportingFixtureDeps): Promise<
     await db.collection('coachingSessions').insertOne({
       _id: oid(id), kpmId: office, coachMembershipId: coach, coacheeMembershipId: coachee, status: 'finalized', date: day,
       lastWeek: null, lastWeekItems: [], tips: [], leadActions: [],
-      actionItems: [{ itemId: seedObjectId('reporting-fixture', 'item', office, slot), text: 'Book two presentations', dueDate: addDays(day, 7), carriedFromItemId: null }],
+      actionItems: [{ itemId: seedObjectId('reporting-fixture', 'item', office, slot), text: 'Jadwalkan dua presentasi', dueDate: addDays(day, 7), carriedFromItemId: null }],
       snapshot: null, finalizedAt: at(day, 4), finalizedByMembershipId: coach, version: 3, frozenAt: at(day, 4), corrections: [],
       deletedAt: null, createdAt: at(day, 3), createdBy: coach, updatedAt: at(day, 4), updatedBy: coach,
     });
@@ -364,9 +364,9 @@ export async function seedReportingFixture(deps: ReportingFixtureDeps): Promise<
     await db.collection('leads').insertOne({
       _id: oid(id), kpmId, ownerMembershipId: ownerId, name, type: 'recruitment', contact: { phone: null, email: null },
       statusCode, statusId: status ? String(status._id) : null, commitments: [], remarks: null,
-      nextActionDate: closedWonOn ? null : addDays(today, 3), nextActionNote: closedWonOn ? null : 'Confirm the AAJI exam date.',
+      nextActionDate: closedWonOn ? null : addDays(today, 3), nextActionNote: closedWonOn ? null : 'Konfirmasi tanggal ujian AAJI.',
       outcome: closedWonOn ? 'won' : null, outcomeAt: closedWonOn ? at(closedWonOn, 5) : null, dateRegistered: registered,
-      source: 'Personal network', version: path.length + (closedWonOn ? 2 : 1),
+      source: 'Jaringan pribadi', version: path.length + (closedWonOn ? 2 : 1),
       transitions: path.map((code, i) => ({
         fromStatusCode: i === 0 ? null : path[i - 1], toStatusCode: code,
         at: at(addDays(closedWonOn ?? today, -(path.length - i) * 4), 4), byMembershipId: ownerId,

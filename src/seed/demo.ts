@@ -62,7 +62,7 @@ import { CoachingSession, CoachingSessionSchema } from '@/modules/coaching/coach
 import { CoachingProfile, CoachingProfileSchema } from '@/modules/coaching/coaching-profile.schema';
 import { LeaderNote, LeaderNoteSchema } from '@/modules/coaching/leader-note.schema';
 import { backfillCoachingSnapshots } from './coaching-snapshots';
-import { buildCalendarFixture, type CalendarFixture } from './calendar-fixture';
+import { buildCalendarFixture, CALENDAR_WORDS as CAL, type CalendarFixture } from './calendar-fixture';
 import { buildActivationFixture, type ActivationFixture } from './activation-fixture';
 import { seedSubscriptionFixture } from './subscription-fixture';
 import { seedPersonalFor } from './personal-fixture';
@@ -82,7 +82,7 @@ import { buildFirstSaleFixture, type FirstSaleFixture } from './first-sale-fixtu
 import { up as backfillFirstSales } from '../migrations/0042-membership-first-sale';
 import { seedLeaderForumFixture, type LeaderForumFixture } from './leader-forum-fixture';
 import { seedTrainingFixture, type TrainingFixture } from './training-fixture';
-import { seedEventsFixture, type EventsFixture } from './events-fixture';
+import { CONFIGURED_EVENTS, seedEventsFixture, type EventsFixture } from './events-fixture';
 import { seedCampaignsFixture, type CampaignsFixture } from './campaigns-fixture';
 import { seedComplianceFixture, type ComplianceFixture } from './compliance-fixture';
 import { seedJoiningFixture, type JoiningFixture } from './joining-fixture';
@@ -189,6 +189,50 @@ const RINA_JOINED_DAYS_AGO = 58;
 const BUDI_JOINED_DAYS_AGO = 61;
 /** When 0555's Owner and Lina joined: before 0555's two months of files, its logging and its 1:1 — and Lina's activation start. */
 const OFFICE_0555_JOINED_DAYS_AGO = 60;
+
+/*
+ * **What the office types, in Bahasa Indonesia** (P18.98-T7, OD-238): the demo reads as an Indonesian office. Content an
+ * office typed is shown as typed in both languages (ADR-0179 §5), so this is the seed's own text, never a translation.
+ * Each row below is written once and then left as it is, so a database seeded before keeps the English it was given:
+ * where a writer keys on what a row says (a notice's payload, an audit row's fields, a group's name), the English it
+ * wrote before is named beside it as `formerly`, and a re-run that finds either writes nothing.
+ */
+
+/** The reasons people typed: promotions, a removal, a decline, a suspension, a support session. */
+export const DEMO_REASONS = {
+  sariPromoted: 'Siap memimpin unit sendiri',
+  dewiPromoted: 'Mengambil jalur AAB setelah Q2',
+  yantiRemoved: 'Pindah ke kompetitor, lalu kembali tiga minggu kemudian.',
+  fajarDeclined: 'Unit saya penuh kuartal ini — coba ke Agus, unitnya masih ada tempat.',
+  suspended: 'Biaya platform belum dibayar',
+  removedForCompetitor: 'Pindah ke kompetitor',
+  impersonation: 'Tiket dukungan 118 — tidak bisa melihat unitnya',
+} as const;
+
+/** The English the seed typed before P18.98-T7, by the same keys: what a re-run over an older database finds. */
+const FORMER_REASONS: Readonly<Record<keyof typeof DEMO_REASONS, string>> = {
+  sariPromoted: 'Ready to lead a unit of her own',
+  dewiPromoted: 'Took the AAB track after Q2',
+  yantiRemoved: 'Left for a competitor, then came back three weeks later.',
+  fajarDeclined: 'My unit is full this quarter — ask Agus, he has room.',
+  suspended: 'Unpaid platform fees',
+  removedForCompetitor: 'Left for a competitor',
+  impersonation: 'Support ticket 118 — cannot see her unit',
+};
+
+/**
+ * **The office's three events, as `configure()` writes them**, by code (`events-fixture.ts` holds their words). Reminders
+ * name each by the title the office holds — read back by code — so a database seeded before keeps its English titles
+ * and its reminders agree with them.
+ */
+const DEMO_EVENTS = CONFIGURED_EVENTS;
+type DemoEventCode = keyof typeof DEMO_EVENTS;
+
+/** The two informal groups in 0417, and the name the first had before P18.98-T7. */
+export const DEMO_GROUPS = {
+  mentoring: { name: 'Mentoring Agen Baru', formerly: 'New Agent Mentoring Circle' },
+  topProducers: { name: 'Top Producers 2026' },
+} as const;
 
 type Role = 'ab' | 'aab' | 'agent';
 
@@ -732,23 +776,20 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     if (await missing(Events as never)) {
     await Events.insertMany([
       {
-        kpmId, code: 'KICKOFF', typeCode: 'TRAINING', title: 'Kickoff 2026',
-        blurb: 'What the year looks like, and what we are measured on.',
+        kpmId, code: 'KICKOFF', typeCode: 'TRAINING', ...DEMO_EVENTS.KICKOFF,
         description: '', startsAt: at(14, 9), endsAt: at(14, 13), location: 'Kantor KPM',
         locationUrl: null,
         audience: { issuer: 'kpm', scope: 'all_agents', inviteeMembershipIds: [] },
       },
       {
-        kpmId, code: 'LEADERS_HUDDLE', typeCode: 'RECOGNITION',
-        title: 'Leaders’ huddle', blurb: 'Unit numbers, and who needs help this month.',
+        kpmId, code: 'LEADERS_HUDDLE', typeCode: 'RECOGNITION', ...DEMO_EVENTS.LEADERS_HUDDLE,
         description: '', startsAt: fromNow(-1), endsAt: fromNow(6), location: 'Ruang rapat',
         locationUrl: null,
         // Leaders by the graph, never by job title — which is what makes this row worth seeding.
         audience: { issuer: 'kpm', scope: 'leaders', inviteeMembershipIds: [] },
       },
       {
-        kpmId, code: 'PRULINK_BRIEFING', typeCode: 'PRODUCT_LAUNCH',
-        title: 'PRULink briefing', blurb: 'The new rider, and how to position it.',
+        kpmId, code: 'PRULINK_BRIEFING', typeCode: 'PRODUCT_LAUNCH', ...DEMO_EVENTS.PRULINK_BRIEFING,
         description: '', startsAt: at(-21, 10), endsAt: at(-21, 13), location: 'Online',
         locationUrl: 'https://meet.example.test/prulink',
         audience: { issuer: 'company', scope: 'all_agents', inviteeMembershipIds: [] },
@@ -856,23 +897,23 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     if (await missing(Campaigns as never)) {
     await Campaigns.insertMany([
       {
-        kpmId, code: 'YEAR_END_DRIVE', title: 'Year-End Star Club Drive',
-        description: 'Push to Star Club before the year closes.',
+        kpmId, code: 'YEAR_END_DRIVE', title: 'Kejar Star Club Akhir Tahun',
+        description: 'Dorong sampai Star Club sebelum tahun berakhir.',
         startsAt: at(-30, 0), endsAt: at(60, 0),
         requirements: [{
           metricKey: 'APE_ACHIEVED', comparator: 'gte',
           value: 500_000_000 * 100, unit: 'idr_minor',
         }],
-        reward: 'Extra unit budget and a dinner',
+        reward: 'Tambahan anggaran unit dan makan malam bersama',
       },
       {
-        kpmId, code: 'RECRUIT_SPRINT', title: 'Recruitment sprint',
-        description: 'Four weeks of recruiting, counted on activity.',
+        kpmId, code: 'RECRUIT_SPRINT', title: 'Sprint recruitment',
+        description: 'Empat minggu recruitment, dihitung dari aktivitas.',
         startsAt: at(-120, 0), endsAt: at(-90, 0),
         requirements: [{
           metricKey: 'RECRUITMENT_SUCCESS_RATE', comparator: 'gte', value: 0.3, unit: 'ratio',
         }],
-        reward: 'Recognition at the monthly huddle',
+        reward: 'Apresiasi di rapat bulanan',
       },
     ].map((campaign) => ({
       ...campaign, version: 1, status: 'active', archivedAt: null, deletedAt: null,
@@ -1176,7 +1217,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       await History.create({
         kpmId, membershipId: String(created._id), eventType: 'removed',
         fromRole: role, validFrom: removedAt, validTo: null,
-        reason: 'Left the industry — seeded so the Removed tab has something to show',
+        reason: 'Keluar dari industri asuransi.',
       });
     }
 
@@ -1404,8 +1445,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
 
   // Both AABs were agents first. Without these the Role change log is empty, and an
   // empty log reads as a screen that does not work.
-  await promotedEarlier(id0417, sari, 'agent', 'aab', ab, 'Ready to lead a unit of her own', 62);
-  await promotedEarlier(id0417, dewi, 'agent', 'aab', ab, 'Took the AAB track after Q2', 21);
+  await promotedEarlier(id0417, sari, 'agent', 'aab', ab, DEMO_REASONS.sariPromoted, 62);
+  await promotedEarlier(id0417, dewi, 'agent', 'aab', ab, DEMO_REASONS.dewiPromoted, 21);
 
   /*
    * Sari's two agents joined after her promotion, 62 days ago: Budi the day after, before his first logged
@@ -1496,11 +1537,13 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    * the Owner — because that is the whole point of a group: it is not the tree.
    */
   const groupSeeds = [
-    { name: 'New Agent Mentoring Circle', owner: sari.id, members: [rina.id, budi.id] },
-    { name: 'Top Producers 2026', owner: owner.id, members: [ab.id, sari.id] },
+    { ...DEMO_GROUPS.mentoring, owner: sari.id, members: [rina.id, budi.id] },
+    { ...DEMO_GROUPS.topProducers, owner: owner.id, members: [ab.id, sari.id] },
   ];
   for (const seed of groupSeeds) {
-    const existing = await Groups.findOne({ kpmId: id0417, name: seed.name }).exec();
+    // Found under the name an earlier run gave it too, so a database seeded before P18.98-T7 gets no second group.
+    const names = 'formerly' in seed ? [seed.name, seed.formerly] : [seed.name];
+    const existing = await Groups.findOne({ kpmId: id0417, name: { $in: names } }).exec();
     const group =
       existing ??
       (await Groups.create({
@@ -1662,15 +1705,15 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   await seedLeads(id0417, [
     // A name from a Thursday BOP and nothing more — legal to hold, and the reason the gate sits
     // on the contact fields rather than on the record. No type, so no stage is possible yet.
-    { owner: rina.id, name: 'Pak Bambang', type: null, remarks: 'Met at the Thursday BOP.' },
+    { owner: rina.id, name: 'Pak Bambang', type: null, remarks: 'Ketemu di BOP hari Kamis.' },
     {
       // Seeded as *Ibu Dewi Lestari* until P11-T2's verification: the AAB's own name, on the roster the
       // coaching demo walks, where *Leads · Ibu Dewi Lestari* in Rina's sessions read as the AAB.
       owner: rina.id, name: 'Ibu Rosa Damayanti', formerly: 'Ibu Dewi Lestari', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'],
       phone: '0812-1100-2200',
-      remarks: 'Hot button: the eldest starts university in two years.',
-      nextActionIn: 7, nextActionNote: 'Coffee at Grand Indonesia, 10:00.',
+      remarks: 'Kebutuhan utama: anak sulung masuk kuliah dua tahun lagi.',
+      nextActionIn: 7, nextActionNote: 'Ngopi di Grand Indonesia, jam 10.00.',
       thisMonth: true, source: 'Referral — Ibu Sari',
     },
     {
@@ -1682,23 +1725,23 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       owner: rina.id, name: 'Pak Hendro Gunawan', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED'],
       email: 'hendro.g@example.com',
-      remarks: 'Application already in with another insurer; comparing.',
-      nextActionIn: -6, nextActionNote: 'Chase the illustration.',
+      remarks: 'SPAJ sudah masuk di asuransi lain; masih membandingkan.',
+      nextActionIn: -6, nextActionNote: 'Follow up soal ilustrasinya.',
       thisMonth: true, source: 'Canvassing — Senayan',
     },
     {
       // Nothing typed against it at all: no date and no remark, so it carries two flags.
       owner: rina.id, name: 'Pak Surya Dharma', type: 'sales',
       path: ['NOT_YET_APPROACHED'],
-      source: 'Walk-in — BSD office',
+      source: 'Datang langsung — kantor BSD',
     },
     {
       // Open, on the stage that closes the pipeline. The only state in which ✓ is available.
       owner: rina.id, name: 'Ibu Wulan Sari', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED', 'APPROVED_NOT_PAID', 'PAID_AND_ISSUED'],
       phone: '0811-9090-3030',
-      remarks: 'Premium paid on the 12th; waiting on the policy document.',
-      nextActionIn: 2, nextActionNote: 'Hand over the policy.',
+      remarks: 'Premi sudah dibayar tanggal 12; menunggu dokumen polis.',
+      nextActionIn: 2, nextActionNote: 'Serahkan polisnya.',
       thisMonth: true, source: 'Referral — Pak Hendro',
     },
     {
@@ -1706,22 +1749,22 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       owner: rina.id, name: 'Ibu Ratna Kusuma', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'], outcome: 'won',
       phone: '0812-3344-5566',
-      remarks: 'Took the education plan. Asked about a second policy for her son.',
+      remarks: 'Ambil produk dana pendidikan. Tanya soal polis kedua untuk putranya.',
       source: 'Referral — Ibu Sari',
     },
     {
       owner: budi.id, name: 'Sdri. Maya Puspita', type: 'recruitment',
       path: ['NOT_APPROACHED'],
       phone: '0813-4455-6677',
-      remarks: 'Referred by her cousin, who is already an agent. Not yet approached.',
-      source: 'Referral — agent network',
+      remarks: 'Direferensikan sepupunya yang sudah jadi agen. Belum didekati.',
+      source: 'Referral — jaringan agen',
     },
     {
       owner: budi.id, name: 'Pak Andi Kurniawan', type: 'recruitment',
       path: ['NOT_APPROACHED', 'MEETING_SCHEDULED', 'RECRUITMENT_PRESENTATION', 'AGENT_CODE_CREATED', 'AAJI_LICENSED'],
       phone: '0857-7788-9900',
-      remarks: 'Sat through the NBO. Asked about the licence timeline.',
-      nextActionIn: 11, nextActionNote: 'Send the AAJI schedule.',
+      remarks: 'Sudah ikut NBO. Tanya soal jadwal lisensi.',
+      nextActionIn: 11, nextActionNote: 'Kirim jadwal ujian AAJI.',
       thisMonth: true, source: 'BOP — 12 September',
     },
     {
@@ -1729,7 +1772,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       owner: budi.id, name: 'Pak Joko Prasetyo', type: 'recruitment',
       path: ['NOT_APPROACHED', 'MEETING_SCHEDULED'], outcome: 'lost',
       phone: '0856-2233-4455',
-      remarks: 'Took a salaried role instead. Happy to be asked again next year.',
+      remarks: 'Memilih kerja kantoran bergaji tetap. Boleh ditawari lagi tahun depan.',
       source: 'BOP — 12 September',
     },
     /*
@@ -1746,36 +1789,36 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       owner: rina.id, name: 'Pak Bambang Sutrisno', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED', 'APPROVED_NOT_PAID', 'PAID_AND_ISSUED'],
       outcome: 'won', phone: '0811-2233-4455',
-      remarks: 'Whole-life, paid annually. Wants his wife reviewed next.',
+      remarks: 'Asuransi jiwa seumur hidup, premi tahunan. Berikutnya minta istrinya dibuatkan juga.',
       source: 'Referral — Pak Hendro',
     },
     {
       owner: rina.id, name: 'Ibu Dewi Anggraini', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'],
       outcome: 'won', email: 'dewi.a@example.com',
-      remarks: 'Education plan for two children. Asked about topping up next year.',
+      remarks: 'Dana pendidikan untuk dua anak. Tanya soal top up tahun depan.',
       source: 'Canvassing — Senayan',
     },
     {
       owner: rina.id, name: 'Pak Slamet Riyadi', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'],
       outcome: 'won', phone: '0812-9988-7766',
-      remarks: 'Critical illness rider added at underwriting.',
+      remarks: 'Rider penyakit kritis ditambahkan saat underwriting.',
       source: 'BOP — 12 September',
     },
     {
       owner: rina.id, name: 'Ibu Lestari Wibowo', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'],
       outcome: 'won',
-      remarks: 'Renewal from a policy she held elsewhere.',
+      remarks: 'Pindahan dari polis yang dia pegang di tempat lain.',
       source: 'Referral — Ibu Ratna',
     },
     {
       owner: rina.id, name: 'Pak Yusuf Maulana', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED', 'PAID_AND_ISSUED'],
       outcome: 'won', phone: '0857-1122-3344',
-      remarks: 'Paid by transfer on the day. Referred his brother.',
-      source: 'Referral — agent network',
+      remarks: 'Bayar lewat transfer hari itu juga. Memberi referral saudaranya.',
+      source: 'Referral — jaringan agen',
     },
     {
       // Lost late, which the ladder allows at any rung (§3.7) — and the more useful case to see,
@@ -1783,14 +1826,14 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       owner: rina.id, name: 'Pak Hendra Gunawan', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED'], outcome: 'lost',
       phone: '0813-7766-5544',
-      remarks: 'Underwriting asked for a medical he did not want to take.',
+      remarks: 'Underwriting minta pemeriksaan medis, dia tidak bersedia.',
       source: 'Canvassing — Senayan',
     },
     {
       owner: rina.id, name: 'Sdri. Fitri Handayani', type: 'recruitment',
       path: ['NOT_APPROACHED', 'MEETING_SCHEDULED'], outcome: 'lost',
       email: 'fitri.h@example.com',
-      remarks: 'Finishing her degree first. Said to ask again in a year.',
+      remarks: 'Mau menyelesaikan kuliah dulu. Minta dihubungi lagi tahun depan.',
       source: 'BOP — 12 September',
     },
     {
@@ -1798,8 +1841,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       owner: dewi.id, name: 'Pak Rizal Effendi', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'],
       phone: '0815-6677-8899',
-      remarks: 'Wants a critical-illness rider costed.',
-      nextActionIn: 4, nextActionNote: 'Send the two illustrations.',
+      remarks: 'Minta dihitungkan rider penyakit kritis.',
+      nextActionIn: 4, nextActionNote: 'Kirim dua ilustrasinya.',
       source: 'Referral — Pak Agus',
     },
   ]);
@@ -2248,7 +2291,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       const firstApe = right[0] ? Math.round(right[0].values.apeMonthly * 1.1) : 0;
       const correction = {
         value: firstApe, provenance: 'corrected', sourceBatchId: null,
-        correctedBy: admin.id, correctedAt, reason: 'Carrier restated the APE by email after the file was sent',
+        correctedBy: admin.id, correctedAt, reason: 'Perusahaan meralat APE lewat email setelah file dikirim.',
         replacedValue: right[0]?.values.apeMonthly ?? null,
       };
       await MonthRows.insertMany(roster.map((member) => monthRow(member, thisMonth, {
@@ -2332,7 +2375,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     await RatioDefinitions.create({
       kpmId: id0555,
       code: 'REFERRAL_RATE',
-      label: 'Referral rate',
+      label: 'Rasio referral',
       numerator: ['LEADS_NEW_PROSPECT'],
       denominator: ['LEADS_CONTACTED'],
       benchmark: 0.35,
@@ -2369,15 +2412,15 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       owner: agent0555.id, name: 'Ibu Christine Halim', type: 'sales',
       path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'],
       phone: '0819-2200-3311',
-      remarks: 'Kelapa Gading. Wants unit-link, sceptical about fees.',
-      nextActionIn: 3, nextActionNote: 'Walk through the fee table.',
-      source: 'Walk-in — Kelapa Gading',
+      remarks: 'Kelapa Gading. Tertarik unit link, ragu soal biayanya.',
+      nextActionIn: 3, nextActionNote: 'Jelaskan tabel biayanya.',
+      source: 'Datang langsung — Kelapa Gading',
     },
     {
       owner: owner0555.id, name: 'Pak Teguh Santoso', type: 'recruitment',
       path: ['NOT_APPROACHED', 'MEETING_SCHEDULED'],
       email: 'teguh.s@example.com',
-      remarks: 'Branch manager at a bank, looking for a second income.',
+      remarks: 'Kepala cabang di sebuah bank, cari penghasilan tambahan.',
       source: 'Referral — Hendra',
     },
   ]);
@@ -2531,7 +2574,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   }
 
   await kpmRequest('ade@agencyboost.test', 'Ade Kurniawan', 'he', 'Bandung Kota Branch', {
-    note: 'Six agents ready to move across from a branch that is closing.',
+    note: 'Enam agen siap pindah dari cabang yang akan tutup.',
     createdAt: daysAgo(3),
   });
   await kpmRequest('maya@agencyboost.test', 'Maya Sari', 'she', 'Surabaya Timur Branch', {
@@ -2542,7 +2585,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     status: 'declined',
     decidedAt: daysAgo(9),
     decidedByUserId: String(superAdmin._id),
-    reason: 'Too close to an existing office. Reapply once the territory split is settled.',
+    reason: 'Terlalu dekat dengan kantor yang sudah ada. Silakan ajukan lagi setelah pembagian wilayah selesai.',
     createdAt: daysAgo(12),
   });
   await kpmRequest('owner@kpm0555.test', 'Hendra Wijaya', 'he', 'Kelapa Gading Branch', {
@@ -2573,7 +2616,11 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     to: { userId: string; membershipId: string | null },
     templateId: string,
     payload: Record<string, unknown>,
-    opts: { readDaysAgo?: number; readAt?: Date } & ({ sentDaysAgo: number } | { sentAt: Date }),
+    opts: {
+      readDaysAgo?: number; readAt?: Date;
+      /** The payload an earlier run wrote this notice with, before its words were Indonesian (P18.98-T7). */
+      formerly?: Record<string, unknown>;
+    } & ({ sentDaysAgo: number } | { sentAt: Date }),
   ) {
     /*
      * **Keyed on what the notice says, never on when** (P11-T2 AC-6). The key was `createdAt`, which is
@@ -2582,7 +2629,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
      * template and the payload's fields are the notice; a re-run finds it and writes nothing.
      */
     const existing = await Notifications.findOne({
-      userId: to.userId, templateId, ...asFieldFilter({ payload }),
+      userId: to.userId, templateId,
+      $or: [payload, ...(opts.formerly ? [opts.formerly] : [])].map((said) => asFieldFilter({ payload: said })),
     }).exec();
     if (existing) return;
     const at = 'sentAt' in opts ? opts.sentAt : daysAgo(opts.sentDaysAgo);
@@ -2612,14 +2660,14 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   await notify(
     { userId: String(sariUser._id), membershipId: sari.id },
     NotificationTemplate.ROLE_CHANGED,
-    { reason: 'Ready to lead a unit of her own' },
-    { sentDaysAgo: 62, readDaysAgo: 61 },
+    { reason: DEMO_REASONS.sariPromoted },
+    { sentDaysAgo: 62, readDaysAgo: 61, formerly: { reason: FORMER_REASONS.sariPromoted } },
   );
   await notify(
     { userId: String(dewiUser._id), membershipId: dewi.id },
     NotificationTemplate.ROLE_CHANGED,
-    { reason: 'Took the AAB track after Q2' },
-    { sentDaysAgo: 21, readDaysAgo: 20 },
+    { reason: DEMO_REASONS.dewiPromoted },
+    { sentDaysAgo: 21, readDaysAgo: 20, formerly: { reason: FORMER_REASONS.dewiPromoted } },
   );
 
   // Rina and Budi: how each of them arrived. Two different doors, two templates, on the days they joined.
@@ -2648,8 +2696,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   await notify(
     { userId: String(removedUser._id), membershipId: null },
     NotificationTemplate.MEMBER_REMOVED,
-    { reason: 'Left for a competitor, then came back three weeks later.' },
-    { sentDaysAgo: 50, readDaysAgo: 49 },
+    { reason: DEMO_REASONS.yantiRemoved },
+    { sentDaysAgo: 50, readDaysAgo: 49, formerly: { reason: FORMER_REASONS.yantiRemoved } },
   );
   await notify(
     { userId: String(removedUser._id), membershipId: null },
@@ -2662,8 +2710,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   await notify(
     { userId: String(untaggedUser._id), membershipId: null },
     NotificationTemplate.JOIN_REQUEST_DECLINED,
-    { reason: 'My unit is full this quarter — ask Agus, he has room.' },
-    { sentDaysAgo: 8 },
+    { reason: DEMO_REASONS.fajarDeclined },
+    { sentDaysAgo: 8, formerly: { reason: FORMER_REASONS.fajarDeclined } },
   );
 
   // ------------------------------------------------------------ the audit log
@@ -2680,6 +2728,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     action: string,
     targetCollection: string,
     fields: Record<string, unknown>,
+    /** The fields an earlier run wrote this row with, before its words were Indonesian (P18.98-T7). */
+    formerly?: Record<string, unknown>,
   ) {
     /*
      * **The same trap, the same fix** (P11-T2 AC-6): `fields` carries `createdAt: daysAgo(n)`, a new
@@ -2687,7 +2737,9 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
      * action and what it was done to; when is not part of what it is.
      */
     const { createdAt: _when, ...what } = fields;
-    const existing = await Audit.findOne({ action, ...asFieldFilter(what) }).exec();
+    const existing = await Audit.findOne({
+      action, $or: [what, ...(formerly ? [{ ...what, ...formerly }] : [])].map((said) => asFieldFilter(said)),
+    }).exec();
     if (existing) return;
     await Audit.create({
       kpmId: null,
@@ -2727,9 +2779,9 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   await audited('kpm.suspended', 'kpms', {
     targetId: String(kpm0999._id),
     before: { status: 'active' },
-    after: { status: 'suspended', reason: 'Unpaid platform fees' },
+    after: { status: 'suspended', reason: DEMO_REASONS.suspended },
     createdAt: daysAgo(14),
-  });
+  }, { after: { status: 'suspended', reason: FORMER_REASONS.suspended } });
   await audited('kpm_request.declined', 'kpmRequests', {
     after: { branchName: 'Medan Selatan Branch' },
     createdAt: daysAgo(9),
@@ -2755,9 +2807,9 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     actorUserId: String(sariUser._id),
     targetMembershipId: rina.id,
     onBehalfOf: true,
-    after: { reason: 'Left for a competitor' },
+    after: { reason: DEMO_REASONS.removedForCompetitor },
     createdAt: daysAgo(50),
-  });
+  }, { after: { reason: FORMER_REASONS.removedForCompetitor } });
 
   /*
    * The pair is deliberately asymmetric, because the service writes it that way.
@@ -2770,9 +2822,9 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    */
   await audited('impersonation.started', 'users', {
     targetId: String(rinaUser._id),
-    after: { reason: 'Support ticket 118 — cannot see her unit', minutes: 60 },
+    after: { reason: DEMO_REASONS.impersonation, minutes: 60 },
     createdAt: daysAgo(6),
-  });
+  }, { after: { reason: FORMER_REASONS.impersonation, minutes: 60 } });
   await audited('impersonation.ended', 'users', {
     kpmId: id0417,
     effectiveUserId: String(rinaUser._id),
@@ -2997,7 +3049,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       totalCount: 1,
       at: daysAgo(5),
       byMembershipId: sari.id,
-      reason: 'Two submissions were logged against the wrong day.',
+      reason: 'Dua submission tercatat di hari yang salah.',
     }],
   });
 
@@ -3197,7 +3249,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   await insertFixtureRows(CalendarEvents as unknown as mongoose.Model<object>, calendar.entries);
   /*
    * **Rina hides her own entries from her leaders** (P13.1-T8, ADR-0110): *Hide my personal activities* is on
-   * for her, so Sari's compare shows *Client meeting — Pak Gunadi* and her task as *Busy* at their times, while
+   * for her, so Sari's compare shows *Pertemuan klien — Pak Gunadi* and her task as *Busy* at their times, while
    * Sari's own 1:1s with her stay in full — Sari organised them. Agus's compare with Sari, the OD-87 walk, is
    * untouched. Set on every run — the schema writes `false` when a membership is created, so there is no
    * "never written" to wait for — and a walker who switched it off gets it back on the next run, as `--reset`
@@ -3249,26 +3301,29 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const HISTORY_SIZE = 45;
   const hour = 60 * 60 * 1000;
   const officeDate = (at: Date) => clock.localDateFor(DEFAULT_TENANT_TIMEZONE, at);
-  /** When the office's seeded events start, in days from the run (the `Events` rows above): a reminder precedes its event. */
-  const EVENT_STARTS_IN_DAYS: Record<string, number> = { 'PRULink briefing': -21, 'Leaders’ huddle': 0, 'Kickoff 2026': 14 };
+  /**
+   * When the office's seeded events start, in days from the run (the `Events` rows above), by code: a reminder precedes
+   * its event. By code, not by title, since P18.98-T7 — a database seeded before holds the English titles.
+   */
+  const EVENT_STARTS_IN_DAYS: Record<DemoEventCode, number> = { PRULINK_BRIEFING: -21, LEADERS_HUDDLE: 0, KICKOFF: 14 };
   const historyCast = [
     {
       key: 'agus', user: abUser, membership: ab, joinedDaysAgo: 106,
       requests: [{ fullName: sariUser.fullName, daysAgo: 103 }, { fullName: dewiUser.fullName, daysAgo: 100 }],
-      reminders: ['Leaders’ huddle', 'PRULink briefing', 'Kickoff 2026'],
+      reminders: ['LEADERS_HUDDLE', 'PRULINK_BRIEFING', 'KICKOFF'],
     },
     {
       key: 'sari', user: sariUser, membership: sari, joinedDaysAgo: 103,
       requests: [{ fullName: rinaUser.fullName, daysAgo: RINA_JOINED_DAYS_AGO }, { fullName: removedUser.fullName, daysAgo: 28 }],
-      reminders: ['Leaders’ huddle', 'PRULink briefing', 'Kickoff 2026'],
+      reminders: ['LEADERS_HUDDLE', 'PRULINK_BRIEFING', 'KICKOFF'],
     },
     {
       key: 'rina', user: rinaUser, membership: rina, joinedDaysAgo: RINA_JOINED_DAYS_AGO,
-      requests: [], reminders: ['PRULink briefing', 'Kickoff 2026'],
+      requests: [], reminders: ['PRULINK_BRIEFING', 'KICKOFF'],
     },
   ] as const;
-  const reminderFor = (titles: readonly string[], at: Date, i: number) => {
-    const upcoming = titles.filter((title) => daysAgo(-EVENT_STARTS_IN_DAYS[title]).getTime() > at.getTime());
+  const reminderFor = (codes: readonly DemoEventCode[], at: Date, i: number) => {
+    const upcoming = codes.filter((code) => daysAgo(-EVENT_STARTS_IN_DAYS[code]).getTime() > at.getTime());
     return upcoming[i % upcoming.length];
   };
   /*
@@ -3277,17 +3332,17 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    * read back from the three events above, so a database whose events an earlier run dated keeps that run's dates.
    */
   const remindedEvents = new Map(
-    (await Events.find({ kpmId: id0417, title: { $in: Object.keys(EVENT_STARTS_IN_DAYS) }, deletedAt: null }).lean().exec())
-      .map((event) => [event.title, event]),
+    (await Events.find({ kpmId: id0417, code: { $in: Object.keys(EVENT_STARTS_IN_DAYS) }, deletedAt: null }).lean().exec())
+      .map((event) => [event.code, event]),
   );
-  const reminderPayload = (title: string): Record<string, unknown> => {
-    const event = remindedEvents.get(title);
+  const reminderPayload = (code: DemoEventCode): Record<string, unknown> => {
+    const event = remindedEvents.get(code);
     return event
       ? {
-        eventId: String(event._id), title, startsAt: event.startsAt.toISOString(),
+        eventId: String(event._id), title: event.title, startsAt: event.startsAt.toISOString(),
         timezone: DEFAULT_TENANT_TIMEZONE, location: event.location,
       }
-      : { title };
+      : { title: DEMO_EVENTS[code].title };
   };
   const historyRows: Record<string, unknown>[] = [];
   for (const person of historyCast) {
@@ -3348,7 +3403,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       historyRows.push({
         _id: new mongoose.Types.ObjectId(seedObjectId('inbox-repeats', person.key, String(n))),
         kpmId: id0417, membershipId: person.membership.id, userId: String(person.user._id),
-        templateId: NotificationTemplate.EVENT_REMINDER, payload: reminderPayload('Kickoff 2026'),
+        templateId: NotificationTemplate.EVENT_REMINDER, payload: reminderPayload('KICKOFF'),
         delivery: Object.fromEntries(
           (TEMPLATE_CHANNELS[NotificationTemplate.EVENT_REMINDER] ?? []).map((channel) => [channel, { status: 'sent', at }]),
         ),
@@ -3637,8 +3692,8 @@ ${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guid
     newcomer@agencyboost.test                          Brand new — starts at Register KPM
 
   GROUPS in KPM 0417, at /people/members → Groups
-    New Agent Mentoring Circle   owned by Sari · Rina and Budi tagged
-    Top Producers 2026           owned by the Owner · Agus and Sari tagged
+    ${DEMO_GROUPS.mentoring.name.padEnd(28)} owned by Sari · Rina and Budi tagged
+    ${DEMO_GROUPS.topProducers.name.padEnd(28)} owned by the Owner · Agus and Sari tagged
     Agus, Sari and Yosef also carry the Core Leader tag
 
   KPM REQUESTS at /admin/kpm-requests  (Super Admin)
@@ -3757,25 +3812,25 @@ ${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guid
 
   CALENDAR at /calendar  (the entries are in calendarEvents, from src/seed/calendar-fixture.ts;
              this week is ${calendar.monday} to the Sunday after, the office's today ${calendar.today})
-    agus@kpm0417.test            his week: Weekly unit standup Monday and Thursday 9:00, the
-                                 Goal review, a Prospecting call block, Client trip — Surabaya
-                                 (Friday and Saturday, Travel), and Client review — Hartono family
+    agus@kpm0417.test            his week: ${CAL.standup} Monday and Thursday 9:00, the
+                                 ${CAL.goalReview}, a ${CAL.prospecting}, ${CAL.trip}
+                                 (Friday and Saturday, Travel), and ${CAL.clientReview}
                                  with an address in its notes. Monday has four lines: Month draws
                                  "+1 more…", or "+2 more…" when seeded on a Monday, his 1:1 with
                                  Indah today being a fifth. That 1:1 is the day his draft is open
-    Compare (Agus)               + Compare with downline → Sari: her Client visit — Tanjung family
-                                 in full, address included; the Owner's Branch leaders review she
+    Compare (Agus)               + Compare with downline → Sari: her ${CAL.clientVisit}
+                                 in full, address included; the Owner's ${CAL.leadersReview} she
                                  attends is Busy. Every compared week is recorded in the audit log
     Block time (Agus)            his block on Indah on Wednesday, 15:00 — placed, not asked;
                                  Indah has "Time was blocked on your calendar" in the bell
-    sari@kpm0417.test            Leads follow-up block; the Goal review invitation pending, with
+    sari@kpm0417.test            ${CAL.leadsFollowUp}; the ${CAL.goalReview} invitation pending, with
                                  "You have a new invitation" in the bell; the standups accepted;
-                                 her weekly 1:1 coaching with Rina on her sessions' days; the
-                                 Unit huddle, which Rina declined
-    rina@kpm0417.test            Client meeting — Pak Gunadi and a task; Sari's 1:1s, whose chip
+                                 her weekly ${CAL.oneToOne('Rina Wijaya')} on her sessions' days; the
+                                 ${CAL.huddle}, which Rina declined
+    rina@kpm0417.test            ${CAL.clientMeeting} and a task; Sari's 1:1s, whose chip
                                  links nowhere for her; the declined huddle is off her grid, and
                                  its "You have a new invitation" in the bell, read, still opens it
-    Hide my personal activities  on for Rina: Sari's compare shows her Client meeting and task as
+    Hide my personal activities  on for Rina: Sari's compare shows her ${CAL.clientMeeting} and task as
                                  Busy; Sari's own 1:1s with her stay in full
     indah@kpm0417.test           a task, the standups accepted, Agus's block (Close alone)
     The month                    four lighter weeks before this one and the week after

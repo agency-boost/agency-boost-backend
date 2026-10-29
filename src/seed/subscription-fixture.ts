@@ -106,6 +106,9 @@ export const LEADER_LIMIT_PEOPLE: readonly { email: string; fullName: string; pr
 ];
 
 /** The two offices this fixture makes, by derived id. */
+/** The Owner's reason on each approved promotion past 0603's limit, as typed (P18.98-T7: in Bahasa Indonesia). */
+export const SUBSCRIPTION_PROMOTION_REASON = 'Sudah memimpin tim akhir pekan';
+
 export const SUBSCRIPTION_OFFICES = {
   '0601': { _id: seedObjectId('subscription-fixture', 'kpm', '0601'), branchName: 'Cikarang Branch' },
   '0602': { _id: seedObjectId('subscription-fixture', 'kpm', '0602'), branchName: 'Bekasi Barat Branch' },
@@ -272,7 +275,7 @@ async function seedPastTheLimit(deps: SubscriptionFixtureDeps, plan: ReturnType<
       await deps.place(kpm, String(account._id), 'aab', root, { joinedDaysAgo: 360 - i * 20 });
       continue;
     }
-    const reason = 'Leads the weekend team already';
+    const reason = SUBSCRIPTION_PROMOTION_REASON;
     const placed = await deps.place(kpm, String(account._id), 'aab', root, { joinedDaysAgo: 200, joinedAs: 'agent' });
     await request(placed, {
       reason, status: 'approved', createdAt: deps.daysAgo(who.approvedDaysAgo + 2),
@@ -283,7 +286,7 @@ async function seedPastTheLimit(deps: SubscriptionFixtureDeps, plan: ReturnType<
 
   const rizkyUser = await person(deps, 'agent0603');
   const rizky = await deps.place(kpm, String(rizkyUser._id), 'agent', root, { joinedDaysAgo: 200 });
-  await request(rizky, { reason: 'Ready to bring on his own agents', status: 'pending', createdAt: deps.daysAgo(1) });
+  await request(rizky, { reason: 'Siap merekrut agennya sendiri', status: 'pending', createdAt: deps.daysAgo(1) });
   await deps.recount(kpmId, root.id);
   await subscribe(deps.Kpms, kpmId, plan['0603']);
 }

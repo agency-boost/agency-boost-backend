@@ -46,6 +46,10 @@ export type ProductNeed = (typeof PRODUCT_NEEDS)[number];
  *
  * Named slots rather than a list: an agent looking for the illustration is looking for **the**
  * illustration, and a list would make "which one is the brochure" a question about ordering.
+ *
+ * The labels are the English source of words the API serves in the reader's language (P18.98-T7; ADR-0179 §7):
+ * `modules/products/products.messages.ts` (`PRODUCTS_MESSAGES`) holds each beside its Indonesian — as it does
+ * *Lump-sum*, the one budget band below that is a word. The keys never change.
  */
 export const PRODUCT_DOCUMENT_SLOTS = [
   { key: 'brochure', label: 'Brochure' },

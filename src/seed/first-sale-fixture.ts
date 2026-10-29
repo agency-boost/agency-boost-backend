@@ -128,9 +128,9 @@ export function buildFirstSaleFixture(input: FirstSaleFixtureInput): FirstSaleFi
   const rakaClosed = addDays(input.joined.raka, 119);
   const leads = [
     lead(members.novi, 'Ibu Sekar Ayuningtyas', addDays(input.joined.novi, 8), noviClosed,
-      'Education plan for her daughter. Paid in full.', 'Referral — Arief'),
+      'Dana pendidikan untuk putrinya. Sudah lunas.', 'Referral — Arief'),
     lead(members.raka, 'Pak Darto Wibisono', addDays(input.joined.raka, 104), rakaClosed,
-      'Term life, paid annually. His first case, months in.', 'Canvassing — BSD'),
+      'Asuransi berjangka, premi tahunan. Case pertamanya, setelah berbulan-bulan.', 'Canvassing — BSD'),
   ].filter((row) => row.transitions.every((t) => t.at <= now));
 
   // Rina's fourth 1:1: three weeks back, before the three weekly ones the coaching fixture holds.
@@ -140,10 +140,10 @@ export function buildFirstSaleFixture(input: FirstSaleFixtureInput): FirstSaleFi
     kpmId, coachMembershipId: members.sari, coacheeMembershipId: members.rina, status: 'finalized', date: rinaDate,
     lastWeek: null, lastWeekItems: [],
     actionItems: [{
-      itemId: seedObjectId('first-sale-fixture', 'item', members.rina, 'fourth'), text: 'List ten names for the prospect list',
+      itemId: seedObjectId('first-sale-fixture', 'item', members.rina, 'fourth'), text: 'Tulis sepuluh nama untuk daftar prospek',
       dueDate: addDays(rinaDate, 7), carriedFromItemId: null,
     }],
-    tips: [{ tipId: seedObjectId('first-sale-fixture', 'tip', members.rina, 'fourth'), text: 'Book the calls before noon.', carriedFromTipId: null }],
+    tips: [{ tipId: seedObjectId('first-sale-fixture', 'tip', members.rina, 'fourth'), text: 'Jadwalkan teleponnya sebelum jam 12 siang.', carriedFromTipId: null }],
     leadActions: [], snapshot: null,
     finalizedAt: at(rinaDate), finalizedByMembershipId: members.sari, version: 3, frozenAt: at(rinaDate), corrections: [],
     deletedAt: null, createdBy: members.sari, updatedBy: members.sari, createdAt: at(rinaDate), updatedAt: at(rinaDate),
@@ -151,11 +151,11 @@ export function buildFirstSaleFixture(input: FirstSaleFixtureInput): FirstSaleFi
 
   const guide = [
     'FIRST SALE and the data-backed checklist items (P18.96-T4; ADR-0171)',
-    '  dimas@kpm0417.test   Close first case independently ticks from the production file: Completed from Sales data',
+    '  dimas@kpm0417.test   Closing case pertama secara mandiri ticks from the production file: Completed from Sales data',
     `  novi@kpm0417.test    first sale on day 20 (${noviClosed}), Ibu Sekar Ayuningtyas, paid and issued`,
     `  raka@kpm0417.test    only sale on day 120 (${rakaClosed}), Pak Darto Wibisono — for 3M not activated`,
-    `  rina@kpm0417.test    four 1:1s (the fourth today): Weekly 1-on-1 check-in Completed from Coaching sessions`,
-    '  indah@kpm0417.test   Weekly 1-on-1 check-in: Ticked by Agus Prasetyo, waiting for data',
+    `  rina@kpm0417.test    four 1:1s (the fourth today): Check-in 1-on-1 mingguan Completed from Coaching sessions`,
+    '  indah@kpm0417.test   Check-in 1-on-1 mingguan: Ticked by Agus Prasetyo, waiting for data',
   ].join('\n');
 
   return { leads, sessions, guide };

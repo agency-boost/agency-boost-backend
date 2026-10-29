@@ -296,7 +296,7 @@ describe('the activation’s linked items complete from real writes (Phase 13 ex
         h.as('B_AGENT');
         const kept = (await h.http().get('/activation/me').expect(200)).body as View;
         expect(kept.aspects[0].code).toBe('INTRODUCTION');
-        expect(item(kept, 'CRM_SETUP')).toMatchObject({ label: 'Set up company CRM system', link: null });
+        expect(item(kept, 'CRM_SETUP')).toMatchObject({ label: 'Siapkan sistem CRM perusahaan', link: null });
         expect(item(kept, 'GOAL_SETTING')).toMatchObject({ link: expect.objectContaining({ kind: 'feature:goals' }) });
       } finally {
         await h.col('memberships').deleteOne({ _id: newcomer.insertedId });

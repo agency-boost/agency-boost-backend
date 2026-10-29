@@ -9,6 +9,11 @@ import { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from './assets';
  * `:NNN` is a line of `prototype/AgencyBoost_Recruitment_Section.html`. Every string below is the
  * prototype's, verbatim, and `recruitment.spec.ts` reads each one back out of that file — except seven chip
  * labels, the client's shorter words of 2026-10-26 (UI-015, below), which the spec pins as the client gave them.
+ *
+ * **The English source of words the API serves in the reader's language** (P18.98-T7; ADR-0179 §7): the chips' labels,
+ * the pitch slots' titles and lines and the checklist's labels are the platform's own words, not the company's, and
+ * `modules/recruitment/recruitment.messages.ts` (`RECRUITMENT_MESSAGES`) holds each beside its Indonesian, its English
+ * read from here. A code never changes. The playbook below is the company's content, shown as typed (§5).
  */
 
 /**

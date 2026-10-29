@@ -1,15 +1,15 @@
 import { createHash } from 'node:crypto';
 import mongoose from 'mongoose';
 import { Clock, FixedClock } from '@/common/clock/clock.port';
+import { readerIn } from '@/common/i18n/reader';
 import { formatDayMonth } from '@/common/format/format';
 import { addDays } from '@/common/time/local-day';
 import { DEFAULT_TENANT_TIMEZONE, LEADER_MEETING_SHARE_DAYS, TIME } from '@/domain/constants';
 import { rateCellOf, RATE_ROWS } from '@/migrations/0043-leader-meeting-target-rates';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
-import {
-  firstAgendaTexts, meetingMonth, monthBefore, preparePerformanceData,
-} from '@/modules/leader-meetings/leader-meeting-agenda';
+import { firstAgendaTexts, preparePerformanceData } from '@/modules/leader-meetings/leader-meeting-agenda';
+import { MONTH_NAMES } from '@/modules/leader-meetings/leader-meetings.messages';
 import type {
   ActionStatus, AgendaSection, FrozenEditor, LeaderMeetingActionItem, LeaderMeetingAgendaItem, MonthlyTargetCell,
   TextTargetCell,
@@ -41,7 +41,7 @@ import { seedObjectId } from './coaching-fixture';
  *
  * | Signed in as | Sees |
  * |---|---|
- * | `owner@kpm0417.test` (Wilson Tanoto), `admin@kpm0417.test` (Maya Halim) | **Three meetings, newest first.** **#14**, in three days: *Upcoming*, its scorecard live — the reference slide's table (P18.97-T1): *Full Year* and *YTD* of last year full, a file for every month of it (`reporting-fixture.ts`), so no *(\*)* note on them; *AS OF* yesterday's upload; *# of units 9* where the office has 5 ABs and 4 AABs; the prototype's ten agenda items, *"Prepare {this month} performance data"* (P18.97-T2); the prototype's four rows (`KPM_Owner.html:2516-2521`), **their remarks dated from the meeting** (*"Scheduled for {a week after it}"*) — *"4 open items"*; ***Monthly Target* as rates** — the prototype's typed targets as migration `0043` reads them: *FLC* 1 and *Avg. monthly AA* 3 per unit, so *"9 (1 @ unit)"* and *"27 (3 @ unit)"*; *APE* *TBD*, *Manpower* and *Case submission* blank; *New AA*'s *TBD* kept, not drawn; its editors live — the Owner, Maya Halim, Agus, Sari and Yosef, *"3 core leaders tagged"*. **#13**, two weeks ago: *Completed*, **frozen** the morning after its day, its editors as they were — the Owner, Maya Halim, Agus and Sari, *"2 core leaders tagged"* (Yosef tagged since); the prototype's agenda for it (`:2527-2539`) and its three rows — *Not yet planned*, *Planned* (`:2517`), *Implemented*; **a live link the Owner made two days ago**. **#12**, four weeks ago: *Completed*, *All clear* (`:2563`), **frozen in the shape before the reference slide** (P18.97-T1 AC-19): five columns, *New AA*, *# of units* the AB agencies it froze with, no *AS OF* — so its *YTD* of last year, *Cases/producing agents* and *AS OF* read *—*, and its targets are that count × the rate; **one link made on its day, expired since**. Every write, *+ New meeting* (*#15*), moving #14, *Share* and *Stop sharing*, *Save as PDF* |
+ * | `owner@kpm0417.test` (Wilson Tanoto), `admin@kpm0417.test` (Maya Halim) | **Three meetings, newest first.** **#14**, in three days: *Upcoming*, its scorecard live — the reference slide's table (P18.97-T1): *Full Year* and *YTD* of last year full, a file for every month of it (`reporting-fixture.ts`), so no *(\*)* note on them; *AS OF* yesterday's upload; *# of units 9* where the office has 5 ABs and 4 AABs; the prototype's ten agenda items as an Indonesian reader is given them, *"Siapkan data kinerja {this month}"* (P18.97-T2, P18.98-T5 AC-6); the prototype's four rows (`KPM_Owner.html:2516-2521`), **their remarks dated from the meeting** (*"Dijadwalkan {a week after it}"*), all of their words in Bahasa Indonesia (P18.98-T7) — *"4 open items"*; ***Monthly Target* as rates** — the prototype's typed targets as migration `0043` reads them: *FLC* 1 and *Avg. monthly AA* 3 per unit, so *"9 (1 @ unit)"* and *"27 (3 @ unit)"*; *APE* *TBD*, *Manpower* and *Case submission* blank; *New AA*'s *TBD* kept, not drawn; its editors live — the Owner, Maya Halim, Agus, Sari and Yosef, *"3 core leaders tagged"*. **#13**, two weeks ago: *Completed*, **frozen** the morning after its day, its editors as they were — the Owner, Maya Halim, Agus and Sari, *"2 core leaders tagged"* (Yosef tagged since); the prototype's agenda for it (`:2527-2539`) and its three rows — *Not yet planned*, *Planned* (`:2517`), *Implemented*; **a live link the Owner made two days ago**. **#12**, four weeks ago: *Completed*, *All clear* (`:2563`), **frozen in the shape before the reference slide** (P18.97-T1 AC-19): five columns, *New AA*, *# of units* the AB agencies it froze with, no *AS OF* — so its *YTD* of last year, *Cases/producing agents* and *AS OF* read *—*, and its targets are that count × the rate; **one link made on its day, expired since**. Every write, *+ New meeting* (*#15*), moving #14, *Share* and *Stop sharing*, *Save as PDF* |
  * | `agus@kpm0417.test`, `sari@kpm0417.test` — Core Leaders | The list and #14 by the address, in the field shell, editing; #13 by its link, read-only; no *+ New meeting*, no date control, no *Manage tags →* |
  * | `yosef@kpm0417.test` | On #14's live editors, not on #13's frozen ones |
  * | `rina@kpm0417.test` — an Agent, not tagged | `/leader-meetings` and #14's address: *not found*. #13's link: the meeting read-only. #12's link: *"This link doesn't open anything."* |
@@ -91,56 +91,72 @@ function migratedTargets(typed: Record<string, string>): Record<string, MonthlyT
 type Row = [initiative: string, metric: string, action: string, pic: string, status: ActionStatus, remarks: string];
 
 /**
- * #14's four rows (`:2516-2521`), verbatim but for the first's remark, **dated from the meeting's own day** — a week on
+ * **The meetings' words are the office's, in Bahasa Indonesia** (P18.98-T7, OD-238): what the Owner and the leaders
+ * typed, and the first agenda as the service writes it for a reader in Indonesian (P18.98-T5 AC-6). Every meeting is
+ * keyed by its derived `_id`, so a database seeded before keeps its English and gets no second meeting.
+ */
+const INDONESIAN = readerIn('id');
+
+/** The words the rows' remarks are built from, for the seed's spec. */
+export const FORUM_REMARKS = {
+  scheduled: (day: string) => `Dijadwalkan ${day}`,
+  done: (day: string) => `Selesai ${day}`,
+} as const;
+
+/** The month before a meeting's month, as an Indonesian office writes it: *September* for a meeting in October. */
+const bulanSebelum = (meetingDate: string) => MONTH_NAMES.id[(Number(meetingDate.slice(5, 7)) + 10) % 12];
+
+/**
+ * #14's four rows (`:2516-2521`), in Bahasa Indonesia since P18.98-T7, the first's remark **dated from the meeting's own day** — a week on
  * — where the prototype's *"Scheduled for 2 Sept"* stood still while the meetings moved (P18.97-T2 AC-4, UI-015).
  */
 const rows14 = (date: string): readonly Row[] => [
-  ['Activity tracking tool adoption', 'Adoption 80% (currently 63%)', 'Socialization on Activity Tracking Tool in LWS session', 'Amelia', 'planned', `Scheduled for ${formatDayMonth(addDays(date, 7))}`],
-  ['Activity tracking tool adoption', 'Adoption 80% (currently 63%)', 'Find success story for leaders meeting', 'Amelia', 'planned', 'TBD'],
-  ['Leads Generation Playbook', '# of new prospects', 'Embed into recruitment onboarding', 'Ferry / Joy', 'not_planned', 'TBD'],
-  ['Team Management Playbook', '# of 1-on-1s', 'Embed into leaders training materials', 'Hellen', 'not_planned', 'TBD'],
+  ['Adopsi Activity Tracking Tool', 'Adopsi 80% (saat ini 63%)', 'Sosialisasi Activity Tracking Tool di sesi LWS', 'Amelia', 'planned', FORUM_REMARKS.scheduled(formatDayMonth(addDays(date, 7)))],
+  ['Adopsi Activity Tracking Tool', 'Adopsi 80% (saat ini 63%)', 'Cari kisah sukses untuk rapat leader', 'Amelia', 'planned', 'TBD'],
+  ['Playbook Leads Generation', '# prospek baru', 'Masukkan ke onboarding recruitment', 'Ferry / Joy', 'not_planned', 'TBD'],
+  ['Playbook Team Management', '# 1-on-1', 'Masukkan ke materi pelatihan leader', 'Hellen', 'not_planned', 'TBD'],
 ];
 
 /** #13's: the prototype's two (`:2545-2546`) and one *Planned* row (`:2517`) — *Not yet planned*, *Planned*, *Implemented*. */
 const rows13 = (date: string): readonly Row[] => [
-  ['Recruitment Playbook', '# of FLC / NPA', 'Embed into weekly training materials', 'TBD', 'not_planned', 'TBD'],
+  ['Playbook Recruitment', '# FLC / NPA', 'Masukkan ke materi pelatihan mingguan', 'TBD', 'not_planned', 'TBD'],
   rows14(date)[0],
-  ['Strategic Leader Forum', '100% conducted, next 6 months', 'Monitor production metrics bi-weekly', 'TBD', 'implemented', 'Ongoing'],
+  ['Strategic Leader Forum', '100% terlaksana, 6 bulan ke depan', 'Pantau metrik produksi dua minggu sekali', 'TBD', 'implemented', 'Berjalan'],
 ];
 
 /** #12's one row (`:2563`), implemented: *All clear*. Done the week before its day, where the prototype said *"Done Aug 20"*. */
 const rows12 = (date: string): readonly Row[] => [
-  ['Team Management Playbook', '# of 1-on-1s', 'Draft playbook outline', 'Hellen', 'implemented', `Done ${formatDayMonth(addDays(date, -7))}`],
+  ['Playbook Team Management', '# 1-on-1', 'Susun kerangka playbook', 'Hellen', 'implemented', FORUM_REMARKS.done(formatDayMonth(addDays(date, -7)))],
 ];
 
 type Agenda = Record<AgendaSection, [text: string, pic: string, done: boolean][]>;
 
 /**
- * #13's agenda (`:2527-2539`): the follow-ups the previous session's, the month before; *"Prepare {month} performance
- * data"* its own month since P18.97-T2 (AC-4, ADR-0176 §11). Boxes on *During* alone.
+ * #13's agenda (`:2527-2539`), in Bahasa Indonesia: the follow-ups the previous session's, the month before; *"Siapkan data
+ * kinerja {month}"* its own month since P18.97-T2 (AC-4, ADR-0176 §11). Boxes on *During* alone.
  */
 const agenda13 = (date: string): Agenda => {
-  const month = monthBefore(date);
+  const month = bulanSebelum(date);
   return {
-    preparation: [[`Compile follow-ups from ${month} session`, 'Wilson', false], [preparePerformanceData(date), 'Wilson', false]],
+    preparation: [[`Kumpulkan follow-up dari sesi ${month}`, 'Wilson', false], [preparePerformanceData(date, INDONESIAN), 'Wilson', false]],
     during: [
-      [`Process update — reviewed ${month} follow-ups`, '', true], ['Performance review vs. thresholds', '', true],
-      ['Strategic priorities (Agency) — recruitment focus', '', true], ['Next steps summarized, owners assigned', '', true],
+      [`Pembaruan proses — follow-up ${month} sudah ditinjau`, '', true], ['Tinjauan kinerja terhadap ambang batas', '', true],
+      ['Prioritas strategis (Agency) — fokus recruitment', '', true], ['Langkah berikutnya dirangkum, penanggung jawab ditetapkan', '', true],
     ],
-    post: [['Documented outcomes into template', 'Wilson', false], ['Executed follow-ups from Prudential HO side', '', false]],
+    post: [['Hasil dicatat ke dalam templat', 'Wilson', false], ['Follow-up dari sisi HO Prudential sudah dijalankan', '', false]],
   };
 };
 
 /** #12's agenda (`:2555-2560`). */
 const AGENDA_12: Agenda = {
-  preparation: [['Compile follow-ups from prior session', 'Wilson', false]],
-  during: [['Performance review vs. thresholds', '', true], ['Strategic priorities (Corporate)', '', true]],
-  post: [['Documented outcomes into template', 'Wilson', false]],
+  preparation: [['Kumpulkan follow-up dari sesi sebelumnya', 'Wilson', false]],
+  during: [['Tinjauan kinerja terhadap ambang batas', '', true], ['Prioritas strategis (Korporat)', '', true]],
+  post: [['Hasil dicatat ke dalam templat', 'Wilson', false]],
 };
 
 /** The prototype's ten, PICs empty, as an office's first meeting starts (ADR-0130 §3). */
 const tenItems = (date: string): Agenda => {
-  const texts = firstAgendaTexts(date);
+  const texts = firstAgendaTexts(date, INDONESIAN);
   const of = (list: string[]) => list.map((text): [string, string, boolean] => [text, '', false]);
   return { preparation: of(texts.preparation), during: of(texts.during), post: of(texts.post) };
 };
@@ -380,8 +396,8 @@ export async function seedLeaderForumFixture(deps: LeaderForumFixtureDeps): Prom
     admin@kpm0417.test           as the reference slide: Full Year and YTD of last year full (no (*) note on
                                  them), AS OF the day of the latest upload, # of units ${units14} (every AB and AAB);
                                  Monthly Target as rates — FLC "${units14} (1 @ unit)", Avg. monthly AA
-                                 "${3 * units14} (3 @ unit)", APE TBD, the rest blank; the ten agenda items ("Prepare
-                                 ${meetingMonth(date14)} performance data"), four open items, "Scheduled for ${formatDayMonth(addDays(date14, 7))}",
+                                 "${3 * units14} (3 @ unit)", APE TBD, the rest blank; the ten agenda items ("${preparePerformanceData(date14, INDONESIAN)}"),
+                                 four open items, "${FORUM_REMARKS.scheduled(formatDayMonth(addDays(date14, 7)))}",
                                  "3 core leaders tagged". On a phone, one card per metric; on a tablet, Metrics
                                  stays in view.
                                  #13 on ${date13}, Completed and frozen: its editors the Owner, Maya, Agus and

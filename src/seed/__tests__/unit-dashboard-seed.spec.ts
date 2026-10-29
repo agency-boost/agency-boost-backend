@@ -5,7 +5,15 @@ import { UNIT_DASHBOARD_CORRECTION_REASON } from '@/domain/constants';
 import type { UnitDashboardView, UnitGroup, UnitRow } from '@/modules/unit-dashboard/unit-dashboard.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
+import { COACHING_LEADS } from '../coaching-cast';
 import { ROSTER_PLAN } from '../coaching-fixture';
+
+/*
+ * The words the seed typed, in Bahasa Indonesia since P18.98-T7 (OD-238): Indah's lead's next step from the cast, Rina's
+ * Pak Hendro's from `demo.ts`, and the coaching items from `coaching-fixture.ts`.
+ */
+const INDAH_NEXT = COACHING_LEADS.find((lead) => lead.name === 'Ibu Melati Kusumawardani')!.nextActionNote!;
+const HENDRO_NEXT = 'Follow up soal ilustrasinya.';
 import { seedDemo } from '../demo';
 import {
   UNIT_DASHBOARD_BUDI_YTD_ABOVE_LAST_MONTH, UNIT_DASHBOARD_INDAH_LEAD, unitDashboardLeadId,
@@ -196,11 +204,11 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
 
   it('P15-T2 AC-5 OD-140, typed or from a lead: each row’s next item from the latest 1:1, overdue in office days', () => {
     // Sari's last 1:1 with Agus, twelve days ago: a typed item carried from the one before, due nine days ago.
-    expect(row('Sari').followUp).toEqual({ text: 'Go through Budi\'s lapsed prospects with him', dueDate: '2026-09-29', overdueDays: 9 });
+    expect(row('Sari').followUp).toEqual({ text: 'Tinjau bersama Budi prospeknya yang terbengkalai', dueDate: '2026-09-29', overdueDays: 9 });
     // Indah's, four days ago: a lead action it froze, due two days ago — before any typed item.
-    expect(row('Indah').followUp).toEqual({ text: 'Collect the signed SPAJ.', dueDate: '2026-10-06', overdueDays: 2 });
+    expect(row('Indah').followUp).toEqual({ text: INDAH_NEXT, dueDate: '2026-10-06', overdueDays: 2 });
     // Rina's, today: the lead actions it froze as they stood — Pak Hendro's next action, six days late.
-    expect(row('Rina').followUp).toEqual({ text: 'Chase the illustration.', dueDate: '2026-10-02', overdueDays: 6 });
+    expect(row('Rina').followUp).toEqual({ text: HENDRO_NEXT, dueDate: '2026-10-02', overdueDays: 6 });
     // Nobody without a finalized session has one; a draft (Agus's with Indah today) is no session.
     for (const who of ['Agus', 'Dimas', 'Siti', 'Arief', 'Budi', 'Yanti']) expect({ who, f: row(who).followUp }).toEqual({ who, f: null });
   });
@@ -209,11 +217,11 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     const admin = await as('admin@kpm0417.test', { admin: true });
     const theirs = await wired.unitDashboard.read(admin, { for: agus.membershipId! });
     const text = JSON.stringify(theirs);
-    for (const words of ['Collect the signed SPAJ.', 'Chase the illustration.']) expect([words, text.includes(words)]).toEqual([words, false]);
+    for (const words of [INDAH_NEXT, HENDRO_NEXT]) expect([words, text.includes(words)]).toEqual([words, false]);
     // Sari's is typed, and the same; Indah's and Rina's fall back to a typed item of their own sessions.
     expect(row('Sari', theirs).followUp).toEqual(row('Sari').followUp);
-    expect(row('Indah', theirs).followUp).toEqual({ text: 'Ask Ibu Melati for two referrals at the policy handover', dueDate: '2026-10-07', overdueDays: 1 });
-    expect(row('Rina', theirs).followUp).toEqual({ text: 'Close Pak Hendro\'s illustration, or mark the lead lost', dueDate: '2026-10-10', overdueDays: null });
+    expect(row('Indah', theirs).followUp).toEqual({ text: 'Minta dua referral ke Ibu Melati saat serah terima polis', dueDate: '2026-10-07', overdueDays: 1 });
+    expect(row('Rina', theirs).followUp).toEqual({ text: 'Closing ilustrasi Pak Hendro, atau tandai lead-nya gagal', dueDate: '2026-10-10', overdueDays: null });
     expect(everyRow(theirs).every((r) => !r.coached)).toBe(true);
   });
 

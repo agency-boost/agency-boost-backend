@@ -295,9 +295,10 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
 
     it('the seed gives the prototype’s two: Recruitment and Development (`Overall.html:3164-3183`)', () => {
       const chips = sectionChips(seed, new Map(), cascade);
+      // *Development* in Bahasa Indonesia since P18.98-T7 (OD-238); *Recruitment* is kept English.
       expect(chips.map((c) => [c.code, c.label])).toEqual([
         ['RECRUITMENT', 'Recruitment'],
-        ['DEVELOPMENT', 'Development'],
+        ['DEVELOPMENT', 'Pengembangan'],
       ]);
     });
 

@@ -61,6 +61,8 @@ describe('P18.98-T5 every code’s refusal, in both languages', () => {
     'modules/notifications: emails:subject',
     // *TBD*, the forum's own placeholder, kept English in both (the glossary's §A.4).
     'modules/leader-meetings:tbd',
+    // *FAQ*, the recruitment pitch's third slot: the loanword Indonesian already uses (the glossary's §B.0 rule 5).
+    'modules/recruitment:faqTitle',
   ]);
 
   /**

@@ -333,11 +333,12 @@ export class AdminController {
       + 'puts on its front page.',
   })
   async readTemplate(
+    @Ctx() ctx: RequestContext,
     @Param('companyId') companyId: string,
     @Param('kind') kind: string,
     @Query() query: TemplateQueryDto,
   ) {
-    return this.templates.read(companyId, this.kindOf(kind), query.templateId);
+    return this.templates.read(companyId, this.kindOf(kind), query.templateId, ctx.reader);
   }
 
   @Get('companies/:companyId/template/:kind/history')
@@ -349,11 +350,12 @@ export class AdminController {
       + 'published version is immutable; this is the record of them.',
   })
   async templateHistory(
+    @Ctx() ctx: RequestContext,
     @Param('companyId') companyId: string,
     @Param('kind') kind: string,
     @Query() query: TemplateQueryDto,
   ) {
-    return this.templates.history(companyId, this.kindOf(kind), query.templateId);
+    return this.templates.history(companyId, this.kindOf(kind), query.templateId, ctx.reader);
   }
 
   @Put('companies/:companyId/template/:kind')

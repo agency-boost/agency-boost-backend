@@ -321,11 +321,11 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
         ['SALES', 6], ['PRODUCT', 0], ['RECRUITING', 0], ['TEAM_MANAGEMENT', 0], ['SOFT_SKILLS', 0], ['COMPANY_AND_KPM', 0],
       ]);
       expect(catalog.training[0].skills[0]).toEqual({
-        code: 'PROSPECTING', label: 'Prospecting',
+        code: 'PROSPECTING', label: 'Pencarian prospek',
         modules: [
-          { code: 'PROSPECT_LIST', title: 'Building Your Prospect List' },
-          { code: 'REFERRAL_GENERATION', title: 'Referral Generation Techniques' },
-          { code: 'COLD_APPROACH_SCRIPTS', title: 'Cold Approach Scripts' },
+          { code: 'PROSPECT_LIST', title: 'Menyusun daftar prospek Anda' },
+          { code: 'REFERRAL_GENERATION', title: 'Teknik mendapatkan referensi' },
+          { code: 'COLD_APPROACH_SCRIPTS', title: 'Script pendekatan prospek baru' },
         ],
       });
       expect(catalog.training.flatMap((c) => c.skills.flatMap((s) => s.modules.map((m) => m.code)))).toEqual(h.sales);
