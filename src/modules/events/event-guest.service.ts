@@ -159,18 +159,47 @@ export class EventGuestService {
     return this.fresh(ctx, event, me);
   }
 
-  /** `POST /events/:eventId/rsvp/cancel` — idempotent; refused from `endsAt`. */
+  /**
+   * `POST /events/:eventId/rsvp/cancel` — *Tidak ikut*; idempotent; refused from `endsAt`.
+   *
+   * **From going, or from no answer at all** (UI V1, UI-108: *Ikut* and *Tidak ikut* both on the card): a member who
+   * never RSVP'd says they are not coming, and a row is made to hold it, as *Join* makes one. Until UI V1 it changed
+   * only a row still *going*, since the only way to it was the modal's *Cancel RSVP*.
+   */
   async cancelRsvp(ctx: RequestContext, eventId: string): Promise<GuestEvent> {
     const me = this.member(ctx);
     const event = await this.visible(ctx, eventId, me);
     this.refuseOnceEnded(event);
-    // Only a row still *going*; never a row made by cancelling nothing.
+    // Only a row not yet *cancelled*: two taps at once change it once, and the second writes no audit row.
     const changed = await this.rsvps.writeWhen(
-      ctx, String(event._id), me, { rsvpStatus: 'going' },
-      { rsvpStatus: 'cancelled', cancelledAt: this.clock.now() }, false,
+      ctx, String(event._id), me, { rsvpStatus: { $ne: 'cancelled' } },
+      { rsvpStatus: 'cancelled', cancelledAt: this.clock.now() }, true,
     );
     if (changed) {
-      await this.record(ctx, 'event.rsvp_cancelled', event, me, changed.id, { rsvpStatus: 'going' }, { rsvpStatus: 'cancelled' });
+      await this.record(ctx, 'event.rsvp_cancelled', event, me, changed.id,
+        { rsvpStatus: changed.before?.rsvpStatus ?? null }, { rsvpStatus: 'cancelled' });
+    }
+    return this.fresh(ctx, event, me);
+  }
+
+  /**
+   * `POST /events/:eventId/rsvp/withdraw` — **the answer taken back** (UI V1, UI-108: *tap the chosen one again to undo
+   * it*): *Ikut* or *Tidak ikut* tapped a second time leaves the member with no answer, as before they gave one.
+   * Idempotent — no answer changes nothing and makes no row; refused from `endsAt`, as the other two are. The row stays
+   * (soft-delete is for erasure, not for an answer withdrawn), its status `null`.
+   */
+  async withdrawRsvp(ctx: RequestContext, eventId: string): Promise<GuestEvent> {
+    const me = this.member(ctx);
+    const event = await this.visible(ctx, eventId, me);
+    this.refuseOnceEnded(event);
+    const changed = await this.rsvps.writeWhen(
+      ctx, String(event._id), me, { rsvpStatus: { $ne: null } },
+      { rsvpStatus: null, rsvpAt: null, cancelledAt: null }, false,
+    );
+    if (changed) {
+      // No upsert: the row was there, and its answer was not none, or the condition would not have matched it.
+      await this.record(ctx, 'event.rsvp_withdrawn', event, me, changed.id,
+        { rsvpStatus: changed.before.rsvpStatus }, { rsvpStatus: null });
     }
     return this.fresh(ctx, event, me);
   }

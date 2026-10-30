@@ -27,4 +27,11 @@ export const USERS_REFUSALS = refusals('modules/users', {
       id: 'Bulan bergabung dengan perusahaan tidak boleh di masa depan.',
     },
   },
+  /** *Profil saya*'s photo (UI-111): its own ceiling, `AVATAR.MAX_BYTES`, said in KB. */
+  ASSET_TOO_LARGE: {
+    photoAtMost: ({ kb }: { kb: number }) => ({
+      en: `A profile photo must be ${kb} KB or smaller.`,
+      id: `Ukuran foto profil paling besar ${kb} KB.`,
+    }),
+  },
 });

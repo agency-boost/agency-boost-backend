@@ -6,10 +6,10 @@ import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { AssetRepository } from './asset.repository';
 import { AssetSchema } from './asset.schema';
 import { AssetService } from './asset.service';
-import { AssetOwner, SignedUpload, StoragePort, StoredObject } from './storage.port';
+import { AssetOwner, ownerSegment, SignedUpload, StoragePort, StoredObject } from './storage.port';
 
 /** The folder the adapter would use, mirrored so a stub key still reads like a real one. */
-const ownerFolder = (o: AssetOwner) => (o.kind === 'kpm' ? o.kpmId : `company/${o.companyId}`);
+const ownerFolder = (o: AssetOwner) => ownerSegment(o);
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 const KPM_A = '66f0000000000000000000a1';

@@ -356,7 +356,7 @@ export interface SeedResult {
   joining: JoiningFixture;
   /** P18.96-T4: the first sales on day 20 and day 120, Rina's fourth 1:1 (`first-sale-fixture.ts`). */
   firstSales: FirstSaleFixture;
-  /** P18.96-T6: Lukman, not activated by a sale on day 96, and Tari, marked left (`activation-3m-fixture.ts`). */
+  /** P18.96-T6, UI-023: Lukman, Teraktivasi late by a sale on day 96, and Tari, marked left (`activation-3m-fixture.ts`). */
   activation3M: Activation3MSeed;
 }
 
@@ -1501,6 +1501,10 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const cast = {} as Record<CastKey, Placed>;
   for (const person of COACHING_CAST) {
     const account = await user(person.email, person.fullName, { agentCode: person.agentCode, pronoun: person.pronoun });
+    // UI V1 (UI-081, D-22): a WhatsApp number for some of the cast, given once to an account that has none.
+    if (person.phone) {
+      await Users.updateOne({ _id: account._id, phone: null }, { $set: { phone: person.phone } }).exec();
+    }
     cast[person.key] = await place(
       office0417, String(account._id), person.role, person.leader === 'agus' ? ab : cast.arief,
       { joinedDaysAgo: person.joinedDaysAgo, joinedAs: person.promoted ? 'agent' : person.role },
@@ -3513,8 +3517,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const cohort = await seedActivationCohort({ clock, kpmId: id0417, cast: reportingCast });
 
   // ------------------- P18.96-T6 — 3M activation (`activation-3m-fixture.ts`): the two results nobody under Agus had —
-  // Lukman, not activated by a sale on day 96, and Tari, marked left before one. Placed after every other 0417 member,
-  // so nobody's agent sequence moves; before the forum, so #12's and #13's frozen scorecards count them as a read would.
+  // Lukman, Teraktivasi late (amber) by a sale on day 96, and Tari, marked left before one — which decides nothing.
+  // Placed after every other 0417 member, so nobody's agent sequence moves; before the forum, so #12's and #13's frozen scorecards count them as a read would.
   const activation3M = await seedActivation3MFixture({
     clock, kpmId: id0417, office0417, agus: ab, arief: cast.arief, ariefUserId: await userOf(cast.arief.id),
     user: (email, fullName, opts) => user(email, fullName, opts),

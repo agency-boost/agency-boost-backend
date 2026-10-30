@@ -65,8 +65,11 @@ describe('the calendar over HTTP (P12-T2, P12-T3)', () => {
         today: ROSTER_TODAY,
         // 10:00 in Jakarta is the office's 600th minute, whatever the server's clock says.
         now: { at: '2026-09-14T03:00:00.000Z', minute: 600 },
-        subject: { membershipId: h.id('AGUS'), name: 'Agus Salim', rung: { code: 'AB', label: 'AB' } },
+        subject: { membershipId: h.id('AGUS'), name: 'Agus Salim', rung: { code: 'AB', label: 'AB' }, phone: null },
         entries: [],
+        // UI V1 (UI-104): what other features put on the calendar — nothing yet for Agus this week.
+        tasks: [],
+        events: [],
       });
     });
 

@@ -57,7 +57,7 @@ import {
   ActivityLogCorrectionSchema, ActivityLogEntrySchema, ActivityLogSchema,
 } from '@/modules/activity/activity-log.schema';
 import {
-  LeadCommitmentSchema, LeadContactSchema, LeadSchema, LeadTransitionSchema,
+  LeadCommitmentSchema, LeadContactSchema, LeadNextActionDoneSchema, LeadSchema, LeadTransitionSchema,
 } from '@/modules/leads/lead.schema';
 import {
   GoalCascadeMappingSchema, GoalRevisionSchema, GoalSchema, GoalSnapshotSchema,
@@ -79,7 +79,7 @@ import {
   CapabilityStageRowSchema,
 } from '@/modules/capability/capability.schema';
 import {
-  CoachingActionItemSchema, CoachingLastWeekItemSchema, CoachingLastWeekSchema, CoachingLeadActionSchema,
+  CoachingActionItemDoneSchema, CoachingActionItemSchema, CoachingLastWeekItemSchema, CoachingLastWeekSchema, CoachingLeadActionSchema,
   CoachingSessionCorrectionSchema, CoachingSessionSchema, CoachingSnapshotSchema, CoachingTipSchema,
 } from '@/modules/coaching/coaching-session.schema';
 import { CoachingProfileRevisionSchema, CoachingProfileSchema } from '@/modules/coaching/coaching-profile.schema';
@@ -254,6 +254,12 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
       + 'them is a write rather than a delete',
   ],
   [
+    'leadNextActionDone (subdocument)',
+    LeadNextActionDoneSchema,
+    'the latest ticked next action inside a lead (UI-104): *Urungkan* clears it, and the lead holds it, so it '
+      + 'goes with the lead',
+  ],
+  [
     'leadTransition (subdocument)',
     LeadTransitionSchema,
     'one move along a ladder. **Append-only and never removed** — it is what makes a jump '
@@ -325,6 +331,12 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     CoachingLastWeekItemSchema,
     'a copy of last week\'s item inside the session reviewing it: the draft\'s whole editable state is '
       + 'saved at once, and a finalized session keeps it in corrections[] when it is reopened (ADR-0042)',
+  ],
+  [
+    'coachingActionItemDone (subdocument)',
+    CoachingActionItemDoneSchema,
+    'a coachee\'s tick on one action item, kept beside the session\'s lists (UI-104): *Urungkan* removes it, and it '
+      + 'goes with the session that holds it',
   ],
   [
     'coachingActionItem (subdocument)',
@@ -452,6 +464,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [LeadSchema, 'LeadSchema'],
   [LeadContactSchema, 'LeadContactSchema'],
   [LeadTransitionSchema, 'LeadTransitionSchema'],
+  [LeadNextActionDoneSchema, 'LeadNextActionDoneSchema'],
   [LeadCommitmentSchema, 'LeadCommitmentSchema'],
   [GoalSchema, 'GoalSchema'],
   [GoalSnapshotSchema, 'GoalSnapshotSchema'],
@@ -491,6 +504,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [CoachingLastWeekSchema, 'CoachingLastWeekSchema'],
   [CoachingLastWeekItemSchema, 'CoachingLastWeekItemSchema'],
   [CoachingActionItemSchema, 'CoachingActionItemSchema'],
+  [CoachingActionItemDoneSchema, 'CoachingActionItemDoneSchema'],
   [CoachingTipSchema, 'CoachingTipSchema'],
   [CoachingLeadActionSchema, 'CoachingLeadActionSchema'],
   [CoachingSessionCorrectionSchema, 'CoachingSessionCorrectionSchema'],

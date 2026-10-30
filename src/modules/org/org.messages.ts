@@ -199,6 +199,14 @@ export const ORG_REFUSALS = refusals('modules/org', {
     },
   },
 
+  /* ------------------------------------------------------------------ a person's WhatsApp number (M1) */
+  MEMBER_PHONE_ON_FILE: {
+    onFile: {
+      en: 'They already have a WhatsApp number. Only they can change it, on My profile.',
+      id: 'Dia sudah memiliki nomor WhatsApp. Hanya dia yang dapat mengubahnya, di Profil saya.',
+    },
+  },
+
   /* ------------------------------------------------------------------ who administers the office */
   ORG_ALREADY_ADMIN: {
     alreadyAdmin: {
@@ -239,6 +247,11 @@ export const ORG_REFUSALS = refusals('modules/org', {
     orgLevelCodeShape: {
       en: 'orgLevelCode must be a rung code',
       id: 'orgLevelCode harus berupa kode jenjang',
+    },
+    /* UI V1 (2026-10-30; UI-081, D-22): an agent's WhatsApp number, set by their leader — `+62` and 9 to 13 digits. */
+    phoneShape: {
+      en: 'phone must be an Indonesian number: 9 to 13 digits after +62',
+      id: 'phone harus nomor Indonesia: 9 sampai 13 digit setelah +62',
     },
   },
 });

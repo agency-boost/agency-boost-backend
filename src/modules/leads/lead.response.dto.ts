@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { LEAD_OUTCOMES, LEAD_TYPES } from './lead.schema';
-import type { LeadFlag, LeadPage, LeadView } from './lead.service';
+import type { LeadDetailView, LeadFlag, LeadMoveView, LeadPage, LeadView } from './lead.service';
 
 export class LeadContactDto {
   @ApiProperty({ type: String, nullable: true })
@@ -103,6 +103,27 @@ export class LeadResponseDto implements LeadView {
       + 'key carrying a number is one nobody can match against.',
   })
   overdueDays!: number | null;
+}
+
+/** One move along a lead's ladder (UI V1, UI-105): the lead sheet's *Riwayat*. */
+export class LeadMoveDto implements LeadMoveView {
+  @ApiProperty({ type: String, format: 'date-time' })
+  at!: string;
+
+  @ApiProperty({ type: String, nullable: true, description: '`null` on the lead’s first move: it had no stage before.' })
+  fromStatusCode!: string | null;
+
+  @ApiProperty({ type: String, example: 'FOLLOW_UP', description: 'A code; the office names it.' })
+  toStatusCode!: string;
+}
+
+/** `GET /leads/:id`: the list's lead, and its moves (UI V1, UI-105). The list never carries them. */
+export class LeadDetailResponseDto extends LeadResponseDto implements LeadDetailView {
+  @ApiProperty({
+    type: [LeadMoveDto],
+    description: 'Every move along its ladder, oldest first. Append-only: a reopen or a type change adds none.',
+  })
+  history!: LeadMoveDto[];
 }
 
 export class LeadPageDto implements LeadPage {

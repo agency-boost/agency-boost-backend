@@ -410,7 +410,7 @@
     },
     "/api/v1/leads/{id}": {
       "get": {
-        "description": "**404, not 403**, for another office’s. A lead you do not own — one of somebody you coach — writes one entry to the audit log; your own writes none.\n\n**Requires `lead:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "**404, not 403**, for another office’s. A lead you do not own — one of somebody you coach — writes one entry to the audit log; your own writes none. **With its `history`** (UI V1, UI-105): every move along its ladder, oldest first, for the lead sheet’s *Riwayat* — on this read only, never the list.\n\n**Requires `lead:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "LeadController_read_v1",
         "parameters": [
           {
@@ -963,6 +963,114 @@
         "x-required-permission": "lead:mark_outcome"
       }
     },
+    "/api/v1/leads/{id}/next-action/done": {
+      "put": {
+        "description": "From your Calendar’s *Tugas* (UI V1, UI-104). `done: true` clears the next action’s date and note — the lead then asks for a new one — and keeps them so `done: false` can put them back. **Your own lead only**: a lead of somebody you coach is `404`, as one out of reach is. Always pinned to `version`. A lead with nothing to tick, or nothing to put back, is answered as it is.\n\n**Requires `lead:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeadController_setNextActionDone_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetNextActionDoneDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `lead:update`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — not a lead of yours: somebody else’s, another office’s, or nobody’s.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VERSION_CONFLICT` — the lead changed since `version`: re-read it. Nothing was written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Tick your lead’s next action done, or take the tick back",
+        "tags": [
+          "leads"
+        ],
+        "x-required-permission": "lead:update"
+      }
+    },
     "/api/v1/goals/{period}": {
       "get": {
         "description": "The goal, or **the office’s defaults** when there is none — so the screen opens on five filled cards rather than on empty ones, and a first-time reader sees what a plan looks like. `projected` is recomputed on every read; `snapshot` is what was agreed. Somebody else’s plan, named by `for`, comes back without their measured rates.\n\n**Requires `goal:read`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -1185,6 +1293,114 @@
           "goals"
         ],
         "x-required-permission": "goal:update"
+      }
+    },
+    "/api/v1/goals/{period}/preview": {
+      "post": {
+        "description": "The cascade over the inputs the screen holds, by the formula a save uses, and **nothing written** — Goal Settings’ result card and commitment move with it as a slider moves. The body is a save’s; `for` is a read’s, `goal:read`’s reach, 404 beyond it. On somebody else’s plan the APE produced is the figure they stored, as a save keeps it. An assumption that cannot make a plan answers `projected: null` — the save still refuses it by name. Reachable in a read-only support session, as the read is.\n\n**Requires `goal:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "GoalController_preview_v1",
+        "parameters": [
+          {
+            "name": "period",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "for",
+            "required": false,
+            "in": "query",
+            "description": "A **membership** you may read the plan of, as your grant allows (§3.6). Omitted, or your own, it is your own. Somebody outside it is a **404, never a 403**: a refusal that confirmed the person exists would answer a question nobody was entitled to ask. Anybody else’s plan comes back with `measured: null`.",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveGoalDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalPreviewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `goal:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "What a plan would mean, unsaved",
+        "tags": [
+          "goals"
+        ],
+        "x-required-permission": "goal:read"
       }
     },
     "/api/v1/kpm/data-upload/template": {
@@ -2320,6 +2536,59 @@
         ]
       }
     },
+    "/api/v1/auth/verify-email-change": {
+      "post": {
+        "description": "UI V1 (UI-111, ADR-0181). The token from the link sent to the new address, single-use, valid as long as a verification link. Moves `users.email` to the pending address, marks it verified, audits `user.email_changed` and answers the new address. Sessions stay signed in. An unknown, used, replaced or expired link is `400 AUTH_TOKEN_INVALID`, as `verify-email` answers; an address taken since the request is `409 AUTH_EMAIL_TAKEN`.",
+        "operationId": "AuthController_verifyEmailChange_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailChangedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Open an email change's link: the account moves to the new address",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/forgot-password": {
       "post": {
         "description": "Always 202, whether or not the address exists.",
@@ -2699,6 +2968,74 @@
         ]
       }
     },
+    "/api/v1/auth/me/email": {
+      "post": {
+        "description": "UI V1 (UI-111, ADR-0181). `{ newEmail, currentPassword }`. The password is checked again (`401 AUTH_INVALID_CREDENTIALS`, as `change-password`); the address is lower-cased and trimmed as registration does; your own address is `400 VALIDATION_FAILED`, another account's `409 AUTH_EMAIL_TAKEN`, each with `details.field: newEmail`. **Nothing on the account changes yet**: a link is sent to the new address (`POST /auth/verify-email-change` applies it) and a notice with no link to the current one. A newer request replaces the pending one. 5 per hour per account (`429 AUTH_RATE_LIMITED`). Refused `403 PERM_DENIED` in any support session.\n\n**Any signed-in user.** No further permission.",
+        "operationId": "AuthController_requestEmailChange_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeEmailDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusAckDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Ask to change your email address",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/me": {
       "get": {
         "description": "The resolved context: identity, membership, and the permissions held right now. Resolved per request, so a revoked grant disappears immediately.\n\n**Any signed-in user.** No further permission.",
@@ -2747,7 +3084,7 @@
         ]
       },
       "patch": {
-        "description": "Your name, preferred name and pronoun; your date of birth, gender, company join month and work status (ADR-0158); and the language you read AgencyBoost in, `locale` (`id` or `en`, ADR-0179) — each optional, none clearable. A birth date must be in the past and at least 18 years ago and a join month not in the future, else `400 VALIDATION_FAILED` naming the field; a `locale` that is not `id` or `en`, `null` included, is `400 VALIDATION_FAILED` with `details.violations`. Work status is written on your membership in your office, and on your account until you have one. **Refused `403 PERM_DENIED` in any support session**, read-only, setup or elevated: a person's own account, their language included, is theirs to change.\n\n**Any signed-in user.** No further permission.",
+        "description": "Your name, preferred name and pronoun; your date of birth, gender, company join month and work status (ADR-0158); the language you read AgencyBoost in, `locale` (`id` or `en`, ADR-0179); and your WhatsApp number, `phone` (UI V1: stored as `+62` and 9 to 13 digits, else `400 VALIDATION_FAILED`; empty or `null` clears it) — each optional, none of the others clearable. A birth date must be in the past and at least 18 years ago and a join month not in the future, else `400 VALIDATION_FAILED` naming the field; a `locale` that is not `id` or `en`, `null` included, is `400 VALIDATION_FAILED` with `details.violations`. Work status is written on your membership in your office, and on your account until you have one. **Refused `403 PERM_DENIED` in any support session**, read-only, setup or elevated: a person's own account, their language included, is theirs to change.\n\n**Any signed-in user.** No further permission.",
         "operationId": "AuthController_updateMe_v1",
         "parameters": [],
         "requestBody": {
@@ -2808,6 +3145,236 @@
           }
         ],
         "summary": "Update your own account",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me/profile": {
+      "get": {
+        "description": "*Profil saya* (UI-111): your insurer and the agent code it issued (never changed here: *Hubungi admin KPM*), your leader in this office (`null` with none) and your group — everybody you lead, at any depth, by role (`null` when you lead nobody). Your own, read from the session; somebody in no office reads no leader and no group.\n\n**Any signed-in user.** No further permission.",
+        "operationId": "ProfileController_facts_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileFactsDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Your profile’s read-only facts",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me/avatar/upload": {
+      "post": {
+        "description": "*Simpan foto*, first step (UI-111): the browser crops the picture to a 256 × 256 JPEG and uploads it straight to storage with this form, under your own folder (ADR-0153: file bytes never transit the API). A type other than `image/jpeg` is `415 ASSET_TYPE_NOT_ALLOWED`, more than 512 KB `413 ASSET_TOO_LARGE`. **Refused `403 PERM_DENIED` in any support session.**\n\n**Any signed-in user.** No further permission.",
+        "operationId": "ProfileController_requestAvatarUpload_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestAvatarUploadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedUploadDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sign the upload of your profile photo",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me/avatar": {
+      "put": {
+        "description": "*Simpan foto*, second step: storage is asked what it holds under the key, and the type and size are checked against that (ADR-0040) before it becomes your photo. A key outside your own photo folder is `404 NOT_FOUND`; nothing there `409 ASSET_NOT_UPLOADED`; not a JPEG `415`, over 512 KB `413`. Answers the signed link every avatar of yours now draws. **Refused `403 PERM_DENIED` in any support session.**\n\n**Any signed-in user.** No further permission.",
+        "operationId": "ProfileController_attachAvatar_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachAvatarDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AvatarDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Make the uploaded photo yours",
+        "tags": [
+          "auth"
+        ]
+      },
+      "delete": {
+        "description": "*Hapus foto*: every avatar of yours draws your initials again. Answers `{ avatarUrl: null }`. **Refused `403 PERM_DENIED` in any support session.**\n\n**Any signed-in user.** No further permission.",
+        "operationId": "ProfileController_removeAvatar_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AvatarDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove your profile photo",
         "tags": [
           "auth"
         ]
@@ -5974,6 +6541,96 @@
         "x-required-permission": "member:read_profile"
       }
     },
+    "/api/v1/members/search": {
+      "get": {
+        "description": "UI V1 (UI-012, UI-059, D-14): the picker that opens a person's page. Part of a name (full or preferred) or an agent code, case-insensitive; empty or absent lists the first people. Narrowed exactly as the roster is — the office for its Owner and Admins, an AB's downline, an AAB's own unit — **never yourself**, so an Agent finds nobody. Active members only, A to Z by name, the first `limit` (10, at most 20). Names and codes only: nothing is recorded as read, as the tree records nothing.\n\n**Requires `member:read_profile`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "OrgController_search_v1",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Part of a name or an agent code, case-insensitive. Empty or absent lists the first people A to Z.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 20,
+              "default": 10,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberSearchResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:read_profile`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Search agent: the people you may see, by name or agent code",
+        "tags": [
+          "organisation"
+        ],
+        "x-required-permission": "member:read_profile"
+      }
+    },
     "/api/v1/members/{membershipId}/role": {
       "patch": {
         "description": "Agent ⇄ AAB is the direct leader's call. Anything involving AB is the Owner's or an Admin's. Nobody moves: a role change is a statement about a person, not a reorganisation. Demoting somebody who still leads people is refused with the count, so the caller knows what has to happen first.\n\n**Requires `member:change_role`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -7637,6 +8294,104 @@
         "x-required-permission": "member:read_profile"
       }
     },
+    "/api/v1/members/{membershipId}/phone": {
+      "put": {
+        "description": "*Isi nomor WhatsApp* on a person in your unit (UI-081, D-22): an AB for their downline, an AAB for their own unit — anybody else, another office's member or somebody who has left is `404 NOT_FOUND`. Typed as people type it and stored as `+62` and 9 to 13 digits, else `400 VALIDATION_FAILED` naming `phone`; not clearable here. **Only a missing number is filled**: a person who already has one is `409 MEMBER_PHONE_ON_FILE` and keeps it (they change their own, `PATCH /auth/me`); the condition is part of the write, so a race cannot overwrite. Saved on the person's account, so it is the number they see on their own profile. One `member.phone_updated` audit entry, without the number. **Refused `403 PERM_DENIED` in any support session.**\n\n**Requires `member:update_phone`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "MemberPhoneController_set_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMemberPhoneDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberPhoneDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:update_phone`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save the WhatsApp number of somebody you coach",
+        "tags": [
+          "organisation"
+        ],
+        "x-required-permission": "member:update_phone"
+      }
+    },
     "/api/v1/admin/leader-limit-requests": {
       "get": {
         "description": "Every office’s requests, pending first, each with the office’s limit and Leaders used now. The Super Admin’s alone: an office’s own Owner reads their office’s at /members/leader-limit-requests.\n\n**Requires `leader_limit_request:read`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -8605,6 +9360,65 @@
           }
         ],
         "summary": "Requests waiting on you",
+        "tags": [
+          "joining an office"
+        ],
+        "x-required-permission": "leader_request:read_inbox"
+      }
+    },
+    "/api/v1/join/requests/count": {
+      "get": {
+        "description": "UI V1 (UI-085): the count on the Pending Requests tab, shown on every User Management screen. The same requests `GET /join/requests` lists, counted without reading their names.\n\n**Requires `leader_request:read_inbox`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "OnboardingController_waitingCount_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaitingRequestCountDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `leader_request:read_inbox`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "How many requests are waiting on you",
         "tags": [
           "joining an office"
         ],
@@ -17245,7 +18059,7 @@
     },
     "/api/v1/events/{eventId}/rsvp/cancel": {
       "post": {
-        "description": "Idempotent; refused from `endsAt`. Another office’s event, an archived one and one whose audience did not hold the reader **as at its start** all answer `404`, deliberately indistinguishable: a `403` would confirm the event exists.\n\n**Requires `event:cancel_rsvp`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "From going, or from no answer at all, which makes the row (UI V1, UI-108). Idempotent; refused from `endsAt`. Another office’s event, an archived one and one whose audience did not hold the reader **as at its start** all answer `404`, deliberately indistinguishable: a `403` would confirm the event exists.\n\n**Requires `event:cancel_rsvp`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "EventGuestController_cancelRsvp_v1",
         "parameters": [
           {
@@ -17344,7 +18158,115 @@
             "bearer": []
           }
         ],
-        "summary": "*Cancel RSVP*",
+        "summary": "*Cancel RSVP* — the card’s *Tidak ikut*",
+        "tags": [
+          "events"
+        ],
+        "x-required-permission": "event:cancel_rsvp"
+      }
+    },
+    "/api/v1/events/{eventId}/rsvp/withdraw": {
+      "post": {
+        "description": "The card’s *Ikut* or *Tidak ikut* tapped again (UI V1, UI-108): the member is left with no answer. Idempotent: no answer changes nothing and makes no row. Refused from `endsAt`. Another office’s event, an archived one and one whose audience did not hold the reader **as at its start** all answer `404`, deliberately indistinguishable: a `403` would confirm the event exists.\n\n**Requires `event:cancel_rsvp`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "EventGuestController_withdrawRsvp_v1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoEventBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestEventDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `event:cancel_rsvp`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`EVENT_RSVP_CLOSED` — the event has ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The RSVP taken back",
         "tags": [
           "events"
         ],
@@ -20299,7 +21221,7 @@
             }
           },
           "422": {
-            "description": "`COACHING_SESSION_INCOMPLETE` — `details.rule` names the check; `details.leadId` and `details.leadName` the lead, for `LEAD_THIS_MONTH_UNDATED`.",
+            "description": "`COACHING_SESSION_INCOMPLETE` — `details.rule` names the check; `details.leadId` and `details.leadName` the lead, for `LEAD_THIS_MONTH_UNDATED`; `details.count` and `details.itemIds` the action items with no date, for `UNDATED_ACTION_ITEM` (UI-060).",
             "content": {
               "application/json": {
                 "schema": {
@@ -20964,21 +21886,129 @@
         "x-required-permission": "coaching_session:export_pdf"
       }
     },
+    "/api/v1/coaching/sessions/{sessionId}/action-items/{itemId}/done": {
+      "put": {
+        "description": "Your own action item — one a finalized session you were coached in agreed — ticked done from your Calendar, or the tick taken back. It leaves your Calendar while ticked, and the next session with you starts with it ticked in its review. Nothing that was agreed changes and no version moves. Sending what is stored changes nothing. **Refused `403 PERM_DENIED` in any support session**, an elevated one included: the tick is the coachee’s own.\n\n**Requires `calendar_entry:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "CoachingActionDoneController_set_v1",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "itemId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CoachingItemDoneDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachingItemDoneResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `calendar_entry:update`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — not a finalized session you were coached in, or no such item in it: a session of somebody else’s (your coachee’s included), a draft, another office’s, or nobody’s id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Tick one of your coaching action items done, or take the tick back",
+        "tags": [
+          "coaching"
+        ],
+        "x-required-permission": "calendar_entry:update"
+      }
+    },
     "/api/v1/calendar/entries": {
       "get": {
-        "description": "Your own calendar — every entry you organise, and every one you are on and have not declined — for the week or the month holding `date`, with the period’s days, the dates ‹ and › ask for, and the office’s today and now: nothing is worked out in the browser. Weeks run Monday to Sunday in the office’s zone; a month is padded to whole weeks, and its padding days carry their entries too.\n\nWith `for`, the week or the month of somebody you coach, beside your own: everything they organised in full, and an entry they only attend in full only when you could read it yourself — otherwise as a busy block. An entry organised by somebody who hides their details is a busy block too, unless you are on it. Each such read is recorded.\n\n**Requires `calendar_entry:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Your own calendar — every entry you organise, and every one you are on and have not declined — for the week or the month holding `date`, or the Agenda’s or *3 Hari*’s days from it, with the period’s days, the dates ‹ and › ask for, and the office’s today and now: nothing is worked out in the browser. Weeks run Monday to Sunday in the office’s zone; a month is padded to whole weeks, and its padding days carry their entries too.\n\nBeside the entries, **what other features put on it** (UI V1): `tasks` — lead next actions and open coaching action items, dated with no time — and `events`, the events you said you are going to. Read from their sources each time, so a change there shows here at once; none can be edited here.\n\nWith `for`, the week or the month of somebody you coach, beside your own: everything they organised in full, and an entry they only attend in full only when you could read it yourself — otherwise as a busy block. An entry organised by somebody who hides their details is a busy block too, unless you are on it. Each such read is recorded.\n\n**Requires `calendar_entry:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "CalendarController_read_v1",
         "parameters": [
           {
             "name": "view",
             "required": false,
             "in": "query",
-            "description": "The period to answer.",
+            "description": "The period to answer: the week holding `date`, its month padded to whole weeks, the Agenda — 7 days from `date` — or *3 Hari*, 3 days from it.",
             "schema": {
               "default": "week",
               "enum": [
                 "week",
-                "month"
+                "month",
+                "agenda",
+                "three_days"
               ],
               "type": "string"
             }
@@ -21072,7 +22102,7 @@
             "bearer": []
           }
         ],
-        "summary": "A week or a month of a calendar",
+        "summary": "A week, a month, an Agenda or 3 Hari of a calendar",
         "tags": [
           "calendar"
         ],
@@ -22712,7 +23742,7 @@
     },
     "/api/v1/new-hires": {
       "get": {
-        "description": "Every new hire you coach, at any depth, whose join date is in the last twelve months — never an existing agent — in three sections by their 3M activation: in progress (days 1 to 90), activated (a first paid and issued case by day 90) and not activated (none by then, or they left before one). Each row: the join date, the day, the first sale, the result, the day they left and their checklist where they have one. At the top, the 3M activation % of everybody listed and of each unit — your direct unit, then each AAB’s or AB’s below you — overall and by join month. A result decided is kept, and never changes after. Each new hire shown is a recorded read.\n\n**Requires `new_hires:read_roster`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every new hire you coach, at any depth, whose join date is in the last twelve months — never an existing agent — in three sections by their 3M activation: in progress (days 1 to 90), activated (a first paid and issued case by day 90, or after it) and not activated (none by day 90). Each row: the join date, the day, the first sale with its day and source, the status and their checklist where they have one. At the top, the 3M activation % of everybody listed and of each unit — your direct unit, then each AAB’s or AB’s below you — overall and by join month. A result decided is kept, and never changes after. Each new hire shown is a recorded read.\n\n**Requires `new_hires:read_roster`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "NewHiresController_roster_v1",
         "parameters": [],
         "responses": {
@@ -22779,97 +23809,9 @@
         "x-required-permission": "new_hires:read_roster"
       }
     },
-    "/api/v1/new-hires/{membershipId}/left": {
-      "post": {
-        "description": "Records that a new hire has left, today: their 3M activation is decided — not activated unless their first sale came first — and kept, and they are removed from the office as a removal removes anybody, so they leave every count of people. Their checklist and history stay, and New Hires lists them for the rest of their year. Only for a new hire New Hires lists: one who joined in the last twelve months. Audited.\n\n**Requires `new_hire:mark_left`.** See `docs/00-product/roles-and-permissions.md`.",
-        "operationId": "NewHiresController_markLeft_v1",
-        "parameters": [
-          {
-            "name": "membershipId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NewHireMarkedLeftDto"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`PERM_DENIED` — an Agent who leads, or a read-only support session. `ORG_REMOVAL_NOT_PERMITTED` — the office’s root member or its owner, whom nobody removes from inside the office.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`NOT_FOUND` — nobody you may mark: somebody you do not coach, a member who has left the office, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "`NOT_A_NEW_HIRE` — they joined as an existing agent. `NEW_HIRE_NOT_MARKABLE` — they joined more than twelve months ago, so New Hires no longer lists them (`details.reason: past_the_year`); remove them instead. `NEW_HIRE_HAS_REPORTS` — somebody reports to them: move them first; `details.directCount` says how many. `NEW_HIRE_ALREADY_LEFT` — they are marked as left already; `details.leftOn` says when.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Mark a new hire as left",
-        "tags": [
-          "activation"
-        ],
-        "x-required-permission": "new_hire:mark_left"
-      }
-    },
     "/api/v1/new-hires/{membershipId}": {
       "get": {
-        "description": "As the hire reads it, in any state — without their own note and date on each item. The detail page, and a coaching page’s Activation tab. A recorded read.\n\n**Requires `activation:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "As the hire reads it, in any state — without their own note and date on each item — and, in `newHire`, their 3M standing as their row on New Hires says it: the status, the day and the first sale with its day and source. The detail page, and a coaching page’s Activation tab. A recorded read.\n\n**Requires `activation:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "NewHiresController_detail_v1",
         "parameters": [
           {
@@ -23636,6 +24578,179 @@
           "unit-dashboard"
         ],
         "x-required-permission": "unit_dashboard:update_production"
+      }
+    },
+    "/api/v1/unit/dashboard/activities": {
+      "get": {
+        "description": "The *Activities* tab: for the unit the dashboard would answer — yours, or with `for` a leader’s below you; the agency’s owner and its administrators any leader’s — **every person’s count per activity type** over a week, Monday to Sunday, or a calendar month on the agency’s calendar (`span`, the period holding `date`), with the *Unit*’s and the *Group*’s *Total* column summed; the agency’s sections and types in its order, an archived one only while the period counts it; and **the Ratio page’s ratios over the *Unit*’s and the *Group*’s counts summed**, always the last 30 days. Counts only, never points. Somebody who leads nobody is answered an empty unit. Every member shown other than you is recorded as read.\n\n**Requires `unit_dashboard:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "UnitActivitiesController_read_v1",
+        "parameters": [
+          {
+            "name": "span",
+            "required": false,
+            "in": "query",
+            "description": "*Minggu | Bulan*: a week Monday to Sunday (the default), or a calendar month, on the agency’s calendar.",
+            "schema": {
+              "default": "week",
+              "enum": [
+                "week",
+                "month"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "date",
+            "required": false,
+            "in": "query",
+            "description": "A day in the week or month to read; omitted, the agency’s today. A day after today is refused (`400`).",
+            "schema": {
+              "example": "2026-10-28",
+              "type": "string"
+            }
+          },
+          {
+            "name": "for",
+            "required": false,
+            "in": "query",
+            "description": "The **membership** whose unit to read, as the dashboard’s own `for`. Omitted, it is your own unit.",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitActivitiesDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — `date` is not a day, or is after the agency’s today; `span` is neither `week` nor `month`; or a parameter has another name. `details.field` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `unit_dashboard:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — `for` names yourself, somebody who leads nobody, somebody outside your reach or who has left, **or** somebody in another office: indistinguishable, as on `GET /unit/dashboard`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A unit’s activity per person, and its ratios",
+        "tags": [
+          "unit-dashboard"
+        ],
+        "x-required-permission": "unit_dashboard:read"
+      }
+    },
+    "/api/v1/home": {
+      "get": {
+        "description": "Every block of Home in one read, for the reader alone. **Your own**: your activity today and yesterday and the seven days ending today (the totals Activity Management saved, on the agency’s calendar); today’s timed calendar items and today’s open tasks (your latest 1:1’s action items due today, and your own leads whose next action is today); *Aksi hari ini*, at most three — today’s tasks, then your next timed items; and the quote and the pose of the day. **If you lead somebody**: *Active Agent* exactly as the Unit Dashboard’s tile counts it, *Coaching 7 hari* (members coached in the last 7 days, out of the same manpower), each with its *Unit* and *AAB* split, and *Laporan tim* — everybody in your Group but you, yesterday’s and today’s count, nobody-reported first, with their photo (a signed link) and WhatsApp number; each of them recorded as read. Somebody who leads nobody gets `leader: null`.\n\n**Requires `personal_summary:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "HomeController_read_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller holds no `personal_summary:read`; `NO_MEMBERSHIP` — they belong to no office.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Your Home: today, your list, your last seven days — and your team’s, if you lead",
+        "tags": [
+          "home"
+        ],
+        "x-required-permission": "personal_summary:read"
       }
     },
     "/api/v1/recruitment/attack-plan": {
@@ -25553,7 +26668,7 @@
             }
           },
           "400": {
-            "description": "`VALIDATION_FAILED` — not exactly one field, a field too long or unknown, or `done` on an item outside *During*.",
+            "description": "`VALIDATION_FAILED` — not exactly one field, or a field too long or unknown. `done` is any section’s since UI V1 (UI-110).",
             "content": {
               "application/json": {
                 "schema": {
@@ -26583,6 +27698,55 @@
           "targetMet"
         ]
       },
+      "SummaryPoliciesDto": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "activity_log"
+            ],
+            "description": "Every count of policies on the page — the *Submission polis* chips and the pace sentence’s *closing N* — is the member’s activity log. APE, the gap and *Polis yang dibutuhkan* are the production upload’s (`monthly.source`, `yearly.source`). The screen says which (UI-052)."
+          },
+          "codes": {
+            "example": [
+              "SELL_SUBMISSION"
+            ],
+            "description": "The codes the office binds to *Submission polis*, counted.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "source",
+          "codes"
+        ]
+      },
+      "SummaryUploadedOnDto": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "nullable": true,
+            "format": "date",
+            "example": "2026-10-30",
+            "description": "The office’s day its latest production file for `month` was uploaded, in its calendar; `null` while there is none."
+          },
+          "year": {
+            "type": "string",
+            "nullable": true,
+            "format": "date",
+            "example": "2026-10-30",
+            "description": "The office’s day its latest production file of any month of `year`, up to `month`, was uploaded; `null` while there is none."
+          }
+        },
+        "required": [
+          "month",
+          "year"
+        ]
+      },
       "ActivityTargetDto": {
         "type": "object",
         "properties": {
@@ -26700,7 +27864,7 @@
             "example": "2026-09-28"
           },
           "targets": {
-            "description": "Leads contacted, appointments, closings — in that order.",
+            "description": "Leads contacted, appointments, closings — in that order. The year’s are the cascade on what the year still needs, so its closings target is `yearly.policiesNeeded` (UI-052).",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ActivityTargetDto"
@@ -26708,7 +27872,7 @@
           },
           "total": {
             "type": "number",
-            "description": "Every activity logged over the period, across all categories."
+            "description": "*n aktivitas*: the sum of the rows below — `targets` and every row of `sections`, each code once (UI-052)."
           },
           "sections": {
             "description": "One per summary tile the reader is shown (ADR-0064) whose sections hold none of the three codes above.",
@@ -26932,6 +28096,22 @@
               }
             ]
           },
+          "policies": {
+            "description": "Where every count of policies on the page comes from: the activity log (UI-052).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SummaryPoliciesDto"
+              }
+            ]
+          },
+          "uploadedOn": {
+            "description": "The day the page’s APE is valid for — the latest production upload of the month, and of the year (UI-054).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SummaryUploadedOnDto"
+              }
+            ]
+          },
           "activity": {
             "description": "*Your sales activity targets* and the other sections.",
             "allOf": [
@@ -26966,6 +28146,8 @@
           "monthly",
           "yearly",
           "pace",
+          "policies",
+          "uploadedOn",
           "activity",
           "leads",
           "insights"
@@ -27197,6 +28379,176 @@
           "pageSize"
         ]
       },
+      "LeadMoveDto": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fromStatusCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "`null` on the lead’s first move: it had no stage before."
+          },
+          "toStatusCode": {
+            "type": "string",
+            "example": "FOLLOW_UP",
+            "description": "A code; the office names it."
+          }
+        },
+        "required": [
+          "at",
+          "fromStatusCode",
+          "toStatusCode"
+        ]
+      },
+      "LeadDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "ownerMembershipId": {
+            "type": "string",
+            "description": "The membership whose lead it is, never a user id."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "sales",
+              "recruitment"
+            ],
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "contact": {
+            "description": "No `lawfulBasis` or `consentAt` beside it since 2026-10-07 (ADR-0108 §1).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LeadContactDto"
+              }
+            ]
+          },
+          "statusCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "The code, never the label."
+          },
+          "thisMonth": {
+            "type": "boolean",
+            "description": "**Derived**: is there a commitment for the office’s current month? Nothing clears it, so it cannot be left true for an agent who has not opened the app since March."
+          },
+          "committedMonths": {
+            "example": [
+              "2026-09",
+              "2026-10"
+            ],
+            "description": "Every month this lead was promised for, oldest first, in the office’s timezone. The archive behind *did they do what they said* — written when the promise is made rather than swept somewhere when the month ends.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "remarks": {
+            "type": "string",
+            "nullable": true
+          },
+          "nextActionDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-02"
+          },
+          "nextActionNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "won",
+              "lost"
+            ],
+            "nullable": true
+          },
+          "source": {
+            "type": "string",
+            "nullable": true
+          },
+          "dateRegistered": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "version": {
+            "type": "number",
+            "description": "What a later write pins, so two people cannot overwrite each other."
+          },
+          "flags": {
+            "type": "array",
+            "description": "Computed on read, never stored — a stored flag is one that is wrong at midnight. A closed lead carries none. **A commitment for this month does not suppress them**, unlike the prototype, which shows only the green chip on a lead that is also two weeks overdue.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "overdue",
+                "no-next-action",
+                "no-remarks"
+              ]
+            }
+          },
+          "lastEditedBy": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": false,
+            "properties": {
+              "membershipId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "description": "Who last changed this lead, when that was not the agent whose lead it is (ADR-0044) — `null` otherwise. A proxy edit is recognisable by `updatedBy` differing from `ownerMembershipId`: two columns, so no flag is needed."
+          },
+          "overdueDays": {
+            "type": "number",
+            "nullable": true,
+            "example": 14,
+            "description": "How late, in the office’s own calendar days — `null` unless `flags` carries `overdue`. Beside `flags` rather than inside it: `flags` is what the list filters on, and a filter key carrying a number is one nobody can match against."
+          },
+          "history": {
+            "description": "Every move along its ladder, oldest first. Append-only: a reopen or a type change adds none.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeadMoveDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "ownerMembershipId",
+          "type",
+          "name",
+          "contact",
+          "statusCode",
+          "thisMonth",
+          "committedMonths",
+          "remarks",
+          "nextActionDate",
+          "nextActionNote",
+          "outcome",
+          "source",
+          "dateRegistered",
+          "version",
+          "flags",
+          "lastEditedBy",
+          "overdueDays",
+          "history"
+        ]
+      },
       "CreateLeadDto": {
         "type": "object",
         "properties": {
@@ -27390,6 +28742,25 @@
         },
         "required": [
           "outcome"
+        ]
+      },
+      "SetNextActionDoneDto": {
+        "type": "object",
+        "properties": {
+          "done": {
+            "type": "boolean",
+            "description": "`true` ticks the next action done; `false` puts the one last ticked back."
+          },
+          "version": {
+            "type": "number",
+            "minimum": 1,
+            "example": 3,
+            "description": "The version the lead was read at."
+          }
+        },
+        "required": [
+          "done",
+          "version"
         ]
       },
       "DeletedLeadDto": {
@@ -27810,6 +29181,48 @@
           "caseSizeMinor",
           "leadsToApptPct",
           "closingRatePct"
+        ]
+      },
+      "GoalPreviewDto": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "example": "2026"
+          },
+          "monthsLeft": {
+            "type": "number",
+            "example": 2.1,
+            "description": "The divisor in force: the typed one, or the office’s calendar."
+          },
+          "monthsLeftIsOverride": {
+            "type": "boolean",
+            "description": "Whether `monthsLeft` was typed over (`true`) or is the office’s calendar."
+          },
+          "achieved": {
+            "description": "The APE the plan is measured against: the office’s year to date where it holds one, else the typed figure on your own plan and the stored one on anybody else’s.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoalAchievedDto"
+              }
+            ]
+          },
+          "projected": {
+            "nullable": true,
+            "description": "The cascade, as a save would store it. `null` when the inputs cannot make a plan — a save refuses that with `GOAL_INVALID_ASSUMPTION`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoalProjectionDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "period",
+          "monthsLeft",
+          "monthsLeftIsOverride",
+          "achieved",
+          "projected"
         ]
       },
       "TemplateFileDto": {
@@ -28799,6 +30212,23 @@
           "newPassword"
         ]
       },
+      "ChangeEmailDto": {
+        "type": "object",
+        "properties": {
+          "newEmail": {
+            "type": "string",
+            "example": "agus.baru@kpm0417.test"
+          },
+          "currentPassword": {
+            "type": "string",
+            "description": "The password the account signs in with now."
+          }
+        },
+        "required": [
+          "newEmail",
+          "currentPassword"
+        ]
+      },
       "UpdateProfileDto": {
         "type": "object",
         "properties": {
@@ -28853,8 +30283,47 @@
               "en"
             ],
             "description": "The language you read AgencyBoost in: `id`, Bahasa Indonesia, or `en`, English. Saved on your account, so it follows you to every device. Not clearable: anything else, `null` included, is `400 VALIDATION_FAILED`."
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true,
+            "example": "0812-1100-2200",
+            "description": "Your WhatsApp number. Spaces, dashes, dots and brackets go, and a leading `+62`, `62` or `0`; what is left must be 9 to 13 digits, stored as `+62…`, else `400 VALIDATION_FAILED` naming `phone`. Empty, blank or `null` clears it."
           }
         }
+      },
+      "RequestAvatarUploadDto": {
+        "type": "object",
+        "properties": {
+          "mimeType": {
+            "type": "string",
+            "enum": [
+              "image/jpeg"
+            ],
+            "description": "The crop is always a JPEG."
+          },
+          "bytes": {
+            "type": "number",
+            "example": 24576,
+            "description": "What the browser is about to send: at most 512 KB (`AVATAR.MAX_BYTES`), checked here and again against what storage holds (ADR-0040)."
+          }
+        },
+        "required": [
+          "mimeType",
+          "bytes"
+        ]
+      },
+      "AttachAvatarDto": {
+        "type": "object",
+        "properties": {
+          "storageKey": {
+            "type": "string",
+            "example": "dev/user/66f0…/avatar/01JB…"
+          }
+        },
+        "required": [
+          "storageKey"
+        ]
       },
       "ApproveKpmRequestDto": {
         "type": "object",
@@ -29480,6 +30949,19 @@
         },
         "required": [
           "isCoreLeader"
+        ]
+      },
+      "SetMemberPhoneDto": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string",
+            "example": "0812-1100-2200",
+            "description": "Spaces, dashes, dots and brackets go, and a leading `+62`, `62` or `0`; what is left must be 9 to 13 digits, stored as `+62…`, else `400 VALIDATION_FAILED` naming `phone`."
+          }
+        },
+        "required": [
+          "phone"
         ]
       },
       "DeclineLeaderLimitRequestDto": {
@@ -34909,6 +36391,11 @@
             "type": "string",
             "example": "Rina Wijaya"
           },
+          "photoUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "UI V1 (UI-111): their profile photo, when they have one, as a signed link (`users.avatarUrl`); the row draws initials otherwise."
+          },
           "rung": {
             "$ref": "#/components/schemas/RosterRungDto"
           },
@@ -34940,6 +36427,7 @@
         "required": [
           "membershipId",
           "name",
+          "photoUrl",
           "rung",
           "depth",
           "lastOneOnOne",
@@ -35040,6 +36528,11 @@
             "type": "string",
             "example": "Rina Wijaya"
           },
+          "photoUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "UI V1 (UI-111): their profile photo, when they have one, as a signed link (`users.avatarUrl`); the header draws initials otherwise."
+          },
           "pronoun": {
             "type": "string",
             "enum": [
@@ -35075,6 +36568,7 @@
           "today",
           "membershipId",
           "name",
+          "photoUrl",
           "pronoun",
           "rung",
           "leader",
@@ -35801,6 +37295,12 @@
             "example": "2026-10-05",
             "description": "The last day it may be reopened, for a reader who may reopen it — given after that day too, so the screen can say until when — else `null`."
           },
+          "defaultDueDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-11-06",
+            "description": "The date a new action item starts with (UI-060): the office’s today plus seven days — the same weekday next week. *+* fills it in; *Start* gave it to every carried item. The leader may change it. `null` where no row can be added: a finalized session, or a reader who is not its writing coach."
+          },
           "lastWeek": {
             "nullable": true,
             "description": "The finalized session *last week* is; `null` for a first session.",
@@ -35864,6 +37364,7 @@
           "finalizedAt",
           "finalizedBy",
           "reopenableUntil",
+          "defaultDueDate",
           "lastWeek",
           "lastWeekItems",
           "leadActions",
@@ -36619,12 +38120,44 @@
           "actionItems"
         ]
       },
+      "CoachingItemDoneDto": {
+        "type": "object",
+        "properties": {
+          "done": {
+            "type": "boolean",
+            "description": "`true` ticks the item done; `false` takes the tick back (*Urungkan*)."
+          }
+        },
+        "required": [
+          "done"
+        ]
+      },
+      "CoachingItemDoneResponseDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean",
+            "description": "Where the item stands now."
+          }
+        },
+        "required": [
+          "sessionId",
+          "itemId",
+          "done"
+        ]
+      },
       "CalendarBusyBlockDto": {
         "type": "object",
         "properties": {
           "allDay": {
             "type": "boolean",
-            "description": "Travel: two dates and no times."
+            "description": "An all-day trip: two dates and no times. `false` on a trip with times (UI V1), which has both, and on every other type."
           },
           "date": {
             "type": "string",
@@ -36648,13 +38181,13 @@
             "type": "string",
             "nullable": true,
             "example": null,
-            "description": "Travel’s departure date; `null` otherwise."
+            "description": "Travel’s departure date — a joined event’s first day when it runs over several; `null` otherwise."
           },
           "endsOn": {
             "type": "string",
             "nullable": true,
             "example": null,
-            "description": "Travel’s return date, inclusive; `null` otherwise."
+            "description": "Travel’s return date, inclusive — a joined event’s last day when it runs over several; `null` otherwise."
           },
           "startsAt": {
             "type": "string",
@@ -36682,6 +38215,224 @@
           "startsAt",
           "endsAt",
           "busy"
+        ]
+      },
+      "CalendarTaskLeadDto": {
+        "type": "object",
+        "properties": {
+          "leadId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "number",
+            "example": 3,
+            "description": "The version a tick (`PUT /leads/:id/next-action/done`) pins."
+          }
+        },
+        "required": [
+          "leadId",
+          "version"
+        ]
+      },
+      "CalendarTaskCoachingDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "coachMembershipId": {
+            "type": "string",
+            "description": "Who coached the person: *Dari: {NAME}*."
+          }
+        },
+        "required": [
+          "sessionId",
+          "itemId",
+          "coachMembershipId"
+        ]
+      },
+      "CalendarTaskDto": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "example": "lead:66f0…",
+            "description": "`lead:{leadId}` or `coaching:{sessionId}:{itemId}`."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "lead",
+              "coaching"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-10-30",
+            "description": "The office date it is due: a next action’s date, an action item’s due date."
+          },
+          "ownerMembershipId": {
+            "type": "string",
+            "description": "Whose task it is: the lead’s owner, or the person coached."
+          },
+          "name": {
+            "type": "string",
+            "example": "Ibu Wiwik Setyaningsih",
+            "description": "The lead’s name, or the coach’s."
+          },
+          "note": {
+            "type": "string",
+            "example": "Invite BOP",
+            "description": "The next action’s note, or the action item; `''` when none."
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true,
+            "description": "The lead’s WhatsApp number, or the coach’s; `null` when none."
+          },
+          "lead": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CalendarTaskLeadDto"
+              }
+            ]
+          },
+          "coaching": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CalendarTaskCoachingDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "taskId",
+          "source",
+          "date",
+          "ownerMembershipId",
+          "name",
+          "note",
+          "phone",
+          "lead",
+          "coaching"
+        ]
+      },
+      "CalendarHiddenTaskDto": {
+        "type": "object",
+        "properties": {
+          "busy": {
+            "type": "boolean",
+            "example": true
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-10-30"
+          }
+        },
+        "required": [
+          "busy",
+          "date"
+        ]
+      },
+      "CalendarEventTypeDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "BOP"
+          },
+          "label": {
+            "type": "string",
+            "example": "Business Opportunity Presentation",
+            "description": "As the office typed it."
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
+      "CalendarJoinedEventDto": {
+        "type": "object",
+        "properties": {
+          "allDay": {
+            "type": "boolean",
+            "description": "An all-day trip: two dates and no times. `false` on a trip with times (UI V1), which has both, and on every other type."
+          },
+          "date": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-28",
+            "description": "A timed entry’s office date; `null` on Travel."
+          },
+          "start": {
+            "type": "string",
+            "nullable": true,
+            "example": "09:00",
+            "description": "A timed entry’s start, `HH:mm`; `null` on Travel."
+          },
+          "end": {
+            "type": "string",
+            "nullable": true,
+            "example": "09:30",
+            "description": "A timed entry’s end, `HH:mm`, `00:00` being midnight at the end of its date; `null` on Travel."
+          },
+          "startsOn": {
+            "type": "string",
+            "nullable": true,
+            "example": null,
+            "description": "Travel’s departure date — a joined event’s first day when it runs over several; `null` otherwise."
+          },
+          "endsOn": {
+            "type": "string",
+            "nullable": true,
+            "example": null,
+            "description": "Travel’s return date, inclusive — a joined event’s last day when it runs over several; `null` otherwise."
+          },
+          "startsAt": {
+            "type": "string",
+            "example": "2026-09-28T02:00:00.000Z",
+            "description": "The start, a UTC instant."
+          },
+          "endsAt": {
+            "type": "string",
+            "example": "2026-09-28T02:30:00.000Z",
+            "description": "The end, a UTC instant, exclusive."
+          },
+          "eventId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "example": "BOP Surabaya"
+          },
+          "type": {
+            "$ref": "#/components/schemas/CalendarEventTypeDto"
+          },
+          "location": {
+            "type": "string",
+            "example": "Kantor KPM, lantai 3",
+            "description": "`''` when none."
+          }
+        },
+        "required": [
+          "allDay",
+          "date",
+          "start",
+          "end",
+          "startsOn",
+          "endsOn",
+          "startsAt",
+          "endsAt",
+          "eventId",
+          "title",
+          "type",
+          "location"
         ]
       },
       "CalendarDayDto": {
@@ -36753,12 +38504,18 @@
           },
           "rung": {
             "$ref": "#/components/schemas/CalendarRungDto"
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true,
+            "description": "A compared person’s WhatsApp number, for the one button beside their tasks (UI V1); `null` on your own read, and when none is on file."
           }
         },
         "required": [
           "membershipId",
           "name",
-          "rung"
+          "rung",
+          "phone"
         ]
       },
       "CalendarPeriodDto": {
@@ -36768,7 +38525,9 @@
             "type": "string",
             "enum": [
               "week",
-              "month"
+              "month",
+              "agenda",
+              "three_days"
             ]
           },
           "from": {
@@ -36833,6 +38592,34 @@
               ]
             },
             "description": "By start, then id: each an entry, or — in a compared read, for an entry the member only attends that you could not read in your own right — a busy block. Everything overlapping the period."
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CalendarTaskDto"
+                },
+                {
+                  "$ref": "#/components/schemas/CalendarHiddenTaskDto"
+                }
+              ]
+            },
+            "description": "**Tugas** (UI V1): the lead next actions and open coaching action items dated in the period, coaching first, then by name — read from their sources now. For a compared member who hides their details, each is its day alone, a count."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CalendarJoinedEventDto"
+                },
+                {
+                  "$ref": "#/components/schemas/CalendarBusyBlockDto"
+                }
+              ]
+            },
+            "description": "The events the person said they are *going* to, overlapping the period — busy blocks for a compared member who hides their details."
           }
         },
         "required": [
@@ -36846,7 +38633,9 @@
           "today",
           "now",
           "subject",
-          "entries"
+          "entries",
+          "tasks",
+          "events"
         ]
       },
       "CalendarDownlineRowDto": {
@@ -36951,6 +38740,11 @@
             "maxLength": 1000,
             "example": "Zoom — zoom.us/j/91827364",
             "description": "*Notes / location*. Optional; trimmed."
+          },
+          "allDay": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "**Travel only**: `true` or absent, *Sepanjang hari* — the trip’s two dates; `false`, a trip with times — `startsOn` and `start`, `endsOn` and `end`. Sent `true` on any other type, it is refused."
           },
           "date": {
             "type": "string",
@@ -37073,7 +38867,7 @@
         "properties": {
           "allDay": {
             "type": "boolean",
-            "description": "Travel: two dates and no times."
+            "description": "An all-day trip: two dates and no times. `false` on a trip with times (UI V1), which has both, and on every other type."
           },
           "date": {
             "type": "string",
@@ -37097,13 +38891,13 @@
             "type": "string",
             "nullable": true,
             "example": null,
-            "description": "Travel’s departure date; `null` otherwise."
+            "description": "Travel’s departure date — a joined event’s first day when it runs over several; `null` otherwise."
           },
           "endsOn": {
             "type": "string",
             "nullable": true,
             "example": null,
-            "description": "Travel’s return date, inclusive; `null` otherwise."
+            "description": "Travel’s return date, inclusive — a joined event’s last day when it runs over several; `null` otherwise."
           },
           "startsAt": {
             "type": "string",
@@ -37216,6 +39010,11 @@
             "example": "Zoom — zoom.us/j/91827364",
             "description": "*Notes / location*. Optional; trimmed."
           },
+          "allDay": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "**Travel only**: `true` or absent, *Sepanjang hari* — the trip’s two dates; `false`, a trip with times — `startsOn` and `start`, `endsOn` and `end`. Sent `true` on any other type, it is refused."
+          },
           "date": {
             "type": "string",
             "nullable": true,
@@ -37287,6 +39086,11 @@
             "maxLength": 1000,
             "example": "Zoom — zoom.us/j/91827364",
             "description": "*Notes / location*. Optional; trimmed."
+          },
+          "allDay": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "**Travel only**: `true` or absent, *Sepanjang hari* — the trip’s two dates; `false`, a trip with times — `startsOn` and `start`, `endsOn` and `end`. Sent `true` on any other type, it is refused."
           },
           "date": {
             "type": "string",
@@ -37806,7 +39610,7 @@
             "type": "string",
             "maxLength": 500,
             "example": "Ibu Ratna Kusuma",
-            "description": "`closing`, a new one: who the case was sold to — the lead’s name."
+            "description": "`closing`, a new one: who the case was sold to — the lead’s name. Absent with a `date`: a pecah telor’s day alone (UI V1, D-26), logged under a name the API gives it."
           },
           "date": {
             "type": "string",
@@ -37918,26 +39722,31 @@
         "properties": {
           "activated": {
             "type": "number",
-            "description": "Their first sale was on or before day 90 of the join date."
+            "description": "Their first sale was on or before day 90 of the join date: the numerator."
           },
           "notActivated": {
             "type": "number",
-            "description": "No first sale by day 90 — or they left before one."
+            "description": "Past day 90 with no first sale: with `activated`, the denominator."
+          },
+          "late": {
+            "type": "number",
+            "description": "A first sale after day 90 (*lewat 3M*): Teraktivasi, and in neither part of the share."
           },
           "inProgress": {
             "type": "number",
-            "description": "Still within their 90 days: in neither part of the share."
+            "description": "Still within their 90 days with no first sale: in neither part of the share (rule A)."
           },
           "pct": {
             "type": "number",
             "nullable": true,
-            "example": 60,
-            "description": "Activated ÷ (activated + not activated), a whole percent; `null` while none of them is decided — never 0."
+            "example": 100,
+            "description": "*Aktivasi 3M*: activated by day 90 ÷ (that + past day 90 with no first sale), a whole percent; `null` while none of them is decided — never 0. The screen shows this alone."
           }
         },
         "required": [
           "activated",
           "notActivated",
+          "late",
           "inProgress",
           "pct"
         ]
@@ -37947,21 +39756,25 @@
         "properties": {
           "activated": {
             "type": "number",
-            "description": "Their first sale was on or before day 90 of the join date."
+            "description": "Their first sale was on or before day 90 of the join date: the numerator."
           },
           "notActivated": {
             "type": "number",
-            "description": "No first sale by day 90 — or they left before one."
+            "description": "Past day 90 with no first sale: with `activated`, the denominator."
+          },
+          "late": {
+            "type": "number",
+            "description": "A first sale after day 90 (*lewat 3M*): Teraktivasi, and in neither part of the share."
           },
           "inProgress": {
             "type": "number",
-            "description": "Still within their 90 days: in neither part of the share."
+            "description": "Still within their 90 days with no first sale: in neither part of the share (rule A)."
           },
           "pct": {
             "type": "number",
             "nullable": true,
-            "example": 60,
-            "description": "Activated ÷ (activated + not activated), a whole percent; `null` while none of them is decided — never 0."
+            "example": 100,
+            "description": "*Aktivasi 3M*: activated by day 90 ÷ (that + past day 90 with no first sale), a whole percent; `null` while none of them is decided — never 0. The screen shows this alone."
           },
           "month": {
             "type": "string",
@@ -37972,6 +39785,7 @@
         "required": [
           "activated",
           "notActivated",
+          "late",
           "inProgress",
           "pct",
           "month"
@@ -38118,13 +39932,37 @@
           },
           "day": {
             "type": "number",
-            "description": "Which day of their first 90 today is, the join date day 1."
+            "description": "Which day since joining today is, the join date day 1: *Hari ke-X*."
           },
           "firstSaleDate": {
             "type": "string",
             "nullable": true,
-            "example": "2026-08-25",
-            "description": "The first paid and issued case; `null` with none."
+            "example": "2026-09-01",
+            "description": "The first sale (*pecah telor*): a paid and issued case, or a closing logged from the checklist; `null` with none."
+          },
+          "firstSaleDay": {
+            "type": "number",
+            "nullable": true,
+            "example": 30,
+            "description": "The first sale’s day since joining, the join date day 1: *Pecah telor di hari ke-X*. `null` with none."
+          },
+          "firstSaleSource": {
+            "type": "string",
+            "enum": [
+              "sales",
+              "manual"
+            ],
+            "nullable": true,
+            "description": "`sales` — a sales lead at Paid and issued, or the production file; `manual` — a closing logged from the checklist. `null` with none."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "activated",
+              "activated_late",
+              "not_yet"
+            ],
+            "description": "Teraktivasi as soon as there is a first sale: `activated` by day 90, `activated_late` after it (amber, outside the share); `not_yet` without one. Leaving is not a status."
           },
           "activation3M": {
             "type": "string",
@@ -38133,12 +39971,12 @@
               "activated",
               "not_activated"
             ],
-            "description": "In progress through day 90; then activated (a first sale by day 90) or not — kept once decided."
+            "description": "The 3M result: activated as soon as a first sale on or before day 90 is recorded; not activated once day 90 passes without one; in progress otherwise. Kept from day 91."
           },
           "leftOn": {
             "type": "string",
             "nullable": true,
-            "description": "The day they were marked left; `null` while not."
+            "description": "The day they were marked left; `null` while not. Kept as data only: it decides nothing and no screen shows it."
           },
           "checklist": {
             "nullable": true,
@@ -38156,6 +39994,9 @@
           "joinDate",
           "day",
           "firstSaleDate",
+          "firstSaleDay",
+          "firstSaleSource",
+          "status",
           "activation3M",
           "leftOn",
           "checklist"
@@ -38165,21 +40006,21 @@
         "type": "object",
         "properties": {
           "inProgress": {
-            "description": "Days 1 to 90, by day, highest first.",
+            "description": "No first sale, within days 1 to 90: by day, highest first.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/NewHireRowDto"
             }
           },
           "activated": {
-            "description": "By join date, newest first.",
+            "description": "Teraktivasi — `activated` and `activated_late` — by join date, newest first.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/NewHireRowDto"
             }
           },
           "notActivated": {
-            "description": "By join date, newest first — the ones who left among them.",
+            "description": "No first sale, past day 90: by join date, newest first.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/NewHireRowDto"
@@ -38240,35 +40081,238 @@
           "sections"
         ]
       },
-      "NewHireMarkedLeftDto": {
+      "NewHireLeaderDto": {
         "type": "object",
         "properties": {
           "membershipId": {
             "type": "string"
           },
-          "leftAt": {
+          "name": {
             "type": "string",
-            "format": "date-time"
+            "example": "Sari Puspita",
+            "description": "The full name."
           },
-          "leftOn": {
-            "type": "string",
-            "example": "2026-10-27",
-            "description": "The day it fell on."
-          },
-          "activation3M": {
+          "role": {
             "type": "string",
             "enum": [
-              "activated",
-              "not_activated"
+              "ab",
+              "aab",
+              "agent"
             ],
-            "description": "Their 3M activation, decided now."
+            "description": "Their rung: *AB*, *AAB* or *Agent*."
           }
         },
         "required": [
           "membershipId",
-          "leftAt",
-          "leftOn",
-          "activation3M"
+          "name",
+          "role"
+        ]
+      },
+      "NewHireStandingDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "activated",
+              "activated_late",
+              "not_yet"
+            ],
+            "description": "As on the row: `activated` by day 90, `activated_late` after it (amber), `not_yet` without a first sale."
+          },
+          "activation3M": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "activated",
+              "not_activated"
+            ],
+            "description": "The 3M result, as on the row."
+          },
+          "joinDate": {
+            "type": "string",
+            "example": "2026-08-03",
+            "description": "The join date, day 1."
+          },
+          "day": {
+            "type": "number",
+            "example": 88,
+            "description": "Today’s day since joining: *Hari 88 /90*."
+          },
+          "firstSaleDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-01"
+          },
+          "firstSaleDay": {
+            "type": "number",
+            "nullable": true,
+            "example": 30,
+            "description": "*Pecah telor di hari ke-X*; `null` with none."
+          },
+          "firstSaleSource": {
+            "type": "string",
+            "enum": [
+              "sales",
+              "manual"
+            ],
+            "nullable": true,
+            "description": "Where the first sale came from."
+          },
+          "leader": {
+            "nullable": true,
+            "description": "Who they report to (UI-027, D-25): the header’s *AAB Arief · Bergabung 3 Agu 2026*. `null` with nobody.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NewHireLeaderDto"
+              }
+            ]
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true,
+            "example": "+6281211002200",
+            "description": "Their WhatsApp number as stored (`users.phone`), or `null` with none (UI-027, UI-081): the detail’s *WhatsApp* opens it, or asks for it first."
+          }
+        },
+        "required": [
+          "status",
+          "activation3M",
+          "joinDate",
+          "day",
+          "firstSaleDate",
+          "firstSaleDay",
+          "firstSaleSource",
+          "leader",
+          "phone"
+        ]
+      },
+      "NewHireDetailDto": {
+        "type": "object",
+        "properties": {
+          "hire": {
+            "$ref": "#/components/schemas/ActivationPersonDto"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "graduated",
+              "expired"
+            ],
+            "description": "Open until the hire marks it complete, or until six calendar months after its start date."
+          },
+          "startDate": {
+            "type": "string",
+            "example": "2026-08-06",
+            "description": "Day 1, an office date: the hire’s **join date** (ADR-0169 §2), the membership’s `joinDate`."
+          },
+          "startCorrected": {
+            "nullable": true,
+            "description": "A leader’s correction of the join date: who, and when. `null` while it is the date the hire was added with.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationStartCorrectedDto"
+              }
+            ]
+          },
+          "today": {
+            "type": "string",
+            "example": "2026-10-03",
+            "description": "The office’s today: nothing is worked out in the browser."
+          },
+          "day": {
+            "type": "number",
+            "example": 59,
+            "description": "Whole office days since the start date, plus one; never below 1."
+          },
+          "window": {
+            "type": "number",
+            "example": 90,
+            "description": "The office’s activation window, in days."
+          },
+          "overdue": {
+            "type": "boolean",
+            "description": "Past the window, below 100%, and still open."
+          },
+          "endsOn": {
+            "type": "string",
+            "example": "2027-02-06",
+            "description": "Six calendar months after the start date, an office date."
+          },
+          "done": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number",
+            "description": "The pinned version’s item count."
+          },
+          "pct": {
+            "type": "number",
+            "example": 56,
+            "description": "`round(done / total × 100)`."
+          },
+          "aspects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivationAspectProgressDto"
+            }
+          },
+          "firstCaseClosed": {
+            "type": "boolean",
+            "description": "The item coded `FIRST_CASE_CLOSED` is done."
+          },
+          "graduatedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "graduatedBy": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationPersonDto"
+              }
+            ]
+          },
+          "note": {
+            "nullable": true,
+            "description": "The leader’s coaching note, which the hire reads.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationNoteDto"
+              }
+            ]
+          },
+          "newHire": {
+            "nullable": true,
+            "description": "The strip at the top of the detail (UI-023, D-25): the row’s status, from the same function. `null` for somebody who is not a new hire.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NewHireStandingDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "hire",
+          "state",
+          "startDate",
+          "startCorrected",
+          "today",
+          "day",
+          "window",
+          "overdue",
+          "endsOn",
+          "done",
+          "total",
+          "pct",
+          "aspects",
+          "firstCaseClosed",
+          "graduatedAt",
+          "graduatedBy",
+          "note",
+          "newHire"
         ]
       },
       "TickHireActivationItemDto": {
@@ -38390,7 +40434,7 @@
           },
           "newHires": {
             "type": "number",
-            "description": "Of `total`, the new hires before a first sale: in the team, and left out of *Direct Group production* and *On pace to be active (Group)*."
+            "description": "Of `total`, the new hires before a first sale: in the team, left out of *Direct Group production*, and in *Active Agent*’s `of` though never its `count` (UI-013)."
           }
         },
         "required": [
@@ -38456,16 +40500,51 @@
         "properties": {
           "count": {
             "type": "number",
-            "description": "`POTENTIAL_MAA_COUNT_IN_UNIT`, over the people who count for production."
+            "description": "`POTENTIAL_MAA_COUNT_IN_UNIT`: who is pacing to an active month, among the people who count for production."
           },
           "of": {
             "type": "number",
-            "description": "Everybody the group holds but a new hire before a first sale."
+            "description": "Manpower (UI-013): everybody the group holds, its head and every new hire included — the same number as *Your team*."
           }
         },
         "required": [
           "count",
           "of"
+        ]
+      },
+      "ActiveAgentTileDto": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "description": "`POTENTIAL_MAA_COUNT_IN_UNIT`: who is pacing to an active month, among the people who count for production."
+          },
+          "of": {
+            "type": "number",
+            "description": "Manpower (UI-013): everybody the group holds, its head and every new hire included — the same number as *Your team*."
+          },
+          "unit": {
+            "description": "*Unit*: the head and their direct agents — the rows of `yourUnit` (UI-013, D-16).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PotentialActiveDto"
+              }
+            ]
+          },
+          "aab": {
+            "description": "*AAB*: every unit below the head, its head included. `unit` and `aab` add up to the total.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PotentialActiveDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "of",
+          "unit",
+          "aab"
         ]
       },
       "PotentialRecruitsTileDto": {
@@ -38495,7 +40574,12 @@
             "$ref": "#/components/schemas/GroupProductionTileDto"
           },
           "potentialActive": {
-            "$ref": "#/components/schemas/PotentialActiveDto"
+            "description": "*Active Agent* (UI-013): pacing of manpower, with its *Unit* and *AAB* split.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActiveAgentTileDto"
+              }
+            ]
           },
           "potentialRecruits": {
             "$ref": "#/components/schemas/PotentialRecruitsTileDto"
@@ -38838,6 +40922,11 @@
             "type": "string",
             "example": "Rina Wijaya"
           },
+          "photoUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "UI V1 (UI-111): their profile photo, when they have one, as a signed link (`users.avatarUrl`); the row draws initials otherwise."
+          },
           "isReader": {
             "type": "boolean",
             "description": "The reader’s own row."
@@ -38865,6 +40954,10 @@
           },
           "leadsCounts": {
             "$ref": "#/components/schemas/LeadCountsDto"
+          },
+          "closings": {
+            "type": "number",
+            "description": "*Closing* (UI-028; O-4): their sales leads that reached *Paid and issued* within `window`, on the agency’s calendar — each lead counted on its first move there."
           },
           "activity": {
             "$ref": "#/components/schemas/UnitActivityDto"
@@ -38923,6 +41016,7 @@
         "required": [
           "membershipId",
           "name",
+          "photoUrl",
           "isReader",
           "coached",
           "rung",
@@ -38931,6 +41025,7 @@
           "goal",
           "production",
           "leadsCounts",
+          "closings",
           "activity",
           "lastOneOnOne",
           "status",
@@ -38997,6 +41092,10 @@
           "leadsCounts": {
             "$ref": "#/components/schemas/LeadCountsDto"
           },
+          "closings": {
+            "type": "number",
+            "description": "The rows’ *Closing* summed (UI-028)."
+          },
           "touches": {
             "$ref": "#/components/schemas/CountAgainstDto"
           },
@@ -39005,12 +41104,13 @@
           },
           "newHires": {
             "type": "number",
-            "description": "New hires before a first sale whom `goal` and `potentialActive` leave out."
+            "description": "New hires before a first sale whom `goal` leaves out, and `potentialActive.count` (never its `of`, UI-013)."
           }
         },
         "required": [
           "goal",
           "leadsCounts",
+          "closings",
           "touches",
           "potentialActive",
           "newHires"
@@ -39176,6 +41276,12 @@
           },
           "mdrt": {
             "$ref": "#/components/schemas/UnitMdrtDto"
+          },
+          "lastUpload": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-28",
+            "description": "*Last updated* (UI-028): the agency’s day of its newest standing production import, of any month; `null` while it has none."
           }
         },
         "required": [
@@ -39191,7 +41297,8 @@
           "yourUnit",
           "units",
           "production",
-          "mdrt"
+          "mdrt",
+          "lastUpload"
         ]
       },
       "ProductionRowDto": {
@@ -39258,6 +41365,973 @@
         "required": [
           "updated",
           "state"
+        ]
+      },
+      "ActivityPeriodDto": {
+        "type": "object",
+        "properties": {
+          "span": {
+            "type": "string",
+            "enum": [
+              "week",
+              "month"
+            ]
+          },
+          "from": {
+            "type": "string",
+            "example": "2026-10-26",
+            "description": "The week’s Monday, or the month’s first day."
+          },
+          "to": {
+            "type": "string",
+            "example": "2026-11-01",
+            "description": "The week’s Sunday, or the month’s last day."
+          },
+          "current": {
+            "type": "boolean",
+            "description": "The period holds the agency’s today: › goes nowhere."
+          },
+          "previous": {
+            "type": "string",
+            "example": "2026-10-25",
+            "description": "A day in the period before: ‹ reads it."
+          },
+          "next": {
+            "type": "string",
+            "nullable": true,
+            "description": "A day in the period after; `null` on the current one."
+          }
+        },
+        "required": [
+          "span",
+          "from",
+          "to",
+          "current",
+          "previous",
+          "next"
+        ]
+      },
+      "ActivitiesHeadDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Agus Prasetyo"
+          },
+          "isReader": {
+            "type": "boolean",
+            "description": "The unit is the reader’s own."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "isReader"
+        ]
+      },
+      "ActivitiesTypeDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SELL_SUBMISSION"
+          },
+          "label": {
+            "type": "string",
+            "example": "Submission polis",
+            "description": "As the agency named it — content, never translated."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "status"
+        ]
+      },
+      "ActivitiesSectionDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SELLING"
+          },
+          "label": {
+            "type": "string",
+            "example": "Penjualan",
+            "description": "As the agency named it."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "types": {
+            "description": "Its active types in the agency’s order, and an archived one only while the period counts it.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivitiesTypeDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "status",
+          "types"
+        ]
+      },
+      "CodeCountDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SELL_SUBMISSION",
+            "description": "The activity type’s stable code."
+          },
+          "count": {
+            "type": "number",
+            "example": 3
+          }
+        },
+        "required": [
+          "code",
+          "count"
+        ]
+      },
+      "ActivitiesPersonDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Indah Permatasari"
+          },
+          "isReader": {
+            "type": "boolean"
+          },
+          "inUnit": {
+            "type": "boolean",
+            "description": "In the *Unit*: the head and their direct agents who lead nobody. Everybody is in the *Group*."
+          },
+          "photoUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "UI V1 (UI-111): their profile photo, signed, when they have one; the column draws initials otherwise."
+          },
+          "counts": {
+            "description": "Their counts in the period, codes above zero.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CodeCountDto"
+            }
+          },
+          "total": {
+            "type": "number",
+            "description": "Their counts summed."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "isReader",
+          "inUnit",
+          "photoUrl",
+          "counts",
+          "total"
+        ]
+      },
+      "ScopeTotalsDto": {
+        "type": "object",
+        "properties": {
+          "counts": {
+            "description": "Each code summed over the scope’s people.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CodeCountDto"
+            }
+          },
+          "total": {
+            "type": "number",
+            "description": "Every count of the scope’s people summed."
+          }
+        },
+        "required": [
+          "counts",
+          "total"
+        ]
+      },
+      "ActivitiesTotalsDto": {
+        "type": "object",
+        "properties": {
+          "unit": {
+            "$ref": "#/components/schemas/ScopeTotalsDto"
+          },
+          "group": {
+            "$ref": "#/components/schemas/ScopeTotalsDto"
+          }
+        },
+        "required": [
+          "unit",
+          "group"
+        ]
+      },
+      "UnitRatioTagDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true,
+            "example": "SELLING"
+          },
+          "label": {
+            "type": "string",
+            "example": "Selling"
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
+      "UnitRatioSidesDto": {
+        "type": "object",
+        "properties": {
+          "numerator": {
+            "type": "string",
+            "nullable": true,
+            "example": "Selling"
+          },
+          "denominator": {
+            "type": "string",
+            "nullable": true,
+            "example": "Recruitment"
+          }
+        },
+        "required": [
+          "numerator",
+          "denominator"
+        ]
+      },
+      "UnitRatioTermDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SELL_SUBMISSION"
+          },
+          "label": {
+            "type": "string",
+            "example": "Submission polis"
+          },
+          "displayOrder": {
+            "type": "number",
+            "example": 6,
+            "description": "Display order — the number the log screen shows. 0 when the code is unknown."
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "displayOrder"
+        ]
+      },
+      "UnitRatioDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SELLING_SUCCESS_RATE"
+          },
+          "label": {
+            "type": "string",
+            "example": "Selling success rate",
+            "description": "As the agency named it."
+          },
+          "comparison": {
+            "type": "string",
+            "enum": [
+              "gte",
+              "band"
+            ]
+          },
+          "displayUnit": {
+            "type": "string",
+            "enum": [
+              "percent",
+              "decimal",
+              "points"
+            ]
+          },
+          "benchmark": {
+            "type": "number",
+            "example": 0.3,
+            "description": "The agency’s own benchmark."
+          },
+          "tag": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UnitRatioTagDto"
+              }
+            ]
+          },
+          "sides": {
+            "nullable": true,
+            "description": "The balance’s two ends; `null` for a rate.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UnitRatioSidesDto"
+              }
+            ]
+          },
+          "numerator": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnitRatioTermDto"
+            }
+          },
+          "denominator": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnitRatioTermDto"
+            }
+          },
+          "purpose": {
+            "type": "string",
+            "nullable": true
+          },
+          "divergesFromStandard": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "number",
+            "nullable": true,
+            "description": "A rate’s proportion, or the balance’s lean in points. **`null` is not enough data**, never 0."
+          },
+          "share": {
+            "type": "number",
+            "nullable": true,
+            "description": "Balance only: the numerator side’s share, in percent."
+          },
+          "numeratorCount": {
+            "type": "number",
+            "description": "The set’s numerator codes summed."
+          },
+          "denominatorCount": {
+            "type": "number",
+            "description": "The set’s denominator codes summed."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "alert",
+              "neutral"
+            ],
+            "description": "Judged on the unrounded value."
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "comparison",
+          "displayUnit",
+          "benchmark",
+          "tag",
+          "sides",
+          "numerator",
+          "denominator",
+          "purpose",
+          "divergesFromStandard",
+          "value",
+          "share",
+          "numeratorCount",
+          "denominatorCount",
+          "status"
+        ]
+      },
+      "ActivitiesRatiosDto": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "example": "2026-10-01"
+          },
+          "to": {
+            "type": "string",
+            "example": "2026-10-30"
+          },
+          "days": {
+            "type": "number",
+            "example": 30,
+            "description": "`ROLLING_30D`, fixed: the ratios never follow the period."
+          },
+          "unit": {
+            "description": "The Ratio page’s ratios over the *Unit*’s counts summed, on the head’s rung.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnitRatioDto"
+            }
+          },
+          "group": {
+            "description": "The same over the *Group*’s.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnitRatioDto"
+            }
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "days",
+          "unit",
+          "group"
+        ]
+      },
+      "UnitActivitiesDto": {
+        "type": "object",
+        "properties": {
+          "today": {
+            "type": "string",
+            "example": "2026-10-30",
+            "description": "The agency’s today."
+          },
+          "period": {
+            "$ref": "#/components/schemas/ActivityPeriodDto"
+          },
+          "head": {
+            "$ref": "#/components/schemas/ActivitiesHeadDto"
+          },
+          "empty": {
+            "type": "boolean",
+            "description": "The head leads nobody: no columns."
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivitiesSectionDto"
+            }
+          },
+          "people": {
+            "description": "One column per person, in the roster’s order: the head, their direct agents, then each unit below.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivitiesPersonDto"
+            }
+          },
+          "totals": {
+            "$ref": "#/components/schemas/ActivitiesTotalsDto"
+          },
+          "ratios": {
+            "$ref": "#/components/schemas/ActivitiesRatiosDto"
+          }
+        },
+        "required": [
+          "today",
+          "period",
+          "head",
+          "empty",
+          "sections",
+          "people",
+          "totals",
+          "ratios"
+        ]
+      },
+      "HomePersonDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Wilson Tanoto"
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true,
+            "example": "+6281211002200"
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "phone"
+        ]
+      },
+      "HomeCoachingActionDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "coaching"
+            ]
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "example": "Siapkan daftar 20 prospek baru"
+          },
+          "from": {
+            "nullable": true,
+            "description": "*Dari: NAME* — who coached them.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HomePersonDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "sessionId",
+          "itemId",
+          "text",
+          "from"
+        ]
+      },
+      "HomeLeadContactDto": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "phone",
+          "email"
+        ]
+      },
+      "HomeLeadActionDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "lead"
+            ]
+          },
+          "leadId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Ibu Wiwik Setyaningsih"
+          },
+          "type": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "sales",
+              "recruitment"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "nullable": true,
+            "example": "Invite BOP"
+          },
+          "contact": {
+            "$ref": "#/components/schemas/HomeLeadContactDto"
+          },
+          "version": {
+            "type": "number",
+            "example": 3,
+            "description": "The lead’s version, for saving its number."
+          }
+        },
+        "required": [
+          "kind",
+          "leadId",
+          "name",
+          "type",
+          "note",
+          "contact",
+          "version"
+        ]
+      },
+      "HomeAgendaActionDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "agenda"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "entry",
+              "event"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "example": "meeting",
+            "description": "An entry’s type code, or a joined event’s type as the agency named it."
+          },
+          "title": {
+            "type": "string",
+            "example": "Weekly unit huddle"
+          },
+          "date": {
+            "type": "string",
+            "example": "2026-10-30"
+          },
+          "start": {
+            "type": "string",
+            "example": "15:00"
+          }
+        },
+        "required": [
+          "kind",
+          "source",
+          "id",
+          "type",
+          "title",
+          "date",
+          "start"
+        ]
+      },
+      "HomeNowDto": {
+        "type": "object",
+        "properties": {
+          "minute": {
+            "type": "number",
+            "example": 545,
+            "description": "The agency’s wall clock as the read was made, in minutes since midnight: the greeting’s time of day."
+          }
+        },
+        "required": [
+          "minute"
+        ]
+      },
+      "HomeQuoteDto": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "number",
+            "example": 16,
+            "description": "The quote’s place in the list, from 0: the agency’s day number mod 20."
+          },
+          "text": {
+            "type": "string",
+            "example": "Plans are only good intentions unless they immediately degenerate into hard work.",
+            "description": "In the language it was said in, whatever the reader’s."
+          },
+          "person": {
+            "type": "string",
+            "example": "Peter Drucker"
+          },
+          "pose": {
+            "type": "string",
+            "enum": [
+              "thinking",
+              "celebrating",
+              "pointing",
+              "phone"
+            ],
+            "description": "Boost’s pose: the day number mod 4."
+          }
+        },
+        "required": [
+          "index",
+          "text",
+          "person",
+          "pose"
+        ]
+      },
+      "HomeDayDto": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "example": "2026-10-30"
+          },
+          "count": {
+            "type": "number",
+            "example": 4,
+            "description": "The day’s saved total; 0 where nothing was saved."
+          }
+        },
+        "required": [
+          "date",
+          "count"
+        ]
+      },
+      "HomeActivityDto": {
+        "type": "object",
+        "properties": {
+          "today": {
+            "type": "number",
+            "example": 0
+          },
+          "yesterday": {
+            "type": "number",
+            "example": 5
+          },
+          "days": {
+            "description": "The seven agency days ending today, oldest first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HomeDayDto"
+            }
+          },
+          "total": {
+            "type": "number",
+            "example": 18
+          }
+        },
+        "required": [
+          "today",
+          "yesterday",
+          "days",
+          "total"
+        ]
+      },
+      "HomeScheduleDto": {
+        "type": "object",
+        "properties": {
+          "meetings": {
+            "type": "number",
+            "example": 2,
+            "description": "Timed things today: calendar entries not declined (no trip) and joined events."
+          },
+          "tasks": {
+            "type": "number",
+            "example": 3,
+            "description": "Open *Tugas* today: action items and leads’ next actions due today, none ticked."
+          }
+        },
+        "required": [
+          "meetings",
+          "tasks"
+        ]
+      },
+      "HomeCountOfDto": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "example": 1
+          },
+          "of": {
+            "type": "number",
+            "example": 4
+          }
+        },
+        "required": [
+          "count",
+          "of"
+        ]
+      },
+      "HomeSplitDto": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "example": 4
+          },
+          "of": {
+            "type": "number",
+            "example": 12,
+            "description": "Manpower: everybody in the Group, its head and the new hires included."
+          },
+          "unit": {
+            "description": "The head and their direct agents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HomeCountOfDto"
+              }
+            ]
+          },
+          "aab": {
+            "description": "Every AAB unit below them.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HomeCountOfDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "of",
+          "unit",
+          "aab"
+        ]
+      },
+      "HomeTeamPersonDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Lukman Hakim"
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "photoUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "A signed link to their photo, never the stored key."
+          },
+          "inUnit": {
+            "type": "boolean",
+            "description": "In the reader’s Unit; everybody is in the Group."
+          },
+          "yesterday": {
+            "type": "number",
+            "nullable": true,
+            "description": "Yesterday’s saved total; `null` for no saved day."
+          },
+          "today": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "phone",
+          "photoUrl",
+          "inUnit",
+          "yesterday",
+          "today"
+        ]
+      },
+      "HomeLeaderDto": {
+        "type": "object",
+        "properties": {
+          "activeAgent": {
+            "description": "Exactly the Unit Dashboard’s *Active Agent* tile.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HomeSplitDto"
+              }
+            ]
+          },
+          "coached7d": {
+            "description": "Members coached in the last 7 days (`COACHED_7D`), out of manpower.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HomeSplitDto"
+              }
+            ]
+          },
+          "team": {
+            "description": "Nobody-reported first, then not today, then the rest.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HomeTeamPersonDto"
+            }
+          }
+        },
+        "required": [
+          "activeAgent",
+          "coached7d",
+          "team"
+        ]
+      },
+      "HomeDto": {
+        "type": "object",
+        "properties": {
+          "today": {
+            "type": "string",
+            "example": "2026-10-30"
+          },
+          "yesterday": {
+            "type": "string",
+            "example": "2026-10-29"
+          },
+          "month": {
+            "type": "string",
+            "example": "2026-10"
+          },
+          "now": {
+            "$ref": "#/components/schemas/HomeNowDto"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/HomeQuoteDto"
+          },
+          "activity": {
+            "$ref": "#/components/schemas/HomeActivityDto"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/HomeScheduleDto"
+          },
+          "actions": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/HomeCoachingActionDto"
+                },
+                {
+                  "$ref": "#/components/schemas/HomeLeadActionDto"
+                },
+                {
+                  "$ref": "#/components/schemas/HomeAgendaActionDto"
+                }
+              ]
+            },
+            "description": "*Aksi hari ini*: at most three — today’s tasks, then today’s timed things, then the next days’."
+          },
+          "leader": {
+            "nullable": true,
+            "description": "`null` for somebody who leads nobody.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HomeLeaderDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "today",
+          "yesterday",
+          "month",
+          "now",
+          "quote",
+          "activity",
+          "schedule",
+          "actions",
+          "leader"
         ]
       },
       "RecruitmentChoiceDto": {
@@ -41764,6 +44838,25 @@
           "override"
         ]
       },
+      "ComplianceThresholdsDto": {
+        "type": "object",
+        "properties": {
+          "lowBelowPct": {
+            "type": "number",
+            "example": 50,
+            "description": "UI V1 (UI-109): a bar below this share done is red (`KPM_REPORTING.COMPLIANCE_LOW_BELOW_PCT`)."
+          },
+          "highFromPct": {
+            "type": "number",
+            "example": 80,
+            "description": "From this share done it is green (`KPM_REPORTING.COMPLIANCE_HIGH_FROM_PCT`)."
+          }
+        },
+        "required": [
+          "lowBelowPct",
+          "highFromPct"
+        ]
+      },
       "ComplianceViewDto": {
         "type": "object",
         "properties": {
@@ -41802,6 +44895,9 @@
           },
           "can": {
             "$ref": "#/components/schemas/ComplianceCanDto"
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/ComplianceThresholdsDto"
           }
         },
         "required": [
@@ -41812,7 +44908,8 @@
           "catalog",
           "selected",
           "tree",
-          "can"
+          "can",
+          "thresholds"
         ]
       },
       "ForumRungDto": {
@@ -41845,6 +44942,11 @@
             "type": "string",
             "example": "Agus Prasetyo"
           },
+          "photoUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "UI V1 (UI-111): their profile photo, when they have one, as a signed link (`users.avatarUrl`); the avatar draws initials otherwise."
+          },
           "rung": {
             "$ref": "#/components/schemas/ForumRungDto"
           },
@@ -41860,6 +44962,7 @@
         "required": [
           "membershipId",
           "name",
+          "photoUrl",
           "rung",
           "isReader",
           "tagged"
@@ -42374,7 +45477,7 @@
           },
           "done": {
             "type": "boolean",
-            "description": "Meaningful on *During* only."
+            "description": "Ticked or not, in any section (UI V1, UI-110)."
           },
           "version": {
             "type": "number",
@@ -42685,7 +45788,7 @@
           },
           "done": {
             "type": "boolean",
-            "description": "The box, on *During* only."
+            "description": "The item’s box, in any section (UI V1, UI-110)."
           },
           "version": {
             "type": "number",
@@ -43022,6 +46125,25 @@
           "current"
         ]
       },
+      "EmailChangedDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "changed"
+            ]
+          },
+          "email": {
+            "type": "string",
+            "example": "agus.baru@kpm0417.test"
+          }
+        },
+        "required": [
+          "status",
+          "email"
+        ]
+      },
       "MeUserDto": {
         "type": "object",
         "properties": {
@@ -43041,6 +46163,17 @@
           "pronoun": {
             "type": "string",
             "nullable": true
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true,
+            "example": "+6281211002200",
+            "description": "Your WhatsApp number, or `null`. Saved as `+62…` since UI V1; one recorded before then reads as it was typed. Set with `PATCH /auth/me`."
+          },
+          "avatarUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Your profile photo, as a signed link valid 12 hours (`AVATAR.URL_TTL_SECONDS`; the bucket is private), or `null` for none — the avatar then draws `initials`. Set with `PUT /auth/me/avatar`, cleared with `DELETE`."
           },
           "initials": {
             "type": "string",
@@ -43102,6 +46235,8 @@
           "fullName",
           "preferredName",
           "pronoun",
+          "phone",
+          "avatarUrl",
           "initials",
           "platformRole",
           "dateOfBirth",
@@ -43304,6 +46439,106 @@
           "permissions",
           "activation",
           "newHires"
+        ]
+      },
+      "ProfileLeaderDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Wilson Tanoto"
+          },
+          "orgLevelCode": {
+            "type": "string",
+            "example": "AB",
+            "description": "Their rung’s code; the screen names it from the office’s ladder."
+          }
+        },
+        "required": [
+          "name",
+          "orgLevelCode"
+        ]
+      },
+      "ProfileGroupDto": {
+        "type": "object",
+        "properties": {
+          "people": {
+            "type": "number",
+            "example": 11,
+            "description": "Everybody the reader leads, at any depth, active."
+          },
+          "ab": {
+            "type": "number",
+            "example": 0
+          },
+          "aab": {
+            "type": "number",
+            "example": 3
+          },
+          "agents": {
+            "type": "number",
+            "example": 8
+          }
+        },
+        "required": [
+          "people",
+          "ab",
+          "aab",
+          "agents"
+        ]
+      },
+      "ProfileFactsDto": {
+        "type": "object",
+        "properties": {
+          "companyName": {
+            "type": "string",
+            "nullable": true,
+            "example": "Prudential Indonesia",
+            "description": "Their insurer, as the platform names it."
+          },
+          "agentCode": {
+            "type": "string",
+            "nullable": true,
+            "example": "70012345",
+            "description": "The code their insurer issued; never changed here."
+          },
+          "leader": {
+            "nullable": true,
+            "description": "`null` with no leader, or no office.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProfileLeaderDto"
+              }
+            ]
+          },
+          "group": {
+            "nullable": true,
+            "description": "`null` for somebody who leads nobody.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProfileGroupDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "companyName",
+          "agentCode",
+          "leader",
+          "group"
+        ]
+      },
+      "AvatarDto": {
+        "type": "object",
+        "properties": {
+          "avatarUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "A signed link valid 12 hours, or `null`: initials."
+          }
+        },
+        "required": [
+          "avatarUrl"
         ]
       },
       "JoinStateDto": {
@@ -43602,6 +46837,19 @@
           "routedFromName",
           "leaderMembershipId",
           "leaderName"
+        ]
+      },
+      "WaitingRequestCountDto": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "example": 2,
+            "description": "Requests waiting on you, as `GET /join/requests` lists them; the office's whole queue for the Owner or an Admin."
+          }
+        },
+        "required": [
+          "count"
         ]
       },
       "RoutingChoiceDto": {
@@ -45490,6 +48738,77 @@
           "canChangeRole"
         ]
       },
+      "MemberSearchHitDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership the pick opens: `/coaching/{membershipId}/summary`."
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "preferredName": {
+            "type": "string",
+            "nullable": true
+          },
+          "agentCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "ab",
+              "aab",
+              "agent"
+            ]
+          },
+          "orgLevelCode": {
+            "type": "string",
+            "description": "The rung, by its ladder code; `role` is the class it gives."
+          }
+        },
+        "required": [
+          "membershipId",
+          "fullName",
+          "preferredName",
+          "agentCode",
+          "role",
+          "orgLevelCode"
+        ]
+      },
+      "MemberSearchResultDto": {
+        "type": "object",
+        "properties": {
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemberSearchHitDto"
+            }
+          }
+        },
+        "required": [
+          "members"
+        ]
+      },
+      "MemberPhoneDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "phone": {
+            "type": "string",
+            "example": "+6281211002200",
+            "description": "As stored: `+62` and 9 to 13 digits."
+          }
+        },
+        "required": [
+          "membershipId",
+          "phone"
+        ]
+      },
       "RoleChangeEntryDto": {
         "type": "object",
         "properties": {
@@ -45725,6 +49044,15 @@
           },
           "isSelf": {
             "type": "boolean"
+          },
+          "todayActivityCount": {
+            "type": "number",
+            "description": "UI V1 (UI-059, O-5): this person's activity count today — the office's day (Asia/Jakarta), the total Activity Management saved for it; 0 when nothing was logged. The Group Tree's *n aktivitas* / *Belum lapor* pill."
+          },
+          "photoUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "UI V1 (UI-059): their profile photo, when they have one (`users.avatarUrl`); the row draws initials otherwise."
           }
         },
         "required": [
@@ -45741,7 +49069,9 @@
           "directCounts",
           "subtreeCount",
           "isLeader",
-          "isSelf"
+          "isSelf",
+          "todayActivityCount",
+          "photoUrl"
         ]
       },
       "OrgTreeLeaderDto": {

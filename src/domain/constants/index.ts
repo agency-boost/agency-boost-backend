@@ -250,6 +250,12 @@ export const COACHING = {
    * (`KPM_Owner.html:1014`, `:1018`). **Fixed**: the window is part of the label, always.
    */
   COVERAGE_WINDOWS: [PERIOD.ROLLING_7D_DAYS, PERIOD.ROLLING_30D_DAYS] as readonly number[],
+  /**
+   * `COACHING_ACTION_DEFAULT_DUE_DAYS` (§B.8; UI V1, 2026-10-30, UI-060 — the owner's *"every action always has a
+   * date"*): an action item carried forward at *Start*, or added with *+*, is dated this many days after the office's
+   * today — the same weekday next week — and the leader may change it. **Fixed**.
+   */
+  ACTION_DEFAULT_DUE_DAYS: 7,
 } as const;
 
 /**
@@ -306,6 +312,7 @@ export {
   TRAINING_STATUSES,
   type TrainingStatus,
   SEED_TRAINING_CATEGORIES,
+  MOTIVATION_CATEGORY,
   SEED_TRAINING_SKILLS,
   SEED_TRAINING_MODULES,
   type SeedTrainingCategory,
@@ -389,7 +396,7 @@ export {
   PRODUCT_RUN_OFF_NOTE,
 } from './attack-plan';
 
-export { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from './assets';
+export { ASSET_LIMITS, AVATAR, DOCUMENT_MIME_TYPES } from './assets';
 export { PRODUCTION, PRODUCTION_UPLOAD } from './production';
 
 // Phase 15: the Unit Dashboard's periods, its save's bound, and the reason a leader's correction carries.
@@ -573,6 +580,9 @@ export {
   type WorkStatus,
   AGENT_CODE_PATTERN,
 } from './personal-data';
+
+// UI V1 (2026-10-30; UI-081, D-22): a person's WhatsApp number, as *Isi nomor WhatsApp* saves it.
+export { PHONE_NATIONAL_DIGITS, PHONE_COUNTRY_PREFIX, normalisePhone } from './phone';
 
 // Phase 18.98: the two languages, and Bahasa Indonesia for a person who has chosen neither (ADR-0179 §1).
 export {

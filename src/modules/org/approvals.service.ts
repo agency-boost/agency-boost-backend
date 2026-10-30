@@ -131,6 +131,31 @@ export class ApprovalsService {
   }
 
   /**
+   * **How many requests are waiting on this approver** (UI V1, UI-085: the orange count on the *Pending Requests* tab,
+   * read on all four User Management screens). The inbox's own filter — what was addressed or routed to them; the
+   * office's whole queue for the Owner or an Admin — and, as the inbox drops a request whose member is gone, only
+   * requests whose member is still in the office. Two narrow reads, ids only, never the names the inbox reads.
+   */
+  async waitingCount(ctx: RequestContext): Promise<{ count: number }> {
+    const me = this.requireLeader(ctx);
+    const rows = await this.requests.find(
+      ctx,
+      {
+        status: 'pending',
+        ...(this.isTenantAdmin(ctx) ? {} : { $or: [{ leaderMembershipId: me }, { routedToMembershipId: me }] }),
+      },
+      { projection: { membershipId: 1 } },
+    );
+    if (rows.length === 0) return { count: 0 };
+    const present = new Set((await this.members.find(
+      ctx,
+      { _id: { $in: [...new Set(rows.map((r) => r.membershipId))] } },
+      { projection: { _id: 1 } },
+    )).map((m) => String(m._id)));
+    return { count: rows.filter((r) => present.has(r.membershipId)).length };
+  }
+
+  /**
    * Everything waiting on this approver.
    *
    * Includes requests routed *to* them by somebody above: an AB may send an agent into

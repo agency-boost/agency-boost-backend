@@ -42,6 +42,9 @@ import { up as membershipFirstSale } from './0042-membership-first-sale';
 import { up as leaderMeetingTargetRates } from './0043-leader-meeting-target-rates';
 import { up as trainingCategoryDescriptions } from './0045-training-category-descriptions';
 import { up as defaultTemplateInIndonesian } from './0046-default-template-in-indonesian';
+import { up as leavingDecidesNo3M } from './0047-leaving-decides-no-3m';
+import { up as defaultTemplateMotivation } from './0048-default-template-motivation';
+import { up as calendarAllDay } from './0049-calendar-all-day';
 
 /*
  * The list on its own (P18.7-T3), so a spec can run every migration against an empty database without
@@ -112,4 +115,13 @@ export const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Dat
   // P18.98-T7 (OD-238, ADR-0179 §5): the Template company's Default template in Bahasa Indonesia, where it still holds
   // the seeded English — never an office's own words, nor any copy made from the template before.
   ['0046-default-template-in-indonesian', defaultTemplateInIndonesian],
+  // P18.99-T3 (UI V1, UI-023; the owner's D-24): a 3M result a leaving kept, inside the 90 days, given back to the sale
+  // and the join date — a leaving decides nothing and there is no *Keluar*.
+  ['0047-leaving-decides-no-3m', leavingDecidesNo3M],
+  // P18.99-T10 (UI V1, UI-063): the owner's seventh training category, *Motivation*, in the Template company's Default
+  // template, after *Team Management* — never an office's own taxonomy, nor any copy made from the template before.
+  ['0048-default-template-motivation', defaultTemplateMotivation],
+  // P18.99-T15 (UI V1, UI-104 point 8): every calendar entry says whether it is all-day — an old trip yes, the rest no —
+  // now that a trip may have times.
+  ['0049-calendar-all-day', calendarAllDay],
 ];

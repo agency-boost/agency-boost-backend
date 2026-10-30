@@ -7,6 +7,7 @@ import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { RECRUITMENT_CANDIDATE_TYPES, RECRUITMENT_PITCH_SLOTS, SEED_RECRUITMENT_PLAYBOOK } from '@/domain/constants';
+import { SEED_RECRUITMENT_PLAYBOOK_ID } from '@/domain/constants/recruitment-words-id';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
@@ -446,8 +447,9 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       session.current = AGENT;
       const id = await http().get('/recruitment/pitch-materials').set(...IN_INDONESIAN).expect(200);
       expect(id.body.slots.map((s: { slot: string; title: string }) => [s.slot, s.title])).toEqual([
-        ['opportunity', 'Ikhtisar peluang'], ['proof', 'Bukti & kredibilitas'], ['faq', 'FAQ'],
-        ['howtojoin', 'Cara bergabung'], ['company', 'Profil perusahaan'], ['agency', 'Profil agensi'],
+        // Each title its English name in both languages (UI-107: *English name as in the app*).
+        ['opportunity', 'Opportunity Overview'], ['proof', 'Proof & Credibility'], ['faq', 'FAQ'],
+        ['howtojoin', 'How to Join'], ['company', 'Company Profile'], ['agency', 'Agency Profile'],
       ]);
       expect(id.body.slots[0].checklist[0]).toEqual({ code: 'career-path', label: 'Jenjang karier (Agent → AAB → AB)', ticked: false });
       const en = await http().get('/recruitment/pitch-materials').expect(200);
@@ -456,7 +458,7 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
         .toEqual(RECRUITMENT_PITCH_SLOTS[0].checklist.map((i) => i.label));
     });
 
-    it('P18.98-T7 the attack plan’s chips and tags in the reader’s language; the company’s words as typed', async () => {
+    it('P18.98-T7, UI-107 the attack plan’s chips and tags in the reader’s language; the seed playbook in Indonesian too', async () => {
       session.current = AGENT;
       const id = await http().get(PLAN).set(...IN_INDONESIAN).expect(200);
       const en = await http().get(PLAN).expect(200);
@@ -465,8 +467,14 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       expect(en.body.vocabulary.types.map((c: { label: string }) => c.label))
         .toEqual(RECRUITMENT_CANDIDATE_TYPES.map((c) => c.label));
       expect(id.body.plan.brief.type).toEqual({ code: 'retiree', label: 'Pensiunan' });
-      expect(id.body.plan.profile).toEqual(en.body.plan.profile);
-      expect(id.body.plan.nextAction).toBe(en.body.plan.nextAction);
+      // The company still holds the platform's seed words, so an Indonesian reader reads them in Indonesian (UI-107).
+      expect(id.body.plan.profile).toMatchObject({
+        code: 'retiree', label: SEED_RECRUITMENT_PLAYBOOK_ID.profiles.retiree.label,
+        tagline: SEED_RECRUITMENT_PLAYBOOK_ID.profiles.retiree.tagline,
+      });
+      expect(en.body.plan.profile.tagline).toBe(SEED_RECRUITMENT_PLAYBOOK.profiles.retiree.tagline);
+      expect(id.body.plan.nextAction).toBe(SEED_RECRUITMENT_PLAYBOOK_ID.nextAction);
+      expect(en.body.plan.nextAction).toBe(SEED_RECRUITMENT_PLAYBOOK.nextAction);
     });
 
     it('P18.98-T7 the Super Admin’s playbook read serves the chips in the reader’s language', async () => {
@@ -506,14 +514,14 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       expect(empty.body.error).toMatchObject({
         code: 'VALIDATION_FAILED',
         // P18.98-T7: the slot named in Indonesian too.
-        message: 'Ikhtisar peluang belum memiliki file: unggah file dulu sebelum mengonfirmasi isinya.',
+        message: 'Opportunity Overview belum memiliki file: unggah file dulu sebelum mengonfirmasi isinya.',
         details: { field: 'slot', slot: 'opportunity' },
       });
       const { version } = await upload('agency');
       const noItem = await http().put(`${PITCH}/agency/confirmations/income`).set(...IN_INDONESIAN)
         .send({ ticked: true, version }).expect(400);
       expect(noItem.body.error).toMatchObject({
-        message: 'Profil agensi tidak memiliki item "income" untuk dikonfirmasi.', details: { field: 'item', item: 'income' },
+        message: 'Agency Profile tidak memiliki item "income" untuk dikonfirmasi.', details: { field: 'item', item: 'income' },
       });
     });
 

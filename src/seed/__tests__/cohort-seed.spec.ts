@@ -174,9 +174,11 @@ describe('P18.1-T1 the cohort seed — a run at 10:00 on 10 October 2026 in Jaka
       expect(cell('fy')).toEqual({ kind: 'figure', value: 100, leavesOut: [] });
     });
 
-    it('P18.96-T6 AC-2 and in YTD: 4 of 8 decided — Indah, Dimas, Siti and Pandu activated; Kemal, Raka (day 120), Lukman, Tari not', () => {
-      // Those still in their 90 days (Novi, Wahyu, Budi, Rina, Yanti) are in neither part, and wait on no month.
-      expect(cell('ytd')).toEqual({ kind: 'figure', value: 50, leavesOut: [] });
+    it('UI-023 and in YTD: 8 of 9 decided — Indah, Dimas, Siti, Pandu, Novi, Wahyu, Budi and Rina activated; Kemal not', () => {
+      // Rule A (UI V1): a first sale by day 90 counts at once — Novi, Wahyu, Budi and Rina, inside their 90 days. Raka's
+      // day-120 and Lukman's day-96 sales are in neither part; Tari (marked left — it decides nothing) and Yanti, inside
+      // their 90 days with no sale, are not counted yet. They wait on no month.
+      expect(cell('ytd')).toEqual({ kind: 'figure', value: 89, leavesOut: [] });
     });
 
     it('P18.1-T1 AC-2 a meeting two weeks ago (the seed’s #13), frozen today, reads the same two cells', async () => {
@@ -185,7 +187,7 @@ describe('P18.1-T1 the cohort seed — a run at 10:00 on 10 October 2026 in Jaka
       const at = (column: 'fy' | 'ytd') => thirteen.rows.find((r) => r.key === 'new_agent_3m')!.cells[column];
       expect([at('fy'), at('ytd')]).toEqual([
         { kind: 'figure', value: 100, leavesOut: [] },
-        { kind: 'figure', value: 50, leavesOut: [] },
+        { kind: 'figure', value: 89, leavesOut: [] },
       ]);
     });
 

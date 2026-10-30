@@ -7,6 +7,7 @@ import {
 import { field } from '@/common/validation/violations';
 import { CALENDAR, CALENDAR_ENTRY_TYPES, type CalendarEntryType } from '@/domain/constants';
 import { CALENDAR_REFUSALS } from './calendar.messages';
+import { CALENDAR_VIEWS, type CalendarView } from './calendar-time';
 
 /**
  * **The calendar's requests** (`functional/calendar.md`, the Data contract). The shapes and the limits
@@ -29,9 +30,14 @@ const TIME_SHAPE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const TIME_MESSAGE = field(CALENDAR_REFUSALS.VALIDATION_FAILED.clockShape({ field: '$property' }));
 
 export class CalendarEntriesQueryDto {
-  @ApiPropertyOptional({ enum: ['week', 'month'], default: 'week', description: 'The period to answer.' })
-  @IsOptional() @IsIn(['week', 'month'])
-  view?: 'week' | 'month';
+  @ApiPropertyOptional({
+    enum: CALENDAR_VIEWS, default: 'week',
+    description:
+      'The period to answer: the week holding `date`, its month padded to whole weeks, the Agenda — '
+      + `${CALENDAR.AGENDA_DAYS} days from \`date\` — or *3 Hari*, ${CALENDAR.THREE_DAYS} days from it.`,
+  })
+  @IsOptional() @IsIn(CALENDAR_VIEWS)
+  view?: CalendarView;
 
   @ApiPropertyOptional({
     example: '2026-09-28',
@@ -65,6 +71,15 @@ class CalendarEntryFieldsDto {
   })
   @IsOptional() @IsString() @MaxLength(CALENDAR.NOTES_MAX)
   notes?: string | null;
+
+  @ApiPropertyOptional({
+    type: Boolean, nullable: true,
+    description:
+      '**Travel only**: `true` or absent, *Sepanjang hari* — the trip’s two dates; `false`, a trip with times — '
+      + '`startsOn` and `start`, `endsOn` and `end`. Sent `true` on any other type, it is refused.',
+  })
+  @IsOptional() @IsBoolean()
+  allDay?: boolean | null;
 
   @ApiPropertyOptional({ type: String, nullable: true, example: '2026-09-28', description: 'A timed entry’s office date.' })
   @IsOptional() @IsString() @Matches(DATE_SHAPE, { message: DATE_MESSAGE })

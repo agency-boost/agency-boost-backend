@@ -76,6 +76,26 @@ export class CoachingActionItem {
 
 export const CoachingActionItemSchema = SchemaFactory.createForClass(CoachingActionItem);
 
+/**
+ * **An action item its coachee ticked done** (UI V1, 2026-10-30, UI-104 point 4; ADR-0180 §11): from their Calendar's
+ * *Tugas*, with *Urungkan* taking it back. Kept **beside** what was agreed, never in it: the finalized lists stay as
+ * they were finalized (P11-T5 AC-2), and the next *Start* reads these to tick the item in *last week's* review.
+ */
+@Schema({ _id: false })
+export class CoachingActionItemDone {
+  @Prop({ type: String, required: true })
+  itemId!: string;
+
+  @Prop({ type: Date, required: true })
+  at!: Date;
+
+  /** The coachee, the only member who ticks it. */
+  @Prop({ type: String, required: true })
+  byMembershipId!: string;
+}
+
+export const CoachingActionItemDoneSchema = SchemaFactory.createForClass(CoachingActionItemDone);
+
 /** A coaching tip, as written, or carried from last week as written. */
 @Schema({ _id: false })
 export class CoachingTip {
@@ -321,6 +341,14 @@ export class CoachingSession {
 
   @Prop({ type: [CoachingSessionCorrectionSchema], default: [] })
   corrections!: CoachingSessionCorrection[];
+
+  /**
+   * **The action items its coachee has ticked done** from Calendar (UI-104), one row per item, the newest tick's. Not
+   * part of any finalized version, so a tick moves no `version`, conflicts with no edit and survives a reopen; the next
+   * *Start* with the coachee — whoever leads it — ticks those items in its review (`reviewedItems`).
+   */
+  @Prop({ type: [CoachingActionItemDoneSchema], default: [] })
+  actionItemsDone!: CoachingActionItemDone[];
 
   @Prop({ type: Date, default: null })
   deletedAt!: Date | null;

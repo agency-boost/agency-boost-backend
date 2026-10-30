@@ -25,9 +25,10 @@ describe('CalendarService, at the edges of what it reads', () => {
       {} as never,
       {} as never,
       new FixedClock(new Date('2026-09-14T03:00:00Z')),
+      { tasksOf: async () => [], joinedEventsOf: async () => [] } as never,
     );
     const read = await service.read(ctx, {});
-    expect(read.subject).toEqual({ membershipId: 'me', name: '', rung: { code: 'MANAGER', label: 'MANAGER' } });
+    expect(read.subject).toEqual({ membershipId: 'me', name: '', rung: { code: 'MANAGER', label: 'MANAGER' }, phone: null });
     expect(read.entries).toEqual([]);
   });
 
@@ -44,6 +45,7 @@ describe('CalendarService, at the edges of what it reads', () => {
       {} as never,
       {} as never,
       new FixedClock(new Date('2026-09-14T03:00:00Z')),
+      {} as never,
     );
     for (const named of ['', 'me']) {
       await expect(service.read(ctx, { for: named })).rejects.toMatchObject({ code: 'NOT_FOUND' });

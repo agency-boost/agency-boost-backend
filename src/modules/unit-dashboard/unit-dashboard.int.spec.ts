@@ -26,6 +26,8 @@ import { VALUE_COLUMNS } from '../production/production-preview';
 import { TEMPLATE_HEADER_V1 } from '../production/production-template';
 import { SummaryController } from '../summary/summary.controller';
 import { SummaryService } from '../summary/summary.service';
+import { UnitActivitiesController } from './unit-activities.controller';
+import { UnitActivitiesService } from './unit-activities.service';
 import { UnitDashboardController } from './unit-dashboard.controller';
 import { UnitDashboardService } from './unit-dashboard.service';
 
@@ -72,9 +74,10 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
     await seedUnitLeads(office);
 
     const moduleRef = await Test.createTestingModule({
-      controllers: [UnitDashboardController, SummaryController, CoachingController, ProductionController],
+      controllers: [UnitDashboardController, UnitActivitiesController, SummaryController, CoachingController, ProductionController],
       providers: [
         { provide: UnitDashboardService, useValue: wired.unitDashboard },
+        { provide: UnitActivitiesService, useValue: wired.unitActivities },
         { provide: SummaryService, useValue: wired.summary },
         { provide: CoachingRosterService, useValue: wired.coachingRoster },
         { provide: CoacheeService, useValue: wired.coachee },
@@ -103,6 +106,57 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
     expect(declaredPermissions(UnitDashboardController)).toEqual({
       read: 'unit_dashboard:read',
       updateProduction: 'unit_dashboard:update_production',
+    });
+    // UI V1 (UI-001): the Activities tab reads on the dashboard's own grant.
+    expect(declaredPermissions(UnitActivitiesController)).toEqual({ read: 'unit_dashboard:read' });
+  });
+
+  describe('UI-001 GET /unit/dashboard/activities — a positive and a negative per role (Phase 18.99 T4)', () => {
+    const activities = (query: Record<string, string> = {}) => http().get('/unit/dashboard/activities').query(query);
+
+    it('UI-001 positive: an AB is answered the table and the Unit and Group ratios; an AAB their own group', async () => {
+      as('AGUS');
+      const res = await activities({ span: 'month' }).expect(200);
+      expect(res.body).toMatchObject({ empty: false, period: { span: 'month', from: '2026-09-01', to: '2026-09-30', current: true } });
+      expect(res.body.people).toHaveLength(11);
+      expect(res.body.ratios).toMatchObject({ days: 30 });
+      expect(Array.isArray(res.body.ratios.unit) && Array.isArray(res.body.ratios.group)).toBe(true);
+      as('SARI');
+      expect((await activities().expect(200)).body.people.map((p: { name: string }) => p.name))
+        .toEqual(['Sari Puspita', 'Budi Santoso', 'Rina Wijaya', 'Nina Lestari', 'Dodi Kurniawan']);
+    });
+
+    it('UI-001 positive: the Owner any leader’s unit by for; an Agent leading nobody the empty unit — never a 403', async () => {
+      as('OWNER');
+      expect((await activities({ for: office.id.SARI }).expect(200)).body.head).toMatchObject({ name: 'Sari Puspita', isReader: false });
+      as('INDAH');
+      expect((await activities().expect(200)).body).toMatchObject({ empty: true, people: [] });
+    });
+
+    it('UI-001 negative: a membership on no rung the matrix names is refused by the guard; a Super Admin has no office', async () => {
+      const agus = office.as('AGUS');
+      session.current = new RequestContext('u-x', 'none', { ...agus.membership!, orgLevelCode: 'NOT_A_RUNG', hierarchyRole: NO_CLASS });
+      expect((await activities().expect(403)).body.error).toMatchObject({ code: 'PERM_DENIED', details: { permission: 'unit_dashboard:read' } });
+      session.current = SUPER_ADMIN;
+      expect((await activities().expect(403)).body.error.code).toBe('TENANT_NO_MEMBERSHIP');
+    });
+
+    it('UI-001 negative: outside the reach — another office’s leader, a peer’s unit — is 404, never 403', async () => {
+      as('AGUS');
+      expect((await activities({ for: office.id.B_AB }).expect(404)).body.error.code).toBe('NOT_FOUND');
+      expect((await activities({ for: office.id.PEER_AB }).expect(404)).body.error.code).toBe('NOT_FOUND');
+    });
+
+    it.each([
+      ['a span it does not know', { span: 'year' }, 'span'],
+      ['a date that is not a day', { date: '14-09-2026' }, 'date'],
+      ['a day after today', { date: '2026-09-15' }, 'date'],
+      ['a parameter of any other name', { period: 'month' }, 'period'],
+    ])('UI-001 %s is 400 VALIDATION_FAILED, named in details', async (_, query, named) => {
+      as('AGUS');
+      const res = await activities(query as Record<string, string>).expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      expect(JSON.stringify(res.body.error.details)).toContain(named);
     });
   });
 
@@ -439,5 +493,52 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
       expect(back.goal.source).toMatchObject({ provenance: 'corrected', correctedBy: { name: 'Sari Puspita' } });
       await all();
     }, 120_000);
+  });
+  /*
+   * **A saved photo shows on every avatar of that person** (UI V1, UI-111): the Unit roster's rows, the coaching
+   * roster's rows and the coachee's own header. `users.avatarUrl` is a storage key in a private bucket; each read
+   * signs it into a link (`AvatarLinks`, over the stub storage here), and somebody without one is `null` — initials.
+   */
+  describe('UI-111 — the profile photo on the Unit roster, the coaching roster and the coachee header', () => {
+    const KEY = 'user/66f0000000000000000009a1/avatar/01JAAAAAAAAAAAAAAAAAAAAAAA.jpg';
+    const SIGNED = `https://cdn.test/${KEY}?sig=abc`;
+    const rina = () => ({ email: 'rina@coaching.test' });
+    beforeAll(async () => { await db().collection('users').updateOne(rina(), { $set: { avatarUrl: KEY } }); });
+    afterAll(async () => { await db().collection('users').updateOne(rina(), { $set: { avatarUrl: null } }); });
+
+    it('UI-111 GET /unit/dashboard: a row with a stored photo carries its signed link, a row without one null', async () => {
+      as('SARI');
+      const rows = everyRow((await dashboard().expect(200)).body) as (Row & { photoUrl: string | null })[];
+      expect(rows.find((r) => r.membershipId === office.id.RINA)!.photoUrl).toBe(SIGNED);
+      expect(rows.filter((r) => r.membershipId !== office.id.RINA).every((r) => r.photoUrl === null)).toBe(true);
+      // Never the storage key itself.
+      expect(JSON.stringify(rows)).not.toContain(`"${KEY}"`);
+    });
+
+    it('UI-111 GET /unit/dashboard/activities: each person’s column carries their signed link, or null', async () => {
+      as('SARI');
+      const people = (await http().get('/unit/dashboard/activities').expect(200)).body.people as
+        { membershipId: string; photoUrl: string | null }[];
+      expect(people.find((p) => p.membershipId === office.id.RINA)!.photoUrl).toBe(SIGNED);
+      expect(people.filter((p) => p.membershipId !== office.id.RINA).every((p) => p.photoUrl === null)).toBe(true);
+      expect(JSON.stringify(people)).not.toContain(`"${KEY}"`);
+    });
+
+    it('UI-111 GET /coaching/coachees: the same person’s row carries the link, everybody else null', async () => {
+      as('SARI');
+      const body = (await http().get('/coaching/coachees').expect(200)).body as {
+        directAgents: { membershipId: string; photoUrl: string | null }[];
+        units: { head: { membershipId: string; photoUrl: string | null }; members: { membershipId: string; photoUrl: string | null }[] }[];
+      };
+      const rows = [...body.directAgents, ...body.units.flatMap((u) => [u.head, ...u.members])];
+      expect(rows.find((r) => r.membershipId === office.id.RINA)!.photoUrl).toBe(SIGNED);
+      expect(rows.filter((r) => r.membershipId !== office.id.RINA).every((r) => r.photoUrl === null)).toBe(true);
+    });
+
+    it('UI-111 GET /coaching/coachees/:id: the coachee’s header carries their link, and a coachee without one null', async () => {
+      as('SARI');
+      expect((await http().get(`/coaching/coachees/${office.id.RINA}`).expect(200)).body.photoUrl).toBe(SIGNED);
+      expect((await http().get(`/coaching/coachees/${office.id.BUDI}`).expect(200)).body.photoUrl).toBeNull();
+    });
   });
 });

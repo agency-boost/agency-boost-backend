@@ -3,7 +3,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import type { Sentence } from '@/common/i18n/sentence';
-import { rollingWindow, type LocalDate } from '@/common/time/local-day';
+import { localDayOf, rollingWindow, type LocalDate } from '@/common/time/local-day';
 import {
   MDRT_CAMPAIGN_CODE, PERIOD, UNIT_DASHBOARD, type UnitDashboardPeriod,
 } from '@/domain/constants';
@@ -13,7 +13,7 @@ import { newHireBeforeFirstSale, type ProductionStanding } from '@/domain/metric
 import type { GoalPaceStatus } from '@/domain/metrics/goal-pace-status';
 import { subPeriodActivityTarget } from '@/domain/metrics/sub-period-activity-target';
 import {
-  cascadeActivityTouches, rollUpCounts, rollUpLeadCounts, rollUpProduction,
+  activeAgentSplit, cascadeActivityTouches, rollUpCounts, rollUpLeadCounts, rollUpProduction,
   type CountAgainst, type LeadCountsRow, type PairedGoal,
 } from '@/domain/metrics/unit-rollup';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
@@ -29,6 +29,7 @@ import { CoachResolver, type Coachee } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import type { Provenance } from '@/modules/production/monthly-agent-data.schema';
+import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
 import { ProductionCorrections } from '@/modules/production/production-correction.service';
 import { type MonthState, ProductionMonths } from '@/modules/production/production-months.service';
 import { ProductionReadings, type MonthLedger, type ReadCell } from '@/modules/production/production-readings';
@@ -39,6 +40,7 @@ import { defaultBinding } from '@/modules/config/activity-binding';
 import { ActivityBindingService } from '@/modules/config/activity-binding.service';
 import { TenantDay, type Office } from '@/modules/tenants/tenant-day.service';
 import { UNIT_DASHBOARD_REFUSALS } from './unit-dashboard.messages';
+import { closingsIn, rosterScopes } from './unit-figures';
 
 /** A member, by the membership that identifies them (invariant §2). */
 export interface UnitPerson {
@@ -82,6 +84,8 @@ export interface UnitLastOneOnOne {
 
 /** One person on the roster: the reader, the unit's head, or somebody below them. */
 export interface UnitRow extends UnitPerson {
+  /** Their profile photo as a signed link (UI V1, UI-111); `null` for none: the row draws initials. */
+  photoUrl: string | null;
   /** The reader's own row: *You ({first name})*, no *Last 1:1*, and it drills to the reader's own screens. */
   isReader: boolean;
   /**
@@ -99,6 +103,11 @@ export interface UnitRow extends UnitPerson {
   goal: GoalCell;
   production: { monthly: ProductionCell; ytd: ProductionCell };
   leadsCounts: LeadCountsRow;
+  /**
+   * ***Closing*** (UI V1, UI-028; O-4): their sales leads that reached *Paid and issued* within the period's `window` —
+   * the roster's *Closing* column, beside *Leads penjualan*, *Leads rekrut* and *Potensi rekrut* (`leadsCounts`).
+   */
+  closings: number;
   activity: { leads: CountAgainst; appointments: CountAgainst; closings: CountAgainst; touches: CountAgainst };
   /** Coaching's; `null` on the reader's own row, and before a first finalized session (*No 1:1 yet*). */
   lastOneOnOne: UnitLastOneOnOne | null;
@@ -129,6 +138,8 @@ export interface UnitRow extends UnitPerson {
 export interface UnitTotal {
   goal: PairedGoal;
   leadsCounts: LeadCountsRow;
+  /** The rows' *Closing* summed (UI-028). */
+  closings: number;
   touches: CountAgainst;
   potentialActive: { count: number; of: number };
   /** The new hires before a first sale the goal and *on pace* leave out — named in their ⓘ (P18.96-T5 AC-4). */
@@ -159,11 +170,16 @@ export interface UnitDashboardView {
   tiles: {
     /**
      * Everybody on the roster, a new hire from their join date (ADR-0172 §1); `newHires` of them before a first sale,
-     * whom *Direct Group production* and *On pace to be active (Group)* leave out (§2).
+     * whom *Direct Group production* leaves out (§2) — and *Active Agent*'s count, never its `of` (UI-013).
      */
     team: { total: number; direct: number; units: number; underUnits: number; newHires: number };
     directGroupProduction: PairedGoal & { period: 'month' | 'year' };
-    potentialActive: { count: number; of: number };
+    /**
+     * ***Active Agent*** (UI V1, UI-013; D-16): `POTENTIAL_MAA_COUNT_IN_UNIT` out of **manpower** — every row, the head and
+     * the new hires included, the same number as `team.total` — with its *Unit* (the head and their direct agents) and
+     * *AAB* (every unit below) split, the two adding up to it.
+     */
+    potentialActive: { count: number; of: number; unit: { count: number; of: number }; aab: { count: number; of: number } };
     potentialRecruits: { yourUnit: number; aabs: number };
   };
   yourUnit: { rows: UnitRow[]; total: UnitTotal };
@@ -174,6 +190,24 @@ export interface UnitDashboardView {
    * ended, and the tooltip composed from its requirement — or saying none is running.
    */
   mdrt: { running: boolean; tooltip: string };
+  /**
+   * ***Last updated*** (UI V1, UI-028; UI-054): **the office's day its latest production file was imported** — the newest
+   * import standing (`committed`), of any month, on the office's calendar — or `null` while it has none. The roster's
+   * *⟳ Last updated 28 Okt 26*, and the Personal Summary's date header.
+   */
+  lastUpload: LocalDate | null;
+}
+
+/** Whose unit a read is, and who is in it, by the roster's scopes (UI-001's *Unit | Group*; `rosterScopes`). */
+export interface UnitPeople {
+  head: { membershipId: string; orgLevelCode: string; isReader: boolean };
+  /** The head and their direct agents who lead nobody, in the roster's order. */
+  unit: string[];
+  /** Everybody, the head first, in the roster's order; only the head when they lead nobody. */
+  group: string[];
+  names: ReadonlyMap<string, string>;
+  /** The head leads nobody. */
+  empty: boolean;
 }
 
 /** What *Save all* answers: how many rows changed, and the month as it now stands. */
@@ -236,6 +270,8 @@ export class UnitDashboardService {
     private readonly chaseReadings: CampaignChaseReadings,
     /** P18.96-T5: the head's own membership, for whether they count for production yet — coachees carry theirs. */
     private readonly memberships: MembershipRepository,
+    /** UI V1 (UI-028): the office's imports, for the day of the latest standing one — *Last updated*. */
+    private readonly batches: DataUploadBatchRepository,
     /*
      * ADR-0163 §4: which activity types each cascade role counts — the office's binding, the one reader. The
      * application always provides it; optional, the token named (a `X | null` parameter is emitted as `Object`),
@@ -267,7 +303,7 @@ export class UnitDashboardService {
     const campaignScope = scopeFor(ctx, 'campaign_qualification:read');
     const chaseReach = new Set(ids.filter((id) => id === me || campaignScope === 'own-kpm' || campaignScope === 'all'
       || ((campaignScope === 'own-downline' || campaignScope === 'own-unit') && head.coachedByReader.has(id))));
-    const [recency, paces, ledgers, counts, leadCounts, ladder, state, chases, binding, headMembership] = await Promise.all([
+    const [recency, paces, ledgers, counts, leadCounts, ladder, state, chases, binding, headMembership, closed, lastUpload] = await Promise.all([
       this.sessions.recencyOf(ctx, coached, office),
       this.paces.paceOf(ctx, ids, { today: office.today, month: office.month, onTrackRatio: office.settings.onTrackPaceThreshold }),
       this.production.ledgersFor(ctx, ids, office.month),
@@ -280,11 +316,14 @@ export class UnitDashboardService {
       this.bindings ? this.bindings.resolveCascadeBinding(ctx) : Promise.resolve(defaultBinding()),
       // The head's own classification and first sale (ADR-0172 §2): a coachee's arrive on their membership.
       this.memberships.findById(ctx, head.membershipId),
+      // UI-028 (O-4): each person's sales leads that reached *Paid and issued*, and when — counted in the window below.
+      this.leads.closingsOfMany(ctx, ids),
+      this.lastUploadDay(ctx, office),
     ]);
     /*
      * **Who counts for production on the office's today** (ADR-0172 §2, P18.96-T5 AC-2): `COUNTS_FOR_PRODUCTION`, decided
      * once per row here and read by every total and tile below (`rollUpProduction`). A new hire before their first sale
-     * is in the team and tagged, and in no production total and no *on pace*.
+     * is in the team and tagged, and in no production total and no *on pace* count — its `of` is everybody (UI-013).
      */
     const standings = new Map<string, ProductionStanding>([
       [head.membershipId, standingOf(headMembership)],
@@ -309,13 +348,15 @@ export class UnitDashboardService {
     const correctors = [...ledgers.values()].flatMap((ledger) => [
       ledger.thisMonthCells.monthly.correctedBy, ledger.thisMonthCells.ytd.correctedBy, ledger.standing.yearToDate?.correctedBy ?? null,
     ]).filter((id): id is string => id !== null);
-    const [plans, followUps, names] = await Promise.all([
+    const [plans, followUps, people] = await Promise.all([
       this.goals.plansOf(ctx, office.today.slice(0, 4), ids, new Map(
         [...ledgers].map(([id, ledger]) => [id, ledger.standing.yearToDate]),
       )),
       this.sessions.followUpsOf(ctx, latest.map((l) => l.sessionId), office, leadsShown),
-      this.names.byMembershipId(ctx, [...ids, ...latest.map((l) => l.coachMembershipId), ...correctors]),
+      // The rows' photos signed with their names (UI V1, UI-111); a coach or a corrector is only named.
+      this.names.pictured(ctx, [...ids, ...latest.map((l) => l.coachMembershipId), ...correctors], ids),
     ]);
+    const names = new Map([...people].map(([id, p]) => [id, p.name]));
 
     /*
      * **Which rows open the person's coaching pages** (`coached`): the coaching person shell answers somebody
@@ -355,6 +396,7 @@ export class UnitDashboardService {
       return {
         membershipId: id,
         name: nameOf(id),
+        photoUrl: people.get(id)?.photoUrl ?? null,
         isReader: id === me,
         coached: id === me || (opensCoaching && head.coachedByReader.has(id)),
         rung: { code: orgLevelCode, label: labels.get(orgLevelCode) ?? orgLevelCode },
@@ -372,6 +414,7 @@ export class UnitDashboardService {
           ytd: productionCell(ledger.thisMonthCells.ytd, person),
         },
         leadsCounts: leadCounts.get(id)!,
+        closings: closingsIn(closed.get(id) ?? [], window, office.timezone),
         activity: {
           leads: leadsChip, appointments: appointmentsChip, closings: closingsChip,
           touches: cascadeActivityTouches([leadsChip, appointmentsChip, closingsChip]),
@@ -436,7 +479,8 @@ export class UnitDashboardService {
         },
         // Paired, as a unit's total is (ADR-0165 §1): a target counts only beside the production it measures.
         directGroupProduction: { ...roster.goal, period: goalPeriod },
-        potentialActive: roster.potentialActive,
+        // UI-013: out of manpower, as *Your team* counts it, split Unit / AAB.
+        potentialActive: activeAgentSplit(yourUnitRows, units.flatMap(rowsOf)),
         potentialRecruits: {
           yourUnit: rollUpLeadCounts(yourUnitRows.map((r) => r.leadsCounts)).recruitNominated,
           aabs: rollUpLeadCounts(units.flatMap(rowsOf).map((r) => r.leadsCounts)).recruitNominated,
@@ -445,6 +489,7 @@ export class UnitDashboardService {
       yourUnit: { rows: yourUnitRows, total: totalOf(yourUnitRows) },
       units,
       mdrt: chases.mdrt,
+      lastUpload,
     };
 
     // Last, once the answer exists: one entry per member shown other than the reader, in one insert.
@@ -561,10 +606,11 @@ export class UnitDashboardService {
   private async empty(
     ctx: RequestContext, office: Office, period: UnitDashboardPeriod, window: { from: LocalDate; to: LocalDate }, head: Head,
   ): Promise<UnitDashboardView> {
-    const [state, names, chases] = await Promise.all([
+    const [state, names, chases, lastUpload] = await Promise.all([
       this.months.state(ctx, office.month),
       this.names.byMembershipId(ctx, [head.membershipId]),
       this.chaseReadings.ofMany(ctx, []),
+      this.lastUploadDay(ctx, office),
     ]);
     const nothing = totalOf([]);
     return {
@@ -573,13 +619,53 @@ export class UnitDashboardService {
       tiles: {
         team: { total: 0, direct: 0, units: 0, underUnits: 0, newHires: 0 },
         directGroupProduction: { ...nothing.goal, period: period === 'year' ? 'year' : 'month' },
-        potentialActive: nothing.potentialActive,
+        potentialActive: activeAgentSplit([], []),
         potentialRecruits: { yourUnit: 0, aabs: 0 },
       },
       yourUnit: { rows: [], total: nothing },
       units: [],
       mdrt: chases.mdrt,
+      lastUpload,
     };
+  }
+
+  /**
+   * **Whose unit, and who is in it** (UI V1, UI-001: the Activities tab's *Unit | Group*): the head the read would answer
+   * — the reader, or `for`, by the same reach and the same 404s (`headOf`) — and the roster's two scopes, in its order
+   * (`rosterScopes`), with everybody's name. Reads no figure and writes no entry: the caller reads and records its own.
+   */
+  async people(ctx: RequestContext, asked?: string): Promise<UnitPeople> {
+    const me = requireMembership(ctx);
+    const head = await this.headOf(ctx, me, asked);
+    const ids = [head.membershipId, ...head.coachees.map((c) => c.membershipId)];
+    const names = await this.names.byMembershipId(ctx, ids);
+    const scopes = rosterScopes(
+      head.membershipId,
+      head.coachees.map((c) => ({
+        membershipId: c.membershipId, leaderId: c.membership.leaderId as string, role: c.membership.role,
+      })),
+      (id) => names.get(id) ?? '',
+    );
+    return {
+      head: { membershipId: head.membershipId, orgLevelCode: head.orgLevelCode, isReader: head.isReader },
+      ...scopes,
+      names,
+      empty: head.coachees.length === 0,
+    };
+  }
+
+  /**
+   * ***Last updated*** (UI-028): the office's day of its newest standing import, of any month, by the moment the read is
+   * made — the Leader Forum scorecard's *AS OF* rule (`scorecard.service.ts`), over every month. One read on the batches'
+   * `kpmId` index, the newest first.
+   */
+  private async lastUploadDay(ctx: RequestContext, office: Office): Promise<LocalDate | null> {
+    const [latest] = await this.batches.find(
+      ctx,
+      { status: 'committed', committedAt: { $ne: null } },
+      { sort: { committedAt: -1 }, limit: 1, projection: { committedAt: 1 } },
+    );
+    return latest?.committedAt ? localDayOf(latest.committedAt, office.timezone) : null;
   }
 }
 
@@ -607,14 +693,16 @@ function rowsOf(group: UnitGroup): UnitRow[] {
 /**
  * A total row over some rows, by the rollup rule — its goal **paired** (ADR-0165 §1, P18.8-T15 AC-6): a member's target
  * counts only when their production is held, so a late file is named in the tooltip rather than counted as 0. **The
- * goal and *on pace* read the people who count for production** (`rollUpProduction`, ADR-0172 §2): a new hire before
- * their first sale is in neither, and counted in `newHires`; the leads and the goal activities are everybody's.
+ * goal reads the people who count for production** (`rollUpProduction`, ADR-0172 §2): a new hire before their first
+ * sale is not in it, and counted in `newHires`; ***on pace*** counts only them too and is **out of everybody** (UI-013);
+ * the leads and the goal activities are everybody's.
  */
 function totalOf(rows: readonly UnitRow[]): UnitTotal {
   const production = rollUpProduction(rows);
   return {
     goal: production.goal,
     leadsCounts: rollUpLeadCounts(rows.map((r) => r.leadsCounts)),
+    closings: rows.reduce((sum, r) => sum + r.closings, 0),
     touches: rollUpCounts(rows.map((r) => r.activity.touches)),
     potentialActive: production.potentialActive,
     newHires: production.newHires,

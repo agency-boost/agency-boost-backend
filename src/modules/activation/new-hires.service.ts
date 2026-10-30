@@ -1,24 +1,30 @@
 import { Injectable } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { NotFoundException } from '@/common/errors/domain.exception';
 import { addDays, isLocalDate } from '@/common/time/local-day';
 import { refuseWith } from '@/common/validation/fields';
 import { ACTIVATION, ACTIVATION_3M } from '@/domain/constants';
-import { activation3MByJoinMonth, activation3MDay, activation3MShare, newHiresWindow } from '@/domain/metrics/activation-3m';
+import {
+  activation3MByJoinMonth, activation3MDay, activation3MFirstSaleDay, activation3MShare, newHireStatusOf, newHiresWindow,
+} from '@/domain/metrics/activation-3m';
+import type { FirstSaleSource } from '@/domain/metrics/first-sale';
 import { AuditService } from '@/modules/audit/audit.service';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import type { MembershipDocument } from '@/modules/org/membership.schema';
-import { TenantDay } from '@/modules/tenants/tenant-day.service';
+import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
+import { User, type UserDocument } from '@/modules/users/user.schema';
 import type { ActivationProgressDocument } from './activation-progress.schema';
 import { ActivationProgressRepository } from './activation-progress.repository';
 import { ActivationProgressService, activationClosed } from './activation-progress.service';
 import type {
-  ActivationClosingsView, ActivationNoteSavedView, ActivationView, NewHireMarkedLeftView, NewHireRowView, NewHiresRosterView,
-  NewHireUnitRefView, Activation3MFiguresView,
+  ActivationClosingsView, ActivationNoteSavedView, ActivationView, FirstSaleSourceView, NewHireDetailView, NewHireLeaderView,
+  NewHireRowView, NewHiresRosterView, NewHireStandingView, NewHireUnitRefView, Activation3MFiguresView,
 } from './activation-progress.view';
 import { Activation3MService } from './activation-3m.service';
 import { ActivationItemRecords, type ItemRecordInput } from './activation-records.service';
@@ -55,17 +61,20 @@ export class NewHiresService {
     private readonly memberships: MembershipRepository,
     // P18.96-T4 AC-3: a tick of a data-backed item, with its record; and the hire's closings it names.
     private readonly records: ActivationItemRecords,
-    // P18.96-T6 AC-1, AC-4: each new hire's 3M activation, kept once decided, and *Mark left*.
+    // P18.96-T6 AC-1: each new hire's 3M activation, kept once decided.
     private readonly results: Activation3MService,
+    // UI V1, UI-027: the hire's WhatsApp number on their detail (`users.phone`), for the leader who coaches them.
+    @InjectModel(User.name) private readonly users: Model<UserDocument>,
   ) {}
 
   /**
-   * **`GET /new-hires`** (ADR-0173; P18.96-T6 AC-2, AC-3): **every new hire the reader coaches whose join date is in the
-   * last twelve months** (`newHiresWindow`, the office's calendar) — `joinedAs = new_hire`, at any depth, never an
-   * existing agent — in three sections by their 3M activation (`ACTIVATION_3M`): *In progress*, *Activated*, *Not
-   * activated* (the ones who left among them). Each row: the join date, the day of the 90, the first sale, the result,
-   * the day they left, and their checklist where they have one — an AB or an AAB placed as a new hire has none
-   * (ADR-0103), and is listed with `checklist: null`.
+   * **`GET /new-hires`** (ADR-0173; P18.96-T6 AC-2, AC-3; UI V1, UI-023): **every new hire the reader coaches whose
+   * join date is in the last twelve months** (`newHiresWindow`, the office's calendar) — `joinedAs = new_hire`, at any
+   * depth, never an existing agent — in three sections by their **status** (D-24): *In progress* (no first sale, days 1
+   * to 90), *Teraktivasi* (a first sale — by day 90, or after it in amber) and *not activated* (no first sale, past day
+   * 90). Each row: the join date, today's day, the first sale with its day and source, the status, the 3M result, and
+   * their checklist where they have one — an AB or an AAB placed as a new hire has none (ADR-0103), and is listed with
+   * `checklist: null`. A hire marked left is listed as anybody else, by their sale and join date (no *Keluar*, UI-025).
    *
    * **The 3M activation %** (`ACTIVATION_3M_PCT`) of everybody listed, and of each unit — *Direct Unit*, then each
    * AAB's (or AB's) below the reader, D-group's grouping kept — each overall and by join month, so the page's month
@@ -127,6 +136,9 @@ export class NewHiresService {
         joinDate: m.joinDate!,
         day: activation3MDay(m.joinDate!, office.today),
         firstSaleDate: m.firstSaleDate ?? null,
+        firstSaleDay: activation3MFirstSaleDay(m.joinDate!, m.firstSaleDate ?? null),
+        firstSaleSource: saleSourceOf(m.firstSaleDate ? (m.firstSaleSource ?? null) : null),
+        status: newHireStatusOf(results.get(membershipId) ?? 'in_progress', m.firstSaleDate ?? null),
         activation3M: results.get(membershipId) ?? 'in_progress',
         leftOn: m.leftAt ? this.clock.localDateFor(office.timezone, m.leftAt) : null,
         checklist: checklist
@@ -141,7 +153,9 @@ export class NewHiresService {
     const byName = (a: NewHireRowView, b: NewHireRowView) => a.hire.name.localeCompare(b.hire.name);
     const newestFirst = (a: NewHireRowView, b: NewHireRowView) =>
       (a.joinDate < b.joinDate ? 1 : a.joinDate > b.joinDate ? -1 : byName(a, b));
-    const of = (result: NewHireRowView['activation3M']) => rows.filter((r) => r.activation3M === result);
+    const of = (section: 'inProgress' | 'activated' | 'notActivated') => rows.filter((r) => (
+      section === 'activated' ? r.status !== 'not_yet'
+        : r.status === 'not_yet' && (section === 'inProgress') === (r.activation3M === 'in_progress')));
 
     // *Direct Unit* first, then the leaders A to Z by full name; a unit nobody listed is in omitted.
     const unitKey = (u: NewHireUnitRefView) => u.leader?.membershipId ?? 'direct';
@@ -167,18 +181,11 @@ export class NewHiresService {
       activation3M: figuresOf(rows),
       units: orderedUnits.map((u) => ({ ...u.ref, activation3M: figuresOf(u.rows) })),
       sections: {
-        inProgress: of('in_progress').sort((a, b) => b.day - a.day || byName(a, b)),
+        inProgress: of('inProgress').sort((a, b) => b.day - a.day || byName(a, b)),
         activated: of('activated').sort(newestFirst),
-        notActivated: of('not_activated').sort(newestFirst),
+        notActivated: of('notActivated').sort(newestFirst),
       },
     };
-  }
-
-  /**
-   * **`POST /new-hires/:membershipId/left`** (ADR-0173 §3; P18.96-T6 AC-4): *Mark left* — `Activation3MService.markLeft`.
-   */
-  async markLeft(ctx: RequestContext, membershipId: string): Promise<NewHireMarkedLeftView> {
-    return this.results.markLeft(ctx, membershipId);
   }
 
   /** The newest activation of each member, any state — one per membership is the rule, the newest wins. */
@@ -194,12 +201,57 @@ export class NewHiresService {
    * detail page, and the coaching *Activation* tab. The hire's own note and date on each item are not in
    * it. One §3.5 entry per read.
    */
-  async detail(ctx: RequestContext, membershipId: string): Promise<ActivationView> {
+  async detail(ctx: RequestContext, membershipId: string): Promise<NewHireDetailView> {
     const doc = await this.reach(ctx, membershipId);
     const office = await this.days.office(ctx);
-    const view = await this.activations.viewOne(ctx, doc, office, 'leader');
+    const view = await this.withStanding(ctx, await this.activations.viewOne(ctx, doc, office, 'leader'), office);
     await this.subjectReads.record(ctx, { membershipId }, 'activation', { from: doc.startDate, to: office.today });
     return view;
+  }
+
+  /**
+   * **The hire's 3M standing beside their activation** (UI V1, UI-023; D-25): the strip on the detail says what their
+   * row says — the same `newHireStatusOf`, day and first sale — so a write on the detail (a tick that records a closing,
+   * a corrected join date) answers the strip as it now stands. `null` for somebody who is not a new hire.
+   *
+   * **And the header's two facts** (UI-027, D-25): who they report to — their leader's name and rung — and their
+   * WhatsApp number (`users.phone`), which the detail's *WhatsApp* opens. Both are read only here, for a reader who
+   * reaches this hire (`reach`, `COACH`); the number never reaches the roster.
+   */
+  private async withStanding(
+    ctx: RequestContext, view: ActivationView, office: OfficeDay,
+  ): Promise<NewHireDetailView> {
+    const member = await this.memberships.findById(ctx, view.hire.membershipId);
+    if (!member || member.joinedAs !== 'new_hire' || !member.joinDate) return { ...view, newHire: null };
+    const result = (await this.results.settle(ctx, [member], office)).get(view.hire.membershipId) ?? 'in_progress';
+    const firstSaleDate = member.firstSaleDate ?? null;
+    const newHire: NewHireStandingView = {
+      status: newHireStatusOf(result, firstSaleDate),
+      activation3M: result,
+      joinDate: member.joinDate,
+      day: activation3MDay(member.joinDate, office.today),
+      firstSaleDate,
+      firstSaleDay: activation3MFirstSaleDay(member.joinDate, firstSaleDate),
+      firstSaleSource: saleSourceOf(firstSaleDate ? (member.firstSaleSource ?? null) : null),
+      leader: await this.leaderOf(ctx, member),
+      phone: await this.phoneOf(member),
+    };
+    return { ...view, newHire };
+  }
+
+  /** The hire's leader as their header names them (UI-027): membership, name and rung; `null` with nobody. */
+  private async leaderOf(ctx: RequestContext, member: MembershipDocument): Promise<NewHireLeaderView | null> {
+    if (!member.leaderId) return null;
+    const leader = await this.memberships.findById(ctx, member.leaderId);
+    if (!leader) return null;
+    const name = (await this.names.byMembershipId(ctx, [String(leader._id)])).get(String(leader._id));
+    return name ? { membershipId: String(leader._id), name, role: leader.role } : null;
+  }
+
+  /** The hire's WhatsApp number as stored on their account (UI-027), or `null`. */
+  private async phoneOf(member: MembershipDocument): Promise<string | null> {
+    const user = await this.users.findOne({ _id: member.userId }).select('phone').lean().exec();
+    return (user as { phone?: string | null } | null)?.phone ?? null;
   }
 
   /**
@@ -208,8 +260,9 @@ export class NewHiresService {
    */
   async tick(
     ctx: RequestContext, membershipId: string, code: string, change: { done: boolean; record?: ItemRecordInput },
-  ): Promise<ActivationView> {
-    return this.records.tick(ctx, await this.reach(ctx, membershipId), code, change, 'leader');
+  ): Promise<NewHireDetailView> {
+    const view = await this.records.tick(ctx, await this.reach(ctx, membershipId), code, change, 'leader');
+    return this.withStanding(ctx, view, await this.days.office(ctx));
   }
 
   /**
@@ -228,7 +281,7 @@ export class NewHiresService {
    * **does not reclassify** them: `joinedAs` was decided once, when the date was first set. The path and the body's
    * `startDate` keep their names, so nothing that calls it breaks.
    */
-  async correctStart(ctx: RequestContext, membershipId: string, startDate: string): Promise<ActivationView> {
+  async correctStart(ctx: RequestContext, membershipId: string, startDate: string): Promise<NewHireDetailView> {
     const doc = await this.reach(ctx, membershipId);
     const office = await this.days.office(ctx);
     const earliest = addDays(office.today, -ACTIVATION.START_DATE_MAX_DAYS_BACK);
@@ -256,7 +309,7 @@ export class NewHiresService {
       before: { startDate: doc.startDate, joinDate: member?.joinDate ?? null },
       after: { startDate, joinDate: startDate },
     });
-    return this.activations.viewOne(ctx, updated, office, 'leader');
+    return this.withStanding(ctx, await this.activations.viewOne(ctx, updated, office, 'leader'), office);
   }
 
   /**
@@ -306,11 +359,20 @@ export class NewHiresService {
   }
 }
 
-/** `ACTIVATION_3M_PCT` of a set of rows: all of them, and each join month, newest first. */
+/**
+ * `ACTIVATION_3M_PCT` of a set of rows (rule A, UI V1): all of them, and each join month, newest first — one function
+ * for the tree and for each leader's group, so the list, the tile and every leader's % agree.
+ */
 function figuresOf(rows: readonly NewHireRowView[]): Activation3MFiguresView {
+  const outcomes = rows.map((r) => ({ joinDate: r.joinDate, result: r.activation3M, firstSaleDate: r.firstSaleDate }));
   return {
-    all: activation3MShare(rows.map((r) => r.activation3M)),
-    byMonth: activation3MByJoinMonth(rows.map((r) => ({ joinDate: r.joinDate, result: r.activation3M })))
-      .map(({ month, share }) => ({ month, ...share })),
+    all: activation3MShare(outcomes),
+    byMonth: activation3MByJoinMonth(outcomes).map(({ month, share }) => ({ month, ...share })),
   };
+}
+
+/** Where a first sale came from, as the page says it (D-26): the data — a lead or the production file — or a hand tick. */
+function saleSourceOf(source: FirstSaleSource | null): FirstSaleSourceView | null {
+  if (source === null) return null;
+  return source === 'manual' ? 'manual' : 'sales';
 }

@@ -22,7 +22,7 @@ import { Storage } from '@google-cloud/storage';
 import { HttpStatus } from '@nestjs/common';
 import { FixedClock } from '@/common/clock/clock.port';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from '@/domain/constants';
+import { ASSET_LIMITS, AVATAR, DOCUMENT_MIME_TYPES } from '@/domain/constants';
 import { AssetService } from './asset.service';
 import { GcsAdapter, storageRefusal } from './gcs.adapter';
 
@@ -128,6 +128,24 @@ describe('P18.7-T2 GcsAdapter (ADR-0153)', () => {
         owner: { kind: 'company', companyId: 'co-1' }, folder: 'training', filename: 'a.pdf', mimeType: 'application/pdf',
       });
       expect(company.storageKey).toMatch(new RegExp(`^dev/company/co-1/training/${ULID.source}$`));
+    });
+
+    it('UI-111 folders a person’s profile photo under user/<userId>, apart from every office and company', async () => {
+      const photo = await makeAdapter().createSignedUpload({
+        owner: { kind: 'user', userId: 'u-1' }, folder: 'avatar', filename: 'avatar.jpg', mimeType: 'image/jpeg',
+      });
+      expect(photo.storageKey).toMatch(new RegExp(`^dev/user/u-1/avatar/${ULID.source}$`));
+    });
+
+    it('L5 a route’s own ceiling replaces 25 MB in the policy: a profile photo’s 512 KB, enforced by storage on the bytes', async () => {
+      await makeAdapter().createSignedUpload({
+        owner: { kind: 'user', userId: 'u-1' }, folder: 'avatar', filename: 'avatar.jpg', mimeType: 'image/jpeg',
+        maxBytes: AVATAR.MAX_BYTES,
+      });
+      expect(mockFile.generateSignedPostPolicyV4).toHaveBeenCalledWith(expect.objectContaining({
+        conditions: [['content-length-range', 1, 512 * 1024]],
+        fields: { 'Content-Type': 'image/jpeg' },
+      }));
     });
 
     it('P18.7-T2 mints a fresh key per request', async () => {

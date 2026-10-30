@@ -35,13 +35,31 @@ export interface StoredObject {
  */
 export type AssetOwner =
   | { kind: 'kpm'; kpmId: string }
-  | { kind: 'company'; companyId: string };
+  | { kind: 'company'; companyId: string }
+  /**
+   * **A person, not an office** (UI V1, UI-111): their profile photo, under `<env>/user/<userId>/…`. Identity is
+   * global (ADR-0002), so the photo follows the person across offices and a person's erasure stays a folder operation.
+   */
+  | { kind: 'user'; userId: string };
+
+/**
+ * **The owner's folder in a key**: `<kpmId>`, `company/<companyId>` or `user/<userId>` (ADR-0032; UI-111). One
+ * function, so the adapter and every stub of it name a folder the same way.
+ */
+export function ownerSegment(owner: AssetOwner): string {
+  switch (owner.kind) {
+    case 'kpm': return owner.kpmId;
+    case 'company': return `company/${owner.companyId}`;
+    case 'user': return `user/${owner.userId}`;
+  }
+}
 
 export abstract class StoragePort {
   /**
    * A short-lived signed upload, so file bytes never transit the API. `allowedMimeTypes` is a route's
    * narrower list (a PDF-only route's), which the vendor is asked to enforce too where it can; absent, the
-   * route keeps the whole allow-list, checked on confirm.
+   * route keeps the whole allow-list, checked on confirm. `maxBytes` is a route's narrower ceiling (a profile
+   * photo's, `AVATAR.MAX_BYTES`), which the vendor enforces on the bytes themselves; absent, `ASSET_LIMITS.MAX_BYTES`.
    */
   abstract createSignedUpload(params: {
     owner: AssetOwner;
@@ -49,6 +67,7 @@ export abstract class StoragePort {
     filename: string;
     mimeType: string;
     allowedMimeTypes?: readonly string[];
+    maxBytes?: number;
   }): Promise<SignedUpload>;
 
   /**

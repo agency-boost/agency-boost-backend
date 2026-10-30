@@ -1,8 +1,8 @@
 import { PERFORMANCE } from '@/domain/constants';
 import { personLeadCounts } from './lead-counts';
 import {
-  cascadeActivityTouches, potentialMaaCountInUnit, rollUpCounts, rollUpGoal, rollUpGoalPaired, rollUpLeadCounts,
-  rollUpProduction, type ProductionRow,
+  activeAgentSplit, cascadeActivityTouches, potentialMaaCountInUnit, rollUpCounts, rollUpGoal, rollUpGoalPaired,
+  rollUpLeadCounts, rollUpProduction, type ProductionRow,
 } from './unit-rollup';
 
 const M = 1_000_000 * 100;
@@ -140,6 +140,10 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
       expect(potentialMaaCountInUnit([true, false, null, true])).toEqual({ count: 2, of: 4 });
       expect(potentialMaaCountInUnit([])).toEqual({ count: 0, of: 0 });
     });
+
+    it('UI-013 counts out of manpower when the caller names it: the pacing of those who sell, over everybody', () => {
+      expect(potentialMaaCountInUnit([true, false, true], 5)).toEqual({ count: 2, of: 5 });
+    });
   });
 
   /**
@@ -151,7 +155,7 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
       goal: { targetMinor: 50 * M, actualMinor: 20 * M }, pacingToMaa: true, newHireBeforeFirstSale: false, ...over,
     });
 
-    it('P18.96-T5 AC-2 leaves a new hire before a first sale out of the target, the production and on pace — both sides', () => {
+    it('UI-013 leaves a new hire before a first sale out of the production and of on pace’s count — never its of', () => {
       const rows = [
         row({}),
         row({ goal: { targetMinor: 100 * M, actualMinor: 0 }, pacingToMaa: true, newHireBeforeFirstSale: true }),
@@ -159,7 +163,8 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
       ];
       expect(rollUpProduction(rows)).toEqual({
         goal: rollUpGoalPaired([rows[0].goal, rows[2].goal]),
-        potentialActive: { count: 1, of: 2 },
+        // Pacing, the new hire is still not in `count` (the numerator rule is unchanged); she is in `of`, manpower.
+        potentialActive: { count: 1, of: 3 },
         newHires: 1,
       });
       // Counted, the new hire's Rp 100 jt target with nothing sold would read 28%, not 63%.
@@ -182,12 +187,30 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
       });
     });
 
-    it('P18.96-T5 AC-2 a unit of new hires only is a total of nobody: Not uploaded yet, 0 of 0 on pace', () => {
+    it('UI-013 a unit of new hires only is a production total of nobody — Not uploaded yet — and 0 of 2 on pace', () => {
       expect(rollUpProduction([row({ newHireBeforeFirstSale: true }), row({ newHireBeforeFirstSale: true })])).toEqual({
         goal: { targetMinor: null, actualMinor: null, attainmentPct: null, missing: 0, gapMinor: null, overMinor: null },
-        potentialActive: { count: 0, of: 0 },
+        potentialActive: { count: 0, of: 2 },
         newHires: 2,
       });
+    });
+
+    it('UI-013 the report’s Active Agent: 4 of 12 (33%) — Unit 1 of 4, AAB 3 of 8, adding up to the total', () => {
+      // Agus's Unit: himself and three direct agents, one pacing. The AAB side: eight people, three pacing, one of them a
+      // new hire before a first sale (Yanti) — in the eight, never in the three.
+      const unit = [row({}), row({ pacingToMaa: false }), row({ pacingToMaa: null }), row({ pacingToMaa: false })];
+      const aab = [
+        row({}), row({}), row({}), row({ pacingToMaa: true, newHireBeforeFirstSale: true }),
+        ...Array.from({ length: 4 }, () => row({ pacingToMaa: false })),
+      ];
+      const split = activeAgentSplit(unit, aab);
+      expect(split).toEqual({ count: 4, of: 12, unit: { count: 1, of: 4 }, aab: { count: 3, of: 8 } });
+      expect(split.unit.count + split.aab.count).toBe(split.count);
+      expect(split.unit.of + split.aab.of).toBe(split.of);
+      // The tile reads it whole: 4 of 12 is 33%.
+      expect(Math.round((split.count / split.of) * 100)).toBe(33);
+      // And the total is the rollup over everybody: the split is a partition of it.
+      expect(rollUpProduction([...unit, ...aab]).potentialActive).toEqual({ count: 4, of: 12 });
     });
   });
 

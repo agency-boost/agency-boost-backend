@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import { NotFoundException } from '@/common/errors/domain.exception';
+import { render } from '@/common/i18n/sentence';
 import { isLocalDate, type LocalDate } from '@/common/time/local-day';
 import { refuseWith, type FieldSentence } from '@/common/validation/fields';
 import { CoachingSessionService } from '@/modules/coaching/coaching-session.service';
@@ -11,7 +12,7 @@ import {
   ActivationProgressService, recordRequired, type ItemChange, type ItemRecord, type ItemWritePlan,
 } from './activation-progress.service';
 import type { ActivationClosingsView, ActivationView } from './activation-progress.view';
-import { ACTIVATION_REFUSALS } from './activation.messages';
+import { ACTIVATION_MESSAGES, ACTIVATION_REFUSALS } from './activation.messages';
 
 const SAY = ACTIVATION_REFUSALS.VALIDATION_FAILED;
 
@@ -42,7 +43,8 @@ const NOTE_MAX = 500;
  *    - *Which case?* naming an **existing closing**: one of the member's sales leads at *Paid and issued*
  *      (`LeadService.closingsOf`, `lead:read`'s reach);
  *    - *Log a new closing*: `LeadService.logClosing` — a sales lead created at *Paid and issued* on that day, in the
- *      member's pipeline (`lead:create`'s reach);
+ *      member's pipeline (`lead:create`'s reach); **a pecah telor's day alone** (UI V1, D-26) logs one named by the API
+ *      (`pecahTelorClosing`), since *Kapan pecah telor?* asks for nothing else;
  *    - *Log 1:1* by a **leader**: `CoachingSessionService.logOneOnOne` — a finalized session with the hire;
  *    - *Log 1:1* by the **hire**: their own date and note on the item — a coachee writes no session about themselves
  *      (ADR-0078), so theirs is a claim the coaching sessions confirm;
@@ -121,7 +123,12 @@ export class ActivationItemRecords {
       if (!found) throw new NotFoundException('Lead');
       return { collection: 'leads', id: found.leadId };
     }
-    const name = input.name?.trim() ?? '';
+    /*
+     * UI V1, D-26 (UI-027): *Kapan pecah telor?* sends the day alone — no name, no policy number — so the closing it
+     * logs is named by the API, in the recorder's language. A name sent empty is still refused: that is a form's slip.
+     */
+    const dateOnly = input.name === undefined;
+    const name = dateOnly ? render(ACTIVATION_MESSAGES.pecahTelorClosing, ctx.reader) : input.name!.trim();
     const violations: FieldSentence[] = [];
     if (name.length === 0) violations.push(SAY.closingName);
     const dateProblem = dayProblem(input.date, plan.startDate, today, 'closing');

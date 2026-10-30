@@ -27,5 +27,18 @@ export const UNIT_DASHBOARD_REFUSALS = refusals('modules/unit-dashboard', {
       en: 'month must be YYYY-MM',
       id: 'month harus dengan format YYYY-MM',
     },
+
+    /*
+     * The Activities tab's read (UI V1, UI-001): `date` names a day in the period to read, never one after the agency's
+     * today — › stops at the current week or month. A field is named as the API names it (`date`).
+     */
+    dateShape: {
+      en: 'date must be a day, YYYY-MM-DD',
+      id: 'date harus berupa tanggal, dengan format YYYY-MM-DD',
+    },
+    futureDate: {
+      en: 'There is nothing to show after today: pick this week or month, or an earlier one.',
+      id: 'Belum ada yang bisa ditampilkan setelah hari ini: pilih minggu atau bulan ini, atau yang sebelumnya.',
+    },
   },
 });

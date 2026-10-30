@@ -46,6 +46,19 @@ describe('SMTP delivery (P4-T14)', () => {
     });
   });
 
+  it('UI-111 sends an email change’s link to the address being proved, not the one the account has (ADR-0181)', async () => {
+    const adapter = make();
+    await adapter.send(
+      {
+        userId: 'u1', templateId: NotificationTemplate.EMAIL_CHANGE_VERIFICATION, payload: {}, toAddress: 'rina.baru@kpm.test',
+      },
+      { subject: 'S', body: 'B' },
+    );
+    expect(sendMail).toHaveBeenCalledWith({
+      from: 'AgencyBoost <no-reply@test>', to: 'rina.baru@kpm.test', subject: 'S', text: 'B',
+    });
+  });
+
   it('refuses to send to nobody, loudly enough to be recorded', async () => {
     // The service turns a throw into `failed` with this reason on it, which is the audit
     // trail wanted. Silently doing nothing would record a success that never happened.

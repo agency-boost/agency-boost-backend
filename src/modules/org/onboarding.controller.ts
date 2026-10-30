@@ -218,6 +218,18 @@ export class OnboardingController {
     return this.approvals.inbox(ctx);
   }
 
+  @Get('requests/count')
+  @RequirePermission('leader_request:read_inbox')
+  @ApiOperation({
+    summary: 'How many requests are waiting on you',
+    description:
+      'UI V1 (UI-085): the count on the Pending Requests tab, shown on every User Management screen. The same requests ' +
+      '`GET /join/requests` lists, counted without reading their names.',
+  })
+  async waitingCount(@Ctx() ctx: RequestContext) {
+    return this.approvals.waitingCount(ctx);
+  }
+
   @Get('requests/routing')
   @RequirePermission('leader_request:read_inbox')
   @ApiOperation({

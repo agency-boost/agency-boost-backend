@@ -140,13 +140,25 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
       });
     });
 
-    it('P18.1-T2 AC-5, AC-9 refused 400: done outside During, two fields, none, an unknown field, a text or PIC too long, a null', async () => {
+    it('UI-110 every agenda item can be ticked, in Persiapan and Setelah rapat as in Saat rapat, audited as any field', async () => {
       as('OWNER');
       const view = await read(id);
       const prep = view.agenda.preparation[0];
+      const post = view.agenda.post[0];
+      expect((await http().patch(`/leader-meetings/${id}/agenda-items/${prep.id}`).send({ done: true, version: prep.version }).expect(200)).body)
+        .toMatchObject({ id: prep.id, done: true, version: prep.version + 1 });
+      expect((await http().patch(`/leader-meetings/${id}/agenda-items/${post.id}`).send({ done: true, version: post.version }).expect(200)).body)
+        .toMatchObject({ id: post.id, done: true });
+      const after = await read(id);
+      expect(after.agenda.preparation[0].done).toBe(true);
+      expect(after.agenda.post[0].done).toBe(true);
+    });
+
+    it('P18.1-T2 AC-5, AC-9 refused 400: two fields, none, an unknown field, a text or PIC too long, a null', async () => {
+      as('OWNER');
+      const view = await read(id);
       const during = view.agenda.during[1];
       for (const [itemId, body] of [
-        [prep.id, { done: true, version: prep.version }],
         [during.id, { text: 'a', pic: 'b', version: during.version }],
         [during.id, { version: during.version }],
         [during.id, { owner: 'x', version: during.version }],
@@ -419,7 +431,7 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
 
   /** **The minutes' refusals in Bahasa Indonesia** (P18.98-T5 AC-7): the codes and details as in English. */
   describe('P18.98-T5 AC-7 the minutes’ refusals in Indonesian', () => {
-    it('P18.98-T5 AC-7 one field per write, a box off During, a row with no target, ape in sen, a rate that is no number', async () => {
+    it('P18.98-T5 AC-7 one field per write, a row with no target, ape in sen, a rate that is no number', async () => {
       const { id } = await make('Refused in Indonesian', '2026-10-06');
       as('OWNER');
       const view = await read(id);
@@ -428,8 +440,6 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
 
       expect(await say(http().patch(`/leader-meetings/${id}/agenda-items/${prep.id}`).send({ text: 'a', pic: 'b', version: 1 }), 400))
         .toMatchObject({ code: 'VALIDATION_FAILED', message: 'Kirim tepat satu dari text, pic, done, beserta versi yang Anda baca.' });
-      expect(await say(http().patch(`/leader-meetings/${id}/agenda-items/${prep.id}`).send({ done: true, version: 1 }), 400))
-        .toMatchObject({ details: { violations: ['done hanya dapat dicentang pada item di bagian Saat rapat.'] } });
       expect(await say(http().put(`/leader-meetings/${id}/monthly-targets/new_aa`).send({ rate: 1, version: 0 }), 400))
         .toMatchObject({ message: expect.stringMatching(/^row harus salah satu dari ape, .+: baris lain tidak memiliki Monthly Target\.$/) });
       expect(await say(http().put(`/leader-meetings/${id}/monthly-targets/ape`).send({ rate: 1.5, version: 0 }), 400))

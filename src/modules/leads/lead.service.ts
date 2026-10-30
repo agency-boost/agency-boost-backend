@@ -140,6 +140,23 @@ export interface LeadView {
 }
 
 /**
+ * **One move along the lead's ladder, as its sheet's *Riwayat* reads it** (UI V1, UI-105; D-19): when, and from which
+ * stage to which, by code — the screen names the stage in the office's own words. The stored `transitions`, which are
+ * append-only and written from a lead's first move (invariant §5's spirit), oldest first. Who moved it stays in the
+ * record and out of the answer: the sheet does not say it.
+ */
+export interface LeadMoveView {
+  at: string;
+  fromStatusCode: string | null;
+  toStatusCode: string;
+}
+
+/** One lead read by its id (`GET /leads/:id`): the list's shape, and its moves (UI-105). The list never carries them. */
+export interface LeadDetailView extends LeadView {
+  history: LeadMoveView[];
+}
+
+/**
  * The lead record (P7-T1).
  *
  * **Whose lead a write is.** Without `owner`, a create is the caller's own lead, as an activity day is
@@ -501,6 +518,9 @@ export class LeadService {
      * correcting today's promise, not erasing a past one. Nothing before this month can be
      * reached from here at all.
      */
+    // A next action written over one ticked done replaces it: *Urungkan* has nothing left to put back (UI-104).
+    if (input.nextActionDate !== undefined || input.nextActionNote !== undefined) $set.nextActionDone = null;
+
     const commit = dropCommitment ? false : input.thisMonth;
     const alreadyCommitted = (lead.commitments ?? []).some((c) => c.month === day.month);
     const write: Record<string, unknown> = { $set, $inc: { version: 1 } };
@@ -685,6 +705,51 @@ export class LeadService {
   }
 
   /**
+   * **`PUT /leads/:id/next-action/done` — *Selesai*, or *Urungkan*, from the owner's Calendar** (UI V1, 2026-10-30,
+   * UI-104 point 4; ADR-0180 §11; `functional/leads.md`, *UI V1*).
+   *
+   * - **Ticked** (`done: true`): the next action's date and note move into `nextActionDone`, with when and by whom, and
+   *   the lead's own are cleared — so the lead asks for a new one everywhere (*Isi tindakan*, UI-062), and it leaves
+   *   the owner's Calendar and Home's count.
+   * - **Taken back** (`done: false`): what was ticked is put back and the marker cleared.
+   * - **The owner's alone**, whatever `lead:update` reaches: a leader's Calendar shows a downline's tasks with no
+   *   checkbox, and a leader naming one here is `404`, as a lead out of reach is — scope first, then whose it is, then
+   *   the version, so a refusal confirms nothing.
+   * - **Always pinned** (`VERSION_CONFLICT`): a tick clears what may have just been rewritten in a 1-on-1.
+   * - Nothing to tick, or nothing to put back — the lead holds no next action, or holds a new one — answers the lead
+   *   as it is and writes nothing.
+   */
+  async setNextActionDone(ctx: RequestContext, id: string, done: boolean, version: number): Promise<LeadView> {
+    const membershipId = this.me(ctx);
+    const lead = await this.reachable(ctx, id, 'lead:update');
+    if (lead.ownerMembershipId !== membershipId) throw new NotFoundException('Lead');
+    if (version !== lead.version) throw new VersionConflictException(version, lead.version);
+    const day = await this.days.for(ctx);
+    const holds = Boolean(lead.nextActionDate || lead.nextActionNote?.trim());
+    const kept = lead.nextActionDone ?? null;
+    if (done ? !holds : !kept || holds) return this.view(lead, day, await this.attribution(ctx, [lead]));
+
+    const write = done
+      ? {
+        $set: {
+          nextActionDone: {
+            date: lead.nextActionDate, note: lead.nextActionNote, at: this.clock.now(), byMembershipId: membershipId,
+          },
+          nextActionDate: null,
+          nextActionNote: null,
+        },
+        $inc: { version: 1 },
+      }
+      : {
+        $set: { nextActionDate: kept!.date, nextActionNote: kept!.note, nextActionDone: null },
+        $inc: { version: 1 },
+      };
+    const updated = await this.writeAt(ctx, lead, write);
+    await this.record(ctx, done ? 'lead.next_action_done' : 'lead.next_action_undone', id, {});
+    return this.view(updated, day, await this.attribution(ctx, [updated]));
+  }
+
+  /**
    * Soft, and the owner's alone (§3.7).
    *
    * Nothing is removed. Erasure under PDP is a deliberate, audited, cascading operation and not
@@ -766,7 +831,7 @@ export class LeadService {
    * subject, from no date to the office's today — what `GET /leads?owner=` writes for the same rows. Once,
    * after the answer exists; the owner's own read writes none (`SubjectReadAudit`).
    */
-  async read(ctx: RequestContext, id: string): Promise<LeadView> {
+  async read(ctx: RequestContext, id: string): Promise<LeadDetailView> {
     // Before the repository, so a caller with no office is refused by name rather than by a
     // `MissingTenantContextError` surfacing as 500 — which is what a Super Admin's `all` grant
     // would otherwise produce here (ADR-0044).
@@ -776,7 +841,16 @@ export class LeadService {
     await this.subjectReads.record(
       ctx, { membershipId: String(lead.ownerMembershipId) }, 'leads', { from: null, to: day.today },
     );
-    return view;
+    /*
+     * **Its moves, for the lead sheet's *Riwayat*** (UI V1, UI-105): on this read alone, never on the list, which would
+     * carry every lead's whole history to draw a card that shows none of it.
+     */
+    const history = (lead.transitions ?? []).map((move) => ({
+      at: new Date(move.at).toISOString(),
+      fromStatusCode: move.fromStatusCode ?? null,
+      toStatusCode: move.toStatusCode,
+    }));
+    return { ...view, history };
   }
 
   /**

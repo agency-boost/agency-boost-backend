@@ -112,6 +112,29 @@ export interface DirectoryPage {
 export const DIRECTORY_PAGE_SIZE = 25;
 export const DIRECTORY_MAX_PAGE_SIZE = 100;
 
+/** *Search agent*'s list (UI V1; UI-012, D-14): ten people unless asked for fewer or more, and never more than twenty. */
+export const MEMBER_SEARCH_DEFAULT = 10;
+export const MEMBER_SEARCH_MAX = 20;
+
+/**
+ * **One person *Search agent* offers** (UI V1, 2026-10-30; UI-012, UI-059, the owner's D-14): the NAME on the left, the
+ * agent code on the right, and the membership the pick opens (`/coaching/{membershipId}/summary`). Nothing else — no
+ * email, no leader, no counts — so the read records no disclosure, as the org tree, which shows the same, records none.
+ */
+export interface MemberSearchHit {
+  membershipId: string;
+  fullName: string;
+  preferredName: string | null;
+  agentCode: string | null;
+  role: HierarchyRole;
+  orgLevelCode: string;
+}
+
+/** Which of a user's fields a search reads: the roster's three, or *Search agent*'s name alone (its code is the membership's). */
+type NameFields = readonly ('fullName' | 'preferredName' | 'email')[];
+const ROSTER_SEARCH: NameFields = ['fullName', 'email'];
+const PICKER_SEARCH: NameFields = ['fullName', 'preferredName'];
+
 /**
  * Avatar initials.
  *
@@ -200,6 +223,53 @@ export class DirectoryService {
   }
 
   /**
+   * **Search agent** (UI V1, 2026-10-30; UI-012, UI-059, the owner's D-14): the people this reader may see, by part of a
+   * name or an agent code, for a picker that opens the one chosen.
+   *
+   * - **Narrowed as the roster is** (`visibleTo`, `reader-visibility.ts`): a tenant admin the office, an AB their
+   *   downline, an AAB their own unit's subtree, an Agent only themselves — and **never the reader**, whose own page is
+   *   not somebody to look up, so an Agent finds nobody. Active members only: the picker opens a person's page now.
+   * - **Name or agent code, nothing else**: the roster's search also reads the email, which the picker never shows.
+   * - **A to Z by name**, then by code, the first `limit`. Every match in reach is read and sorted here, because the
+   *   name is on the global user and the reach on the membership; a reader's reach is their office at most.
+   * - **No disclosure recorded**: names and codes only, what the org tree shows, which records none either.
+   */
+  async search(ctx: RequestContext, query: { q?: string; limit?: number } = {}): Promise<MemberSearchHit[]> {
+    const limit = Math.min(Math.max(query.limit ?? MEMBER_SEARCH_DEFAULT, 1), MEMBER_SEARCH_MAX);
+    // Under `$and`, never spread: the narrowing for an Agent is `{ _id: self }`, which would collide with the `$ne`.
+    const filter = await this.byName(
+      { $and: [visibleTo(ctx, DIRECTORY_READ), { _id: { $ne: ctx.membershipId ?? null }, status: 'active' }] },
+      query.q,
+      PICKER_SEARCH,
+    );
+    const rows = await this.members.find(ctx, filter, {
+      projection: { userId: 1, agentCode: 1, role: 1, orgLevelCode: 1 },
+    });
+    if (rows.length === 0) return [];
+
+    const users = await this.users
+      .find({ _id: { $in: rows.map((r) => r.userId) } })
+      .select('fullName preferredName')
+      .exec();
+    const byUser = new Map(users.map((u) => [String(u._id), u]));
+    return rows
+      .map((m): MemberSearchHit => {
+        const user = byUser.get(m.userId);
+        return {
+          membershipId: String(m._id),
+          fullName: user?.fullName ?? '',
+          preferredName: preferredNameOf(user?.preferredName),
+          agentCode: m.agentCode ?? null,
+          role: m.role,
+          orgLevelCode: m.orgLevelCode,
+        };
+      })
+      .sort((a, b) => a.fullName.localeCompare(b.fullName, 'id', { sensitivity: 'base' })
+        || (a.agentCode ?? '').localeCompare(b.agentCode ?? ''))
+      .slice(0, limit);
+  }
+
+  /**
    * Search spans two collections: the agent code is on the membership, the name and
    * email are on the global user. Resolving the user side first keeps the membership
    * query a single indexed lookup instead of a `$lookup` that would have to be checked
@@ -208,13 +278,14 @@ export class DirectoryService {
   private async byName(
     filter: FilterQuery<MembershipDocument>,
     q?: string,
+    fields: NameFields = ROSTER_SEARCH,
   ): Promise<FilterQuery<MembershipDocument>> {
     const term = q?.trim();
     if (!term) return filter;
 
     const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const matching = await this.users
-      .find({ $or: [{ fullName: new RegExp(escaped, 'i') }, { email: new RegExp(escaped, 'i') }] })
+      .find({ $or: fields.map((name) => ({ [name]: new RegExp(escaped, 'i') })) })
       .select('_id')
       .exec();
 

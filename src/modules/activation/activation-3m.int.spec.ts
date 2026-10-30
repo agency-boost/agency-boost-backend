@@ -1,16 +1,15 @@
 import mongoose from 'mongoose';
-import type { RemovalService } from '@/modules/org/removal.service';
 import {
   startActivationHarness, stopActivationHarness, TODAY, type ActivationHarness, type Who,
 } from '../../../test/activation-office';
-import { KPM_A } from '../../../test/coaching-office';
 
 type Row = {
   hire: { membershipId: string; name: string }; unit: { kind: string; leader: { membershipId: string; name: string } | null };
-  joinDate: string; day: number; firstSaleDate: string | null; activation3M: string; leftOn: string | null;
+  joinDate: string; day: number; firstSaleDate: string | null; firstSaleDay: number | null; firstSaleSource: string | null;
+  status: string; activation3M: string; leftOn: string | null;
   checklist: { state: string; done: number; total: number; pct: number; overdue: boolean } | null;
 };
-type Share = { activated: number; notActivated: number; inProgress: number; pct: number | null };
+type Share = { activated: number; notActivated: number; late: number; inProgress: number; pct: number | null };
 type Figures = { all: Share; byMonth: (Share & { month: string })[] };
 type Roster = {
   today: string; window: { from: string; to: string }; days: number; activation3M: Figures;
@@ -87,7 +86,7 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
       expect(await member('DIMAS')).toMatchObject({ joinedAs: 'new_hire', joinDate: '2025-09-14' });
     });
 
-    it('P18.96-T6 AC-3 in progress through day 90, activated by a first sale on or before it, not activated otherwise', async () => {
+    it('UI-023 sections by status: a first sale by day 90 Teraktivasi at once, after it Teraktivasi late; no sale past day 90 not', async () => {
       await h.start('BUDI', '2026-07-15'); // day 62
       await sold('BUDI', 'Ibu Ratna', '2026-08-20T03:00:00Z');
       await h.start('INDAH', '2026-06-10'); // day 97
@@ -96,12 +95,20 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
       await h.start('TARI', '2026-06-01'); // day 106 — Lukas's, an Agent who leads — sold on day 93
       await sold('TARI', 'Ibu Wati', '2026-09-01T03:00:00Z');
       const r = await roster();
-      expect(names(r.sections.inProgress)).toEqual(['Budi Santoso']);
-      expect(names(r.sections.activated)).toEqual(['Indah Permatasari']);
-      // By join date, newest first; ties by name.
-      expect(names(r.sections.notActivated)).toEqual(['Dimas Pratama', 'Tari Anggraini']);
-      expect(row(r, 'BUDI')).toMatchObject({ day: 62, firstSaleDate: '2026-08-20', activation3M: 'in_progress', leftOn: null });
-      expect(row(r, 'TARI')).toMatchObject({ day: 106, firstSaleDate: '2026-09-01', activation3M: 'not_activated' });
+      expect(names(r.sections.inProgress)).toEqual([]);
+      // Teraktivasi — by day 90 or after it — by join date, newest first; ties by name.
+      expect(names(r.sections.activated)).toEqual(['Budi Santoso', 'Indah Permatasari', 'Tari Anggraini']);
+      expect(names(r.sections.notActivated)).toEqual(['Dimas Pratama']);
+      // Budi sold on day 37: Teraktivasi the day it was recorded (rule A), not on day 91.
+      expect(row(r, 'BUDI')).toMatchObject({
+        day: 62, firstSaleDate: '2026-08-20', firstSaleDay: 37, firstSaleSource: 'sales', status: 'activated',
+        activation3M: 'activated', leftOn: null,
+      });
+      // Tari sold on day 93: Teraktivasi in amber, her 3M result not activated.
+      expect(row(r, 'TARI')).toMatchObject({
+        day: 106, firstSaleDate: '2026-09-01', firstSaleDay: 93, status: 'activated_late', activation3M: 'not_activated',
+      });
+      expect(row(r, 'DIMAS')).toMatchObject({ status: 'not_yet', firstSaleDay: null, firstSaleSource: null, activation3M: 'not_activated' });
       expect(row(r, 'INDAH').checklist).toMatchObject({ state: 'open', overdue: true, total: 16 });
     });
 
@@ -136,11 +143,11 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
       await h.start('RINA', '2026-05-20'); // May, Sari's: not activated
       await h.start('BUDI', '2026-07-15'); // July, Sari's: in progress
       const r = await roster();
-      expect(r.activation3M.all).toEqual({ activated: 1, notActivated: 2, inProgress: 1, pct: 33 });
+      expect(r.activation3M.all).toEqual({ activated: 1, notActivated: 2, late: 0, inProgress: 1, pct: 33 });
       expect(r.activation3M.byMonth).toEqual([
-        { month: '2026-07', activated: 0, notActivated: 0, inProgress: 1, pct: null },
-        { month: '2026-06', activated: 1, notActivated: 1, inProgress: 0, pct: 50 },
-        { month: '2026-05', activated: 0, notActivated: 1, inProgress: 0, pct: 0 },
+        { month: '2026-07', activated: 0, notActivated: 0, late: 0, inProgress: 1, pct: null },
+        { month: '2026-06', activated: 1, notActivated: 1, late: 0, inProgress: 0, pct: 50 },
+        { month: '2026-05', activated: 0, notActivated: 1, late: 0, inProgress: 0, pct: 0 },
       ]);
       expect(r.units.map((u) => [u.kind, u.leader?.name ?? null, u.activation3M.all.pct])).toEqual([
         ['direct', null, 50], ['aab', 'Sari Puspita', 0],
@@ -148,6 +155,91 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
       // The AAB reads her own unit's: the same rows, the same figure.
       const sari = await roster('SARI');
       expect(sari.activation3M.all).toEqual(r.units[1].activation3M.all);
+    });
+
+    it('UI-023 rule A: a sale after day 90 is in neither part, nor is a hire inside their 90 days with none', async () => {
+      await h.start('INDAH', '2026-06-10');
+      await sold('INDAH', 'Pak Yusuf', '2026-07-01T03:00:00Z'); // day 22: activated
+      await h.start('DIMAS', '2026-06-01'); // past day 90, no sale: not activated
+      await h.start('TARI', '2026-06-01');
+      await sold('TARI', 'Ibu Wati', '2026-09-01T03:00:00Z'); // day 93: late, in neither part
+      await h.start('BUDI', '2026-07-15'); // Sari's, day 62, no sale: in neither part
+      const r = await roster();
+      expect(r.activation3M.all).toEqual({ activated: 1, notActivated: 1, late: 1, inProgress: 1, pct: 50 });
+      // Each leader's group by the same function: Sari's one hire is undecided, so hers has no figure, never 0%.
+      expect(r.units.map((u) => [u.leader?.name ?? 'Direct Unit', u.activation3M.all.pct])).toEqual([
+        ['Direct Unit', 50], ['Sari Puspita', null],
+      ]);
+    });
+
+    it('UI-023 cross-tenant: office B’s Teraktivasi hire is in office B’s figure alone — never in office A’s rows or share', async () => {
+      await h.start('INDAH', '2026-06-10'); // office A: past day 90, no sale
+      await h.start('B_AGENT', '2026-08-01');
+      await sold('B_AGENT', 'Ibu Bayu', '2026-08-20T03:00:00Z'); // office B: day 20, Teraktivasi
+      const a = await roster();
+      expect(names(rows(a))).not.toContain('Bayu Saputra');
+      expect(a.activation3M.all).toMatchObject({ activated: 0, notActivated: 1, pct: 0 });
+      const b = await roster('B_AB');
+      expect(rows(b).map((r) => [r.hire.name, r.status, r.firstSaleDay, r.firstSaleSource])).toEqual([['Bayu Saputra', 'activated', 20, 'sales']]);
+      expect(b.activation3M.all).toMatchObject({ activated: 1, notActivated: 0, pct: 100 });
+    });
+
+    it('UI-023 the detail’s strip says what the row says: the status, the day and the first sale with its day and source', async () => {
+      await h.start('BUDI', '2026-07-15'); // day 62
+      await sold('BUDI', 'Ibu Ratna', '2026-08-20T03:00:00Z'); // day 37
+      await h.start('TARI', '2026-06-01'); // day 106
+      await sold('TARI', 'Ibu Wati', '2026-09-01T03:00:00Z'); // day 93
+      const strip = async (as: Who, who: Who) => {
+        h.as(as);
+        return (await h.http().get(`/new-hires/${id(who)}`).expect(200)).body.newHire;
+      };
+      expect(await strip('SARI', 'BUDI')).toEqual({
+        status: 'activated', activation3M: 'activated', joinDate: '2026-07-15', day: 62,
+        firstSaleDate: '2026-08-20', firstSaleDay: 37, firstSaleSource: 'sales',
+        // UI-027: the header's leader and the WhatsApp number (none on file here).
+        leader: { membershipId: id('SARI'), name: 'Sari Puspita', role: 'aab' }, phone: null,
+      });
+      expect(await strip('LUKAS', 'TARI')).toMatchObject({ status: 'activated_late', activation3M: 'not_activated', firstSaleDay: 93 });
+      // The row and the strip are one function.
+      const row = (await roster()).sections.activated.find((r) => r.hire.membershipId === id('BUDI'))!;
+      expect([row.status, row.firstSaleDay]).toEqual(['activated', 37]);
+    });
+
+    it('UI-027 (D-26) a pecah telor date alone, from the leader: a closing logged that day, the strip Teraktivasi, recorded by them', async () => {
+      await h.start('BUDI', '2026-07-15'); // day 62
+      h.as('SARI');
+      // In the recorder's language: the closing it logs is named by the API, in Bahasa Indonesia here.
+      const view = (await h.http().put(`/new-hires/${id('BUDI')}/items/FIRST_CASE_CLOSED`).set('Accept-Language', 'id')
+        .send({ done: true, record: { kind: 'closing', date: '2026-08-13' } }).expect(200)).body;
+      expect(view.newHire).toMatchObject({
+        status: 'activated', firstSaleDate: '2026-08-13', firstSaleDay: 30, firstSaleSource: 'manual',
+      });
+      const tick = view.aspects.flatMap((a: { items: { code: string }[] }) => a.items)
+        .find((it: { code: string }) => it.code === 'FIRST_CASE_CLOSED');
+      // *Dicatat oleh*: the tick is the leader's.
+      expect(tick).toMatchObject({ done: true, source: 'leader', doneBy: { membershipId: id('SARI') } });
+      const lead = await h.col('leads').findOne({ ownerMembershipId: id('BUDI'), loggedFrom: 'activation_checklist' });
+      expect(lead?.name).toBe('Pecah telor (tanggal dicatat manual)');
+      // The row reads the same first sale.
+      expect([row(await roster(), 'BUDI').status, row(await roster(), 'BUDI').firstSaleDay]).toEqual(['activated', 30]);
+    });
+
+    it('UI-027 (D-26) refused: a pecah telor before the join date or after today, 400 — nothing ticked or logged', async () => {
+      await h.start('BUDI', '2026-07-15');
+      h.as('SARI');
+      for (const date of ['2026-07-14', '2026-09-15']) {
+        await h.http().put(`/new-hires/${id('BUDI')}/items/FIRST_CASE_CLOSED`)
+          .send({ done: true, record: { kind: 'closing', date } }).expect(400);
+      }
+      expect(await h.col('leads').countDocuments({ ownerMembershipId: id('BUDI') })).toBe(0);
+    });
+
+    it('UI-023 a sale inside the 90 days reads activated at once and keeps nothing; day 91 keeps it', async () => {
+      await h.start('BUDI', '2026-07-15'); // day 62
+      await sold('BUDI', 'Ibu Ratna', '2026-08-20T03:00:00Z');
+      expect(row(await roster(), 'BUDI').activation3M).toBe('activated');
+      // Inside the 90 days nothing is kept, so a wrong production file put right can still take its sale back (M4).
+      expect((await member('BUDI')).activation3M ?? null).toBeNull();
     });
   });
 
@@ -217,228 +309,18 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
 
   // ------------------------------------------------------------------ AC-4: Mark left
 
-  describe('AC-4 Mark left', () => {
-    it('P18.96-T6 AC-4 a leader marks a new hire left: today, the result decided and kept, audited — and removed from the office', async () => {
+  describe('UI-025 Mark left is retired (ADR-0180 §6)', () => {
+    it('UI-025 POST /new-hires/:membershipId/left is gone: 404 to the leader who could mark, and nothing is written', async () => {
       await h.start('BUDI', '2026-07-15');
-      await sold('BUDI', 'Ibu Ratna', '2026-08-20T03:00:00Z');
-      await h.start('DODI', '2026-08-10');
-      const budi = (await left('SARI', 'BUDI').expect(200)).body;
-      expect(budi).toEqual({ membershipId: id('BUDI'), leftAt: h.clock.now().toISOString(), leftOn: TODAY, activation3M: 'activated' });
-      // Left before any sale: not activated, at once, inside the 90 days.
-      expect((await left('SARI', 'DODI').expect(200)).body.activation3M).toBe('not_activated');
-      /*
-       * ADR-0169 §4 as amended 2026-10-27: leaving removes them, through the removal's own path — the status and
-       * `removedAt` the same instant, the edge closed and a `removed` one opened, `member.removed` — so they leave every
-       * count of people as any leaver does. Their leader stays on the row, as a removal keeps it; the checklist stays.
-       */
-      const stored = await member('DODI');
-      expect(stored).toMatchObject({
-        status: 'removed', removedAt: h.clock.now(), leaderId: id('NINA'), activation3M: 'not_activated', leftAt: h.clock.now(),
-      });
-      expect(await h.col('membershipHistory').find({ membershipId: id('DODI'), validTo: null }).toArray())
-        .toEqual([expect.objectContaining({ eventType: 'removed', actorMembershipId: id('SARI') })]);
-      expect(await h.col('auditLog').countDocuments({ action: 'member.removed', targetMembershipId: id('DODI') })).toBe(1);
-      expect(await h.col('activationProgress').findOne({ membershipId: id('DODI') })).toMatchObject({ graduatedAt: null });
-      // Out of reach of every leader's routes now — and still on the year's list, by result.
-      h.as('SARI');
-      await h.http().get(`/new-hires/${id('DODI')}`).expect(404);
-      const r = await roster('SARI');
-      expect(r.sections.notActivated.map((x) => [x.hire.name, x.leftOn])).toEqual([['Dodi Kurniawan', TODAY]]);
-      expect(r.sections.activated.map((x) => [x.hire.name, x.leftOn])).toEqual([['Budi Santoso', TODAY]]);
-      expect((await marks()).map((m) => [m.targetMembershipId, m.actorMembershipId, m.targetCollection, m.before, m.after])).toEqual([
-        [id('BUDI'), id('SARI'), 'memberships', { leftAt: null, activation3M: null }, { leftAt: h.clock.now().toISOString(), activation3M: 'activated' }],
-        [id('DODI'), id('SARI'), 'memberships', { leftAt: null, activation3M: null }, { leftAt: h.clock.now().toISOString(), activation3M: 'not_activated' }],
-      ]);
-    });
-
-    it('P18.96-T6 AC-4 leaving after day 90 changes nothing: the 90 days decided it, kept first', async () => {
-      await h.start('DIMAS', '2026-06-01');
-      expect((await left('AGUS', 'DIMAS').expect(200)).body.activation3M).toBe('not_activated');
-      expect(await member('DIMAS')).toMatchObject({ activation3M: 'not_activated' });
-    });
-
-    it('P18.96-T6 AC-4 refused: a second time 409 NEW_HIRE_ALREADY_LEFT, an existing agent 409 NOT_A_NEW_HIRE — nothing written', async () => {
-      await h.start('BUDI', '2026-07-15');
-      await left('SARI', 'BUDI').expect(200);
-      const again = await left('SARI', 'BUDI').expect(409);
-      expect(again.body.error).toMatchObject({ code: 'NEW_HIRE_ALREADY_LEFT', details: { leftOn: TODAY } });
-      await existingAgent('RINA', '2026-08-01');
-      expect((await left('SARI', 'RINA').expect(409)).body.error.code).toBe('NOT_A_NEW_HIRE');
-      expect((await member('RINA')).leftAt ?? null).toBeNull();
-      expect(await marks()).toHaveLength(1);
-    });
-
-    it('P18.96-T6 AC-4 refused 409 NEW_HIRE_HAS_REPORTS for a new hire who leads somebody — nothing written', async () => {
-      await h.start('LUKAS', '2026-08-01'); // an Agent with a direct report, Tari
-      const res = await left('AGUS', 'LUKAS').expect(409);
-      expect(res.body.error).toMatchObject({ code: 'NEW_HIRE_HAS_REPORTS', details: { directCount: 1 } });
-      expect(res.body.error.message).toBe('1 person reports to them. Move them to another leader before marking them as left.');
-      expect(await member('LUKAS')).toMatchObject({ status: 'active' });
-      expect((await member('LUKAS')).leftAt ?? null).toBeNull();
+      const res = await left('SARI', 'BUDI').expect(404);
+      expect(res.body.error.code).toBe('NOT_FOUND');
+      const m = await member('BUDI');
+      expect([m.status, m.leftAt ?? null]).toEqual(['active', null]);
       expect(await marks()).toEqual([]);
-    });
-
-    it('P18.98-T5 AC-7 refuses Mark left in Indonesian: the same code and details, in the reader’s words', async () => {
-      await h.start('LUKAS', '2026-08-01'); // an Agent with a direct report, Tari
-      expect((await left('AGUS', 'LUKAS').set('Accept-Language', 'id').expect(409)).body.error).toMatchObject({
-        code: 'NEW_HIRE_HAS_REPORTS', details: { directCount: 1 },
-        message: '1 orang melapor kepadanya. Pindahkan orang itu ke leader lain sebelum menandainya keluar.',
-      });
-      await existingAgent('RINA', '2026-08-01');
-      expect((await left('SARI', 'RINA').set('Accept-Language', 'id').expect(409)).body.error).toMatchObject({
-        code: 'NOT_A_NEW_HIRE',
-        message: 'Dia bergabung sebagai agent yang sudah ada, jadi tidak ada 3M activation yang perlu diakhiri. Hanya new hire '
-          + 'yang dapat ditandai keluar.',
-      });
-      await h.start('DODI', '2024-03-01');
-      expect((await left('AGUS', 'DODI').set('Accept-Language', 'id').expect(409)).body.error).toMatchObject({
-        code: 'NEW_HIRE_NOT_MARKABLE', details: { reason: 'past_the_year', joinDate: '2024-03-01' },
-        message: 'Dia bergabung lebih dari setahun yang lalu, jadi dia tidak lagi ada di New Hires dan tidak ada hasil 3M yang '
-          + 'perlu ditentukan. Untuk mengeluarkannya dari tim, keluarkan dia.',
-      });
-      await h.start('BUDI', '2026-07-15');
-      await left('SARI', 'BUDI').expect(200);
-      expect((await left('SARI', 'BUDI').set('Accept-Language', 'id').expect(409)).body.error).toMatchObject({
-        code: 'NEW_HIRE_ALREADY_LEFT', message: 'Dia sudah ditandai keluar.', details: { leftOn: TODAY },
-      });
-    });
-
-    it('P18.98-T5 AC-6 stores the reason Mark left writes in the language of whoever marks it — kept as written', async () => {
-      await h.start('BUDI', '2026-07-15');
-      await h.start('INDAH', '2026-07-20');
-      await left('SARI', 'BUDI').expect(200);
-      await left(h.officeOnly('OWNER'), 'INDAH').set('Accept-Language', 'id').expect(200);
-      const reasonOf = async (who: Who) =>
-        (await h.col('membershipHistory').findOne({ membershipId: id(who), eventType: 'removed' }))!.reason;
-      expect(await reasonOf('BUDI')).toBe('Left the office as a new hire.');
-      expect(await reasonOf('INDAH')).toBe('Keluar dari KPM sebagai new hire.');
-      // Stored as text: a later read in the other language, or a later writer, changes neither.
-      h.as('SARI');
-      await h.http().get('/new-hires').set('Accept-Language', 'id').expect(200);
-      expect(await reasonOf('BUDI')).toBe('Left the office as a new hire.');
-      const removed = await h.col('auditLog').find({ action: 'member.removed' }).toArray();
-      expect(removed.map((entry) => entry.after.reason).sort())
-        .toEqual(['Keluar dari KPM sebagai new hire.', 'Left the office as a new hire.']);
-    });
-
-    it('P18.96-T6 AC-4 permitted: the hire’s AAB, the AB above, the Owner and an Admin as such — new_hire:mark_left', async () => {
-      for (const [as, who] of [
-        ['SARI', 'BUDI'], ['AGUS', 'RINA'], [h.officeOnly('OWNER'), 'DODI'], [h.officeOnly('ADMIN'), 'INDAH'],
-      ] as const) {
-        await h.start(who, '2026-08-01');
-        const res = await left(as, who);
-        expect([who, res.status]).toEqual([who, 200]);
-      }
-      expect(await marks()).toHaveLength(4);
-    });
-
-    it('P18.96-T6 AC-4 refused: an Agent who leads 403, a read-only session 403; a peer, Dewi, oneself and a removed member 404', async () => {
-      await h.start('TARI', '2026-08-01');
-      await h.start('BUDI', '2026-08-01');
-      expect((await left('LUKAS', 'TARI').expect(403)).body.error.code).toBe('PERM_DENIED');
-      expect((await left(h.supporting('SARI'), 'BUDI').expect(403)).body.error.code).toBe('PERM_DENIED');
-      for (const [as, who] of [['PEER_AB', 'BUDI'], ['DEWI', 'BUDI'], ['AGUS', 'AGUS'], ['AGUS', 'LEFT'], ['PEER_AAB', 'TARI']] as const) {
-        const res = await left(as, who);
-        expect([as, who, res.status, res.body.error?.code]).toEqual([as, who, 404, 'NOT_FOUND']);
-      }
-      expect(await marks()).toEqual([]);
-      expect((await member('BUDI')).leftAt ?? null).toBeNull();
-    });
-
-    it('P18.96-T6 AC-4 cross-tenant: office A’s leaders and Owner cannot mark office B’s new hire; office B’s leader can', async () => {
-      await h.start('B_AGENT', '2026-08-01');
-      for (const as of ['AGUS', h.officeOnly('OWNER')] as const) {
-        expect((await left(as, 'B_AGENT').expect(404)).body.error.code).toBe('NOT_FOUND');
-      }
-      expect((await member('B_AGENT')).leftAt ?? null).toBeNull();
-      await left('B_AB', 'B_AGENT').expect(200);
-    });
-
-    it('P18.96-T6 AC-4 an elevated support session marks as its member, both actors on the record', async () => {
-      await h.start('BUDI', '2026-08-01');
-      await left(h.supporting('SARI', false), 'BUDI').expect(200);
-      expect((await marks()).map((m) => [m.actorUserId, m.effectiveUserId, m.actorMembershipId])).toEqual([['u-support', 'u-SARI', id('SARI')]]);
     });
   });
 
-  // ------------------------------------------------------------------ the exit review: no wider than the removal
-
-  describe('the P18.96 exit review: Mark left is no wider than the removal it ends in', () => {
-    /** Nobody marked, removed or audited as removed: the refusal wrote nothing. */
-    const nothingWritten = async (...who: Who[]) => {
-      for (const w of who) {
-        const m = await member(w);
-        expect([w, m.status, m.leftAt ?? null, m.activation3M ?? null]).toEqual([w, 'active', null, null]);
-      }
-      expect(await marks()).toEqual([]);
-      expect(await h.col('auditLog').countDocuments({ action: 'member.removed' })).toBe(0);
-    };
-
-    it('P18.96-T8 M1 the office’s root is refused 403 ORG_REMOVAL_NOT_PERMITTED, as the removal refuses it — nothing written', async () => {
-      await h.start('OWNER', '2026-08-01'); // the root: no leader
-      const res = await left(h.officeOnly('ADMIN'), 'OWNER').expect(403);
-      expect(res.body.error).toMatchObject({
-        code: 'ORG_REMOVAL_NOT_PERMITTED', message: 'The office’s root member cannot be removed. Reassign the office first.',
-      });
-      await nothingWritten('OWNER');
-    });
-
-    it('P18.96-T8 M1 the office’s owner who has a leader is refused 403 ORG_REMOVAL_NOT_PERMITTED — to their leader and an Admin', async () => {
-      await h.start('INDAH', '2026-08-01');
-      // Ownership moved to a member, who keeps her leader (`RemovalService.refuseTheOffice`'s second rule).
-      const kpm = { _id: new mongoose.Types.ObjectId(KPM_A) };
-      expect((await h.col('kpms').updateOne(kpm, { $set: { ownerUserId: (await member('INDAH')).userId } })).modifiedCount).toBe(1);
-      try {
-        for (const as of ['AGUS', h.officeOnly('ADMIN')] as const) {
-          const res = await left(as, 'INDAH').expect(403);
-          expect(res.body.error).toMatchObject({
-            code: 'ORG_REMOVAL_NOT_PERMITTED', message: 'They own this office. Transfer it first — only the platform can do that.',
-          });
-        }
-        await nothingWritten('INDAH');
-      } finally {
-        await h.col('kpms').updateOne(kpm, { $unset: { ownerUserId: '' } });
-      }
-    });
-
-    it('P18.96-T8 M2 refused 409 NEW_HIRE_NOT_MARKABLE outside the year: three levels down and two years on, or twelve months to the day', async () => {
-      await h.start('DODI', '2024-03-01'); // Agus ─ Sari ─ Nina ─ Dodi: the removal is Nina's to make, or the office's
-      const old = await left('AGUS', 'DODI').expect(409);
-      expect(old.body.error).toMatchObject({
-        code: 'NEW_HIRE_NOT_MARKABLE', details: { reason: 'past_the_year', joinDate: '2024-03-01' },
-      });
-      await h.start('DIMAS', '2025-09-14'); // off the page by a day (`newHiresWindow`)
-      expect((await left('AGUS', 'DIMAS').expect(409)).body.error.details.reason).toBe('past_the_year');
-      // The Owner is held to the same.
-      expect((await left(h.officeOnly('OWNER'), 'DODI').expect(409)).body.error.code).toBe('NEW_HIRE_NOT_MARKABLE');
-      await nothingWritten('DODI', 'DIMAS');
-    });
-
-    it('P18.96-T8 M2 accepted anywhere inside the year: the year’s first day, in progress with a sale, and activated past day 90', async () => {
-      await h.start('RINA', '2025-09-15'); // the first day of the year listed, not activated
-      expect((await left('SARI', 'RINA').expect(200)).body.activation3M).toBe('not_activated');
-      await h.start('BUDI', '2026-07-15'); // day 62, sold on day 37: still in progress
-      await sold('BUDI', 'Ibu Ratna', '2026-08-20T03:00:00Z');
-      expect((await left('SARI', 'BUDI').expect(200)).body.activation3M).toBe('activated');
-      // Activated, day 97, its checklist overdue: the page offers Mark left on it, and the result stays activated.
-      await h.start('INDAH', '2026-06-10');
-      await sold('INDAH', 'Pak Yusuf', '2026-07-01T03:00:00Z');
-      expect(row(await roster(), 'INDAH')).toMatchObject({ activation3M: 'activated', checklist: { overdue: true } });
-      expect((await left('AGUS', 'INDAH').expect(200)).body.activation3M).toBe('activated');
-    });
-
-    it('P18.96-T8 L5 a removal that fails leaves them as they were — active, no leftAt, nothing kept or audited — and marking again works', async () => {
-      await h.start('BUDI', '2026-08-01');
-      const removal = (h.wired.activation3M as unknown as { removal: RemovalService }).removal;
-      jest.spyOn(removal, 'depart').mockRejectedValueOnce(new Error('the database went away'));
-      await left('SARI', 'BUDI').expect(500);
-      await nothingWritten('BUDI');
-      expect((await left('SARI', 'BUDI').expect(200)).body.activation3M).toBe('not_activated');
-      expect(await member('BUDI')).toMatchObject({ status: 'removed', activation3M: 'not_activated' });
-    });
-  });
-
-  // ------------------------------------------------------------------ the exit review: a withdrawn file
+  // ------------------------------------------------------------------ the exit review: the file's first sale
 
   describe('the P18.96 exit review: a first sale the file no longer shows (M4)', () => {
     it('P18.96-T8 M4 a month’s policies corrected to none recompute a first sale the file gave: in progress, it is gone, and day 91 decides not activated', async () => {

@@ -190,7 +190,7 @@ describe('the coaching roster over HTTP (P11-T6)', () => {
     as('AGUS');
     const res = await get().expect(200);
     const rina = everybody(res.body).find((r) => r.membershipId === office.id.RINA);
-    expect(Object.keys(rina!).sort()).toEqual(['depth', 'lastOneOnOne', 'membershipId', 'name', 'rung', 'status']);
+    expect(Object.keys(rina!).sort()).toEqual(['depth', 'lastOneOnOne', 'membershipId', 'name', 'photoUrl', 'rung', 'status']);
     // Rina logged 53 recruiting follow-ups a day for a fortnight: not one of those numbers is in the answer.
     expect(JSON.stringify(res.body)).not.toMatch(/"(count|logged|total|totalCount|entries|compliant\w*)"/);
   });

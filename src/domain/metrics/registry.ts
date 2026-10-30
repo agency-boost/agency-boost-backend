@@ -253,6 +253,12 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   SALES_LEADS_CLOSING_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
   RECRUITMENT_NOMINATED_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
   /*
+   * UI V1 (Phase 18.99 T4; UI-028, O-4): the roster's *Closing* — sales leads whose first move to *Paid and issued*
+   * falls in the period the screen shows: the calendar month by default, `ROLLING_7D` and the year to date as its other
+   * views, as `CASCADE_ACTIVITY_TOUCHES`. Counted by `closingsIn` (`unit-dashboard/unit-figures.ts`).
+   */
+  SALES_LEADS_CLOSED_IN_PERIOD: { period: 'CALENDAR_MONTH', threshold: null },
+  /*
    * `PACING_TO_MAA` counted over a group, so its period is that metric's. No threshold of its own: the
    * gate is `PACING_TO_MAA`'s. Computed in `domain/metrics/unit-rollup.ts`.
    */

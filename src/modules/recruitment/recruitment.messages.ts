@@ -110,21 +110,26 @@ const CHIP = (vocabulary: readonly { code: string; label: string }[], code: stri
  * §B.0's voice and listed for the product owner (P18.98-T7).
  */
 export const RECRUITMENT_MESSAGES = messages('modules/recruitment', {
-  /* ---- the six pitch slots (`RECRUITMENT_PITCH_SLOTS`) ---- */
-  opportunityTitle: { en: SLOT('opportunity').title, id: 'Ikhtisar peluang' },
+  /*
+   * ---- the six pitch slots (`RECRUITMENT_PITCH_SLOTS`) ----
+   * **A slot's title is its English name in both languages** (UI V1, UI-107: *one row per material with its English
+   * name as in the app*; the seed playbook's Indonesian next action names *Opportunity Overview* too). Its line is
+   * Indonesian.
+   */
+  opportunityTitle: { en: SLOT('opportunity').title, id: SLOT('opportunity').title },
   opportunityLine: { en: SLOT('opportunity').line, id: 'Pitch utama: perannya, penghasilannya, dan apa yang dibutuhkan.' },
-  proofTitle: { en: SLOT('proof').title, id: 'Bukti & kredibilitas' },
+  proofTitle: { en: SLOT('proof').title, id: SLOT('proof').title },
   proofLine: { en: SLOT('proof').line, id: 'Rekam jejak, testimoni, dan alasan untuk percaya.' },
   faqTitle: { en: SLOT('faq').title, id: 'FAQ' },
   faqLine: { en: SLOT('faq').line, id: 'Jawaban lugas atas pertanyaan yang selalu diajukan kandidat.' },
-  howtojoinTitle: { en: SLOT('howtojoin').title, id: 'Cara bergabung' },
+  howtojoinTitle: { en: SLOT('howtojoin').title, id: SLOT('howtojoin').title },
   howtojoinLine: {
     en: SLOT('howtojoin').line,
     id: 'Langkah pendaftaran, dokumen yang diperlukan, dan penandaan ke KPM.',
   },
-  companyTitle: { en: SLOT('company').title, id: 'Profil perusahaan' },
+  companyTitle: { en: SLOT('company').title, id: SLOT('company').title },
   companyLine: { en: SLOT('company').line, id: 'Profil perusahaan asuransi yang produknya dipasarkan agensi ini.' },
-  agencyTitle: { en: SLOT('agency').title, id: 'Profil agensi' },
+  agencyTitle: { en: SLOT('agency').title, id: SLOT('agency').title },
   agencyLine: { en: SLOT('agency').line, id: 'Profil agensi ini sendiri.' },
 
   /* ---- *Opportunity Overview*'s checklist ---- */

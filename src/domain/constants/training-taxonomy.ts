@@ -81,7 +81,24 @@ export const SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97: Readonly<Record<string,
 };
 
 /**
- * `KPM_Owner.html:4267`, the six categories in its order. **Each carries one real line saying what it teaches**
+ * **Motivation, the owner's seventh category** (Phase 18.99 T10; the UI V1 report's UI-063, *new, owner 30 Oct*): the
+ * category row's order is *Sales · Product · Recruiting · Team Management · **Motivation** · Soft Skills · Company and
+ * KPM*, so it sits fifth and the two after it move down one. **Empty, as the five others are**: a category with no
+ * published module is not offered to a field member (ADR-0176 §9), so nobody sees it until an office publishes a module
+ * in it. Its code is stable from today (invariant §3). *Motivasi* is the approved glossary's word for *motivation*
+ * (§B.10, the recruitment playbook's); its line is proposed in §B.10 (*UI V1, Phase 18.99 T10*). A new office is given
+ * it from here; migration `0048` gives it to the Template company's *Default template*; an office made before keeps its
+ * own taxonomy (ADR-0018) and adds it in Settings › Training if it wants it.
+ */
+export const MOTIVATION_CATEGORY: SeedTrainingCategory = {
+  code: 'MOTIVATION',
+  label: 'Motivasi',
+  description: 'Semangat, tujuan, dan kebiasaan yang membuat Anda terus bergerak setiap hari.',
+  displayOrder: 5,
+};
+
+/**
+ * `KPM_Owner.html:4267`, the six categories in its order, and since UI V1 the owner's seventh, *Motivation*, fifth. **Each carries one real line saying what it teaches**
  * (P18.97-T4 AC-9, ADR-0176 §9; UI-031), shown under a category's title on an agent's training page and under its name
  * in the Owner's settings. Sales's read *"Structured modules — tracked here."* — `Training Section.html:1201` less
  * OD-150's Skill Tracker promise — and the other five nothing. A new office is given these; migration `0045` gives
@@ -114,17 +131,19 @@ export const SEED_TRAINING_CATEGORIES: readonly SeedTrainingCategory[] = [
     description: 'Pimpin unit Anda: tetapkan goal, beri coaching kepada agen Anda, dan bantu agen baru memulai.',
     displayOrder: 4,
   },
+  // The owner's seventh (UI V1, UI-063, 30 Oct 2026), between Team Management and Soft Skills: `MOTIVATION_CATEGORY`.
+  MOTIVATION_CATEGORY,
   {
     code: 'SOFT_SKILLS',
     label: 'Soft skills',
     description: 'Komunikasi, rasa percaya diri, dan kebiasaan harian di balik penjualan yang konsisten.',
-    displayOrder: 5,
+    displayOrder: 6,
   },
   {
     code: 'COMPANY_AND_KPM',
     label: 'Perusahaan dan KPM',
     description: 'Cara kerja perusahaan asuransi Anda dan KPM ini, serta kepada siapa bertanya untuk setiap hal.',
-    displayOrder: 6,
+    displayOrder: 7,
   },
 ];
 

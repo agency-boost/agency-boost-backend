@@ -106,11 +106,17 @@ export function leadActionsOf(leads: readonly SessionLead[], reader: Reader): Co
  * its typed ones, then its lead-derived ones with their *Leads · {name}* tag — each with its date and
  * **none ticked**: a tick is written by the session that reviews the item, never on the one it came from
  * (P11-T5 AC-2). A typed item keeps its id; a lead-derived one, which had none, is named by its lead.
+ *
+ * **Except a typed item its coachee ticked done from Calendar** (UI V1, 2026-10-30, UI-104 point 4): `doneIds`, kept
+ * beside the carried session (`actionItemsDone`), comes in ticked — the review starts from what the coachee said, the
+ * leader may untick it, and *Start* does not carry it forward.
  */
-export function reviewedItems(version: Pick<FinalizedVersion, 'actionItems' | 'leadActions'>): CoachingLastWeekItem[] {
+export function reviewedItems(
+  version: Pick<FinalizedVersion, 'actionItems' | 'leadActions'>, doneIds: ReadonlySet<string> = new Set(),
+): CoachingLastWeekItem[] {
   return [
     ...version.actionItems.map((item) => ({
-      itemId: item.itemId, text: item.text, dueDate: item.dueDate, leadId: null, leadName: null, done: false,
+      itemId: item.itemId, text: item.text, dueDate: item.dueDate, leadId: null, leadName: null, done: doneIds.has(item.itemId),
     })),
     ...version.leadActions.map((action) => ({
       itemId: `lead-${action.leadId}`, text: action.text, dueDate: action.dueDate,
@@ -120,22 +126,35 @@ export function reviewedItems(version: Pick<FinalizedVersion, 'actionItems' | 'l
 }
 
 /**
+ * **The date an action item starts with** (UI V1, 2026-10-30, UI-060 — the owner's *"every action always has a date"*):
+ * the office's today plus `COACHING_ACTION_DEFAULT_DUE_DAYS` — the same weekday next week. A carried-forward item and a
+ * new one (*+*) both take it; the leader may change it.
+ */
+export function actionDefaultDueDate(today: LocalDate): LocalDate {
+  return addDays(today, COACHING.ACTION_DEFAULT_DUE_DAYS);
+}
+
+/**
  * **Carry-forward at *Start*** (`Overall.html:10671-10679`, ADR-0081): every item of last week not done —
- * at *Start*, every one — into *Other action items* **with its date cleared**, **except an item whose
- * lead has a next action date now**, which *From leads (automatic)* lists live; and every tip, as
- * written. `newId` mints each copy's own id.
+ * at *Start*, every one — into *Other action items*, **except an item whose lead has a next action date now**, which
+ * *From leads (automatic)* lists live; and every tip, as written. `newId` mints each copy's own id.
+ *
+ * **Each carried item is dated `dueDate`** — `actionDefaultDueDate`, a week from the office's today (UI-060). The
+ * prototype cleared the date, so a carried item looked finished and finalize refused it with no row named; since UI V1
+ * every action always has a date the leader can change.
  */
 export function carryForward(
   items: readonly CoachingLastWeekItem[],
   tips: readonly CoachingTip[],
   leads: readonly SessionLead[],
   newId: () => string,
+  dueDate: LocalDate,
 ): { actionItems: CoachingActionItem[]; tips: CoachingTip[] } {
   const dated = new Set(leads.filter((lead) => lead.nextActionDate !== null).map((lead) => lead.id));
   return {
     actionItems: items
       .filter((item) => !item.done && !(item.leadId !== null && dated.has(item.leadId)))
-      .map((item) => ({ itemId: newId(), text: item.text, dueDate: null, carriedFromItemId: item.itemId })),
+      .map((item) => ({ itemId: newId(), text: item.text, dueDate, carriedFromItemId: item.itemId })),
     tips: tips.map((tip) => ({ tipId: newId(), text: tip.text, carriedFromTipId: tip.tipId })),
   };
 }
@@ -151,6 +170,12 @@ export interface FinalizeRefusal {
   rule: FinalizeRule;
   leadId?: string;
   leadName?: string;
+  /**
+   * `UNDATED_ACTION_ITEM` only (UI-060): **how many** typed items have no date, and **which** — their ids, in the
+   * session's order — so the screen can say the count above *Finalkan* and outline each row.
+   */
+  count?: number;
+  itemIds?: string[];
 }
 
 /**
@@ -178,19 +203,22 @@ const blank = (text: string) => text.trim() === '';
 /**
  * **Finalize's five checks, in the prototype's order** (`Overall.html:11110-11117`), the first that fails
  * answering: no action item at all, lead-derived or typed; a blank tip; a blank typed item; an undated
- * typed item; a lead of the coachee promised for this month — closed ones included — with no next action
+ * typed item — with how many and which (UI-060); a lead of the coachee promised for this month — closed ones included — with no next action
  * date, the first in the order its leads were registered. `null` when the session may be finalized.
  */
 export function finalizeRefusal(input: {
   leadActions: readonly unknown[];
-  actionItems: readonly { text: string; dueDate: string | null }[];
+  actionItems: readonly { itemId?: string; text: string; dueDate: string | null }[];
   tips: readonly { text: string }[];
   leads: readonly SessionLead[];
 }): FinalizeRefusal | null {
   if (input.leadActions.length + input.actionItems.length === 0) return { rule: 'NO_ACTION_ITEM' };
   if (input.tips.some((tip) => blank(tip.text))) return { rule: 'EMPTY_TIP' };
   if (input.actionItems.some((item) => blank(item.text))) return { rule: 'EMPTY_ACTION_ITEM' };
-  if (input.actionItems.some((item) => !item.dueDate)) return { rule: 'UNDATED_ACTION_ITEM' };
+  const undated = input.actionItems.filter((item) => !item.dueDate);
+  if (undated.length > 0) {
+    return { rule: 'UNDATED_ACTION_ITEM', count: undated.length, itemIds: undated.map((item) => item.itemId ?? '') };
+  }
   const unplanned = [...input.leads]
     .sort((a, b) => a.registeredAt - b.registeredAt || (a.id < b.id ? -1 : 1))
     .find((lead) => lead.thisMonth && lead.nextActionDate === null);

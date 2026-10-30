@@ -83,7 +83,7 @@ export class LeaderMeetingMinutes {
   }
 
   /**
-   * **One agenda field**: its text, its PIC, or — on *During* only, where the prototype draws the boxes — its box.
+   * **One agenda field**: its text, its PIC, or its box — in any section since UI V1 (UI-110).
    * **A text that trims to nothing removes the item** (the prototype draws no remove), answered `{ removed: true }`.
    */
   async saveAgendaItem(
@@ -92,10 +92,9 @@ export class LeaderMeetingMinutes {
   ): Promise<AgendaItem | { removed: true }> {
     const meeting = await this.writable(ctx, meetingId);
     const field = oneField(input, AGENDA_FIELDS);
+    // UI V1 (UI-110): every item has its box, in each of the three sections — it was *During*'s alone, as the
+    // prototype drew it, until the owner's mockup of 30 Oct gave each card a done count.
     const found = findAgendaItem(meeting, itemId);
-    if (field === 'done' && found && found.section !== 'during') {
-      refuseWith([LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED.doneDuringOnly]);
-    }
     if (!found) throw await this.itemConflict(ctx, meetingId, itemId, input.version);
     const { section, item: before } = found;
 

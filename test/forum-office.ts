@@ -74,7 +74,7 @@ export async function buildForumServices(wired: ReturnType<typeof configModule>)
   const links = new LeaderMeetingShareLinkRepository(model(LeaderMeetingShareLink.name, LeaderMeetingShareLinkSchema));
   await Promise.all([LeaderMeeting.name, LeaderMeetingShareLink.name].map((name) => mongoose.model(name).syncIndexes()));
   const people = new LeaderMeetingPeople(
-    wired.memberships, new MemberNames(wired.memberships, wired.users as never), wired.orgLevels, wired.kpms as never,
+    wired.memberships, new MemberNames(wired.memberships, wired.users as never, wired.avatarLinks), wired.orgLevels, wired.kpms as never,
   );
   const scorecards = scorecardServiceOf(wired);
   const forum = new LeaderMeetingsService(meetings, people, scorecards, wired.audit, wired.clock);

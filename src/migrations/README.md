@@ -102,3 +102,16 @@ templates and every template saved from an office are copies, never links (ADR-0
 moves. A second run, and a run on a database `0037` made from today's seed, write none. `0038` and `0045` write the
 English they were written for since this change, so an office still holding the older seeded words is given the English,
 as it would have been — never the Indonesian.
+`0047-leaving-decides-no-3m` (Phase 18.99, P18.99-T3; UI V1, UI-023, the owner's D-24) prints `{ cleared, kept }`: the
+left new hires whose 3M result a leaving had kept on or before their day 90 — given back to their first sale and join
+date, `activation3M` and `activation3MLockedAt` set to `null`, `leftAt` kept — and the left new hires whose result was
+kept after day 90, as anybody's is, left as they are. Office by office, in each office's timezone. A second run clears
+none.
+`0048-default-template-motivation` (Phase 18.99, P18.99-T10; UI V1, UI-063, the owner's 30 Oct) prints
+`{ templates, current }`: the versions of the Template company's Default template given the owner's seventh training
+category, *Motivation* (`MOTIVATION_CATEGORY`, *Motivasi*), after *Team Management*, and those already holding one coded
+`MOTIVATION` — today's `0037`, or the Super Admin's own — left as they are. Never an office's taxonomy or snapshot, an
+insurer's template or a template saved from an office (ADR-0018). No version moves. A second run writes none.
+`0049-calendar-all-day` (Phase 18.99, P18.99-T15) prints `{ trips, timed }`: the calendar entries given `allDay` — every
+trip written before the field `true`, as Travel was all-day by its type, every other entry `false` (UI-104 point 8, a
+trip with times). A row that already says either keeps it. A second run writes none.

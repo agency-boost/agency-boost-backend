@@ -529,7 +529,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
    * Owner's settings still list it, and a member's history under one is still read, as a category no longer offered.
    */
   describe('a category with nothing published (P18.97-T4 AC-9)', () => {
-    const EMPTY = ['PRODUCT', 'RECRUITING', 'TEAM_MANAGEMENT', 'SOFT_SKILLS', 'COMPANY_AND_KPM'];
+    const EMPTY = ['PRODUCT', 'RECRUITING', 'TEAM_MANAGEMENT', 'MOTIVATION', 'SOFT_SKILLS', 'COMPANY_AND_KPM'];
     const codes = (view: View) => view.categories.map((c) => c.code);
 
     it('P18.97-T4 AC-9 a field member’s read leaves out every category with no published module', async () => {

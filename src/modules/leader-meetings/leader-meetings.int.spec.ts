@@ -460,6 +460,32 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
     });
   });
 
+  /*
+   * **A saved photo shows on every avatar of that person** (UI V1, UI-111): the forum's editors, on the list's cards and
+   * the meeting's head. `users.avatarUrl` is a storage key in a private bucket, signed per read (`AvatarLinks`).
+   */
+  describe('UI-111 the editors’ profile photos', () => {
+    const KEY = 'user/66f0000000000000000009b1/avatar/01JBBBBBBBBBBBBBBBBBBBBBBB.jpg';
+    const SIGNED = `https://cdn.test/${KEY}?sig=abc`;
+    const sari = { email: 'sari@coaching.test' };
+    beforeAll(async () => { await db().collection('users').updateOne(sari, { $set: { avatarUrl: KEY } }); });
+    afterAll(async () => { await db().collection('users').updateOne(sari, { $set: { avatarUrl: null } }); });
+
+    it('UI-111 the list and the head carry an editor’s photo as a signed link, and an editor without one null', async () => {
+      const meeting = await make('Photos', '2026-10-16');
+      as('OWNER');
+      const card = (await http().get('/leader-meetings').expect(200)).body.meetings.find((m: { id: string }) => m.id === meeting.id);
+      const view = (await http().get(`/leader-meetings/${meeting.id}`).expect(200)).body;
+      for (const editors of [card.editors, view.editors]) {
+        expect(editors.coreLeaders.map((p: { name: string; photoUrl: string | null }) => [p.name, p.photoUrl])).toEqual([
+          ['Agus Salim', null], ['Sari Puspita', SIGNED],
+        ]);
+        expect(editors.owner.photoUrl).toBeNull();
+      }
+      expect(JSON.stringify(view)).not.toContain(`"${KEY}"`);
+    });
+  });
+
   describe('P18.97-T8 F1 a phone card’s change, as the meeting is served (parity F-256)', () => {
     it('P18.97-T8 F1 3M new agent % at 60% against 100% is served −40 points; a sum and a count keep a percentage of last year’s', async () => {
       const meeting = await make('Points', '2026-09-12');

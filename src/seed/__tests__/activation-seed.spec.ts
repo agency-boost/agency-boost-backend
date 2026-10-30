@@ -103,57 +103,69 @@ describe.each([
     expect(item(indah, 'INDEPENDENT_AGENT_MILESTONE').done).toBe(false);
   });
 
-  it('P18.96-T6 Seed: Agus’s new hires in three sections — Rina in progress, Indah and Dimas activated, Lukman and Tari not', async () => {
+  it('UI-023 Seed: Wahyu, Novi, Budi and Rina are Teraktivasi; Lukman amber on day 96; Tari and Yanti not yet', async () => {
     const roster = await wired.newHires.roster(await as('agus@kpm0417.test'));
     const rows = (section: keyof typeof roster.sections) => roster.sections[section].map((r) => `${r.hire.name} ${r.day}`);
-    // Through day 90, with a first sale or not; by day, highest first.
-    expect(rows('inProgress')).toEqual([
-      'Wahyu Saputra 87', 'Novi Andriani 85', 'Budi Santoso 62', 'Rina Wijaya 59', 'Yanti Kusuma 29',
+    // No first sale, inside the 90 days; by day, highest first. Tari's leaving decides nothing (no *Keluar*).
+    expect(rows('inProgress')).toEqual(['Tari Wulandari 41', 'Yanti Kusuma 29']);
+    // Teraktivasi as soon as there is a first sale, newest joiner first.
+    expect(rows('activated')).toEqual([
+      'Rina Wijaya 59', 'Budi Santoso 62', 'Novi Andriani 85', 'Wahyu Saputra 87', 'Dimas Pratama 95',
+      'Indah Permatasari 98', 'Lukman Hakim 100', 'Siti Rahmawati 102',
     ]);
-    // A first sale by day 90 — Siti's checklist graduated, Dimas's and Indah's overdue: the checklist is not the result.
-    expect(rows('activated')).toEqual(['Dimas Pratama 95', 'Indah Permatasari 98', 'Siti Rahmawati 102']);
-    expect(rows('notActivated')).toEqual(['Tari Wulandari 41', 'Lukman Hakim 100']);
+    expect(rows('notActivated')).toEqual([]);
     const row = (name: string) => Object.values(roster.sections).flat().find((r) => r.hire.name === name)!;
-    // Lukman's only sale was on day 96: active since, and not activated.
+    for (const name of ['Wahyu Saputra', 'Novi Andriani', 'Budi Santoso', 'Rina Wijaya']) {
+      expect([name, row(name).status, row(name).activation3M]).toEqual([name, 'activated', 'activated']);
+      expect(row(name).firstSaleDay).toBeLessThanOrEqual(90);
+    }
+    // Novi's sale is a lead on day 20: from the data.
+    expect(row('Novi Andriani')).toMatchObject({ firstSaleDay: 20, firstSaleSource: 'sales' });
+    // Lukman's only sale was on day 96: Teraktivasi in amber, his 3M result not activated.
     expect(row('Lukman Hakim')).toMatchObject({
-      activation3M: 'not_activated', leftOn: null, firstSaleDate: addDays(row('Lukman Hakim').joinDate, 95),
-      unit: { kind: 'direct', leader: null }, checklist: { state: 'open', overdue: true },
+      status: 'activated_late', activation3M: 'not_activated', firstSaleDay: 96, firstSaleSource: 'sales',
+      firstSaleDate: addDays(row('Lukman Hakim').joinDate, 95), unit: { kind: 'direct', leader: null },
+      checklist: { state: 'open', overdue: true },
     });
-    // Tari left on day 35 before any sale, marked by Arief.
+    // Tari left on day 35 before any sale, marked by Arief: in progress, by her join date alone.
     expect(row('Tari Wulandari')).toMatchObject({
-      activation3M: 'not_activated', leftOn: addDays(today, -6), firstSaleDate: null, unit: { kind: 'aab', leader: { name: 'Arief Hidayat' } },
+      status: 'not_yet', activation3M: 'in_progress', firstSaleDate: null, firstSaleDay: null, firstSaleSource: null,
+      unit: { kind: 'aab', leader: { name: 'Arief Hidayat' } },
     });
-    expect(row('Indah Permatasari')).toMatchObject({ checklist: { state: 'open', overdue: true } });
+    expect(row('Yanti Kusuma')).toMatchObject({ status: 'not_yet', firstSaleDay: null });
+    expect(row('Indah Permatasari')).toMatchObject({ status: 'activated', checklist: { state: 'open', overdue: true } });
     expect(row('Siti Rahmawati')).toMatchObject({ checklist: { state: 'graduated', pct: 100 } });
     // An existing agent never appears: Sari, Dewi and Arief lead units, and the cohort's twelve are not his.
     expect(Object.values(roster.sections).flat().map((r) => r.hire.name)).not.toEqual(expect.arrayContaining(['Sari Puspita']));
   });
 
-  it('P18.96-T6 Seed: Agus’s 3M activation % is 3 of 5, over at least two join months, and each unit’s beside it', async () => {
+  it('UI-023 Seed: Agus’s Aktivasi 3M is 7 of 7 — Lukman outside it — and each leader’s group is 100%: Arief 2 of 2', async () => {
     const roster = await wired.newHires.roster(await as('agus@kpm0417.test'));
-    expect(roster.activation3M.all).toEqual({ activated: 3, notActivated: 2, inProgress: 5, pct: 60 });
-    expect(roster.activation3M.byMonth.filter((m) => m.pct !== null).length).toBeGreaterThanOrEqual(2);
+    expect(roster.activation3M.all).toEqual({ activated: 7, notActivated: 0, late: 1, inProgress: 2, pct: 100 });
     // Direct Unit first, then the leaders A to Z.
-    expect(roster.units.map((u) => [u.leader?.name ?? 'Direct Unit', u.activation3M.all.activated, u.activation3M.all.notActivated]))
-      .toEqual([['Direct Unit', 3, 1], ['Arief Hidayat', 0, 1], ['Sari Puspita', 0, 0]]);
-    expect(roster.units.find((u) => u.leader?.name === 'Sari Puspita')!.activation3M.all.pct).toBeNull();
+    expect(roster.units.map((u) => [u.leader?.name ?? 'Direct Unit', u.activation3M.all]))
+      .toEqual([
+        ['Direct Unit', { activated: 3, notActivated: 0, late: 1, inProgress: 0, pct: 100 }],
+        ['Arief Hidayat', { activated: 2, notActivated: 0, late: 0, inProgress: 1, pct: 100 }],
+        ['Sari Puspita', { activated: 2, notActivated: 0, late: 0, inProgress: 1, pct: 100 }],
+      ]);
     // Each month's figure is its join month's new hires.
     for (const month of roster.activation3M.byMonth) {
       const theirs = Object.values(roster.sections).flat().filter((r) => r.joinDate.startsWith(month.month));
-      expect(month.activated + month.notActivated + month.inProgress).toBe(theirs.length);
+      expect(month.activated + month.notActivated + month.late + month.inProgress).toBe(theirs.length);
     }
   });
 
-  it('P18.96-T6 Seed: Arief reads Tari’s leaving, and its audit row; the decided results Agus’s read kept stay kept', async () => {
+  it('UI-023 Seed: Tari’s leaving is kept as data and its audit row, and keeps no result; results past day 90 are kept', async () => {
     const arief = await wired.newHires.roster(await as('arief@kpm0417.test'));
-    expect(arief.sections.notActivated.map((r) => [r.hire.name, r.leftOn])).toEqual([['Tari Wulandari', addDays(today, -6)]]);
+    expect(arief.sections.inProgress.map((r) => [r.hire.name, r.leftOn])).toEqual([['Tari Wulandari', addDays(today, -6)]]);
     const tariUser = await col('users').findOne({ email: 'tari@kpm0417.test' });
     const tari = (await col('memberships').findOne({ userId: String(tariUser!._id) }))!;
     // *Mark left* removes a new hire from the office: removed the instant she left (ADR-0169 §4 as amended).
-    expect(tari).toMatchObject({ activation3M: 'not_activated', status: 'removed' });
+    expect(tari).toMatchObject({ activation3M: null, status: 'removed' });
     expect(tari.removedAt).toEqual(tari.leftAt);
     expect(await col('auditLog').countDocuments({ action: 'new_hire.marked_left', targetMembershipId: String(tari._id) })).toBe(1);
-    // Agus's read above kept the five decided results on their memberships.
+    // Agus's read above kept the results past day 90 on their memberships; inside the 90 days nothing is kept.
     for (const [email, result] of [['indah@kpm0417.test', 'activated'], ['lukman@kpm0417.test', 'not_activated']] as const) {
       expect([email, (await memberOf(email)).activation3M]).toEqual([email, result]);
     }

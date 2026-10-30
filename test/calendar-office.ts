@@ -10,6 +10,10 @@ import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { CalendarController } from '@/modules/calendar/calendar.controller';
 import { CalendarService } from '@/modules/calendar/calendar.service';
 import { CalendarPeopleService } from '@/modules/calendar/calendar-people.service';
+import { CoachingActionDone } from '@/modules/coaching/coaching-action-done.service';
+import { CoachingActionDoneController } from '@/modules/coaching/coaching-action-done.controller';
+import { LeadController } from '@/modules/leads/lead.controller';
+import { LeadService } from '@/modules/leads/lead.service';
 import {
   Notification, NotificationPreferences, NotificationPreferencesSchema, NotificationSchema,
 } from '@/modules/notifications/notification.schema';
@@ -115,10 +119,13 @@ export async function startCalendar(options: { realNotifications?: boolean } = {
   await Promise.all(mongoose.modelNames().map((name) => mongoose.model(name).init()));
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [CalendarController],
+    // UI V1 (UI-104): the two writes a calendar's *Tugas* makes at their sources — a lead's next action, a coaching item.
+    controllers: [CalendarController, LeadController, CoachingActionDoneController],
     providers: [
       { provide: CalendarService, useValue: wired.calendar },
       { provide: CalendarPeopleService, useValue: wired.calendarPeople },
+      { provide: LeadService, useValue: wired.leadRecords },
+      { provide: CoachingActionDone, useValue: new CoachingActionDone(wired.coachingSessions, wired.audit, wired.clock) },
     ],
   }).compile();
   const app = moduleRef.createNestApplication();

@@ -32,7 +32,7 @@ export class LeaderMeetingAgendaItem {
   @Prop({ type: String, default: '' })
   pic!: string;
 
-  /** Meaningful on *During* only, where the prototype draws the boxes (`:2817`). */
+  /** Ticked in any section since UI V1 (UI-110); *During*'s alone before, where the prototype draws the boxes (`:2817`). */
   @Prop({ type: Boolean, default: false })
   done!: boolean;
 

@@ -101,6 +101,12 @@ export class User {
   @Prop({ type: String, enum: [...WORK_STATUSES, null], default: null })
   registeredWorkStatus!: WorkStatus | null;
 
+  /**
+   * **Their profile photo: the stored object's key, never a link** (UI V1, UI-111). The name is older than the
+   * decision: the bucket is private (ADR-0153) and every link expires, so `PUT /auth/me/avatar` writes the key of the
+   * 256px JPEG under `<env>/user/<userId>/avatar/`, and **every read that draws the photo signs a link to it**
+   * (`AvatarLinks`) — `GET /auth/me`, the group tree, the forum. `null`: initials. Never sent to a client as it is.
+   */
   @Prop({ type: String, default: null })
   avatarUrl!: string | null;
 

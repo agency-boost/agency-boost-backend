@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HierarchyRole, RequestContext } from '@/common/context/request-context';
 import {
-  AAB, AB, AGENT, BLOCKED_WHILE_IMPERSONATING, can, KPM_ADMIN, KPM_OWNER, isBlockedWhileImpersonating, isOwnerReserved, isReadLike, PERMISSIONS,
+  AAB, AB, AGENT, BLOCKED_WHILE_IMPERSONATING, can, isBlockedWhileImpersonating, isOwnerReserved, isReadLike, PERMISSIONS,
   Permission, Scope, scopeFor, SETUP_SESSION_WRITE_SCOPE,
 } from './permissions';
 
@@ -393,6 +393,7 @@ describe('permission matrix', () => {
       'leader_meeting:export_pdf': `${DERIVED} (\`read\` and \`read_shared_link\`, \`can.print\`)`,
       'export:any': DERIVED,
       'member:revoke_invite': `${STRUCK} (P3.6-T1)`,
+      'new_hire:mark_left': `${STRUCK} (UI V1, UI-025: retired with its route, ADR-0180 §6)`,
       'org_tree:drill_to_unit_dashboard': `${STRUCK} (P15-T0, D-reach)`,
       'coaching_note:write': STRUCK,
       'coaching_session:share': STRUCK,
@@ -1116,14 +1117,9 @@ describe('permission matrix', () => {
      * and any added later, is granted to no office role and no platform role; one who stands on a rung holds that
      * rung's, as the member they are (§1.1), which reaches only the hires they coach.
      */
-    it('P18.96-T6 AC-4 new_hire:mark_left: an AB and an AAB over their downline, the Owner and an Admin the office — no Agent, no Super Admin', () => {
-      expect([...PERMISSIONS['new_hire:mark_left']].map((g) => [g.grantee, g.scope])).toEqual([
-        [KPM_OWNER, 'own-kpm'], [KPM_ADMIN, 'own-kpm'], [AB, 'own-downline'], [AAB, 'own-downline'],
-      ]);
-      for (const role of ['KPM_OWNER', 'KPM_ADMIN', 'AB', 'AAB']) expect([role, can(ROLES[role], 'new_hire:mark_left')]).toEqual([role, true]);
-      for (const role of ['AGENT', 'SUPER_ADMIN']) expect([role, can(ROLES[role], 'new_hire:mark_left')]).toEqual([role, false]);
-      // A write by its verb: a read-only support session is refused it.
-      expect(isReadLike('new_hire:mark_left')).toBe(false);
+    it('UI-025 new_hire:mark_left is retired with its route: nobody holds it (ADR-0180 §6)', () => {
+      expect('new_hire:mark_left' in PERMISSIONS).toBe(false);
+      expect(Object.keys(PERMISSIONS).filter((name) => name.startsWith('new_hire:'))).toEqual([]);
     });
 
     it('P18.6-T1 AC-7 OD-158: no activation or new-hires permission is granted to the Owner, the Admin or the Super Admin', () => {

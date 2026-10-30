@@ -59,6 +59,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       read: 'event:read_list',
       rsvp: 'event:rsvp',
       cancelRsvp: 'event:cancel_rsvp',
+      withdrawRsvp: 'event:cancel_rsvp',
       claim: 'event_attendance:self_claim',
       submitFeedback: 'event_feedback:submit',
     });
@@ -83,6 +84,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
         as(who);
         await http().post(`/events/${idOf('UPCOMING')}/rsvp`).expect(201);
         await http().post(`/events/${idOf('UPCOMING')}/rsvp/cancel`).expect(201);
+        await http().post(`/events/${idOf('UPCOMING')}/rsvp/withdraw`).expect(201);
         await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
         await http().post(`/events/${idOf('PAST_ALL')}/feedback`).send({ score: 8 }).expect(201);
       },
@@ -95,6 +97,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       for (const call of [
         () => http().post(`/events/${idOf('UPCOMING')}/rsvp`),
         () => http().post(`/events/${idOf('UPCOMING')}/rsvp/cancel`),
+        () => http().post(`/events/${idOf('UPCOMING')}/rsvp/withdraw`),
         () => http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`),
         () => http().post(`/events/${idOf('PAST_ALL')}/feedback`).send({ score: 9 }),
       ]) expect((await call().expect(403)).body.error.code).toBe('PERM_DENIED');
@@ -109,6 +112,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       for (const call of [
         () => http().post(`/events/${idOf('UPCOMING')}/rsvp`),
         () => http().post(`/events/${idOf('UPCOMING')}/rsvp/cancel`),
+        () => http().post(`/events/${idOf('UPCOMING')}/rsvp/withdraw`),
         () => http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`),
         () => http().post(`/events/${idOf('PAST_ALL')}/feedback`).send({ score: 9 }),
       ]) expect((await call().expect(403)).body.error.code).toBe('PERM_DENIED');
@@ -248,12 +252,48 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(await db().collection('eventRsvps').countDocuments({ membershipId: office.id.RINA })).toBe(1);
     });
 
+    it('UI-108 Tidak ikut from no answer makes the row, cancelled — audited once, from null', async () => {
+      as('RINA');
+      const id = idOf('UPCOMING');
+      expect((await http().post(`/events/${id}/rsvp/cancel`).expect(201)).body.me.rsvp).toBe('cancelled');
+      await http().post(`/events/${id}/rsvp/cancel`).expect(201);
+      const audits = await db().collection('auditLog').find({ action: /^event\.rsvp/ }).sort({ _id: 1 }).toArray();
+      expect(audits.map((a) => a.action)).toEqual(['event.rsvp_cancelled']);
+      expect(audits[0]).toMatchObject({ before: { rsvpStatus: null }, after: { rsvpStatus: 'cancelled' } });
+      expect(await db().collection('eventRsvps').countDocuments({ membershipId: office.id.RINA })).toBe(1);
+    });
+
+    it('UI-108 the chosen answer tapped again is undone: Ikut and Tidak ikut each withdraw to no answer, audited', async () => {
+      as('RINA');
+      const id = idOf('UPCOMING');
+      await http().post(`/events/${id}/rsvp`).expect(201);
+      expect((await http().post(`/events/${id}/rsvp/withdraw`).expect(201)).body.me).toEqual({ rsvp: null, claimed: false, feedback: null });
+      await http().post(`/events/${id}/rsvp/withdraw`).expect(201);
+      await http().post(`/events/${id}/rsvp/cancel`).expect(201);
+      expect((await http().post(`/events/${id}/rsvp/withdraw`).expect(201)).body.me.rsvp).toBeNull();
+      const audits = await db().collection('auditLog').find({ action: /^event\.rsvp/ }).sort({ _id: 1 }).toArray();
+      expect(audits.map((a) => a.action)).toEqual(['event.rsvp', 'event.rsvp_withdrawn', 'event.rsvp_cancelled', 'event.rsvp_withdrawn']);
+      expect(audits[1]).toMatchObject({ before: { rsvpStatus: 'going' }, after: { rsvpStatus: null } });
+      expect(audits[3]).toMatchObject({ before: { rsvpStatus: 'cancelled' }, after: { rsvpStatus: null } });
+      // One row throughout, never deleted: an answer withdrawn is a status, not an erasure.
+      const rows = await db().collection('eventRsvps').find({ membershipId: office.id.RINA }).toArray();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ rsvpStatus: null, deletedAt: null });
+    });
+
+    it('UI-108 withdrawing with no answer changes nothing and makes no row', async () => {
+      as('RINA');
+      expect((await http().post(`/events/${idOf('UPCOMING')}/rsvp/withdraw`).expect(201)).body.me.rsvp).toBeNull();
+      expect(await db().collection('eventRsvps').countDocuments({ membershipId: office.id.RINA })).toBe(0);
+      expect(await db().collection('auditLog').countDocuments({ action: 'event.rsvp_withdrawn' })).toBe(0);
+    });
+
     it('P18.5-T5 AC-5 a running event still takes an RSVP; from endsAt both are refused 409, at the exact boundary', async () => {
       as('AGUS');
       await http().post(`/events/${idOf('RUNNING_LEADERS')}/rsvp`).expect(201);
       as('RINA');
-      // ENDS_NOW ended at ROSTER_NOW to the millisecond: closed.
-      for (const path of ['rsvp', 'rsvp/cancel']) {
+      // ENDS_NOW ended at ROSTER_NOW to the millisecond: closed — the card's undo too (UI-108).
+      for (const path of ['rsvp', 'rsvp/cancel', 'rsvp/withdraw']) {
         const res = await http().post(`/events/${idOf('ENDS_NOW')}/${path}`).expect(409);
         expect(res.body.error.code).toBe('EVENT_RSVP_CLOSED');
       }

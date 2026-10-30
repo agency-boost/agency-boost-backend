@@ -47,7 +47,7 @@ export class ActivationItemRecordInputDto {
 
   @ApiPropertyOptional({
     type: String, maxLength: RECORD_TEXT_MAX, example: 'Ibu Ratna Kusuma',
-    description: '`closing`, a new one: who the case was sold to — the lead’s name.',
+    description: '`closing`, a new one: who the case was sold to — the lead’s name. Absent with a `date`: a pecah telor’s day alone (UI V1, D-26), logged under a name the API gives it.',
   })
   @IsOptional() @IsString() @MaxLength(RECORD_TEXT_MAX)
   name?: string;

@@ -138,7 +138,7 @@ export class LeaderScorecardService {
       this.memberships.find(
         ctx,
         { joinedAs: 'new_hire', joinDate: { $gte: periods.fy.from, $lte: cohortTo } },
-        { projection: { joinedAs: 1, joinDate: 1, firstSaleDate: 1, leftAt: 1, activation3M: 1 } },
+        { projection: { joinedAs: 1, joinDate: 1, firstSaleDate: 1, activation3M: 1 } },
       ),
       this.latestUpload(ctx, range, timezone),
     ]);
@@ -169,7 +169,7 @@ export class LeaderScorecardService {
       // OD-26 is open: no source holds the FLC count for any period.
       flc: columns(() => PENDING),
       producing_agents: producing,
-      new_agent_3m: yearly((period) => this.newAgent3m(reads, period, today, newHires)),
+      new_agent_3m: yearly((period) => this.newAgent3m(period, today, newHires)),
       avg_monthly_aa: columns((period) => this.overHeld(
         period, (m) => this.maaCount(reads, period, m),
         (values) => (period.months.length === 1 ? values[0] : maaMonthlyAvg(values)),
@@ -335,25 +335,27 @@ export class LeaderScorecardService {
   }
 
   /**
-   * ***3M new agent %*** — **`ACTIVATION_3M_PCT`** since P18.96-T6 (ADR-0171 §2, which retired `NEW_AGENT_3M_ACTIVE_PCT`):
-   * of the office's new hires who joined in the period — by their join date in the office's calendar, removed or not —
-   * activated ÷ (activated + not activated), each hire's `ACTIVATION_3M` as it stands on the office's today: the result
-   * kept on the membership where one is, computed the same where none is yet. Nothing is written here. *Pending data*
-   * while none of them is decided; **it names no month left out** — a hire still in their 90 days is in neither part,
-   * and waits on no file.
+   * ***3M new agent %*** — **`ACTIVATION_3M_PCT`** since P18.96-T6 (ADR-0171 §2, which retired `NEW_AGENT_3M_ACTIVE_PCT`),
+   * by rule A since UI V1 (UI-023): of the office's new hires who joined in the period — by their join date in the
+   * office's calendar, removed or not — activated by day 90 ÷ (that + past day 90 with no first sale), each hire's
+   * `ACTIVATION_3M` as it stands on the office's today: the result kept on the membership where one is, computed the
+   * same where none is yet. A first sale after day 90 is in neither part, nor is a hire inside their 90 days without one;
+   * leaving decides nothing. Nothing is written here. *Pending data* while none of them is decided; **it names no month
+   * left out** — a hire still in their 90 days waits on no file.
    */
   private newAgent3m(
-    reads: Reads, period: Period, today: LocalDate,
-    newHires: readonly Pick<Membership, 'joinDate' | 'firstSaleDate' | 'leftAt' | 'activation3M'>[],
+    period: Period, today: LocalDate,
+    newHires: readonly Pick<Membership, 'joinDate' | 'firstSaleDate' | 'activation3M'>[],
   ): ScorecardCell {
     if (period.months.length === 0) return PENDING;
     const cohort = newHires.filter((m) => m.joinDate !== null && m.joinDate >= period.from && m.joinDate <= period.end);
-    const share = activation3MShare(cohort.map((m) => activation3MOf({
-      joinDate: m.joinDate!,
-      firstSaleDate: m.firstSaleDate ?? null,
-      leftOn: m.leftAt ? this.clock.localDateFor(reads.timezone, m.leftAt) : null,
-      locked: m.activation3M ?? null,
-    }, today)));
+    const share = activation3MShare(cohort.map((m) => {
+      const firstSaleDate = m.firstSaleDate ?? null;
+      return {
+        result: activation3MOf({ joinDate: m.joinDate!, firstSaleDate, locked: m.activation3M ?? null }, today),
+        firstSaleDate,
+      };
+    }));
     return share.pct === null ? PENDING : figure(share.pct);
   }
 

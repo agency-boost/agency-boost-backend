@@ -148,8 +148,10 @@ describe('the coaching session over HTTP (P11-T5)', () => {
         status: 'draft', version: 1, date: null, finalizedAt: null, finalizedBy: null, reopenableUntil: null,
         lastWeek: { sessionId: String(lastWeek._id), date: '2026-09-10' },
         lastWeekItems: [{ itemId: 'INDAH-1', text: 'Book two presentations', dueDate: '2026-09-10', lead: null, done: false }],
-        // Carried, with its date cleared: set fresh in this session (`Overall.html:10671-10674`).
-        actionItems: [{ text: 'Book two presentations', dueDate: null }],
+        // UI-060: carried, dated a week from the office's today — every action always has a date, which the leader can
+        // change (the prototype cleared it, `Overall.html:10671-10674`). *+* takes the same `defaultDueDate`.
+        actionItems: [{ text: 'Book two presentations', dueDate: '2026-09-21' }],
+        defaultDueDate: '2026-09-21',
         tips: [], leadActions: [], snapshot: null, earlier: [],
       });
 
@@ -190,7 +192,7 @@ describe('the coaching session over HTTP (P11-T5)', () => {
         { itemId: `lead-${undatedLead}`, text: 'Send the brochure', dueDate: '2026-09-12', lead: { leadId: undatedLead, name: 'Pak Surya' }, done: false },
       ]);
       expect(res.body.actionItems.map((i: Doc) => [i.text, i.dueDate])).toEqual([
-        ['Practise the close', null], ['Send the brochure', null],
+        ['Practise the close', '2026-09-21'], ['Send the brochure', '2026-09-21'],
       ]);
       expect(res.body.tips.map((t: Doc) => t.text)).toEqual(['Ask for the referral before you leave.']);
       // *From leads (automatic)* lists the dated lead, live.
@@ -659,6 +661,44 @@ describe('the coaching session over HTTP (P11-T5)', () => {
       expect(final.after).toMatchObject({ date: ROSTER_TODAY, correction: true });
       // The correction's own round of goal notices is released, not the first round's again.
       expect(wired.releasedNotifications.map((r) => r.coalesceKey)).toEqual([`${done.sessionId}:0`, `${done.sessionId}:1`]);
+    });
+
+    it('UI-060 Ubah lagi, then finalized again: one coaching — the date kept, one session counted, the last 1:1 not moved', async () => {
+      const done = await finalized('AGUS', 'INDAH', [dated('As agreed')]);
+      const counted = () => col('coachingSessions').countDocuments({
+        coacheeMembershipId: id('INDAH'), status: { $in: ['finalized', 'reopened'] }, date: { $ne: null },
+      });
+      const before = await counted();
+      clock.set(new Date('2026-09-16T03:00:00Z'));
+      as('AGUS');
+      const reopened = (await reopen(done.sessionId, done.version).expect(200)).body;
+      // Reopened, every field is as it was: the same rows, the same date, a draft again to its coach.
+      expect(reopened).toMatchObject({ status: 'reopened', date: ROSTER_TODAY, actionItems: done.actionItems, tips: done.tips });
+      const refinal = (await finalize(done.sessionId, reopened.version).expect(200)).body;
+      expect(refinal).toMatchObject({ status: 'finalized', date: ROSTER_TODAY });
+      // One document, counted once by every coaching reader: Last 1:1 is its date, not the day it was finalized again.
+      expect(await counted()).toBe(before);
+      const last = await wired.coachingReadings.lastOneOnOnes(office.as('AGUS'), [id('INDAH')]);
+      expect(last.get(id('INDAH'))).toMatchObject({ sessionId: done.sessionId, date: ROSTER_TODAY });
+      expect((await history('INDAH').expect(200)).body.sessions.filter((r: Doc) => r.sessionId === done.sessionId))
+        .toEqual([expect.objectContaining({ date: ROSTER_TODAY })]);
+    });
+
+    it('UI-060 a new row saved with no date is dated a week ahead; one cleared by hand stays empty, and finalize names how many', async () => {
+      const { sessionId, version } = (await start('AGUS', 'INDAH').expect(201)).body;
+      const saved = (await save(sessionId, {
+        version, lastWeekItems: [],
+        actionItems: [{ text: 'Added with +' }, { text: 'Cleared by hand', dueDate: null }, { text: 'Third', dueDate: null }],
+        tips: [],
+      }).expect(200)).body;
+      expect(saved.actionItems.map((i: Doc) => [i.text, i.dueDate])).toEqual([
+        ['Added with +', '2026-09-21'], ['Cleared by hand', null], ['Third', null],
+      ]);
+      const refused = await finalize(sessionId, saved.version).expect(422);
+      expect(refused.body.error).toMatchObject({
+        code: 'COACHING_SESSION_INCOMPLETE',
+        details: { rule: 'UNDATED_ACTION_ITEM', count: 2, itemIds: [saved.actionItems[1].itemId, saved.actionItems[2].itemId] },
+      });
     });
 
     it('P11-T5 AC-6 a session under correction is the next draft’s last week as its latest finalized version, and holds up no Start', async () => {

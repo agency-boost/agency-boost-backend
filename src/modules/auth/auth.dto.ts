@@ -7,6 +7,7 @@ import {
 import {
   AGENT_CODE_PATTERN, GENDERS, LANGUAGES, WORK_STATUSES, type Gender, type Language, type WorkStatus,
 } from '@/domain/constants';
+import { PHONE_FIELD_SHAPE, phoneFromBody } from '@/modules/users/phone-input';
 import { preferredNameOf } from '@/modules/users/display-name';
 import { field } from '@/common/validation/violations';
 import { PasswordService } from './password.service';
@@ -160,6 +161,23 @@ export class ChangePasswordDto {
   newPassword!: string;
 }
 
+/**
+ * **`POST /auth/me/email`** (UI V1, UI-111; ADR-0181): the address to move the account to, and the password again.
+ * Trimmed at the door, so an address pasted with a space is not refused for it; the service lower-cases it as
+ * registration does (`normalisedEmail`).
+ */
+export class ChangeEmailDto {
+  @ApiProperty({ example: 'agus.baru@kpm0417.test' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsEmail()
+  @MaxLength(254)
+  newEmail!: string;
+
+  @ApiProperty({ description: 'The password the account signs in with now.' })
+  @IsString()
+  currentPassword!: string;
+}
+
 export class UpdateProfileDto {
   @ApiPropertyOptional({ example: 'Rina Wijaya' })
   @IsOptional()
@@ -230,6 +248,24 @@ export class UpdateProfileDto {
   @ValidateIf((_, value) => value !== undefined)
   @IsIn(LANGUAGES, { message: field(SAY.localeShape) })
   locale?: Language;
+
+  /*
+   * **Your WhatsApp number** (UI V1, 2026-10-30; UI-081, D-22): what *Isi nomor WhatsApp* and *Profil saya* save. Typed
+   * as people type it and stored as `+62` and 9 to 13 digits (`normalisePhone`); empty, blank or `null` clears it.
+   */
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    example: '0812-1100-2200',
+    description: 'Your WhatsApp number. Spaces, dashes, dots and brackets go, and a leading `+62`, `62` or `0`; what is '
+      + 'left must be 9 to 13 digits, stored as `+62…`, else `400 VALIDATION_FAILED` naming `phone`. Empty, blank or '
+      + '`null` clears it.',
+  })
+  @Transform(({ value }) => phoneFromBody(value))
+  @ValidateIf((_, value) => value !== undefined && value !== null)
+  // No `@IsString()`: the shape refuses anything that is not text, and says one sentence rather than two.
+  @Matches(PHONE_FIELD_SHAPE, { message: field(SAY.phoneShape) })
+  phone?: string | null;
 }
 
 export class ImpersonateDto {

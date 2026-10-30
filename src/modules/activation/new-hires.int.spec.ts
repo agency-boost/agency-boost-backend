@@ -72,8 +72,8 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       // P18.96-T6: past day 90 with no first sale, Indah is not activated; her checklist is overdue as before.
       expect(rowOf(r, 'Indah Permatasari')).toEqual({
         hire: { membershipId: id('INDAH'), name: 'Indah Permatasari' }, unit: { kind: 'direct', leader: null },
-        joinDate: '2026-06-10', day: 97, firstSaleDate: null, activation3M: 'not_activated', leftOn: null,
-        checklist: { state: 'open', done: 1, total: 16, pct: 6, overdue: true },
+        joinDate: '2026-06-10', day: 97, firstSaleDate: null, firstSaleDay: null, firstSaleSource: null, status: 'not_yet',
+        activation3M: 'not_activated', leftOn: null, checklist: { state: 'open', done: 1, total: 16, pct: 6, overdue: true },
       });
       expect(r.units[2].leader).toEqual({ membershipId: id('SARI'), name: 'Sari Puspita' });
     });
@@ -122,8 +122,11 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
         .send({ done: true, record: { kind: 'closing', name: 'Ibu Ratna', date: '2026-09-01' } }).expect(200);
       const budi = rowOf(await roster(), 'Budi Santoso');
       // Two of sixteen: the closing is a lead in his pipeline, so *Add prospects* completes from it too. P18.96-T6: the
-      // row carries his first sale — the logged closing's day — where the *Active Agent* ✓ was.
-      expect(budi).toMatchObject({ firstSaleDate: '2026-09-01', activation3M: 'in_progress', checklist: { pct: 13 } });
+      // row carries his first sale — the logged closing's day — where the *Active Agent* ✓ was. UI-023: a first sale by day
+      // 90 is Teraktivasi at once, and a closing logged from the checklist is the leader's own record — `manual` (D-26).
+      expect(budi).toMatchObject({
+        firstSaleDate: '2026-09-01', firstSaleSource: 'manual', status: 'activated', activation3M: 'activated', checklist: { pct: 13 },
+      });
     });
 
     it('P18.96-T6 AC-3 a graduated or expired checklist no longer takes its hire off: the year lists them, by result', async () => {

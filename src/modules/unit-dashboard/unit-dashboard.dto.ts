@@ -7,6 +7,7 @@ import {
 import { field } from '@/common/validation/violations';
 import { UNIT_DASHBOARD, type UnitDashboardPeriod } from '@/domain/constants';
 import { UNIT_DASHBOARD_REFUSALS } from './unit-dashboard.messages';
+import { ACTIVITY_SPANS, type ActivitySpan } from './unit-figures';
 
 /**
  * **`period` and `for`, and nothing else** (P15-T1 AC-10): a period it does not know, or a parameter of any
@@ -31,6 +32,39 @@ export class UnitDashboardQueryDto {
     description:
       'The **membership** whose unit to read: somebody below you who leads somebody — or, for the agency’s '
       + 'owner and its administrators, any leader in the agency. Omitted, it is your own unit.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  for?: string;
+}
+
+/**
+ * **The Activities tab's read** (UI V1, UI-001): `span`, `date` and `for`, and nothing else — a parameter of any other
+ * name is refused by name, as the dashboard's own read refuses one.
+ */
+export class UnitActivitiesQueryDto {
+  @ApiPropertyOptional({
+    enum: ACTIVITY_SPANS,
+    default: 'week',
+    description: '*Minggu | Bulan*: a week Monday to Sunday (the default), or a calendar month, on the agency’s calendar.',
+  })
+  @IsOptional()
+  @IsIn(ACTIVITY_SPANS)
+  span?: ActivitySpan;
+
+  @ApiPropertyOptional({
+    example: '2026-10-28',
+    description: 'A day in the week or month to read; omitted, the agency’s today. A day after today is refused (`400`).',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: field(UNIT_DASHBOARD_REFUSALS.VALIDATION_FAILED.dateShape) })
+  date?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 64,
+    description: 'The **membership** whose unit to read, as the dashboard’s own `for`. Omitted, it is your own unit.',
   })
   @IsOptional()
   @IsString()

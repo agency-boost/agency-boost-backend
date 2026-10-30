@@ -1,11 +1,14 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { render } from '@/common/i18n/sentence';
+import { ActivityReadings } from '@/modules/activity/activity-readings';
+import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { preferredNameOf } from '@/modules/users/display-name';
+import { AvatarLinks } from '@/modules/users/avatar.service';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { initialsOf } from './directory.service';
 import { MembershipRepository } from './membership.repository';
@@ -47,6 +50,13 @@ export interface OrgTreeNode {
   /** The graph, not the role (OD-23). */
   isLeader: boolean;
   isSelf: boolean;
+  /**
+   * **Today's activity count** (UI V1, UI-059; O-5): the office's day, the total Activity Management saved for it —
+   * `ActivityReadings.perPersonPerDay`, the read Home's team list takes too (UI-101). 0 when nothing was logged.
+   */
+  todayActivityCount: number;
+  /** **Their profile photo**, when they have one (UI-059; `users.avatarUrl`, set by *Profil saya*, UI-111). */
+  photoUrl: string | null;
 }
 
 /**
@@ -103,6 +113,19 @@ export class OrgTreeService {
   constructor(
     private readonly members: MembershipRepository,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
+    /*
+     * Today's count per person (UI V1, UI-059; O-5): the activity module's seam, and the office's day. Both are
+     * providers of the application; optional so a test that draws only the tree's shape builds it with the two above,
+     * and then every count reads 0.
+     */
+    @Optional() @Inject(ActivityReadings) private readonly activity: ActivityReadings | null = null,
+    @Optional() @Inject(TenantDay) private readonly days: TenantDay | null = null,
+    /*
+     * **Each photo as a signed link** (UI V1, UI-059, UI-111): `users.avatarUrl` holds a storage key and the bucket is
+     * private, so the photos are signed here, once per photo per half day (`AvatarLinks`). Optional: without it every
+     * row draws its initials, never a key.
+     */
+    @Optional() @Inject(AvatarLinks) private readonly avatarLinks: AvatarLinks | null = null,
   ) {}
 
   async read(ctx: RequestContext): Promise<OrgTree> {
@@ -123,8 +146,11 @@ export class OrgTreeService {
       );
     }
 
-    // One lookup for every name, rather than one per node.
-    const named = await this.namesFor(rows.map((r) => r.userId));
+    // One lookup for every name, rather than one per node; one for today's counts (UI-059).
+    const [named, today] = await Promise.all([
+      this.namesFor(rows.map((r) => r.userId)),
+      this.todayCounts(ctx, rows.map((r) => String(r._id))),
+    ]);
 
     const present = new Set(rows.map((r) => String(r._id)));
     // A person whose account is gone is still a node, named in the reader's language (P18.98-T5 AC-4).
@@ -140,6 +166,9 @@ export class OrgTreeService {
         .map((r) => r.depth),
     );
     const counts = { ab: 0, aab: 0, agent: 0, total: 0 };
+    const photos = this.avatarLinks
+      ? await this.avatarLinks.linksFor(rows.map((r) => named.get(r.userId)?.avatarUrl))
+      : new Map<string, string>();
     const nodes: OrgTreeNode[] = [];
     const rootIds: string[] = [];
 
@@ -180,6 +209,8 @@ export class OrgTreeService {
         subtreeCount: row.subtreeCount ?? 0,
         isLeader: directCount > 0,
         isSelf: id === self,
+        todayActivityCount: today.get(id) ?? 0,
+        photoUrl: photos.get(named.get(row.userId)?.avatarUrl ?? '') ?? null,
       });
     }
 
@@ -212,6 +243,8 @@ export class OrgTreeService {
     const leader = await this.members.findById(ctx, me.leaderId);
     if (!leader || leader.status === 'removed') return null;
 
+    // Four fields and no more — no photo either (UI-059's upline row draws initials): this card is the registered
+    // exception to "you see your downline only" (`multi-tenancy-and-scoping.md`), bounded on purpose.
     const fullName = (await this.namesFor([leader.userId])).get(leader.userId)?.fullName
       ?? render(ORG_MESSAGES.unknownName, ctx.reader);
     return {
@@ -220,6 +253,20 @@ export class OrgTreeService {
       initials: initialsOf(fullName),
       role: leader.role,
     };
+  }
+
+  /**
+   * **Each node's activity count today** (UI V1, UI-059; O-5): the office's day through `TenantDay` — never the
+   * server's clock (invariant §9) — and the counts through `ActivityReadings.perPersonPerDay`, one query for the whole
+   * tree, within the office. Only the people the tree already holds: the reader may see them, so they may see this.
+   */
+  private async todayCounts(ctx: RequestContext, membershipIds: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (!this.activity || !this.days || membershipIds.length === 0) return out;
+    const { today } = await this.days.for(ctx);
+    const counts = await this.activity.perPersonPerDay(ctx, membershipIds, [today]);
+    for (const [id, byDay] of counts) out.set(id, byDay.get(today) ?? 0);
+    return out;
   }
 
   private async namesFor(userIds: string[]) {

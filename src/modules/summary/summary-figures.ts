@@ -168,6 +168,21 @@ export function summaryPlan(input: {
   };
 }
 
+/**
+ * **The year's activity targets are what the year still needs** (UI V1, 2026-10-30, UI-052 — *"the yearly Submission
+ * polis target equals the Gap number"*): the cascade run on the year's APE gap (`APE_GAP_TO_TARGET`), so the
+ * *Submission polis* target is *Polis yang dibutuhkan* itself — `ceil(gap ÷ case size)` both — and *Set appointment*
+ * and *Sales meeting* follow from it at the goal's own rates. A year whose gap is unmeasured keeps the cascade on the
+ * annual target (`summaryPlan`); a year made needs nothing more, 0 of each. The month is unchanged: its target is fixed
+ * when the month begins (ADR-0056), and its gap shrinks as its APE lands.
+ */
+function yearlyCountsOf(
+  plan: SummaryPlan, yearly: PeriodFigures, rates: Pick<PlannedGoal, 'caseSizeMinor' | 'closingRatePct' | 'leadsToApptPct'>,
+): CascadeCounts | null {
+  if (plan.yearlyCounts === null || yearly.gapMinor === null || rates.caseSizeMinor <= 0) return plan.yearlyCounts;
+  return cascadeCounts(yearly.gapMinor, rates);
+}
+
 /** Where a production figure came from, said with it (ADR-0008, P9-T6). */
 export interface FigureSource {
   provenance: 'imported' | 'corrected' | 'self_reported';
@@ -209,7 +224,10 @@ export interface GoalFigures {
   /** Whether a goal has been **saved** for the year. The defaults a first-time reader sees are not one. */
   set: boolean;
   caseSizeMinor: number;
-  /** The month's and the year's targets, before anything is measured against them. */
+  /**
+   * The month's and the year's targets. `yearlyCounts` is the cascade on what the year still needs (UI-052), so its
+   * *Submission polis* is `yearly.policiesNeeded`.
+   */
   plan: SummaryPlan;
   /** *Monthly* (ADR-0056): this month's fixed target against this month's uploaded APE. */
   monthly: PeriodFigures & { source: FigureSource | null };
@@ -252,7 +270,7 @@ export function goalFigures(input: {
   return {
     set: goal.savedAt !== null,
     caseSizeMinor: goal.caseSizeMinor,
-    plan,
+    plan: { ...plan, yearlyCounts: yearlyCountsOf(plan, yearly, goal) },
     monthly: {
       ...monthly,
       source: thisMonth
@@ -476,9 +494,17 @@ export function sectionChips(
     });
 }
 
-/** *N total activities logged … across all categories* — every code, archived and unshown included. */
-export function totalLogged(counts: ReadonlyMap<string, number>): number {
+/**
+ * ***n aktivitas*** (UI V1, UI-052): **the sum of the breakdown the Summary returns** — the three target chips' codes and
+ * every row of every section chip, each code once — so the total and the rows it sits over always agree. A code logged
+ * in no chip the reader is shown (a selling type that is not one of the three, a section their rung does not see) is
+ * in neither: the page counts what it shows.
+ */
+export function totalLogged(
+  counts: ReadonlyMap<string, number>, targets: readonly Pick<ActivityTarget, 'codes'>[], sections: readonly SectionChip[],
+): number {
+  const shown = new Set([...targets.flatMap((t) => t.codes), ...sections.flatMap((s) => s.rows.map((r) => r.code))]);
   let total = 0;
-  for (const n of counts.values()) total += n;
+  for (const code of shown) total += counts.get(code) ?? 0;
   return total;
 }

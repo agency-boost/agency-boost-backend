@@ -152,15 +152,19 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     expect(view.tiles.team.newHires).toBeGreaterThanOrEqual(1);
   });
 
-  it('P18.96-T5 AC-2 Yanti, on pace, is in neither Sari’s total nor Agus’s tiles: not the count, not the of, not the target', () => {
+  it('UI-013 Yanti, on pace, is in Active Agent’s of — manpower — and never its count, nor the target', () => {
     expect(row('Yanti').pacingToMaa).toBe(true);
     const sari = view.units[2];
     const selling = rowsOf(sari).filter((r) => !r.newHireBeforeFirstSale);
     expect(selling.map((r) => first(r.name))).toEqual(['Sari', 'Budi', 'Rina']);
-    expect(sari.total.potentialActive).toEqual({ count: selling.filter((r) => r.pacingToMaa === true).length, of: 3 });
+    expect(sari.total.potentialActive).toEqual({ count: selling.filter((r) => r.pacingToMaa === true).length, of: 4 });
     const all = everyRow(view).filter((r) => !r.newHireBeforeFirstSale);
-    expect(view.tiles.potentialActive).toEqual({ count: all.filter((r) => r.pacingToMaa === true).length, of: all.length });
-    expect(view.tiles.potentialActive.of).toBe(view.tiles.team.total - view.tiles.team.newHires);
+    expect(view.tiles.potentialActive).toMatchObject({ count: all.filter((r) => r.pacingToMaa === true).length, of: everyRow(view).length });
+    // The same number as *Your team*, and the Unit / AAB split adds up to it.
+    expect(view.tiles.potentialActive.of).toBe(view.tiles.team.total);
+    const { unit, aab } = view.tiles.potentialActive;
+    expect([unit.of, aab.of]).toEqual([view.yourUnit.rows.length, view.tiles.team.total - view.yourUnit.rows.length]);
+    expect(unit.count + aab.count).toBe(view.tiles.potentialActive.count);
     // Her target is out of the group's production: the paired target is the selling rows' with production held.
     const held = all.filter((r) => r.goal.actualMinor !== null);
     expect(view.tiles.directGroupProduction.targetMinor).toBe(held.reduce((s, r) => s + (r.goal.targetMinor ?? 0), 0));
@@ -243,7 +247,8 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
         expect(total.goal.actualMinor).toBe(actuals.length ? actuals.reduce((a, b) => a + b, 0) : null);
         expect(total.goal.targetMinor).toBe(targets.length ? targets.reduce((a, b) => a + b, 0) : null);
         expect(total.goal.missing).toBe(rows.length - actuals.length);
-        expect(total.potentialActive).toEqual({ count: rows.filter((r) => r.pacingToMaa === true).length, of: rows.length });
+        // UI-013: out of everybody — manpower.
+        expect(total.potentialActive).toEqual({ count: rows.filter((r) => r.pacingToMaa === true).length, of: everybody.length });
       }
     }
   });

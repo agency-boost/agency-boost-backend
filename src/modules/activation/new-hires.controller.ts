@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, Param, Put } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
@@ -7,7 +7,7 @@ import {
   CorrectActivationStartDto, SaveActivationNoteDto, TickHireActivationItemDto,
 } from './activation-progress.dto';
 import {
-  ActivationClosingsDto, ActivationNoteSavedDto, ActivationViewDto, NewHireMarkedLeftDto, NewHiresRosterDto,
+  ActivationClosingsDto, ActivationNoteSavedDto, NewHireDetailDto, NewHiresRosterDto,
 } from './activation-progress.response.dto';
 import { NewHiresService } from './new-hires.service';
 
@@ -40,8 +40,8 @@ export class NewHiresController {
     description:
       'Every new hire you coach, at any depth, whose join date is in the last twelve months — never an existing '
       + 'agent — in three sections by their 3M activation: in progress (days 1 to 90), activated (a first paid and '
-      + 'issued case by day 90) and not activated (none by then, or they left before one). Each row: the join date, '
-      + 'the day, the first sale, the result, the day they left and their checklist where they have one. At the top, '
+      + 'issued case by day 90, or after it) and not activated (none by day 90). Each row: the join date, '
+      + 'the day, the first sale with its day and source, the status and their checklist where they have one. At the top, '
       + 'the 3M activation % of everybody listed and of each unit — your direct unit, then each AAB’s or AB’s below '
       + 'you — overall and by join month. A result decided is kept, and never changes after. Each new hire shown is '
       + 'a recorded read.',
@@ -56,50 +56,17 @@ export class NewHiresController {
     return this.hires.roster(ctx);
   }
 
-  @Post(':membershipId/left')
-  @HttpCode(HttpStatus.OK)
-  @RequirePermission('new_hire:mark_left')
-  @ApiOperation({
-    summary: 'Mark a new hire as left',
-    description:
-      'Records that a new hire has left, today: their 3M activation is decided — not activated unless their first '
-      + 'sale came first — and kept, and they are removed from the office as a removal removes anybody, so they leave '
-      + 'every count of people. Their checklist and history stay, and New Hires lists them for the rest of their year. '
-      + 'Only for a new hire New Hires lists: one who joined in the last twelve months. Audited.',
-  })
-  @ApiResponse(refusal(
-    403,
-    '`PERM_DENIED` — an Agent who leads, or a read-only support session. `ORG_REMOVAL_NOT_PERMITTED` — the office’s '
-    + 'root member or its owner, whom nobody removes from inside the office.',
-  ))
-  @ApiResponse(refusal(
-    404,
-    '`NOT_FOUND` — nobody you may mark: somebody you do not coach, a member who has left the office, yourself, or an '
-    + 'id that is nobody’s — deliberately indistinguishable from one in another office.',
-  ))
-  @ApiResponse(refusal(
-    409,
-    '`NOT_A_NEW_HIRE` — they joined as an existing agent. `NEW_HIRE_NOT_MARKABLE` — they joined more than twelve '
-    + 'months ago, so New Hires no longer lists them (`details.reason: past_the_year`); remove them instead. '
-    + '`NEW_HIRE_HAS_REPORTS` — somebody reports to them: move them '
-    + 'first; `details.directCount` says how many. `NEW_HIRE_ALREADY_LEFT` — they are marked as left already; '
-    + '`details.leftOn` says when.',
-  ))
-  @ApiResponse({ status: 200, type: NewHireMarkedLeftDto })
-  async markLeft(@Ctx() ctx: RequestContext, @Param('membershipId') membershipId: string) {
-    return this.hires.markLeft(ctx, membershipId);
-  }
-
   @Get(':membershipId')
   @RequirePermission('activation:read')
   @ApiOperation({
     summary: 'One hire’s activation',
     description:
-      'As the hire reads it, in any state — without their own note and date on each item. The detail page, '
-      + 'and a coaching page’s Activation tab. A recorded read.',
+      'As the hire reads it, in any state — without their own note and date on each item — and, in `newHire`, their 3M '
+      + 'standing as their row on New Hires says it: the status, the day and the first sale with its day and source. The '
+      + 'detail page, and a coaching page’s Activation tab. A recorded read.',
   })
   @ApiResponse(refusal(404, NOT_REACHED))
-  @ApiResponse({ status: 200, type: ActivationViewDto })
+  @ApiResponse({ status: 200, type: NewHireDetailDto })
   async detail(@Ctx() ctx: RequestContext, @Param('membershipId') membershipId: string) {
     return this.hires.detail(ctx, membershipId);
   }
@@ -146,7 +113,7 @@ export class NewHiresController {
     '`ACTIVATION_RECORD_REQUIRED` — a tick of an item that completes from sales or coaching data, sent without its '
     + 'record. `details.form` says which: `closing` or `one_on_one`.',
   ))
-  @ApiResponse({ status: 200, type: ActivationViewDto })
+  @ApiResponse({ status: 200, type: NewHireDetailDto })
   async tick(
     @Ctx() ctx: RequestContext,
     @Param('membershipId') membershipId: string,
@@ -172,7 +139,7 @@ export class NewHiresController {
   ))
   @ApiResponse(refusal(404, NOT_REACHED))
   @ApiResponse(refusal(409, CLOSED))
-  @ApiResponse({ status: 200, type: ActivationViewDto })
+  @ApiResponse({ status: 200, type: NewHireDetailDto })
   async correctStart(
     @Ctx() ctx: RequestContext, @Param('membershipId') membershipId: string, @Body() body: CorrectActivationStartDto,
   ) {

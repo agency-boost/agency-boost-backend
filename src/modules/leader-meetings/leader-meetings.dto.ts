@@ -105,7 +105,7 @@ export class SaveAgendaItemDto {
   @MaxLength(picMax)
   pic?: string;
 
-  @ApiPropertyOptional({ description: 'The box, on *During* only.' })
+  @ApiPropertyOptional({ description: 'The item’s box, in any section (UI V1, UI-110).' })
   @Sent()
   @IsBoolean()
   done?: boolean;

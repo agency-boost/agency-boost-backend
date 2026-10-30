@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import type { DirectoryMember, DirectoryPage, MemberPersonal } from './directory.service';
+import type { DirectoryMember, DirectoryPage, MemberPersonal, MemberSearchHit } from './directory.service';
+import type { MemberPhone } from './member-phone.service';
 import type { Gender, WorkStatus } from '@/domain/constants';
 import type { GroupSummary, MemberTags } from './group.service';
 import type { KpmDirectoryEntry, LeaderChoice, JoinState } from './onboarding.service';
@@ -552,6 +553,12 @@ export class OrgTreeNodeDto implements OrgTreeNode {
   @ApiProperty({ type: Boolean })
   isSelf!: boolean;
 
+  @ApiProperty({ type: Number, description: "UI V1 (UI-059, O-5): this person's activity count today — the office's day (Asia/Jakarta), the total Activity Management saved for it; 0 when nothing was logged. The Group Tree's *n aktivitas* / *Belum lapor* pill." })
+  todayActivityCount!: number;
+
+  @ApiProperty({ type: String, nullable: true, description: 'UI V1 (UI-059): their profile photo, when they have one (`users.avatarUrl`); the row draws initials otherwise.' })
+  photoUrl!: string | null;
+
 }
 
 export class OrgTreeLeaderDto implements OrgTreeLeader {
@@ -646,4 +653,49 @@ export class LeaderLimitRequestRowDto implements LeaderLimitRequestRow {
 
   @ApiProperty({ type: Number, description: 'The office\u2019s Leaders used now.' })
   leadersUsed!: number;
+}
+
+/** One person *Search agent* offers (UI V1, 2026-10-30; UI-012, UI-059, D-14). */
+export class MemberSearchHitDto implements MemberSearchHit {
+  @ApiProperty({ type: String, description: 'The membership the pick opens: `/coaching/{membershipId}/summary`.' })
+  membershipId!: string;
+
+  @ApiProperty({ type: String })
+  fullName!: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  preferredName!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  agentCode!: string | null;
+
+  @ApiProperty({ type: String, enum: ['ab', 'aab', 'agent'] })
+  role!: HierarchyRole;
+
+  @ApiProperty({ type: String, description: 'The rung, by its ladder code; `role` is the class it gives.' })
+  orgLevelCode!: string;
+}
+
+/** *Search agent*'s answer: the people in reach who match, A to Z by name, the first `limit`. */
+export class MemberSearchResultDto {
+  @ApiProperty({ type: () => MemberSearchHitDto, isArray: true })
+  members!: MemberSearchHit[];
+}
+
+/** A person's WhatsApp number, as their leader saved it (UI V1, 2026-10-30; UI-081, D-22). */
+export class MemberPhoneDto implements MemberPhone {
+  @ApiProperty({ type: String })
+  membershipId!: string;
+
+  @ApiProperty({ type: String, example: '+6281211002200', description: 'As stored: `+62` and 9 to 13 digits.' })
+  phone!: string;
+}
+
+/** UI V1 (UI-085): how many join requests are waiting on the reader — the *Pending Requests* tab's count. */
+export class WaitingRequestCountDto {
+  @ApiProperty({
+    type: Number, example: 2,
+    description: 'Requests waiting on you, as `GET /join/requests` lists them; the office\'s whole queue for the Owner or an Admin.',
+  })
+  count!: number;
 }

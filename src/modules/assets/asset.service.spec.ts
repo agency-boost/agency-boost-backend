@@ -5,11 +5,11 @@ import { readerIn } from '@/common/i18n/reader';
 import { AssetService } from './asset.service';
 import { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from '@/domain/constants';
 import {
-  AssetOwner, SignedUpload, StoragePort, StoredObject,
+  AssetOwner, ownerSegment, SignedUpload, StoragePort, StoredObject,
 } from './storage.port';
 
 /** The folder the adapter would use, mirrored so a stub key still reads like a real one. */
-const ownerFolder = (o: AssetOwner) => (o.kind === 'kpm' ? o.kpmId : `company/${o.companyId}`);
+const ownerFolder = (o: AssetOwner) => ownerSegment(o);
 
 class StubStorage extends StoragePort {
   removed: string[] = [];

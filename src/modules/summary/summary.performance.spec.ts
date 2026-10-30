@@ -127,9 +127,11 @@ describe('the Personal Summary, measured (P10-T4)', () => {
     expect(view.yearly).toMatchObject({ actualMinor: 180 * M });
     // One closing a day: the last 30 days, today included, are 30 of them — office B's ten a day are not (ADR-0109).
     expect(view.pace).toMatchObject({ closingsLast30Days: 30 });
-    // The year's chips: 257 days of one closing each, against ceil(500 / 18) = 28.
-    expect(view.activity.yearly.targets[2]).toMatchObject({ logged: 257, target: 28 });
+    // The year's chips: 257 days of one closing each, against what the year still needs (UI-052): ceil((500 − 180) / 18) = 18.
+    expect(view.activity.yearly.targets[2]).toMatchObject({ logged: 257, target: 18 });
+    expect(view.activity.yearly.targets[2].target).toBe(view.yearly.policiesNeeded);
     expect(view.activity.yearly.sections[0]).toMatchObject({ code: 'RECRUITMENT', total: 257 });
+    // UI-052: the total is the breakdown's sum — the closings and the recruitment shown, nothing else.
     expect(view.activity.yearly.total).toBe(514);
     expect(view.leads).toMatchObject({ total: 30 });
     expect(view.leads.rows).toHaveLength(10);

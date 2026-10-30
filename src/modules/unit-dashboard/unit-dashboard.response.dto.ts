@@ -111,6 +111,11 @@ class UnitChasedCampaignDto {
 export class UnitRowDto implements UnitRow {
   @ApiProperty() membershipId!: string;
   @ApiProperty({ example: 'Rina Wijaya' }) name!: string;
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'UI V1 (UI-111): their profile photo, when they have one, as a signed link (`users.avatarUrl`); the row draws initials otherwise.',
+  })
+  photoUrl!: string | null;
   @ApiProperty({ description: 'The reader’s own row.' }) isReader!: boolean;
   @ApiProperty({
     description:
@@ -125,6 +130,10 @@ export class UnitRowDto implements UnitRow {
   @ApiProperty({ type: GoalCellDto }) goal!: GoalCell;
   @ApiProperty({ type: ProductionCellsDto }) production!: { monthly: ProductionCell; ytd: ProductionCell };
   @ApiProperty({ type: LeadCountsDto }) leadsCounts!: LeadCountsRow;
+  @ApiProperty({
+    description: '*Closing* (UI-028; O-4): their sales leads that reached *Paid and issued* within `window`, on the agency’s '
+      + 'calendar — each lead counted on its first move there.',
+  }) closings!: number;
   @ApiProperty({ type: UnitActivityDto }) activity!: UnitRow['activity'];
 
   @ApiProperty({
@@ -186,17 +195,35 @@ class PairedGoalDto implements PairedGoal {
 }
 
 class PotentialActiveDto {
-  @ApiProperty({ description: '`POTENTIAL_MAA_COUNT_IN_UNIT`, over the people who count for production.' }) count!: number;
-  @ApiProperty({ description: 'Everybody the group holds but a new hire before a first sale.' }) of!: number;
+  @ApiProperty({
+    description: '`POTENTIAL_MAA_COUNT_IN_UNIT`: who is pacing to an active month, among the people who count for production.',
+  }) count!: number;
+  @ApiProperty({
+    description: 'Manpower (UI-013): everybody the group holds, its head and every new hire included — the same number as *Your team*.',
+  }) of!: number;
+}
+
+class ActiveAgentTileDto extends PotentialActiveDto {
+  @ApiProperty({
+    type: PotentialActiveDto,
+    description: '*Unit*: the head and their direct agents — the rows of `yourUnit` (UI-013, D-16).',
+  }) unit!: { count: number; of: number };
+  @ApiProperty({
+    type: PotentialActiveDto,
+    description: '*AAB*: every unit below the head, its head included. `unit` and `aab` add up to the total.',
+  }) aab!: { count: number; of: number };
 }
 
 export class UnitTotalDto implements UnitTotal {
   @ApiProperty({ type: PairedGoalDto, description: 'Over the people who count for production: no new hire before a first sale.' })
   goal!: PairedGoal;
   @ApiProperty({ type: LeadCountsDto }) leadsCounts!: LeadCountsRow;
+  @ApiProperty({ description: 'The rows’ *Closing* summed (UI-028).' }) closings!: number;
   @ApiProperty({ type: CountAgainstDto }) touches!: CountAgainst;
   @ApiProperty({ type: PotentialActiveDto }) potentialActive!: { count: number; of: number };
-  @ApiProperty({ description: 'New hires before a first sale whom `goal` and `potentialActive` leave out.' }) newHires!: number;
+  @ApiProperty({
+    description: 'New hires before a first sale whom `goal` leaves out, and `potentialActive.count` (never its `of`, UI-013).',
+  }) newHires!: number;
 }
 
 export class UnitGroupDto implements UnitGroup {
@@ -213,8 +240,8 @@ class TeamTileDto {
   @ApiProperty({ description: 'The units below the head.' }) units!: number;
   @ApiProperty({ description: 'Everybody under those units’ heads.' }) underUnits!: number;
   @ApiProperty({
-    description: 'Of `total`, the new hires before a first sale: in the team, and left out of *Direct Group production* '
-      + 'and *On pace to be active (Group)*.',
+    description: 'Of `total`, the new hires before a first sale: in the team, left out of *Direct Group production*, and '
+      + 'in *Active Agent*’s `of` though never its `count` (UI-013).',
   }) newHires!: number;
 }
 
@@ -230,7 +257,10 @@ class PotentialRecruitsTileDto {
 class UnitTilesDto {
   @ApiProperty({ type: TeamTileDto }) team!: UnitDashboardView['tiles']['team'];
   @ApiProperty({ type: GroupProductionTileDto }) directGroupProduction!: UnitDashboardView['tiles']['directGroupProduction'];
-  @ApiProperty({ type: PotentialActiveDto }) potentialActive!: { count: number; of: number };
+  @ApiProperty({
+    type: ActiveAgentTileDto,
+    description: '*Active Agent* (UI-013): pacing of manpower, with its *Unit* and *AAB* split.',
+  }) potentialActive!: UnitDashboardView['tiles']['potentialActive'];
   @ApiProperty({ type: PotentialRecruitsTileDto }) potentialRecruits!: { yourUnit: number; aabs: number };
 }
 
@@ -277,6 +307,12 @@ export class UnitDashboardDto implements UnitDashboardView {
   @ApiProperty({ type: [UnitGroupDto] }) units!: UnitGroup[];
   @ApiProperty({ type: UnitProductionStateDto }) production!: UnitDashboardView['production'];
   @ApiProperty({ type: UnitMdrtDto }) mdrt!: UnitDashboardView['mdrt'];
+  @ApiProperty({
+    type: String, nullable: true, example: '2026-10-28',
+    description: '*Last updated* (UI-028): the agency’s day of its newest standing production import, of any month; `null` '
+      + 'while it has none.',
+  })
+  lastUpload!: string | null;
 }
 
 export class ProductionUpdatedDto implements ProductionUpdated {

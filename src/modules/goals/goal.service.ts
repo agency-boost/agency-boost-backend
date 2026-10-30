@@ -140,6 +140,19 @@ export interface GoalAchieved {
   month: string | null;
 }
 
+/**
+ * **A plan worked out and not saved** (`GoalService.preview`, P18.99-T5): what the inputs a screen holds would mean,
+ * by the formula a save uses. `monthsLeft` is the figure in force — the typed one, or the office's calendar.
+ */
+export interface GoalPreview {
+  period: string;
+  monthsLeft: number;
+  monthsLeftIsOverride: boolean;
+  achieved: GoalAchieved;
+  /** `null` when the inputs cannot make a plan, as a read answers it. */
+  projected: CascadeResult | null;
+}
+
 /** One goal, as a caller reads it. */
 /**
  * The two conversion assumptions as the subject actually logged them (ADR-0055, P10-T9): printed under
@@ -486,6 +499,41 @@ export class GoalService {
     ctx: RequestContext, period: string, forMembershipId?: string,
   ): Promise<Omit<GoalView, 'id' | 'membershipId' | 'version'>> {
     return this.planOf(ctx, period, await this.subject(ctx, forMembershipId, 'goal:read'));
+  }
+
+  /**
+   * **What a plan would mean, before anybody saves it** (P18.99-T5, UI V1 UI-014, UI-016, UI-017): the cascade over
+   * the inputs a screen holds, worked out by the one formula a save uses and **written nowhere**.
+   *
+   * Goal Settings' result card and its commitment move as a slider moves. The screen holds no copy of the cascade
+   * (P8-T3 AC-2: the prototype's three surfaces disagree, and a second implementation is how that happens), so it asks
+   * here instead, and a save then stores exactly what the reader watched.
+   *
+   * **The same figures a save would store**, by the same rules: the months left from the office's calendar unless
+   * typed over; the APE produced the office's year to date where it holds one, and **only the member's own typed
+   * figure on their own plan** — on anybody else's, the figure they stored, as a leader's save keeps it (ADR-0075).
+   * Whose plan is `goal:read`'s reach, 404 beyond it, never 403. **An assumption that cannot make a plan is
+   * `projected: null`**, as a read answers one, not the save's 422: the screen is mid-edit, and the save still refuses
+   * it by name. A field that is not a number at all is the save's own 400 (`checkGoal`).
+   */
+  async preview(
+    ctx: RequestContext, period: string, body: unknown, forMembershipId?: string,
+  ): Promise<GoalPreview> {
+    const membershipId = await this.subject(ctx, forMembershipId, 'goal:read');
+    const input = checkGoal(body);
+    const day = await this.days.for(ctx);
+    const monthsLeft = input.monthsLeft ?? defaultMonthsLeft(period, this.clock.now(), day.timezone);
+    const typed = membershipId === ctx.membershipId
+      ? input.apeAchievedMinor!
+      : ((await this.goals.findOne(ctx, { membershipId, period }))?.apeAchievedMinor ?? 0);
+    const achieved = await this.achievedFor(ctx, membershipId, period, typed);
+    return {
+      period,
+      monthsLeft,
+      monthsLeftIsOverride: input.monthsLeft !== null && input.monthsLeft !== undefined,
+      achieved,
+      projected: projectionOf({ ...input, monthsLeft, apeAchievedMinor: achieved.minor }),
+    };
   }
 
   /**

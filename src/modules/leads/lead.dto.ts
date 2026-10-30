@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
-  Allow, ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsInt, IsMongoId, IsOptional, IsString, MaxLength, Min,
+  Allow, ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsMongoId, IsOptional, IsString, MaxLength, Min,
 } from 'class-validator';
 import { LEAD_FLAGS, type LeadFlag } from './lead-attention';
 import { LEAD_SORT_KEYS, type LeadSortKey } from './lead-order';
@@ -118,6 +118,21 @@ export class SetLeadOutcomeDto extends PinnedVersion {
   })
   @Allow()
   outcome!: 'won' | 'lost' | null;
+}
+
+/**
+ * ***Selesai*** **or** ***Urungkan*** **on a lead's next action, from Calendar** (UI V1, UI-104 point 4): the whole state
+ * and the version it was read at — **always pinned**, since a tick clears the next action and an undo writes it back.
+ */
+export class SetNextActionDoneDto {
+  @ApiProperty({ type: Boolean, description: '`true` ticks the next action done; `false` puts the one last ticked back.' })
+  @IsBoolean()
+  done!: boolean;
+
+  @ApiProperty({ type: Number, minimum: 1, example: 3, description: 'The version the lead was read at.' })
+  @IsInt()
+  @Min(1)
+  version!: number;
 }
 
 /**

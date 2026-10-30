@@ -34,6 +34,13 @@ export const ErrorCode = {
    * with **no token at all** is still `AUTH_TOKEN_INVALID`: there was no session to end.
    */
   AUTH_SESSION_ENDED: 'AUTH_SESSION_ENDED',
+  /**
+   * **The address asked for belongs to another account** (UI V1, UI-111; ADR-0181): `POST /auth/me/email` when the new
+   * address is taken, and `POST /auth/verify-email-change` when it was taken between the request and the link. `409`,
+   * `details: { field: 'newEmail' }`. Registration never says this — an address taken there is answered as a success
+   * (the enumeration oracle) — but this route is behind a session and the password, and rate limited.
+   */
+  AUTH_EMAIL_TAKEN: 'AUTH_EMAIL_TAKEN',
 
   /*
    * Activity logging (P6). The catalog carried these four rows from an earlier phase and the
@@ -256,6 +263,13 @@ export const ErrorCode = {
    * since moved off a leader rung keeps the flag, and re-saving their other tags is not refused.
    */
   CORE_LEADER_NOT_A_LEADER: 'CORE_LEADER_NOT_A_LEADER',
+  /**
+   * **A leader's *Isi nomor WhatsApp* for somebody who already has a number** (the Phase 18.99 exit review, M1).
+   * `409`, from `PUT /members/:membershipId/phone`: a leader fills a missing number, and never replaces one — a number on
+   * file is the person's own to change, on *Profil saya* (`PATCH /auth/me`). The write is conditional on the stored
+   * number being empty, so two leaders saving at once cannot overwrite each other either. Nothing is written.
+   */
+  MEMBER_PHONE_ON_FILE: 'MEMBER_PHONE_ON_FILE',
   ORG_ALREADY_ADMIN: 'ORG_ALREADY_ADMIN',
   ORG_NOT_AN_ADMIN: 'ORG_NOT_AN_ADMIN',
   ORG_ADMIN_TARGET_NOT_ACTIVE: 'ORG_ADMIN_TARGET_NOT_ACTIVE',
@@ -367,27 +381,6 @@ export const ErrorCode = {
    * it names, or the 1:1 — saved together. `422`, `details.code` and `details.form` (`closing` | `one_on_one`).
    */
   ACTIVATION_RECORD_REQUIRED: 'ACTIVATION_RECORD_REQUIRED',
-  /**
-   * *Mark left* for a new hire already marked (P18.96-T6 AC-4, ADR-0173 §3): leaving is recorded once. `409`,
-   * `details.leftOn`, the office day it was.
-   */
-  NEW_HIRE_ALREADY_LEFT: 'NEW_HIRE_ALREADY_LEFT',
-  /**
-   * *Mark left* for an **existing agent** (P18.96-T6 AC-4, ADR-0169 §3): only a new hire has a 3M activation for leaving
-   * to end. `409`.
-   */
-  NOT_A_NEW_HIRE: 'NOT_A_NEW_HIRE',
-  /**
-   * *Mark left* for a new hire who **leads somebody** (P18.96-T6 AC-4): leaving removes them from the office, and a
-   * removal says where reports go — so move them first. `409`, `details.directCount`.
-   */
-  NEW_HIRE_HAS_REPORTS: 'NEW_HIRE_HAS_REPORTS',
-  /**
-   * *Mark left* for a new hire `/new-hires` no longer lists (the P18.96 exit review, M2; ADR-0173 §1, §3): their join
-   * date is **outside the page's year** (`details.reason: 'past_the_year'`, `details.joinDate`). They leave through the
-   * removal, which only their direct leader or the office makes. `409`.
-   */
-  NEW_HIRE_NOT_MARKABLE: 'NEW_HIRE_NOT_MARKABLE',
 
   /*
    * Templates and the cascade types (P13.2-T6; ADR-0115; `functional/tenant-config.md`).

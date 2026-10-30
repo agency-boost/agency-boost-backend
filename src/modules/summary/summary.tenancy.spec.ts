@@ -326,11 +326,15 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       // The closings chip and the pace sentence name one number.
       expect(view.pace?.closingTarget).toBe(month.closings.target);
 
-      // The year: 500 through the cascade once — ceil(500 / 18) = 28, ceil(28 / 0.3) = 94, ceil(94 / 0.3) = 314.
+      // UI-052: the year is what it still needs — 500 less the 200 done, through the cascade once: ceil(300 / 18) = 17,
+      // ceil(17 / 0.3) = 57, ceil(57 / 0.3) = 190. Its Submission polis target is *Polis yang dibutuhkan* itself.
       expect(view.activity.yearly).toMatchObject({ from: '2026-01-01', to: '2026-09-14' });
-      expect(year.closings).toMatchObject({ logged: 11, target: 28, attainmentPct: 39 });
-      expect(year.appointments).toMatchObject({ logged: 36, target: 94 });
-      expect(year.leads).toMatchObject({ logged: 120, target: 314, attainmentPct: 38 });
+      expect(year.closings).toMatchObject({ logged: 11, target: 17, attainmentPct: 65 });
+      expect(year.closings.target).toBe(view.yearly.policiesNeeded);
+      expect(year.appointments).toMatchObject({ logged: 36, target: 57 });
+      expect(year.leads).toMatchObject({ logged: 120, target: 190, attainmentPct: 63 });
+      // UI-052: every count of policies on the page is the activity log's Submission polis, and the answer says so.
+      expect(view.policies).toEqual({ source: 'activity_log', codes: ['SELL_SUBMISSION'] });
     });
 
     it('AC-1: holds this month’s chip targets when this month’s own APE arrives (ADR-0056)', async () => {
@@ -379,7 +383,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       expect(chips((await wired.summary.read(agent())).activity.monthly).appointments.logged).toBe(4);
     });
 
-    it('AC-2, P10.1-T6 AC-5: one chip per other summary tile — the seed’s two — with its total, its rows, and the total across every category', async () => {
+    it('UI-052 one chip per other summary tile — the seed’s two — with its total and rows, and a total that is their sum', async () => {
       await day('2026-09-03', { RECRUIT_PRESENTATION: 3, RECRUIT_FOLLOWUP: 2, DEV_TRAINING_ATTEND: 1, SELL_SUBMISSION: 1 });
       await day('2026-09-10', { RECRUIT_AGENT_CODE: 1, DEV_TEAM_ACTIVITY: 4, LEADS_NEW_PROSPECT: 6 });
 
@@ -398,7 +402,11 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
         ['DEV_TRAINING_ATTEND', 1], ['DEV_COACHING_RECEIVED', 0], ['DEV_TEAM_ACTIVITY', 4],
       ]);
       expect(view.activity.yearly.sections.map((s) => s.code)).toEqual(['RECRUITMENT', 'DEVELOPMENT']);
-      expect(view.activity.monthly.total).toBe(18);
+      // UI-052: the total is the breakdown's sum — Recruitment 6, Development 5 and Submission polis 1. The six new
+      // prospects are in no chip the page shows, so in no total either: *n aktivitas* equals the rows beneath it.
+      const shown = view.activity.monthly.targets.reduce((n, t) => n + t.logged, 0) + sections.reduce((n, c) => n + c.total, 0);
+      expect(view.activity.monthly.total).toBe(12);
+      expect(view.activity.monthly.total).toBe(shown);
     });
 
     it('P10.1-T6 AC-5: a tile counts only the sections this rung is shown, and a section left ungrouped is a chip of its own', async () => {
@@ -430,8 +438,8 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       const asLeader = await wired.summary.read(agent({ orgLevelCode: 'AB', hierarchyRole: 'ab' }));
 
       expect(asAgent.activity.monthly.sections.map((s) => s.code)).toEqual(['DEVELOPMENT']);
-      // The total is every category's, so a history the reader is not shown still adds up.
-      expect(asAgent.activity.monthly.total).toBe(3);
+      // UI-052: the total is what the reader is shown — the hidden section's three are in no chip, so in no total.
+      expect(asAgent.activity.monthly.total).toBe(0);
       expect(asLeader.activity.monthly.sections.map((s) => s.code)).toContain('RECRUITMENT');
     });
 
@@ -779,6 +787,73 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
       expect(view.monthly.actualMinor).toBe(30 * M);
       expect(closings(view.activity.monthly)).toBe(0);
+    });
+  });
+
+  describe('UI V1 (UI-054) — the day the page’s APE is valid for, the latest upload', () => {
+    beforeEach(() => mongoose.connection.db!.collection('kpms').updateOne(
+      { _id: new mongoose.Types.ObjectId(KPM) }, { $set: { createdAt: new Date('2025-06-01T00:00:00Z') } },
+    ));
+    let revision = 0;
+    /** One import of a month's file, committed at an instant (or not standing at all). */
+    const upload = (month: string, committedAt: string | null, { kpmId = KPM, status = 'committed' } = {}) => {
+      revision += 1;
+      return mongoose.connection.db!.collection('dataUploadBatches').insertOne({
+        kpmId, month, status, filename: `0417-${month}.csv`, fileSha256: `sha-${revision}`, templateVersion: 1,
+        encoding: 'utf-8', delimiter: ',', basedOnRevision: revision - 1, monthRevision: revision, rowCount: 1,
+        writtenRowCount: 1, cellCount: 1, issueCount: 0, startedAt: committedAt ? new Date(committedAt) : new Date(),
+        committedAt: committedAt ? new Date(committedAt) : null, committedBy: 'mem-owner', deletedAt: null,
+      } as never);
+    };
+
+    it('UI-054 the month’s latest file standing, on the office’s day — 20:00 UTC on the 12th is the 13th in Jakarta', async () => {
+      await upload('2026-09', '2026-09-02T03:00:00Z');
+      await upload('2026-09', '2026-09-12T20:00:00Z');
+      await upload('2026-09', '2026-09-14T01:00:00Z', { status: 'reverted' }); // stands for nothing
+      await upload('2026-09', null, { status: 'pending' });
+      await upload('2026-08', '2026-09-13T23:00:00Z'); // August's, uploaded later: the year's, not the month's
+
+      const view = await wired.summary.read(agent());
+
+      expect(view.uploadedOn).toEqual({ month: '2026-09-13', year: '2026-09-14' });
+    });
+
+    it('UI-054 none for the month yet: no date — the year still has last month’s', async () => {
+      await upload('2026-08', '2026-09-03T02:00:00Z');
+
+      const view = await wired.summary.read(agent());
+
+      expect(view.uploadedOn).toEqual({ month: null, year: '2026-09-03' });
+    });
+
+    it('UI-054 a past month and a past year read their own files, never a later month’s', async () => {
+      await upload('2025-12', '2026-01-05T02:00:00Z');
+      await upload('2026-01', '2026-02-04T02:00:00Z');
+      await upload('2026-08', '2026-09-03T02:00:00Z');
+      await upload('2026-09', '2026-09-10T02:00:00Z');
+
+      const august = await wired.summary.read(agent(), undefined, { month: '2026-08' });
+      const lastYear = await wired.summary.read(agent(), undefined, { year: '2025' });
+
+      expect(august.uploadedOn).toEqual({ month: '2026-09-03', year: '2026-09-03' });
+      expect(lastYear.uploadedOn).toEqual({ month: '2026-01-05', year: '2026-01-05' });
+    });
+
+    it('UI-054 reads nothing of another office’s uploads', async () => {
+      await upload('2026-09', '2026-09-13T02:00:00Z', { kpmId: OTHER_KPM });
+
+      const view = await wired.summary.read(agent());
+
+      expect(view.uploadedOn).toEqual({ month: null, year: null });
+    });
+
+    it('UI-054 a leader’s copy of a coachee’s Summary reads the office’s same date', async () => {
+      await upload('2026-09', '2026-09-12T02:00:00Z');
+
+      expect((await wired.summary.read(agent())).uploadedOn.month).toBe('2026-09-12');
+      // The subject's Summary as a leader's read computes it, once `COACH` has resolved them (`of`).
+      const copy = await wired.summary.of(owner(), { membershipId: ME, orgLevelCode: 'AGENT', self: false });
+      expect(copy.uploadedOn.month).toBe('2026-09-12');
     });
   });
 

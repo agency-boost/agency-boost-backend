@@ -1,14 +1,15 @@
+import { AvatarDto, ProfileFactsDto } from '@/modules/users/profile.dto';
 import { SummaryDto } from '@/modules/summary/summary.response.dto';
 import { Type } from '@nestjs/common';
 import {
-  AccessTokenDto, ImpersonationSessionDto, MeDto, MyKpmRequestDto, ReadinessDto,
+  AccessTokenDto, EmailChangedDto, ImpersonationSessionDto, MeDto, MyKpmRequestDto, ReadinessDto,
   RedeemedInviteDto, SessionDto, StatusAckDto,
 } from '@/modules/auth/session.response.dto';
 import {
   InboxDto, NotificationReadStateDto, UnreadCountDto,
 } from '@/modules/notifications/notification.response.dto';
 import { DeletedLeadDto, LeadOrderDto, LeadPageDto, LeadResponseDto } from '@/modules/leads/lead.response.dto';
-import { GoalResponseDto } from '@/modules/goals/goal.response.dto';
+import { GoalPreviewDto, GoalResponseDto } from '@/modules/goals/goal.response.dto';
 import {
   CorrectionResultDto, HistoryDto, ImportResultDto, MonthStateDto, MonthViewDto, TemplateFileDto,
   UploadPreviewDto,
@@ -17,7 +18,7 @@ import {
   DelegatedAdminDto, DirectoryMemberDto, DirectoryPageDto, GroupSummaryDto, InvitePreviewDto,
   JoinStateDto, KpmDirectoryEntryDto, LeaderChoiceDto, LeaderLimitRequestRowDto, MemberTagsDto,
   MyLeaderCodeDto, OrgTreeDto, PendingRequestDto, RoleChangeEntryDto, RoutingChoiceDto, TeamMemberDto,
-  UntaggedMemberDto,
+  UntaggedMemberDto, MemberPhoneDto, MemberSearchResultDto, WaitingRequestCountDto,
 } from '@/modules/org/org.response.dto';
 import {
   KpmAdminViewDto, KpmRequestRowDto, KpmViewDto, OrgLevelRowDto, PlatformAdminRowDto,
@@ -39,7 +40,7 @@ import {
 } from '@/modules/training/training-progress.response.dto';
 import { ActivationChecklistDto } from '@/modules/activation/activation.response.dto';
 import {
-  ActivationClosingsDto, ActivationNoteSavedDto, ActivationViewDto, NewHireMarkedLeftDto, NewHiresRosterDto,
+  ActivationClosingsDto, ActivationNoteSavedDto, ActivationViewDto, NewHiresRosterDto,
 } from '@/modules/activation/activation-progress.response.dto';
 import { ProductResponseDto } from '@/modules/products/product.response.dto';
 import {
@@ -91,6 +92,8 @@ import {
 } from '@/modules/activity/activity.response.dto';
 import { CoacheeDto, CoachingRosterDto } from '@/modules/coaching/coaching.response.dto';
 import { ProductionUpdatedDto, UnitDashboardDto } from '@/modules/unit-dashboard/unit-dashboard.response.dto';
+import { UnitActivitiesDto } from '@/modules/unit-dashboard/unit-activities.response.dto';
+import { HomeDto } from '@/modules/home/home.response.dto';
 import {
   AdoptionDto, KpmAnalyticsDto, KpmOverviewDto, NotLoggedDto, PlatformAnalyticsDto, RecruitTargetDto,
 } from '@/modules/reporting/reporting.response.dto';
@@ -106,6 +109,7 @@ import {
   CalendarDeletedDto, CalendarDownlineDto, CalendarEntryDto, CalendarPeoplePageDto, CalendarPeriodDto,
   CalendarSettingsDto,
 } from '@/modules/calendar/calendar.response.dto';
+import { CoachingItemDoneResponseDto } from '@/modules/coaching/coaching-action-done.controller';
 import {
   AgendaItemDto, AgendaItemSavedDto, LEADER_FORUM_SHARED_SHAPES, LeaderActionItemDto, MeetingCardDto, MeetingListViewDto,
   MeetingViewDto, MonthlyTargetSavedDto, ShareLinkDto, ShareLinksRevokedDto,
@@ -123,6 +127,9 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // Phase 15: a leader's unit, and *Update production*.
   UnitDashboardController_read: { type: UnitDashboardDto },
   UnitDashboardController_updateProduction: { type: ProductionUpdatedDto },
+  // UI V1 (Phase 18.99 T4, UI-001): the Activities tab's table.
+  UnitActivitiesController_read: { type: UnitActivitiesDto },
+  HomeController_read: { type: HomeDto },
   // Phase 18: the Owner's reporting — the Overview, its not-logged list and target, the analytics, the platform's.
   KpmOverviewController_read: { type: KpmOverviewDto },
   KpmOverviewController_notLogged: { type: NotLoggedDto },
@@ -166,6 +173,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // P11-T10: a finalized session's print, and the reader's own coaching.
   CoachingRecordController_mine: { type: MySessionsDto },
   CoachingRecordController_print: { type: SessionPrintDto },
+  // UI V1 (UI-104): a coachee's tick on an action item, from Calendar.
+  CoachingActionDoneController_set: { type: CoachingItemDoneResponseDto },
   // Phase 12: the calendar — a period of one calendar, one entry, its writes, the picker and the compare list.
   CalendarController_read: { type: CalendarPeriodDto },
   CalendarController_readOne: { type: CalendarEntryDto },
@@ -192,7 +201,6 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   ActivationProgressController_closings: { type: ActivationClosingsDto },
   NewHiresController_closings: { type: ActivationClosingsDto },
   // P18.96-T6 AC-4: *Mark left*.
-  NewHiresController_markLeft: { type: NewHireMarkedLeftDto },
   AuthController_resendVerification: { type: StatusAckDto },
   AuthController_sessions: { type: SessionDto, isArray: true },
   HealthController_live: { type: StatusAckDto },
@@ -211,8 +219,16 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AuthController_forgotPassword: { type: StatusAckDto },
   AuthController_resetPassword: { type: StatusAckDto },
   AuthController_changePassword: { type: StatusAckDto },
+  // UI V1 (UI-111, ADR-0181): an email change asked for, and its link opened.
+  AuthController_requestEmailChange: { type: StatusAckDto },
+  AuthController_verifyEmailChange: { type: EmailChangedDto },
   AuthController_me: { type: MeDto },
   AuthController_updateMe: { type: MeDto },
+  // UI V1 (UI-111): *Profil saya*'s read-only facts and its photo.
+  ProfileController_facts: { type: ProfileFactsDto },
+  ProfileController_requestAvatarUpload: { type: SignedUploadDto },
+  ProfileController_attachAvatar: { type: AvatarDto },
+  ProfileController_removeAvatar: { type: AvatarDto },
 
   OnboardingController_me: { type: JoinStateDto },
   OnboardingController_kpms: { type: KpmDirectoryEntryDto, isArray: true },
@@ -226,6 +242,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   OnboardingController_previewInvite: { type: InvitePreviewDto },
   OnboardingController_redeem: { type: RedeemedInviteDto },
   OnboardingController_inbox: { type: PendingRequestDto, isArray: true },
+  OnboardingController_waitingCount: { type: WaitingRequestCountDto },
   OnboardingController_routing: { type: RoutingChoiceDto, isArray: true },
   OnboardingController_approve: { type: PendingRequestDto, isArray: true },
   OnboardingController_decline: { type: PendingRequestDto, isArray: true },
@@ -268,6 +285,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_setLateStage: { type: LeadStatusDto },
   GoalController_read: { type: GoalResponseDto },
   GoalController_save: { type: GoalResponseDto },
+  GoalController_preview: { type: GoalPreviewDto },
   ProductionController_readMonth: { type: MonthViewDto },
   ProductionController_template: { type: TemplateFileDto },
   ProductionController_preview: { type: UploadPreviewDto },
@@ -284,6 +302,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   LeadController_update: { type: LeadResponseDto },
   LeadController_setStatus: { type: LeadResponseDto },
   LeadController_setOutcome: { type: LeadResponseDto },
+  // UI V1 (UI-104): the owner's tick on a next action, from Calendar.
+  LeadController_setNextActionDone: { type: LeadResponseDto },
   LeadController_remove: { type: DeletedLeadDto },
   TenantConfigController_archiveLeadStatus: { type: LeadStatusDto },
   TenantConfigController_restoreLeadStatus: { type: LeadStatusDto },
@@ -391,6 +411,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   EventGuestController_read: { type: GuestEventDto },
   EventGuestController_rsvp: { type: GuestEventDto },
   EventGuestController_cancelRsvp: { type: GuestEventDto },
+  // UI V1 (Phase 18.99 T13, UI-108): *Tidak ikut* after *Ikut*, the RSVP back to none.
+  EventGuestController_withdrawRsvp: { type: GuestEventDto },
   EventGuestController_claim: { type: GuestEventDto },
   EventGuestController_submitFeedback: { type: GuestEventDto },
 
@@ -419,6 +441,9 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   CapabilityController_add: { type: CapabilityCatalogDto },
   CapabilityController_reorder: { type: CapabilityCatalogDto },
   OrgController_myTeam: { type: TeamMemberDto, isArray: true },
+  // UI V1 (2026-10-30): *Search agent* (UI-012, D-14), and a leader saving an agent's WhatsApp number (UI-081, D-22).
+  OrgController_search: { type: MemberSearchResultDto },
+  MemberPhoneController_set: { type: MemberPhoneDto },
   OrgController_changeRole: { type: TeamMemberDto, isArray: true },
   OrgController_remove: { type: TeamMemberDto, isArray: true },
   OrgController_roleLog: { type: RoleChangeEntryDto, isArray: true },

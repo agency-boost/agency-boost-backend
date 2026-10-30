@@ -27,10 +27,11 @@ import { can, PERMISSIONS, Permission } from '@/modules/rbac/permissions';
 import { ActivationNav, activationNavFor } from '@/modules/activation/activation-nav.port';
 import { ProfileLineReader, profileLineFor } from '@/modules/org/profile-line';
 import { InvitesService } from '@/modules/org/invites.service';
+import { AvatarLinks } from '@/modules/users/avatar.service';
 import { AuthService } from './auth.service';
 import { RateLimiter } from './rate-limiter';
 import {
-  ChangePasswordDto, ForgotPasswordDto, LoginDto, RefreshDto, RegisterDto,
+  ChangeEmailDto, ChangePasswordDto, ForgotPasswordDto, LoginDto, RefreshDto, RegisterDto,
   ResetPasswordDto, TokenDto, UpdateProfileDto,
 } from './auth.dto';
 
@@ -54,6 +55,14 @@ const FORGOT_LIMIT = 3;
 const FORGOT_WINDOW_SECONDS = 60 * 60;
 const RESEND_LIMIT = 3;
 const RESEND_WINDOW_SECONDS = 60 * 60;
+
+/**
+ * Email changes asked for, per account, per hour (UI-111, ADR-0181 §2). A person changes their address once and maybe
+ * corrects a typo; five is far above that and far below what probing whether addresses have accounts would need — the
+ * `409` says so, behind the session and the password.
+ */
+const EMAIL_CHANGE_LIMIT = 5;
+const EMAIL_CHANGE_WINDOW_SECONDS = 60 * 60;
 
 /**
  * Refreshing, per session, per hour (P4-T13).
@@ -122,6 +131,12 @@ export class AuthController {
      * harness that never registers on an invite builds this without the org module's graph.
      */
     @Optional() @Inject(InvitesService) private readonly invites: InvitesService | null = null,
+    /*
+     * **The photo's signed link** (UI V1, UI-111): `users.avatarUrl` holds the photo's storage key and the bucket is
+     * private, so `/auth/me` signs a link for the title row and the *Lainnya* sheet. Optional, as the readers above are:
+     * a spec that builds this controller for something else reads no photo, `null`, and the initials are drawn.
+     */
+    @Optional() @Inject(AvatarLinks) private readonly avatarLinks: AvatarLinks | null = null,
   ) {}
 
   /**
@@ -401,6 +416,23 @@ export class AuthController {
   }
 
   @Public()
+  @Post('verify-email-change')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Open an email change\'s link: the account moves to the new address',
+    description:
+      'UI V1 (UI-111, ADR-0181). The token from the link sent to the new address, single-use, valid as long as a '
+      + 'verification link. Moves `users.email` to the pending address, marks it verified, audits '
+      + '`user.email_changed` and answers the new address. Sessions stay signed in. An unknown, used, replaced or '
+      + 'expired link is `400 AUTH_TOKEN_INVALID`, as `verify-email` answers; an address taken since the request is '
+      + '`409 AUTH_EMAIL_TAKEN`.',
+  })
+  async verifyEmailChange(@Body() dto: TokenDto) {
+    const { email } = await this.auth.confirmEmailChange(dto.token);
+    return { status: 'changed', email };
+  }
+
+  @Public()
   @Post('forgot-password')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
@@ -508,6 +540,29 @@ export class AuthController {
   }
 
   @ApiBearerAuth()
+  @Post('me/email')
+  // The person's login is theirs to change, never a support session's (ADR-0162 §4, ADR-0181 §1).
+  @RefuseInSupportSession()
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Ask to change your email address',
+    description:
+      'UI V1 (UI-111, ADR-0181). `{ newEmail, currentPassword }`. The password is checked again (`401 '
+      + 'AUTH_INVALID_CREDENTIALS`, as `change-password`); the address is lower-cased and trimmed as registration '
+      + 'does; your own address is `400 VALIDATION_FAILED`, another account\'s `409 AUTH_EMAIL_TAKEN`, each with '
+      + '`details.field: newEmail`. **Nothing on the account changes yet**: a link is sent to the new address '
+      + '(`POST /auth/verify-email-change` applies it) and a notice with no link to the current one. A newer request '
+      + 'replaces the pending one. 5 per hour per account (`429 AUTH_RATE_LIMITED`). Refused `403 PERM_DENIED` in any '
+      + 'support session.',
+  })
+  async requestEmailChange(@Ctx() ctx: RequestContext, @Body() dto: ChangeEmailDto, @Req() req: Request) {
+    this.limit(`email-change:${ctx.userId}`, EMAIL_CHANGE_LIMIT, EMAIL_CHANGE_WINDOW_SECONDS);
+    // Both emails in the language of the page that asked, for a person who has saved none (P18.98-T5 AC-5).
+    await this.auth.requestEmailChange(ctx.userId, dto.newEmail, dto.currentPassword, readerOfRequest(req));
+    return { status: 'accepted' };
+  }
+
+  @ApiBearerAuth()
   // The three routes somebody on a generated password may reach: see who they are,
   // replace it, or leave (P3.6-T4).
   @AllowTemporaryPassword()
@@ -533,6 +588,10 @@ export class AuthController {
         fullName: user?.fullName,
         preferredName: preferredNameOf(user?.preferredName),
         pronoun: user?.pronoun,
+        // UI V1 (UI-081, D-22): the number *Isi nomor WhatsApp* saves, or one an invite or a leader gave them.
+        phone: user?.phone ?? null,
+        // UI V1 (UI-111): their photo as a signed link, or `null` — the avatar then draws the initials.
+        avatarUrl: this.avatarLinks ? await this.avatarLinks.linkFor(user?.avatarUrl) : null,
         initials: initialsOf(user?.fullName ?? ''),
         platformRole: ctx.platformRole,
         // What a person records (ADR-0158): `null` is *Not recorded* — somebody who arrived before it was asked.
@@ -591,9 +650,10 @@ export class AuthController {
     summary: 'Update your own account',
     description:
       'Your name, preferred name and pronoun; your date of birth, gender, company join month and work '
-      + 'status (ADR-0158); and the language you read AgencyBoost in, `locale` (`id` or `en`, ADR-0179) — each '
-      + 'optional, none clearable. A birth date must be in the past and at least 18 years ago and a join month not '
-      + 'in the future, else `400 VALIDATION_FAILED` naming the field; a `locale` that is not `id` or `en`, `null` '
+      + 'status (ADR-0158); the language you read AgencyBoost in, `locale` (`id` or `en`, ADR-0179); and your '
+      + 'WhatsApp number, `phone` (UI V1: stored as `+62` and 9 to 13 digits, else `400 VALIDATION_FAILED`; '
+      + 'empty or `null` clears it) — each optional, none of the others clearable. A birth date must be in the '
+      + 'past and at least 18 years ago and a join month not in the future, else `400 VALIDATION_FAILED` naming the field; a `locale` that is not `id` or `en`, `null` '
       + 'included, is `400 VALIDATION_FAILED` with `details.violations`. Work status is written on your membership '
       + 'in your office, and on your account until you have one. **Refused `403 PERM_DENIED` in any support '
       + 'session**, read-only, setup or elevated: a person\'s own account, their language included, is theirs to '

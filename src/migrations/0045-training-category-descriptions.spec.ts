@@ -12,7 +12,12 @@ const OLD_SALES = SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97.SALES;
 const NEW = Object.fromEntries(
   Object.entries(SEEDED_TRAINING_WORDINGS_BEFORE_OD_238.categories).map(([code, c]) => [code, c.description]),
 );
-const CODES = SEED_TRAINING_CATEGORIES.map((c) => c.code);
+/**
+ * The six this migration was written for. *Motivation*, the owner's seventh (UI V1, P18.99-T10), came after it, was never
+ * seeded without a line, and is `0048`'s to give a template.
+ */
+const SIX = SEED_TRAINING_CATEGORIES.filter((c) => c.code in SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97);
+const CODES = SIX.map((c) => c.code);
 
 /**
  * **A real line for each default training category, for offices that already exist** (P18.97-T4 AC-9, ADR-0176 §9;
@@ -24,7 +29,7 @@ describe('0045 — the default training categories’ descriptions (P18.97-T4 AC
   const db = () => mongoose.connection.db as mongoose.mongo.Db;
   /** The six as seeded, Sales with OD-150's sentence and the rest with none, at version 1 unless edited. */
   const seeded = (kpmId: string, over: Record<string, { description?: string | null; version?: number }> = {}) =>
-    SEED_TRAINING_CATEGORIES.map((c, i) => ({
+    SIX.map((c, i) => ({
       kpmId, code: c.code, label: c.label, description: SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97[c.code],
       displayOrder: i + 1, version: 1, status: 'active', archivedAt: null, deletedAt: null, ...over[c.code],
     }));
@@ -32,7 +37,7 @@ describe('0045 — the default training categories’ descriptions (P18.97-T4 AC
     kpmId, version, sourceVersion: 1, publishedAt: new Date(), publishedBy: null, deletedAt: null,
     payload: { training, ratios: [{ code: 'SELLING_SUCCESS_RATE' }] },
   });
-  const templateCategories = (over: Record<string, string | null> = {}) => SEED_TRAINING_CATEGORIES.map((c) => ({
+  const templateCategories = (over: Record<string, string | null> = {}) => SIX.map((c) => ({
     code: c.code, label: c.label,
     description: c.code in over ? over[c.code] : SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97[c.code],
   }));

@@ -24,6 +24,8 @@ const ROUTES: Record<string, string> = {
   create: 'lead:create',
   // P18.8-T7: the owner's own order. `lead-order.int.spec.ts` asks whose list it writes.
   reorder: 'lead:update',
+  // UI V1 (UI-104): the owner's tick on a next action, from Calendar.
+  setNextActionDone: 'lead:update',
   update: 'lead:update',
   setStatus: 'lead:update',
   setOutcome: 'lead:mark_outcome',
@@ -156,6 +158,28 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
       const id = await staged('PAID_AND_ISSUED');
       const res = await http().get(`${url}/${id}`).expect(200);
       expect(res.body.statusCode).toBe('PAID_AND_ISSUED');
+    });
+
+    it('UI-105 answers one lead with its moves, oldest first, and the list without them', async () => {
+      const id = await staged('FOLLOW_UP');
+      await http().patch(`${url}/${id}/status`).send({ statusCode: 'POLICY_SUBMITTED' }).expect(200);
+      // A reopen moves nothing, so it adds nothing to the history.
+      await http().patch(`${url}/${id}/outcome`).send({ outcome: 'lost' }).expect(200);
+      await http().patch(`${url}/${id}/outcome`).send({ outcome: null }).expect(200);
+
+      const one = await http().get(`${url}/${id}`).expect(200);
+      expect(one.body.history).toEqual([
+        { at: NOW.toISOString(), fromStatusCode: null, toStatusCode: 'FOLLOW_UP' },
+        { at: NOW.toISOString(), fromStatusCode: 'FOLLOW_UP', toStatusCode: 'POLICY_SUBMITTED' },
+      ]);
+      const list = await http().get(url).expect(200);
+      expect(list.body.rows[0]).not.toHaveProperty('history');
+    });
+
+    it('UI-105 answers a lead that has never moved with an empty history', async () => {
+      const { body } = await add({ type: 'sales' }).expect(201);
+      const one = await http().get(`${url}/${body.id}`).expect(200);
+      expect(one.body.history).toEqual([]);
     });
 
     it('refuses the other ladder’s stage with its own code', async () => {

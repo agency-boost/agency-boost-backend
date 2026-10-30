@@ -206,6 +206,9 @@ import {
 } from '@/modules/auth/impersonation-session.schema';
 import { AuthService } from '@/modules/auth/auth.service';
 import { AuthController } from '@/modules/auth/auth.controller';
+import { ProfileController } from '@/modules/users/profile.controller';
+import { ProfileService } from '@/modules/users/profile.service';
+import { AvatarLinks, AvatarService } from '@/modules/users/avatar.service';
 import { PasswordService } from '@/modules/auth/password.service';
 import { RateLimiter } from '@/modules/auth/rate-limiter';
 import { ContextResolver } from '@/modules/auth/context-resolver';
@@ -243,6 +246,8 @@ import { TransfersService } from '@/modules/org/transfers.service';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { DirectoryService } from '@/modules/org/directory.service';
 import { OrgController } from '@/modules/org/org.controller';
+import { MemberPhoneController } from '@/modules/org/member-phone.controller';
+import { MemberPhoneService } from '@/modules/org/member-phone.service';
 import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { LeaderLimitRequest, LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
 import { LeaderLimitRequestAdminController } from '@/modules/org/leader-limit-request.controller';
@@ -285,9 +290,17 @@ import { CalendarService } from '@/modules/calendar/calendar.service';
 import { CalendarPeopleService } from '@/modules/calendar/calendar-people.service';
 import { CalendarLeave } from '@/modules/calendar/calendar-leave';
 import { CalendarController } from '@/modules/calendar/calendar.controller';
+import { CalendarAutoItems } from '@/modules/calendar/calendar-auto-items';
+import { CoachingActionDone } from '@/modules/coaching/coaching-action-done.service';
+import { CoachingActionDoneController } from '@/modules/coaching/coaching-action-done.controller';
 import { RoleChangeService } from '@/modules/org/role-change.service';
+import { ActivityRatioReadings } from '@/modules/activity/activity-ratio-readings';
+import { UnitActivitiesController } from '@/modules/unit-dashboard/unit-activities.controller';
+import { UnitActivitiesService } from '@/modules/unit-dashboard/unit-activities.service';
 import { UnitDashboardController } from '@/modules/unit-dashboard/unit-dashboard.controller';
 import { UnitDashboardService } from '@/modules/unit-dashboard/unit-dashboard.service';
+import { HomeController } from '@/modules/home/home.controller';
+import { HomeService } from '@/modules/home/home.service';
 import {
   RecruitmentController, RecruitmentPitchController, RecruitmentPlaybookController,
 } from '@/modules/recruitment/recruitment.controller';
@@ -437,6 +450,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     ProductionController,
     HealthController,
     AuthController,
+    // UI V1 (UI-111): *Profil saya*'s photo and read-only facts, under `/auth/me`.
+    ProfileController,
     AdminController,
     // P13.2-T6: a company's named templates (ADR-0115).
     NamedTemplateController,
@@ -444,6 +459,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     OfficeTemplateController,
     CompanyController,
     OrgController,
+    // UI V1 (2026-10-30; UI-081, D-22): a leader saves an agent's WhatsApp number.
+    MemberPhoneController,
     // ADR-0157: the Super Admin's queue of leaders past an office's limit.
     LeaderLimitRequestAdminController,
     OnboardingController,
@@ -477,6 +494,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     CoachingProfileController,
     // P11-T10: the print of a finalized session, and the reader's own coaching.
     CoachingRecordController,
+    // UI V1 (UI-104): a coachee's tick on an action item, from Calendar.
+    CoachingActionDoneController,
     // Phase 12: the calendar.
     CalendarController,
     // Phase 13: the hire's own activation, and a leader's new hires.
@@ -491,6 +510,10 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     BillingController,
     // Phase 15: a leader's unit, and *Update production*.
     UnitDashboardController,
+    // UI V1 (Phase 18.99 T4, UI-001): the Unit Dashboard's Activities tab.
+    UnitActivitiesController,
+    // UI V1, Phase 18.99 T11 (UI-100, UI-101): Home's one read.
+    HomeController,
     // Phase 17: the agents' Recruitment, the office's pitch settings, and the company's playbook.
     RecruitmentController,
     RecruitmentPitchController,
@@ -589,6 +612,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     ActivityLogRepository,
     ActivityService,
     ActivityReadings,
+    // UI V1 (Phase 18.99 T4): the ratios over sets of members — the Ratio page's and the Unit Dashboard's.
+    ActivityRatioReadings,
     SummaryService,
     CampaignRepository,
     CampaignService,
@@ -679,6 +704,11 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     InvitesService,
     TransfersService,
     RoleChangeService,
+    MemberPhoneService,
+    // UI V1 (UI-111): the profile photo, its signed links, and the profile's read-only facts.
+    AvatarService,
+    AvatarLinks,
+    ProfileService,
     LeaderLimitRequestService,
     RemovalService,
     OrgTreeService,
@@ -707,6 +737,9 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     CalendarEventRepository,
     CalendarNotices,
     CalendarService,
+    // UI V1 (UI-104): lead next actions, open coaching action items and joined events, merged at query time.
+    CalendarAutoItems,
+    CoachingActionDone,
     CalendarPeopleService,
     CalendarLeave,
     /*
@@ -750,6 +783,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
      * a leader's corrections through the month table's own function. No collection of its own.
      */
     UnitDashboardService,
+    UnitActivitiesService,
+    HomeService,
     /*
      * Phase 17: recruitment tools — the company's playbook (read live, written by the Super Admin, given to a
      * company started from the defaults by `TenantService`), the plan built from it, and an office's pitch.

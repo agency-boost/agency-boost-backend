@@ -135,16 +135,17 @@ describe('Phase 18.1 the Strategic Leader Forum seed — a run at 10:00 on 10 Oc
     expect(stored!.frozenScorecard).toEqual(await thatMorning.compute(input));
     /*
      * Asked today, every row but *3M new agent %* answers the same: the periods end at the meeting's date either way.
-     * That row reads each new hire's 3M activation as it stands (P18.96-T6, `ACTIVATION_3M_PCT`), and three of the
-     * year's — Indah, Dimas and Siti — passed day 90 since that morning: a live read would count them. The frozen one does
-     * not move (ADR-0129 §7): 1 of 4 that morning, Pandu; 4 of 8 today.
+     * That row reads each new hire's 3M activation as it stands (P18.96-T6, `ACTIVATION_3M_PCT`, by rule A since UI V1,
+     * UI-023): a first sale by day 90 counts the day it is recorded, one after day 90 is in neither part. Since that
+     * morning one more hire is decided, so a live read moves; the frozen one does not (ADR-0129 §7): 7 of 8 that
+     * morning, 8 of 9 today — Raka's day-120 and Lukman's day-96 sales outside the share, Tari and Yanti inside their 90 days.
      */
     const again = await forum.scorecards.compute(input);
     const others = (card: { rows: { key: string }[] }) => ({ ...card, rows: card.rows.filter((r) => r.key !== 'new_agent_3m') });
     expect(others(stored!.frozenScorecard)).toEqual(others(again));
     const ytd = (card: { rows: { key: string; cells: Record<string, unknown> }[] }) => card.rows.find((r) => r.key === 'new_agent_3m')!.cells.ytd;
     expect([ytd(stored!.frozenScorecard), ytd(again)]).toEqual([
-      { kind: 'figure', value: 25, leavesOut: [] }, { kind: 'figure', value: 50, leavesOut: [] },
+      { kind: 'figure', value: 88, leavesOut: [] }, { kind: 'figure', value: 89, leavesOut: [] },
     ]);
     expect(views[13].actionItems.map((r) => r.status)).toEqual(['not_planned', 'planned', 'implemented']);
     // P18.97-T2 AC-4: the follow-ups the session before's; the month item #13's own month.

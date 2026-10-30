@@ -218,7 +218,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
   describe('P18.6-T1 AC-2, AC-3 — the read’s shape and the summary', () => {
     it('P18.6-T1 AC-2 the sub-line’s two counts, six chips in order, the catalog, the selection, the tree and what the reader may do', async () => {
       const view = await read();
-      expect(Object.keys(view).sort()).toEqual(['can', 'catalog', 'people', 'selected', 'summary', 'today', 'tree', 'units']);
+      expect(Object.keys(view).sort()).toEqual(['can', 'catalog', 'people', 'selected', 'summary', 'thresholds', 'today', 'tree', 'units']);
       expect({ today: view.today, people: view.people, units: view.units }).toEqual({ today: TODAY, people: 16, units: 4 });
       expect(view.summary.map((c) => c.category)).toEqual([...COMPLIANCE_CATEGORIES]);
       expect(view.selected).toEqual({ category: 'training', item: 'PROSPECT_LIST' });
@@ -300,6 +300,11 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       ]);
     });
 
+    it('UI-109 serves where a bar turns red and green, the registry’s 50% and 80%, so the phone re-declares neither', async () => {
+      const view = await read({ category: 'training' });
+      expect(view.thresholds).toEqual({ lowBelowPct: 50, highFromPct: 80 });
+    });
+
     it('P18.6-T1 AC-8 a card counts the rows the item applies to; a section, its cards', async () => {
       const view = await read({ category: 'activation' });
       const agus = view.tree[0];
@@ -318,7 +323,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
     it('P18.6-T1 AC-4 the office’s categories in order, an empty one included; the skills holding a module; their modules', async () => {
       const { catalog } = await read();
       expect(catalog.training.map((c) => [c.code, c.skills.length])).toEqual([
-        ['SALES', 6], ['PRODUCT', 0], ['RECRUITING', 0], ['TEAM_MANAGEMENT', 0], ['SOFT_SKILLS', 0], ['COMPANY_AND_KPM', 0],
+        ['SALES', 6], ['PRODUCT', 0], ['RECRUITING', 0], ['TEAM_MANAGEMENT', 0], ['MOTIVATION', 0], ['SOFT_SKILLS', 0], ['COMPANY_AND_KPM', 0],
       ]);
       expect(catalog.training[0].skills[0]).toEqual({
         code: 'PROSPECTING', label: 'Pencarian prospek',

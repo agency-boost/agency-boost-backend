@@ -47,10 +47,6 @@ export const LEADER_MEETINGS_REFUSALS = refusals('modules/leader-meetings', {
       en: `Send exactly one of ${fields.join(', ')}, with the version you read.`,
       id: `Kirim tepat satu dari ${fields.join(', ')}, beserta versi yang Anda baca.`,
     }),
-    doneDuringOnly: {
-      en: 'done is ticked on During items only.',
-      id: 'done hanya dapat dicentang pada item di bagian Saat rapat.',
-    },
     targetRow: ({ rows }: { rows: readonly string[] }) => ({
       en: `row must be one of ${rows.join(', ')}: the others take no Monthly Target.`,
       id: `row harus salah satu dari ${rows.join(', ')}: baris lain tidak memiliki Monthly Target.`,

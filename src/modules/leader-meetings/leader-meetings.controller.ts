@@ -212,7 +212,7 @@ export class LeaderMeetingsController {
   @ApiResponse({ status: 200, type: AgendaItemSavedDto })
   @ApiResponse(refusal(
     400,
-    '`VALIDATION_FAILED` — not exactly one field, a field too long or unknown, or `done` on an item outside *During*.',
+    '`VALIDATION_FAILED` — not exactly one field, or a field too long or unknown. `done` is any section’s since UI V1 (UI-110).',
   ))
   @ApiResponse(ITEM_CONFLICT)
   @ApiResponse(NOT_FOUND)

@@ -3,6 +3,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { Membership, MembershipSchema } from './membership.schema';
 import { MembershipRepository } from './membership.repository';
 import { MemberNames } from './member-names.service';
+import type { AvatarLinks } from '@/modules/users/avatar.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 
@@ -170,6 +171,46 @@ describe('a person’s name, from their membership', () => {
         .updateOne({ _id: new mongoose.Types.ObjectId('66f0000000000000000002' + '02') }, { $unset: { fullName: '' } });
       const rows = await memberships.find(ctx(), {}, { projection: { userId: 1 } });
       expect(await names.byReadMemberships(rows)).toEqual(new Map([[SARI, 'Ibu Sari']]));
+    });
+  });
+  /*
+   * **Names with the photos of the people a read draws** (UI V1, UI-111): the Unit roster, the coaching roster and the
+   * coachee's header, the forum's editors. The photo is a storage key on `users.avatarUrl`, signed into a link here.
+   */
+  describe('pictured', () => {
+    const SARI_KEY = 'user/66f000000000000000000201/avatar/01JAAAAAAAAAAAAAAAAAAAAAAA.jpg';
+    const signer = () => {
+      const linksFor = jest.fn(async (keys: readonly (string | null | undefined)[]) =>
+        new Map(keys.filter((k): k is string => !!k).map((k) => [k, `https://signed.test/${k}`])));
+      return { linksFor } as unknown as AvatarLinks & { linksFor: typeof linksFor };
+    };
+
+    beforeEach(async () => {
+      await mongoose.connection.db!.collection('users')
+        .updateOne({ _id: new mongoose.Types.ObjectId('66f000000000000000000201') }, { $set: { avatarUrl: SARI_KEY, pronoun: 'she' } });
+    });
+
+    it('UI-111 a person with a stored photo gets its signed link, one without gets null, in one batch of signatures', async () => {
+      const links = signer();
+      const pictured = new MemberNames(memberships, mongoose.model(User.name, UserSchema) as never, links);
+      const found = await pictured.pictured(ctx(), [SARI, RINA]);
+      expect(found.get(SARI)).toEqual({ name: 'Ibu Sari', pronoun: 'she', photoUrl: `https://signed.test/${SARI_KEY}` });
+      expect(found.get(RINA)).toEqual({ name: 'Rina Wijaya', pronoun: 'they', photoUrl: null });
+      expect(links.linksFor).toHaveBeenCalledTimes(1);
+    });
+
+    it('UI-111 signs only the people the read draws: somebody it only names keeps a null photo', async () => {
+      const links = signer();
+      const pictured = new MemberNames(memberships, mongoose.model(User.name, UserSchema) as never, links);
+      const found = await pictured.pictured(ctx(), [SARI, RINA], [RINA]);
+      expect(found.get(SARI)).toMatchObject({ name: 'Ibu Sari', photoUrl: null });
+      expect(links.linksFor).toHaveBeenCalledWith([null]);
+    });
+
+    it('UI-111 without a signer every photo is null — initials, never the storage key — and another office is nobody', async () => {
+      const found = await names.pictured(ctx(), [SARI, ELSEWHERE]);
+      expect(found).toEqual(new Map([[SARI, { name: 'Ibu Sari', pronoun: 'she', photoUrl: null }]]));
+      expect((await names.pictured(ctx(), [])).size).toBe(0);
     });
   });
 });

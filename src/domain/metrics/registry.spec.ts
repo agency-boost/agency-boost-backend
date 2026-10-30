@@ -261,6 +261,8 @@ describe('the metric registry (P4-T4)', () => {
       OPEN_SALES_LEADS: 15,
       SALES_LEADS_CLOSING_THIS_MONTH: 15,
       RECRUITMENT_NOMINATED_THIS_MONTH: 15,
+      // UI V1 (Phase 18.99 T4, UI-028): the roster's *Closing*.
+      SALES_LEADS_CLOSED_IN_PERIOD: 18.99,
       POTENTIAL_MAA_COUNT_IN_UNIT: 15,
       CASCADE_ACTIVITY_TOUCHES: 15,
       // P18-T1, P18-T2 (D-registry): the Owner's reporting — the office's five, and MOC's six inputs.
@@ -337,8 +339,9 @@ describe('the metric registry (P4-T4)', () => {
       // Calendar's, 16 was Billing, 17 Recruitment tools, 19 go-live. Today's set is pinned below.
       const phases = [...new Set(METRIC_IDS.map(sept29Phase))].sort((a, b) => a - b);
       // 18.5 since P18.5-T8 registered *New Hire* (`NEW_HIRES`), a metric that plan never had; 18.6 since P18.6-T1;
-      // 18.96 since P18.96-T4 (`FIRST_SALE_DATE`); 18.97 since P18.97-T1 (`CASES_PER_PRODUCING_AGENT`).
-      expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 14, 15, 18, 18.1, 18.5, 18.6, 18.96, 18.97]);
+      // 18.96 since P18.96-T4 (`FIRST_SALE_DATE`); 18.97 since P18.97-T1 (`CASES_PER_PRODUCING_AGENT`); 18.99 since UI V1
+      // (`SALES_LEADS_CLOSED_IN_PERIOD`).
+      expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 14, 15, 18, 18.1, 18.5, 18.6, 18.96, 18.97, 18.99]);
     });
 
     it('evaluated campaigns in Phase 14 under that plan, the old plan’s 12: where campaign qualification is computed', () => {
@@ -378,6 +381,8 @@ describe('the metric registry (P4-T4)', () => {
         'COUNTS_FOR_PRODUCTION',
         // And 3M activation: a result decided once, and a share of a set (P18.96-T6 AC-1, AC-2).
         'ACTIVATION_3M', 'ACTIVATION_3M_PCT',
+        // And UI V1's *Closing*, a roster column registered after campaign evaluation (Phase 18.99 T4, UI-028).
+        'SALES_LEADS_CLOSED_IN_PERIOD',
       ].sort());
     });
 
@@ -419,7 +424,8 @@ describe('the metric registry (P4-T4)', () => {
         const phases = [...new Set(METRIC_IDS.map((id) => metric(id).phase))].sort((a, b) => a - b);
         // 18.6 since P18.6-T1: the compliance tree's two, after campaign evaluation and no requirement's (below); 18.96
         // since P18.96-T4, the first sale's day, no requirement's either; 18.97 since P18.97-T1, *Cases/producing agents*.
-        expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 15, 18, 18.1, 18.5, 18.6, 18.96, 18.97]);
+        // 18.99 since UI V1: the roster's *Closing*, no requirement's.
+        expect(phases).toEqual([6, 7, 8, 9, 10, 11, 13, 13.1, 13.2, 15, 18, 18.1, 18.5, 18.6, 18.96, 18.97, 18.99]);
       });
 
       it('pins, by key, every metric measured by the time a campaign is evaluated: all of them', () => {
@@ -462,7 +468,7 @@ describe('the metric registry (P4-T4)', () => {
         // P18.97-T1's *Cases/producing agents* is an office's figure, no requirement's either.
         expect(METRIC_IDS.filter((id) => metric(id).phase > CAMPAIGN_EVALUATION_PHASE).sort()).toEqual([
           'ACTIVATION_3M', 'ACTIVATION_3M_PCT', 'ACTIVATION_COMPLETION_RATE', 'CASES_PER_PRODUCING_AGENT', 'COUNTS_FOR_PRODUCTION',
-          'FIRST_SALE_DATE', 'GOAL_SET_RATE',
+          'FIRST_SALE_DATE', 'GOAL_SET_RATE', 'SALES_LEADS_CLOSED_IN_PERIOD',
         ]);
       });
 

@@ -84,8 +84,14 @@ export class SectionChipDto implements SectionChip {
 export class SummaryActivityDto implements SummaryActivity {
   @ApiProperty({ example: '2026-09-01' }) from!: string;
   @ApiProperty({ example: '2026-09-28' }) to!: string;
-  @ApiProperty({ type: [ActivityTargetDto], description: 'Leads contacted, appointments, closings — in that order.' }) targets!: ActivityTargetDto[];
-  @ApiProperty({ description: 'Every activity logged over the period, across all categories.' }) total!: number;
+  @ApiProperty({
+    type: [ActivityTargetDto],
+    description: 'Leads contacted, appointments, closings — in that order. The year’s are the cascade on what the year still '
+      + 'needs, so its closings target is `yearly.policiesNeeded` (UI-052).',
+  }) targets!: ActivityTargetDto[];
+  @ApiProperty({
+    description: '*n aktivitas*: the sum of the rows below — `targets` and every row of `sections`, each code once (UI-052).',
+  }) total!: number;
   @ApiProperty({ type: [SectionChipDto], description: 'One per summary tile the reader is shown (ADR-0064) whose sections hold none of the three codes above.' })
   sections!: SectionChipDto[];
 }
@@ -134,6 +140,33 @@ class SummaryGoalDto {
   @ApiProperty({ type: String, nullable: true, format: 'date-time' }) savedAt!: string | null;
 }
 
+/** Where the page's counts of policies come from (UI-052). */
+class SummaryPoliciesDto {
+  @ApiProperty({
+    enum: ['activity_log'],
+    description:
+      'Every count of policies on the page — the *Submission polis* chips and the pace sentence’s *closing N* — is the '
+      + 'member’s activity log. APE, the gap and *Polis yang dibutuhkan* are the production upload’s (`monthly.source`, '
+      + '`yearly.source`). The screen says which (UI-052).',
+  }) source!: 'activity_log';
+  @ApiProperty({ type: [String], example: ['SELL_SUBMISSION'], description: 'The codes the office binds to *Submission polis*, counted.' })
+  codes!: string[];
+}
+
+/** The day the page's APE is valid for (UI V1, UI-054): the date header above the goal card. */
+class SummaryUploadedOnDto {
+  @ApiProperty({
+    type: String, nullable: true, format: 'date', example: '2026-10-30',
+    description: 'The office’s day its latest production file for `month` was uploaded, in its calendar; `null` while there is none.',
+  })
+  month!: string | null;
+  @ApiProperty({
+    type: String, nullable: true, format: 'date', example: '2026-10-30',
+    description: 'The office’s day its latest production file of any month of `year`, up to `month`, was uploaded; `null` while there is none.',
+  })
+  year!: string | null;
+}
+
 /** Which period the Summary is for, and which there are (P18.8-T11, ADR-0161 §4). */
 class SummaryPeriodDto {
   @ApiProperty({ example: '2025-03', description: 'The office’s first month, `YYYY-MM`, in its zone: the earliest `month` there is, and its year the earliest `year`.' })
@@ -165,6 +198,15 @@ export class SummaryDto implements SummaryView {
 
   @ApiProperty({ type: PaceDto, nullable: true, description: 'The pace sentence (ADR-0109); `null` without a goal, and for a month that has ended (ADR-0161).' })
   pace!: Pace | null;
+
+  @ApiProperty({ type: SummaryPoliciesDto, description: 'Where every count of policies on the page comes from: the activity log (UI-052).' })
+  policies!: { source: 'activity_log'; codes: string[] };
+
+  @ApiProperty({
+    type: SummaryUploadedOnDto,
+    description: 'The day the page’s APE is valid for — the latest production upload of the month, and of the year (UI-054).',
+  })
+  uploadedOn!: { month: string | null; year: string | null };
 
   @ApiProperty({ type: SummaryActivityPeriodsDto, description: '*Your sales activity targets* and the other sections.' })
   activity!: { monthly: SummaryActivityDto; yearly: SummaryActivityDto };

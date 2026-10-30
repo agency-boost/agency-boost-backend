@@ -44,6 +44,13 @@ export interface CastPerson {
    */
   agentCode: string;
   /**
+   * **Their WhatsApp number** (UI V1, 2026-10-30; UI-081, UI-101, D-22), on their account (`users.phone`), as
+   * *Isi nomor WhatsApp* stores one: `+62` and its digits. **Some have one and some do not**, so both of the WhatsApp
+   * button's paths can be walked in a browser as Agus: Indah, Siti, Arief and Wahyu open WhatsApp at once; Dimas and
+   * Novi open the sheet. Given once, to an account that has none — a number somebody saved in a walk is kept.
+   */
+  phone?: string;
+  /**
    * **When they joined, in days before the run**: after their leader could lead them — Agus joined, or
    * Arief became an AAB — and before their first activity day (41 back), their goal (60 back at most)
    * and any promotion. So the edge a session or a goal rests on was open on its day (`demo.ts`, the
@@ -66,15 +73,15 @@ export interface CastPerson {
  * nobody (`role-change.service.ts`).
  */
 export const COACHING_CAST: readonly CastPerson[] = [
-  { key: 'indah', email: 'indah@kpm0417.test', fullName: 'Indah Permatasari', pronoun: 'she', role: 'agent', leader: 'agus', agentCode: '80101', joinedDaysAgo: 97 },
+  { key: 'indah', email: 'indah@kpm0417.test', fullName: 'Indah Permatasari', pronoun: 'she', role: 'agent', leader: 'agus', agentCode: '80101', joinedDaysAgo: 97, phone: '+6281211002201' },
   { key: 'dimas', email: 'dimas@kpm0417.test', fullName: 'Dimas Pratama', pronoun: 'he', role: 'agent', leader: 'agus', agentCode: '80102', joinedDaysAgo: 94 },
-  { key: 'siti', email: 'siti@kpm0417.test', fullName: 'Siti Rahmawati', pronoun: 'she', role: 'agent', leader: 'agus', agentCode: '80103', joinedDaysAgo: 101 },
+  { key: 'siti', email: 'siti@kpm0417.test', fullName: 'Siti Rahmawati', pronoun: 'she', role: 'agent', leader: 'agus', agentCode: '80103', joinedDaysAgo: 101, phone: '+6281311002203' },
   {
     key: 'arief', email: 'arief@kpm0417.test', fullName: 'Arief Hidayat', pronoun: 'he', role: 'aab', leader: 'agus', agentCode: '80104',
-    joinedDaysAgo: 104, promoted: { daysAgo: 90, reason: 'Siap memimpin unit sendiri' },
+    joinedDaysAgo: 104, phone: '+6281511002204', promoted: { daysAgo: 90, reason: 'Siap memimpin unit sendiri' },
   },
   { key: 'novi', email: 'novi@kpm0417.test', fullName: 'Novi Andriani', pronoun: 'she', role: 'agent', leader: 'arief', agentCode: '80105', joinedDaysAgo: 84 },
-  { key: 'wahyu', email: 'wahyu@kpm0417.test', fullName: 'Wahyu Saputra', pronoun: 'he', role: 'agent', leader: 'arief', agentCode: '80106', joinedDaysAgo: 79 },
+  { key: 'wahyu', email: 'wahyu@kpm0417.test', fullName: 'Wahyu Saputra', pronoun: 'he', role: 'agent', leader: 'arief', agentCode: '80106', joinedDaysAgo: 79, phone: '+6285711002206' },
 ];
 
 /*

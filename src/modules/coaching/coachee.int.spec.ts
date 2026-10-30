@@ -82,6 +82,7 @@ describe('the person a coaching page opens on, over HTTP (P11-T7)', () => {
         today: ROSTER_TODAY,
         membershipId: office.id.INDAH,
         name: 'Indah Permatasari',
+        photoUrl: null,
         pronoun: 'she',
         rung: { code: 'AGENT', label: 'Agent' },
         leader: { membershipId: office.id.AGUS, name: 'Agus Salim' },
@@ -239,7 +240,7 @@ describe('the person a coaching page opens on, over HTTP (P11-T7)', () => {
     const res = await get(office.id.RINA).expect(200);
 
     expect(Object.keys(res.body).sort())
-      .toEqual(['direct', 'downline', 'leader', 'membershipId', 'name', 'pronoun', 'rung', 'today']);
+      .toEqual(['direct', 'downline', 'leader', 'membershipId', 'name', 'photoUrl', 'pronoun', 'rung', 'today']);
     // Rina logged 53 recruiting follow-ups a day for a fortnight: not one count is in the answer.
     expect(JSON.stringify(res.body)).not.toMatch(/"(count|logged|total|totalCount|entries|status)"/);
     // Directory facts: no §3.5 entry for this read, or for any read above.

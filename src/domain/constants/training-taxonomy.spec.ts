@@ -2,8 +2,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CODE_PATTERN } from '@/common/validation/fields';
 import {
-  SEED_TRAINING_CATEGORIES, SEED_TRAINING_MODULES, SEED_TRAINING_SKILLS, SEEDED_TRAINING_WORDINGS_BEFORE_OD_238,
+  MOTIVATION_CATEGORY, SEED_TRAINING_CATEGORIES, SEED_TRAINING_MODULES, SEED_TRAINING_SKILLS,
+  SEEDED_TRAINING_WORDINGS_BEFORE_OD_238,
 } from './training-taxonomy';
+
+/** The prototype's six: every seeded category but the owner's *Motivation* (UI V1, UI-063), which no prototype draws. */
+const PROTOTYPE_SIX = SEED_TRAINING_CATEGORIES.filter((c) => c.code !== MOTIVATION_CATEGORY.code);
 
 /**
  * **The seed in the prototype's English** (P18.98-T7, OD-238): the words it gave before it was written in Bahasa
@@ -49,8 +53,24 @@ describe('the seeded training taxonomy (P5-T1)', () => {
   });
 
   it('seeds the prototype’s six categories, in its order', () => {
-    expect(SEED_TRAINING_CATEGORIES.map(englishCategory)).toEqual(source.categories);
-    expect(SEED_TRAINING_CATEGORIES.map((c) => c.displayOrder)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(PROTOTYPE_SIX.map(englishCategory)).toEqual(source.categories);
+  });
+
+  /*
+   * **UI V1 (Phase 18.99 T10; UI-063): the owner's seventh, *Motivation*,** fifth in the category row — *Sales · Product ·
+   * Recruiting · Team Management · Motivation · Soft Skills · Company and KPM* — a stable code, *Motivasi* in the
+   * approved glossary's word, empty as the five after Sales are.
+   */
+  it('UI-063 seeds Motivation fifth, between Team Management and Soft Skills, with nothing in it', () => {
+    expect(SEED_TRAINING_CATEGORIES.map((c) => c.code)).toEqual([
+      'SALES', 'PRODUCT', 'RECRUITING', 'TEAM_MANAGEMENT', 'MOTIVATION', 'SOFT_SKILLS', 'COMPANY_AND_KPM',
+    ]);
+    expect(SEED_TRAINING_CATEGORIES.map((c) => c.displayOrder)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(MOTIVATION_CATEGORY).toEqual({
+      code: 'MOTIVATION', label: 'Motivasi',
+      description: 'Semangat, tujuan, dan kebiasaan yang membuat Anda terus bergerak setiap hari.', displayOrder: 5,
+    });
+    expect(SEED_TRAINING_SKILLS.some((s) => s.categoryCode === 'MOTIVATION')).toBe(false);
   });
 
   it('seeds Sales’s six skills, in its order, and nothing in the other five', () => {
@@ -74,10 +94,10 @@ describe('the seeded training taxonomy (P5-T1)', () => {
    * 0046 is exactly what the seed changed.
    */
   it('P18.98-T7 writes the six categories, the skills and the modules in Bahasa Indonesia', () => {
-    expect(SEED_TRAINING_CATEGORIES.map((c) => c.label)).toEqual([
+    expect(PROTOTYPE_SIX.map((c) => c.label)).toEqual([
       'Sales', 'Produk', 'Recruitment', 'Manajemen tim', 'Soft skills', 'Perusahaan dan KPM',
     ]);
-    expect(SEED_TRAINING_CATEGORIES.map((c) => c.description)).toEqual([
+    expect(PROTOTYPE_SIX.map((c) => c.description)).toEqual([
       'Temukan prospek, gali kebutuhannya, jawab keberatan, dan lakukan closing.',
       'Apa yang dilindungi setiap produk, untuk siapa produk itu cocok, dan cara menjelaskannya.',
       'Temukan, dekati, dan rekrut orang-orang yang akan membangun tim Anda.',
@@ -95,7 +115,7 @@ describe('the seeded training taxonomy (P5-T1)', () => {
       'Mengenali peluang penjualan silang', 'Praktik terbaik mempertahankan nasabah',
     ]);
     // Every English word recorded is one the seed changed, and every one it changed is recorded.
-    for (const c of SEED_TRAINING_CATEGORIES) {
+    for (const c of PROTOTYPE_SIX) {
       expect({ code: c.code, kept: WAS.categories[c.code].label === undefined }).toEqual({ code: c.code, kept: c.label === 'Sales' });
       expect(englishCategory(c) === c.label).toBe(c.label === 'Sales');
       expect(WAS.categories[c.code].description).not.toBe(c.description);

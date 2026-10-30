@@ -11,7 +11,7 @@
  * |---|---|
  * | `dimas@kpm0417.test` (Agus) | *Close first case independently* **ticks itself** on the first read, *"Completed from Sales data · 1 {last month}"* — his first sale is the production file's last month, `monthly_file`, his existing closing (AC-5). His leads hold none at *Paid and issued* |
  * | `novi@kpm0417.test` (Arief) | **A first sale on day 20**: *Ibu Sekar Ayuningtyas*, a sales lead walked to *Paid and issued* 19 days after her join date and won — her first sale `lead`, day 20; *Close first case independently* completes from it, naming the lead. For T6's *activated* |
- * | `raka@kpm0417.test` (Satria) | **His only sale on day 120**: *Pak Darto Wibisono*, paid and issued 119 days after he joined, and no policy on any file — his first sale `lead`, day 120. His activation graduated long ago (`cohort-fixture.ts`), so no checklist moves; the date is for T6's *not activated* |
+ * | `raka@kpm0417.test` (Satria) | **His only sale on day 120**: *Pak Darto Wibisono*, paid and issued 119 days after he joined, and no policy on any file — his first sale `lead`, day 120. His activation graduated long ago (`cohort-fixture.ts`), so no checklist moves; the date is for T6's *not activated* — since UI V1 *Teraktivasi* in amber, outside the 3M rate |
  * | `rina@kpm0417.test` (Sari) | **Four 1:1s**: a fourth session with Sari three weeks ago, before the cohort fixture's three weekly ones, so *Weekly 1-on-1 check-in* completes from the fourth — today's — *"Completed from Coaching sessions · {today}"*. Her leads reach *Paid and issued* too, so her first case and her milestone tick from her sales |
  * | `indah@kpm0417.test` (Agus) | **Waiting for data**: Agus's hand tick of *Weekly 1-on-1 check-in* (`activation-fixture.ts`) reads *"Ticked by Agus Prasetyo, waiting for data"* — she has one 1:1 since joining, not four. Her own tick of *Close first case independently* switches to the production file's month on the first read |
  */
@@ -153,7 +153,7 @@ export function buildFirstSaleFixture(input: FirstSaleFixtureInput): FirstSaleFi
     'FIRST SALE and the data-backed checklist items (P18.96-T4; ADR-0171)',
     '  dimas@kpm0417.test   Closing case pertama secara mandiri ticks from the production file: Completed from Sales data',
     `  novi@kpm0417.test    first sale on day 20 (${noviClosed}), Ibu Sekar Ayuningtyas, paid and issued`,
-    `  raka@kpm0417.test    only sale on day 120 (${rakaClosed}), Pak Darto Wibisono — for 3M not activated`,
+    `  raka@kpm0417.test    only sale on day 120 (${rakaClosed}), Pak Darto Wibisono — Teraktivasi late, outside the 3M rate`,
     `  rina@kpm0417.test    four 1:1s (the fourth today): Check-in 1-on-1 mingguan Completed from Coaching sessions`,
     '  indah@kpm0417.test   Check-in 1-on-1 mingguan: Ticked by Agus Prasetyo, waiting for data',
   ].join('\n');

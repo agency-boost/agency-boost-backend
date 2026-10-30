@@ -1591,6 +1591,30 @@ describe('organisation', () => {
       expect(inbox[0].routedFromName).toBeNull();
     });
 
+    it('UI-085 counts what waits on a leader as the inbox lists it, and nothing of another office', async () => {
+      await askedFor(ab, 'First Asker');
+      await askedFor(ab, 'Second Asker');
+      await askedFor(aab, 'For The AAB');
+
+      expect(await approvals.waitingCount(abCtx)).toEqual({ count: 2 });
+      expect((await approvals.waitingCount(abCtx)).count).toBe((await approvals.inbox(abCtx)).length);
+      expect(await approvals.waitingCount(aabCtx)).toEqual({ count: 1 });
+      // The same leader's id, read as office B: B's requests only, and B has none.
+      const elsewhere = new RequestContext(abCtx.userId, 'none', { ...abCtx.membership!, kpmId: KPM_B });
+      expect(await approvals.waitingCount(elsewhere)).toEqual({ count: 0 });
+    });
+
+    it('UI-085 counts nothing once the request is decided, and drops a request whose member is gone, as the inbox does', async () => {
+      const first = await askedFor(ab, 'First Asker');
+      const second = await askedFor(ab, 'Second Asker');
+      await approvals.approve(abCtx, (await approvals.inbox(abCtx)).find((r) => r.membershipId === first.membershipId)!.requestId);
+      expect(await approvals.waitingCount(abCtx)).toEqual({ count: 1 });
+
+      await mongoose.model(Membership.name).updateOne({ _id: second.membershipId }, { $set: { deletedAt: new Date() } });
+      expect(await approvals.inbox(abCtx)).toEqual([]);
+      expect(await approvals.waitingCount(abCtx)).toEqual({ count: 0 });
+    });
+
     it('AC-2: offers the sub-units under the leader a request names, and only those', async () => {
       const otherAb = await join(KPM_A, 'ab');
       await join(KPM_A, 'aab', otherAb);

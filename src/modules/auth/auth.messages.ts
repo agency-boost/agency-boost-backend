@@ -62,6 +62,17 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
       id: 'Sesi Anda tidak berlaku lagi. Silakan masuk lagi.',
     },
   },
+  /* UI V1 (2026-10-30; UI-111, ADR-0181): a new email address another account already has. */
+  AUTH_EMAIL_TAKEN: {
+    belongsToAnother: {
+      en: 'That address belongs to another account. Use a different one.',
+      id: 'Alamat itu sudah dipakai akun lain. Gunakan alamat lain.',
+    },
+    takenSinceRequest: {
+      en: 'That address now belongs to another account, so your email has not changed. Ask again with a different one.',
+      id: 'Alamat itu sekarang dipakai akun lain, jadi email Anda tidak berubah. Minta lagi dengan alamat lain.',
+    },
+  },
   AUTH_SESSION_ENDED: {
     ended: {
       en: 'Your session ended. Sign in again.',
@@ -97,6 +108,11 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
       en: 'Choose a different password from the one you are using now.',
       id: 'Pilih kata sandi yang berbeda dari yang Anda pakai sekarang.',
     },
+    /* UI V1 (UI-111, ADR-0181): `POST /auth/me/email` with the address the account already has. */
+    sameEmail: {
+      en: 'That is already your email address.',
+      id: 'Itu sudah alamat email Anda.',
+    },
     impersonationReason: {
       en: 'A reason is required to impersonate a user.',
       id: 'Alasan wajib diisi untuk bertindak sebagai pengguna lain.',
@@ -129,6 +145,11 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
     localeShape: {
       en: 'locale must be id or en',
       id: 'locale harus id atau en',
+    },
+    /* UI V1 (2026-10-30; UI-081, D-22): a WhatsApp number, `+62` and 9 to 13 digits once read (`normalisePhone`). */
+    phoneShape: {
+      en: 'phone must be an Indonesian number: 9 to 13 digits after +62',
+      id: 'phone harus nomor Indonesia: 9 sampai 13 digit setelah +62',
     },
   },
   TENANT_SUSPENDED: {

@@ -10,6 +10,7 @@ import {
 } from '@/domain/constants';
 import { scopeFor } from '@/modules/rbac/permissions';
 import { planFor, type Brief, type ScoredProduct } from './attack-plan.scorer';
+import { productWordsFor } from './product-words';
 import { budgetBandWords } from './products.messages';
 import {
   effectiveWordsOf, KpmProductService, type OfficeShelf, type OfficeShelfEntry,
@@ -112,7 +113,7 @@ export class ProductCatalogService {
   /** `GET /product-catalog`: the office's shelf, as cards. */
   async catalog(ctx: RequestContext): Promise<{ products: CatalogCardView[] }> {
     const { items } = await this.shelf(ctx);
-    return { products: items.map((item) => this.card(item)) };
+    return { products: items.map((item) => this.card(ctx, item)) };
   }
 
   /** `GET /product-catalog/:productCode`: one product the office keeps on, as the drawer reads it. */
@@ -193,11 +194,16 @@ export class ProductCatalogService {
     return item;
   }
 
-  private card({ product, view, approved }: ShelfItem): CatalogCardView {
+  /**
+   * A card. **Its words for the reader** (UI V1, UI-107): the tagline in Indonesian where it is still the platform's
+   * seed English, else as typed (`productWordsFor`); the name is a name, in both.
+   */
+  private card(ctx: RequestContext, { product, view, approved }: ShelfItem): CatalogCardView {
+    const say = productWordsFor(product.code, ctx.reader);
     return {
       code: product.code,
       name: view.displayName.value,
-      tagline: effectiveWordsOf(product, approved).description,
+      tagline: say(effectiveWordsOf(product, approved).description),
       category: {
         code: product.category,
         label: PRODUCT_CATEGORY_LABELS[product.category as ProductCategory] ?? product.category,
@@ -211,16 +217,18 @@ export class ProductCatalogService {
   private detail(ctx: RequestContext, item: ShelfItem): CatalogProductView {
     const { product, view, approved } = item;
     const words = effectiveWordsOf(product, approved);
+    // The platform's seed words in the reader's language, a company's or an office's as typed (UI V1, UI-107).
+    const say = productWordsFor(product.code, ctx.reader);
     const script = Object.fromEntries(SCRIPT_KEYS.map((key) => {
       const value = words.script[key];
-      return [key, key === 'benefits' ? [...((value as string[] | undefined) ?? [])] : String(value ?? '')];
+      return [key, key === 'benefits' ? ((value as string[] | undefined) ?? []).map(say) : say(String(value ?? ''))];
     })) as unknown as CatalogScriptView;
 
     return {
-      ...this.card(item),
-      benefits: [...product.benefits],
-      differentiator: product.differentiator,
-      bestFit: product.bestFor,
+      ...this.card(ctx, item),
+      benefits: product.benefits.map(say),
+      differentiator: say(product.differentiator),
+      bestFit: say(product.bestFor),
       ageBands: product.eligibleAgeBands.map((band) => PRODUCT_AGE_BAND_LABELS[band] ?? String(band)),
       // *Lump-sum* is a word, written for the reader (P18.98-T7); a range of sums reads the same in both.
       budgetBands: product.eligibleBudgetBands.map((band) => {

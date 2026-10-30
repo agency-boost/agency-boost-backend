@@ -217,6 +217,30 @@ export const EMAIL_MESSAGES = messages('modules/notifications: emails', {
       + 'tautan ini akan kedaluwarsa dengan sendirinya.',
   },
   seeWhatChanged: { en: 'Open AgencyBoost to see what changed.', id: 'Buka AgencyBoost untuk melihat perubahannya.' },
+  /* UI V1 (2026-10-30; UI-111, ADR-0181): the email change — its link, to the new address; its notice, to the old. */
+  changeVerifySubject: { en: 'Confirm your new email address', id: 'Konfirmasi alamat email baru Anda' },
+  changeVerifyOpen: {
+    en: 'Open this link to make this address the email you sign in to AgencyBoost with. '
+      + 'Your email does not change until you do.',
+    id: 'Buka tautan ini untuk menjadikan alamat ini email yang Anda pakai untuk masuk ke AgencyBoost. '
+      + 'Email Anda tidak berubah sebelum Anda membukanya.',
+  },
+  changeVerifyIgnore: {
+    en: 'If you did not ask for this, ignore it. Nothing changes until the link is opened, and it expires on its own.',
+    id: 'Jika Anda tidak memintanya, abaikan email ini. Tidak ada yang berubah sampai tautan dibuka, dan tautan ini '
+      + 'akan kedaluwarsa dengan sendirinya.',
+  },
+  changeNoticeSubject: { en: 'Your email address is being changed', id: 'Alamat email Anda sedang diubah' },
+  changeNoticeAsked: ({ newEmail }: { newEmail: string }) => ({
+    en: `Someone signed in to your account asked to change its email to ${newEmail}. `
+      + 'It changes only when the link sent to that address is opened.',
+    id: `Seseorang yang masuk ke akun Anda meminta email akun ini diubah menjadi ${newEmail}. `
+      + 'Email itu baru berubah setelah tautan yang dikirim ke alamat tersebut dibuka.',
+  }),
+  changeNoticeNotYou: {
+    en: 'If this was not you, change your password now: that cancels the change.',
+    id: 'Jika ini bukan Anda, segera ubah kata sandi Anda: itu membatalkan perubahan ini.',
+  },
 });
 
 /** **The inbox's own refusal** (P18.98-T5 AC-2): a permission the reader does not hold. */

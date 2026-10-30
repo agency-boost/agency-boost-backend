@@ -216,41 +216,12 @@ export const ACTIVATION_REFUSALS = refusals('modules/activation', {
       id: 'Item ini dicentang bersama 1:1 yang disebutkannya: catat 1:1 itu, dengan hari diadakannya dan catatannya.',
     },
   },
-  NOT_A_NEW_HIRE: {
-    existingAgent: {
-      en: 'They joined as an existing agent, so they have no 3M activation to end. Only a new hire is marked as left.',
-      id: 'Dia bergabung sebagai agent yang sudah ada, jadi tidak ada 3M activation yang perlu diakhiri. Hanya new hire '
-        + 'yang dapat ditandai keluar.',
-    },
-  },
-  NEW_HIRE_HAS_REPORTS: {
-    reportsToThem: ({ reports }: { reports: number }) => ({
-      en: `${reports} ${reports === 1 ? 'person reports' : 'people report'} to them. Move ${reports === 1 ? 'them' : 'those people'} `
-        + 'to another leader before marking them as left.',
-      id: `${n(reports)} orang melapor kepadanya. Pindahkan ${reports === 1 ? 'orang itu' : 'mereka'} `
-        + 'ke leader lain sebelum menandainya keluar.',
-    }),
-  },
-  NEW_HIRE_NOT_MARKABLE: {
-    pastTheYear: {
-      en: 'They joined more than a year ago, so they are no longer on New Hires and there is no 3M result to decide. '
-        + 'To take them out of the team, remove them.',
-      id: 'Dia bergabung lebih dari setahun yang lalu, jadi dia tidak lagi ada di New Hires dan tidak ada hasil 3M yang '
-        + 'perlu ditentukan. Untuk mengeluarkannya dari tim, keluarkan dia.',
-    },
-  },
-  NEW_HIRE_ALREADY_LEFT: {
-    already: {
-      en: 'They are marked as left already.',
-      id: 'Dia sudah ditandai keluar.',
-    },
-  },
 });
 
 /**
  * **The activation module's other sentences** (P18.98-T5 AC-4, AC-6): what completes an item on its own and where a
  * data-backed item's source line says it came from — served with every read of a checklist, for the reader — and the
- * reason *Mark left* stores for its removal, in the language of whoever marks it. Each English is the registry's own
+ * name a pecah telor's closing is logged under (D-26), in the language of whoever records it. Each English is the registry's own
  * (`activation-checklist.ts`), read from it, so the two cannot drift; the feature links' *Goal Settings*, *Leads
  * Management* and *Activity Management* are page names and stay English in both (§A.1, §A.2).
  */
@@ -293,10 +264,14 @@ export const ACTIVATION_MESSAGES = messages('modules/activation', {
     en: ACTIVATION_DATA_LINK_KINDS['coaching:weekly:4'].label,
     id: 'Sesi coaching',
   },
-  /** The reason *Mark left* stores for the removal it makes (AC-6): written in the language of the leader marking it. */
-  leftAsNewHire: {
-    en: 'Left the office as a new hire.',
-    id: 'Keluar dari KPM sebagai new hire.',
+  /**
+   * **The name a pecah telor's closing is logged under** (UI V1, D-26, UI-027): *Kapan pecah telor?* takes a date and
+   * nothing else, so the closing it logs in the hire's pipeline is named by the API — in the language of whoever
+   * records it, and shown as stored, as every lead's name is.
+   */
+  pecahTelorClosing: {
+    en: 'First sale (date recorded by hand)',
+    id: 'Pecah telor (tanggal dicatat manual)',
   },
 });
 

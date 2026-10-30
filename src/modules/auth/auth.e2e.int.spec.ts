@@ -2105,6 +2105,9 @@ describe('auth and admin over HTTP', () => {
 
       const res = await api().get('/api/v1/join/requests').set(asJoiner).expect(403);
       expect(res.body.error.details.permission).toBe('leader_request:read_inbox');
+      // UI-085: the tab's count is the inbox's, and refused the same way.
+      const count = await api().get('/api/v1/join/requests/count').set(asJoiner).expect(403);
+      expect(count.body.error.details.permission).toBe('leader_request:read_inbox');
     });
 
     it('shows the request, approves it, and empties the inbox', async () => {
@@ -2116,16 +2119,24 @@ describe('auth and admin over HTTP', () => {
       const inbox = await api().get('/api/v1/join/requests').set(auth).expect(200);
       expect(inbox.body).toHaveLength(1);
       expect(inbox.body[0].role).toBe('agent');
+      // UI-085: the Pending Requests tab's count says the same.
+      expect((await api().get('/api/v1/join/requests/count').set(auth).expect(200)).body).toEqual({ count: 1 });
 
       const after = await api()
         .post(`/api/v1/join/requests/${inbox.body[0].requestId}/approve`)
         .set(auth).send({}).expect(200);
       expect(after.body).toEqual([]);
+      expect((await api().get('/api/v1/join/requests/count').set(auth).expect(200)).body).toEqual({ count: 0 });
 
       // They are in, under the approver, and their own view says so.
       const me = await api().get('/api/v1/join/me').set(asJoiner).expect(200);
       expect(me.body.status).toBe('active');
       expect(me.body.leaderMembershipId).toBe(leaderId);
+
+      // T1 (the Phase 18.99 exit review): an active Agent, who leads nobody, is refused the tab's count as the inbox.
+      const agentCount = await api().get('/api/v1/join/requests/count').set(asJoiner).expect(403);
+      expect(agentCount.body.error).toMatchObject({ code: 'PERM_DENIED', details: { permission: 'leader_request:read_inbox' } });
+      await api().get('/api/v1/join/requests').set(asJoiner).expect(403);
     });
 
     it('AC-4: refuses a second decision, naming which way the first went', async () => {

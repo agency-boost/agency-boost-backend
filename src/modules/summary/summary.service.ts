@@ -1,7 +1,7 @@
 import { Injectable, Optional, Inject } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import { SUMMARY } from '@/domain/constants';
-import { endOfMonth, rollingWindow, type LocalDate } from '@/common/time/local-day';
+import { endOfMonth, localDayOf, rollingWindow, type LocalDate } from '@/common/time/local-day';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { ActivityService } from '@/modules/activity/activity.service';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
@@ -9,6 +9,7 @@ import { GoalService } from '@/modules/goals/goal.service';
 import { LeadReadings, type OpenLead } from '@/modules/leads/lead-readings';
 import { CoachResolver, type Subject } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
+import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
 import { ProductionReadings } from '@/modules/production/production-readings';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { boundCodes, countOf, defaultBinding } from '@/modules/config/activity-binding';
@@ -30,9 +31,13 @@ export interface SummaryActivity {
    */
   from: LocalDate;
   to: LocalDate;
-  /** Leads contacted, appointments, closings — each against the cascade run on the period's APE target. */
+  /**
+   * Leads contacted, appointments, closings — each against the cascade run on the period's APE target: this month's
+   * fixed one, or, for the year, what the year still needs (UI-052: the year's *Submission polis* is *Polis yang
+   * dibutuhkan*).
+   */
   targets: ActivityTarget[];
-  /** *N total activities logged … across all categories.* */
+  /** *n aktivitas*: the sum of `targets`' and `sections`' rows, each code once (UI-052) — what the page shows. */
   total: number;
   /** One per other section the member's rung is shown — the subject's, on a leader's copy. */
   sections: SectionChip[];
@@ -60,6 +65,20 @@ export interface SummaryView {
   yearly: PeriodFigures & { source: FigureSource };
   /** The pace sentence (ADR-0109); `null` without a goal, and for a month that has ended (P18.8-T11). */
   pace: Pace | null;
+  /**
+   * **Where this page's counts of policies come from** (UI V1, UI-052), so the screen can say so: every one — the
+   * *Submission polis* chips and the pace sentence's *closing N* — is the member's **activity log**
+   * (`activity_log`), the codes the office binds to *Submission polis* (`codes`). APE, the gap and *Polis yang
+   * dibutuhkan* are the office's **production upload** (`monthly.source`, `yearly.source`).
+   */
+  policies: { source: 'activity_log'; codes: string[] };
+  /**
+   * **The day the page's APE is valid for** (UI V1, UI-054: the date header above the goal card): the office's day its
+   * latest production file standing for the period was uploaded, in its calendar — for `month`, that month's file; for
+   * `year`, the newest file of any of its months up to `month`. `null` while there is none, and the header names the
+   * period instead. The upload's date, not today's: a figure from the 12th says the 12th on the 30th.
+   */
+  uploadedOn: { month: LocalDate | null; year: LocalDate | null };
   /** What was logged against the plan, and the rest of the member's sections (P10-T5). */
   activity: { monthly: SummaryActivity; yearly: SummaryActivity };
   /**
@@ -128,6 +147,11 @@ export class SummaryService {
      * application always provides it; optional so a hand-built instance need not, and without it the default binding.
      */
     @Optional() @Inject(ActivityBindingService) private readonly bindings: ActivityBindingService | null = null,
+    /*
+     * UI-054: the office's production imports, for the day the page's APE is valid for. The application always provides
+     * it; optional so a hand-built instance need not (a coaching snapshot reads no date), and without it no date.
+     */
+    @Optional() @Inject(DataUploadBatchRepository) private readonly batches: DataUploadBatchRepository | null = null,
   ) {}
 
   /**
@@ -178,7 +202,9 @@ export class SummaryService {
     // The pace sentence's *tracking to close N* (ADR-0109): the office's last 30 days, today included. Read only
     // for the current month: about a month that has ended the sentence would be false (ADR-0161 §4).
     const paceWindow = rollingWindow(day.today, SUMMARY.PACE_WINDOW_DAYS);
-    const [ledgers, counts, yearCounts, recentCounts, sections, openLeads, compliance, ratios, binding] = await Promise.all([
+    const [
+      ledgers, counts, yearCounts, recentCounts, sections, openLeads, compliance, ratios, binding, monthUpload, yearUpload,
+    ] = await Promise.all([
       /*
        * The year to date through last month, this month's own APE and the year's latest year to date, with
        * who corrected each, in one read — the reading the Unit Dashboard makes for a whole unit (Phase 15),
@@ -195,6 +221,9 @@ export class SummaryService {
       this.activityLog.ratiosOf(ctx, subject),
       // Which codes the three targets and the pace count: the office's binding, today (ADR-0163 §4).
       this.bindings ? this.bindings.resolveCascadeBinding(ctx) : Promise.resolve(defaultBinding()),
+      // UI-054: the day the month's APE, and the year's, is valid for — the latest file standing for each.
+      this.uploadedOn(ctx, { from: period.month, to: period.month }, day.timezone),
+      this.uploadedOn(ctx, { from: `${year}-01`, to: period.month }, day.timezone),
     ]);
 
     /*
@@ -233,12 +262,12 @@ export class SummaryService {
     const cascadeCodes = boundCodes(binding);
     const activityFor = (
       window: { from: LocalDate; to: LocalDate }, logged: Map<string, number>, plan: typeof monthlyCounts,
-    ): SummaryActivity => ({
-      ...window,
-      targets: activityTargets(plan, binding, logged),
-      total: totalLogged(logged),
-      sections: sectionChips(sections, logged, cascadeCodes),
-    });
+    ): SummaryActivity => {
+      const targets = activityTargets(plan, binding, logged);
+      const chips = sectionChips(sections, logged, cascadeCodes);
+      // UI-052: the total is the breakdown's own sum.
+      return { ...window, targets, total: totalLogged(logged, targets, chips), sections: chips };
+    };
 
     /*
      * **The prototype's sentence, by the prototype's arithmetic** (ADR-0109): *N* the closings of the last
@@ -271,6 +300,8 @@ export class SummaryService {
       monthly,
       yearly,
       pace,
+      policies: { source: 'activity_log', codes: [...binding.closings] },
+      uploadedOn: { month: monthUpload, year: yearUpload },
       activity: {
         monthly: activityFor(monthWindow, counts, monthlyCounts),
         yearly: activityFor(yearWindow, yearCounts, yearlyCounts),
@@ -298,5 +329,22 @@ export class SummaryService {
   private async unitOpenLeads(ctx: RequestContext, member: string): Promise<number> {
     const reach = await this.coach.reach(ctx, 'lead:read');
     return this.leadReadings.countOpenOf(ctx, reach, member);
+  }
+
+  /**
+   * **The office's day its latest production file for a range of months was uploaded** (UI V1, UI-054): the newest
+   * import standing (`committed` — a reverted or a failed one stands for nothing) of those months, in the office's
+   * calendar, or `null` while there is none. The office's own: through the tenant-scoped repository, on the batches'
+   * `(kpmId, month, status, …)` index. The figure is the office's, so a leader's read of a coachee's Summary reads the
+   * same date the coachee does.
+   */
+  private async uploadedOn(ctx: RequestContext, months: { from: string; to: string }, timezone: string): Promise<LocalDate | null> {
+    if (!this.batches) return null;
+    const [latest] = await this.batches.find(
+      ctx,
+      { month: { $gte: months.from, $lte: months.to }, status: 'committed', committedAt: { $ne: null } },
+      { sort: { committedAt: -1 }, limit: 1, projection: { committedAt: 1 } },
+    );
+    return latest?.committedAt ? localDayOf(latest.committedAt, timezone) : null;
   }
 }

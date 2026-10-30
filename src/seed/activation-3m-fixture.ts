@@ -10,20 +10,20 @@ import { seedObjectId } from './coaching-fixture';
 import { markNewHires } from './join-dates';
 
 /**
- * **3M activation on `/new-hires`, seeded** (P18.96-T6; ADR-0171 §2, ADR-0173; `functional/activation.md`, *3M
- * activation — Seed*): the two results Agus's people had none of. Every other new hire under him has a first sale —
- * Indah's, Dimas's and Siti's on day 39 to 46 (*Activated*), Rina's, Budi's, Novi's, Wahyu's and Yanti's inside their
- * 90 days (*In progress*) — so two new hires are placed here, after every other 0417 member, so nobody's agent
- * sequence moves:
+ * **3M activation on `/new-hires`, seeded** (P18.96-T6; ADR-0171 §2, ADR-0173; amended by UI V1, UI-023, the owner's
+ * D-24; `functional/activation.md`, *3M activation — Seed*): the two cases Agus's people had none of. Every other new
+ * hire under him has a first sale — Indah's, Dimas's and Siti's on day 39 to 46, Rina's, Budi's, Novi's and Wahyu's
+ * inside their 90 days, all ***Teraktivasi*** since UI V1 — but Yanti, inside her 90 days with none. So two new hires are
+ * placed here, after every other 0417 member, so nobody's agent sequence moves:
  *
  * | Account | Who | What `/new-hires` shows |
  * |---|---|---|
- * | `lukman@kpm0417.test` | **Lukman Hakim**, Agus's own agent, joined 99 days ago (day 100) | ***Not activated***: his only sale, *Pak Hendra Kusnadi*, was paid and issued on **day 96** — after day 90, so it makes him active and does not change his result. His checklist, 5 of 16 by his own ticks and his first case from the sale, is overdue: *Schedule 1:1* and *Mark left* |
- * | `tari@kpm0417.test` | **Tari Wulandari**, Arief's agent, joined 40 days ago | ***Not activated · Left***: Arief marked her left six days ago, on day 35, before any sale — decided that day and kept, with its audit row. *Mark left* removes a new hire from the office, so she is in no roster or count of people since, and Arief's and Agus's `/new-hires` still list her for her year |
+ * | `lukman@kpm0417.test` | **Lukman Hakim**, Agus's own agent, joined 99 days ago (day 100) | ***Teraktivasi* in amber, *Pecah telor di hari ke-96***: his only sale, *Pak Hendra Kusnadi*, was paid and issued on **day 96** — after day 90, so his 3M result is *not activated* and **he is in neither part of the 3M share**. His checklist, 5 of 16 by his own ticks and his first case from the sale, is overdue |
+ * | `tari@kpm0417.test` | **Tari Wulandari**, Arief's agent, joined 40 days ago | ***Belum*, *Hari ke-41***: Arief marked her left six days ago, on day 35, before any sale — kept as data (`leftAt`, its audit row), and **deciding nothing** since UI V1: no *Keluar*, and inside her 90 days she is in neither part of the share (Arief's 2 of 2, 100%, not 2 of 3). *Mark left* removed her from the office, so she is in no roster or count of people since, and Arief's and Agus's `/new-hires` still list her for her year |
  *
- * **Agus's 3M activation % then reads 3 of 5 (60%)**, and by join month — on a run on 27 October 2026 — **July 75%**
- * (Indah, Dimas and Siti activated, Lukman not), **September 0%** (Tari; Yanti in progress), August with nobody decided
- * yet; **Arief's unit 0 of 1**, Tari, and **Direct Unit 3 of 4**. The months move with the run's day.
+ * **Agus's *Aktivasi 3M* then reads 100%** — seven activated by day 90, nobody past day 90 without a sale, Lukman late
+ * and Tari and Yanti inside their 90 days in neither part — and so do *Direct Unit* (3 of 3), **Arief's** (Wahyu and
+ * Novi, 2 of 2) and **Sari's** (Budi and Rina, 2 of 2).
  *
  * **Derived ids, written once**: the two activations, Lukman's lead and Tari's audit row carry an `_id` from
  * `seedObjectId`, and Tari's leaving is written only while she has none, so a re-run writes nothing and a walk's
@@ -166,12 +166,13 @@ export async function seedActivation3MFixture(deps: Activation3MSeedDeps): Promi
     written += 1;
   }
 
-  // Tari, marked left by Arief six days ago, before any sale: *Not activated*, decided that day and kept — what *Mark
-  // left* writes (`Activation3MService.markLeft`), at the instant she was removed, and its audit row.
+  // Tari, marked left by Arief six days ago, before any sale: `leftAt` at the instant she was removed, and its audit
+  // row — what *Mark left* wrote before UI-025 retired it. It keeps no 3M result: a leaving decides nothing
+  // since UI V1 (D-24), and inside her 90 days there is nothing to keep.
   const leftAt = ((await db.collection('memberships').findOne({ _id: oid(tari.id) }))!.removedAt as Date | null) ?? at(addDays(today, -T.leftDaysAgo));
   const left = await db.collection('memberships').updateOne(
     { _id: oid(tari.id), kpmId, leftAt: null },
-    { $set: { leftAt, activation3M: 'not_activated', activation3MLockedAt: leftAt, updatedBy: deps.arief.id } },
+    { $set: { leftAt, updatedBy: deps.arief.id } },
   );
   if (left.modifiedCount > 0) {
     const auditId = oid(seedObjectId('activation-3m-fixture', 'audit', kpmId, tari.id));
@@ -180,19 +181,20 @@ export async function seedActivation3MFixture(deps: Activation3MSeedDeps): Promi
         _id: auditId, kpmId, actorUserId: deps.ariefUserId, effectiveUserId: null, actorMembershipId: deps.arief.id,
         onBehalfOf: false, action: 'new_hire.marked_left', targetCollection: 'memberships', targetId: tari.id,
         targetMembershipId: tari.id, before: { leftAt: null, activation3M: null },
-        after: { leftAt: leftAt.toISOString(), activation3M: 'not_activated' }, createdAt: leftAt, updatedAt: leftAt,
+        after: { leftAt: leftAt.toISOString(), activation3M: 'in_progress' }, createdAt: leftAt, updatedAt: leftAt,
       });
       written += 1;
     }
   }
 
   const guide = [
-    '3M ACTIVATION on /new-hires (P18.96-T6; ADR-0171 §2, ADR-0173)  (from src/seed/activation-3m-fixture.ts)',
-    `  agus@kpm0417.test    In progress: Novi, Wahyu, Budi, Rina, Yanti · Activated: Indah, Dimas, Siti · Not activated:`,
-    `                       Lukman (day 100, his only sale on day 96: ${closed}) and Tari (left ${addDays(today, -T.leftDaysAgo)})`,
-    '                       3M activation %: 3 of 5 (60%); by join month, on 27 Oct: Jul 75%, Aug —, Sep 0%',
-    '  lukman@kpm0417.test  Agus\'s agent: Schedule 1:1 and Mark left on his row (not activated, checklist overdue)',
-    '  tari@kpm0417.test    Arief\'s agent, marked left by Arief before any sale: Not activated · Left',
+    '3M ACTIVATION on /new-hires (P18.96-T6; ADR-0171 §2, ADR-0173; UI V1, UI-023)  (from src/seed/activation-3m-fixture.ts)',
+    `  agus@kpm0417.test    Teraktivasi: Wahyu, Novi, Budi, Rina, Indah, Dimas, Siti · amber: Lukman (day 96: ${closed})`,
+    '                       Belum: Yanti, and Tari (marked left on day 35, which decides nothing)',
+    '                       Aktivasi 3M 100% (7 of 7 decided; Lukman late and Tari, Yanti in their 90 days in neither part);',
+    '                       Direct Unit 100%, Arief 100% (2 of 2, not 2 of 3), Sari 100%',
+    '  lukman@kpm0417.test  Agus\'s agent: Pecah telor di hari ke-96, amber, outside the 3M rate (checklist overdue)',
+    '  tari@kpm0417.test    Arief\'s agent, marked left by Arief before any sale: Belum, Hari ke-41 (no Keluar)',
   ].join('\n');
   return { written, members: { lukman: lukman.id, tari: tari.id }, guide };
 }

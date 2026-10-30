@@ -86,6 +86,13 @@ export const NotificationTemplate = {
   IMPERSONATION_ELEVATED: 'impersonation.elevated',
   EMAIL_VERIFICATION: 'auth.email_verification',
   PASSWORD_RESET: 'auth.password_reset',
+  /*
+   * A change of the account's email (UI V1, UI-111; ADR-0181): the link that applies it, **to the new address**
+   * (`SendRequest.toAddress`), and a notice that it was asked for, to the address the account has now, with no link
+   * that applies anything. Email only, as the two above: the link proves the mailbox, and an inbox row proves nothing.
+   */
+  EMAIL_CHANGE_VERIFICATION: 'auth.email_change_verification',
+  EMAIL_CHANGE_REQUESTED: 'auth.email_change_requested',
 } as const;
 
 export type NotificationTemplateId =
@@ -123,6 +130,8 @@ export const TEMPLATE_CHANNELS: Record<NotificationTemplateId, readonly Notifica
   [NotificationTemplate.IMPERSONATION_ELEVATED]: ['in_app', 'email'],
   [NotificationTemplate.EMAIL_VERIFICATION]: ['email'],
   [NotificationTemplate.PASSWORD_RESET]: ['email'],
+  [NotificationTemplate.EMAIL_CHANGE_VERIFICATION]: ['email'],
+  [NotificationTemplate.EMAIL_CHANGE_REQUESTED]: ['email'],
 };
 
 export interface SendRequest {
@@ -137,6 +146,12 @@ export interface SendRequest {
    * language. Every other email reads the recipient's `users.locale`, or a reader who has chosen nothing.
    */
   readonly reader?: Reader;
+  /**
+   * **An address the account does not have yet** (UI V1, UI-111; ADR-0181): the email change's link goes to the new
+   * address, which is not `users.email` until that link is opened. The email channel sends there instead of looking
+   * the recipient up; every other send leaves it unset, so mail goes to the address the account has at sending.
+   */
+  readonly toAddress?: string;
 }
 
 /** A channel implementation. Adding WhatsApp means implementing this once. */

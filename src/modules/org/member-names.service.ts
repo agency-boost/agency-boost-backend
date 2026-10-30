@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, isValidObjectId } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { AvatarLinks } from '@/modules/users/avatar.service';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { MembershipRepository } from './membership.repository';
 import type { MembershipDocument } from './membership.schema';
@@ -17,6 +18,14 @@ export type ReadMembership = Pick<MembershipDocument, '_id' | 'userId'>;
 export interface NamedPerson {
   name: string;
   pronoun: 'she' | 'he' | 'they';
+}
+
+/**
+ * A person as a row that draws their avatar names them (UI V1, UI-111): `NamedPerson`, and their profile photo as a
+ * signed link — `null` for none, which the row draws as initials.
+ */
+export interface PicturedPerson extends NamedPerson {
+  photoUrl: string | null;
 }
 
 /**
@@ -40,6 +49,13 @@ export class MemberNames {
   constructor(
     private readonly memberships: MembershipRepository,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
+    /*
+     * **Each photo as a signed link** (UI V1, UI-111): `users.avatarUrl` holds a storage key and the bucket is private
+     * (ADR-0153), so `pictured` signs the photos it answers (`AvatarLinks`, once per photo per half day). The
+     * application always provides it; optional, so the many readers built with the two above keep naming people, and
+     * without it every photo is `null` — initials, never a key.
+     */
+    @Optional() @Inject(AvatarLinks) private readonly avatarLinks: AvatarLinks | null = null,
   ) {}
 
   /**
@@ -79,6 +95,33 @@ export class MemberNames {
   }
 
   /**
+   * **`people`, with the photos of the people a read draws an avatar for** (UI V1, UI-111: *every avatar of yours —
+   * Unit roster, coaching lists, Leader Forum — shows it*): the same two reads, the photo's key read beside the name,
+   * then **one batch of signatures** (`AvatarLinks.linksFor`) over the photos of `drawnIds` alone — the rows the read
+   * returns with an avatar, never a coach or a corrector it only names. Everybody else, and anybody without a photo,
+   * has `photoUrl: null`. A photo that cannot be signed is `null` too: the read still answers.
+   */
+  async pictured(
+    ctx: RequestContext, membershipIds: readonly string[], drawnIds: readonly string[] = membershipIds,
+  ): Promise<Map<string, PicturedPerson>> {
+    const unique = [...new Set(membershipIds)].filter((id) => Boolean(id) && isValidObjectId(id));
+    if (unique.length === 0) return new Map();
+
+    const members = await this.memberships.find(ctx, { _id: { $in: unique } });
+    const people = await this.peopleOf(members, true);
+    const drawn = new Set(drawnIds);
+    const links = this.avatarLinks
+      ? await this.avatarLinks.linksFor([...people].filter(([id]) => drawn.has(id)).map(([, p]) => p.photoKey))
+      : new Map<string, string>();
+
+    const out = new Map<string, PicturedPerson>();
+    for (const [id, { photoKey, ...person }] of people) {
+      out.set(id, { ...person, photoUrl: drawn.has(id) && photoKey ? links.get(photoKey) ?? null : null });
+    }
+    return out;
+  }
+
+  /**
    * **`byMembershipId`, for memberships the caller has just read through the tenant repository** (the Owner's
    * reporting at 500 members, 2026-10-29): their `_id` and `userId`, as `MembershipRepository` answered them, so they
    * are not read a second time — the users read alone. `OfficePeople` reads every member's row for its figures; asking
@@ -93,19 +136,33 @@ export class MemberNames {
     return new Map([...people].map(([membershipId, person]) => [membershipId, person.name]));
   }
 
-  /** The second hop: the users behind memberships already read, each once, over their primary key. */
-  private async peopleOf(members: readonly ReadMembership[]): Promise<Map<string, NamedPerson>> {
+  /**
+   * The second hop: the users behind memberships already read, each once, over their primary key — with `photos`,
+   * each one's photo key (`users.avatarUrl`) beside the name, for `pictured` to sign.
+   */
+  private async peopleOf(members: readonly ReadMembership[]): Promise<Map<string, NamedPerson>>;
+  private async peopleOf(
+    members: readonly ReadMembership[], photos: true,
+  ): Promise<Map<string, NamedPerson & { photoKey: string | null }>>;
+  private async peopleOf(
+    members: readonly ReadMembership[], photos = false,
+  ): Promise<Map<string, NamedPerson & { photoKey?: string | null }>> {
     const userIds = [...new Set(members.map((m) => String(m.userId)))];
     if (userIds.length === 0) return new Map();
 
-    const users = await this.users.find({ _id: { $in: userIds } }).select('fullName pronoun').lean().exec();
+    const users = await this.users.find({ _id: { $in: userIds } })
+      .select(photos ? 'fullName pronoun avatarUrl' : 'fullName pronoun').lean().exec();
     const named = new Map(
-      (users as unknown as { _id: unknown; fullName?: string; pronoun?: NamedPerson['pronoun'] }[])
+      (users as unknown as { _id: unknown; fullName?: string; pronoun?: NamedPerson['pronoun']; avatarUrl?: string | null }[])
         // A row older than the field reads as the schema's default, which `lean()` does not apply.
-        .map((u) => [String(u._id), { name: u.fullName ?? '', pronoun: u.pronoun ?? 'they' }]),
+        .map((u) => [String(u._id), {
+          name: u.fullName ?? '',
+          pronoun: u.pronoun ?? 'they',
+          ...(photos ? { photoKey: u.avatarUrl ?? null } : {}),
+        }]),
     );
 
-    const out = new Map<string, NamedPerson>();
+    const out = new Map<string, NamedPerson & { photoKey?: string | null }>();
     for (const member of members) {
       const person = named.get(String(member.userId));
       if (person?.name) out.set(String(member._id), person);

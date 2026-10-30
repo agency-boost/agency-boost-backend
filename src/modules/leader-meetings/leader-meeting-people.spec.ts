@@ -13,6 +13,8 @@ function people(fakes: {
   rows?: Record<string, unknown>[];
   reader?: Record<string, unknown> | null;
   names?: Record<string, string>;
+  /** UI-111: a person's photo, as `MemberNames.pictured` signed it. */
+  photos?: Record<string, string>;
   ladder?: { code: string; label: string }[];
   kpm?: Record<string, unknown> | null;
 }) {
@@ -20,7 +22,11 @@ function people(fakes: {
     findById: async () => fakes.reader ?? null,
     find: async () => fakes.rows ?? [],
   };
-  const names = { byMembershipId: async () => new Map(Object.entries(fakes.names ?? {})) };
+  const names = {
+    pictured: async () => new Map(Object.entries(fakes.names ?? {}).map(([id, name]) => [
+      id, { name, pronoun: 'they', photoUrl: fakes.photos?.[id] ?? null },
+    ])),
+  };
   const orgLevels = { list: async () => fakes.ladder ?? [] };
   const kpms = { findById: () => ({ select: () => ({ lean: () => ({ exec: async () => fakes.kpm ?? null }) }) }) };
   return new LeaderMeetingPeople(memberships as never, names as never, orgLevels as never, kpms as never);
@@ -110,11 +116,24 @@ describe('who reads the forum, and who edits it (P18.1-T2 AC-1, D-coeditors)', (
     const describe = await people({ names: { 'm-owner': 'Wilson', 'm-reader': 'Rina' }, ladder: [{ code: 'AB', label: 'Agency Builder' }] })
       .describer(ctx(), { timezone: 'Asia/Jakarta', branch: '', ownerUserId: null, companyId: 'c' }, [list]);
     const editors = describe.editors(list, true);
-    expect(editors.owner).toEqual({ membershipId: 'm-owner', name: 'Wilson', rung: { code: 'AB', label: 'Agency Builder' }, isReader: false, tagged: true });
-    expect(editors.coreLeaders).toEqual([{ membershipId: 'm-reader', name: 'Rina', rung: { code: 'SENIOR', label: 'SENIOR' }, isReader: true, tagged: true }]);
+    expect(editors.owner).toEqual({ membershipId: 'm-owner', name: 'Wilson', photoUrl: null, rung: { code: 'AB', label: 'Agency Builder' }, isReader: false, tagged: true });
+    expect(editors.coreLeaders).toEqual([{ membershipId: 'm-reader', name: 'Rina', photoUrl: null, rung: { code: 'SENIOR', label: 'SENIOR' }, isReader: true, tagged: true }]);
     // The Owner is never counted among the core leaders tagged, tagged or not.
     expect([editors.coreLeaderCount, editors.frozen]).toEqual([1, true]);
     expect(describe.nameOf('m-gone')).toBeNull();
     expect(describe.editors([], false).owner).toBeNull();
+  });
+  it('UI-111 each editor carries their photo as a signed link, and an editor without one null: initials', async () => {
+    const list: FrozenEditor[] = [
+      { membershipId: 'm-owner', as: 'owner', rungCode: 'AB', tagged: true },
+      { membershipId: 'm-reader', as: 'core_leader', rungCode: 'AB', tagged: true },
+    ];
+    const describe = await people({
+      names: { 'm-owner': 'Wilson', 'm-reader': 'Rina' },
+      photos: { 'm-owner': 'https://cdn.test/user/u-wilson/avatar/a.jpg?sig=abc' },
+    }).describer(ctx(), { timezone: 'Asia/Jakarta', branch: '', ownerUserId: null, companyId: null }, [list]);
+    const editors = describe.editors(list, false);
+    expect(editors.owner?.photoUrl).toBe('https://cdn.test/user/u-wilson/avatar/a.jpg?sig=abc');
+    expect(editors.coreLeaders.map((p) => p.photoUrl)).toEqual([null]);
   });
 });

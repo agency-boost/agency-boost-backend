@@ -129,7 +129,8 @@ export class LeaderMeetingPeople {
   }
 
   /**
-   * **Names and rungs for every list of editors a read serves, in one pass**: the names in two queries, the
+   * **Names, photos and rungs for every list of editors a read serves, in one pass**: the names in two queries — each
+   * photo's key read beside the name and signed in one batch (UI-111) — the
    * company's ladder in one, however many meetings and people. Each list is then described by the function this
    * answers — the Owner first, the Admins and the Core Leaders each by name — and `coreLeaderCount` counts every
    * editor tagged but the Owner. An editor whose membership is gone from the office is left out.
@@ -141,12 +142,15 @@ export class LeaderMeetingPeople {
     nameOf: (membershipId: string) => string | null;
   }> {
     const ids = [...new Set(lists.flatMap((list) => list.map((e) => e.membershipId)))];
-    const names = await this.names.byMembershipId(ctx, ids);
+    // Every editor of every list is drawn with an avatar, so each one's photo is signed with the name (UI V1, UI-111).
+    const people = await this.names.pictured(ctx, ids);
+    const names = new Map([...people].map(([id, p]) => [id, p.name]));
     const ladder = office.companyId ? await this.orgLevels.list(ctx, office.companyId) : [];
     const labels = new Map(ladder.map((level) => [level.code, level.label]));
     const person = (e: FrozenEditor): ForumPerson => ({
       membershipId: e.membershipId,
       name: names.get(e.membershipId)!,
+      photoUrl: people.get(e.membershipId)?.photoUrl ?? null,
       rung: { code: e.rungCode, label: labels.get(e.rungCode) ?? e.rungCode },
       isReader: e.membershipId === ctx.membershipId,
       tagged: e.tagged,

@@ -273,6 +273,15 @@ export class CoachingSessionDto implements CoachingSessionView {
   })
   reopenableUntil!: string | null;
 
+  @ApiProperty({
+    type: String, nullable: true, example: '2026-11-06',
+    description:
+      'The date a new action item starts with (UI-060): the office’s today plus seven days — the same weekday next '
+      + 'week. *+* fills it in; *Start* gave it to every carried item. The leader may change it. `null` where no row '
+      + 'can be added: a finalized session, or a reader who is not its writing coach.',
+  })
+  defaultDueDate!: string | null;
+
   @ApiProperty({ type: LastWeekRefDto, nullable: true, description: 'The finalized session *last week* is; `null` for a first session.' })
   lastWeek!: { sessionId: string; date: string } | null;
 

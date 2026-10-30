@@ -14,6 +14,7 @@ import {
 import { RatioComparison, RatioDefinitionDocument, RatioOrigin } from './ratio-definition.schema';
 import { checkRatioCreate, checkRatioUpdate } from './config-input';
 import { CONFIG_REFUSALS } from './config.messages';
+import { diverges } from './ratio-diverges';
 
 /** The ratios' own refusals, in both languages (P18.98-T5 AC-3). */
 const SAY = CONFIG_REFUSALS.VALIDATION_FAILED;
@@ -51,21 +52,8 @@ export interface RatioDefinitionView {
   appliesToOrgLevelCodes: string[];
 }
 
-/** Two formula sides are the same set of codes. Order is display, never meaning. */
-const sameCodes = (a: readonly string[], b: readonly string[]) =>
-  a.length === b.length && [...a].sort().join() === [...b].sort().join();
-
-/**
- * The row's formula against the one its office was provisioned with (ADR-0024).
- *
- * `false` for a ratio the office created: there is no standard it could have moved away
- * from, which is not the same as agreeing with one.
- */
-export function diverges(doc: RatioDefinitionDocument): boolean {
-  if (!doc.standardNumerator || !doc.standardDenominator) return false;
-  return !sameCodes(doc.numerator, doc.standardNumerator)
-    || !sameCodes(doc.denominator, doc.standardDenominator);
-}
+/** Whether a row's formula has moved from its standard (ADR-0024): its own file since UI V1 (Phase 18.99 T4). */
+export { diverges } from './ratio-diverges';
 
 /**
  * The office's ratio definitions (P4-T2).

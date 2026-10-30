@@ -100,7 +100,7 @@ describe('compare and Block time (P12-T5)', () => {
         type: 'client', title: 'Client visit — Kusuma', notes: 'Client site — Kusuma residence, Jl. Melati 4', inviteeIds: [h.id('RINA')],
       }));
       const pane = (await compare('AGUS', h.id('SARI')).expect(200)).body;
-      expect(pane.subject).toEqual({ membershipId: h.id('SARI'), name: 'Sari Puspita', rung: { code: 'AAB', label: 'AAB' } });
+      expect(pane.subject).toEqual({ membershipId: h.id('SARI'), name: 'Sari Puspita', rung: { code: 'AAB', label: 'AAB' }, phone: null });
       expect(pane.entries).toEqual([{
         ...visit,
         readerIs: 'ancestor', myAnswer: null,

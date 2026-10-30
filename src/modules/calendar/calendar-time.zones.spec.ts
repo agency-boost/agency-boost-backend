@@ -65,7 +65,7 @@ describe('exit criterion 1: the office’s boundaries, with the process clock in
     expect(a.mondayStart).toMatchObject({ from: '2026-06-01', to: '2026-07-05' });
     expect((a.sixRows as { days: unknown[] }).days).toHaveLength(42);
     expect(a.halfPastMidnight).toEqual({
-      timing: { startsAt: '2026-09-27T17:30:00.000Z', endsAt: '2026-09-27T18:00:00.000Z', startsOn: null, endsOn: null },
+      timing: { allDay: false, startsAt: '2026-09-27T17:30:00.000Z', endsAt: '2026-09-27T18:00:00.000Z', startsOn: null, endsOn: null },
     });
     expect(a.toMidnight).toMatchObject({ timing: { endsAt: '2026-09-28T17:00:00.000Z' } });
     expect(a.trip).toMatchObject({ timing: { startsAt: '2026-09-30T17:00:00.000Z', endsAt: '2026-10-02T17:00:00.000Z' } });

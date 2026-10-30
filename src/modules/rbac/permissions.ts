@@ -798,21 +798,10 @@ export const PERMISSIONS = {
     { grantee: AGENT, scope: 'own-downline' },
   ],
   /*
-   * ***Mark left*** (P18.96-T6 AC-4; ADR-0173 §3, ADR-0169 §4 as amended): `POST /new-hires/:membershipId/left` records
-   * that a new hire has left — `leftAt`, which decides their 3M activation — and removes them through the removal's own
-   * path, so they leave every count of people; their history stays. Not `member:remove_from_team`'s rules: a leader
-   * above the direct one may mark it, and a new hire who leads somebody is refused. **A leader's for the new hires they coach** (`COACH`, as
-   * `new_hires:read_roster` lists them): an AB and an AAB. **The Owner and an Admin for the office's**, at `own-kpm` —
-   * a fact about a membership, not the checklist ADR-0148 keeps them from changing. **Not an Agent who leads**, whose
-   * roster shows the row without it, and not the Super Admin's. A write: a read-only support session is refused it, an
-   * elevated one writes as its member with both actors audited (§3.13).
+   * *`new_hire:mark_left`* — *Mark left*, `POST /new-hires/:membershipId/left` (P18.96-T6 AC-4) — **retired 2026-10-30**
+   * (UI V1, UI-025; ADR-0180 §6): there is no *Keluar* in the interface, so the route lost its only caller and went with
+   * its grant. `leftAt` stays in the data and decides nothing; somebody who leaves is removed (`member:remove_from_team`).
    */
-  'new_hire:mark_left': [
-    { grantee: KPM_OWNER, scope: 'own-kpm' },
-    { grantee: KPM_ADMIN, scope: 'own-kpm' },
-    { grantee: AB, scope: 'own-downline' },
-    { grantee: AAB, scope: 'own-downline' },
-  ],
 
   /*
    * ---- Training progress (P18.5-T1, T4; roles §3.7; `functional/training.md`, *The permissions*). ----
@@ -1021,6 +1010,19 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+  ],
+  /*
+   * **A leader saves the WhatsApp number of somebody they coach** (UI V1, 2026-10-30; UI-081, UI-101, the owner's D-22:
+   * *a leader may set it for their agents*) — `PUT /members/:membershipId/phone`, the *Isi nomor WhatsApp* sheet on a
+   * person's row. The `COACH` reach, as `coaching_profile:update`: an AB their downline, an AAB their own unit's subtree
+   * (`own-downline` is the right token for an AAB too, roles §1 rule 2). **Nobody else**: the Owner and an Admin keep
+   * the office's people at arm's length from their accounts, an Agent sets only their own (`PATCH /auth/me`, which
+   * needs no grant), and a Super Admin is in no office. A personal datum, so refused in every support session
+   * (`@RefuseInSupportSession`).
+   */
+  'member:update_phone': [
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-downline' },
   ],
   // Tags, and only the office's admins set them. A group is not hierarchy and not
   // access, so no leader grant: it is the office's own way of organising, not a unit's.

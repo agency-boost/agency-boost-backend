@@ -24,7 +24,7 @@ function str(payload: Record<string, unknown>, key: string, fallback = ''): stri
  * authoritative channel, and `inbox-copy.ts` is the one place a row's words live —
  * "a change here changes what six books say". So every template that has both channels is
  * rendered *from* that copy, with the email adding only what an inbox does not need: a
- * greeting, and somewhere to go. The two auth templates have no inbox row at all (no
+ * greeting, and somewhere to go. The auth templates have no inbox row at all (no
  * `in_app` channel), so their words are written here, and nowhere else says them twice.
  *
  * Links are built from `APP_ORIGIN` — the app's origin, not this API's. A person opens a
@@ -71,6 +71,23 @@ export class EmailTemplateRenderer extends TemplateRenderer {
           `${origin}/reset-password/${str(payload, 'token')}`,
           '',
           say(EMAIL_MESSAGES.resetIgnore),
+        ]);
+
+      // UI V1 (UI-111, ADR-0181): the link to the new address, and a notice with no link to the old one.
+      case NotificationTemplate.EMAIL_CHANGE_VERIFICATION:
+        return compose(say(EMAIL_MESSAGES.changeVerifySubject), [
+          say(EMAIL_MESSAGES.changeVerifyOpen),
+          '',
+          `${origin}/verify-email-change/${str(payload, 'token')}`,
+          '',
+          say(EMAIL_MESSAGES.changeVerifyIgnore),
+        ]);
+
+      case NotificationTemplate.EMAIL_CHANGE_REQUESTED:
+        return compose(say(EMAIL_MESSAGES.changeNoticeSubject), [
+          say(EMAIL_MESSAGES.changeNoticeAsked({ newEmail: str(payload, 'newEmail') })),
+          '',
+          say(EMAIL_MESSAGES.changeNoticeNotYou),
         ]);
 
       default: {

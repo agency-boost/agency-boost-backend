@@ -5,7 +5,7 @@ import { ulid } from 'ulid';
 import { Clock } from '@/common/clock/clock.port';
 import { ASSET_LIMITS } from '@/domain/constants';
 import { SNIFF_SAMPLE_BYTES, sniffedContentType } from './content-sniff';
-import { AssetOwner, SignedUpload, StoragePort, StoredObject } from './storage.port';
+import { AssetOwner, ownerSegment, SignedUpload, StoragePort, StoredObject } from './storage.port';
 
 /** How long a signed upload form stays usable: the browser posts it at once. */
 const UPLOAD_TTL_MS = 10 * 60 * 1000;
@@ -82,12 +82,14 @@ export class GcsAdapter extends StoragePort {
   }
 
   /**
-   * `<prefix>/<owner>/<folder>/<leaf>`. The owner segment is `<kpmId>` or `company/<companyId>` (ADR-0032): the
+   * `<prefix>/<owner>/<folder>/<leaf>`. The owner segment is `<kpmId>`, `company/<companyId>` (ADR-0032) or, for a
+   * person's profile photo, `user/<userId>` (UI-111): the
    * literal `company` keeps a company's material apart from any office's, so per-office erasure stays a prefix
    * operation that cannot take the company's files with it.
    */
   private key(owner: AssetOwner, folder: string, leaf: string): string {
-    const ownerFolder = owner.kind === 'kpm' ? owner.kpmId : `company/${owner.companyId}`;
+    // A person's own (UI-111) is the literal `user`, as `company` keeps a company's material apart from any office's.
+    const ownerFolder = ownerSegment(owner);
     return `${this.config.getOrThrow<string>('STORAGE_KEY_PREFIX')}/${ownerFolder}/${folder}/${leaf}`;
   }
 
@@ -101,7 +103,8 @@ export class GcsAdapter extends StoragePort {
    * - **`Content-Type`**: exactly `mimeType`, which the service has already checked against the route's list —
    *   so a route's narrower `allowedMimeTypes` (a PDF-only route) needs nothing further here. It pins the *claim*
    *   only: at confirm the type is read from the bytes (`describe`), and the route's list is checked against that.
-   * - **`content-length-range` 1 .. 25 MB** (`ASSET_LIMITS.MAX_BYTES`): an empty or oversized file never lands.
+   * - **`content-length-range` 1 .. 25 MB** (`ASSET_LIMITS.MAX_BYTES`), or 1 .. the route's own `maxBytes` (a profile
+   *   photo's 512 KB, `AVATAR.MAX_BYTES`): an empty or oversized file never lands.
    * - Nothing else: a form field the policy does not name is refused, so the browser cannot add metadata.
    */
   async createSignedUpload(params: {
@@ -110,12 +113,13 @@ export class GcsAdapter extends StoragePort {
     filename: string;
     mimeType: string;
     allowedMimeTypes?: readonly string[];
+    maxBytes?: number;
   }): Promise<SignedUpload> {
     const storageKey = this.key(params.owner, params.folder, ulid());
     const [policy] = await this.bucket.file(storageKey).generateSignedPostPolicyV4({
       // The SDK's clock, not the injected one (see `sdkNow`).
       expires: sdkNow() + UPLOAD_TTL_MS,
-      conditions: [['content-length-range', 1, ASSET_LIMITS.MAX_BYTES]],
+      conditions: [['content-length-range', 1, params.maxBytes ?? ASSET_LIMITS.MAX_BYTES]],
       fields: { 'Content-Type': params.mimeType },
     }).catch((err: unknown) => {
       throw refused('to sign the upload', err);

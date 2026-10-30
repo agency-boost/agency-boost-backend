@@ -271,15 +271,15 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
   });
 
   describe('P18.98-T7 the slots’ words in the reader’s language (ADR-0179 §7)', () => {
-    it('serves each title, line and checklist label in Indonesian to an Indonesian reader; codes, states and order as they are', async () => {
+    it('serves each line and checklist label in Indonesian to an Indonesian reader, each title its English name (UI-107); codes, states and order as they are', async () => {
       const view = await wired.recruitmentPitch.read(inIndonesian(member(KPM_A)));
       expect(view.slots.map((s) => [s.slot, s.title, s.required, s.state])).toEqual([
-        ['opportunity', 'Ikhtisar peluang', true, 'missing'],
-        ['proof', 'Bukti & kredibilitas', true, 'missing'],
+        ['opportunity', 'Opportunity Overview', true, 'missing'],
+        ['proof', 'Proof & Credibility', true, 'missing'],
         ['faq', 'FAQ', true, 'missing'],
-        ['howtojoin', 'Cara bergabung', true, 'missing'],
-        ['company', 'Profil perusahaan', false, 'missing'],
-        ['agency', 'Profil agensi', false, 'missing'],
+        ['howtojoin', 'How to Join', true, 'missing'],
+        ['company', 'Company Profile', false, 'missing'],
+        ['agency', 'Agency Profile', false, 'missing'],
       ]);
       expect(view.slots.map((s) => s.line)).toEqual([
         'Pitch utama: perannya, penghasilannya, dan apa yang dibutuhkan.',
@@ -302,10 +302,11 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
       const key = await uploadTo(KPM_A, 'x.pdf');
       await db().collection('assets').updateOne({ storageKey: key }, { $set: { originalFilename: null } });
       const slot = await wired.recruitmentPitch.attach(inIndonesian(owner(KPM_A)), 'howtojoin', key);
-      expect([slot.title, slot.file!.name]).toEqual(['Cara bergabung', 'Cara bergabung']);
+      // A title is its English name in both languages since UI V1 (UI-107).
+      expect([slot.title, slot.file!.name]).toEqual(['How to Join', 'How to Join']);
       // Another reader reads the slot in their own language; the stored name is what was written.
       const english = await slotOf(KPM_A, 'howtojoin');
-      expect([english.title, english.file!.name]).toEqual(['How to Join', 'Cara bergabung']);
+      expect([english.title, english.file!.name]).toEqual(['How to Join', 'How to Join']);
     });
 
     it('a refusal names the slot in its reader’s language', async () => {
@@ -318,10 +319,10 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
         return null;
       };
       expect(await refused(inIndonesian(owner(KPM_A)), 'income')).toBe(
-        'Ikhtisar peluang belum memiliki file: unggah file dulu sebelum mengonfirmasi isinya.',
+        'Opportunity Overview belum memiliki file: unggah file dulu sebelum mengonfirmasi isinya.',
       );
       expect(await refused(inIndonesian(owner(KPM_A)), 'nope')).toBe(
-        'Ikhtisar peluang tidak memiliki item "nope" untuk dikonfirmasi.',
+        'Opportunity Overview tidak memiliki item "nope" untuk dikonfirmasi.',
       );
     });
   });

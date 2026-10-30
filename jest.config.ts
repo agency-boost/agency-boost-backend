@@ -161,6 +161,9 @@ const config: Config = {
     './src/modules/events/': { lines: 95, branches: 95, functions: 95, statements: 95 },
     './src/modules/events/event-audience.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/events/event-guest.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    // Phase 18.99 (the exit review, T1): the coachee's tick from Calendar — who may write it, a tick that changes nothing,
+    // and the session gone between the read and the write — pinned whole by its own spec.
+    './src/modules/coaching/coaching-action-done.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/events/event-roll-call.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/events/event-readings.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/products/': { lines: 95, branches: 84, functions: 95, statements: 95 },

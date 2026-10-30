@@ -1,6 +1,6 @@
 import { CASCADE_ACTIVITY_CODES, SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES } from '@/domain/constants';
 import {
-  activityTargets, madeFigures, monthlyApeTarget, paceFor, periodFigures, sectionChips, summaryPlan, totalLogged,
+  activityTargets, goalFigures, madeFigures, monthlyApeTarget, paceFor, periodFigures, sectionChips, summaryPlan, totalLogged,
   ytdBeforeThisMonth, type PlannedGoal, type ShownSection,
 } from './summary-figures';
 
@@ -272,9 +272,18 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
       ]);
     });
 
-    it('totals every code logged, in any section or none', () => {
-      expect(totalLogged(new Map([['A', 3], ['B', 0], ['C', 4]]))).toBe(7);
-      expect(totalLogged(new Map())).toBe(0);
+    it('UI-052 the total is the breakdown’s sum — the three targets and every chip row, each code once; nothing unshown', () => {
+      // Agus on staging: Set appointment 1, Recruitment 1, Development 2 shown — and two of a selling type no chip shows.
+      const counts = new Map([['SET_APPT', 1], ['MEETING', 0], ['SUBMIT', 0], ['RECRUIT', 1], ['DEV_A', 1], ['DEV_B', 1], ['UNSHOWN', 2]]);
+      const targets = [{ codes: ['SET_APPT'] }, { codes: ['MEETING'] }, { codes: ['SUBMIT'] }];
+      const chips = [
+        { code: 'RECRUITMENT', label: 'Recruitment', total: 1, rows: [{ code: 'RECRUIT', label: 'r', count: 1 }] },
+        { code: 'DEVELOPMENT', label: 'Development', total: 2, rows: [{ code: 'DEV_A', label: 'a', count: 1 }, { code: 'DEV_B', label: 'b', count: 1 }] },
+      ];
+      expect(totalLogged(counts, targets, chips)).toBe(4);
+      // A code in two places is counted once.
+      expect(totalLogged(counts, [...targets, { codes: ['SET_APPT'] }], chips)).toBe(4);
+      expect(totalLogged(new Map(), [], [])).toBe(0);
     });
   });
 
@@ -421,6 +430,29 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
         goal: goal({ caseSizeMinor: 0 }), month: '2026-09', throughLastMonthMinor: 160 * M, thisMonthMinor: null,
       });
       expect(plan).toMatchObject({ monthlyTargetMinor: 85 * M, monthlyCounts: null, yearlyCounts: null });
+    });
+
+    /** `goalFigures` over the goal above: Rp 500 jt for the year, Rp 240 jt done, Rp 18 jt a case. */
+    const figuresOf = (over: Partial<PlannedGoal> = {}) => goalFigures({
+      goal: goal(over), month: '2026-09', throughLastMonth: { minor: 160 * M }, thisMonth: null, yearToDate: null, names: new Map(),
+    });
+
+    it('UI-052 the year’s Submission polis target is Polis yang dibutuhkan — the cascade on what the year still needs', () => {
+      const { plan, yearly, monthly } = figuresOf();
+      // (500 − 240) ÷ 18 → 15 policies still needed; ÷ 0.3 → 50 meetings; ÷ 0.3 → 167 appointments.
+      expect(yearly.policiesNeeded).toBe(15);
+      expect(plan.yearlyCounts).toEqual({ policies: 15, appointments: 50, leads: 167 });
+      expect(plan.yearlyCounts!.policies).toBe(yearly.policiesNeeded);
+      // The month is unchanged: its target fixed when it began (ADR-0056), 85 M → 5 policies.
+      expect(plan.monthlyCounts).toEqual({ policies: 5, appointments: 17, leads: 57 });
+      expect(monthly.targetMinor).toBe(85 * M);
+    });
+
+    it('UI-052 a year made needs nothing more — 0 of each — and a year with no goal has no targets', () => {
+      expect(figuresOf({ achieved: { minor: 520 * M, month: '2026-09', provenance: 'imported' } }).plan.yearlyCounts)
+        .toEqual({ policies: 0, appointments: 0, leads: 0 });
+      expect(figuresOf({ savedAt: null }).plan.yearlyCounts).toBeNull();
+      expect(figuresOf({ caseSizeMinor: 0 }).plan.yearlyCounts).toBeNull();
     });
   });
 });

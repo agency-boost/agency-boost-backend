@@ -1,13 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import {
   CreateLeadDto, CreateLeadQueryDto, ListLeadsQueryDto, ReorderLeadsDto, SetLeadOutcomeDto, SetLeadStatusDto,
-  UpdateLeadDto,
+  SetNextActionDoneDto, UpdateLeadDto,
 } from './lead.dto';
-import { DeletedLeadDto, LeadOrderDto, LeadPageDto, LeadResponseDto } from './lead.response.dto';
+import { DeletedLeadDto, LeadDetailResponseDto, LeadOrderDto, LeadPageDto, LeadResponseDto } from './lead.response.dto';
 import { LeadService } from './lead.service';
 
 /**
@@ -78,9 +78,10 @@ export class LeadController {
     summary: 'One lead',
     description:
       '**404, not 403**, for another office’s. A lead you do not own — one of somebody you coach — '
-      + 'writes one entry to the audit log; your own writes none.',
+      + 'writes one entry to the audit log; your own writes none. **With its `history`** (UI V1, UI-105): every '
+      + 'move along its ladder, oldest first, for the lead sheet’s *Riwayat* — on this read only, never the list.',
   })
-  @ApiResponse({ status: 200, type: LeadResponseDto })
+  @ApiResponse({ status: 200, type: LeadDetailResponseDto })
   async read(@Ctx() ctx: RequestContext, @Param('id') id: string) {
     return this.leads.read(ctx, id);
   }
@@ -177,6 +178,23 @@ export class LeadController {
     @Ctx() ctx: RequestContext, @Param('id') id: string, @Body() body: SetLeadOutcomeDto,
   ) {
     return this.leads.setOutcome(ctx, id, body.outcome, body.version);
+  }
+
+  @Put(':id/next-action/done')
+  @RequirePermission('lead:update')
+  @ApiOperation({
+    summary: 'Tick your lead’s next action done, or take the tick back',
+    description:
+      'From your Calendar’s *Tugas* (UI V1, UI-104). `done: true` clears the next action’s date and note — the lead '
+      + 'then asks for a new one — and keeps them so `done: false` can put them back. **Your own lead only**: a lead '
+      + 'of somebody you coach is `404`, as one out of reach is. Always pinned to `version`. A lead with nothing to '
+      + 'tick, or nothing to put back, is answered as it is.',
+  })
+  @ApiResponse({ status: 200, type: LeadResponseDto })
+  @ApiResponse({ status: 404, description: '`NOT_FOUND` — not a lead of yours: somebody else’s, another office’s, or nobody’s.', type: ApiErrorEnvelope })
+  @ApiResponse({ status: 409, description: STALE, type: ApiErrorEnvelope })
+  async setNextActionDone(@Ctx() ctx: RequestContext, @Param('id') id: string, @Body() body: SetNextActionDoneDto) {
+    return this.leads.setNextActionDone(ctx, id, body.done, body.version);
   }
 
   @Delete(':id')

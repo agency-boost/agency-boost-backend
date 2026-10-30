@@ -40,10 +40,12 @@ describe('P15-T1 AC-11, P18.5-T7 AC-8 the Unit Dashboard reads no training or ev
   const rel = (f: string) => f.slice(SRC.length + 1);
 
   it('P15-T1 AC-11 the module has code to check', () => {
-    // Its sentences in both languages since P18.98-T5: `unit-dashboard.messages.ts`, the catalogue.
+    // Its sentences in both languages since P18.98-T5: `unit-dashboard.messages.ts`, the catalogue. The Activities tab's
+    // read and its rules since UI V1 (Phase 18.99 T4): `unit-activities.*`, `unit-figures.ts` — walked like the rest.
     expect(code.map((f) => f.slice(MODULE.length + 1)).sort()).toEqual([
+      'unit-activities.controller.ts', 'unit-activities.response.dto.ts', 'unit-activities.service.ts',
       'unit-dashboard.controller.ts', 'unit-dashboard.dto.ts', 'unit-dashboard.messages.ts',
-      'unit-dashboard.response.dto.ts', 'unit-dashboard.service.ts',
+      'unit-dashboard.response.dto.ts', 'unit-dashboard.service.ts', 'unit-figures.ts',
     ]);
   });
 

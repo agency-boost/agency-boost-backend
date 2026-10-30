@@ -72,6 +72,8 @@ describe('P18.8-T2 — the leader-limit request routes, over HTTP', () => {
 
   it('declares the permission each route needs', () => {
     expect(declaredPermissions(OrgController)).toMatchObject({
+      // UI V1 (UI-012, D-14; the Phase 18.99 exit review, T1): *Search agent* reads on the roster's own grant.
+      search: 'member:read_profile',
       leaderLimitRequests: 'leader_limit_request:read',
       cancelLeaderLimitRequest: 'leader_limit_request:create',
       requestPastLeaderLimit: 'leader_limit_request:create',

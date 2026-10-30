@@ -1,5 +1,5 @@
 import {
-  AssetOwner, SignedUpload, StoragePort, StoredObject,
+  AssetOwner, ownerSegment, SignedUpload, StoragePort, StoredObject,
 } from '@/modules/assets/storage.port';
 
 /**
@@ -27,9 +27,7 @@ export class StubStorage extends StoragePort {
     owner: AssetOwner; folder: string; filename: string; mimeType: string; allowedMimeTypes?: readonly string[];
   }): Promise<SignedUpload> {
     this.signedWith.push({ folder: params.folder, mimeType: params.mimeType, allowedMimeTypes: params.allowedMimeTypes });
-    const owner = params.owner.kind === 'kpm'
-      ? params.owner.kpmId
-      : `company/${params.owner.companyId}`;
+    const owner = ownerSegment(params.owner);
     this.next += 1;
     const storageKey = `dev/${owner}/${params.folder}/${String(this.next).padStart(4, '0')}`;
     // Present from the moment a signature is issued, so the common path in a test is the
@@ -78,7 +76,7 @@ export class StubStorage extends StoragePort {
     if (!source || this.failing.has(params.storageKey)) {
       throw new Error(`Storage could not copy ${params.storageKey}.`);
     }
-    const owner = params.owner.kind === 'kpm' ? params.owner.kpmId : `company/${params.owner.companyId}`;
+    const owner = ownerSegment(params.owner);
     this.next += 1;
     const storageKey = `dev/${owner}/${params.folder}/${String(this.next).padStart(4, '0')}`;
     const copied = { ...source, storageKey };
@@ -97,7 +95,7 @@ export class StubStorage extends StoragePort {
   async putObject(params: {
     owner: AssetOwner; folder: string; name: string; mimeType: string; body: Buffer;
   }): Promise<StoredObject & { sent: boolean }> {
-    const owner = params.owner.kind === 'kpm' ? params.owner.kpmId : `company/${params.owner.companyId}`;
+    const owner = ownerSegment(params.owner);
     const storageKey = `dev/${owner}/${params.folder}/${params.name}`;
     const held = this.objects.get(storageKey);
     if (held) return { ...held, sent: false };

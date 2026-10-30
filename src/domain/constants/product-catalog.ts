@@ -157,6 +157,21 @@ export interface SeedAttackPlan {
   readonly nextAction: string;
 }
 
+/**
+ * **A seed product's words in another language, field for field** (UI V1, UI-107; Phase 18.99 T13): what
+ * `product-words-id.ts` holds for every product below, so a reader in that language reads the platform's default words
+ * in it. Every list is the seed's length and order; a field the seed leaves blank (a run-off product's `opening` and
+ * `nextAction`) stays blank. `objectionYouSay` is not here: it is the need's reply (`SEED_REPLY_BY_NEED`), translated
+ * once by need.
+ */
+export interface SeedProductWords {
+  readonly tagline: string;
+  readonly benefits: readonly string[];
+  readonly differentiator: string;
+  readonly bestFor: string;
+  readonly defaultAttackPlan: Omit<SeedAttackPlan, 'objectionYouSay'>;
+}
+
 export interface SeedProduct {
   readonly code: string;
   readonly name: string;

@@ -68,6 +68,15 @@ export class StatusAckDto {
   status!: string;
 }
 
+/** `POST /auth/verify-email-change` (UI V1, UI-111; ADR-0181): the change applied, and the address it moved to. */
+export class EmailChangedDto {
+  @ApiProperty({ type: String, enum: ['changed'] })
+  status!: string;
+
+  @ApiProperty({ type: String, example: 'agus.baru@kpm0417.test' })
+  email!: string;
+}
+
 /** The identity half of `GET /auth/me`. */
 export class MeUserDto {
   @ApiProperty({ type: String })
@@ -84,6 +93,22 @@ export class MeUserDto {
 
   @ApiProperty({ type: String, nullable: true })
   pronoun!: string | null;
+
+  /* UI V1 (2026-10-30; UI-081, D-22): the WhatsApp number the person saved, or one an invite or their leader gave them. */
+  @ApiProperty({
+    type: String, nullable: true, example: '+6281211002200',
+    description: 'Your WhatsApp number, or `null`. Saved as `+62…` since UI V1; one recorded before then reads as it was '
+      + 'typed. Set with `PATCH /auth/me`.',
+  })
+  phone!: string | null;
+
+  /* UI V1 (2026-10-30; UI-111): the photo *Profil saya* saved, as a link every avatar of theirs draws. */
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'Your profile photo, as a signed link valid 12 hours (`AVATAR.URL_TTL_SECONDS`; the bucket is private), '
+      + 'or `null` for none — the avatar then draws `initials`. Set with `PUT /auth/me/avatar`, cleared with `DELETE`.',
+  })
+  avatarUrl!: string | null;
 
   @ApiProperty({ type: String, description: 'Derived server-side, so every avatar agrees.' })
   initials!: string;

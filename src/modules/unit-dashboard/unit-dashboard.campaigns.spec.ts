@@ -61,6 +61,21 @@ describe('the Unit Dashboard’s campaign parts (P18.5-T7)', () => {
     expect(row(v, 'SARI')).toMatchObject({ chasingMdrt: false, campaigns: [] });
   });
 
+  it('P18.5-T7 AC-7 two chips of one title are ordered by code, so two reads never shuffle them', async () => {
+    const owner = office.as('OWNER');
+    for (const code of ['ZETA_PUSH', 'ALPHA_PUSH']) {
+      await wired.campaigns.create(owner, {
+        code, title: 'Q3 Push', startsAt: wib('2026-09-01T00:00:00'), endsAt: wib('2026-09-30T23:59:00'), requirements: [],
+      });
+      await chase('DIMAS', code);
+    }
+    expect(row(await read('AGUS'), 'DIMAS').campaigns).toEqual([
+      { code: 'MDRT_QUALIFICATION', title: 'MDRT Qualification' },
+      { code: 'ALPHA_PUSH', title: 'Q3 Push' },
+      { code: 'ZETA_PUSH', title: 'Q3 Push' },
+    ]);
+  });
+
   it('P18.5-T7 AC-7 Agus’s roster: his own ✓, Dimas ✓, Rina ✓ in Sari’s unit, the rest —', async () => {
     const v = await read('AGUS');
     expect(Object.fromEntries(everyRow(v).map((r) => [r.name, r.chasingMdrt]))).toMatchObject({

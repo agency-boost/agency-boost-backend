@@ -22,6 +22,11 @@ class ForumRungDto {
 export class ForumPersonDto implements ForumPerson {
   @ApiProperty({ description: 'The membership: the person in this agency, never their account.' }) membershipId!: string;
   @ApiProperty({ example: 'Agus Prasetyo' }) name!: string;
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'UI V1 (UI-111): their profile photo, when they have one, as a signed link (`users.avatarUrl`); the avatar draws initials otherwise.',
+  })
+  photoUrl!: string | null;
   @ApiProperty({ type: ForumRungDto }) rung!: { code: string; label: string };
   @ApiProperty({ description: 'The reader themselves: *"(You)"* after the name.' }) isReader!: boolean;
   @ApiProperty({
@@ -234,7 +239,7 @@ export class AgendaItemDto implements AgendaItem {
   @ApiProperty() id!: string;
   @ApiProperty({ description: 'Plain text.' }) text!: string;
   @ApiProperty({ description: 'A name typed by hand; empty for none.' }) pic!: string;
-  @ApiProperty({ description: 'Meaningful on *During* only.' }) done!: boolean;
+  @ApiProperty({ description: 'Ticked or not, in any section (UI V1, UI-110).' }) done!: boolean;
   @ApiProperty({ example: 1 }) version!: number;
 }
 

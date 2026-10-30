@@ -178,3 +178,41 @@ describe('P18.98-T5 AC-5 the email in the recipient’s language', () => {
     }
   });
 });
+
+/**
+ * **UI-111 — the email change's two emails** (UI V1, 2026-10-30; ADR-0181): the link that applies it, to the new address,
+ * opening the app's `/verify-email-change/<token>`; and a notice to the old one naming the new address, with **no link
+ * at all** — nothing in it applies the change, and what it asks of somebody who did not ask is a new password.
+ */
+describe('UI-111 the email change’s emails (ADR-0181)', () => {
+  it('UI-111 the link to the new address opens the app’s verify-email-change page, and says nothing changes until then', () => {
+    const { subject, body } = renderer.render(NotificationTemplate.EMAIL_CHANGE_VERIFICATION, {
+      token: 'tok-789', fullName: 'Agus Prasetyo',
+    }, SOURCE_READER);
+    expect(subject).toBe('[AgencyBoost] Confirm your new email address');
+    expect(body).toContain('Hello Agus Prasetyo,');
+    expect(body).toContain('https://app.agencyboost.test/verify-email-change/tok-789');
+    expect(body).toContain('Your email does not change until you do.');
+  });
+
+  it('UI-111 the notice to the old address names the new one, tells somebody who did not ask what to do, and has no link', () => {
+    const { subject, body } = renderer.render(NotificationTemplate.EMAIL_CHANGE_REQUESTED, {
+      fullName: 'Agus Prasetyo', newEmail: 'agus.baru@kpm.test',
+    }, SOURCE_READER);
+    expect(subject).toBe('[AgencyBoost] Your email address is being changed');
+    expect(body).toContain('asked to change its email to agus.baru@kpm.test.');
+    expect(body).toContain('If this was not you, change your password now');
+    expect(body).not.toMatch(/https?:\/\//);
+  });
+
+  it('UI-111 both in Indonesian for an Indonesian reader', () => {
+    const ID = readerIn('id');
+    const link = renderer.render(NotificationTemplate.EMAIL_CHANGE_VERIFICATION, { token: 't', fullName: 'Agus' }, ID);
+    expect(link.subject).toBe('[AgencyBoost] Konfirmasi alamat email baru Anda');
+    expect(link.body).toContain('Email Anda tidak berubah sebelum Anda membukanya.');
+    const notice = renderer.render(NotificationTemplate.EMAIL_CHANGE_REQUESTED, { fullName: 'Agus', newEmail: 'a@b.test' }, ID);
+    expect(notice.subject).toBe('[AgencyBoost] Alamat email Anda sedang diubah');
+    expect(notice.body).toContain('meminta email akun ini diubah menjadi a@b.test.');
+    expect(notice.body).toContain('Jika ini bukan Anda, segera ubah kata sandi Anda');
+  });
+});

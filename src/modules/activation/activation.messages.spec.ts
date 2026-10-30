@@ -10,13 +10,15 @@ import { ACTIVATION_MESSAGES, ACTIVATION_REFUSALS, completesWhenOf, dataLinkLabe
  * each link kind's English is the registry's, byte for byte.
  */
 describe('P18.98-T5 the activation catalogue', () => {
-  it('AC-2 says how many report to a new hire, one and many, in both languages', () => {
-    const one = ACTIVATION_REFUSALS.NEW_HIRE_HAS_REPORTS.reportsToThem({ reports: 1 });
-    const three = ACTIVATION_REFUSALS.NEW_HIRE_HAS_REPORTS.reportsToThem({ reports: 3 });
-    expect(english(one)).toBe('1 person reports to them. Move them to another leader before marking them as left.');
-    expect(english(three)).toBe('3 people report to them. Move those people to another leader before marking them as left.');
-    expect(indonesian(one)).toBe('1 orang melapor kepadanya. Pindahkan orang itu ke leader lain sebelum menandainya keluar.');
-    expect(indonesian(three)).toBe('3 orang melapor kepadanya. Pindahkan mereka ke leader lain sebelum menandainya keluar.');
+  it('UI-025 Mark left is retired: none of its refusals is in the catalogue any more', () => {
+    for (const code of ['NOT_A_NEW_HIRE', 'NEW_HIRE_HAS_REPORTS', 'NEW_HIRE_NOT_MARKABLE', 'NEW_HIRE_ALREADY_LEFT']) {
+      expect([code, code in ACTIVATION_REFUSALS]).toEqual([code, false]);
+    }
+  });
+
+  it('UI-027 (D-26) names a pecah telor’s closing in both languages', () => {
+    expect(english(ACTIVATION_MESSAGES.pecahTelorClosing)).toBe('First sale (date recorded by hand)');
+    expect(indonesian(ACTIVATION_MESSAGES.pecahTelorClosing)).toBe('Pecah telor (tanggal dicatat manual)');
   });
 
   it('AC-3 writes a count past a thousand the Indonesian way, and keeps the English as it was', () => {
@@ -47,10 +49,5 @@ describe('P18.98-T5 the activation catalogue', () => {
     expect([dataLinkLabelOf('sales:first'), dataLinkLabelOf('sales:closings:3'), dataLinkLabelOf('coaching:weekly:4')]
       .map((label) => [english(label), indonesian(label)]))
       .toEqual([['Sales data', 'Data penjualan'], ['Sales data', 'Data penjualan'], ['Coaching sessions', 'Sesi coaching']]);
-  });
-
-  it('AC-6 the reason Mark left stores, in both languages', () => {
-    expect([english(ACTIVATION_MESSAGES.leftAsNewHire), indonesian(ACTIVATION_MESSAGES.leftAsNewHire)])
-      .toEqual(['Left the office as a new hire.', 'Keluar dari KPM sebagai new hire.']);
   });
 });

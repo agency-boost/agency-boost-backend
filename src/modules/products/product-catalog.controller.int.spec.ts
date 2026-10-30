@@ -13,7 +13,10 @@ import {
   AAB, AB, ADMIN, AGENT, declaredPermissions, EVERY_MEMBER, FIXTURE_KPM, OWNER,
   productionPipe, session, StubAuth, SUPER_ADMIN,
 } from '../../../test/http-permissions';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { listenOnLoopback } from '../../../test/listen';
+import { SEED_PRODUCTS } from '@/domain/constants/product-catalog';
+import { SEED_PRODUCTS_ID, SEED_REPLY_BY_NEED_ID } from '@/domain/constants/product-words-id';
 import { AttackPlanController, ProductCatalogController } from './product-catalog.controller';
 import { ProductCatalogService } from './product-catalog.service';
 
@@ -177,6 +180,41 @@ describe('the Product Catalog and the Sales Attack Plan over HTTP (Phase 14)', (
         product: { code: 'PRUMAPAN' }, verdict: 'good_fit', outside: [],
         alternatives: [{ code: 'PRUANUGERAH', name: 'PRUAnugerah' }], moreCount: 0, shelfEmpty: false,
       });
+    });
+  });
+
+  /**
+   * **The platform's words in the reader's language** (UI V1, UI-107): a company that still holds the seed's English
+   * serves it in Indonesian to `Accept-Language: id` — the shelf's lines, the drawer and the plan — and as stored to `en`.
+   * The product's name is a name in both. A word an office typed is as typed (`product-words.spec.ts`, the rule's unit).
+   */
+  describe('UI-107 the seed products in the reader’s language', () => {
+    const MAPAN = SEED_PRODUCTS.find((p) => p.code === 'PRUMAPAN')!;
+    const MAPAN_ID = SEED_PRODUCTS_ID.PRUMAPAN;
+
+    it('UI-107 the shelf: each line in Indonesian to an Indonesian reader, as stored to an English one', async () => {
+      const id = await get('/product-catalog').set(...IN_INDONESIAN).expect(200);
+      const en = await get('/product-catalog').expect(200);
+      const card = (body: { products: { code: string; name: string; tagline: string }[] }) =>
+        body.products.find((p) => p.code === 'PRUMAPAN')!;
+      expect(card(id.body)).toMatchObject({ name: 'PRUMapan', tagline: MAPAN_ID.tagline });
+      expect(card(en.body)).toMatchObject({ name: 'PRUMapan', tagline: MAPAN.tagline });
+    });
+
+    it('UI-107 the drawer and the plan: every word of the script in Indonesian, the reply by need', async () => {
+      const drawer = (await get('/product-catalog/PRUMAPAN').set(...IN_INDONESIAN).expect(200)).body;
+      expect(drawer).toMatchObject({
+        benefits: MAPAN_ID.benefits, differentiator: MAPAN_ID.differentiator, bestFit: MAPAN_ID.bestFor,
+        script: {
+          goodFit: MAPAN_ID.defaultAttackPlan.goodFit, opening: MAPAN_ID.defaultAttackPlan.opening,
+          benefits: MAPAN_ID.defaultAttackPlan.benefits, fullScript: MAPAN_ID.defaultAttackPlan.fullScript,
+          objectionTheySay: MAPAN_ID.defaultAttackPlan.objectionTheySay,
+          objectionYouSay: SEED_REPLY_BY_NEED_ID.retirement, nextAction: MAPAN_ID.defaultAttackPlan.nextAction,
+        },
+      });
+      const plan = (await get('/attack-plan?need=retirement&age=2&budget=2').set(...IN_INDONESIAN).expect(200)).body;
+      expect(plan.product).toMatchObject({ name: 'PRUMapan', tagline: MAPAN_ID.tagline, script: drawer.script });
+      expect(plan.alternatives).toEqual([{ code: 'PRUANUGERAH', name: 'PRUAnugerah' }]);
     });
   });
 

@@ -8,8 +8,8 @@ import { AdminDelegationService } from './admin-delegation.service';
 import { GroupService } from './group.service';
 import { OrgTreeService } from './org-tree.service';
 import {
-  ChangeRoleDto, CreateLeaderLimitRequestDto, DirectoryQueryDto, GroupDto, RemoveMemberDto, SetCoreLeaderDto,
-  TagMemberDto,
+  ChangeRoleDto, CreateLeaderLimitRequestDto, DirectoryQueryDto, GroupDto, MemberSearchQueryDto, RemoveMemberDto,
+  SetCoreLeaderDto, TagMemberDto,
 } from './org.dto';
 import { LeaderLimitRequestService } from './leader-limit-request.service';
 import { RemovalService } from './removal.service';
@@ -51,6 +51,25 @@ export class OrgController {
   })
   async myTeam(@Ctx() ctx: RequestContext) {
     return this.roles.team(ctx);
+  }
+
+  /*
+   * Before `GET :membershipId`, or that route would read `search` as somebody's id: Nest matches in the order the
+   * handlers are declared.
+   */
+  @Get('search')
+  @RequirePermission('member:read_profile')
+  @ApiOperation({
+    summary: 'Search agent: the people you may see, by name or agent code',
+    description:
+      'UI V1 (UI-012, UI-059, D-14): the picker that opens a person\'s page. Part of a name (full or preferred) or an '
+      + 'agent code, case-insensitive; empty or absent lists the first people. Narrowed exactly as the roster is — '
+      + 'the office for its Owner and Admins, an AB\'s downline, an AAB\'s own unit — **never yourself**, so an Agent '
+      + 'finds nobody. Active members only, A to Z by name, the first `limit` (10, at most 20). Names and codes only: '
+      + 'nothing is recorded as read, as the tree records nothing.',
+  })
+  async search(@Ctx() ctx: RequestContext, @Query() query: MemberSearchQueryDto) {
+    return { members: await this.directory.search(ctx, query) };
   }
 
   @Patch(':membershipId/role')

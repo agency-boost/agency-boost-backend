@@ -22,6 +22,8 @@ export type MeetingState = 'upcoming' | 'completed';
 export interface ForumPerson {
   membershipId: string;
   name: string;
+  /** Their profile photo as a signed link (UI V1, UI-111); `null` for none: the avatar draws initials. */
+  photoUrl: string | null;
   rung: { code: string; label: string };
   /** The reader themselves: *"(You)"* after the name. */
   isReader: boolean;

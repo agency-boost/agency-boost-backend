@@ -78,7 +78,7 @@ describe('the calendar’s clock, in the office’s zone', () => {
       const result = timingOf('meeting', { date: '2026-09-28', start: '00:30', end: '01:00' }, JAKARTA);
       expect(result).toEqual({
         timing: {
-          startsAt: new Date('2026-09-27T17:30:00Z'), endsAt: new Date('2026-09-27T18:00:00Z'), startsOn: null, endsOn: null,
+          allDay: false, startsAt: new Date('2026-09-27T17:30:00Z'), endsAt: new Date('2026-09-27T18:00:00Z'), startsOn: null, endsOn: null,
         },
       });
       // Inside the office's week of the 28th, which begins at its own midnight.
@@ -97,7 +97,7 @@ describe('the calendar’s clock, in the office’s zone', () => {
       const result = timingOf('task', { date: '2026-09-28', start: '23:30', end: '00:00' }, JAKARTA);
       expect(result).toEqual({
         timing: {
-          startsAt: new Date('2026-09-28T16:30:00Z'), endsAt: new Date('2026-09-28T17:00:00Z'), startsOn: null, endsOn: null,
+          allDay: false, startsAt: new Date('2026-09-28T16:30:00Z'), endsAt: new Date('2026-09-28T17:00:00Z'), startsOn: null, endsOn: null,
         },
       });
       const stored = { type: 'task' as const, ...(result as { timing: { startsAt: Date; endsAt: Date } }).timing, startsOn: null, endsOn: null };
@@ -112,7 +112,7 @@ describe('the calendar’s clock, in the office’s zone', () => {
       const result = timingOf('travel', { startsOn: '2026-10-01', endsOn: '2026-10-02' }, JAKARTA);
       expect(result).toEqual({
         timing: {
-          startsAt: new Date('2026-09-30T17:00:00Z'), endsAt: new Date('2026-10-02T17:00:00Z'),
+          allDay: true, startsAt: new Date('2026-09-30T17:00:00Z'), endsAt: new Date('2026-10-02T17:00:00Z'),
           startsOn: '2026-10-01', endsOn: '2026-10-02',
         },
       });
@@ -164,6 +164,23 @@ describe('the rules an entry’s timing keeps (P12-T2 AC-5)', () => {
     expect(refused(timingOf('travel', { startsOn: '2026-02-30', endsOn: '2026-13-01' }, JAKARTA))).toEqual([
       'startsOn must be a day, written YYYY-MM-DD.', 'endsOn must be a day, written YYYY-MM-DD.',
     ]);
+  });
+
+  it('UI-104 a trip with times needs a time on each date: one that is no time is refused, naming its field', () => {
+    expect(refused(timingOf('travel', {
+      allDay: false, startsOn: '2026-10-01', start: '7:30', endsOn: '2026-10-02', end: '24:00',
+    }, JAKARTA))).toEqual(['start must be a time, written HH:mm.', 'end must be a time, written HH:mm.']);
+    expect(refusedInIndonesian(timingOf('travel', {
+      allDay: false, startsOn: '2026-10-01', start: '07:30', endsOn: '2026-10-02', end: '18:0',
+    }, JAKARTA))).toEqual(['end harus berupa jam, dengan format HH:mm.']);
+    // With both times well formed it is a trip with times, its instants the office's wall clock on each date.
+    expect(timingOf('travel', { allDay: false, startsOn: '2026-10-01', start: '07:30', endsOn: '2026-10-02', end: '18:00' }, JAKARTA))
+      .toEqual({
+        timing: {
+          allDay: false, startsAt: new Date('2026-10-01T00:30:00Z'), endsAt: new Date('2026-10-02T11:00:00Z'),
+          startsOn: '2026-10-01', endsOn: '2026-10-02',
+        },
+      });
   });
 
   it('P12-T2 AC-5 a return before the departure is refused; the same day is a one-day trip', () => {

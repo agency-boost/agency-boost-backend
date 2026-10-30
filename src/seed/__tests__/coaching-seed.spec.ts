@@ -327,6 +327,20 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     }
   });
 
+  it('UI-081 / D-22 some of the cast have a WhatsApp number and some none, so both of the button’s paths can be walked', async () => {
+    const phones: Record<string, string | null> = {};
+    for (const person of COACHING_CAST) {
+      phones[person.key] = (await col('users').findOne({ email: person.email }))!.phone ?? null;
+      expect([person.key, phones[person.key]]).toEqual([person.key, person.phone ?? null]);
+    }
+    expect(Object.values(phones).filter((p) => p !== null).length).toBeGreaterThan(0);
+    expect(Object.values(phones).filter((p) => p === null).length).toBeGreaterThan(0);
+    // As *Isi nomor WhatsApp* stores one: `+62` and 9 to 13 digits.
+    for (const phone of Object.values(phones).filter((p): p is string => p !== null)) {
+      expect(phone).toMatch(/^\+62\d{9,13}$/);
+    }
+  });
+
   it("P11-T2 AC-1 the new people follow the seed's patterns: an email at the office, the field password, a code of their own", async () => {
     const passwords = new PasswordService();
     const codes = new Set<string>();

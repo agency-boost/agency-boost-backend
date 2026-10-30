@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { GOAL_MODES } from './goal.schema';
 import type { CascadeResult } from './goal-cascade';
-import type { GoalAchieved, GoalMeasured, GoalSnapshotView, GoalView } from './goal.service';
+import type { GoalAchieved, GoalMeasured, GoalPreview, GoalSnapshotView, GoalView } from './goal.service';
 
 export class GoalMeasuredDto implements GoalMeasured {
   @ApiProperty({ example: '2026-08-30' }) from!: string;
@@ -225,4 +225,35 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
       + 'columns, no flag (ADR-0046).',
   })
   savedByMembershipId!: string | null;
+}
+
+/**
+ * **`POST /goals/:period/preview`** (P18.99-T5, UI V1 UI-014): what the inputs a screen holds would mean, worked out
+ * by the formula a save uses and written nowhere — the months in force, the APE produced the plan is measured
+ * against, and the cascade.
+ */
+export class GoalPreviewDto implements GoalPreview {
+  @ApiProperty({ type: String, example: '2026' })
+  period!: string;
+
+  @ApiProperty({ type: Number, example: 2.1, description: 'The divisor in force: the typed one, or the office’s calendar.' })
+  monthsLeft!: number;
+
+  @ApiProperty({ type: Boolean, description: 'Whether `monthsLeft` was typed over (`true`) or is the office’s calendar.' })
+  monthsLeftIsOverride!: boolean;
+
+  @ApiProperty({
+    type: GoalAchievedDto,
+    description: 'The APE the plan is measured against: the office’s year to date where it holds one, else the typed '
+      + 'figure on your own plan and the stored one on anybody else’s.',
+  })
+  achieved!: GoalAchievedDto;
+
+  @ApiProperty({
+    type: GoalProjectionDto,
+    nullable: true,
+    description: 'The cascade, as a save would store it. `null` when the inputs cannot make a plan — a save refuses '
+      + 'that with `GOAL_INVALID_ASSUMPTION`.',
+  })
+  projected!: CascadeResult | null;
 }

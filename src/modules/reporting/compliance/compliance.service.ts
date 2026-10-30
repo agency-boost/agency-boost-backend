@@ -3,6 +3,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import type { LocalDate } from '@/common/time/local-day';
 import { refuseWith } from '@/common/validation/fields';
+import { KPM_REPORTING } from '@/domain/constants';
 import { memberAt } from '@/domain/metrics/office-headcount';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { can } from '@/modules/rbac/permissions';
@@ -72,6 +73,8 @@ export interface ComplianceView {
   selected: { category: ComplianceCategoryKey; item: string | null };
   tree: ComplianceSection[];
   can: { override: boolean };
+  /** UI V1 (UI-109): where a bar turns red and green, `KPM_REPORTING`'s, so no screen re-declares them. */
+  thresholds: { lowBelowPct: number; highFromPct: number };
 }
 
 /** What the read takes: a category, and — on the three categories that hold several — an item. */
@@ -228,6 +231,10 @@ export class ComplianceService {
       selected: { category, item: chosen.item },
       tree,
       can: { override: can(ctx, 'campaign_qualification:override') },
+      thresholds: {
+        lowBelowPct: KPM_REPORTING.COMPLIANCE_LOW_BELOW_PCT,
+        highFromPct: KPM_REPORTING.COMPLIANCE_HIGH_FROM_PCT,
+      },
     };
 
     // Last, once the answer exists: what the chosen category's cells disclosed (D-audit-tree), in one insert.

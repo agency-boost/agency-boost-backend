@@ -155,6 +155,8 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'OPEN_SALES_LEADS', name: 'Open sales leads', unit: 'count', phase: 15 },
   { key: 'SALES_LEADS_CLOSING_THIS_MONTH', name: 'Sales leads closing this month', unit: 'count', phase: 15 },
   { key: 'RECRUITMENT_NOMINATED_THIS_MONTH', name: 'Recruitment candidates nominated this month', unit: 'count', phase: 15 },
+  // UI V1 (Phase 18.99 T4; UI-028, O-4): the Unit Dashboard roster's *Closing*.
+  { key: 'SALES_LEADS_CLOSED_IN_PERIOD', name: 'Closing (sales leads paid and issued in the period)', unit: 'count', phase: 18.99, requirable: false },
   { key: 'POTENTIAL_MAA_COUNT_IN_UNIT', name: 'Potential Monthly Active Agents in unit', unit: 'count', phase: 15 },
   { key: 'CASCADE_ACTIVITY_TOUCHES', name: 'Touches on the goal activities', unit: 'count', phase: 15, campaign: { source: 'activity', aggregate: 'sum', subject: 'self' } },
   { key: 'NEW_ACTIVE_AGENTS', name: 'New active agents', unit: 'count', phase: 9, campaign: { source: 'file', aggregate: 'sum', subject: 'self' } },

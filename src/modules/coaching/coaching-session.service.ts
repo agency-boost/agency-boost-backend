@@ -24,7 +24,7 @@ import { sessionFinalized } from './coaching-session.gate';
 import { SESSION_LIMITS } from './coaching-session.dto';
 import { CoachingSessionRepository } from './coaching-session.repository';
 import {
-  carryForward, coalesceKeyOf, finalizeRefusal, finalizeSentence, latestFinalized, leadActionsOf,
+  actionDefaultDueDate, carryForward, coalesceKeyOf, finalizeRefusal, finalizeSentence, latestFinalized, leadActionsOf,
   reopenableUntil, reopenWindowOpen, reviewedItems, type FinalizedVersion, type SessionLead,
 } from './coaching-session.rules';
 import type {
@@ -96,6 +96,12 @@ export interface CoachingSessionView {
   finalizedAt: string | null;
   finalizedBy: SessionPerson | null;
   reopenableUntil: string | null;
+  /**
+   * **The date a new action item starts with** (UI-060): the office's today plus `COACHING_ACTION_DEFAULT_DUE_DAYS` —
+   * what *+* fills in, and what *Start* gave every carried item. The leader may change it. `null` where no row can be
+   * added: a finalized session, or a reader who is not its writing coach.
+   */
+  defaultDueDate: LocalDate | null;
   lastWeek: { sessionId: string; date: string } | null;
   lastWeekItems: LastWeekItemView[];
   leadActions: LeadActionView[];
@@ -367,8 +373,8 @@ export class CoachingSessionService {
    * **`POST /coaching/coachees/:membershipId/sessions` — *Start*** (ADR-0081, P11-T5 AC-1). The pair's
    * open draft when there is one — a second *Start* resumes it, from any device — else a new draft that
    * fixes *last week*, copies its items untouched into *Last week's action items*, and carries forward
-   * every item not done with its date cleared, except one whose lead has a next action date now, and
-   * every tip. Two racing *Start*s write one draft: the partial unique index refuses the second, which
+   * every item not done **dated a week from the office's today** (UI-060, `actionDefaultDueDate`), except one whose
+   * lead has a next action date now, and every tip. Two racing *Start*s write one draft: the partial unique index refuses the second, which
    * resumes the first.
    */
   async start(ctx: RequestContext, coacheeId: string): Promise<{ created: boolean; session: CoachingSessionView }> {
@@ -388,8 +394,10 @@ export class CoachingSessionService {
     );
     const carried = last ? latestFinalized(last)! : null;
     const leads = await this.leadsOf(ctx, coacheeId, day);
-    const lastWeekItems = carried ? reviewedItems(carried) : [];
-    const forward = carryForward(lastWeekItems, carried?.tips ?? [], leads, newId);
+    // An item the coachee ticked from Calendar comes in ticked, and is not carried (UI-104 point 4).
+    const ticked = new Set((last?.actionItemsDone ?? []).map((d) => d.itemId));
+    const lastWeekItems = carried ? reviewedItems(carried, ticked) : [];
+    const forward = carryForward(lastWeekItems, carried?.tips ?? [], leads, newId, actionDefaultDueDate(day.today));
 
     let created: CoachingSessionDocument;
     try {
@@ -433,13 +441,17 @@ export class CoachingSessionService {
    */
   async save(ctx: RequestContext, sessionId: string, input: SaveSessionInput): Promise<SessionDraftSaved> {
     const { session } = await this.writable(ctx, sessionId);
+    // UI-060: a new row sent with no `dueDate` at all is dated a week ahead; `null` is a date cleared by hand, and kept.
+    const fresh = input.actionItems.some((row) => row.itemId === undefined && row.dueDate === undefined);
+    const defaultDue = fresh ? actionDefaultDueDate((await this.days.for(ctx)).today) : null;
 
     const lastWeekItems = applyTicks(session.lastWeekItems.map(plainLastWeekItem), input.lastWeekItems);
     const actionItems = replaceRows(
       session.actionItems.map(plainActionItem), (item) => item.itemId, input.actionItems, (row) => row.itemId,
       'actionItems',
       (row, prior): CoachingActionItem => ({
-        itemId: prior?.itemId ?? newId(), text: row.text, dueDate: checkDate(row.dueDate ?? null, 'actionItems'),
+        itemId: prior?.itemId ?? newId(), text: row.text,
+        dueDate: !prior && row.dueDate === undefined ? defaultDue : checkDate(row.dueDate ?? null, 'actionItems'),
         carriedFromItemId: prior?.carriedFromItemId ?? null,
       }),
     );
@@ -471,6 +483,11 @@ export class CoachingSessionService {
    * the audit entry, the coachee's notice (`{ sessionId }` and nothing a leader typed), and the round's
    * held goal email, released without being awaited (`announceFinalized`). Neither notice ever fails the
    * finalize, and the email never delays it.
+   *
+   * **A session reopened with *Ubah lagi* and finalized again is one coaching** (ADR-0079; UI V1, UI-060): its `date`
+   * and its snapshot never move, it is one document, and every coaching reader — *Last 1:1*, `COACHED_7D`,
+   * `COACHING_COVERAGE`, the leader's frequency — counts sessions by their `date`, finalized at least once. An action
+   * item without a date is refused `UNDATED_ACTION_ITEM` with `details.count` and `details.itemIds` (UI-060).
    */
   async finalize(ctx: RequestContext, sessionId: string, version: number): Promise<CoachingSessionView> {
     const { session, standing, coachee } = await this.writable(ctx, sessionId);
@@ -783,6 +800,8 @@ export class CoachingSessionService {
       finalizedAt: finalizedAt ? finalizedAt.toISOString() : null,
       finalizedBy: finalizedBy ? person(finalizedBy) : null,
       reopenableUntil: await this.reopenableFor(ctx, session, standing),
+      // Only where a row can be added: an open session, to its coach. A finalized one reads as it was agreed.
+      defaultDueDate: open ? actionDefaultDueDate(day.today) : null,
       lastWeek: session.lastWeek ? { sessionId: session.lastWeek.sessionId, date: session.lastWeek.date } : null,
       lastWeekItems: lastWeekItems.map(lastWeekItemView),
       leadActions: leadActions.map(leadActionView),

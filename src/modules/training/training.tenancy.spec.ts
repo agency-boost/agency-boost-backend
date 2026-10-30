@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import type { DomainException } from '@/common/errors/domain.exception';
 import { readerIn } from '@/common/i18n/reader';
-import { SEED_TRAINING_MODULES } from '@/domain/constants';
+import { SEED_TRAINING_CATEGORIES, SEED_TRAINING_MODULES } from '@/domain/constants';
 import type { ConfigChangeDto } from '@/modules/config/changes.dto';
 import { TrainingService } from './training.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
@@ -54,7 +54,7 @@ describe('the office training taxonomy (P5-T1)', () => {
     it('seeds the Owner prototype’s taxonomy when the company has published none', async () => {
       const tree = await training.list(ctx(KPM_A));
       expect(tree.map((c) => c.code)).toEqual([
-        'SALES', 'PRODUCT', 'RECRUITING', 'TEAM_MANAGEMENT', 'SOFT_SKILLS', 'COMPANY_AND_KPM',
+        'SALES', 'PRODUCT', 'RECRUITING', 'TEAM_MANAGEMENT', 'MOTIVATION', 'SOFT_SKILLS', 'COMPANY_AND_KPM',
       ]);
       const sales = tree[0];
       expect(sales.skills.map((s) => s.code)).toEqual([
@@ -142,7 +142,8 @@ describe('the office training taxonomy (P5-T1)', () => {
   describe('creating and editing (AC-2, AC-9)', () => {
     it('appends a category, a skill within its category, and a module within its skill', async () => {
       const category = await training.createCategory(ctx(KPM_A), { code: 'onboarding', label: 'Onboarding' });
-      expect(category).toMatchObject({ code: 'ONBOARDING', displayOrder: 7, version: 1, description: null });
+      // After the seed's seven (UI V1: Motivation the seventh, P18.99-T10).
+      expect(category).toMatchObject({ code: 'ONBOARDING', displayOrder: SEED_TRAINING_CATEGORIES.length + 1, version: 1, description: null });
 
       const skill = await training.createSkill(ctx(KPM_A), { code: 'FIRST_WEEK', categoryCode: 'onboarding', label: 'First week' });
       expect(skill).toMatchObject({ categoryCode: 'ONBOARDING', displayOrder: 1 });

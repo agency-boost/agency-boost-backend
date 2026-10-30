@@ -38,7 +38,7 @@ export class LogEmailAdapter extends NotificationChannelAdapter {
 
   async send(to: SendRequest, rendered: RenderedMessage): Promise<void> {
     this.logger.log(
-      `\n── would send to ${to.userId ?? '(unknown)'} ──\n`
+      `\n── would send to ${to.toAddress ?? to.userId ?? '(unknown)'} ──\n`
         + `${rendered.subject}\n\n${rendered.body}\n──`,
     );
   }

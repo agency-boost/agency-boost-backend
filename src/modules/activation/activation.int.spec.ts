@@ -53,8 +53,7 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
     expect(declaredPermissions(NewHiresController)).toEqual({
       roster: 'new_hires:read_roster', detail: 'activation:read', tick: 'activation:update_manual_item',
       correctStart: 'activation:set_start_date', saveNote: 'activation_note:write', closings: 'activation:read',
-      // P18.96-T6 AC-4: *Mark left*.
-      markLeft: 'new_hire:mark_left',
+      // UI-025: *Mark left* is retired with its grant (ADR-0180 §6).
     });
   });
 

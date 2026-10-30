@@ -5,8 +5,9 @@ import {
 import type {
   ActivationAspectProgressView, ActivationClosingsView, ActivationClosingView, ActivationItemProgressView,
   ActivationItemRecordView, ActivationNoteSavedView, ActivationNoteView, ActivationPersonView, ActivationView,
-  Activation3MFiguresView, Activation3MMonthView, Activation3MResultView, Activation3MShareView, NewHireChecklistView,
-  NewHireMarkedLeftView, NewHireRowView, NewHiresRosterView, NewHireUnitRefView, NewHireUnitView,
+  Activation3MFiguresView, Activation3MMonthView, Activation3MResultView, Activation3MShareView, FirstSaleSourceView,
+  NewHireChecklistView, NewHireDetailView, NewHireLeaderView, NewHireRowView, NewHiresRosterView, NewHireStandingView,
+  NewHireStatusView, NewHireUnitRefView, NewHireUnitView,
 } from './activation-progress.view';
 import type { ActivationState, AspectStatus } from './activation-rules';
 import { ActivationLinkDto } from './activation.response.dto';
@@ -205,19 +206,26 @@ export class ActivationViewDto implements ActivationView {
 
 const RESULTS: Activation3MResultView[] = ['in_progress', 'activated', 'not_activated'];
 
+const STATUSES: NewHireStatusView[] = ['activated', 'activated_late', 'not_yet'];
+
 export class Activation3MShareDto implements Activation3MShareView {
-  @ApiProperty({ type: Number, description: 'Their first sale was on or before day 90 of the join date.' })
+  @ApiProperty({ type: Number, description: 'Their first sale was on or before day 90 of the join date: the numerator.' })
   activated!: number;
 
-  @ApiProperty({ type: Number, description: 'No first sale by day 90 — or they left before one.' })
+  @ApiProperty({ type: Number, description: 'Past day 90 with no first sale: with `activated`, the denominator.' })
   notActivated!: number;
 
-  @ApiProperty({ type: Number, description: 'Still within their 90 days: in neither part of the share.' })
+  @ApiProperty({ type: Number, description: 'A first sale after day 90 (*lewat 3M*): Teraktivasi, and in neither part of the share.' })
+  late!: number;
+
+  @ApiProperty({ type: Number, description: 'Still within their 90 days with no first sale: in neither part of the share (rule A).' })
   inProgress!: number;
 
   @ApiProperty({
-    type: Number, nullable: true, example: 60,
-    description: 'Activated ÷ (activated + not activated), a whole percent; `null` while none of them is decided — never 0.',
+    type: Number, nullable: true, example: 100,
+    description:
+      '*Aktivasi 3M*: activated by day 90 ÷ (that + past day 90 with no first sale), a whole percent; `null` while none '
+      + 'of them is decided — never 0. The screen shows this alone.',
   })
   pct!: number | null;
 }
@@ -278,19 +286,47 @@ export class NewHireRowDto implements NewHireRowView {
   @ApiProperty({ type: String, example: '2026-08-06', description: 'The join date, day 1: what *Join date* prints.' })
   joinDate!: string;
 
-  @ApiProperty({ type: Number, description: 'Which day of their first 90 today is, the join date day 1.' })
+  @ApiProperty({ type: Number, description: 'Which day since joining today is, the join date day 1: *Hari ke-X*.' })
   day!: number;
 
-  @ApiProperty({ type: String, nullable: true, example: '2026-08-25', description: 'The first paid and issued case; `null` with none.' })
+  @ApiProperty({
+    type: String, nullable: true, example: '2026-09-01',
+    description: 'The first sale (*pecah telor*): a paid and issued case, or a closing logged from the checklist; `null` with none.',
+  })
   firstSaleDate!: string | null;
 
   @ApiProperty({
+    type: Number, nullable: true, example: 30,
+    description: 'The first sale’s day since joining, the join date day 1: *Pecah telor di hari ke-X*. `null` with none.',
+  })
+  firstSaleDay!: number | null;
+
+  @ApiProperty({
+    type: String, enum: ['sales', 'manual'], nullable: true,
+    description: '`sales` — a sales lead at Paid and issued, or the production file; `manual` — a closing logged from the checklist. `null` with none.',
+  })
+  firstSaleSource!: FirstSaleSourceView | null;
+
+  @ApiProperty({
+    type: String, enum: STATUSES,
+    description:
+      'Teraktivasi as soon as there is a first sale: `activated` by day 90, `activated_late` after it (amber, outside the '
+      + 'share); `not_yet` without one. Leaving is not a status.',
+  })
+  status!: NewHireStatusView;
+
+  @ApiProperty({
     type: String, enum: RESULTS,
-    description: 'In progress through day 90; then activated (a first sale by day 90) or not — kept once decided.',
+    description:
+      'The 3M result: activated as soon as a first sale on or before day 90 is recorded; not activated once day 90 '
+      + 'passes without one; in progress otherwise. Kept from day 91.',
   })
   activation3M!: Activation3MResultView;
 
-  @ApiProperty({ type: String, nullable: true, description: 'The day they were marked left; `null` while not.' })
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'The day they were marked left; `null` while not. Kept as data only: it decides nothing and no screen shows it.',
+  })
   leftOn!: string | null;
 
   @ApiProperty({
@@ -309,13 +345,13 @@ export class NewHiresWindowDto {
 }
 
 export class NewHiresSectionsDto {
-  @ApiProperty({ type: [NewHireRowDto], description: 'Days 1 to 90, by day, highest first.' })
+  @ApiProperty({ type: [NewHireRowDto], description: 'No first sale, within days 1 to 90: by day, highest first.' })
   inProgress!: NewHireRowDto[];
 
-  @ApiProperty({ type: [NewHireRowDto], description: 'By join date, newest first.' })
+  @ApiProperty({ type: [NewHireRowDto], description: 'Teraktivasi — `activated` and `activated_late` — by join date, newest first.' })
   activated!: NewHireRowDto[];
 
-  @ApiProperty({ type: [NewHireRowDto], description: 'By join date, newest first — the ones who left among them.' })
+  @ApiProperty({ type: [NewHireRowDto], description: 'No first sale, past day 90: by join date, newest first.' })
   notActivated!: NewHireRowDto[];
 }
 
@@ -339,18 +375,59 @@ export class NewHiresRosterDto implements NewHiresRosterView {
   sections!: NewHiresSectionsDto;
 }
 
-export class NewHireMarkedLeftDto implements NewHireMarkedLeftView {
-  @ApiProperty({ type: String })
-  membershipId!: string;
+/** The hire's leader on their detail (UI-027). */
+export class NewHireLeaderDto extends ActivationPersonDto implements NewHireLeaderView {
+  @ApiProperty({ type: String, enum: ['ab', 'aab', 'agent'], description: 'Their rung: *AB*, *AAB* or *Agent*.' })
+  role!: NewHireLeaderView['role'];
+}
 
-  @ApiProperty({ type: String, format: 'date-time' })
-  leftAt!: string;
+export class NewHireStandingDto implements NewHireStandingView {
+  @ApiProperty({
+    type: String, enum: STATUSES,
+    description: 'As on the row: `activated` by day 90, `activated_late` after it (amber), `not_yet` without a first sale.',
+  })
+  status!: NewHireStatusView;
 
-  @ApiProperty({ type: String, example: '2026-10-27', description: 'The day it fell on.' })
-  leftOn!: string;
+  @ApiProperty({ type: String, enum: RESULTS, description: 'The 3M result, as on the row.' })
+  activation3M!: Activation3MResultView;
 
-  @ApiProperty({ type: String, enum: ['activated', 'not_activated'], description: 'Their 3M activation, decided now.' })
-  activation3M!: 'activated' | 'not_activated';
+  @ApiProperty({ type: String, example: '2026-08-03', description: 'The join date, day 1.' })
+  joinDate!: string;
+
+  @ApiProperty({ type: Number, example: 88, description: 'Today’s day since joining: *Hari 88 /90*.' })
+  day!: number;
+
+  @ApiProperty({ type: String, nullable: true, example: '2026-09-01' })
+  firstSaleDate!: string | null;
+
+  @ApiProperty({ type: Number, nullable: true, example: 30, description: '*Pecah telor di hari ke-X*; `null` with none.' })
+  firstSaleDay!: number | null;
+
+  @ApiProperty({ type: String, enum: ['sales', 'manual'], nullable: true, description: 'Where the first sale came from.' })
+  firstSaleSource!: FirstSaleSourceView | null;
+
+  @ApiProperty({
+    type: NewHireLeaderDto, nullable: true,
+    description: 'Who they report to (UI-027, D-25): the header’s *AAB Arief · Bergabung 3 Agu 2026*. `null` with nobody.',
+  })
+  leader!: NewHireLeaderDto | null;
+
+  @ApiProperty({
+    type: String, nullable: true, example: '+6281211002200',
+    description:
+      'Their WhatsApp number as stored (`users.phone`), or `null` with none (UI-027, UI-081): the detail’s *WhatsApp* opens '
+      + 'it, or asks for it first.',
+  })
+  phone!: string | null;
+}
+
+/** `GET /new-hires/:membershipId`, and every write on it: the activation, and the hire's 3M standing (UI-023). */
+export class NewHireDetailDto extends ActivationViewDto implements NewHireDetailView {
+  @ApiProperty({
+    type: NewHireStandingDto, nullable: true,
+    description: 'The strip at the top of the detail (UI-023, D-25): the row’s status, from the same function. `null` for somebody who is not a new hire.',
+  })
+  newHire!: NewHireStandingDto | null;
 }
 
 export class ActivationNoteSavedDto implements ActivationNoteSavedView {

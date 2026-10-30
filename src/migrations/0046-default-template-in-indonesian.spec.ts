@@ -57,7 +57,10 @@ function english(kind: string): Payload {
     case 'training_taxonomy':
       return {
         categories: rows(p, 'categories').map((c) => ({
-          ...c, label: T.categories[String(c.code)].label ?? c.label, description: T.categories[String(c.code)].description,
+          // *Motivation* (UI V1, P18.99-T10) was never seeded in English: it reads as the seed gives it.
+          ...c,
+          label: T.categories[String(c.code)]?.label ?? c.label,
+          description: T.categories[String(c.code)]?.description ?? c.description,
         })),
         skills: rows(p, 'skills').map((s) => was(T.skills, s)),
         modules: rows(p, 'modules').map((m) => was(T.modules, m, 'title')),

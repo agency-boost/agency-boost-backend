@@ -121,7 +121,7 @@ describe('the Unit Dashboard (Phase 15)', () => {
           directGroupProduction: {
             targetMinor: null, actualMinor: null, attainmentPct: null, missing: 0, gapMinor: null, overMinor: null, period: 'month',
           },
-          potentialActive: { count: 0, of: 0 },
+          potentialActive: { count: 0, of: 0, unit: { count: 0, of: 0 }, aab: { count: 0, of: 0 } },
           potentialRecruits: { yourUnit: 0, aabs: 0 },
         });
         expect(view.production.canUpdate).toBe(false);
@@ -378,11 +378,14 @@ describe('the Unit Dashboard (Phase 15)', () => {
           for (const key of ['salesOpen', 'salesClosing', 'recruitOpen', 'recruitNominated'] as const) {
             expect(total.leadsCounts[key]).toBe(everybody.reduce((s, r) => s + r.leadsCounts[key], 0));
           }
+          // UI-028: a total's *Closing* is its rows'.
+          expect(total.closings).toBe(everybody.reduce((s, r) => s + r.closings, 0));
           expect(total.touches).toEqual({
             logged: everybody.reduce((s, r) => s + r.activity.touches.logged, 0),
             target: held(everybody.map((r) => r.activity.touches.target)),
           });
-          expect(total.potentialActive).toEqual({ count: rows.filter((r) => r.pacingToMaa === true).length, of: rows.length });
+          // UI-013: the count over the people who count for production, out of everybody — manpower.
+          expect(total.potentialActive).toMatchObject({ count: rows.filter((r) => r.pacingToMaa === true).length, of: everybody.length });
         };
         check(view.yourUnit.rows, view.yourUnit.total);
         const groups = (g: UnitGroup): UnitGroup[] => [g, ...g.units.flatMap(groups)];
@@ -394,8 +397,14 @@ describe('the Unit Dashboard (Phase 15)', () => {
         expect(tilePeriod).toBe(period === 'year' ? 'year' : 'month');
         check(all, {
           goal: production, leadsCounts: sumLeads(all), touches: sumTouches(all), potentialActive: view.tiles.potentialActive,
-          newHires: view.tiles.team.newHires,
+          newHires: view.tiles.team.newHires, closings: all.reduce((s, r) => s + r.closings, 0),
         });
+        // UI-013: Active Agent's of is Your team's number, and its Unit / AAB split adds up to it — Unit is Your Unit.
+        const { unit, aab, of } = view.tiles.potentialActive;
+        expect(of).toBe(view.tiles.team.total);
+        expect(unit).toEqual(view.yourUnit.total.potentialActive);
+        expect([unit.count + aab.count, unit.of + aab.of]).toEqual([view.tiles.potentialActive.count, of]);
+        expect(aab.of).toBe(view.units.reduce((n, g) => n + rowsOf(g).length, 0));
         expect(view.tiles.team).toEqual({
           total: all.length, direct: view.yourUnit.rows.length, units: view.units.length,
           underUnits: all.length - view.yourUnit.rows.length - view.units.length,
@@ -450,7 +459,7 @@ describe('the Unit Dashboard (Phase 15)', () => {
       await memberships().updateMany({ kpmId: KPM_A }, { $unset: { joinedAs: '', firstSaleDate: '' } });
     });
 
-    it('P18.96-T5 AC-1, AC-2 a new hire with no first sale is in the team, tagged, and in neither production nor on pace', async () => {
+    it('UI-013 a new hire with no first sale is in the team, tagged, out of production and on pace’s count — in its of', async () => {
       const before = await read('AGUS');
       const dimas = rowFor(before, 'DIMAS');
       expect([dimas.goal.actualMinor !== null, dimas.goal.targetMinor !== null, dimas.newHireBeforeFirstSale]).toEqual([true, true, false]);
@@ -467,12 +476,14 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect(view.yourUnit.total).toMatchObject({ newHires: 1, goal: { actualMinor: actual, missing: before.yourUnit.total.goal.missing } });
       expect(view.tiles.directGroupProduction.actualMinor).toBe(before.tiles.directGroupProduction.actualMinor! - dimas.goal.actualMinor!);
       expect(view.tiles.directGroupProduction.targetMinor).toBe(before.tiles.directGroupProduction.targetMinor! - dimas.goal.targetMinor!);
-      // On pace: out of the count and out of `of`.
+      // UI-013 Active Agent: out of the count, never out of `of` — manpower, the same number as Your team.
       const pacing = dimas.pacingToMaa === true ? 1 : 0;
-      expect(view.tiles.potentialActive).toEqual({
-        count: before.tiles.potentialActive.count - pacing, of: before.tiles.potentialActive.of - 1,
+      expect(view.tiles.potentialActive).toMatchObject({
+        count: before.tiles.potentialActive.count - pacing, of: before.tiles.potentialActive.of,
+        unit: { count: before.tiles.potentialActive.unit.count - pacing, of: before.tiles.potentialActive.unit.of },
       });
-      expect(view.yourUnit.total.potentialActive.of).toBe(before.yourUnit.total.potentialActive.of - 1);
+      expect(view.tiles.potentialActive.of).toBe(view.tiles.team.total);
+      expect(view.yourUnit.total.potentialActive.of).toBe(before.yourUnit.total.potentialActive.of);
       // The leads and the goal activities are still everybody's.
       expect(view.yourUnit.total.leadsCounts).toEqual(before.yourUnit.total.leadsCounts);
       expect(view.yourUnit.total.touches).toEqual(before.yourUnit.total.touches);
@@ -485,7 +496,8 @@ describe('the Unit Dashboard (Phase 15)', () => {
         return { tag: rowFor(view, 'DIMAS').newHireBeforeFirstSale, newHires: view.tiles.team.newHires, of: view.tiles.potentialActive.of };
       };
       const all = everyRow(await read('AGUS')).length;
-      expect(await counted('2026-09-15')).toEqual({ tag: true, newHires: 1, of: all - 1 });
+      // UI-013: `of` is manpower whatever the first sale — the tag and the production's left-out count move.
+      expect(await counted('2026-09-15')).toEqual({ tag: true, newHires: 1, of: all });
       expect(await counted(ROSTER_TODAY)).toEqual({ tag: false, newHires: 0, of: all });
       expect(await counted('2026-08-20')).toEqual({ tag: false, newHires: 0, of: all });
     });
@@ -499,17 +511,17 @@ describe('the Unit Dashboard (Phase 15)', () => {
         .toEqual([before.tiles.directGroupProduction, before.tiles.potentialActive, before.yourUnit.total]);
     });
 
-    it('P18.96-T5 AC-2 every total above a new hire leaves them out — Rina in Sari’s unit, and on Sari’s own dashboard', async () => {
+    it('UI-013 every total above a new hire leaves them out of production, never of on pace’s of — Rina in Sari’s unit', async () => {
       await mark('RINA', { joinedAs: 'new_hire', firstSaleDate: null });
       const agus = await read('AGUS');
       const sari = agus.units[2];
       expect(sari.total.newHires).toBe(1);
-      expect(sari.total.potentialActive.of).toBe(rowsOf(sari).length - 1);
+      expect(sari.total.potentialActive.of).toBe(rowsOf(sari).length);
       expect(sari.units[0].total.newHires).toBe(0);
       const own = await read('SARI');
       expect(own.yourUnit.total.newHires).toBe(1);
       expect(own.tiles.team.newHires).toBe(1);
-      expect(own.tiles.potentialActive.of).toBe(everyRow(own).length - 1);
+      expect(own.tiles.potentialActive.of).toBe(everyRow(own).length);
     });
 
     it('P18.96-T5 AC-3 the head is read too: a new-hire leader before a first sale is tagged on their own dashboard', async () => {

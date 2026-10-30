@@ -28,14 +28,15 @@ import { AuditService } from './audit.service';
  * /training/progress?for=`, coaching's *Training* tab, a coachee's training record read whole, once per read,
  * `from: null` (P18.5-T4 AC-1); `kpm_compliance`: `GET /kpm/analytics/compliance?category=activity`, the Owner's
  * compliance tree's *Activity Mgmt*, once per member it lists, `from: null` — the tree's *Training* and *Activation*
- * reads write `training` and `activation`, the surfaces of the same facts (P18.6-T1 AC-9, D-audit-tree). Not the
+ * reads write `training` and `activation`, the surfaces of the same facts (P18.6-T1 AC-9, D-audit-tree); `home`: `GET
+ * /home`'s *Laporan tim*, once per person on it, over yesterday and today (UI V1, Phase 18.99 T11; UI-101). Not the
  * retired `compliance`, `GET /activity/compliance`'s, kept for the entries it wrote. The action keeps its
  * name on every one, so a single query on `targetMembershipId` lists every disclosure of a member's data.
  */
 export type SubjectReadSurface =
   | 'log' | 'summary' | 'compliance' | 'personal_summary' | 'leads' | 'ratios' | 'coaching_session'
   | 'coaching_session_print' | 'calendar' | 'activation' | 'activity_dashboard' | 'unit_dashboard'
-  | 'kpm_overview' | 'directory' | 'training' | 'kpm_compliance';
+  | 'kpm_overview' | 'directory' | 'training' | 'kpm_compliance' | 'home';
 
 /** The days a read disclosed: from a day, or `null` for the whole record, to a day. */
 export interface SubjectReadRange {

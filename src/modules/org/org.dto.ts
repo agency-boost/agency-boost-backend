@@ -7,6 +7,8 @@ import {
 import { field } from '@/common/validation/violations';
 import { JOINING_REFUSALS } from '@/domain/constants/joining.messages';
 import { ORG_REFUSALS } from './org.messages';
+import { PHONE_FIELD_SHAPE, phoneFromBody } from '@/modules/users/phone-input';
+import { MEMBER_SEARCH_DEFAULT, MEMBER_SEARCH_MAX } from './directory.service';
 
 export class DirectoryQueryDto {
   @ApiPropertyOptional({ description: 'Name, email or agent code. Case-insensitive.' })
@@ -44,6 +46,44 @@ export class DirectoryQueryDto {
   @Min(1)
   @Max(100)
   limit?: number;
+}
+
+/**
+ * **Search agent** (UI V1, 2026-10-30; UI-012, UI-059, the owner's D-14): who the picker offers, by name or agent code.
+ */
+export class MemberSearchQueryDto {
+  @ApiPropertyOptional({
+    description: 'Part of a name or an agent code, case-insensitive. Empty or absent lists the first people A to Z.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(120)
+  q?: string;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: MEMBER_SEARCH_MAX, default: MEMBER_SEARCH_DEFAULT })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(MEMBER_SEARCH_MAX)
+  limit?: number;
+}
+
+/**
+ * **A leader saves an agent's WhatsApp number** (UI V1, 2026-10-30; UI-081, UI-101, the owner's D-22): *Isi nomor
+ * WhatsApp* on a person they coach. Required here — clearing a number is the person's own, on `PATCH /auth/me`.
+ */
+export class SetMemberPhoneDto {
+  @ApiProperty({
+    type: String,
+    example: '0812-1100-2200',
+    description: 'Spaces, dashes, dots and brackets go, and a leading `+62`, `62` or `0`; what is left must be 9 to 13 '
+      + 'digits, stored as `+62…`, else `400 VALIDATION_FAILED` naming `phone`.',
+  })
+  @Transform(({ value }) => phoneFromBody(value))
+  @Matches(PHONE_FIELD_SHAPE, { message: field(ORG_REFUSALS.VALIDATION_FAILED.phoneShape) })
+  phone!: string;
 }
 
 export class KpmSearchDto {

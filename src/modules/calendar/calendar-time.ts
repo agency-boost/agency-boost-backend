@@ -19,7 +19,12 @@ const REQUIRED = VALIDATION_REFUSALS.VALIDATION_FAILED.required;
  * So the same request answers the same entries whether the server runs in UTC, Jakarta or New York.
  */
 
-export type CalendarView = 'week' | 'month';
+/**
+ * What a read answers: a week (Monday to Sunday), a month padded to whole weeks, **the Agenda** — `CALENDAR.AGENDA_DAYS`
+ * from the day asked for — or **3 Hari**, `CALENDAR.THREE_DAYS` from it (UI V1, 2026-10-30, UI-104 points 5 and 10).
+ */
+export const CALENDAR_VIEWS = ['week', 'month', 'agenda', 'three_days'] as const;
+export type CalendarView = (typeof CALENDAR_VIEWS)[number];
 
 /** One day of a period, and whether it is the period's own or a month's padding. */
 export interface PeriodDay {
@@ -33,10 +38,13 @@ export interface Period {
   /** The first and last office dates drawn, inclusive: a week's Monday and Sunday, a month's padded rows. */
   from: LocalDate;
   to: LocalDate;
-  /** `YYYY-MM` in Month, `null` in Week. */
+  /** `YYYY-MM` in Month, `null` in every other view. */
   month: string | null;
   days: PeriodDay[];
-  /** The `date` ‹ and › ask for: the Monday of the week before and after, or the first of the month. */
+  /**
+   * The `date` ‹ and › ask for: the Monday of the week before and after, the first of the month, or — in the Agenda and
+   * 3 Hari — the day as many days before and after.
+   */
   previous: LocalDate;
   next: LocalDate;
 }
@@ -63,6 +71,17 @@ export function mondayOf(date: LocalDate): LocalDate {
  * four to six rows — with the padding's days marked as not the month's own.
  */
 export function periodOf(view: CalendarView, date: LocalDate): Period {
+  if (view === 'agenda' || view === 'three_days') {
+    // From the day asked for, never its week's Monday: the Agenda opens on today with no past day (UI-104 point 10).
+    const length = view === 'agenda' ? CALENDAR.AGENDA_DAYS : CALENDAR.THREE_DAYS;
+    const to = addDays(date, length - 1);
+    return {
+      view, from: date, to, month: null,
+      days: daysBetween(date, to).map((day) => ({ date: day, inPeriod: true })),
+      previous: addDays(date, -length),
+      next: addDays(date, length),
+    };
+  }
   if (view === 'week') {
     const from = mondayOf(date);
     const to = addDays(from, 6);
@@ -118,6 +137,11 @@ export function officeClockOf(timezone: string, at: Date): { date: LocalDate; ti
 
 /** An entry's timing as a request states it: a timed entry's date and times, or Travel's two dates. */
 export interface TimingInput {
+  /**
+   * **Travel only** (UI V1, UI-104 point 8, *Sepanjang hari*): `true` or absent, the trip's two office dates; `false`,
+   * a start date and time and an end date and time. A timed type is never all-day, and saying so is refused.
+   */
+  allDay?: boolean | null;
   date?: string | null;
   start?: string | null;
   end?: string | null;
@@ -127,6 +151,8 @@ export interface TimingInput {
 
 /** An entry's timing as it is stored. */
 export interface StoredTiming {
+  /** An all-day trip; `false` on a timed trip and on every other type. */
+  allDay: boolean;
   startsAt: Date;
   endsAt: Date;
   startsOn: LocalDate | null;
@@ -135,6 +161,14 @@ export interface StoredTiming {
 
 const TIMED_FIELDS = ['date', 'start', 'end'] as const;
 const TRAVEL_FIELDS = ['startsOn', 'endsOn'] as const;
+/** A trip with times (UI-104 point 8): its two dates, and a time on each. */
+const TIMED_TRIP_FIELDS = ['startsOn', 'start', 'endsOn', 'end'] as const;
+const ALL_TIMING_FIELDS = ['date', 'start', 'end', 'startsOn', 'endsOn'] as const;
+
+/** Whether a stored or requested trip is all-day: only `false` makes it timed, so a row older than the field is all-day. */
+export function isAllDayTrip(entry: { type: CalendarEntryType; allDay?: boolean | null }): boolean {
+  return entry.type === CALENDAR_ALL_DAY_TYPE && entry.allDay !== false;
+}
 
 /**
  * **An entry's timing, checked and converted** (P12-T2 AC-5; `functional/calendar.md`, *Its fields*):
@@ -152,9 +186,11 @@ export function timingOf(
 ): { timing: StoredTiming } | { violations: FieldSentence[] } {
   const violations: FieldSentence[] = [];
   const travel = type === CALENDAR_ALL_DAY_TYPE;
-  const own = travel ? TRAVEL_FIELDS : TIMED_FIELDS;
-  const other = travel ? TIMED_FIELDS : TRAVEL_FIELDS;
-  for (const field of other) {
+  const allDay = travel && input.allDay !== false;
+  if (!travel && input.allDay === true) violations.push(SAY.notPartOf({ field: 'allDay', travel: false }));
+  const own: readonly (keyof TimingInput)[] = allDay ? TRAVEL_FIELDS : travel ? TIMED_TRIP_FIELDS : TIMED_FIELDS;
+  for (const field of ALL_TIMING_FIELDS) {
+    if (own.includes(field)) continue;
     if (input[field] !== undefined && input[field] !== null) {
       violations.push(SAY.notPartOf({ field, travel }));
     }
@@ -169,19 +205,31 @@ export function timingOf(
     const endsOn = input.endsOn as string;
     if (!isLocalDate(startsOn)) violations.push(SAY.dayShape({ field: 'startsOn' }));
     if (!isLocalDate(endsOn)) violations.push(SAY.dayShape({ field: 'endsOn' }));
+    if (!allDay) {
+      if (!WALL_CLOCK.test(input.start as string)) violations.push(SAY.timeShape({ field: 'start' }));
+      if (!WALL_CLOCK.test(input.end as string)) violations.push(SAY.timeShape({ field: 'end' }));
+    }
     if (violations.length) return { violations };
     if (endsOn < startsOn) return { violations: [SAY.endsBeforeStarts] };
     if (daysBetween(startsOn, endsOn).length > CALENDAR.TRAVEL_DAYS_MAX) {
       return { violations: [SAY.tripTooLong({ max: CALENDAR.TRAVEL_DAYS_MAX })] };
     }
-    return {
-      timing: {
-        startsAt: startOfOfficeDay(timezone, startsOn),
-        endsAt: startOfOfficeDay(timezone, addDays(endsOn, 1)),
-        startsOn,
-        endsOn,
-      },
-    };
+    if (allDay) {
+      return {
+        timing: {
+          allDay: true,
+          startsAt: startOfOfficeDay(timezone, startsOn),
+          endsAt: startOfOfficeDay(timezone, addDays(endsOn, 1)),
+          startsOn,
+          endsOn,
+        },
+      };
+    }
+    // A timed trip: the office's wall clock on each of its two dates, the end after the start.
+    const startsAt = instantOf(timezone, startsOn, minutesOf(input.start as string));
+    const endsAt = instantOf(timezone, endsOn, minutesOf(input.end as string));
+    if (endsAt <= startsAt) return { violations: [SAY.tripEndBeforeStart] };
+    return { timing: { allDay: false, startsAt, endsAt, startsOn, endsOn } };
   }
 
   const date = input.date as string;
@@ -196,6 +244,7 @@ export function timingOf(
   if (to <= from) return { violations: [SAY.endBeforeStart] };
   return {
     timing: {
+      allDay: false,
       startsAt: instantOf(timezone, date, from),
       endsAt: instantOf(timezone, date, to),
       startsOn: null,
@@ -219,14 +268,20 @@ export interface OfficeTiming {
  * `HH:mm` times, an end at the next midnight answered `00:00`.
  */
 export function officeTimingOf(
-  entry: { type: CalendarEntryType; startsAt: Date; endsAt: Date; startsOn: string | null; endsOn: string | null },
+  entry: {
+    type: CalendarEntryType; allDay?: boolean | null; startsAt: Date; endsAt: Date; startsOn: string | null; endsOn: string | null;
+  },
   timezone: string,
 ): OfficeTiming {
-  if (entry.type === CALENDAR_ALL_DAY_TYPE) {
+  if (isAllDayTrip(entry)) {
     return { allDay: true, date: null, start: null, end: null, startsOn: entry.startsOn, endsOn: entry.endsOn };
   }
   const start = officeClockOf(timezone, entry.startsAt);
   const end = officeClockOf(timezone, entry.endsAt);
+  // A timed trip (UI-104 point 8) keeps its two dates beside its date and times: it may run over several days.
+  if (entry.type === CALENDAR_ALL_DAY_TYPE) {
+    return { allDay: false, date: start.date, start: start.time, end: end.time, startsOn: entry.startsOn, endsOn: entry.endsOn };
+  }
   return { allDay: false, date: start.date, start: start.time, end: end.time, startsOn: null, endsOn: null };
 }
 

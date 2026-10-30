@@ -36,6 +36,11 @@ export const CALENDAR_REFUSALS = refusals('modules/calendar', {
       en: 'end must be after start on the same date.',
       id: 'end harus setelah start pada tanggal yang sama.',
     },
+    /* A trip with times (UI V1, UI-104 point 8): its end, on endsOn, after its start, on startsOn. */
+    tripEndBeforeStart: {
+      en: 'endsOn and end must come after startsOn and start.',
+      id: 'endsOn dan end harus setelah startsOn dan start.',
+    },
 
     /* The DTO's own sentence for a time (`field`, `calendar.dto.ts`); its day is `dayShape`. */
     clockShape: ({ field }: { field: string }) => ({

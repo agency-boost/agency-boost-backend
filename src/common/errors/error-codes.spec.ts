@@ -63,6 +63,13 @@ describe('P18.98-T5 every code’s refusal, in both languages', () => {
     'modules/leader-meetings:tbd',
     // *FAQ*, the recruitment pitch's third slot: the loanword Indonesian already uses (the glossary's §B.0 rule 5).
     'modules/recruitment:faqTitle',
+    // The other five pitch slots' titles: each material's English name in both languages (UI V1, UI-107: *one row per
+    // material with its English name as in the app*).
+    'modules/recruitment:opportunityTitle',
+    'modules/recruitment:proofTitle',
+    'modules/recruitment:howtojoinTitle',
+    'modules/recruitment:companyTitle',
+    'modules/recruitment:agencyTitle',
   ]);
 
   /**

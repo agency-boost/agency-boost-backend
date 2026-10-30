@@ -201,7 +201,7 @@ export class RemovalService {
 
   /**
    * **Nobody leaves who holds the office up** — `remove`'s two rules, shared with every other way out of the office
-   * that ends in `depart` (*Mark left*, `Activation3MService.markLeft`; the P18.96 exit review, M1), so none of them can
+   * that ends in `depart` (*Mark left* did, until UI-025 retired it; the P18.96 exit review, M1), so none of them can
    * take out somebody `remove` would refuse. `403 ORG_REMOVAL_NOT_PERMITTED` for both.
    */
   async refuseTheOffice(ctx: RequestContext, target: MembershipDocument): Promise<void> {
@@ -242,9 +242,9 @@ export class RemovalService {
   /**
    * **The removal itself, once every rule above has let it through** (P18.96-T6): the status and `removedAt`, the open
    * edge closed and a `removed` event opened, the leader's counts, the person's notice, the audit row and the departure
-   * hook — **never with reports**, whom the caller has moved first. `remove` calls it after its own checks; *Mark left*
-   * (`Activation3MService.markLeft`, ADR-0173 §3 as amended) calls it for a new hire who leads nobody, after
-   * `refuseTheOffice`, so a leaver leaves every count of people through the one path ADR-0136's leaver counting reads.
+   * hook — **never with reports**, whom the caller has moved first. `remove` calls it after its own checks — the one
+   * caller since *Mark left* was retired (UI V1, UI-025) — so a leaver leaves every count of people through the one path
+   * ADR-0136's leaver counting reads.
    */
   async depart(
     ctx: RequestContext,

@@ -139,6 +139,38 @@ describe('a member’s entries are readable only by them, their invitees and the
       }
     });
 
+    it('UI-100 Home’s next timed things after today never hold another office’s entries or joined events', async () => {
+      // Office B's rows filed under Sari's and Rina's membership ids: an entry with Rina on it, and an event Sari joined.
+      const entryId = new mongoose.Types.ObjectId();
+      const eventId = new mongoose.Types.ObjectId();
+      await h.col('calendarEvents').insertOne({
+        _id: entryId, kpmId: KPM_B, organiserMembershipId: h.id('SARI'), type: 'meeting', title: 'Office B only', notes: '',
+        startsAt: new Date('2026-09-15T02:00:00Z'), endsAt: new Date('2026-09-15T03:00:00Z'), startsOn: null, endsOn: null,
+        attendees: [{ membershipId: h.id('RINA'), placed: false, answer: 'pending', answeredAt: null, addedAt: new Date() }],
+        version: 1, deletedAt: null,
+      });
+      await h.col('events').insertOne({
+        _id: eventId, kpmId: KPM_B, code: 'EV-B-NEXT', typeCode: 'BOP', title: 'Office B event', blurb: '', description: '',
+        startsAt: new Date('2026-09-16T02:00:00Z'), endsAt: new Date('2026-09-16T04:00:00Z'), location: '', locationUrl: null,
+        audience: { issuer: 'kpm', scope: 'all' }, version: 1, status: 'active', archivedAt: null, deletedAt: null,
+      });
+      await h.col('eventRsvps').insertOne({
+        kpmId: KPM_B, eventId: eventId.toString(), membershipId: h.id('SARI'), rsvpStatus: 'going', rsvpAt: null,
+        cancelledAt: null, claimedAt: null, confirmedAttended: null, deletedAt: null,
+      });
+      try {
+        // This office's own: Sari's client visit on the 16th, which Rina is on. Office B's rows are in neither.
+        expect((await h.wired.calendar.nextAfterToday(h.office.as('SARI'), 5)).map((i) => i.title)).toEqual(['Client visit — Kusuma']);
+        expect((await h.wired.calendar.nextAfterToday(h.office.as('RINA'), 5)).map((i) => i.title)).toEqual(['Client visit — Kusuma']);
+        // And office B's own member reads none of this office's.
+        expect(await h.wired.calendar.nextAfterToday(h.office.as('B_AGENT'), 5)).toEqual([]);
+      } finally {
+        await h.col('calendarEvents').deleteOne({ _id: entryId });
+        await h.col('events').deleteOne({ _id: eventId });
+        await h.col('eventRsvps').deleteMany({ eventId: eventId.toString() });
+      }
+    });
+
     it('P12-T5 AC-9 another office’s leader can neither compare nor block this office’s member, nor invite them', async () => {
       h.as('B_AB');
       await h.http().get('/calendar/entries').query({ for: h.id('SARI') }).expect(404);

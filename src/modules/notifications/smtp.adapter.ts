@@ -127,7 +127,8 @@ export class SmtpChannelAdapter extends NotificationChannelAdapter implements On
   }
 
   async send(to: SendRequest, rendered: RenderedMessage): Promise<void> {
-    const address = to.userId ? await this.addresses.addressOf(to.userId) : null;
+    // The email change's link goes to the address being proved (`toAddress`), which the account does not hold yet.
+    const address = to.toAddress ?? (to.userId ? await this.addresses.addressOf(to.userId) : null);
     if (!address) {
       // Thrown rather than swallowed: `NotificationService` turns it into a recorded
       // `failed` with this reason on it, which is exactly the audit trail wanted.

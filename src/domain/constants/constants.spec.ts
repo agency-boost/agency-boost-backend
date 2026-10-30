@@ -186,6 +186,9 @@ describe('domain constants', () => {
       // `COACHED_7D`'s and `COACHED_30D`'s windows: the named periods, never a second copy of them.
       expect(COACHING.COVERAGE_WINDOWS).toEqual([PERIOD.ROLLING_7D_DAYS, PERIOD.ROLLING_30D_DAYS]);
     });
+    it('UI-060 pins COACHING_ACTION_DEFAULT_DUE_DAYS at 7: an action item is dated a week ahead (§B.8, Fixed)', () => {
+      expect(COACHING.ACTION_DEFAULT_DUE_DAYS).toBe(7);
+    });
     it('pins the ratio window at 30 days', () => {
       expect(PERFORMANCE.RATIO_WINDOW_DAYS).toBe(30);
       // It is `ROLLING_30D`, and fixed (ADR-0022): one number, not an office's.

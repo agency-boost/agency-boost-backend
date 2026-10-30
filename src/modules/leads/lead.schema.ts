@@ -75,6 +75,28 @@ export class LeadCommitment {
 }
 export const LeadCommitmentSchema = SchemaFactory.createForClass(LeadCommitment);
 
+/**
+ * **A next action its owner ticked done** (UI V1, 2026-10-30, UI-104 point 4; ADR-0180 §11): the date and the note it
+ * had, when, and by whom. Ticking clears the lead's own `nextActionDate` and `nextActionNote`, so every screen then asks
+ * for a new one (*Isi tindakan*, UI-062); *Urungkan* puts these back and clears the marker. The latest tick's only.
+ */
+@Schema({ _id: false })
+export class LeadNextActionDone {
+  @Prop({ type: String, default: null })
+  date!: string | null;
+
+  @Prop({ type: String, default: null })
+  note!: string | null;
+
+  @Prop({ type: Date, required: true })
+  at!: Date;
+
+  /** The lead's owner: nobody else ticks it. */
+  @Prop({ type: String, required: true })
+  byMembershipId!: string;
+}
+export const LeadNextActionDoneSchema = SchemaFactory.createForClass(LeadNextActionDone);
+
 /** Whatever contact detail the agent has. Both optional, and since 2026-10-07 nothing asked beside them. */
 @Schema({ _id: false })
 export class LeadContact {
@@ -178,6 +200,13 @@ export class Lead {
 
   @Prop({ type: String, default: null, trim: true })
   nextActionNote!: string | null;
+
+  /**
+   * **The next action last ticked done** from the owner's Calendar (UI-104 point 4), `null` when none is — or once a
+   * new one is written over it, or the tick is taken back. What *Urungkan* restores; never read as the next action.
+   */
+  @Prop({ type: LeadNextActionDoneSchema, default: null })
+  nextActionDone!: LeadNextActionDone | null;
 
   /**
    * **One vocabulary.** The agent screen writes `success`/`fail` and the coaching screen writes

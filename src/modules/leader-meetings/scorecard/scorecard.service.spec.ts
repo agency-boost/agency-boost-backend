@@ -299,16 +299,18 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
      * P18.96-T6 (ADR-0171 §2): *3M new agent %* is `ACTIVATION_3M_PCT` — the year's new hires by their join date, a first
      * sale by day 90 activated — not the retired four months of the file. It names no month: nothing waits on one.
      */
-    it('P18.96-T6 AC-2 3M new agent %: last year 2 of 4 — H25 and LEFT sold by day 90, H25Q on day 117, LEFT_QUIET never', () => {
-      // LEFT was removed in June, after selling: a removal is not leaving, and the 90 days decided it.
-      expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(50));
+    it('UI-023 3M new agent %: last year 2 of 3 — H25 and LEFT sold by day 90, LEFT_QUIET never; H25Q’s day 117 in neither part', () => {
+      // LEFT was removed in June, after selling: a removal is not leaving, and the 90 days decided it. H25Q's first sale
+      // after day 90 is *Teraktivasi* in amber — outside the share (rule A, UI V1), so 2 of 3 rather than 2 of 4.
+      expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(67));
       // P18.97-T1 AC-1: the four joined between March and May, inside January to October of last year too.
-      expect(cell(card, 'new_agent_3m', 'ytdLastYear')).toEqual(fig(50));
+      expect(cell(card, 'new_agent_3m', 'ytdLastYear')).toEqual(fig(67));
     });
 
-    it('P18.96-T6 AC-2 3M new agent %: this year 1 of 2 — EARLY’s first sale is day 90, LATE’s the same day is day 91; NEW_JUL in progress', () => {
-      // LATE joined at 23:59 on 31 January and EARLY at 00:01 on 1 February, Jakarta: 1 May is day 91 and day 90.
-      expect(cell(card, 'new_agent_3m', 'ytd')).toEqual(fig(50));
+    it('UI-023 3M new agent %: this year 2 of 2 — EARLY’s first sale is day 90, NEW_JUL’s day 44 counts at once; LATE’s day 91 outside', () => {
+      // LATE joined at 23:59 on 31 January and EARLY at 00:01 on 1 February, Jakarta: 1 May is day 91 and day 90. NEW_JUL
+      // is inside her 90 days, and her sale on day 44 activates her the day it is recorded (rule A). NEW_SEP, no sale, waits.
+      expect(cell(card, 'new_agent_3m', 'ytd')).toEqual(fig(100));
     });
   });
 
@@ -335,8 +337,8 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     expect(cell(card, 'ape', 'ytdLastYear')).toEqual(fig(15 * M));
     // FY 2026 runs to today: the year to date as it stands.
     expect(cell(card, 'ape', 'fy')).toEqual(fig(134 * M));
-    // P18.96-T6: 2026's new hires as they stand today — EARLY activated, LATE not, two in progress.
-    expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(50));
+    // UI-023: 2026's new hires as they stand today — EARLY and NEW_JUL activated, LATE late and outside, NEW_SEP waiting.
+    expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(100));
     expect(cell(card, 'ape', 'thisMonthLastYear')).toEqual(fig(15 * M));
     for (const key of ['ape', 'avg_monthly_aa', 'case_submission'] as const) {
       expect([key, cell(card, key, 'ytd'), cell(card, key, 'lastMonth'), cell(card, key, 'thisMonth')]).toEqual([key, PENDING, PENDING, PENDING]);
@@ -373,8 +375,8 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     expect(cell(card, 'avg_monthly_aa', 'thisMonth')).toEqual(fig(2));
     // Nobody started on 1 or 2 January: the cohort is empty, pending.
     expect(cell(card, 'new_agent_3m', 'ytd')).toEqual(PENDING);
-    // P18.96-T6: 2025's four as they stood on 5 January, every one past day 90.
-    expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(50));
+    // UI-023: 2025's four as they stood on 5 January, every one past day 90 — H25Q late, outside: 2 of 3.
+    expect(cell(card, 'new_agent_3m', 'fy')).toEqual(fig(67));
   });
 
   it('P18.96-T6 AC-2 another office’s new hire never in this office’s figure; theirs not activated, a decided 0%', async () => {
@@ -420,8 +422,8 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     // October is past now, and not held: every year-to-date figure says so; the November it is read in is not named.
     expect(cell(card, 'ape', 'ytd')).toEqual(fig(134 * M, ['2026-10']));
     expect(cell(card, 'case_submission', 'ytd')).toEqual(fig(27, ['2026-08', '2026-10']));
-    // P18.96-T6: read on 2 November — NEW_JUL's day 90 (17 October) has passed, her September sale inside it: 2 of 3.
-    expect(cell(card, 'new_agent_3m', 'ytd')).toEqual(fig(67));
+    // UI-023: read on 2 November — EARLY and NEW_JUL activated, LATE's day 91 outside the share: 2 of 2.
+    expect(cell(card, 'new_agent_3m', 'ytd')).toEqual(fig(100));
     expect(cell(card, 'case_submission', 'thisMonth')).toEqual(PENDING);
   });
 
@@ -484,12 +486,25 @@ describe('the forum’s scorecard, computed (P18.1-T1, P18.1-T2 AC-4; OD-144, AD
     expect(await db().collection('memberships').countDocuments({ activation3M: { $ne: null } })).toBe(0);
   });
 
-  it('P18.96-T6 AC-2 a kept result is read as kept: a new hire whose lock says not activated is not, whatever their first sale says', async () => {
-    await db().collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id.EARLY) }, { $set: { activation3M: 'not_activated' } });
+  it('P18.96-T6 AC-2 a kept result is read as kept: a new hire whose lock says activated is, whatever their first sale says', async () => {
+    // B_HIRE has no first sale and is past day 90: not activated, 0% — until a kept *activated* says otherwise.
+    await db().collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id.B_HIRE) }, { $set: { activation3M: 'activated' } });
     try {
-      expect(cell(await compute('2026-10-13'), 'new_agent_3m', 'ytd')).toEqual(fig(0));
+      expect(cell(await compute('2026-10-13', KPM_B), 'new_agent_3m', 'fy')).toEqual(fig(100));
     } finally {
-      await db().collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id.EARLY) }, { $set: { activation3M: null } });
+      await db().collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id.B_HIRE) }, { $set: { activation3M: null } });
+    }
+  });
+
+  it('UI-023 a kept not activated with a sale recorded since is Teraktivasi late: in neither part of the share', async () => {
+    // EARLY's and NEW_JUL's sales, read after a *not activated* was kept for each: both late, as LATE is — so nobody
+    // this year is decided either way, and the cell is pending: a late sale is never counted as *not activated*.
+    const both = { _id: { $in: [id.EARLY, id.NEW_JUL].map((x) => new mongoose.Types.ObjectId(x)) } };
+    await db().collection('memberships').updateMany(both, { $set: { activation3M: 'not_activated' } });
+    try {
+      expect(cell(await compute('2026-10-13'), 'new_agent_3m', 'ytd')).toEqual(PENDING);
+    } finally {
+      await db().collection('memberships').updateMany(both, { $set: { activation3M: null } });
     }
   });
 });

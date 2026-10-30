@@ -9,6 +9,10 @@ import {
 import type {
   CalendarBusyView, CalendarEntryView, CalendarInviteeView, CalendarPeriodView, CalendarPersonView, ReaderIs,
 } from './calendar-view';
+import type {
+  CalendarHiddenTaskView, CalendarJoinedEventView, CalendarTaskSource, CalendarTaskView,
+} from './calendar-auto-items';
+import { CALENDAR_VIEWS, type CalendarView } from './calendar-time';
 
 /** Declared for OpenAPI. The wire shapes live on the services' view types, which these implement. */
 
@@ -46,7 +50,9 @@ export class CalendarInviteeDto extends CalendarPersonDto implements CalendarInv
 
 /** The office's dates and wall clock an entry or a busy block is answered in. */
 class CalendarTimingDto {
-  @ApiProperty({ description: 'Travel: two dates and no times.' })
+  @ApiProperty({
+    description: 'An all-day trip: two dates and no times. `false` on a trip with times (UI V1), which has both, and on every other type.',
+  })
   allDay!: boolean;
 
   @ApiProperty({ type: String, nullable: true, example: '2026-09-28', description: 'A timed entry’s office date; `null` on Travel.' })
@@ -61,10 +67,16 @@ class CalendarTimingDto {
   })
   end!: string | null;
 
-  @ApiProperty({ type: String, nullable: true, example: null, description: 'Travel’s departure date; `null` otherwise.' })
+  @ApiProperty({
+    type: String, nullable: true, example: null,
+    description: 'Travel’s departure date — a joined event’s first day when it runs over several; `null` otherwise.',
+  })
   startsOn!: string | null;
 
-  @ApiProperty({ type: String, nullable: true, example: null, description: 'Travel’s return date, inclusive; `null` otherwise.' })
+  @ApiProperty({
+    type: String, nullable: true, example: null,
+    description: 'Travel’s return date, inclusive — a joined event’s last day when it runs over several; `null` otherwise.',
+  })
   endsOn!: string | null;
 
   @ApiProperty({ example: '2026-09-28T02:00:00.000Z', description: 'The start, a UTC instant.' })
@@ -118,6 +130,87 @@ export class CalendarBusyBlockDto extends CalendarTimingDto implements CalendarB
   busy!: true;
 }
 
+export class CalendarTaskLeadDto {
+  @ApiProperty()
+  leadId!: string;
+
+  @ApiProperty({ example: 3, description: 'The version a tick (`PUT /leads/:id/next-action/done`) pins.' })
+  version!: number;
+}
+
+export class CalendarTaskCoachingDto {
+  @ApiProperty()
+  sessionId!: string;
+
+  @ApiProperty()
+  itemId!: string;
+
+  @ApiProperty({ description: 'Who coached the person: *Dari: {NAME}*.' })
+  coachMembershipId!: string;
+}
+
+/** One *Tugas* in full (UI V1, UI-104 points 1 and 2). */
+export class CalendarTaskDto implements CalendarTaskView {
+  @ApiProperty({ example: 'lead:66f0…', description: '`lead:{leadId}` or `coaching:{sessionId}:{itemId}`.' })
+  taskId!: string;
+
+  @ApiProperty({ enum: ['lead', 'coaching'] })
+  source!: CalendarTaskSource;
+
+  @ApiProperty({ example: '2026-10-30', description: 'The office date it is due: a next action’s date, an action item’s due date.' })
+  date!: string;
+
+  @ApiProperty({ description: 'Whose task it is: the lead’s owner, or the person coached.' })
+  ownerMembershipId!: string;
+
+  @ApiProperty({ example: 'Ibu Wiwik Setyaningsih', description: 'The lead’s name, or the coach’s.' })
+  name!: string;
+
+  @ApiProperty({ example: 'Invite BOP', description: 'The next action’s note, or the action item; `\'\'` when none.' })
+  note!: string;
+
+  @ApiProperty({ type: String, nullable: true, description: 'The lead’s WhatsApp number, or the coach’s; `null` when none.' })
+  phone!: string | null;
+
+  @ApiProperty({ type: CalendarTaskLeadDto, nullable: true })
+  lead!: CalendarTaskView['lead'];
+
+  @ApiProperty({ type: CalendarTaskCoachingDto, nullable: true })
+  coaching!: CalendarTaskView['coaching'];
+}
+
+/** A compared member’s task while they hide their details (ADR-0110): its day alone, counted and never read. */
+export class CalendarHiddenTaskDto implements CalendarHiddenTaskView {
+  @ApiProperty({ type: Boolean, example: true })
+  busy!: true;
+
+  @ApiProperty({ example: '2026-10-30' })
+  date!: string;
+}
+
+export class CalendarEventTypeDto {
+  @ApiProperty({ example: 'BOP' })
+  code!: string;
+
+  @ApiProperty({ example: 'Business Opportunity Presentation', description: 'As the office typed it.' })
+  label!: string;
+}
+
+/** An event the person said they are going to (UI-104 point 1): read-only, it opens `/events/{eventId}`. */
+export class CalendarJoinedEventDto extends CalendarTimingDto implements CalendarJoinedEventView {
+  @ApiProperty()
+  eventId!: string;
+
+  @ApiProperty({ example: 'BOP Surabaya' })
+  title!: string;
+
+  @ApiProperty({ type: CalendarEventTypeDto })
+  type!: { code: string; label: string };
+
+  @ApiProperty({ example: 'Kantor KPM, lantai 3', description: '`\'\'` when none.' })
+  location!: string;
+}
+
 export class CalendarDayDto {
   @ApiProperty({ example: '2026-09-28' })
   date!: string;
@@ -137,11 +230,17 @@ export class CalendarNowDto {
 export class CalendarSubjectDto extends CalendarPersonDto {
   @ApiProperty({ type: CalendarRungDto })
   rung!: { code: string; label: string };
+
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'A compared person’s WhatsApp number, for the one button beside their tasks (UI V1); `null` on your own read, and when none is on file.',
+  })
+  phone!: string | null;
 }
 
 export class CalendarPeriodDto implements CalendarPeriodView {
-  @ApiProperty({ enum: ['week', 'month'] })
-  view!: 'week' | 'month';
+  @ApiProperty({ enum: CALENDAR_VIEWS })
+  view!: CalendarView;
 
   @ApiProperty({ example: '2026-09-28', description: 'The first office date drawn: a week’s Monday, or a month’s first padded Monday.' })
   from!: string;
@@ -178,6 +277,25 @@ export class CalendarPeriodDto implements CalendarPeriodView {
       + 'you could not read in your own right — a busy block. Everything overlapping the period.',
   })
   entries!: (CalendarEntryView | CalendarBusyView)[];
+
+  @ApiProperty({
+    type: 'array',
+    items: { oneOf: [{ $ref: getSchemaPath(CalendarTaskDto) }, { $ref: getSchemaPath(CalendarHiddenTaskDto) }] },
+    description:
+      '**Tugas** (UI V1): the lead next actions and open coaching action items dated in the period, coaching first, '
+      + 'then by name — read from their sources now. For a compared member who hides their details, each is its day '
+      + 'alone, a count.',
+  })
+  tasks!: (CalendarTaskView | CalendarHiddenTaskView)[];
+
+  @ApiProperty({
+    type: 'array',
+    items: { oneOf: [{ $ref: getSchemaPath(CalendarJoinedEventDto) }, { $ref: getSchemaPath(CalendarBusyBlockDto) }] },
+    description:
+      'The events the person said they are *going* to, overlapping the period — busy blocks for a compared member who '
+      + 'hides their details.',
+  })
+  events!: (CalendarJoinedEventView | CalendarBusyView)[];
 }
 
 export class CalendarDeletedDto implements CalendarDeleted {

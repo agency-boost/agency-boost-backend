@@ -58,7 +58,7 @@ import {
   ActivityLogCorrectionSchema, ActivityLogEntrySchema, ActivityLogSchema,
 } from '@/modules/activity/activity-log.schema';
 import {
-  LeadCommitmentSchema, LeadContactSchema, LeadSchema, LeadTransitionSchema,
+  LeadCommitmentSchema, LeadContactSchema, LeadNextActionDoneSchema, LeadSchema, LeadTransitionSchema,
 } from '@/modules/leads/lead.schema';
 import {
   GoalCascadeMappingSchema, GoalRevisionSchema, GoalSchema, GoalSnapshotSchema,
@@ -80,7 +80,7 @@ import {
   CapabilityStageRowSchema,
 } from '@/modules/capability/capability.schema';
 import {
-  CoachingActionItemSchema, CoachingLastWeekItemSchema, CoachingLastWeekSchema, CoachingLeadActionSchema,
+  CoachingActionItemDoneSchema, CoachingActionItemSchema, CoachingLastWeekItemSchema, CoachingLastWeekSchema, CoachingLeadActionSchema,
   CoachingSessionCorrectionSchema, CoachingSessionSchema, CoachingSnapshotSchema, CoachingTipSchema,
 } from '@/modules/coaching/coaching-session.schema';
 import { CoachingProfileRevisionSchema, CoachingProfileSchema } from '@/modules/coaching/coaching-profile.schema';
@@ -300,6 +300,11 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'a phone and an email inside a lead: no collection and no _id of its own',
   ],
   [
+    'leadNextActionDone (subdocument)',
+    LeadNextActionDoneSchema,
+    'the latest ticked next action inside a lead: no collection and no _id of its own',
+  ],
+  [
     'leadTransition (subdocument)',
     LeadTransitionSchema,
     'one move along a ladder inside a lead: no collection and no _id of its own',
@@ -368,6 +373,11 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'coachingLastWeekItem (subdocument)',
     CoachingLastWeekItemSchema,
     'a copy of one of last week\'s items, ticked inside the session reviewing it: no collection and no _id of its own',
+  ],
+  [
+    'coachingActionItemDone (subdocument)',
+    CoachingActionItemDoneSchema,
+    'a coachee\'s tick on one action item, inside the session: no collection and no _id of its own',
   ],
   [
     'coachingActionItem (subdocument)',
@@ -509,6 +519,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [LeadSchema, 'LeadSchema'],
   [LeadContactSchema, 'LeadContactSchema'],
   [LeadTransitionSchema, 'LeadTransitionSchema'],
+  [LeadNextActionDoneSchema, 'LeadNextActionDoneSchema'],
   [LeadCommitmentSchema, 'LeadCommitmentSchema'],
   [GoalSchema, 'GoalSchema'],
   [GoalSnapshotSchema, 'GoalSnapshotSchema'],
@@ -559,6 +570,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [CoachingLastWeekSchema, 'CoachingLastWeekSchema'],
   [CoachingLastWeekItemSchema, 'CoachingLastWeekItemSchema'],
   [CoachingActionItemSchema, 'CoachingActionItemSchema'],
+  [CoachingActionItemDoneSchema, 'CoachingActionItemDoneSchema'],
   [CoachingTipSchema, 'CoachingTipSchema'],
   [CoachingLeadActionSchema, 'CoachingLeadActionSchema'],
   [CoachingSessionCorrectionSchema, 'CoachingSessionCorrectionSchema'],
