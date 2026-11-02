@@ -27,7 +27,7 @@
 # database failing does not stop the other's backup; the run fails at the end if either did.
 #
 # **Dumped to a file first, then uploaded, rather than streamed into the bucket.** The VM's account
-# holds a custom role on the backups bucket: create objects and read them, never delete or overwrite
+# holds a custom role on the backups bucket: create objects, list and read them, never delete or overwrite
 # (ADR-0152; provision.sh, agencyboostBackupWriter). A streamed upload whose dump failed halfway would
 # leave a truncated archive under a good name, which nothing on this VM could remove and the next
 # restore drill would find first. A file is checked before it leaves, and the upload of a file either

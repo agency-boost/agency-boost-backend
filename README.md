@@ -396,11 +396,12 @@ server accepted the message. Each provider's recipe, and staying out of spam:
   - `gs://agencyboost-backups/prod/…`, kept 30 days;
   - `gs://agencyboost-backups/staging/…`, kept 7 days.
 
-  The VM's role on that bucket creates and reads objects, and can neither delete nor overwrite one.
+  The VM's role on that bucket creates, lists and reads objects, and can neither delete nor overwrite one.
   `sudo systemctl start agencyboost-backup` takes one now.
 - **A failed backup reports itself**: its `OnFailure=` unit logs `AGENCYBOOST_BACKUP_FAILED`, which the
   alert from `provision.sh --alert-email` mails out. Without the Ops Agent or the alert, look for it with
-  `journalctl -t agencyboost-backup -p err`.
+  `journalctl -t agencyboost-backup -p err`, and read **why** with `journalctl -u agencyboost-backup -n 40`: the
+  first shows only that a run failed.
 - Both kinds live in this one project, so **neither survives the project being deleted**. A backups
   bucket in a separate project, or a locked retention policy, is a P19-T6 option.
 - Restore drills, Mongo upgrades and secret rotation are in the runbook.

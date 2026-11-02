@@ -271,11 +271,14 @@ EOF
 run gcloud storage buckets update "gs://$backups" --lifecycle-file="$work/lifecycle.json"
 # Versioning stays off, so a name can be written once and nothing replaces what is under it.
 run gcloud storage buckets update "gs://$backups" --no-versioning
-# Create and read, never delete (P18.7 review, M1). `gcloud storage cp` reads the destination before it
-# writes, which objectCreator alone does not allow. Overwriting needs delete, so this role cannot
-# replace a backup either: a VM that is compromised can add a backup and never remove one.
+# Create, list and read, never delete (P18.7 review, M1). `gcloud storage cp` reads the destination before it
+# writes, which objectCreator alone does not allow, and **lists the bucket to do so**: without
+# storage.objects.list every upload was refused with "does not have storage.objects.list access", and no
+# backup reached the bucket from staging's first deploy until 2026-11-02 (P18.7-T8's pre-flight). Listing shows
+# only the names, which are timestamps of objects this role may read anyway. Overwriting needs delete, so this
+# role cannot replace a backup either: a VM that is compromised can add a backup and never remove one.
 ensure_role agencyboostBackupWriter "AgencyBoost backup writer" \
-  storage.objects.create,storage.objects.get,storage.multipartUploads.create,storage.multipartUploads.abort,storage.multipartUploads.listParts
+  storage.objects.create,storage.objects.get,storage.objects.list,storage.multipartUploads.create,storage.multipartUploads.abort,storage.multipartUploads.listParts
 bind_bucket "$backups" "$runtime_sa" "projects/$project/roles/agencyboostBackupWriter"
 
 # --- Artifact Registry -----------------------------------------------------------------------------
