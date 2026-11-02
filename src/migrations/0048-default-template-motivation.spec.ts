@@ -40,9 +40,12 @@ describe('0048 — Motivation in the Default template (P18.99-T10, UI-063)', () 
 
   beforeAll(startMongo);
   afterAll(stopMongo);
+  // Emptied, not dropped (`jest.config.ts`, *What the ceiling was*): a drop takes WiredTiger's schema lock and waits
+  // behind the other workers' index builds, which on GitHub's runner took this suite's first test past 30 s
+  // (production's first release, 2026-11-02). No test here needs a collection to be missing.
   beforeEach(async () => {
     for (const { name } of await db().listCollections({}, { nameOnly: true }).toArray()) {
-      await db().collection(name).drop();
+      await db().collection(name).deleteMany({});
     }
   });
 

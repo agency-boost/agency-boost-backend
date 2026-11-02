@@ -35,8 +35,11 @@ describe('ContextResolver', () => {
    * synthetic owner membership Phase 2 fabricated is gone: a context built from a row
    * that does not exist cannot carry a direct count, and leadership is that count.
    */
+  // Counted, not drawn: `leaderCode` is unique across every office, and two random draws from 900 met on GitHub's
+  // runner (`E11000 … leaderCode: "LC0779"`, production's first release, 2026-11-02).
+  let joined = 99;
   async function join(userId: string, kpmId: string, over: Record<string, unknown> = {}) {
-    const seq = Math.floor(Math.random() * 900) + 100;
+    const seq = ++joined;
     return mongoose.model(Membership.name).create({
       kpmId, userId, agentCode: `PRU-${seq}`, agentSeq: seq,
       // Every membership carries one, generated with it (P3.6-T1).
