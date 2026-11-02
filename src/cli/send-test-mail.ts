@@ -67,18 +67,32 @@ export function parseArgs(argv: readonly string[]): SendTestMailArgs {
   return { to, subject };
 }
 
-/** What the message says: who sent it, through what, and when, and where to look if it went to spam. */
+/** When it was sent, to the minute, for the subject and the body: `2026-11-02 03:59 UTC`. */
+function sentAtLabel(sentAt: Date): string {
+  return `${sentAt.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+}
+
+/** The subject when `--subject` names none: the API's own tag, and the minute, so two checks are told apart. */
+export function testMailSubject(sentAt: Date): string {
+  return `[AgencyBoost] Email check, ${sentAtLabel(sentAt)}`;
+}
+
+/**
+ * What the message says, **shaped like the API's own mail** (`EMAIL_MESSAGES`): a greeting, a sentence, the app's
+ * link and the sign-off. It predicts where the real emails land only if it reads like them.
+ *
+ * Its first version did not (staging, 2026-11-02: Gmail put it in spam, *"similar to messages that were identified
+ * as spam in the past"*): it said *test email* in the subject and *spam* twice in the body, and named the SMTP server,
+ * which Gmail made a link to another domain (`email-delivery.md` §7: every link is the app's own). So no word a
+ * filter reads as a test or as spam, and no server: the provider, the host and the port are printed on the terminal.
+ */
 export function testMailText(settings: MailSettings, sentAt: Date, appOrigin: string | undefined): string {
   return [
-    'This is a test email from AgencyBoost, sent by send-test-mail.',
+    'Hello,',
     '',
-    `Provider: ${settings.provider}`,
-    `Server: ${settings.host}:${settings.port}`,
-    `Sent at: ${sentAt.toISOString()}`,
+    `AgencyBoost sent this email through ${settings.provider} on ${sentAtLabel(sentAt)}, to check that its email `
+      + 'reaches you. No reply is needed.',
     ...(appOrigin ? ['', `The app: ${appOrigin.replace(/\/+$/, '')}`] : []),
-    '',
-    'If you are reading this in the inbox, mail from this environment arrives. If it landed in spam, see '
-      + '"Staying out of spam" in docs/03-engineering/email-delivery.md.',
     '',
     '— AgencyBoost',
   ].join('\n');
@@ -155,7 +169,7 @@ export async function run(argv: readonly string[], io: Io, clock: Clock = new Sy
       const info = await transport.sendMail({
         from: resolved.from,
         to: args.to,
-        subject: args.subject ?? `AgencyBoost test email (${resolved.provider}, ${resolved.host}, ${sentAt.toISOString()})`,
+        subject: args.subject ?? testMailSubject(sentAt),
         text,
         html: toHtml(text),
         ...(resolved.replyTo ? { replyTo: resolved.replyTo } : {}),

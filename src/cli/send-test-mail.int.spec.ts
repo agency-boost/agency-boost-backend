@@ -3,7 +3,7 @@ import { Writable } from 'node:stream';
 import { SMTPServer } from 'smtp-server';
 import { FixedClock } from '@/common/clock/clock.port';
 import { MailSettings } from '@/modules/notifications/mail-provider';
-import { explainSendError, Io, parseArgs, run, testMailText, USAGE } from './send-test-mail';
+import { explainSendError, Io, parseArgs, run, testMailSubject, testMailText, USAGE } from './send-test-mail';
 
 /** A stream that keeps what was written to it. */
 function capture(): Writable & { text: () => string } {
@@ -91,16 +91,15 @@ describe('send-test-mail (P18.99-T18)', () => {
     const mail = delivered.at(-1)!;
     expect(mail.to).toEqual(['ops@agencyboost.test']);
     const headers = mail.raw.slice(0, mail.raw.search(/\r?\n\r?\n/));
-    expect(headers).toMatch(/^Subject: AgencyBoost test email \(smtp, 127\.0\.0\.1, 2026-11-01T03:04:05\.000Z\)$/m);
+    expect(headers).toMatch(/^Subject: \[AgencyBoost\] Email check, 2026-11-01 03:04 UTC$/m);
     expect(headers).toMatch(/^From: AgencyBoost <no-reply@agencyboost\.test>$/m);
     expect(headers).toMatch(/^Reply-To: support@agencyboost\.test$/m);
     expect(headers).toMatch(/^Content-Type: multipart\/alternative;/m);
     expect(mail.raw).toContain('Content-Type: text/plain');
     expect(mail.raw).toContain('Content-Type: text/html');
     const body = decoded(mail.raw);
-    expect(body).toContain('Provider: smtp');
-    expect(body).toContain(`Server: 127.0.0.1:${port}`);
-    expect(body).toContain('Sent at: 2026-11-01T03:04:05.000Z');
+    expect(body).toContain('AgencyBoost sent this email through smtp on 2026-11-01 03:04 UTC');
+    expect(body).not.toContain('127.0.0.1');
     expect(body).toContain('<a href="https://staging.agencyboost.test"');
 
     expect(call.err.text()).toContain(`Mail: provider smtp via 127.0.0.1:${port} (STARTTLS if offered), as tester`);
@@ -198,10 +197,21 @@ describe('send-test-mail (P18.99-T18)', () => {
       expect(parseArgs(['ops@agencyboost.id'])).toEqual({ to: 'ops@agencyboost.id', subject: undefined });
     });
 
-    it('P18.99-T18 the message names the provider, the server and the time, and the app only when it is known', () => {
+    it('P18.99-T18 the message names the provider and the minute, and the app only when it is known', () => {
       const text = testMailText(settings, SENT_AT, undefined);
-      expect(text).toContain('Provider: ses\nServer: email-smtp.ap-southeast-3.amazonaws.com:587\nSent at: 2026-11-01T03:04:05.000Z');
-      expect(text).not.toContain('The app:');
+      expect(text).toBe('Hello,\n\nAgencyBoost sent this email through ses on 2026-11-01 03:04 UTC, to check that its '
+        + 'email reaches you. No reply is needed.\n\n— AgencyBoost');
+      expect(testMailText(settings, SENT_AT, 'https://staging.agencyboost.id/')).toContain('\n\nThe app: https://staging.agencyboost.id\n\n');
+      expect(testMailSubject(SENT_AT)).toBe('[AgencyBoost] Email check, 2026-11-01 03:04 UTC');
+    });
+
+    // Staging, 2026-11-02: the first version went to Gmail's spam, "similar to messages that were identified as spam".
+    it('P18.99-T18 reads like the API\'s own mail: no "spam", no "test", and no server for a client to make a link of', () => {
+      const words = `${testMailSubject(SENT_AT)}\n${testMailText(settings, SENT_AT, 'https://staging.agencyboost.id')}`;
+      expect(words).not.toMatch(/spam|test/i);
+      expect(words).not.toContain(settings.host);
+      expect(words).not.toContain(String(settings.port));
+      expect(words.startsWith('[AgencyBoost] ')).toBe(true);
     });
 
     it('P18.99-T18 explains a failure that is not an Error, and one with no SMTP code', () => {
